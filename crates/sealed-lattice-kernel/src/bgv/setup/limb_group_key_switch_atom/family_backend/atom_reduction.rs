@@ -1,4 +1,4 @@
-//! Sound reduction of one key-switch digit atom to a single inner product.
+//! Inner-product reduction for one key-switch digit atom.
 //!
 //! The atom congruence over the proof field is, coefficient-wise,
 //!
@@ -11,12 +11,6 @@
 //! one linear claim over `w = (s || e || c)`, using the negacyclic adjoint
 //! identity `<a (*) b, c> = <b, adjoint(a) (*) c>`. The transported `B` term is
 //! carried by the material column form in the key proof, not by this reducer.
-//! Since the residual has degree below `N` and the proof field has more than
-//! `2^768` elements, `<gamma, residual> = 0` for a random `gamma` implies the
-//! residual is zero except with probability about `N / |field|` (about
-//! `2^-755`). This is the family's relation core; it is the same reduction
-//! validated in the test-gated `atom_argument` module, hosted here for the
-//! production backend.
 
 use super::super::negacyclic_transform::NegacyclicDomain;
 use super::super::proof_field::ProofFieldParameters;

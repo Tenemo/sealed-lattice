@@ -33,7 +33,7 @@ pub enum StateCapabilityKind {
     SetupActionRandomnessRoot = 4,
     SetupPublicSeedBranch = 5,
     SetupDealerSetBranch = 6,
-    SetupRkgRoundOneBranch = 7,
+    SetupRelinearizationRoundOneBranch = 7,
     SetupTerminalPackage = 8,
 }
 
@@ -45,7 +45,7 @@ impl StateCapabilityKind {
         Self::SetupActionRandomnessRoot,
         Self::SetupPublicSeedBranch,
         Self::SetupDealerSetBranch,
-        Self::SetupRkgRoundOneBranch,
+        Self::SetupRelinearizationRoundOneBranch,
         Self::SetupTerminalPackage,
     ];
 
@@ -61,7 +61,7 @@ impl StateCapabilityKind {
             4 => Some(Self::SetupActionRandomnessRoot),
             5 => Some(Self::SetupPublicSeedBranch),
             6 => Some(Self::SetupDealerSetBranch),
-            7 => Some(Self::SetupRkgRoundOneBranch),
+            7 => Some(Self::SetupRelinearizationRoundOneBranch),
             8 => Some(Self::SetupTerminalPackage),
             _ => None,
         }
@@ -798,10 +798,6 @@ impl StateWitnessLock {
     }
 }
 
-struct StateCertificateProvenance {
-    _canonical_vote_carriers: Vec<Vec<u8>>,
-}
-
 #[derive(Clone, Copy)]
 struct StateReservationBinding {
     intent_object_hash: Hash512,
@@ -818,7 +814,6 @@ struct StateReservationBinding {
 
 pub struct VerifiedStateReservation {
     binding: StateReservationBinding,
-    _certificate_provenance: StateCertificateProvenance,
 }
 
 impl VerifiedStateReservation {
@@ -868,8 +863,6 @@ pub struct VerifiedStateOutput {
     output_intent_object_hash: Hash512,
     exact_output_hash: Hash512,
     exact_output_byte_length: u64,
-    _exact_output_stream_digest: Hash512,
-    _certificate_provenance: StateCertificateProvenance,
 }
 
 impl VerifiedStateOutput {
@@ -938,7 +931,6 @@ pub struct VerifiedStateRecovery {
     new_recovery_epoch: u64,
     predecessor_transition_hash: Option<Hash512>,
     preserved_latest_intent_object_hash: Option<Hash512>,
-    _certificate_provenance: StateCertificateProvenance,
 }
 
 impl VerifiedStateRecovery {
@@ -1090,10 +1082,8 @@ pub struct StateVerifier {
 impl StateVerifier {
     /// Constructs one suite-bound state verifier context.
     ///
-    /// `maximum_recovery_transitions_per_state_key` must come from the already
-    /// accepted suite record. Intrinsic suite-record validation exists, but the
-    /// complete generated-suite acceptance path does not; callers must not treat
-    /// a raw locally selected value as suite evidence.
+    /// `maximum_recovery_transitions_per_state_key` must come from the accepted
+    /// suite record.
     pub fn new(
         suite_id: Hash512,
         ceremony_context_hash: Hash512,
@@ -1182,7 +1172,7 @@ impl StateVerifier {
             .envelope
             .object_hash()
             .map_err(StateError::from_schema)?;
-        let provenance = self.verify_certificate(
+        self.verify_certificate(
             input.canonical_state_certificate,
             &ResolvedStateIntent {
                 intent_object_hash,
@@ -1204,7 +1194,6 @@ impl StateVerifier {
                 predecessor_transition_hash,
                 authorization_hash: payload.authorization_hash,
             },
-            _certificate_provenance: provenance,
         })
     }
 
@@ -1235,7 +1224,6 @@ impl StateVerifier {
             canonical_state_certificate,
             exact_output_hash,
             verified_stream.total_byte_length(),
-            verified_stream.full_object_digest(),
         ) {
             Ok(value) => VerificationResult::valid(value),
             Err(error) => VerificationResult::refused(error.refusal_reason),
@@ -1249,7 +1237,6 @@ impl StateVerifier {
         canonical_state_certificate: &[u8],
         exact_output_hash: Hash512,
         exact_output_byte_length: u64,
-        exact_output_stream_digest: Hash512,
     ) -> StateResult<VerifiedStateOutput> {
         self.require_reservation_context(verified_reservation)?;
         let binding = verified_reservation.binding;
@@ -1281,7 +1268,7 @@ impl StateVerifier {
             .envelope
             .object_hash()
             .map_err(StateError::from_schema)?;
-        let provenance = self.verify_certificate(
+        self.verify_certificate(
             canonical_state_certificate,
             &ResolvedStateIntent {
                 intent_object_hash: output_intent_object_hash,
@@ -1295,8 +1282,6 @@ impl StateVerifier {
             output_intent_object_hash,
             exact_output_hash,
             exact_output_byte_length,
-            _exact_output_stream_digest: exact_output_stream_digest,
-            _certificate_provenance: provenance,
         })
     }
 
@@ -1391,7 +1376,7 @@ impl StateVerifier {
             .envelope
             .object_hash()
             .map_err(StateError::from_schema)?;
-        let provenance = self.verify_certificate(
+        self.verify_certificate(
             input.canonical_state_certificate,
             &ResolvedStateIntent {
                 intent_object_hash: transition_object_hash,
@@ -1412,7 +1397,6 @@ impl StateVerifier {
             new_recovery_epoch,
             predecessor_transition_hash,
             preserved_latest_intent_object_hash: payload.preserved_latest_intent_object_hash,
-            _certificate_provenance: provenance,
         })
     }
 
@@ -1516,7 +1500,7 @@ impl StateVerifier {
         &self,
         canonical_state_certificate: &[u8],
         expected_intent: &ResolvedStateIntent,
-    ) -> StateResult<StateCertificateProvenance> {
+    ) -> StateResult<()> {
         let certificate =
             StateCertificate::decode(canonical_state_certificate, &self.canonical_decode_limits)?;
         let expected_sequence = derive_state_witness_vote_sequence(
@@ -1589,9 +1573,7 @@ impl StateVerifier {
             }
             previous_roster_position = Some(roster_position);
         }
-        Ok(StateCertificateProvenance {
-            _canonical_vote_carriers: certificate.canonical_signed_state_witness_vote_carriers,
-        })
+        Ok(())
     }
 
     fn roster_position(&self, participant_id: ParticipantIdentity) -> StateResult<u16> {

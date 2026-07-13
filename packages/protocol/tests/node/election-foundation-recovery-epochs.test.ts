@@ -46,7 +46,6 @@ describe('recovery epoch shells', () => {
                         deviceEpoch: 1,
                         actionSequence: 0,
                         contextHash,
-                        isByteIdenticalRetransmission: false,
                     },
                 ],
             }).refusedObjects,

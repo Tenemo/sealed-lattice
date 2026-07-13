@@ -1,5 +1,4 @@
 import {
-    canonicalJson,
     deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
@@ -41,7 +40,7 @@ export type ProtocolRootSigner = (
     signedRoot: CanonicalSignedRootObject,
 ) => ProtocolSignatureEnvelope | Promise<ProtocolSignatureEnvelope>;
 
-export type VssShareAcceptanceRecordInput = {
+type VssShareAcceptanceRecordInput = {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
     readonly envelopeReference: PrivateVssEnvelopeVerificationReference;
@@ -51,7 +50,7 @@ export type VssShareAcceptanceRecordInput = {
     readonly signRoot: ProtocolRootSigner;
 };
 
-export type VssShareComplaintRecordInput = {
+type VssShareComplaintRecordInput = {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
     readonly envelopeReference: PrivateVssEnvelopeVerificationReference;
@@ -74,7 +73,7 @@ export type PrivateVssLocalVerificationFailure = Readonly<{
     }>[];
 }>;
 
-export type VssShareComplaintFromLocalVerificationInput = Omit<
+type VssShareComplaintFromLocalVerificationInput = Omit<
     VssShareComplaintRecordInput,
     'complaintEvidenceRoot' | 'complaintReasonCode'
 > & {
@@ -96,9 +95,6 @@ export type VssShareAcceptanceRecord = Readonly<
         readonly deviceEpoch: number;
         readonly signingPublicKeyHash: ProtocolHash;
         readonly acceptanceRoot: ProtocolHash;
-        readonly acceptanceByteLength: number;
-        readonly acceptanceContextHash: ProtocolHash;
-        readonly signatureEnvelopeHash: ProtocolHash;
         readonly signatureEnvelope: ProtocolSignatureEnvelope;
     }
 >;
@@ -119,9 +115,6 @@ export type VssShareComplaintRecord = Readonly<
         readonly deviceEpoch: number;
         readonly signingPublicKeyHash: ProtocolHash;
         readonly complaintRoot: ProtocolHash;
-        readonly complaintByteLength: number;
-        readonly complaintContextHash: ProtocolHash;
-        readonly signatureEnvelopeHash: ProtocolHash;
         readonly signatureEnvelope: ProtocolSignatureEnvelope;
     }
 >;
@@ -158,11 +151,6 @@ type VssShareVerificationPayloadFields = Readonly<{
     readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
     readonly privateEnvelopeHash: ProtocolHash;
 }>;
-
-const textEncoder = new TextEncoder();
-
-const canonicalByteLength = (value: unknown): number =>
-    textEncoder.encode(canonicalJson(value)).byteLength;
 
 const signatureFailureMessage = (
     recordLabel: string,
@@ -282,7 +270,6 @@ export const createVssShareAcceptanceRecord = async (
         signingPublicKeyHash: input.signingPublicKeyHash,
     } as const satisfies JsonRecord;
     const acceptanceRoot = deriveCanonicalObjectHash(acceptancePayload);
-    const acceptanceByteLength = canonicalByteLength(acceptancePayload);
     // The signature-context hash carries its own objectType discriminator, which
     // domain-separates it from the object root under the shared canonical-object hash.
     const acceptanceContextHash = deriveCanonicalObjectHash({
@@ -319,9 +306,6 @@ export const createVssShareAcceptanceRecord = async (
     return {
         ...acceptancePayload,
         acceptanceRoot,
-        acceptanceByteLength,
-        acceptanceContextHash,
-        signatureEnvelopeHash: signatureEnvelope.signatureHash,
         signatureEnvelope,
     } satisfies VssShareAcceptanceRecord;
 };
@@ -384,7 +368,6 @@ export const createVssShareComplaintRecord = async (
         signingPublicKeyHash: input.signingPublicKeyHash,
     } as const satisfies JsonRecord;
     const complaintRoot = deriveCanonicalObjectHash(complaintPayload);
-    const complaintByteLength = canonicalByteLength(complaintPayload);
     const complaintContextHash = deriveCanonicalObjectHash({
         objectType: 'VssShareComplaintSignatureContext',
         ...shareVerificationPayloadFields(
@@ -420,9 +403,6 @@ export const createVssShareComplaintRecord = async (
     return {
         ...complaintPayload,
         complaintRoot,
-        complaintByteLength,
-        complaintContextHash,
-        signatureEnvelopeHash: signatureEnvelope.signatureHash,
         signatureEnvelope,
     } satisfies VssShareComplaintRecord;
 };

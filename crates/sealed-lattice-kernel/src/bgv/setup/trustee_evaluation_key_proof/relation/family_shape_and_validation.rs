@@ -16,16 +16,14 @@ pub(crate) const PRIVATE_VSS_SHARE_BINDING_LABELS: [&str; 3] = [
     "shareValuesHash",
 ];
 pub(crate) const VSS_SHARE_LINKAGE_BINDING_LABELS: [&str; 1] = ["shareLinkageStatementRoot"];
-pub(crate) const SAME_SECRET_BRIDGE_BINDING_LABELS: [&str; 0] = [];
 pub(crate) const TARGET_DECRYPTION_SHARE_BINDING_LABELS: [&str; 3] = [
     "targetShareProofStatementRoot",
     "activeCredentialBindingRoot",
     "smudgingCommitmentSetRoot",
 ];
-pub(crate) const TRUSTEE_EVALUATION_KEY_BINDING_LABELS: [&str; 4] = [
+pub(crate) const TRUSTEE_EVALUATION_KEY_BINDING_LABELS: [&str; 3] = [
     "requiredGaloisSetHash",
     "evaluatorKeyScheduleRoot",
-    "keySwitchDecompositionHash",
     "sourceConstantCoefficientCommitmentRoot",
 ];
 
@@ -82,7 +80,7 @@ impl SuccinctSetupProofFamilyShape {
             Self::PublicKeyShare => &PUBLIC_KEY_SHARE_SUCCINCT_BINDING_LABELS,
             Self::PrivateVssShare => &PRIVATE_VSS_SHARE_BINDING_LABELS,
             Self::VssShareLinkage => &VSS_SHARE_LINKAGE_BINDING_LABELS,
-            Self::SameSecretBridge => &SAME_SECRET_BRIDGE_BINDING_LABELS,
+            Self::SameSecretBridge => &[],
             Self::TargetDecryptionShare => &TARGET_DECRYPTION_SHARE_BINDING_LABELS,
             Self::TrusteeEvaluationKey => &TRUSTEE_EVALUATION_KEY_BINDING_LABELS,
         }

@@ -1,16 +1,11 @@
 import path from 'node:path';
 
 import {
-    createFocusedRustTestMatchTracker,
+    createHeavyTestProgressReporter,
     resolveFocusedRustTestRunResult,
-} from './focused-rust-test-match.js';
-import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
+} from './heavy-test-progress.js';
 import { runWithLocalRunLog } from './local-run-log.js';
-import {
-    runCommandsInSeries,
-    type CommandInvocation,
-    type CommandRunObserver,
-} from './run-command.js';
+import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
 import {
     cargoTestArgumentsForRustKernelFast,
@@ -24,20 +19,6 @@ export type ParsedRustKernelArguments = {
 
 const usage =
     'Usage: run-rust-kernel-tests.ts [<test name, module name, or Rust file filter>].';
-
-const combineObservers = (
-    observers: readonly CommandRunObserver[],
-): CommandRunObserver => ({
-    onCommandExit: (event): void => {
-        for (const observer of observers) observer.onCommandExit?.(event);
-    },
-    onCommandOutput: (event): void => {
-        for (const observer of observers) observer.onCommandOutput?.(event);
-    },
-    onCommandStart: (event): void => {
-        for (const observer of observers) observer.onCommandStart?.(event);
-    },
-});
 
 export const parseRustKernelArguments = (
     commandArguments: readonly string[],
@@ -117,10 +98,6 @@ export const runRustKernelTests = async (
                     testFilter: parsedArguments.testFilter,
                 });
             }
-            const focusedTestMatchTracker =
-                parsedArguments.testFilter === undefined
-                    ? undefined
-                    : createFocusedRustTestMatchTracker();
             const progressReporter = createHeavyTestProgressReporter({
                 eventFilePath: path.join(
                     runLog.runDirectoryPath,
@@ -133,25 +110,15 @@ export const runRustKernelTests = async (
 
             try {
                 let exitCode = await runCommandsInSeries([command], {
-                    observer:
-                        focusedTestMatchTracker === undefined
-                            ? progressReporter.observer
-                            : combineObservers([
-                                  progressReporter.observer,
-                                  focusedTestMatchTracker.observer,
-                              ]),
+                    observer: progressReporter.observer,
                     outputMode: 'inherit',
                     runLog,
                     terminalOutputFilter: progressReporter.terminalOutputFilter,
                 });
-                if (
-                    focusedTestMatchTracker !== undefined &&
-                    parsedArguments.testFilter !== undefined
-                ) {
+                if (parsedArguments.testFilter !== undefined) {
                     const focusedRunResult = resolveFocusedRustTestRunResult({
                         commandExitCode: exitCode,
-                        matchedTestCount:
-                            focusedTestMatchTracker.matchedTestCount(),
+                        executedTestCount: progressReporter.executedTestCount(),
                         runnerName: 'Rust kernel fast',
                         testFilter: parsedArguments.testFilter,
                     });

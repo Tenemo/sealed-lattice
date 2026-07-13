@@ -1,7 +1,6 @@
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import type {
-    MlDsaSignatureProfile,
     ProtocolHash,
     ProtocolSignatureEnvelope,
 } from '@sealed-lattice/types';
@@ -10,10 +9,15 @@ import {
     canonicalJson,
     deriveCanonicalObjectHash,
     deriveMlDsaPublicKeyHash,
-    deriveProtocolSignatureHash,
 } from '#packages/crypto/src/index';
 
 const textEncoder = new TextEncoder();
+const supportedMlDsaContextString = 'sealed-lattice:v1';
+const protocolSignatureProfile = {
+    algorithm: 'ML-DSA-65',
+    mode: 'PureMLDSA',
+    contextString: supportedMlDsaContextString,
+} as const;
 const mlDsa65SecretKeyByteLength = ml_dsa65.lengths.secretKey!;
 
 export type MlDsaKeyPairFixture = {
@@ -44,31 +48,16 @@ const decodeHexField = (
 };
 
 const canonicalProtocolSignatureMessage = (
-    signature: Pick<
-        ProtocolSignatureEnvelope,
-        'profile' | 'publicKeyHash' | 'signedRoot'
-    >,
+    signature: Pick<ProtocolSignatureEnvelope, 'publicKeyHash' | 'signedRoot'>,
 ): Uint8Array =>
     textEncoder.encode(
         canonicalJson({
             messageDomain: 'sealed-lattice/protocol-signature',
-            profile: signature.profile,
+            profile: protocolSignatureProfile,
             publicKeyHash: signature.publicKeyHash,
             signedRoot: signature.signedRoot,
         }),
     );
-
-export const createMlDsaSignatureProfileFixture = (
-    overrides: Partial<MlDsaSignatureProfile> = {},
-): MlDsaSignatureProfile => {
-    const contextString = overrides.contextString ?? 'sealed-lattice:v1';
-
-    return {
-        algorithm: 'ML-DSA-65',
-        mode: overrides.mode ?? 'PureMLDSA',
-        contextString,
-    };
-};
 
 export const createMlDsaKeyPairFixture = (
     seedLabel: string,
@@ -89,10 +78,7 @@ export const createMlDsaKeyPairFixture = (
 };
 
 export const createProtocolSignatureFixture = (
-    input: Omit<
-        ProtocolSignatureEnvelope,
-        'signatureBytesHex' | 'signatureHash'
-    > & {
+    input: Omit<ProtocolSignatureEnvelope, 'signatureBytesHex'> & {
         readonly secretKeyBytesHex: string;
     },
 ): ProtocolSignatureEnvelope => {
@@ -102,24 +88,18 @@ export const createProtocolSignatureFixture = (
         'secretKeyBytesHex',
     );
     const message = canonicalProtocolSignatureMessage({
-        profile: input.profile,
         publicKeyHash: input.publicKeyHash,
         signedRoot: input.signedRoot,
     });
     const signatureBytes = ml_dsa65.sign(message, secretKey, {
-        context: textEncoder.encode(input.profile.contextString),
+        context: textEncoder.encode(supportedMlDsaContextString),
         extraEntropy: false,
     });
-    const signature = {
-        profile: input.profile,
+
+    return {
         publicKeyBytesHex: input.publicKeyBytesHex,
         publicKeyHash: input.publicKeyHash,
         signatureBytesHex: bytesToHex(signatureBytes),
         signedRoot: input.signedRoot,
-    };
-
-    return {
-        ...signature,
-        signatureHash: deriveProtocolSignatureHash(signature),
     };
 };

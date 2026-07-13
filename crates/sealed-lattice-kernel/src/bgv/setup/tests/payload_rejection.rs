@@ -1,7 +1,18 @@
-﻿use super::*;
+use super::*;
 
 #[test]
 fn passive_setup_rejects_non_canonical_roster_positions_and_hashes() {
+    let mut missing_seed_request = request();
+    missing_seed_request
+        .as_object_mut()
+        .expect("the setup request is an object")
+        .remove("setupSeed");
+    assert!(generate_passive_setup_package_from_request(&missing_seed_request).is_err());
+
+    let mut empty_seed_request = request();
+    empty_seed_request["setupSeed"] = serde_json::json!("");
+    assert!(generate_passive_setup_package_from_request(&empty_seed_request).is_err());
+
     let mut duplicate_position_request = request();
     duplicate_position_request["participants"][1]["rosterPosition"] = serde_json::json!(0);
     assert!(generate_passive_setup_package_from_request(&duplicate_position_request).is_err());
@@ -59,14 +70,6 @@ fn passive_setup_payload_validation_rejects_coefficient_material_mutations() {
         "collective public key coefficient root mutation",
     );
 
-    let mut changed_coefficient_material = package;
-    changed_coefficient_material["collectivePublicKey"]["coefficientMaterial"]["modulusSummaries"]
-        [0]["componentZeroCoefficientDerivationHash512"] = serde_json::json!("1".repeat(128));
-    assert_setup_package_payload_is_rejected(
-        changed_coefficient_material,
-        "collective public key coefficient material mutation",
-    );
-
     let mut changed_public_key_coefficients = setup_package();
     let coefficient_hex = changed_public_key_coefficients["collectivePublicKey"]
         ["coefficientMaterial"]["coefficientTables"][0]["componentZeroCoefficientsLeHex"]
@@ -111,57 +114,36 @@ fn passive_setup_payload_validation_rejects_binding_mutations() {
         (
             "trustee threshold verification key hash",
             Box::new(|mutated_package| {
-                mutated_package["thresholdVerificationMaterial"]["trusteeThresholdVerificationKeyHashes"]
+                mutated_package["thresholdVerificationMaterial"]["verificationKeySet"]["trusteeThresholdVerificationKeyHashes"]
                     [0] = serde_json::json!(valid_hash('2'));
             }),
         ),
         (
             "relinearization key root",
             Box::new(|mutated_package| {
-                mutated_package["evaluationKeys"]["relinearizationKeyRoot"] =
+                mutated_package["evaluationKeys"]["evaluationKeyMaterialCommitment"]["relinearizationKeyRoot"] =
                     serde_json::json!(valid_hash('3'));
             }),
         ),
         (
             "key-switch key root",
             Box::new(|mutated_package| {
-                mutated_package["evaluationKeys"]["keySwitchKeyRoot"] =
+                mutated_package["evaluationKeys"]["evaluationKeyMaterialCommitment"]["keySwitchKeyRoot"] =
                     serde_json::json!(valid_hash('4'));
-            }),
-        ),
-        (
-            "key-switch decomposition hash",
-            Box::new(|mutated_package| {
-                mutated_package["evaluationKeys"]["keySwitchDecompositionHash"] =
-                    serde_json::json!(valid_hash('5'));
             }),
         ),
         (
             "rotation set hash",
             Box::new(|mutated_package| {
-                mutated_package["evaluationKeys"]["rotSetHash"] =
+                mutated_package["evaluationKeys"]["record"]["rotSetHash"] =
                     serde_json::json!(valid_hash('6'));
             }),
         ),
         (
             "rotation key root",
             Box::new(|mutated_package| {
-                mutated_package["evaluationKeys"]["rotationKeyRoots"][0]["rotationKeyRoot"] =
-                    serde_json::json!(valid_hash('7'));
-            }),
-        ),
-        (
-            "evaluation key material commitment",
-            Box::new(|mutated_package| {
-                mutated_package["evaluationKeys"]["evaluationKeyMaterialCommitment"]["record"]["sampledRelationChecks"]
-                    [0]["samples"][0]["relationMatches"] = serde_json::json!(false);
-            }),
-        ),
-        (
-            "evaluation key chunk root",
-            Box::new(|mutated_package| {
-                mutated_package["certificates"]["evaluationKeyStreamingCommitment"]["commitment"]
-                    ["chunkRoot"] = serde_json::json!(valid_hash('a'));
+                mutated_package["evaluationKeys"]["evaluationKeyMaterialCommitment"]["rotationKeyRoots"]
+                    [0]["rotationKeyRoot"] = serde_json::json!(valid_hash('7'));
             }),
         ),
     ];
@@ -174,21 +156,10 @@ fn passive_setup_payload_validation_rejects_binding_mutations() {
 }
 
 #[test]
-fn passive_setup_payload_validation_rejects_evaluator_binding_mutations() {
-    let package = setup_package();
-    for field_name in [
-        "bgvParametersHash",
-        "evaluatorBindingContextHash",
-        "comparisonInputDerivationCircuitHash",
-        "encryptedComparisonInputHash",
-        "encryptedSparseTargetProjectionHash",
-        "targetLayoutHash",
-        "passiveSetupEvaluatorContextBindingHash",
-    ] {
-        let mut mutated_package = package.clone();
-        mutated_package["parameterBindings"][field_name] = serde_json::json!(valid_hash('b'));
-        assert_setup_package_payload_is_rejected(mutated_package, field_name);
-    }
+fn passive_setup_payload_validation_rejects_bgv_parameter_hash_mutation() {
+    let mut mutated_package = setup_package();
+    mutated_package["bgvParametersHash"] = serde_json::json!(valid_hash('b'));
+    assert_setup_package_payload_is_rejected(mutated_package, "BGV parameters hash");
 }
 
 #[test]
@@ -231,9 +202,6 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
         let minimally_shaped_package = serde_json::json!({
             "objectType": "BgvPassiveSetupPackage",
             "participants": vec![serde_json::json!({}); invalid_participant_count],
-            "setupInputs": {
-                "participantCount": invalid_participant_count,
-            },
         });
         assert!(
             validate_setup_package_shape(&minimally_shaped_package).is_err(),
@@ -254,19 +222,6 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
             Box::new(|mutated_package: &mut serde_json::Value| {
                 mutated_package["setupInputs"]["ceremonyId"] = serde_json::json!("ceremony-stale");
             }) as Box<dyn Fn(&mut serde_json::Value)>,
-        ),
-        (
-            "setup participant count",
-            Box::new(|mutated_package: &mut serde_json::Value| {
-                mutated_package["setupInputs"]["participantCount"] = serde_json::json!(4);
-            }),
-        ),
-        (
-            "setup participant identities",
-            Box::new(|mutated_package: &mut serde_json::Value| {
-                mutated_package["setupInputs"]["participantIdentities"][0] =
-                    serde_json::json!("trustee-clone");
-            }),
         ),
         (
             "participant recovery epoch",
@@ -295,41 +250,22 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
 }
 
 #[test]
-fn passive_setup_verification_rejects_rotation_set_gaps() {
+fn passive_setup_verification_rejects_a_missing_rotation_key() {
     let package = setup_package();
     let rotations = package["evaluationKeys"]["rotSet"]["rotations"]
         .as_array()
         .expect("rotations");
     assert_eq!(rotations.len(), 23);
     assert_eq!(rotations[0], serde_json::json!(3));
-    assert_eq!(
-        package["evaluationKeys"]["rotSet"]["requiredRotationGroups"][0]["purpose"],
-        "direct-score-packing-generator-basis"
-    );
-    assert_eq!(
-        package["evaluationKeys"]["rotSet"]["requiredRotationGroups"][1]["purpose"],
-        "generator-ordered-packed-rank-forward-basis"
-    );
-    assert_eq!(
-        package["evaluationKeys"]["rotSet"]["requiredRotationGroups"][2]["purpose"],
-        "generator-ordered-packed-rank-return-basis"
-    );
 
     let mut missing_packed_rank_key = package.clone();
-    missing_packed_rank_key["evaluationKeys"]["rotationKeyRoots"]
+    missing_packed_rank_key["evaluationKeys"]["evaluationKeyMaterialCommitment"]
+        ["rotationKeyRoots"]
         .as_array_mut()
         .expect("rotation roots")
         .remove(0);
     assert_setup_package_payload_is_rejected(
         missing_packed_rank_key,
         "missing generator-ordered packed-rank rotation key",
-    );
-
-    let mut wrong_required_rotation_group = package.clone();
-    wrong_required_rotation_group["evaluationKeys"]["rotSet"]["requiredRotationGroups"][0]["rotations"]
-        [0] = serde_json::json!(1);
-    assert_setup_package_payload_is_rejected(
-        wrong_required_rotation_group,
-        "wrong direct score packing rotation group",
     );
 }

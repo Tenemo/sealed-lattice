@@ -6,29 +6,21 @@
 //! `H` of that order (the trace domain), then commits its low-degree extension
 //! on a `blowup`-times-larger coset `g * K`, where `K` is the subgroup of order
 //! `trace_size * blowup` and `g` is a non-`K` coset offset. FRI runs over the
-//! coset. Unlike the spike's `NegacyclicDomain` (a `2N`-th-root negacyclic
-//! transform for ring products), this is a plain cyclic transform used for
-//! polynomial interpolation and evaluation, which is what the low-degree
-//! argument needs.
+//! coset. This cyclic transform handles polynomial interpolation and evaluation;
+//! `NegacyclicDomain` separately handles ring products.
 //!
 //! The subgroups exist because every atom proof field is a generalized Fermat
 //! prime `p = b^64 + 1` with even `b`, so `p - 1 = b^64` has `2^64` as a factor
-//! and the field has a power-of-two subgroup of every order up to `2^64`. The
-//! spike precomputed only the order-2^16 root; larger domains are computed on
-//! demand, which is what lets the full foundation profile (N = 32768) run without a
-//! trace column split.
+//! and admits the required power-of-two subgroups. Roots above the stored
+//! order-2^16 root are computed on demand, allowing N = 32768 to run without a
+//! trace-column split.
 
 use super::super::proof_field::ProofFieldParameters;
 use super::super::wide_unsigned::{shift_right_one_in_place, subtract_in_place};
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-// The proof fields are generalized Fermat primes `p = b^64 + 1` with even `b`,
-// so `p - 1 = b^64` is divisible by `2^64`: the field has multiplicative
-// subgroups of every order `2^k` for `k <= 64`. The spike precomputed only the
-// order-2^16 root, but larger domains exist and are computed on demand
-// (`primitive_root_of_order`), which lets the full-profile trace fit without a
-// column split. The ceiling is set below the 2-adic valuation with margin for
-// the coset offset (order `2 * MAX_TWO_ADIC_ORDER`).
+// Maximum cyclic domain size. It stays below the fields' 2-adic capacity and
+// leaves room for a coset offset of order `2 * MAX_TWO_ADIC_ORDER`.
 pub(super) const MAX_TWO_ADIC_ORDER: usize = 1 << 20;
 const PRECOMPUTED_ROOT_ORDER: usize = 65_536;
 

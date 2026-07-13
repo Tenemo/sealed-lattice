@@ -1,12 +1,11 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+import { foundationProfile } from '@sealed-lattice/types';
 
 import type { CanonicalProofMaterialChunkPull } from '../setup-proof-material-transport.js';
-import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
 import { appendVaruint } from '../varuint-encoding.js';
 
 import {
     publicKeyShareMaterialEncoding,
-    publicKeyShareProofFamily,
     type PublicKeyShareCoefficientVectorMaterial,
     type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareMaterialRecord,
@@ -64,19 +63,10 @@ const validatePublicKeyShareMaterialContribution = (
             if (
                 rnsPrime === undefined ||
                 coefficientVector.rnsLimbIndex !== rnsLimbIndex ||
-                coefficientVector.rnsPrime !== rnsPrime ||
-                coefficientVector.component !== 'b_i'
+                coefficientVector.rnsPrime !== rnsPrime
             ) {
                 throw new Error(
                     'publicKeyShareMaterialContributions limb metadata must follow Q_share order.',
-                );
-            }
-            if (
-                coefficientVector.coefficientByteLength !==
-                input.ringDegree * 8
-            ) {
-                throw new Error(
-                    'publicKeyShareMaterialContributions coefficient byte length must match ringDegree.',
                 );
             }
             assertProtocolHash(
@@ -103,8 +93,7 @@ const validatePublicKeyShareMaterialContribution = (
                 shareCoefficientHash?.coefficientVectorHash512 !==
                     coefficientVectorHash ||
                 shareCoefficientHash.rnsLimbIndex !== rnsLimbIndex ||
-                shareCoefficientHash.rnsPrime !== rnsPrime ||
-                shareCoefficientHash.component !== 'b_i'
+                shareCoefficientHash.rnsPrime !== rnsPrime
             ) {
                 throw new Error(
                     'publicKeyShareMaterialContributions coefficient hash must match the accepted share record.',
@@ -114,8 +103,6 @@ const validatePublicKeyShareMaterialContribution = (
             return {
                 rnsLimbIndex,
                 rnsPrime,
-                component: 'b_i',
-                coefficientByteLength: coefficientVector.coefficientByteLength,
                 coefficientVectorHash512: coefficientVectorHash,
                 coefficientsLeHex: coefficientVector.coefficientsLeHex,
             };
@@ -152,7 +139,6 @@ export const publicKeyShareMaterialRecordsFromContributions = (
                 );
             const materialRecordWithoutRoot = {
                 objectType: 'PublicKeyShareMaterial',
-                proofFamily: publicKeyShareProofFamily,
                 materialEncoding: publicKeyShareMaterialEncoding,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
@@ -223,7 +209,6 @@ export const createPublicKeyShareMaterialSet = (
         publicKeyShareMaterialRecordsFromContributions(input);
     const materialSetWithoutRoot = {
         objectType: 'PublicKeyShareMaterialSet',
-        proofFamily: publicKeyShareProofFamily,
         materialEncoding: publicKeyShareMaterialEncoding,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -340,10 +325,7 @@ const publicKeyShareMaterialBinarySegments = (
             expectedRnsLimbIndex,
             coefficientVector,
         ] of materialRecord.shareCoefficientVectorsByLimb.entries()) {
-            if (
-                coefficientVector.rnsLimbIndex !== expectedRnsLimbIndex ||
-                coefficientVector.component !== 'b_i'
-            ) {
+            if (coefficientVector.rnsLimbIndex !== expectedRnsLimbIndex) {
                 throw new Error(
                     'publicKeyShareMaterial coefficient vector limbs must follow Q_share order.',
                 );
@@ -429,7 +411,8 @@ export const createPublicKeyShareMaterialEncodingSource = (
                 'public-key share material chunk index must be a non-negative safe integer.',
             );
         }
-        const chunkByteOffset = chunkIndex * setupProofTransportChunkSizeBytes;
+        const chunkByteOffset =
+            chunkIndex * foundationProfile.streamChunkByteLength;
         if (chunkByteOffset >= totalByteLength) {
             if (expectedByteLength !== 0) {
                 throw new Error(
@@ -439,7 +422,7 @@ export const createPublicKeyShareMaterialEncodingSource = (
             return Promise.resolve(undefined);
         }
         const canonicalByteLength = Math.min(
-            setupProofTransportChunkSizeBytes,
+            foundationProfile.streamChunkByteLength,
             totalByteLength - chunkByteOffset,
         );
         if (expectedByteLength !== canonicalByteLength) {

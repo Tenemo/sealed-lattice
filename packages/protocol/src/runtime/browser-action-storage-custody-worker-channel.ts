@@ -118,20 +118,13 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
     return prototype === Object.prototype || prototype === null;
 };
 
-const hasExactKeys = (
+const hasRequiredKeys = (
     value: Record<string, unknown>,
-    expectedKeys: readonly string[],
-): boolean => {
-    const actualKeys = Object.keys(value).sort();
-    const sortedExpectedKeys = [...expectedKeys].sort();
-
-    return (
-        actualKeys.length === sortedExpectedKeys.length &&
-        actualKeys.every(
-            (actualKey, keyIndex) => actualKey === sortedExpectedKeys[keyIndex],
-        )
+    requiredKeys: readonly string[],
+): boolean =>
+    requiredKeys.every((requiredKey) =>
+        Object.prototype.hasOwnProperty.call(value, requiredKey),
     );
-};
 
 const isSafePositiveInteger = (value: unknown): value is number =>
     typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
@@ -159,7 +152,7 @@ const copyBytes = (
 const copyRootBinding = (value: unknown): BrowserActionStorageRootBinding => {
     if (
         !isPlainRecord(value) ||
-        !hasExactKeys(value, [
+        !hasRequiredKeys(value, [
             'actionContextHash',
             'ceremonyContextHash',
             'participantId',
@@ -201,7 +194,7 @@ const copyVerifiedCommitment = (
 ): ExternallyVerifiedStorageRootCommitment => {
     if (
         !isPlainRecord(value) ||
-        !hasExactKeys(value, ['storageRootCommitment'])
+        !hasRequiredKeys(value, ['storageRootCommitment'])
     ) {
         throw new BrowserActionStorageCustodyError(
             'InvalidInput',
@@ -221,7 +214,7 @@ const copyVerifiedCommitment = (
 const copySnapshot = (value: unknown): BrowserDeviceWrappingSnapshot => {
     if (
         !isPlainRecord(value) ||
-        !hasExactKeys(value, [
+        !hasRequiredKeys(value, [
             'mutationIdentifier',
             'recoveryValueExported',
             'storageRootCommitment',
@@ -257,7 +250,7 @@ const copyBoundSnapshotInput = (
 }> => {
     if (
         !isPlainRecord(value) ||
-        !hasExactKeys(value, [
+        !hasRequiredKeys(value, [
             'expectedSnapshot',
             'externallyVerifiedCommitment',
         ])
@@ -323,7 +316,7 @@ const copyPreparationIdentifier = (value: unknown): string => {
 const copyChallenge = (value: unknown): BrowserRecoveryExportChallenge => {
     if (
         !isPlainRecord(value) ||
-        !hasExactKeys(value, ['preparationIdentifier', 'recoveryChecksum'])
+        !hasRequiredKeys(value, ['preparationIdentifier', 'recoveryChecksum'])
     ) {
         throw new BrowserActionStorageCustodyError(
             'OwnedWorkerFailure',
@@ -348,7 +341,7 @@ const copyConfirmation = (
 ): BrowserRecoveryExportConfirmation => {
     if (
         !isPlainRecord(value) ||
-        !hasExactKeys(value, ['canonicalRecoveryText', 'snapshot'])
+        !hasRequiredKeys(value, ['canonicalRecoveryText', 'snapshot'])
     ) {
         throw new BrowserActionStorageCustodyError(
             'OwnedWorkerFailure',
@@ -385,7 +378,7 @@ const copyLimits = (value: unknown): UntrustedStorageTransactionLimits => {
         'maximumTransactionByteLength',
         'maximumTransactionLifetimeMilliseconds',
     ] as const;
-    if (!isPlainRecord(value) || !hasExactKeys(value, keys)) {
+    if (!isPlainRecord(value) || !hasRequiredKeys(value, keys)) {
         throw new BrowserActionStorageCustodyError(
             'InvalidInput',
             'Browser storage transaction limits are malformed.',
@@ -416,7 +409,7 @@ const copyWorkerConfiguration = (
 ): BrowserActionStorageCustodyWorkerConfiguration => {
     if (
         !isPlainRecord(value) ||
-        !hasExactKeys(value, [
+        !hasRequiredKeys(value, [
             'acquisitionDeadlineEpochMilliseconds',
             'binding',
             'databaseName',
@@ -468,7 +461,7 @@ const isCustodyWorkerResponse = (
     }
     if (value.messageKind === 'browser-action-storage-custody-channel-failed') {
         return (
-            hasExactKeys(value, ['errorCode', 'messageKind']) &&
+            hasRequiredKeys(value, ['errorCode', 'messageKind']) &&
             value.errorCode === 'OwnedWorkerFailure'
         );
     }
@@ -476,7 +469,7 @@ const isCustodyWorkerResponse = (
         return false;
     }
     if (value.messageKind === 'browser-action-storage-custody-completed') {
-        return hasExactKeys(value, [
+        return hasRequiredKeys(value, [
             'messageKind',
             'requestIdentifier',
             'result',
@@ -485,7 +478,7 @@ const isCustodyWorkerResponse = (
 
     return (
         value.messageKind === 'browser-action-storage-custody-failed' &&
-        hasExactKeys(value, [
+        hasRequiredKeys(value, [
             'errorCode',
             'messageKind',
             'requestIdentifier',
@@ -511,7 +504,7 @@ const isCustodyWorkerRequest = (
     value: unknown,
 ): value is CustodyWorkerRequest =>
     isPlainRecord(value) &&
-    hasExactKeys(value, [
+    hasRequiredKeys(value, [
         'command',
         'input',
         'messageKind',
@@ -961,7 +954,7 @@ const copyHostCommandInput = (
         case 'confirm-recovery-export': {
             if (
                 !isPlainRecord(input) ||
-                !hasExactKeys(input, [
+                !hasRequiredKeys(input, [
                     'confirmedChecksum',
                     'preparationIdentifier',
                 ])
@@ -986,7 +979,7 @@ const copyHostCommandInput = (
         case 'recover': {
             if (
                 !isPlainRecord(input) ||
-                !hasExactKeys(input, [
+                !hasRequiredKeys(input, [
                     'caseInsensitiveRecoveryText',
                     'externallyVerifiedCommitment',
                     'expectedSnapshot',

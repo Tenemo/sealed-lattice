@@ -15,6 +15,7 @@ import {
     type VssCommittedMaterialCommitmentComputer,
 } from '#packages/protocol/src/setup/vss-commitments';
 import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
+import { withDeterministicWebCryptoRandomness } from '#tests/support/deterministic-web-crypto-randomness';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -75,9 +76,16 @@ type TargetContext = Readonly<{
         targetCiphertextHash: string;
         targetBasisHash: string;
     }>;
-    targetDecryptionCiphertextHash: string;
     targetShareProfile: Readonly<{ targetShareProfileHash: string }>;
 }>;
+
+const createEncryptedLocalTrusteeSetupStateFixture = (
+    input: LocalTrusteeSetupStateInput,
+): ReturnType<typeof createEncryptedLocalTrusteeSetupStateFromVerifiedShares> =>
+    withDeterministicWebCryptoRandomness(
+        ['61'.repeat(12), '51'.repeat(12)],
+        () => createEncryptedLocalTrusteeSetupStateFromVerifiedShares(input),
+    );
 
 const computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentComputer =
     (input) => {
@@ -276,8 +284,6 @@ const setupArtifacts = async (): Promise<SetupArtifacts> => {
                 ],
             },
             storageKeyBytesHex: '41'.repeat(32),
-            localStateAeadNonceBytesHex: '51'.repeat(12),
-            sealedAggregateThresholdShareAeadNonceBytesHex: '61'.repeat(12),
         },
     } as const;
 };
@@ -307,9 +313,6 @@ const targetContext = (
     return {
         setupPackage,
         targetAcceptedRecord,
-        targetDecryptionCiphertextHash: fixtureHash(
-            'target-decryption-ciphertext',
-        ),
         targetShareProfile: {
             targetShareProfileHash: fixtureHash('target-share-profile'),
         },
@@ -320,7 +323,7 @@ describe('local setup-to-target-share witness lifecycle', () => {
     it('restores the setup-produced aggregate opening only from encrypted local state', async () => {
         const artifacts = await setupArtifacts();
         const encryptedState =
-            await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
+            await createEncryptedLocalTrusteeSetupStateFixture(
                 artifacts.localStateInput,
             );
         const target = targetContext(artifacts.aggregateThresholdCommitmentSet);
@@ -366,9 +369,6 @@ describe('local setup-to-target-share witness lifecycle', () => {
                 targetBasisHash: fixtureHash('target-basis'),
             },
         });
-        expect(
-            JSON.stringify(preparedWitness.localTargetShareWitness),
-        ).not.toContain('aggregateCommitmentMessageValuesLeHex');
         const [materialSource] =
             preparedWitness.aggregateOpeningMaterialSources;
         expect(materialSource).toMatchObject({
@@ -404,7 +404,7 @@ describe('local setup-to-target-share witness lifecycle', () => {
         const artifacts = await setupArtifacts();
         const handoff = artifacts.aggregateOpeningCredentialHandoff;
         await expect(
-            createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
+            createEncryptedLocalTrusteeSetupStateFixture({
                 ...artifacts.localStateInput,
                 localTrusteeAggregateOpeningCredentialHandoff: {
                     ...handoff,
@@ -427,7 +427,7 @@ describe('local setup-to-target-share witness lifecycle', () => {
             ],
         } satisfies LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
         await expect(
-            createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
+            createEncryptedLocalTrusteeSetupStateFixture({
                 ...artifacts.localStateInput,
                 localTrusteeAggregateOpeningCredentialHandoff:
                     changedMessageHandoff,
@@ -446,7 +446,7 @@ describe('local setup-to-target-share witness lifecycle', () => {
             ],
         } satisfies LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
         const encryptedChangedRootState =
-            await createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
+            await createEncryptedLocalTrusteeSetupStateFixture({
                 ...artifacts.localStateInput,
                 localTrusteeAggregateOpeningCredentialHandoff:
                     changedRootHandoff,
@@ -467,7 +467,7 @@ describe('local setup-to-target-share witness lifecycle', () => {
         ).rejects.toThrow(/must match the accepted aggregate commitment/u);
 
         const encryptedState =
-            await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
+            await createEncryptedLocalTrusteeSetupStateFixture(
                 artifacts.localStateInput,
             );
         await expect(

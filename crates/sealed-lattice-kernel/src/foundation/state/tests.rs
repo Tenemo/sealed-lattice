@@ -224,7 +224,7 @@ fn verified_exact_output_stream(
         StateCapabilityKind::SetupActionRandomnessRoot
         | StateCapabilityKind::SetupPublicSeedBranch
         | StateCapabilityKind::SetupDealerSetBranch
-        | StateCapabilityKind::SetupRkgRoundOneBranch
+        | StateCapabilityKind::SetupRelinearizationRoundOneBranch
         | StateCapabilityKind::SetupTerminalPackage => {
             panic!("reservation-only state capability has no exact-output stream")
         }
@@ -477,7 +477,7 @@ fn state_derivations_check_domains_boundaries_and_replay_equivocation() {
         StateCapabilityKind::SetupActionRandomnessRoot,
         StateCapabilityKind::SetupPublicSeedBranch,
         StateCapabilityKind::SetupDealerSetBranch,
-        StateCapabilityKind::SetupRkgRoundOneBranch,
+        StateCapabilityKind::SetupRelinearizationRoundOneBranch,
         StateCapabilityKind::SetupTerminalPackage,
     ] {
         assert_eq!(
@@ -1077,7 +1077,7 @@ fn reservation_only_setup_capabilities_verify_recover_and_refuse_outputs() {
         StateCapabilityKind::SetupActionRandomnessRoot,
         StateCapabilityKind::SetupPublicSeedBranch,
         StateCapabilityKind::SetupDealerSetBranch,
-        StateCapabilityKind::SetupRkgRoundOneBranch,
+        StateCapabilityKind::SetupRelinearizationRoundOneBranch,
         StateCapabilityKind::SetupTerminalPackage,
     ] {
         let capability_byte =

@@ -1,7 +1,7 @@
 //! Radix-2 FRI proximity argument over one atom proof field.
 //!
-//! Proves a committed codeword over the coset `offset * K` (|K| a power of two)
-//! is close to the evaluations of a polynomial of degree below the rate bound.
+//! Implements folding for a committed codeword over the coset `offset * K`
+//! (`|K|` a power of two) with a claimed polynomial degree below the rate bound.
 //! Each round folds the codeword with a Fiat-Shamir challenge, halving the
 //! domain (a coset of a 2-adic subgroup stays a coset under squaring), commits
 //! the layer in a salted Merkle tree, and after enough rounds sends the small
@@ -9,10 +9,8 @@
 //! verifier authenticates both leaves against the layer root, rechecks every
 //! fold, and rechecks the final layer's low degree.
 //!
-//! Binding is the salted Merkle commitment; per-query soundness at rate
-//! `1/blowup` follows the standard FRI analysis. The opened salts are revealed
-//! per query (salts only hide unopened leaves), so the verifier recomputes the
-//! exact committed leaf.
+//! Salted Merkle roots bind each layer. Opened salts are revealed with their
+//! query leaves, which lets the verifier recompute each authenticated leaf.
 
 use super::super::proof_field::ProofFieldParameters;
 use super::domain::{CyclicDomain, evaluate_polynomial_at};

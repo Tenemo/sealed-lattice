@@ -3,8 +3,6 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 import { copyCanonicalStreamDescriptor } from './canonical-stream-descriptor.js';
 import type { JsonRecord } from './common-fields.js';
 
-export const setupProofTransportChunkSizeBytes = 1_048_576;
-
 export type CanonicalProofMaterialChunkPull = (input: {
     readonly abortSignal?: AbortSignal;
     readonly chunkIndex: number;
@@ -25,16 +23,6 @@ export type SetupProofMaterialChunkSource = Readonly<{
     readonly proofMaterialRoot: ProtocolHash;
     readonly pullChunk: CanonicalProofMaterialChunkPull;
 }>;
-
-export const setupTransportedProofMaterialFields = (
-    proofMaterialRoot: ProtocolHash,
-): Readonly<
-    JsonRecord & {
-        readonly proofMaterialRoot: ProtocolHash;
-    }
-> => ({
-    proofMaterialRoot,
-});
 
 export const canonicalGeneratedSetupProofMaterialDescriptor = (
     material: CanonicalGeneratedSetupProofMaterial,

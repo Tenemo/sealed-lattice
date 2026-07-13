@@ -412,13 +412,10 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
     Ok(())
 }
 
-// Verify the proven threshold-share aggregate binding: for every aggregate
-// record, a unit-evaluation-point share-linkage proof shows the committed
-// threshold share T_{j,l} is the modular sum of the committed source recipient
-// shares sigma_{i->j,l}. Replaces the removed public homomorphic coordinate-sum.
-// Acceptance is by the proof plus the canonical binding of its statement's
-// committed roots to the recipient-share and aggregate commitment sets, never by
-// any self-attested field.
+// For every aggregate record, verify the unit-evaluation-point share-linkage
+// relation binding the committed threshold share T_{j,l} to the modular sum of
+// the committed source recipient shares sigma_{i->j,l}. The statement roots are
+// bound canonically to the recipient-share and aggregate commitment sets.
 pub(crate) struct VssAggregateThresholdProofContext<'a> {
     pub(crate) ceremony_id: &'a str,
     pub(crate) manifest_hash: &'a str,
@@ -456,10 +453,8 @@ pub(super) fn verify_vss_aggregate_threshold_statement_root(
         ));
     }
 
-    // Rebuild the exact recognized aggregate statement instead of hashing the
-    // input object wholesale. This keeps unknown relay metadata irrelevant
-    // while ensuring the named statement root is derived from every field the
-    // aggregate proof parser and verifier consume.
+    // Rebuild the aggregate statement from every field consumed by the proof
+    // parser and verifier before deriving its named root.
     let statement_without_root = json!({
         "objectType": "VssShareLinkageStatement",
         "isThresholdAggregate": true,

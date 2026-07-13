@@ -2,6 +2,13 @@ use super::*;
 
 use crate::hashing::derive_canonical_object_hash;
 
+pub(super) struct DirectBallotBinaryProofTransport {
+    pub(super) proof_bytes_hash: String,
+    pub(super) chunk_merkle_root: String,
+    pub(super) chunk_hashes: Vec<String>,
+    pub(super) public_transport_hash: String,
+}
+
 pub(super) fn chunk_count_for_bytes(
     byte_count: usize,
     chunk_size_bytes: usize,
@@ -100,9 +107,7 @@ pub(super) fn transport_direct_ballot_binary_proof(
         })?;
 
     Ok(DirectBallotBinaryProofTransport {
-        proof_size_bytes: proof_bytes.len(),
         proof_bytes_hash: transported_proof_bytes_hash,
-        chunk_count,
         chunk_merkle_root,
         chunk_hashes,
         public_transport_hash,

@@ -395,12 +395,9 @@ fn vss_share_linkage_proof_material_reference(
     );
     let checkpoint_key = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssShareLinkageProofCheckpointKey",
-        // The prover revision invalidates cached proofs when the family's proof
-        // structure changes but its statement root does not. Bump it on any
-        // vss-share-linkage schedule/mask change; "trit" covers the Branch 2
-        // stage B.2 move to trit-granular message consistency claims (each digit
-        // split into its base-three trits, witness bound two), which changes the
-        // masked-claim set and proof bytes without touching the statement root.
+        // The revision invalidates cached proofs when proof bytes can change
+        // without changing the statement root. "trit" identifies the current
+        // trit-granular message-claim layout.
         "proverRevision": "share-linkage-trit",
         "statementRoot": package["vssShareLinkageStatement"]["statementRoot"],
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -658,9 +655,7 @@ pub(super) fn vss_share_linkage_proof_generation_request(
         "ringDegree": ring_degree,
         "vssShareLinkage": vss_share_linkage,
         "coefficientMessagesByShamirIndex": coefficient_messages_by_shamir_index,
-        "coefficientOpeningRandomnessByShamirIndex": Vec::<Vec<Vec<i64>>>::new(),
         "recipientShareMessagesByItem": recipient_share_messages_by_item,
-        "recipientShareOpeningRandomnessByItem": Vec::<Vec<Vec<i64>>>::new(),
         "carryWitnessesByItem": carry_witnesses_by_item,
         "vssCommittedMaterialSeedsByBoundMessage": bound_material_seeds,
         "vssCommittedMaterialContextHashesByBoundMessage": bound_material_context_hashes,

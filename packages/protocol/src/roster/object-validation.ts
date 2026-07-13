@@ -410,7 +410,6 @@ export const verifyRosterExternalAcceptance = (
             objectType: acceptance.objectType,
             participantIdentity: acceptance.participantIdentity,
             rosterHash: acceptance.rosterHash,
-            warningTextVersion: acceptance.warningTextVersion,
         });
 
         if (acceptance.rosterExternalAcceptanceHash !== expectedHash) {
@@ -430,8 +429,7 @@ export const verifyRosterExternalAcceptance = (
             acceptance.electionManifestHash !==
                 input.expectedElectionManifestHash ||
             acceptance.acceptedBoardHeadHash !==
-                input.expectedAcceptedBoardHeadHash ||
-            acceptance.warningTextVersion.trim().length === 0
+                input.expectedAcceptedBoardHeadHash
         ) {
             refusedObjects.push(
                 createRefusal(

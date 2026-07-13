@@ -152,7 +152,6 @@ jobs:
                   toolchain: 1.90.0
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
             - name: Run measured-heavy Rust kernel tests
-              id: rust-heavy
               timeout-minutes: 110
               run: pnpm run test:rust:kernel:heavy
             - name: Upload measured-heavy Rust kernel logs
@@ -180,7 +179,6 @@ jobs:
                   toolchain: 1.90.0
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
             - name: Run Rust accepted setup proof tests
-              id: rust-accepted-setup
               timeout-minutes: 350
               run: pnpm run test:rust:kernel:accepted-setup -- --ci
             - name: Upload Rust accepted setup logs
@@ -206,7 +204,6 @@ jobs:
                   toolchain: 1.90.0
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
             - name: Run ten-participant proof-bearing accepted-setup evidence
-              id: rust-ten-participant-accepted-setup-evidence
               timeout-minutes: 350
               run: pnpm run test:rust:kernel:accepted-setup:ten-participant-evidence
             - name: Upload ten-participant accepted-setup evidence logs

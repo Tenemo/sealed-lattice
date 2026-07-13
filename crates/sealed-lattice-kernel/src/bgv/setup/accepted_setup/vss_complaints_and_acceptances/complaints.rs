@@ -36,17 +36,18 @@ pub(in super::super) fn verify_vss_complaints(
     }
 
     let private_vss_envelope_commitment_root = setup_package
-        .get("privateVssEnvelopeCommitmentRoot")
+        .get("privateVssEnvelopeCommitments")
+        .and_then(|commitments| commitments.get("privateVssEnvelopeCommitmentRoot"))
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "privateVssEnvelopeCommitmentRoot was required before VSS complaint verification",
+                "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot was required before VSS complaint verification",
             )
         })?;
     validate_hash_string(
         private_vss_envelope_commitment_root,
-        "privateVssEnvelopeCommitmentRoot",
+        "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
     )?;
     if complaint_set
         .get("privateVssEnvelopeCommitmentRoot")
@@ -55,7 +56,7 @@ pub(in super::super) fn verify_vss_complaints(
     {
         return Ok(Some(vss_complaint_refusal(
             "vssComplaintPrivateEnvelopeRootMismatch",
-            "vssComplaints.privateVssEnvelopeCommitmentRoot must match setupPackage.privateVssEnvelopeCommitmentRoot",
+            "vssComplaints.privateVssEnvelopeCommitmentRoot must match privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
             "setupPackage.vssComplaints.privateVssEnvelopeCommitmentRoot",
         )?));
     }
@@ -199,7 +200,7 @@ fn verify_vss_complaint_record(
     {
         return Ok(Some(vss_complaint_refusal(
             "vssComplaintPrivateEnvelopeRootMismatch",
-            "VSS complaint must bind setupPackage.privateVssEnvelopeCommitmentRoot",
+            "VSS complaint must bind privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
             "setupPackage.vssComplaints.complaintRecords.privateVssEnvelopeCommitmentRoot",
         )?));
     }
@@ -443,69 +444,8 @@ fn verify_vss_complaint_record(
         )?));
     }
 
-    let expected_byte_length =
-        u64::try_from(canonical_json(&complaint_payload)?.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS complaint payload byte length does not fit u64",
-            )
-        })?;
-    let Some(complaint_byte_length) = complaint_record
-        .get("complaintByteLength")
-        .and_then(Value::as_u64)
-    else {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintByteLengthMissing",
-            "VSS complaint must bind complaintByteLength",
-            "setupPackage.vssComplaints.complaintRecords.complaintByteLength",
-        )?));
-    };
-    if complaint_byte_length != expected_byte_length {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintByteLengthMismatch",
-            "VSS complaint byte length does not match the canonical complaint payload",
-            "setupPackage.vssComplaints.complaintRecords.complaintByteLength",
-        )?));
-    }
-
     let expected_context_hash =
         vss_complaint_signature_context_hash(complaint_record, complaint_root)?;
-    let Some(complaint_context_hash) = complaint_record
-        .get("complaintContextHash")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintContextHashMissing",
-            "VSS complaint must bind complaintContextHash",
-            "setupPackage.vssComplaints.complaintRecords.complaintContextHash",
-        )?));
-    };
-    validate_hash_string(
-        complaint_context_hash,
-        "vssComplaints.complaintRecords.complaintContextHash",
-    )?;
-    if complaint_context_hash != expected_context_hash {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintContextHashMismatch",
-            "VSS complaint context hash does not match the signed complaint binding",
-            "setupPackage.vssComplaints.complaintRecords.complaintContextHash",
-        )?));
-    }
-
-    let Some(signature_envelope_hash) = complaint_record
-        .get("signatureEnvelopeHash")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintSignatureHashMissing",
-            "VSS complaint must bind signatureEnvelopeHash",
-            "setupPackage.vssComplaints.complaintRecords.signatureEnvelopeHash",
-        )?));
-    };
-    validate_hash_string(
-        signature_envelope_hash,
-        "vssComplaints.complaintRecords.signatureEnvelopeHash",
-    )?;
     let Some(signature_envelope) = complaint_record.get("signatureEnvelope") else {
         return Ok(Some(vss_complaint_refusal(
             "vssComplaintSignatureMissing",
@@ -528,20 +468,13 @@ fn verify_vss_complaint_record(
             object_root: Some(complaint_root),
             chunk_merkle_root: None,
             board_head_hash: None,
-            context_hash: complaint_context_hash,
+            context_hash: &expected_context_hash,
             recovery_epoch,
             device_epoch,
         },
     )?;
     match verification {
-        Ok(verified_signature_hash) if verified_signature_hash == signature_envelope_hash => {
-            Ok(None)
-        }
-        Ok(_) => Ok(Some(vss_complaint_refusal(
-            "vssComplaintSignatureHashMismatch",
-            "VSS complaint signature envelope hash does not match the verified envelope",
-            "setupPackage.vssComplaints.complaintRecords.signatureEnvelopeHash",
-        )?)),
+        Ok(()) => Ok(None),
         Err(failure) => Ok(Some(vss_complaint_refusal(
             failure.reason_code,
             failure.message,

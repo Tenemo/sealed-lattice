@@ -1,5 +1,4 @@
 use super::*;
-use crate::bgv::setup::setup_proof::material_transport::SetupProofMaterialTransportHashes;
 
 #[derive(Clone)]
 pub(in super::super::super) struct DescriptorBackedVssProofMaterialFixture {
@@ -15,36 +14,6 @@ struct RetainedVssProofMaterial {
     proof_bytes_hash: String,
     proof_bytes: Option<Vec<u8>>,
     proof_binding_lease: Option<crate::bgv::setup::CanonicalSetupProofBindingLease>,
-}
-
-impl RetainedVssProofMaterial {
-    fn transport_accounting(&self) -> SetupProofMaterialTransportHashes {
-        if let Some(proof_bytes) = self.proof_bytes.as_deref() {
-            return canonical_setup_proof_material_transport_accounting(
-                self.proof_family,
-                proof_bytes,
-            )
-            .expect("canonical setup proof material transport accounting");
-        }
-        let stream_summary =
-            crate::bgv::setup::accepted_setup_fixture_proof_binding_stream_summary(
-                self.proof_binding_lease
-                    .as_ref()
-                    .expect("descriptor-backed proof binding lease"),
-                self.proof_family,
-                &self.proof_material_root,
-            )
-            .expect("descriptor-backed proof stream summary lookup");
-        let accounting =
-            crate::bgv::setup::authenticated_setup_transport_accounting(&stream_summary)
-                .expect("descriptor-backed proof transport accounting");
-        SetupProofMaterialTransportHashes {
-            full_object_hash: accounting.full_object_hash,
-            chunk_hashes: accounting.chunk_hashes,
-            chunk_root: accounting.chunk_root,
-            total_byte_length: accounting.total_byte_length,
-        }
-    }
 }
 
 impl DescriptorBackedVssProofMaterialFixture {
@@ -170,7 +139,7 @@ fn rewrite_proof_material_set_for_authenticated_transport(
                 &proof_bytes_hash,
             )
             .expect("setup proof material reference root");
-        let (transport_accounting, retained_material) = if let Some(proof_bytes_base64) =
+        let retained_material = if let Some(proof_bytes_base64) =
             proof_record.get("proofBytesBase64")
         {
             let proof_bytes = crate::transcript_core::decode_standard_base64(
@@ -185,22 +154,14 @@ fn rewrite_proof_material_set_for_authenticated_transport(
                 proof_bytes_hash,
                 "fixture proof bytes must match their published hash",
             );
-            let transport_accounting = canonical_setup_proof_material_transport_accounting(
-                fields.proof_family,
-                &proof_bytes,
-            )
-            .expect("canonical setup proof material transport accounting");
-            (
-                transport_accounting,
-                RetainedVssProofMaterial {
-                    proof_family: fields.proof_family,
-                    proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
-                    proof_material_root: proof_material_root.clone(),
-                    proof_bytes_hash: proof_bytes_hash.clone(),
-                    proof_bytes: Some(proof_bytes),
-                    proof_binding_lease: None,
-                },
-            )
+            RetainedVssProofMaterial {
+                proof_family: fields.proof_family,
+                proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
+                proof_material_root: proof_material_root.clone(),
+                proof_bytes_hash: proof_bytes_hash.clone(),
+                proof_bytes: Some(proof_bytes),
+                proof_binding_lease: None,
+            }
         } else {
             assert_eq!(
                 proof_record["proofMaterialRoot"]
@@ -213,33 +174,14 @@ fn rewrite_proof_material_set_for_authenticated_transport(
                 crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(&proof_material_root)
                     .expect("descriptor-backed proof binding lookup")
                     .expect("descriptor-backed proof binding");
-            let stream_summary =
-                crate::bgv::setup::accepted_setup_fixture_proof_binding_stream_summary(
-                    &proof_binding_lease,
-                    fields.proof_family,
-                    &proof_material_root,
-                )
-                .expect("descriptor-backed proof stream summary lookup");
-            let authenticated_accounting =
-                crate::bgv::setup::authenticated_setup_transport_accounting(&stream_summary)
-                    .expect("descriptor-backed proof transport accounting");
-            let transport_accounting = SetupProofMaterialTransportHashes {
-                full_object_hash: authenticated_accounting.full_object_hash,
-                chunk_hashes: authenticated_accounting.chunk_hashes,
-                chunk_root: authenticated_accounting.chunk_root,
-                total_byte_length: authenticated_accounting.total_byte_length,
-            };
-            (
-                transport_accounting,
-                RetainedVssProofMaterial {
-                    proof_family: fields.proof_family,
-                    proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
-                    proof_material_root: proof_material_root.clone(),
-                    proof_bytes_hash: proof_bytes_hash.clone(),
-                    proof_bytes: None,
-                    proof_binding_lease: Some(proof_binding_lease),
-                },
-            )
+            RetainedVssProofMaterial {
+                proof_family: fields.proof_family,
+                proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
+                proof_material_root: proof_material_root.clone(),
+                proof_bytes_hash: proof_bytes_hash.clone(),
+                proof_bytes: None,
+                proof_binding_lease: Some(proof_binding_lease),
+            }
         };
 
         let record_object = proof_record
@@ -260,11 +202,6 @@ fn rewrite_proof_material_set_for_authenticated_transport(
             "objectType": fields.transport_object_type,
             "proofFamily": fields.proof_family,
             "proofMaterialRoot": proof_material_root,
-            "chunkCount": transport_accounting.chunk_hashes.len(),
-            "totalByteLength": transport_accounting.total_byte_length,
-            "fullObjectHash": transport_accounting.full_object_hash,
-            "chunkRoot": transport_accounting.chunk_root,
-            "chunkHashes": transport_accounting.chunk_hashes,
         }));
         retained_proof_materials.push(retained_material);
     }
@@ -327,22 +264,11 @@ pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
         .as_array_mut()
         .expect("transported VSS aggregate threshold proof materials")
     {
-        let proof_material_root = transported_material["proofMaterialRoot"]
-            .as_str()
-            .expect("VSS aggregate threshold transported proof material root");
-        let retained_material = aggregate_retained_proof_materials
-            .iter()
-            .find(|material| material.proof_material_root == proof_material_root)
-            .expect("retained VSS aggregate threshold proof material");
-        let transport_accounting = retained_material.transport_accounting();
-        transported_material["chunkCount"] =
-            serde_json::json!(transport_accounting.chunk_hashes.len());
-        transported_material["totalByteLength"] =
-            serde_json::json!(transport_accounting.total_byte_length);
-        transported_material["fullObjectHash"] =
-            serde_json::json!(transport_accounting.full_object_hash);
-        transported_material["chunkRoot"] = serde_json::json!(transport_accounting.chunk_root);
-        transported_material["chunkHashes"] = serde_json::json!(transport_accounting.chunk_hashes);
+        *transported_material = serde_json::json!({
+            "objectType": transported_material["objectType"],
+            "proofFamily": transported_material["proofFamily"],
+            "proofMaterialRoot": transported_material["proofMaterialRoot"],
+        });
     }
 
     let rewritten_share_linkage = rewrite_proof_material_set_for_authenticated_transport(

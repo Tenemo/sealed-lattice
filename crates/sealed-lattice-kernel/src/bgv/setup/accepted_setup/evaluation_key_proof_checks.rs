@@ -124,14 +124,6 @@ fn verify_trustee_evaluation_key_proof_set(
     })?;
     let roster = super::accepted_roster_from_package(setup_package);
     verify_context_fields_match(proof_set, setup_context, "trusteeEvaluationKeyProofs")?;
-    for (field_name, expected_value) in [("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)] {
-        if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!("trusteeEvaluationKeyProofs.{field_name} must be {expected_value}"),
-            ));
-        }
-    }
     for (field_name, expected_value) in [
         ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
@@ -154,7 +146,6 @@ fn verify_trustee_evaluation_key_proof_set(
                 "commonRandomness.publicMatrixSeedHash was required before trustee evaluation-key proof verification",
             )
         })?;
-    let key_switch_decomposition_hash = accepted_key_switch_decomposition_hash()?;
     let vss_coefficient_commitment_root = setup_package
         .get("vssCoefficientCommitments")
         .and_then(|commitments| commitments.get("vssCoefficientCommitmentRoot"))
@@ -173,10 +164,6 @@ fn verify_trustee_evaluation_key_proof_set(
         (
             "requiredGaloisSetHash",
             binding.required_galois_set_hash.as_str(),
-        ),
-        (
-            "keySwitchDecompositionHash",
-            key_switch_decomposition_hash.as_str(),
         ),
         (
             "vssCoefficientCommitmentRoot",
@@ -356,14 +343,6 @@ fn verify_trustee_evaluation_key_proof_record(
         ));
     }
     verify_context_fields_match(proof_record, setup_context, "trusteeEvaluationKeyProof")?;
-    for (field_name, expected_value) in [("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)] {
-        if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!("trustee evaluation-key proof {field_name} must be {expected_value}"),
-            ));
-        }
-    }
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
     let source_constant_commitment_root = statement
         .context
@@ -490,15 +469,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_verification_binding_h
         "statementHash": to_hex(&statement.statement_hash()),
         "proofRecordRoot": derive_canonical_object_hash(&proof_record_root_input)?,
     }))
-}
-
-// The accepted key-switch decomposition hash the proof context binds:
-// recomputed from the repo-owned decomposition parameters, never read from the
-// package.
-pub(in crate::bgv::setup) fn accepted_key_switch_decomposition_hash() -> CanonicalResult<String> {
-    derive_canonical_object_hash(
-        &crate::bgv::setup::certificates::key_switch_decomposition_parameters()?,
-    )
 }
 
 pub(in crate::bgv::setup) struct TrusteeEvaluationKeyStatementInputs<'a> {
@@ -683,10 +653,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             (
                 "evaluatorKeyScheduleRoot".to_string(),
                 binding.evaluator_key_schedule_root.clone(),
-            ),
-            (
-                "keySwitchDecompositionHash".to_string(),
-                accepted_key_switch_decomposition_hash()?,
             ),
             (
                 "sourceConstantCoefficientCommitmentRoot".to_string(),
@@ -948,10 +914,8 @@ fn transported_trustee_evaluation_key_proof_material_bytes(
             ));
         }
         let proof_bytes = verified_setup_proof_material_bytes_from_request(
-            request,
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             expected_proof_material_root,
-            proof_material,
             "transportedEvaluationKeyShareProofMaterial.proofMaterials",
         )?;
         matching_bytes = Some(proof_bytes);

@@ -14,12 +14,8 @@ import type {
 } from './run-command.js';
 import { createTestEventWriter } from './test-event-journal.js';
 
-// The heavy accepted-setup tests run under the default libtest harness, which
-// prints `running N tests`, then stays silent until each test finishes. With a
-// handful of tests taking six to eleven minutes each, that looks indistinguishable
-// from a hang. This reporter watches the streamed harness output and prints a
-// periodic heartbeat plus a line per completion, so a long run always shows it is
-// alive and how far along it is. It only reads the output; it never alters it.
+// Libtest is silent between long-running test completions. Report periodic
+// heartbeats and completion lines without altering the child output.
 
 const millisecondsPerSecond = 1000;
 const secondsPerMinute = 60;
@@ -34,9 +30,15 @@ const formatElapsed = (milliseconds: number): string => {
 };
 
 type HeavyTestProgressReporter = {
+    readonly executedTestCount: () => number;
     readonly observer: CommandRunObserver;
     readonly stop: () => void;
     readonly terminalOutputFilter: (line: string) => boolean;
+};
+
+type FocusedRustTestRunResult = {
+    readonly exitCode: number;
+    readonly failureMessage?: string;
 };
 
 type RustTestTimingRecord = {
@@ -120,6 +122,7 @@ export const createHeavyTestProgressReporter = (input: {
     let startedAtMilliseconds = now();
     let expectedTestCount: number | undefined;
     let completedTestCount = 0;
+    let executedTestCount = 0;
     let failedTestCount = 0;
     const lineBuffers: Record<CommandOutputStreamName, string> = {
         stderr: '',
@@ -217,6 +220,9 @@ export const createHeavyTestProgressReporter = (input: {
             pendingTestStartedAtMilliseconds = undefined;
         }
         completedTestCount += 1;
+        if (result !== 'ignored') {
+            executedTestCount += 1;
+        }
         if (result === 'FAILED') {
             failedTestCount += 1;
         }
@@ -311,6 +317,7 @@ export const createHeavyTestProgressReporter = (input: {
             startedAtMilliseconds = now();
             expectedTestCount = undefined;
             completedTestCount = 0;
+            executedTestCount = 0;
             failedTestCount = 0;
             lineBuffers.stderr = '';
             lineBuffers.stdout = '';
@@ -341,9 +348,26 @@ export const createHeavyTestProgressReporter = (input: {
     };
 
     return {
+        executedTestCount: () => executedTestCount,
         observer,
         stop,
         terminalOutputFilter: (line: string): boolean =>
             !isLibtestSlowTestNotice(line),
+    };
+};
+
+export const resolveFocusedRustTestRunResult = (input: {
+    readonly commandExitCode: number;
+    readonly executedTestCount: number;
+    readonly runnerName: string;
+    readonly testFilter: string;
+}): FocusedRustTestRunResult => {
+    if (input.commandExitCode !== 0 || input.executedTestCount > 0) {
+        return { exitCode: input.commandExitCode };
+    }
+
+    return {
+        exitCode: 1,
+        failureMessage: `${input.runnerName} filter "${input.testFilter}" matched zero tests.`,
     };
 };

@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
-import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import {
     bgvCanonicalStreamFamilies,
     type AcceptedSetupSession,
@@ -15,7 +14,6 @@ type ChunkPullRequest = Readonly<{
 }>;
 type TestComponentMaterialSource = Readonly<{
     readonly keySwitchComponentMaterialRoot: string;
-    readonly proofFamily: 'relinearization-key-share';
     readonly pullChunk: Mock<
         (input: ChunkPullRequest) => Promise<ArrayBuffer | undefined>
     >;
@@ -70,8 +68,6 @@ const componentMaterial = (keySwitchComponentMaterialRoot: string) =>
         keySwitchSeedHex: 'abcd',
         level: 0,
         ringDegree: 4,
-        digitCount: 1,
-        rnsLimbCount: 1,
         keySwitchComponentVectorRoot: otherHash,
         keySwitchComponentMaterialRoot,
         descriptorBytes: canonicalStreamDescriptorFixture(4, 0x53, 0x4c),
@@ -87,7 +83,6 @@ const componentMaterialSource = (
 
     return {
         keySwitchComponentMaterialRoot,
-        proofFamily: 'relinearization-key-share',
         pullChunk: vi.fn(
             ({ chunkIndex, expectedByteLength }: ChunkPullRequest) => {
                 const chunk = chunks[chunkIndex];
@@ -132,14 +127,16 @@ const publicEvaluationKeyMaterialSource =
         } as const;
     };
 
-const { prepareSetupPackageVerificationInputForKernel } =
-    await import('#packages/sdk/src/setup-verification-input.js');
+const {
+    prepareSnapshottedSetupPackageVerificationInputForKernel,
+    snapshotSetupPackageVerificationInput,
+} = await import('#packages/sdk/src/setup-verification-input.js');
 
 const prepare = (input: JsonRecord): Promise<JsonRecord> =>
-    prepareSetupPackageVerificationInputForKernel(
+    prepareSnapshottedSetupPackageVerificationInputForKernel(
         {} as TranscriptCoreKernel,
+        snapshotSetupPackageVerificationInput(input as never),
         {} as AcceptedSetupSession,
-        input as never,
     );
 
 describe('evaluation-key component material streaming before terminal verification', () => {
@@ -206,9 +203,6 @@ describe('evaluation-key component material streaming before terminal verificati
         expect(normalizedComponentMaterials).toHaveLength(2);
         expect(normalizedComponentMaterials[0]).toMatchObject({
             keySwitchComponentMaterialRoot: componentMaterialRoot,
-            totalByteLength: 4,
-            fullObjectHash: '4c'.repeat(64),
-            chunkHashes: ['53'.repeat(64)],
         });
     });
 
@@ -264,20 +258,8 @@ describe('evaluation-key component material streaming before terminal verificati
         const normalizedComponentMaterials = (
             verificationInput.transportedEvaluationKeyShareComponentMaterial as JsonRecord
         ).componentMaterials as readonly JsonRecord[];
-        const chunkHash = '53'.repeat(64);
-        const fullObjectHash = '4c'.repeat(64);
         expect(normalizedComponentMaterials[0]).toMatchObject({
             keySwitchComponentMaterialRoot: componentMaterialRoot,
-            totalByteLength: 4,
-            fullObjectHash,
-            chunkRoot: deriveCanonicalObjectHash({
-                objectType: 'SetupTransportChunkManifest',
-                chunkCount: 1,
-                totalByteLength: 4,
-                chunkHashes: [chunkHash],
-                fullObjectHash,
-            }),
-            chunkHashes: [chunkHash],
         });
     });
 
@@ -355,9 +337,6 @@ describe('evaluation-key component material streaming before terminal verificati
         ).publicEvaluationKeyMaterials as readonly JsonRecord[];
         expect(normalizedPublicEvaluationKeyMaterials[0]).toMatchObject({
             publicEvaluationKeyMaterialRoot,
-            totalByteLength: 4,
-            fullObjectHash: '53'.repeat(64),
-            chunkHashes: ['45'.repeat(64)],
         });
     });
 

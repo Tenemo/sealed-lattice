@@ -123,9 +123,10 @@ pub(super) fn compare_setup_context_threshold_degree(
     bound_value: &Value,
     bound_object_description: &str,
 ) -> CanonicalResult<()> {
+    let participant_count = value_u64(setup_context, "participantCount")?;
     compare_required_u64_binding(
         value_u64(bound_value, "thresholdDegree")?,
-        value_u64(setup_context, "qDec")?,
+        decryption_threshold_for_participant_count(participant_count),
         &format!("{bound_object_description} thresholdDegree"),
     )
 }

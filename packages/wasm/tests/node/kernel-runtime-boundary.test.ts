@@ -77,8 +77,7 @@ describe('Transcript-core command boundary', () => {
 
     it('accepts the exact UTF-8 boundary and refuses one byte over', () => {
         const request = {
-            command: 'HashRaw',
-            inputHex: '00',
+            command: 'DescribeBgvRnsParameters',
             escaped: 'quote " and cafe\u0301',
         };
         const expected = new TextEncoder().encode(JSON.stringify(request));
@@ -97,7 +96,11 @@ describe('Transcript-core command boundary', () => {
     });
 
     it('refuses unsafe integers, accessors, custom serializers, and cycles', () => {
-        for (const invalidRequest of [null, 'HashRaw', ['HashRaw']]) {
+        for (const invalidRequest of [
+            null,
+            'DescribeBgvRnsParameters',
+            ['DescribeBgvRnsParameters'],
+        ]) {
             expectCommandBoundaryCode(
                 () => serializeBoundedKernelCommandRequest(invalidRequest),
                 'InvalidProtocolObject',
@@ -107,18 +110,17 @@ describe('Transcript-core command boundary', () => {
         expectCommandBoundaryCode(
             () =>
                 serializeBoundedKernelCommandRequest({
-                    command: 'EvaluatePlaintextComparison',
-                    leftTotalScore: Number.MAX_SAFE_INTEGER + 1,
+                    command: 'DescribeBgvRnsParameters',
+                    unsafeValue: Number.MAX_SAFE_INTEGER + 1,
                 }),
             'InvalidProtocolObject',
         );
 
         let accessorWasRead = false;
-        const accessorRequest = { command: 'HashRaw' } as Record<
-            string,
-            unknown
-        >;
-        Object.defineProperty(accessorRequest, 'inputHex', {
+        const accessorRequest = {
+            command: 'DescribeBgvRnsParameters',
+        } as Record<string, unknown>;
+        Object.defineProperty(accessorRequest, 'accessorValue', {
             enumerable: true,
             get: () => {
                 accessorWasRead = true;
@@ -134,14 +136,16 @@ describe('Transcript-core command boundary', () => {
         expectCommandBoundaryCode(
             () =>
                 serializeBoundedKernelCommandRequest({
-                    command: 'HashRaw',
-                    toJSON: () => ({ command: 'ListCanonicalErrorCodes' }),
+                    command: 'DescribeBgvRnsParameters',
+                    toJSON: () => ({
+                        command: 'DescribeBgvRnsParameters',
+                    }),
                 }),
             'InvalidProtocolObject',
         );
 
         const cyclicRequest: Record<string, unknown> = {
-            command: 'HashRaw',
+            command: 'DescribeBgvRnsParameters',
         };
         cyclicRequest.self = cyclicRequest;
         expectCommandBoundaryCode(
@@ -155,7 +159,7 @@ describe('Transcript-core command boundary', () => {
         sparseValues[0] = 1;
         sparseValues[2] = undefined;
         const request = {
-            command: 'HashRaw',
+            command: 'DescribeBgvRnsParameters',
             omitted: undefined,
             sparse: sparseValues,
         };
@@ -167,12 +171,14 @@ describe('Transcript-core command boundary', () => {
     it('serializes the validated descriptor snapshot without revisiting a proxy', () => {
         let customSerializationReadCount = 0;
         const request = new Proxy(
-            { command: 'HashRaw', inputHex: '00' },
+            { command: 'DescribeBgvRnsParameters' },
             {
                 get: (target, propertyKey, receiver): unknown => {
                     if (propertyKey === 'toJSON') {
                         customSerializationReadCount += 1;
-                        return () => ({ command: 'ListCanonicalErrorCodes' });
+                        return () => ({
+                            command: 'DescribeBgvRnsParameters',
+                        });
                     }
                     return Reflect.get(
                         target,
@@ -184,7 +190,7 @@ describe('Transcript-core command boundary', () => {
         );
 
         expect(serializeBoundedKernelCommandRequest(request)).toEqual(
-            new TextEncoder().encode('{"command":"HashRaw","inputHex":"00"}'),
+            new TextEncoder().encode('{"command":"DescribeBgvRnsParameters"}'),
         );
         expect(customSerializationReadCount).toBe(0);
     });
@@ -195,7 +201,10 @@ describe('Transcript-core command boundary', () => {
             for (let index = 0; index < arrayDepth; index += 1) {
                 nestedValue = [nestedValue];
             }
-            return { command: 'HashRaw', nested: nestedValue };
+            return {
+                command: 'DescribeBgvRnsParameters',
+                nested: nestedValue,
+            };
         };
 
         expect(() =>

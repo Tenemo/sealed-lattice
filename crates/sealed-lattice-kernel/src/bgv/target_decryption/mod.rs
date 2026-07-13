@@ -20,12 +20,14 @@ pub(crate) use command::{
     derive_bgv_target_decryption_result_release_setup_context_from_request,
     finish_bgv_target_decryption_result_release_from_request,
 };
+#[cfg(test)]
 pub(crate) use command::{
     derive_bgv_target_decryption_share_proof_statement_from_request,
+    verify_bgv_target_decryption_share_proof_statement_binding_from_request,
+};
+pub(crate) use command::{
     generate_bgv_target_decryption_share_from_local_share_request,
     generate_bgv_target_decryption_share_proof_material_from_local_witness_request,
-    verify_bgv_target_decryption_share_proof_material_from_request,
-    verify_bgv_target_decryption_share_proof_statement_binding_from_request,
 };
 use json_fields::*;
 use opening::*;
@@ -47,7 +49,7 @@ use crate::{
 
 use crate::{
     bgv::{
-        coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_hash512},
+        coefficient_codec::coefficient_vector_from_le_hex,
         evaluator::{
             engine::{Ciphertext, decryption_accumulator_to_coefficients},
             records::MAXIMUM_OPTION_COUNT,
@@ -59,8 +61,8 @@ use crate::{
         serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object},
         setup::{
             TARGET_DECRYPTION_SHARE_PROOF_FAMILY, accepted_setup_participant_roster_from_package,
-            canonical_target_decryption_parameter_hashes,
-            collective_bgv_setup_context_hashes_from_package,
+            canonical_target_decryption_parameters_hash,
+            collective_bgv_setup_context_hashes_from_package, derive_collective_setup_package_hash,
             verify_vss_public_aggregate_threshold_commitment_set_request,
         },
         setup_helpers::{
@@ -87,10 +89,6 @@ use crate::hashing::hash512_hex;
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
-const TARGET_SHARE_PAYLOAD_ENCODING: &str =
-    "coefficient-domain-u64-little-endian-partial-decryption-limbs";
-const TARGET_PARTIAL_DECRYPTION_LIMB_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/target-partial-decryption-limb";
 const TARGET_DECRYPTION_SMUDGING_SEED_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-seed";
 const TARGET_DECRYPTION_SMUDGING_ZERO_SHARE_DOMAIN: &str =
@@ -114,10 +112,20 @@ struct TargetShareProfile {
 struct ParticipantBinding {
     trustee_identity: String,
     roster_position: usize,
-    board_position: usize,
-    interpolation_point: u64,
-    recovery_epoch: u64,
-    device_epoch: u64,
+}
+
+impl ParticipantBinding {
+    fn interpolation_point(&self) -> CanonicalResult<u64> {
+        self.roster_position
+            .checked_add(1)
+            .and_then(|one_based_position| u64::try_from(one_based_position).ok())
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "target decryption interpolation point does not fit u64",
+                )
+            })
+    }
 }
 
 #[derive(Clone)]
@@ -129,11 +137,10 @@ struct SetupBinding {
     roster_hash: String,
     setup_parameters_hash: String,
     target_decryption_profile_hash: String,
-    target_decryption_profile_binding_hash: String,
     public_matrix_seed_hash: String,
-    share_linkage_statement_root: Option<String>,
+    share_linkage_statement_root: String,
     participants: Vec<ParticipantBinding>,
-    aggregate_threshold_commitment_set: Option<AggregateThresholdCommitmentSetBinding>,
+    aggregate_threshold_commitment_set: AggregateThresholdCommitmentSetBinding,
 }
 
 #[derive(Clone)]

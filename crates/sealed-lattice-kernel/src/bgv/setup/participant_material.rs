@@ -8,7 +8,6 @@ pub(super) fn participant_setup_material(
     bgv_parameters_hash: &str,
     public_common_random_polynomial_root: &str,
     target_decryption_parameters_hash: &str,
-    target_decryption_parameters_binding_hash: &str,
 ) -> CanonicalResult<ParticipantSetupMaterial> {
     let participant_identities = input
         .participants
@@ -61,7 +60,6 @@ pub(super) fn participant_setup_material(
     let trustee_threshold_verification_key = json!({
         "objectType": "TrusteeThresholdVerificationKey",
         "targetDecryptionParametersHash": target_decryption_parameters_hash,
-        "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "trusteeIdentity": participant.trustee_identity,
@@ -80,7 +78,6 @@ pub(super) fn participant_setup_material(
         "thresholdParametersHash": input.threshold_parameters_hash,
         "trusteeIdentity": participant.trustee_identity,
         "rosterPosition": participant.roster_position,
-        "boardPosition": participant.board_position,
         "recoveryEpoch": participant.recovery_epoch,
         "deviceEpoch": participant.device_epoch,
         "bgvParametersHash": bgv_parameters_hash,

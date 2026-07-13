@@ -2,14 +2,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io::{self, Write};
 
-use crate::{
-    hashing::{chunk_root, hash512_hex},
-    ring::{
-        MAXIMUM_SHAMIR_INTERPOLATION_POINTS, ShamirSharePoint, evaluate_plaintext_comparison,
-        interpolate_shamir_constant_term,
-    },
-};
-
 mod command;
 mod json_ingress;
 
@@ -22,7 +14,6 @@ use command::run_transcript_core_command_inner;
 #[serde(rename_all = "PascalCase")]
 pub enum CanonicalErrorCode {
     DuplicateField,
-    FieldOrder,
     FixtureMismatch,
     InvalidChunkSize,
     InvalidEnum,
@@ -33,47 +24,17 @@ pub enum CanonicalErrorCode {
     MalformedLength,
     MalformedMagic,
     MalformedVarUint,
-    MissingField,
     NonCanonicalVarUint,
     ComponentMismatch,
     TrailingBytes,
-    UnknownField,
-    UnsupportedCanonicalEnvelopeVersion,
     UnsupportedObjectType,
     UnsupportedObjectVersion,
 }
-
-/// All canonical error code variants in declaration order.
-///
-/// Adding a new variant to `CanonicalErrorCode` requires extending this slice.
-pub const ALL_CANONICAL_ERROR_CODES: &[CanonicalErrorCode] = &[
-    CanonicalErrorCode::DuplicateField,
-    CanonicalErrorCode::FieldOrder,
-    CanonicalErrorCode::FixtureMismatch,
-    CanonicalErrorCode::InvalidChunkSize,
-    CanonicalErrorCode::InvalidEnum,
-    CanonicalErrorCode::InvalidFixture,
-    CanonicalErrorCode::InvalidProtocolObject,
-    CanonicalErrorCode::InvalidHex,
-    CanonicalErrorCode::InvalidUtf8,
-    CanonicalErrorCode::MalformedLength,
-    CanonicalErrorCode::MalformedMagic,
-    CanonicalErrorCode::MalformedVarUint,
-    CanonicalErrorCode::MissingField,
-    CanonicalErrorCode::NonCanonicalVarUint,
-    CanonicalErrorCode::ComponentMismatch,
-    CanonicalErrorCode::TrailingBytes,
-    CanonicalErrorCode::UnknownField,
-    CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion,
-    CanonicalErrorCode::UnsupportedObjectType,
-    CanonicalErrorCode::UnsupportedObjectVersion,
-];
 
 impl CanonicalErrorCode {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::DuplicateField => "DuplicateField",
-            Self::FieldOrder => "FieldOrder",
             Self::FixtureMismatch => "FixtureMismatch",
             Self::InvalidChunkSize => "InvalidChunkSize",
             Self::InvalidEnum => "InvalidEnum",
@@ -84,12 +45,9 @@ impl CanonicalErrorCode {
             Self::MalformedLength => "MalformedLength",
             Self::MalformedMagic => "MalformedMagic",
             Self::MalformedVarUint => "MalformedVarUint",
-            Self::MissingField => "MissingField",
             Self::NonCanonicalVarUint => "NonCanonicalVarUint",
             Self::ComponentMismatch => "ComponentMismatch",
             Self::TrailingBytes => "TrailingBytes",
-            Self::UnknownField => "UnknownField",
-            Self::UnsupportedCanonicalEnvelopeVersion => "UnsupportedCanonicalEnvelopeVersion",
             Self::UnsupportedObjectType => "UnsupportedObjectType",
             Self::UnsupportedObjectVersion => "UnsupportedObjectVersion",
         }
@@ -127,10 +85,6 @@ impl std::fmt::Display for CanonicalError {
 impl std::error::Error for CanonicalError {}
 
 pub type CanonicalResult<T> = Result<T, CanonicalError>;
-
-pub fn roundtrip_bytes(input: &[u8]) -> Vec<u8> {
-    input.to_vec()
-}
 
 // LEB128: 7 payload bits per byte, high bit set marks a continuation byte.
 pub fn encode_varuint(mut value: u64) -> Vec<u8> {

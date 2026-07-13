@@ -1,50 +1,6 @@
 use super::*;
 
 #[test]
-fn local_target_share_witness_generates_smudged_share() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-
-    let local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-
-    assert_eq!(
-        local_share["sharePayload"]["smudgingInputReport"]["objectType"],
-        json!("TargetDecryptionSmudgingInputReport")
-    );
-    assert_eq!(
-        local_share["sharePayload"]["smudgingInputReport"]["roleReports"]
-            .as_array()
-            .expect("role reports")
-            .len(),
-        2
-    );
-    assert_eq!(
-        local_share["sharePayload"]["smudgingInputReportHash"],
-        json!(
-            derive_canonical_object_hash(&local_share["sharePayload"]["smudgingInputReport"])
-                .expect("smudging input report hash")
-        )
-    );
-}
-
-#[test]
 fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
@@ -76,7 +32,11 @@ fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
     let mut target_id_smudging_by_participant = Vec::with_capacity(selected_participants.len());
     let mut target_order_smudging_by_participant = Vec::with_capacity(selected_participants.len());
     for participant in selected_participants {
-        interpolation_points.push(participant.interpolation_point);
+        interpolation_points.push(
+            participant
+                .interpolation_point()
+                .expect("participant interpolation point"),
+        );
         let local_target_share_witness_value = local_target_share_witness(
             &setup_package,
             &accepted_record,
@@ -173,18 +133,27 @@ fn target_decryption_quorum_release_recovers_target_slots() {
     )
     .expect("target ciphertext pair");
 
-    let trustees = ["trustee-1", "trustee-2"];
-    let mut interpolation_points = Vec::with_capacity(trustees.len());
-    let mut target_id_partials_by_share = Vec::with_capacity(trustees.len());
-    let mut target_order_partials_by_share = Vec::with_capacity(trustees.len());
-    for trustee_identity in trustees {
+    let selected_participants = setup_binding
+        .participants
+        .iter()
+        .take(target_share_profile_binding.minimum_shares_for_interpolation)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        selected_participants.len(),
+        target_share_profile_binding.minimum_shares_for_interpolation,
+        "fixture must include enough participants for interpolation"
+    );
+    let mut interpolation_points = Vec::with_capacity(selected_participants.len());
+    let mut target_id_partials_by_share = Vec::with_capacity(selected_participants.len());
+    let mut target_order_partials_by_share = Vec::with_capacity(selected_participants.len());
+    for participant in selected_participants {
         let local_target_share_witness_value = local_target_share_witness(
             &setup_package,
             &accepted_record,
             &target_ciphertext_binding,
             &target_ciphertexts,
             &target_share_profile_value,
-            trustee_identity,
+            &participant.trustee_identity,
         );
         let local_share = generate_local_share(
             &setup_package,
@@ -193,12 +162,12 @@ fn target_decryption_quorum_release_recovers_target_slots() {
             &target_ciphertexts,
             &target_share_profile_value,
             &local_target_share_witness_value,
-            trustee_identity,
+            &participant.trustee_identity,
         );
         interpolation_points.push(
-            local_share["interpolationPoint"]
-                .as_u64()
-                .expect("interpolation point"),
+            participant
+                .interpolation_point()
+                .expect("participant interpolation point"),
         );
         target_id_partials_by_share.push(
             read_partial_limb_set(

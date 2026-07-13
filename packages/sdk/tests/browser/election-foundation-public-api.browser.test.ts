@@ -7,7 +7,7 @@ import type {
     FoundationBoardCandidate,
     FoundationBoardSessionInput,
 } from '#packages/sdk/src/index';
-import { createAuthenticatedSetupIntentTestVector } from '#packages/wasm/tests/foundation-board-test-vectors';
+import { createAuthenticatedComplaintTestVector } from '#packages/wasm/tests/foundation-board-test-vectors';
 
 type TestedFoundationBoardSession = Readonly<{
     cancel(): void;
@@ -30,19 +30,12 @@ const foundationBoardCandidateObjectHash =
     publicApiRuntimeRecord.foundationBoardCandidateObjectHash as FoundationBoardCandidateObjectHash;
 
 describe('election foundation public package API in browsers', () => {
-    it('runs the canonical board boundary through packaged browser WASM', async () => {
-        const authenticatedSetupIntent =
-            createAuthenticatedSetupIntentTestVector();
+    it('runs an authenticated complaint carrier through packaged browser WASM', async () => {
+        const authenticatedComplaint = createAuthenticatedComplaintTestVector();
         const opened = await createFoundationBoardSession({
             actionContextHash: new Uint8Array(64).fill(0x33),
-            canonicalRosterBytes: authenticatedSetupIntent.canonicalRosterBytes,
+            canonicalRosterBytes: authenticatedComplaint.canonicalRosterBytes,
             ceremonyContextHash: new Uint8Array(64).fill(0x22),
-            limits: {
-                maximumCarrierByteLength: 131_072,
-                maximumCarrierCount: 32,
-                maximumRetainedCarrierByteLength: 1_048_576,
-                maximumUnresolvedDependencyCount: 128,
-            },
             suiteIdentifier: new Uint8Array(64).fill(0x11),
         });
         expect(opened.isValid).toBe(true);
@@ -55,14 +48,14 @@ describe('election foundation public package API in browsers', () => {
                 refusalReason: 'malformedEncoding',
             });
             const accepted = opened.value.ingest(
-                authenticatedSetupIntent.canonicalCarrierBytes,
+                authenticatedComplaint.canonicalCarrierBytes,
             );
             expect(accepted.isValid).toBe(true);
             if (!accepted.isValid) {
                 throw new Error(accepted.refusalReason);
             }
             expect(foundationBoardCandidateObjectHash(accepted.value)).toEqual(
-                authenticatedSetupIntent.objectHash,
+                authenticatedComplaint.objectHash,
             );
             expect(opened.value.requireCompleteCarrierGraph()).toEqual({
                 isValid: true,

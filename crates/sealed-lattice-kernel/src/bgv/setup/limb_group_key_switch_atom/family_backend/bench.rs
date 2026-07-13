@@ -1,8 +1,6 @@
-//! Ignored gate benchmark for the atom family backend: measures per-key
-//! round-one prove/verify wall time and the canonically serialized proof size
-//! (via the proof-bytes codec) at development-and-above ring degrees. With the
-//! two-adic ceiling raised to `2^20` the foundation profile `N = 32768` runs unsplit
-//! (coset `8N = 2^18`), so all three measured degrees use one column set.
+//! Ignored benchmark for per-key round-one prove/verify time, peak memory, and
+//! canonical proof size. All measured degrees fit their `8N` coset below the
+//! `2^20` domain ceiling without splitting columns.
 //!
 //! Run through the guarded focused Rust runner:
 //! `pnpm run test:rust:kernel:accepted-setup -- round_one_key_prover_cost`
@@ -155,17 +153,9 @@ fn synthetic_key(
 fn round_one_key_prover_cost() {
     use std::time::Instant;
     let parameters = sixteen_limb_group_field_parameters();
-    // Ring degrees that fit the 65536 two-adic order unsplit (coset = 8N).
-    // A level-15 key has 16 digits; benchmark that digit count.
-    // A level-15 key has 16 digits. The ZK mask degree must stay below m/2 so
-    // the masked quotients (degree m + 2*mask) fit the degree bound 2m; it also
-    // needs to cover the opened evaluations (2 per query), so it scales with the
-    // ring degree. m/4 satisfies both for these ring degrees.
-    // 80 queries at rate 1/4 gives about 128 conditional classical bits under
-    // the CS25 accounting the setup families use (SEC-004), not the 128-query
-    // (~256-bit) over-provisioning of the first benchmark.
-    // The foundation profile is N = 32768; with the two-adic ceiling raised to 2^20
-    // it runs unsplit (coset 2^18), so the column count does not double.
+    // A level-15 key has 16 digits. For each ring degree m, mask degree m/4
+    // covers two openings per query and stays below m/2, so masked quotients fit
+    // the degree bound 2m. Every measured 8m coset fits below the 2^20 ceiling.
     let digit_count = 16;
     let query_count = 80;
     println!("round-one key ({digit_count} digits, {query_count} queries, mask degree N/4):");

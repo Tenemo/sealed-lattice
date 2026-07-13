@@ -87,7 +87,6 @@ export type RosterExternalAcceptance = {
     readonly rosterHash: ProtocolHash;
     readonly electionManifestHash: ProtocolHash;
     readonly acceptedBoardHeadHash: ProtocolHash;
-    readonly warningTextVersion: string;
     readonly signature: ProtocolSignatureEnvelope;
 };
 
@@ -176,7 +175,6 @@ export type ValidatedFirstValidObject = {
     readonly deviceEpoch: number;
     readonly actionSequence: number;
     readonly contextHash: ProtocolHash;
-    readonly isByteIdenticalRetransmission: boolean;
 };
 
 /** Input used to derive deterministic first-valid ordering. */
@@ -187,7 +185,6 @@ export type FirstValidOrderingInput = {
     readonly currentRecoveryEpochMap: Readonly<
         Record<string, RecoveryEpochMapEntry>
     >;
-    readonly maxPerIdentity?: number;
 };
 
 /** First-valid ordering verification result with ordered objects. */

@@ -1,8 +1,7 @@
 use super::super::*;
 use super::*;
 use crate::bgv::setup::accepted_setup::{
-    TrusteeEvaluationKeyStatementInputs, accepted_key_switch_decomposition_hash,
-    trustee_evaluation_key_statement_from_package,
+    TrusteeEvaluationKeyStatementInputs, trustee_evaluation_key_statement_from_package,
     verified_same_secret_bridge_material_from_package,
 };
 use crate::bgv::setup::evaluation_key_share_material::EvaluationKeyShareProofFamily;
@@ -129,7 +128,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
         let mut record = serde_json::json!({
             "objectType": "TrusteeEvaluationKeyProof",
-            "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -143,7 +141,7 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         });
         let proof_material_root =
             trustee_evaluation_key_proof_material_root_from_fixture_record(&record);
-        let transport_hashes = authenticate_setup_proof_material_stream_for_test(
+        authenticate_setup_proof_material_stream_for_test(
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             &proof_material_root,
             &proof_bytes,
@@ -157,11 +155,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
             "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             "proofMaterialRoot": proof_material_root,
-            "proofChunkCount": transport_hashes.chunk_hashes.len(),
-            "proofTotalByteLength": transport_hashes.total_byte_length,
-            "proofFullObjectHash": transport_hashes.full_object_hash,
-            "proofChunkRoot": transport_hashes.chunk_root,
-            "proofChunkHashes": transport_hashes.chunk_hashes,
         });
         final_package_phase(&format!(
             "generated trustee evaluation-key proof trustee {trustee_roster_position}"
@@ -208,7 +201,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         .collect::<Vec<_>>();
     let mut proof_set = serde_json::json!({
         "objectType": "TrusteeEvaluationKeyProofSet",
-        "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -218,8 +210,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         "rnsLimbCount": DATA_PRIMES.len(),
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
         "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],
-        "keySwitchDecompositionHash": accepted_key_switch_decomposition_hash()
-            .expect("key-switch decomposition hash"),
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
         "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
@@ -246,9 +236,8 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
 
 // The deterministic fixture witness for one trustee's batched statement: the
 // shared VSS secret, per-key fixture errors in statement order, and the
-// same-secret bridge openings. The public-key-share and target-decryption
-// witness fields the DEV prototype carried are absent from the LIVE relation, so
-// this witness only populates the key-relation and linkage columns.
+// same-secret bridge openings. It populates only the key-relation and linkage
+// columns.
 pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
     trustee_roster_position: u64,
     ring_degree: usize,
@@ -323,9 +312,7 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
         vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         vss_public_recipient_share_messages_by_item: Vec::new(),
-        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),

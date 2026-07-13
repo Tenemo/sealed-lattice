@@ -307,6 +307,7 @@ impl DevelopmentBgvKey {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn decrypt_to_coefficients(
         &self,
         ciphertext: &Ciphertext,
@@ -347,6 +348,7 @@ impl DevelopmentBgvKey {
         decryption_accumulator_to_coefficients(ciphertext, &accumulator)
     }
 
+    #[cfg(test)]
     pub(crate) fn decrypt_to_slots(&self, ciphertext: &Ciphertext) -> CanonicalResult<Vec<u64>> {
         let coefficients = self.decrypt_to_coefficients(ciphertext)?;
 

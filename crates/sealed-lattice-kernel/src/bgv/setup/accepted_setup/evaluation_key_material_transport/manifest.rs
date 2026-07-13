@@ -1,6 +1,6 @@
 use super::*;
 
-pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
+pub(super) fn public_evaluation_key_material_manifest(
     setup_package: &Value,
     evaluation_keys: &Value,
 ) -> CanonicalResult<Value> {
@@ -11,8 +11,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
         "rosterHash": value_string(evaluation_keys, "rosterHash")?,
         "setupParametersHash": value_string(evaluation_keys, "setupParametersHash")?,
         "setupEpoch": value_string(evaluation_keys, "setupEpoch")?,
-        "participantCount": value_u64(evaluation_keys, "participantCount")?,
-        "rnsLimbCount": value_u64(evaluation_keys, "rnsLimbCount")?,
         "evaluatorKeyScheduleRoot": value_string(evaluation_keys, "evaluatorKeyScheduleRoot")?,
         "publicKeyShareSuccinctProofSetRoot": value_string(
             evaluation_keys,
@@ -22,11 +20,9 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
             evaluation_keys,
             "relinearizationKeyShareRoundsRoot",
         )?,
-        "relinearizationLevelSchedule": evaluation_keys["relinearizationLevelSchedule"],
         "relinearizationKeyRoots": evaluation_keys["relinearizationKeyRoots"],
         "relinearizationShareMaterialRoots": relinearization_share_material_manifest(setup_package)?,
         "requiredGaloisSetHash": value_string(evaluation_keys, "requiredGaloisSetHash")?,
-        "requiredGaloisKeySchedule": evaluation_keys["requiredGaloisKeySchedule"],
         "galoisKeyShareBatchRoots": evaluation_keys["galoisKeyShareBatchRoots"],
         "galoisKeyRoots": evaluation_keys["galoisKeyRoots"],
         "galoisShareMaterialRoots": galois_share_material_manifest(setup_package)?,
@@ -58,6 +54,30 @@ fn relinearization_share_material_manifest(setup_package: &Value) -> CanonicalRe
         ),
     ] {
         for record in array_value(rounds, record_field_name)? {
+            let mut entry = json!({
+                "round": round_label,
+                "trusteeIdentity": value_string(record, "trusteeIdentity")?,
+                "trusteeRosterPosition": value_u64(record, "trusteeRosterPosition")?,
+                "level": value_u64(record, "level")?,
+                "keySwitchMaterialEncoding": value_string(record, "keySwitchMaterialEncoding")?,
+                "keySwitchDomain": value_string(record, "keySwitchDomain")?,
+                "keySwitchSeedHex": value_string(record, "keySwitchSeedHex")?,
+                "keySwitchComponentVectorRoot": value_string(
+                    record,
+                    "keySwitchComponentVectorRoot",
+                )?,
+                "shareRoot": value_string(record, share_root_field_name)?,
+                "recordRoot": value_string(record, record_root_field_name)?,
+            });
+            if let Some(material_root) = record.get("keySwitchComponentMaterialRoot") {
+                entry
+                    .as_object_mut()
+                    .expect("manifest entry is an object")
+                    .insert(
+                        "keySwitchComponentMaterialRoot".to_string(),
+                        material_root.clone(),
+                    );
+            }
             entries.push((
                 value_u64(record, "level")?,
                 value_u64(record, "trusteeRosterPosition")?,
@@ -66,25 +86,7 @@ fn relinearization_share_material_manifest(setup_package: &Value) -> CanonicalRe
                 } else {
                     1_u8
                 },
-                json!({
-                    "round": round_label,
-                    "trusteeIdentity": value_string(record, "trusteeIdentity")?,
-                    "trusteeRosterPosition": value_u64(record, "trusteeRosterPosition")?,
-                    "level": value_u64(record, "level")?,
-                    "keySwitchMaterialEncoding": value_string(record, "keySwitchMaterialEncoding")?,
-                    "keySwitchDomain": value_string(record, "keySwitchDomain")?,
-                    "keySwitchSeedHex": value_string(record, "keySwitchSeedHex")?,
-                    "keySwitchComponentVectorRoot": value_string(
-                        record,
-                        "keySwitchComponentVectorRoot",
-                    )?,
-                    "keySwitchComponentMaterialRoot": record
-                        .get("keySwitchComponentMaterialRoot")
-                        .cloned()
-                        .unwrap_or(Value::Null),
-                    "shareRoot": value_string(record, share_root_field_name)?,
-                    "recordRoot": value_string(record, record_root_field_name)?,
-                }),
+                entry,
             ));
         }
     }
@@ -108,31 +110,37 @@ fn galois_share_material_manifest(setup_package: &Value) -> CanonicalResult<Vec<
     let mut entries = Vec::new();
     for batch in batches {
         for proof_record in array_value(batch, "galoisKeyShareMaterialRecords")? {
+            let mut entry = json!({
+                "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
+                "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
+                "rotation": value_u64(proof_record, "rotation")?,
+                "level": value_u64(proof_record, "level")?,
+                "keySwitchMaterialEncoding": value_string(
+                    proof_record,
+                    "keySwitchMaterialEncoding",
+                )?,
+                "keySwitchDomain": value_string(proof_record, "keySwitchDomain")?,
+                "keySwitchSeedHex": value_string(proof_record, "keySwitchSeedHex")?,
+                "keySwitchComponentVectorRoot": value_string(
+                    proof_record,
+                    "keySwitchComponentVectorRoot",
+                )?,
+                "galoisKeyShareRoot": value_string(proof_record, "galoisKeyShareRoot")?,
+            });
+            if let Some(material_root) = proof_record.get("keySwitchComponentMaterialRoot") {
+                entry
+                    .as_object_mut()
+                    .expect("manifest entry is an object")
+                    .insert(
+                        "keySwitchComponentMaterialRoot".to_string(),
+                        material_root.clone(),
+                    );
+            }
             entries.push((
                 value_u64(proof_record, "rotation")?,
                 value_u64(proof_record, "level")?,
                 value_u64(proof_record, "trusteeRosterPosition")?,
-                json!({
-                    "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
-                    "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-                    "rotation": value_u64(proof_record, "rotation")?,
-                    "level": value_u64(proof_record, "level")?,
-                    "keySwitchMaterialEncoding": value_string(
-                        proof_record,
-                        "keySwitchMaterialEncoding",
-                    )?,
-                    "keySwitchDomain": value_string(proof_record, "keySwitchDomain")?,
-                    "keySwitchSeedHex": value_string(proof_record, "keySwitchSeedHex")?,
-                    "keySwitchComponentVectorRoot": value_string(
-                        proof_record,
-                        "keySwitchComponentVectorRoot",
-                    )?,
-                    "keySwitchComponentMaterialRoot": proof_record
-                        .get("keySwitchComponentMaterialRoot")
-                        .cloned()
-                        .unwrap_or(Value::Null),
-                    "galoisKeyShareRoot": value_string(proof_record, "galoisKeyShareRoot")?,
-                }),
+                entry,
             ));
         }
     }

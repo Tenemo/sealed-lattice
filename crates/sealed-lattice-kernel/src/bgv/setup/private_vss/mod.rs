@@ -18,12 +18,6 @@ use super::{
     sharing::canonical_trustee_point,
 };
 
-// The private VSS delivery path is split by responsibility into sibling
-// sub-modules. This module owns the request/response boundary: the public
-// verify entry point and the verifier pipeline `verify_private_vss_share_envelope_inner`.
-// The `accepted_setup` module is re-exported so sub-modules keep referencing
-// `super::accepted_setup::accepted_roster_from_setup_context` unchanged after
-// the move under this `private_vss/` directory.
 use super::accepted_setup;
 
 mod bindings;

@@ -29,9 +29,9 @@ pub enum CanonicalStreamDomain {
     SameSecretProof,
     PublicKeyShareProof,
     CollectivePublicKeyAggregateProof,
-    RkgRoundOneProof,
-    RkgRoundOneAggregateProof,
-    RkgRoundTwoProof,
+    RelinearizationRoundOneProof,
+    RelinearizationRoundOneAggregateProof,
+    RelinearizationRoundTwoProof,
     GaloisShareProof,
     EvaluatorKeyAggregateProof,
     CollectivePublicKey,
@@ -60,9 +60,9 @@ impl CanonicalStreamDomain {
         Self::SameSecretProof,
         Self::PublicKeyShareProof,
         Self::CollectivePublicKeyAggregateProof,
-        Self::RkgRoundOneProof,
-        Self::RkgRoundOneAggregateProof,
-        Self::RkgRoundTwoProof,
+        Self::RelinearizationRoundOneProof,
+        Self::RelinearizationRoundOneAggregateProof,
+        Self::RelinearizationRoundTwoProof,
         Self::GaloisShareProof,
         Self::EvaluatorKeyAggregateProof,
         Self::CollectivePublicKey,
@@ -97,11 +97,15 @@ impl CanonicalStreamDomain {
             Self::CollectivePublicKeyAggregateProof => {
                 "sealed-lattice/stream/setup/collective-public-key-aggregate-proof/v1"
             }
-            Self::RkgRoundOneProof => "sealed-lattice/stream/setup/rkg-round-one-proof/v1",
-            Self::RkgRoundOneAggregateProof => {
-                "sealed-lattice/stream/setup/rkg-round-one-aggregate-proof/v1"
+            Self::RelinearizationRoundOneProof => {
+                "sealed-lattice/stream/setup/relinearization-round-one-proof/v1"
             }
-            Self::RkgRoundTwoProof => "sealed-lattice/stream/setup/rkg-round-two-proof/v1",
+            Self::RelinearizationRoundOneAggregateProof => {
+                "sealed-lattice/stream/setup/relinearization-round-one-aggregate-proof/v1"
+            }
+            Self::RelinearizationRoundTwoProof => {
+                "sealed-lattice/stream/setup/relinearization-round-two-proof/v1"
+            }
             Self::GaloisShareProof => "sealed-lattice/stream/setup/galois-share-proof/v1",
             Self::EvaluatorKeyAggregateProof => {
                 "sealed-lattice/stream/setup/evaluator-key-aggregate-proof/v1"
@@ -153,9 +157,9 @@ impl CanonicalStreamDomain {
             Self::SameSecretProof => 4,
             Self::PublicKeyShareProof => 5,
             Self::CollectivePublicKeyAggregateProof => 6,
-            Self::RkgRoundOneProof => 7,
-            Self::RkgRoundOneAggregateProof => 8,
-            Self::RkgRoundTwoProof => 9,
+            Self::RelinearizationRoundOneProof => 7,
+            Self::RelinearizationRoundOneAggregateProof => 8,
+            Self::RelinearizationRoundTwoProof => 9,
             Self::GaloisShareProof => 10,
             Self::EvaluatorKeyAggregateProof => 11,
             Self::CollectivePublicKey => 12,
@@ -185,9 +189,9 @@ impl CanonicalStreamDomain {
             4 => Some(Self::SameSecretProof),
             5 => Some(Self::PublicKeyShareProof),
             6 => Some(Self::CollectivePublicKeyAggregateProof),
-            7 => Some(Self::RkgRoundOneProof),
-            8 => Some(Self::RkgRoundOneAggregateProof),
-            9 => Some(Self::RkgRoundTwoProof),
+            7 => Some(Self::RelinearizationRoundOneProof),
+            8 => Some(Self::RelinearizationRoundOneAggregateProof),
+            9 => Some(Self::RelinearizationRoundTwoProof),
             10 => Some(Self::GaloisShareProof),
             11 => Some(Self::EvaluatorKeyAggregateProof),
             12 => Some(Self::CollectivePublicKey),
@@ -231,8 +235,6 @@ impl CanonicalStreamDomain {
 pub(crate) struct VerifiedCanonicalStreamSummary {
     stream_domain: CanonicalStreamDomain,
     total_byte_length: u64,
-    ordered_chunk_digests: Vec<Hash512>,
-    full_object_digest: Hash512,
     state_exact_output_hash: Option<Hash512>,
 }
 
@@ -243,14 +245,6 @@ impl VerifiedCanonicalStreamSummary {
 
     pub(crate) const fn total_byte_length(&self) -> u64 {
         self.total_byte_length
-    }
-
-    pub(crate) fn ordered_chunk_digests(&self) -> &[Hash512] {
-        &self.ordered_chunk_digests
-    }
-
-    pub(crate) const fn full_object_digest(&self) -> Hash512 {
-        self.full_object_digest
     }
 
     pub(crate) const fn state_exact_output_hash(&self) -> Option<Hash512> {
@@ -471,8 +465,6 @@ impl CanonicalStreamVerifier {
         VerificationResult::valid(VerifiedCanonicalStreamSummary {
             stream_domain: self.stream_domain,
             total_byte_length: self.descriptor.total_byte_length,
-            ordered_chunk_digests: self.descriptor.ordered_chunk_digests,
-            full_object_digest: self.descriptor.full_object_digest,
             state_exact_output_hash,
         })
     }
@@ -742,7 +734,6 @@ mod tests {
             ),
         ] {
             let descriptor = descriptor_for(stream_domain, &bytes);
-            let expected_full_object_digest = descriptor.full_object_digest;
             let mut verifier = CanonicalStreamVerifier::new(stream_domain, descriptor)
                 .expect("state exact-output verifier begins");
             for (chunk_index, chunk) in bytes
@@ -760,7 +751,6 @@ mod tests {
                 .expect("complete exact-output stream verifies");
             assert_eq!(summary.stream_domain(), stream_domain);
             assert_eq!(summary.total_byte_length(), bytes.len() as u64);
-            assert_eq!(summary.full_object_digest(), expected_full_object_digest);
             assert_eq!(
                 summary.state_exact_output_hash(),
                 Some(

@@ -1,14 +1,6 @@
-// Development-only exact-noise probe for the evaluator level budget (the
-// measurements behind the K_top = 20-only decryption scope and the
-// comparison-input cleaning fix). It measures true residual BGV
-// noise, decrypting with the development key, at the comparison handoff (level 6),
-// through the degree-19 Paterson-Stockmeyer rank lookup, and at the terminal
-// target, and it measures the terminal (exit level, noise) for candidate terminal
-// rescale policies that defer power-table rescales to exit at a higher level. It
-// changes no production behavior: it is #[ignore]d and reruns the production
-// building blocks (multiply / multiply_without_immediate_modulus_switch) plus a
-// faithful replica of the Paterson-Stockmeyer structure whose level-floor knob
-// reproduces production exactly at floor 0.
+// Ignored exact-noise probe at the comparison handoff, rank lookup, and target.
+// It uses the production multiplication operations and a faithful rank-lookup
+// replica whose level-floor zero matches production.
 //
 // Run through the guarded focused Rust runner:
 //   pnpm run test:rust:kernel:accepted-setup -- level_budget_probe

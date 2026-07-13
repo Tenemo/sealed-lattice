@@ -1,14 +1,9 @@
 use super::*;
 use crate::bgv::evaluator::engine::ciphertext_add;
 
-// The foundation-profile guard for the multi-ballot comparison handoff: a genuine
-// ten-ballot aggregate at the full score-difference domain (D = 90) must
-// produce ranks that decrypt correctly. The packing construction leaves the
-// comparison input structurally noisy and the comparison evaluation fails as
-// a cliff when that noise exceeds its input ceiling, so tiny-domain coverage
-// (score_domain_max = 2) cannot stand in for this case; this test exists so a
-// saturating handoff can never ship silently again. It runs one full
-// foundation-profile-domain comparison, which costs a couple of minutes.
+// A genuine ten-ballot aggregate at the full score-difference domain must
+// produce decryptable ranks. Tiny-domain coverage does not exercise the same
+// comparison-input noise boundary.
 #[test]
 #[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
 fn heavy_rust_kernel_foundation_profile_domain_multiballot_rank_evaluation_decrypts() {

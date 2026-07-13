@@ -40,7 +40,6 @@ struct TargetDecryptionShareProofRecordVerificationInput<'a> {
     participant: &'a ParticipantBinding,
     target_decryption_share: &'a Value,
     target_share_proof_statement: &'a Value,
-    active_limb_count: usize,
 }
 
 pub(super) struct TargetProofMaterialEvictionGuard {
@@ -94,25 +93,9 @@ pub(super) fn generate_target_decryption_share_proof_material_from_local_witness
                 proof_randomness_nonce_hex: input.proof_randomness_nonce_hex,
             },
         )?;
-    let generated = crate::bgv::setup::generate_target_decryption_share_proof_bytes_from_request(
+    let proof_bytes = crate::bgv::setup::generate_target_decryption_share_proof_bytes_from_request(
         &proof_slice_request,
     )?;
-    let expected_target_roles = expected_target_roles();
-    if generated.target_roles != expected_target_roles {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "target-decryption proof material generator returned noncanonical target-role coverage",
-        ));
-    }
-    let active_limb_count = input.target_ciphertexts.target_id.level + 1;
-    let expected_target_rns_limb_indices = (0..active_limb_count).collect::<Vec<_>>();
-    if generated.target_rns_limb_indices != expected_target_rns_limb_indices {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "target-decryption proof material generator returned noncanonical active-limb coverage",
-        ));
-    }
-    let proof_bytes = generated.proof_bytes;
     let proof_bytes_hash = hash512_hex(
         TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN,
         &[&proof_bytes],
@@ -173,7 +156,6 @@ pub(super) fn verify_target_decryption_share_proof_material(
         "target-decryption proof material root",
     )?;
 
-    let active_limb_count = input.target_ciphertexts.target_id.level + 1;
     let proof_records = array_at_path(input.proof_material, &["proofRecords"])?;
     if proof_records.len() != 1 {
         return Err(CanonicalError::new(
@@ -203,7 +185,6 @@ pub(super) fn verify_target_decryption_share_proof_material(
                 participant: input.participant,
                 target_decryption_share: input.target_decryption_share,
                 target_share_proof_statement: input.proof_statement,
-                active_limb_count,
             },
         )?;
     }
@@ -225,8 +206,6 @@ fn verify_target_decryption_share_proof_record(
             "target-decryption proof record must use the current target proof-record layout",
         ));
     }
-    let expected_target_rns_limb_indices = (0..input.active_limb_count).collect::<Vec<_>>();
-    let expected_target_roles = expected_target_roles();
     let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?;
     let recomputed_proof_bytes_hash = crate::hashing::hash512_hex_streamed_part(
         TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN,
@@ -250,92 +229,10 @@ fn verify_target_decryption_share_proof_record(
                 proof_statement: input.target_share_proof_statement,
             },
         )?;
-    let proof_verification =
-        crate::bgv::setup::verify_target_decryption_share_proof_source_from_request(
-            &proof_verification_request,
-            input.proof_bytes.as_ref(),
-        )?;
-    compare_string_field(
-        &proof_verification,
-        "proofFamily",
-        TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-        "target-decryption proof verification proof family",
+    crate::bgv::setup::verify_target_decryption_share_proof_source_from_request(
+        &proof_verification_request,
+        input.proof_bytes.as_ref(),
     )?;
-    compare_target_roles_field(
-        &proof_verification,
-        &expected_target_roles,
-        "target-decryption proof verification target roles",
-    )?;
-    compare_target_limb_indices_field(
-        &proof_verification,
-        &expected_target_rns_limb_indices,
-        "target-decryption proof verification target limbs",
-    )?;
-    compare_unsigned_field(
-        &proof_verification,
-        "proofByteLength",
-        input.proof_bytes.len() as u64,
-        "target-decryption proof verification proof byte length",
-    )?;
-
-    Ok(())
-}
-
-fn expected_target_roles() -> Vec<String> {
-    TARGET_DECRYPTION_SMUDGING_ROLES
-        .iter()
-        .map(|target_role| (*target_role).to_string())
-        .collect()
-}
-
-fn compare_target_roles_field(
-    value: &Value,
-    expected_target_roles: &[String],
-    field_description: &str,
-) -> CanonicalResult<()> {
-    let actual_target_roles = array_at_path(value, &["targetRoles"])?;
-    if actual_target_roles.len() != expected_target_roles.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            format!("{field_description} count does not match"),
-        ));
-    }
-    for (actual_role, expected_role) in actual_target_roles.iter().zip(expected_target_roles) {
-        if actual_role.as_str() != Some(expected_role.as_str()) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!("{field_description} do not match"),
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn compare_target_limb_indices_field(
-    value: &Value,
-    expected_target_rns_limb_indices: &[usize],
-    field_description: &str,
-) -> CanonicalResult<()> {
-    let actual_target_rns_limb_indices = array_at_path(value, &["targetRnsLimbIndices"])?;
-    if actual_target_rns_limb_indices.len() != expected_target_rns_limb_indices.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            format!("{field_description} count does not match"),
-        ));
-    }
-    for (actual_target_rns_limb_index, expected_target_rns_limb_index) in
-        actual_target_rns_limb_indices
-            .iter()
-            .zip(expected_target_rns_limb_indices)
-    {
-        if actual_target_rns_limb_index.as_u64() != Some(*expected_target_rns_limb_index as u64) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!("{field_description} do not match"),
-            ));
-        }
-    }
 
     Ok(())
 }

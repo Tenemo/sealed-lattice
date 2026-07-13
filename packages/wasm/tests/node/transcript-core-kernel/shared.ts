@@ -1,4 +1,3 @@
-// Shared transcript-core kernel fixtures.
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -28,7 +27,6 @@ const createMockKernelExports = ({
     commandResponse = {
         success: true,
         value: {
-            chunkRoot: 'abc123',
             hash512: 'feedface',
         },
     },
@@ -36,7 +34,6 @@ const createMockKernelExports = ({
     expectedKernelSha256Hex = singleZeroByteSha256Hex,
     onCommand,
     outputLengthAllocationPointer = 512,
-    roundTripPointer = allocationPointer,
 }: {
     readonly allowUnpinnedKernel?: boolean;
     readonly allocationPointer?: number;
@@ -45,7 +42,6 @@ const createMockKernelExports = ({
     readonly expectedKernelSha256Hex?: string;
     readonly onCommand?: (command: unknown) => void;
     readonly outputLengthAllocationPointer?: number;
-    readonly roundTripPointer?: number;
 } = {}): {
     readonly deallocate: ReturnType<typeof vi.fn>;
     readonly encodedCommandResponseLength: number;
@@ -138,7 +134,6 @@ const createMockKernelExports = ({
                         return commandPointer;
                     },
                 ),
-                sealed_lattice_roundtrip: vi.fn(() => roundTripPointer),
             },
         },
         module: fakeModule,
@@ -172,7 +167,6 @@ const createMockKernelExports = ({
             kind: 'function',
             name: 'sealed_lattice_transcript_core_command_with_length',
         },
-        { kind: 'function', name: 'sealed_lattice_roundtrip' },
     ]);
 
     return {

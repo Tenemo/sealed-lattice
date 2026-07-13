@@ -1,40 +1,13 @@
-// Trustee evaluation-key proof: one masked succinct polynomial-IOP argument
-// per trustee covering the whole frozen evaluation-key schedule. For every
-// listed key (relinearization round one, round two, or a Galois rotation),
-// every digit j, and every RNS limb l of that key's level,
-//
-//   b_{j,l} + a_{j,l} * s - p * e_j - [l == j] * source_j = 0 in R_{q_l}
-//
-// with the diagonal source s, s (*) round-one aggregate, or phi_g(s) by kind.
-// The shared witness is committed in evaluation form per limb field, batched
-// across digits and keys by random challenges, and bound across limb fields by
-// bounded random integer combinations of the small witness, published behind
-// shared smudging masks so the masked claims stay comparable as centered
-// integers without revealing the clear sums. The same-secret linkage opens the
-// accepted BDLOP constant commitments natively over the commitment-modulus
-// fields, so the proven key-relation secret is the committed trustee secret.
-//
-// Trust boundary: this argument is an experimental evaluation-key proof path.
-// The package verifier rebuilds every statement from transported share records,
-// recomputed round-one public aggregates, and same-secret commitments before
-// checking the implemented polynomial identities. The current proof does not
-// have an accepted end-to-end extraction, QROM, or zero-knowledge theorem at the
-// required profile, so callers must not treat successful verification as
-// certified foundation evidence.
-//
-// Argument shape per limb field F_{q_l} (one trace commitment and one batched
-// FRI instance per limb, shared by every listed key):
-// - each logical length-N vector (secret, per-key errors, error squares, and
-//   claim-mask digits) is split into TRACE_SPLIT physical columns over the
-//   trace domain of size N / TRACE_SPLIT, masked with a fresh random multiple
-//   of Z_H, and committed in a salted Merkle tree over the DOMAIN_BLOWUP coset
-//   low-degree extension;
-// - vanishing row checks (ternary secret, centered-binomial error support,
-//   square well-formedness, base-3 mask digits) batched into a split quotient;
-// - one univariate sumcheck batching every key's digit-batched linear
-//   key-switch check and the masked cross-limb consistency claims;
-// - DEEP out-of-domain points binding the identities to the committed columns
-//   through quotients in the per-limb batched FRI instance.
+// Setup-proof commands and the shared per-limb polynomial-IOP engine.
+// Statements containing diagonal-source evaluation keys route to the limb-group
+// atom schedule; the other supported proof families use the shared engine here.
+// That engine commits masked witness columns per proof limb, batches support and
+// relation constraints through quotients and a univariate sumcheck, binds
+// cross-limb claims as masked centered integers, and checks low degree through
+// DEEP evaluations and FRI. Same-secret relations open the accepted BDLOP
+// constant commitments, tying the relation witness to the committed secret.
+// Verifiers rebuild statements from transported public material before checking
+// any proof.
 
 mod commands;
 mod evaluation_domain;
@@ -128,7 +101,6 @@ pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
 pub(crate) const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
 pub(crate) const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str = "target-decryption-share";
-// Canonical hash of transported public-key share succinct proof bytes.
 #[cfg(test)]
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],
@@ -142,7 +114,6 @@ pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_bytes_hash
     proof_bytes.hash512_hex(PUBLIC_KEY_SHARE_PROOF_BYTES_HASH_DOMAIN)
 }
 
-// Canonical hash of transported private VSS succinct proof bytes.
 pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
@@ -155,70 +126,46 @@ pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_material_bytes_has
     proof_bytes.hash512_hex(PRIVATE_VSS_SHARE_PROOF_BYTES_HASH_DOMAIN)
 }
 
-// Each logical length-N witness vector is split into TRACE_SPLIT physical
-// columns over a trace domain of size N / TRACE_SPLIT. The split frees domain
-// headroom under the guaranteed 2-adicity of the BGV primes (2^16 divides
-// q - 1): the extension coset is DOMAIN_BLOWUP times the trace, and committed
-// columns claim degree below COMMITMENT_BOUND_FACTOR times the trace, so the
-// batched FRI still runs at rate 1/2 while masked columns of degree
-// trace + COLUMN_MASK_DEGREE fit under the bound without splitting.
-// TRACE_SPLIT packs each logical length-N witness as two half-columns over a
-// half-size domain because only 2^16 divides p-1 (two-adicity headroom); a
-// full-N coset would not fit at the rate-one-half blowup.
+// Split each length-N witness vector into two half-columns because the BGV
+// primes guarantee only 2^16 two-adicity. The half-size trace leaves room for
+// the factor-four extension coset and masked committed-degree bound while the
+// batched FRI runs at rate one half.
 pub(super) const TRACE_SPLIT: usize = 2;
 pub(super) const DOMAIN_BLOWUP: usize = 4;
 pub(super) const COMMITMENT_BOUND_FACTOR: usize = 2;
-// Random Z_H-multiple mask degree per committed column. Every committed
-// phase-one masked column is opened at most 2 * query count plus the random
-// DEEP points and zero anchor (339 at the selected parameters), so 512 random
-// mask coefficients cover the opened evaluations with margin at full size.
-// The cap trace / 4 keeps the cubic row-check composition inside the blowup;
-// development ring sizes below the full parameter set fall under the cap and are not
-// zero-knowledge evidence.
+// Random Z_H-multiple mask degree per committed column. The fixed query and
+// DEEP schedule opens at most 339 evaluations, while 512 coefficients leave
+// margin. The trace/4 cap keeps the cubic row-check composition inside the
+// committed degree bound for smaller traces.
 pub(super) fn column_mask_degree(trace_size: usize) -> usize {
     512.min(trace_size / 4)
 }
-// Random out-of-domain evaluation points per limb; identity soundness per
-// point is (composition degree / challenge field size), around 2^-171 at full
-// size with degree-four extension challenges. A deterministic zero anchor is
-// added to the DEEP evaluation list separately to bind the sumcheck residual's
-// constant term.
+// Random out-of-domain evaluation points per limb. A deterministic zero anchor
+// is added separately to bind the sumcheck residual's constant term.
 pub(super) const DEEP_POINT_COUNT: usize = 2;
 pub(super) const SUMCHECK_RESIDUAL_ANCHOR_POINT_COUNT: usize = 1;
 pub(super) const DEEP_EVALUATION_POINT_COUNT: usize =
     DEEP_POINT_COUNT + SUMCHECK_RESIDUAL_ANCHOR_POINT_COUNT;
-// Independent power-challenge repetitions of the linear-relation sumcheck;
-// each contributes about (trace size / challenge field size), around 2^-174.
+// Independent power-challenge repetitions of the linear-relation sumcheck.
 pub(super) const LINCHECK_REPETITIONS: usize = 2;
-// Cross-limb witness-consistency repetitions and the bit width of the public
-// integer coefficients. Narrow eight-bit coefficients keep the clear sums small
-// (at most 2 * N * 255, about 2^24) so the base-3 smudging masks dominate them
-// only as a bounded-leakage row. This local repetition count is not an
-// end-to-end soundness or zero-knowledge estimate. Share-linkage uses the same
-// twenty-repetition eight-bit schedule as the other families; the earlier
-// four-40-bit schedule forced masks whose CRT lift consumed all three
-// commitment fields, leaving no check field; the standard schedule keeps both
-// carry and message-digit clear sums under the standard 58-digit mask so the
-// lift consumes two of the three commitment fields and the third is the check
-// field that catches an inconsistent per-field witness.
+// Cross-limb witness-consistency repetitions and public coefficient width.
+// Twenty repetitions with eight-bit coefficients bound clear sums by
+// 2 * N * 255. With the
+// 58-digit base-3 mask, their CRT lift consumes two commitment fields and leaves
+// the third to detect an inconsistent per-field witness.
 pub(in crate::bgv::setup) const CONSISTENCY_REPETITIONS: usize = 20;
 pub(in crate::bgv::setup) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_REPETITIONS: usize = 20;
 pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
-// Each consistency claim is one shared integer (clear bounded combination plus
-// a family-selected mask committed digit-wise in base-3 mask columns) published
-// as its residue in every proof field carrying that claim. Setup proof families
-// use 58 base-3 digits, giving a ~2^92 mask bound inside the two-field lift
-// window; per-claim leakage stays the clear bound over the mask bound, about
-// 2^-68. This is not a 128-bit zero-knowledge row.
+// Each consistency claim is one shared integer: a bounded clear combination
+// plus a family-selected mask committed in base-3 digit columns. Its residues
+// are published in every proof field carrying the claim. The 58-digit mask fits
+// inside the two-field CRT lift window, leaving another field for consistency.
 pub(in crate::bgv::setup) const CLAIM_MASK_RADIX: u64 = 3;
 pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
-// Share-linkage carry and message-trit consistency claims both take the
-// standard 58-digit mask under the twenty-repetition eight-bit schedule, so
-// their ~2^92 mask bound leaves the three-field lift with a check field. The
-// trit-claim per-claim leakage is the clear bound over the mask bound: the
-// message digit is trit-decomposed, so each claim commits a single base-three
-// trit (witness bound two) and its leakage is in the standard ~2^-68 class.
+// Share-linkage carry and message-trit claims both use the 58-digit mask, so
+// their lift consumes two of three commitment fields. A message claim binds one
+// base-three trit with witness bound two, not a packed message digit.
 pub(in crate::bgv::setup) const VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 58;
 pub(in crate::bgv::setup) const VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT: usize = 58;
 // Same-secret-bridge target-message digit claims use all three setup
@@ -243,23 +190,17 @@ pub(in crate::bgv::setup) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_D
     142;
 pub(in crate::bgv::setup) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize =
     114;
-// Experimental FRI query count at rate 1/2. Query positions are sampled
-// independently with replacement; repeated positions remain separate trials
-// while their Merkle openings may be deduplicated for transport. No accepted
-// end-to-end soundness claim is derived from this count.
+// Fixed shared-engine FRI query count at rate one half. Positions are sampled
+// independently with replacement; repeated positions remain distinct query
+// ordinals while their Merkle openings may be deduplicated for transport.
 pub(super) const LOW_DEGREE_QUERY_COUNT: usize = 168;
-// This fixed experimental proof path predates suite-selected proof schedules.
-// Keep its rejection work finite until the path consumes the canonical
-// per-family schedule directly; this is an execution ceiling, not a security
-// acceptance claim.
 pub(super) const MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
 pub(super) const MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] = b"batched-column-degree";
 pub(super) const SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] =
     b"sumcheck-residual-degree";
 // The FRI recursion stops at a statement-derived final coefficient layer. The
-// minimum keeps tiny development traces usable; the cap removes committed
-// folded Merkle layers from production-size proofs while keeping final
-// polynomial evaluation small relative to the opened row and hash work.
+// minimum supports small traces; the cap avoids extra committed folded layers
+// while keeping final-polynomial evaluation bounded.
 pub(super) const LOW_DEGREE_MIN_FINAL_COEFFICIENT_COUNT: usize = 32;
 pub(super) const LOW_DEGREE_MAX_FINAL_COEFFICIENT_COUNT: usize = 1024;
 // Smallest supported trace size keeps every domain a usable power of two.
@@ -287,7 +228,6 @@ fn invalid_succinct_setup_proof(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
-// Residue of a signed integer in [0, modulus).
 pub(super) fn signed_value_residue(value: i64, modulus: u64) -> u64 {
     let modulus_i128 = i128::from(modulus);
     let reduced = (i128::from(value) % modulus_i128 + modulus_i128) % modulus_i128;

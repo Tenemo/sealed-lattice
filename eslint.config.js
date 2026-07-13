@@ -15,7 +15,6 @@ const OFF = 0;
 const ERROR = 2;
 
 const sourceFiles = ['**/*.{js,mjs,ts}'];
-const typeScriptFiles = ['**/*.ts'];
 const javaScriptFiles = ['**/*.{js,mjs}'];
 const testFiles = ['packages/*/tests/**/*.ts', 'tests/**/*.ts'];
 const toolFiles = ['tools/**/*.{ts,mjs}', '*.config.{ts,js}'];
@@ -122,7 +121,6 @@ export default defineConfig(
         settings: importResolverSettings,
         rules: {
             ...eslintJs.configs.recommended.rules,
-            'arrow-parens': [ERROR, 'always', { requireForBlockBody: false }],
             'no-redeclare': OFF,
             'no-restricted-exports': OFF,
             'no-restricted-properties': [
@@ -197,12 +195,6 @@ export default defineConfig(
                     pathGroupsExcludedImportTypes: ['builtin'],
                 },
             ],
-        },
-    },
-    {
-        files: typeScriptFiles,
-        rules: {
-            '@typescript-eslint/no-unused-vars': OFF,
         },
     },
     {

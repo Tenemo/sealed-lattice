@@ -1,7 +1,5 @@
 use super::*;
 use crate::bgv::evaluator::{
-    key_switch::{KEY_SWITCH_ERROR_DOMAIN, KEY_SWITCH_SAMPLE_DOMAIN},
-    prg::DeterministicSampler,
     records::MAXIMUM_OPTION_COUNT,
     top_k::{
         DIRECT_COMPARISON_OUTPUT_LEVEL, SELECTED_EVALUATOR_WORKING_LEVEL,
@@ -18,21 +16,14 @@ use rayon::prelude::*;
 mod collective_key_material;
 mod evaluation_binding;
 mod public_evaluation_keys;
-mod relation_checks;
 mod rotation_schedule;
 mod threshold_verification;
 pub(super) use collective_key_material::*;
 pub(super) use evaluation_binding::*;
 pub(super) use public_evaluation_keys::*;
-use relation_checks::*;
 pub(super) use rotation_schedule::evaluation_key_stream_seed;
 use rotation_schedule::*;
 pub(super) use threshold_verification::*;
-
-const DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL: &str =
-    "componentZero=sum_i(-a*s_i+p*e_i),componentOne=a-over-selected-BGV-RNS-data-basis";
-const EVALUATION_KEY_STREAM_POLICY: &str =
-    "sealed-lattice-deterministic-bgv-key-switch-material-stream";
 
 pub(super) struct CollectivePublicKeyCoefficients {
     pub(super) component_zero_coefficients: Vec<u64>,
@@ -53,17 +44,14 @@ struct EvaluationKeyMaterialBinding {
 struct RotationScheduleEntry {
     rotation: usize,
     level: usize,
-    purpose: &'static str,
 }
 
 struct EvaluationKeyMaterialInput<'a> {
     setup_seed_hash: &'a str,
-    sampled_relation_checks: Value,
     ceremony_id: &'a str,
     manifest_hash: &'a str,
     roster_hash: &'a str,
     collective_public_key: &'a Value,
-    key_switch_decomposition_hash: &'a str,
     rot_set: &'a Value,
     rot_set_hash: &'a str,
 }

@@ -547,43 +547,44 @@ const requireKernelMemoryRange = (
     return unsignedPointer;
 };
 
-const resolveNumberExport = (
+type NumberExportName =
+    | 'sealed_lattice_allocate'
+    | 'sealed_lattice_accepted_setup_canonical_stream_begin'
+    | 'sealed_lattice_accepted_setup_command_with_length'
+    | 'sealed_lattice_accepted_setup_session_begin'
+    | 'sealed_lattice_accepted_setup_session_cancel'
+    | 'sealed_lattice_bgv_canonical_stream_absorb_chunk'
+    | 'sealed_lattice_bgv_canonical_stream_begin'
+    | 'sealed_lattice_bgv_canonical_stream_cancel'
+    | 'sealed_lattice_bgv_canonical_stream_finish'
+    | 'sealed_lattice_bgv_canonical_material_reader_begin'
+    | 'sealed_lattice_bgv_canonical_material_reader_cancel'
+    | 'sealed_lattice_bgv_canonical_material_reader_finish'
+    | 'sealed_lattice_bgv_canonical_material_reader_read_chunk'
+    | 'sealed_lattice_canonical_stream_absorb_chunk'
+    | 'sealed_lattice_canonical_stream_begin_verifier'
+    | 'sealed_lattice_canonical_stream_begin_writer'
+    | 'sealed_lattice_canonical_stream_cancel'
+    | 'sealed_lattice_canonical_stream_finish_verifier'
+    | 'sealed_lattice_canonical_stream_finish_writer'
+    | 'sealed_lattice_foundation_board_begin'
+    | 'sealed_lattice_foundation_board_cancel'
+    | 'sealed_lattice_foundation_board_ingest'
+    | 'sealed_lattice_foundation_board_require_complete_carrier_graph'
+    | 'sealed_lattice_deallocate'
+    | 'sealed_lattice_local_storage_root_command'
+    | 'sealed_lattice_state_verifier_begin'
+    | 'sealed_lattice_state_verifier_cancel'
+    | 'sealed_lattice_state_verifier_release'
+    | 'sealed_lattice_state_verifier_finish_output'
+    | 'sealed_lattice_state_verifier_verify_recovery'
+    | 'sealed_lattice_state_verifier_verify_reservation'
+    | 'sealed_lattice_transcript_core_command_with_length';
+
+const resolveNumberExport = <ExportName extends NumberExportName>(
     exports: TranscriptCoreKernelExports,
-    exportName:
-        | 'sealed_lattice_allocate'
-        | 'sealed_lattice_accepted_setup_canonical_stream_begin'
-        | 'sealed_lattice_accepted_setup_command_with_length'
-        | 'sealed_lattice_accepted_setup_session_begin'
-        | 'sealed_lattice_accepted_setup_session_cancel'
-        | 'sealed_lattice_bgv_canonical_stream_absorb_chunk'
-        | 'sealed_lattice_bgv_canonical_stream_begin'
-        | 'sealed_lattice_bgv_canonical_stream_cancel'
-        | 'sealed_lattice_bgv_canonical_stream_finish'
-        | 'sealed_lattice_bgv_canonical_material_reader_begin'
-        | 'sealed_lattice_bgv_canonical_material_reader_cancel'
-        | 'sealed_lattice_bgv_canonical_material_reader_finish'
-        | 'sealed_lattice_bgv_canonical_material_reader_read_chunk'
-        | 'sealed_lattice_canonical_stream_absorb_chunk'
-        | 'sealed_lattice_canonical_stream_begin_verifier'
-        | 'sealed_lattice_canonical_stream_begin_writer'
-        | 'sealed_lattice_canonical_stream_cancel'
-        | 'sealed_lattice_canonical_stream_finish_verifier'
-        | 'sealed_lattice_canonical_stream_finish_writer'
-        | 'sealed_lattice_foundation_board_begin'
-        | 'sealed_lattice_foundation_board_cancel'
-        | 'sealed_lattice_foundation_board_ingest'
-        | 'sealed_lattice_foundation_board_require_complete_carrier_graph'
-        | 'sealed_lattice_deallocate'
-        | 'sealed_lattice_local_storage_root_command'
-        | 'sealed_lattice_state_verifier_begin'
-        | 'sealed_lattice_state_verifier_cancel'
-        | 'sealed_lattice_state_verifier_release'
-        | 'sealed_lattice_state_verifier_finish_output'
-        | 'sealed_lattice_state_verifier_verify_recovery'
-        | 'sealed_lattice_state_verifier_verify_reservation'
-        | 'sealed_lattice_transcript_core_command_with_length'
-        | 'sealed_lattice_roundtrip',
-): ((...values: number[]) => number | void) => {
+    exportName: ExportName,
+): NonNullable<TranscriptCoreKernelExports[ExportName]> => {
     const exportValue = exports[exportName];
     /* v8 ignore next 3 */
     if (typeof exportValue !== 'function') {
@@ -594,6 +595,14 @@ const resolveNumberExport = (
 
     return exportValue;
 };
+
+const resolveOptionalNumberExport = <ExportName extends NumberExportName>(
+    exports: TranscriptCoreKernelExports,
+    exportName: ExportName,
+): NonNullable<TranscriptCoreKernelExports[ExportName]> | undefined =>
+    typeof exports[exportName] === 'function'
+        ? resolveNumberExport(exports, exportName)
+        : undefined;
 
 const copyIntoKernelMemory = (
     memory: WebAssembly.Memory,
@@ -772,7 +781,7 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
     const allocate = resolveNumberExport(
         wasmExports,
         'sealed_lattice_allocate',
-    ) as (length: number) => number;
+    );
     const deallocate = resolveNumberExport(
         wasmExports,
         'sealed_lattice_deallocate',
@@ -780,9 +789,7 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
     const commandWithLength = resolveNumberExport(
         wasmExports,
         'sealed_lattice_transcript_core_command_with_length',
-    ) as NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_transcript_core_command_with_length']
-    >;
+    );
     const exportedFunctionNames = WebAssembly.Module.exports(
         instantiatedSource.module,
     )
@@ -830,11 +837,10 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
 };
 
 export {
-    verifyKernelIntegrity,
-    requireKernelIntegrityExpectation,
     resolveKernelBytes,
     resolveMemory,
     resolveNumberExport,
+    resolveOptionalNumberExport,
     copyIntoKernelMemory,
     copyFromKernelMemory,
     assertKernelMemoryWithinProfile,

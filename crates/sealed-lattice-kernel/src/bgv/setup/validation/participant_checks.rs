@@ -4,7 +4,6 @@ pub(super) fn validate_participant_setup_records(
     setup_package: &Value,
     bgv_parameters_hash: &str,
     target_decryption_parameters_hash: &str,
-    target_decryption_parameters_binding_hash: &str,
 ) -> CanonicalResult<Vec<VerifiedParticipantSetupBinding>> {
     let ceremony_id = string_at_path(setup_package, &["setupInputs", "ceremonyId"])?;
     let manifest_hash = hash_at_path(setup_package, &["setupInputs", "manifestHash"])?;
@@ -12,19 +11,11 @@ pub(super) fn validate_participant_setup_records(
     let threshold_parameters_hash =
         hash_at_path(setup_package, &["setupInputs", "thresholdParametersHash"])?;
     let participants = array_at_path(setup_package, &["participants"])?;
-    let participant_identities =
-        array_at_path(setup_package, &["setupInputs", "participantIdentities"])?;
-    if participant_identities.len() != participants.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setupPackage participant identities do not match participant records",
-        ));
-    }
 
     let mut identities = BTreeSet::new();
     let mut roster_positions = BTreeSet::new();
     let mut verified_participants = Vec::with_capacity(participants.len());
-    for (participant_index, participant_record) in participants.iter().enumerate() {
+    for participant_record in participants {
         compare_string_at_path(
             participant_record,
             &["objectType"],
@@ -63,21 +54,6 @@ pub(super) fn validate_participant_setup_records(
         )?;
         let trustee_identity = string_at_path(participant_record, &["trusteeIdentity"])?;
         ensure_nfc_identity(trustee_identity, "participant trusteeIdentity")?;
-        let listed_identity = participant_identities[participant_index]
-            .as_str()
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "setupPackage participant identities must be strings",
-                )
-            })?;
-        ensure_nfc_identity(listed_identity, "setupPackage participant identity")?;
-        if listed_identity != trustee_identity {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "setupPackage participant identity order does not match participant records",
-            ));
-        }
         let roster_position = usize_at_path(participant_record, &["rosterPosition"])?;
         if roster_position >= participants.len() || !roster_positions.insert(roster_position) {
             return Err(CanonicalError::new(
@@ -120,7 +96,6 @@ pub(super) fn validate_participant_setup_records(
         let trustee_threshold_verification_key = json!({
             "objectType": "TrusteeThresholdVerificationKey",
             "targetDecryptionParametersHash": target_decryption_parameters_hash,
-            "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
             "ceremonyId": ceremony_id,
             "rosterHash": roster_hash,
             "trusteeIdentity": trustee_identity,

@@ -1,10 +1,12 @@
 use std::collections::BTreeSet;
 
 use super::canonical_tuple::CanonicalDecodeBudget;
+use super::private_randomness::suite_sampling_purpose_uses_centered_binomial_bits;
 use super::schemas::{
-    FoundationSchemaError, SchemaResult, read_ascii, read_display_text, read_fixed_bytes,
-    read_hash, read_hash_list, read_item, read_list_header, read_nested_tuple_list_with_budget,
-    read_nested_tuple_with_budget, read_u16, read_u32, read_u64, require_header,
+    FoundationSchemaError, SchemaResult, optional_u16, read_ascii, read_display_text,
+    read_fixed_bytes, read_hash, read_hash_list, read_item, read_list_header,
+    read_nested_tuple_list_with_budget, read_nested_tuple_with_budget, read_optional_u16, read_u16,
+    read_u32, read_u64, require_header,
 };
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
@@ -22,7 +24,9 @@ pub const MOBILE_RUNTIME_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x1809;
 
 const RUNTIME_SCHEMA_VERSION: u16 = 1;
 const MAXIMUM_RUNTIME_BUILD_MANIFEST_BYTE_LENGTH: usize = 65_536;
-const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
+const STREAM_ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
+const CHECKPOINT_LINEAGE_IDENTIFIER_BYTE_LENGTH: usize = 32;
+const RANDOM_BLOCK_BIT_LENGTH: u16 = 512;
 const MINIMUM_SUPPORTED_FREE_STORAGE_BYTE_LENGTH: u64 = 2_147_483_648;
 const RUNTIME_BUDGET_PROFILE_ONE: u16 = 1;
 
@@ -674,7 +678,9 @@ pub struct RandomCursor {
     pub family: u16,
     pub purpose: u16,
     pub derivation_context_hash: Hash512,
+    pub stream_attempt_identifier: [u8; STREAM_ATTEMPT_IDENTIFIER_BYTE_LENGTH],
     pub next_counter: u64,
+    pub next_unread_bit_offset_in_buffered_block: Option<u16>,
 }
 
 impl RandomCursor {
@@ -682,14 +688,34 @@ impl RandomCursor {
         family: u16,
         purpose: u16,
         derivation_context_hash: Hash512,
+        stream_attempt_identifier: [u8; STREAM_ATTEMPT_IDENTIFIER_BYTE_LENGTH],
         next_counter: u64,
+        next_unread_bit_offset_in_buffered_block: Option<u16>,
     ) -> SchemaResult<Self> {
         CheckpointRandomUseProfile::new(family, purpose)?;
+        if let Some(bit_offset) = next_unread_bit_offset_in_buffered_block {
+            if next_counter == 0 || bit_offset >= RANDOM_BLOCK_BIT_LENGTH {
+                return Err(schema_error(
+                    RefusalReason::WrongTypeOrLength,
+                    "a buffered random block requires a generated block and an in-range bit offset",
+                ));
+            }
+            if !(family == 0x0116 && suite_sampling_purpose_uses_centered_binomial_bits(purpose))
+                && bit_offset % 8 != 0
+            {
+                return Err(schema_error(
+                    RefusalReason::WrongTypeOrLength,
+                    "byte-oriented random cursors require a byte-aligned bit offset",
+                ));
+            }
+        }
         Ok(Self {
             family,
             purpose,
             derivation_context_hash,
+            stream_attempt_identifier,
             next_counter,
+            next_unread_bit_offset_in_buffered_block,
         })
     }
 
@@ -698,7 +724,9 @@ impl RandomCursor {
             self.family,
             self.purpose,
             self.derivation_context_hash,
+            self.stream_attempt_identifier,
             self.next_counter,
+            self.next_unread_bit_offset_in_buffered_block,
         )?;
         Ok(CanonicalTuple::new(
             RANDOM_CURSOR_SCHEMA_IDENTIFIER,
@@ -707,18 +735,22 @@ impl RandomCursor {
                 CanonicalItem::unsigned16(self.family),
                 CanonicalItem::unsigned16(self.purpose),
                 CanonicalItem::hash512(self.derivation_context_hash.into_bytes()),
+                CanonicalItem::fixed_bytes(self.stream_attempt_identifier)?,
                 CanonicalItem::unsigned64(self.next_counter),
+                optional_u16(self.next_unread_bit_offset_in_buffered_block)?,
             ],
         ))
     }
 
     fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, RANDOM_CURSOR_SCHEMA_IDENTIFIER, 4)?;
+        require_header(tuple, RANDOM_CURSOR_SCHEMA_IDENTIFIER, 6)?;
         Self::new(
             read_u16(&tuple.items[0])?,
             read_u16(&tuple.items[1])?,
             read_hash(&tuple.items[2])?,
-            read_u64(&tuple.items[3])?,
+            read_fixed_bytes(&tuple.items[3])?,
+            read_u64(&tuple.items[4])?,
+            read_optional_u16(&tuple.items[5])?,
         )
     }
 
@@ -738,7 +770,7 @@ pub struct CheckpointManifest {
     pub ceremony_context_hash: Hash512,
     pub action_context_hash: Hash512,
     pub participant_id: ParticipantIdentity,
-    pub attempt_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+    pub checkpoint_lineage_identifier: [u8; CHECKPOINT_LINEAGE_IDENTIFIER_BYTE_LENGTH],
     pub operation_kind: u16,
     pub safe_boundary_ordinal: u32,
     pub ordered_source_digests: Vec<Hash512>,
@@ -754,7 +786,7 @@ impl CheckpointManifest {
         ceremony_context_hash: Hash512,
         action_context_hash: Hash512,
         participant_id: ParticipantIdentity,
-        attempt_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+        checkpoint_lineage_identifier: [u8; CHECKPOINT_LINEAGE_IDENTIFIER_BYTE_LENGTH],
         operation_kind: u16,
         safe_boundary_ordinal: u32,
         ordered_source_digests: Vec<Hash512>,
@@ -773,7 +805,9 @@ impl CheckpointManifest {
                 cursor.family,
                 cursor.purpose,
                 cursor.derivation_context_hash,
+                cursor.stream_attempt_identifier,
                 cursor.next_counter,
+                cursor.next_unread_bit_offset_in_buffered_block,
             )?;
         }
         validate_strictly_increasing(
@@ -783,6 +817,7 @@ impl CheckpointManifest {
                     cursor.family,
                     cursor.purpose,
                     *cursor.derivation_context_hash.as_bytes(),
+                    cursor.stream_attempt_identifier,
                 )
             },
             "random cursors must be strictly ordered and duplicate-free",
@@ -793,7 +828,7 @@ impl CheckpointManifest {
             ceremony_context_hash,
             action_context_hash,
             participant_id,
-            attempt_identifier,
+            checkpoint_lineage_identifier,
             operation_kind,
             safe_boundary_ordinal,
             ordered_source_digests,
@@ -809,7 +844,7 @@ impl CheckpointManifest {
             self.ceremony_context_hash,
             self.action_context_hash,
             self.participant_id,
-            self.attempt_identifier,
+            self.checkpoint_lineage_identifier,
             self.operation_kind,
             self.safe_boundary_ordinal,
             self.ordered_source_digests.clone(),
@@ -825,7 +860,7 @@ impl CheckpointManifest {
                 CanonicalItem::hash512(self.ceremony_context_hash.into_bytes()),
                 CanonicalItem::hash512(self.action_context_hash.into_bytes()),
                 CanonicalItem::participant_identity(self.participant_id.into_bytes()),
-                CanonicalItem::fixed_bytes(self.attempt_identifier)?,
+                CanonicalItem::fixed_bytes(self.checkpoint_lineage_identifier)?,
                 CanonicalItem::unsigned16(self.operation_kind),
                 CanonicalItem::unsigned32(self.safe_boundary_ordinal),
                 hash_list(&self.ordered_source_digests)?,
@@ -890,7 +925,7 @@ impl CheckpointManifest {
                 CanonicalItem::hash512(self.ceremony_context_hash.into_bytes()),
                 CanonicalItem::hash512(self.action_context_hash.into_bytes()),
                 CanonicalItem::participant_identity(self.participant_id.into_bytes()),
-                CanonicalItem::fixed_bytes(self.attempt_identifier)?,
+                CanonicalItem::fixed_bytes(self.checkpoint_lineage_identifier)?,
                 CanonicalItem::unsigned16(self.operation_kind),
                 CanonicalItem::unsigned32(self.safe_boundary_ordinal),
                 hash_list(&self.ordered_source_digests)?,
@@ -1235,8 +1270,10 @@ mod tests {
             0,
             vec![hash(10), hash(11)],
             vec![
-                RandomCursor::new(0x0116, 1, hash(12), 13).expect("cursor"),
-                RandomCursor::new(0x0116, 2, hash(14), 15).expect("cursor"),
+                RandomCursor::new(0x0116, 1, hash(12), [13; 32], 13, Some(24))
+                    .expect("byte-oriented cursor"),
+                RandomCursor::new(0x0116, 2, hash(14), [15; 32], 15, Some(5))
+                    .expect("centered-binomial cursor"),
             ],
             StreamDescriptor::new(17, vec![hash(16)], hash(17)).expect("descriptor"),
         )
@@ -1437,6 +1474,79 @@ mod tests {
                 .checkpoint_chunk_identifier(3, hash(19))
                 .expect("chunk identifier")
         );
+
+        let mut different_lineage = checkpoint;
+        different_lineage.checkpoint_lineage_identifier = [0x77; 32];
+        assert_ne!(
+            decoded.checkpoint_identifier().expect("identifier"),
+            different_lineage
+                .checkpoint_identifier()
+                .expect("different lineage identifier")
+        );
+    }
+
+    #[test]
+    fn checkpoint_and_chunk_identifiers_match_independent_known_answers() {
+        let checkpoint = CheckpointManifest::new(
+            hash(1),
+            hash(2),
+            hash(3),
+            hash(4),
+            ParticipantIdentity::from_bytes([5; 64]),
+            [6; 32],
+            0x1205,
+            7,
+            vec![hash(8), hash(9)],
+            Vec::new(),
+            StreamDescriptor::new(17, vec![hash(10)], hash(11)).expect("stream descriptor"),
+        )
+        .expect("known-answer checkpoint");
+
+        assert_eq!(
+            checkpoint
+                .checkpoint_identifier()
+                .expect("checkpoint identifier")
+                .to_lowercase_hex(),
+            "fb0c4b1db32fde1b30b98f8f7989384a5fa207559e4aa44867c6bebe223344dbbecd4554f662fc01bd1f566cde001036e0937027ef017e7bfe5b902507d83b2d"
+        );
+        assert_eq!(
+            checkpoint
+                .checkpoint_chunk_identifier(11, hash(12))
+                .expect("checkpoint chunk identifier")
+                .to_lowercase_hex(),
+            "105d8956a0a022dd6ae97ddd6906a6713b97085484360fa3cbbaff2dff01cdfc36cd1ff8c6df068ac8464a950aa07d2132c7c4408e32fff91b3e87c37c7e5f69"
+        );
+    }
+
+    #[test]
+    fn random_cursor_binds_attempt_and_buffered_bit_position() {
+        let byte_cursor = RandomCursor::new(0x0116, 1, hash(41), [42; 32], 3, Some(24))
+            .expect("byte-aligned cursor");
+        let bytes = byte_cursor.encode().expect("cursor encodes");
+        assert_eq!(
+            RandomCursor::decode(&bytes, &CanonicalDecodeLimits::default())
+                .expect("cursor decodes"),
+            byte_cursor
+        );
+
+        let different_attempt = RandomCursor::new(0x0116, 1, hash(41), [43; 32], 3, Some(24))
+            .expect("different attempt cursor");
+        let different_offset = RandomCursor::new(0x0116, 1, hash(41), [42; 32], 3, Some(32))
+            .expect("different offset cursor");
+        assert_ne!(
+            byte_cursor.encode().expect("cursor encodes"),
+            different_attempt.encode().expect("cursor encodes")
+        );
+        assert_ne!(
+            byte_cursor.encode().expect("cursor encodes"),
+            different_offset.encode().expect("cursor encodes")
+        );
+
+        assert!(RandomCursor::new(0x0116, 1, hash(41), [42; 32], 0, Some(0)).is_err());
+        assert!(RandomCursor::new(0x0116, 1, hash(41), [42; 32], 1, Some(512)).is_err());
+        assert!(RandomCursor::new(0x0116, 1, hash(41), [42; 32], 1, Some(7)).is_err());
+        assert!(RandomCursor::new(0x0116, 2, hash(41), [42; 32], 1, Some(7)).is_ok());
+        assert!(RandomCursor::new(0x0116, 1, hash(41), [42; 32], 1, None).is_ok());
     }
 
     #[test]
@@ -1491,6 +1601,30 @@ mod tests {
         duplicate_checkpoint.ordered_random_cursors[1] =
             duplicate_checkpoint.ordered_random_cursors[0];
         assert!(duplicate_checkpoint.encode().is_err());
+
+        let baseline_checkpoint = checkpoint(&runtime_manifest);
+        let first_attempt_cursor =
+            RandomCursor::new(0x0116, 1, hash(20), [1; 32], 1, None).expect("cursor");
+        let second_attempt_cursor =
+            RandomCursor::new(0x0116, 1, hash(20), [2; 32], 1, None).expect("cursor");
+        let make_checkpoint = |ordered_random_cursors| {
+            CheckpointManifest::new(
+                baseline_checkpoint.runtime_build_manifest_hash,
+                baseline_checkpoint.suite_id,
+                baseline_checkpoint.ceremony_context_hash,
+                baseline_checkpoint.action_context_hash,
+                baseline_checkpoint.participant_id,
+                baseline_checkpoint.checkpoint_lineage_identifier,
+                baseline_checkpoint.operation_kind,
+                baseline_checkpoint.safe_boundary_ordinal,
+                baseline_checkpoint.ordered_source_digests.clone(),
+                ordered_random_cursors,
+                baseline_checkpoint.state_stream_descriptor.clone(),
+            )
+        };
+        assert!(make_checkpoint(vec![first_attempt_cursor, second_attempt_cursor]).is_ok());
+        assert!(make_checkpoint(vec![second_attempt_cursor, first_attempt_cursor]).is_err());
+        assert!(make_checkpoint(vec![first_attempt_cursor, first_attempt_cursor]).is_err());
     }
 
     #[test]
@@ -1536,7 +1670,9 @@ mod tests {
             family: 0,
             purpose: 1,
             derivation_context_hash: hash(12),
+            stream_attempt_identifier: [13; 32],
             next_counter: 13,
+            next_unread_bit_offset_in_buffered_block: Some(24),
         };
         assert!(
             CheckpointManifest::new(
@@ -1545,7 +1681,7 @@ mod tests {
                 baseline_checkpoint.ceremony_context_hash,
                 baseline_checkpoint.action_context_hash,
                 baseline_checkpoint.participant_id,
-                baseline_checkpoint.attempt_identifier,
+                baseline_checkpoint.checkpoint_lineage_identifier,
                 baseline_checkpoint.operation_kind,
                 baseline_checkpoint.safe_boundary_ordinal,
                 baseline_checkpoint.ordered_source_digests,
@@ -1589,7 +1725,7 @@ mod tests {
         let mut extra_cursor = checkpoint(&runtime_manifest);
         extra_cursor
             .ordered_random_cursors
-            .push(RandomCursor::new(0x0116, 3, hash(18), 0).expect("extra cursor"));
+            .push(RandomCursor::new(0x0116, 3, hash(18), [19; 32], 0, None).expect("extra cursor"));
         assert!(
             extra_cursor
                 .validate_runtime_profile(&runtime_manifest)

@@ -15,7 +15,7 @@ import {
     createVssSameSecretBridgeStatementSet,
     type VssCommittedMaterialCommitmentComputer,
 } from '#packages/protocol/src/setup/vss-commitments';
-import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
+import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -28,6 +28,10 @@ const qSharePrimes = [
 const ringDegree = 8;
 const participantCount = 2;
 const thresholdDegree = 2;
+
+const transcriptCoreKernel = await loadTranscriptCoreKernel();
+const setupCommitmentComputer: typeof transcriptCoreKernel.computeSetupCommitmentFromOpening =
+    (input) => transcriptCoreKernel.computeSetupCommitmentFromOpening(input);
 
 const fixtureHash = makeSetupFixtureHash('setup-vss-coefficient-commitments');
 
@@ -140,6 +144,22 @@ const sourceTrusteeOpeningState = (
     ),
 });
 
+const coefficientCommitmentBundleInput = (
+    sourceTrusteeOpeningStates: readonly VssSourceTrusteeCoefficientOpeningState[] = [
+        sourceTrusteeOpeningState(0),
+        sourceTrusteeOpeningState(1),
+    ],
+): Parameters<typeof createVssCoefficientCommitmentBundle>[0] => ({
+    setupContext,
+    publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+    setupCommitmentComputer,
+    qSharePrimes,
+    ringDegree,
+    participantCount,
+    thresholdDegree,
+    sourceTrusteeOpeningStates,
+});
+
 const requiredOpening = (
     sourceTrusteeState: VssSourceTrusteeCoefficientOpeningState,
     openingIndex: number,
@@ -199,6 +219,140 @@ const decodeShortSecretResidues = (
             'constant Shamir coefficient is not a centered ternary residue',
         );
     });
+
+const replaceFirstCoefficientOpening = (
+    sourceTrusteeState: VssSourceTrusteeCoefficientOpeningState,
+    replacement: VssCoefficientOpeningInput,
+): VssSourceTrusteeCoefficientOpeningState => ({
+    ...sourceTrusteeState,
+    coefficientOpenings: [
+        replacement,
+        ...sourceTrusteeState.coefficientOpenings.slice(1),
+    ],
+});
+
+type MalformedCoefficientCommitmentBundleCase = Readonly<{
+    name: string;
+    expectedMessage: RegExp;
+    sourceTrusteeOpeningStates: () => readonly VssSourceTrusteeCoefficientOpeningState[];
+}>;
+
+const malformedCoefficientCommitmentBundleCases = [
+    {
+        name: 'missing participant',
+        expectedMessage: /every accepted participant/u,
+        sourceTrusteeOpeningStates: () => [sourceTrusteeOpeningState(0)],
+    },
+    {
+        name: 'duplicate opening coordinate',
+        expectedMessage: /distinct limb\/coefficient coordinates/u,
+        sourceTrusteeOpeningStates: () => {
+            const firstSourceTrustee = sourceTrusteeOpeningState(0);
+            return [
+                {
+                    ...firstSourceTrustee,
+                    coefficientOpenings: [
+                        requiredOpening(firstSourceTrustee, 0),
+                        requiredOpening(firstSourceTrustee, 0),
+                        ...firstSourceTrustee.coefficientOpenings.slice(2),
+                    ],
+                },
+                sourceTrusteeOpeningState(1),
+            ];
+        },
+    },
+    {
+        name: 'coefficient residue at the modulus',
+        expectedMessage: /residue below the declared modulus/u,
+        sourceTrusteeOpeningStates: () => {
+            const firstSourceTrustee = sourceTrusteeOpeningState(0);
+            const firstOpening = requiredOpening(firstSourceTrustee, 0);
+            return [
+                replaceFirstCoefficientOpening(firstSourceTrustee, {
+                    ...firstOpening,
+                    coefficientMessage: [
+                        qSharePrimes[0],
+                        ...firstOpening.coefficientMessage.slice(1),
+                    ],
+                }),
+                sourceTrusteeOpeningState(1),
+            ];
+        },
+    },
+    {
+        name: 'randomness outside the centered ternary domain',
+        expectedMessage: /centered ternary/u,
+        sourceTrusteeOpeningStates: () => {
+            const firstSourceTrustee = sourceTrusteeOpeningState(0);
+            const firstOpening = requiredOpening(firstSourceTrustee, 0);
+            return [
+                replaceFirstCoefficientOpening(firstSourceTrustee, {
+                    ...firstOpening,
+                    randomnessByColumn: [
+                        [
+                            2,
+                            ...requiredRandomnessColumn(firstOpening, 0).slice(
+                                1,
+                            ),
+                        ],
+                        ...firstOpening.randomnessByColumn.slice(1),
+                    ],
+                }),
+                sourceTrusteeOpeningState(1),
+            ];
+        },
+    },
+] as const satisfies readonly MalformedCoefficientCommitmentBundleCase[];
+
+type InvalidOpeningStateGenerationCase = Readonly<{
+    name: string;
+    expectedMessage: RegExp;
+    input: () => Parameters<
+        typeof createVssSourceTrusteeCoefficientOpeningState
+    >[0];
+}>;
+
+const openingStateGenerationInput = (
+    overrides: Partial<
+        Parameters<typeof createVssSourceTrusteeCoefficientOpeningState>[0]
+    > = {},
+): Parameters<typeof createVssSourceTrusteeCoefficientOpeningState>[0] => ({
+    sourceTrusteeIdentity: 'trustee-0',
+    sourceTrusteeRosterPosition: 0,
+    participantCount,
+    qSharePrimes,
+    ringDegree,
+    thresholdDegree,
+    randomBytes: deterministicRandomBytes('trustee-0'),
+    ...overrides,
+});
+
+const invalidOpeningStateGenerationCases = [
+    {
+        name: 'source trustee outside the roster',
+        expectedMessage: /inside the accepted participant count/u,
+        input: () =>
+            openingStateGenerationInput({
+                sourceTrusteeIdentity: 'trustee-2',
+                sourceTrusteeRosterPosition: 2,
+                randomBytes: deterministicRandomBytes('trustee-2'),
+            }),
+    },
+    {
+        name: 'empty RNS basis',
+        expectedMessage: /at least one RNS prime/u,
+        input: () => openingStateGenerationInput({ qSharePrimes: [] }),
+    },
+    {
+        name: 'short randomness response',
+        expectedMessage: /exactly the requested byte length/u,
+        input: () =>
+            openingStateGenerationInput({
+                randomBytes: (byteLength) =>
+                    new Uint8Array(Math.max(0, byteLength - 1)),
+            }),
+    },
+] as const satisfies readonly InvalidOpeningStateGenerationCase[];
 
 describe('VSS coefficient commitment builders', () => {
     it('generates local openings with one short secret shared across RNS limbs', () => {
@@ -319,19 +473,12 @@ describe('VSS coefficient commitment builders', () => {
     });
 
     it('creates deterministic root-bound commitment material from local openings', () => {
-        const bundle = createVssCoefficientCommitmentBundle({
-            setupContext,
-            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-            setupCommitmentComputer,
-            qSharePrimes,
-            ringDegree,
-            participantCount,
-            thresholdDegree,
-            sourceTrusteeOpeningStates: [
+        const bundle = createVssCoefficientCommitmentBundle(
+            coefficientCommitmentBundleInput([
                 sourceTrusteeOpeningState(1),
                 sourceTrusteeOpeningState(0),
-            ],
-        });
+            ]),
+        );
         const { vssCoefficientCommitmentRoot, ...commitmentSetWithoutRoot } =
             bundle.commitmentSet;
         const {
@@ -358,7 +505,7 @@ describe('VSS coefficient commitment builders', () => {
                 (record) => record.sourceTrusteeRosterPosition,
             ),
         ).toEqual([0, 1]);
-        expect(bundle.materialSet.materialRecordCount).toBe(
+        expect(bundle.materialSet.coefficientCommitments).toHaveLength(
             participantCount * qSharePrimes.length * thresholdDegree,
         );
         expect(vssCoefficientCommitmentRoot).toBe(
@@ -395,19 +542,9 @@ describe('VSS coefficient commitment builders', () => {
 
     it('builds the bridge carrier only from matching canonical source material', () => {
         const publicMatrixSeedHash = fixtureHash('public-matrix-seed');
-        const sourceBundle = createVssCoefficientCommitmentBundle({
-            setupContext,
-            publicMatrixSeedHash,
-            setupCommitmentComputer,
-            qSharePrimes,
-            ringDegree,
-            participantCount,
-            thresholdDegree,
-            sourceTrusteeOpeningStates: [
-                sourceTrusteeOpeningState(0),
-                sourceTrusteeOpeningState(1),
-            ],
-        });
+        const sourceBundle = createVssCoefficientCommitmentBundle(
+            coefficientCommitmentBundleInput(),
+        );
         const targetCommitmentBundle = createVssPublicCoefficientCommitmentSet({
             setupContext,
             publicMatrixSeedHash,
@@ -490,146 +627,25 @@ describe('VSS coefficient commitment builders', () => {
         ).toThrow(/canonical public coordinates and roots/u);
     });
 
-    it('rejects malformed local opening state before root publication', () => {
-        const firstSourceTrustee = sourceTrusteeOpeningState(0);
-        const secondSourceTrustee = sourceTrusteeOpeningState(1);
+    it.each(malformedCoefficientCommitmentBundleCases)(
+        'rejects malformed local opening state before root publication: $name',
+        ({ expectedMessage, sourceTrusteeOpeningStates }) => {
+            expect(() =>
+                createVssCoefficientCommitmentBundle(
+                    coefficientCommitmentBundleInput(
+                        sourceTrusteeOpeningStates(),
+                    ),
+                ),
+            ).toThrow(expectedMessage);
+        },
+    );
 
-        expect(() =>
-            createVssCoefficientCommitmentBundle({
-                setupContext,
-                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                setupCommitmentComputer,
-                qSharePrimes,
-                ringDegree,
-                participantCount,
-                thresholdDegree,
-                sourceTrusteeOpeningStates: [firstSourceTrustee],
-            }),
-        ).toThrow(/every accepted participant/u);
-        expect(() =>
-            createVssCoefficientCommitmentBundle({
-                setupContext,
-                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                setupCommitmentComputer,
-                qSharePrimes,
-                ringDegree,
-                participantCount,
-                thresholdDegree,
-                sourceTrusteeOpeningStates: [
-                    {
-                        ...firstSourceTrustee,
-                        coefficientOpenings: [
-                            requiredOpening(firstSourceTrustee, 0),
-                            requiredOpening(firstSourceTrustee, 0),
-                            ...firstSourceTrustee.coefficientOpenings.slice(2),
-                        ],
-                    },
-                    secondSourceTrustee,
-                ],
-            }),
-        ).toThrow(/distinct limb\/coefficient coordinates/u);
-        expect(() =>
-            createVssCoefficientCommitmentBundle({
-                setupContext,
-                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                setupCommitmentComputer,
-                qSharePrimes,
-                ringDegree,
-                participantCount,
-                thresholdDegree,
-                sourceTrusteeOpeningStates: [
-                    {
-                        ...firstSourceTrustee,
-                        coefficientOpenings: [
-                            {
-                                ...requiredOpening(firstSourceTrustee, 0),
-                                coefficientMessage: [
-                                    qSharePrimes[0],
-                                    ...requiredOpening(
-                                        firstSourceTrustee,
-                                        0,
-                                    ).coefficientMessage.slice(1),
-                                ],
-                            },
-                            ...firstSourceTrustee.coefficientOpenings.slice(1),
-                        ],
-                    },
-                    secondSourceTrustee,
-                ],
-            }),
-        ).toThrow(/residue below the declared modulus/u);
-        expect(() =>
-            createVssCoefficientCommitmentBundle({
-                setupContext,
-                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                setupCommitmentComputer,
-                qSharePrimes,
-                ringDegree,
-                participantCount,
-                thresholdDegree,
-                sourceTrusteeOpeningStates: [
-                    {
-                        ...firstSourceTrustee,
-                        coefficientOpenings: [
-                            {
-                                ...requiredOpening(firstSourceTrustee, 0),
-                                randomnessByColumn: [
-                                    [
-                                        2,
-                                        ...requiredRandomnessColumn(
-                                            requiredOpening(
-                                                firstSourceTrustee,
-                                                0,
-                                            ),
-                                            0,
-                                        ).slice(1),
-                                    ],
-                                    ...requiredOpening(
-                                        firstSourceTrustee,
-                                        0,
-                                    ).randomnessByColumn.slice(1),
-                                ],
-                            },
-                            ...firstSourceTrustee.coefficientOpenings.slice(1),
-                        ],
-                    },
-                    secondSourceTrustee,
-                ],
-            }),
-        ).toThrow(/centered ternary/u);
-        expect(() =>
-            createVssSourceTrusteeCoefficientOpeningState({
-                sourceTrusteeIdentity: 'trustee-2',
-                sourceTrusteeRosterPosition: 2,
-                participantCount,
-                qSharePrimes,
-                ringDegree,
-                thresholdDegree,
-                randomBytes: deterministicRandomBytes('trustee-2'),
-            }),
-        ).toThrow(/inside the accepted participant count/u);
-        expect(() =>
-            createVssSourceTrusteeCoefficientOpeningState({
-                sourceTrusteeIdentity: 'trustee-0',
-                sourceTrusteeRosterPosition: 0,
-                participantCount,
-                qSharePrimes: [],
-                ringDegree,
-                thresholdDegree,
-                randomBytes: deterministicRandomBytes('trustee-0'),
-            }),
-        ).toThrow(/at least one RNS prime/u);
-        expect(() =>
-            createVssSourceTrusteeCoefficientOpeningState({
-                sourceTrusteeIdentity: 'trustee-0',
-                sourceTrusteeRosterPosition: 0,
-                participantCount,
-                qSharePrimes,
-                ringDegree,
-                thresholdDegree,
-                randomBytes: (byteLength) =>
-                    new Uint8Array(Math.max(0, byteLength - 1)),
-            }),
-        ).toThrow(/exactly the requested byte length/u);
-    });
+    it.each(invalidOpeningStateGenerationCases)(
+        'rejects invalid local opening generation input: $name',
+        ({ expectedMessage, input }) => {
+            expect(() =>
+                createVssSourceTrusteeCoefficientOpeningState(input()),
+            ).toThrow(expectedMessage);
+        },
+    );
 });

@@ -377,7 +377,6 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
         linkage::linkage_aux_value_column(parameters, &data.layout, &data.values, linkage_offset)
     }
 
-    // The masked coefficient vector for aux column `column`.
     pub(super) fn aux_column_coefficients(
         &self,
         parameters: &ProofFieldParameters<LIMB_COUNT>,

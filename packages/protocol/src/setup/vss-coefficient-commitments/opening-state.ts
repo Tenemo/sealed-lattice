@@ -1,7 +1,3 @@
-// Per-source-trustee VSS coefficient opening-state generation and the provider
-// indirection: reference sorting and full-coverage checks, the coordinate index
-// over a trustee opening state, and the deterministic opening-state and
-// opening-state-provider constructors.
 import {
     type VssCoefficientCommitmentBundleInput,
     type VssCoefficientOpeningInput,

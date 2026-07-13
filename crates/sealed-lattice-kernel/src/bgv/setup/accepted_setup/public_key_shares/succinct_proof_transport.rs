@@ -74,10 +74,8 @@ fn transported_public_key_share_proof_material_bytes(
             ));
         }
         let proof_bytes = verified_setup_proof_material_bytes_from_request(
-            request,
             PUBLIC_KEY_SHARE_PROOF_FAMILY,
             expected_proof_material_root,
-            proof_material,
             "transportedPublicKeyShareProofMaterial.proofMaterials",
         )?;
         matching_bytes = Some(proof_bytes);

@@ -3,18 +3,13 @@ mod aggregation;
 mod command;
 mod encryption;
 mod evaluator_replay;
-mod proof_summary;
 mod proof_transport;
 mod randomness;
 mod request;
 mod target_proposal;
-mod timing;
 use aggregation::*;
 pub(crate) use command::run_direct_encrypted_ballot;
 use encryption::*;
-// The end-to-end foundation-profile evidence test under target_decryption::tests
-// replays a genuine ballot aggregate through this production evaluator path
-// before releasing it through the proof-backed staged decryption commands.
 pub(crate) use evaluator_replay::{
     DirectBallotPackedBatchedPairEvaluatorInput,
     run_direct_ballot_packed_batched_pair_evaluator_for_top_counts,
@@ -24,21 +19,20 @@ pub(crate) use evaluator_replay::{
     direct_ballot_comparison_domain_max, direct_ballot_evaluator_working_level,
     direct_ballot_plaintext_target_slots,
 };
-use proof_summary::*;
 use proof_transport::*;
 use randomness::*;
 use request::*;
 use target_proposal::*;
-use timing::*;
 
 use serde_json::{Value, json};
 
 mod relation_proof;
 
+#[cfg(test)]
+use relation_proof::DirectBallotRelationProofGeneration;
 use relation_proof::{
-    DirectBallotRelationProofGeneration, direct_ballot_relation_proof_bytes_hash,
-    direct_ballot_relation_proof_parameters_hash, generate_direct_ballot_relation_proof,
-    verify_direct_ballot_relation_proof,
+    direct_ballot_relation_proof_bytes_hash, direct_ballot_relation_proof_parameters_hash,
+    generate_direct_ballot_relation_proof, verify_direct_ballot_relation_proof,
 };
 
 use crate::{
@@ -54,8 +48,7 @@ use crate::{
             top_k::{
                 SELECTED_EVALUATOR_WORKING_LEVEL, TIE_POLICY,
                 evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
-                pack_direct_score_slots, packed_score_slot,
-                project_packed_sparse_target_from_rank_evaluation,
+                pack_direct_score_slots, project_packed_sparse_target_from_rank_evaluation,
             },
         },
         modular_arithmetic::add_mod,
@@ -103,9 +96,8 @@ struct DirectEncryptedBallot {
 }
 
 struct DirectBallotAggregationResult {
-    report: Value,
     aggregate_ciphertext: Ciphertext,
-    aggregate_scores: Vec<u64>,
+    aggregate_ciphertext_root: String,
 }
 
 #[derive(Debug)]

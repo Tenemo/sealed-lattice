@@ -24,7 +24,7 @@ import type {
     VssShareComplaintRecord,
 } from './vss-share-verification-records.js';
 
-export type SetupContributionAssemblyInput = Readonly<{
+type SetupContributionAssemblyInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
@@ -40,7 +40,7 @@ export type SetupContributionAssemblyInput = Readonly<{
     readonly publicKeyShareProofRecord?: PublicKeyShareProofRecord;
 }>;
 
-export type SetupContributionAssembly = Readonly<
+type SetupContributionAssembly = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupContributionAssembly';
         readonly ceremonyId: string;
@@ -67,7 +67,6 @@ export type SetupContributionAssembly = Readonly<
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash | null;
         readonly aggregateThresholdShareRoot: ProtocolHash | null;
         readonly localStateRoot: ProtocolHash | null;
-        readonly localStateDeletionReceiptRoot: ProtocolHash | null;
         readonly publicKeyShareRoot: ProtocolHash | null;
         readonly publicKeyShareProofRoot: ProtocolHash | null;
         readonly setupContributionRoot: ProtocolHash;
@@ -99,32 +98,30 @@ const assertTrusteeMatches = (
 const phaseObjectRoots = (
     input: SetupContributionAssemblyInput,
 ): readonly ProtocolHash[] =>
-    [...input.setupPhaseParticipantObjects]
-        .sort((left, right) => left.phaseNumber - right.phaseNumber)
-        .map((phaseObject, phaseObjectIndex) => {
-            const objectPath = `setupPhaseParticipantObjects.${String(phaseObjectIndex)}`;
-            if (phaseObject.trusteeIdentity !== input.trusteeIdentity) {
-                throw new Error(
-                    `${objectPath}.trusteeIdentity must match trusteeIdentity.`,
-                );
-            }
-            if (phaseObject.rosterPosition !== input.trusteeRosterPosition) {
-                throw new Error(
-                    `${objectPath}.rosterPosition must match trusteeRosterPosition.`,
-                );
-            }
-            if (phaseObject.ceremonyId !== input.setupContext.ceremonyId) {
-                throw new Error(
-                    `${objectPath}.ceremonyId must match setupContext.ceremonyId.`,
-                );
-            }
-            assertProtocolHash(
-                phaseObject.phaseObjectRoot,
-                `${objectPath}.phaseObjectRoot`,
+    input.setupPhaseParticipantObjects.map((phaseObject, phaseObjectIndex) => {
+        const objectPath = `setupPhaseParticipantObjects.${String(phaseObjectIndex)}`;
+        if (phaseObject.trusteeIdentity !== input.trusteeIdentity) {
+            throw new Error(
+                `${objectPath}.trusteeIdentity must match trusteeIdentity.`,
             );
+        }
+        if (phaseObject.rosterPosition !== input.trusteeRosterPosition) {
+            throw new Error(
+                `${objectPath}.rosterPosition must match trusteeRosterPosition.`,
+            );
+        }
+        if (phaseObject.ceremonyId !== input.setupContext.ceremonyId) {
+            throw new Error(
+                `${objectPath}.ceremonyId must match setupContext.ceremonyId.`,
+            );
+        }
+        assertProtocolHash(
+            phaseObject.phaseObjectRoot,
+            `${objectPath}.phaseObjectRoot`,
+        );
 
-            return phaseObject.phaseObjectRoot;
-        });
+        return phaseObject.phaseObjectRoot;
+    });
 
 const privateVssEnvelopeRootReferences = (
     input: SetupContributionAssemblyInput,
@@ -335,8 +332,6 @@ export const createSetupContributionAssembly = (
         aggregateThresholdShareRoot:
             input.localStateCommitment?.aggregateThresholdShareRoot ?? null,
         localStateRoot: input.localStateCommitment?.localStateRoot ?? null,
-        localStateDeletionReceiptRoot:
-            input.localStateCommitment?.deletionReceiptRoot ?? null,
         publicKeyShareRoot:
             input.publicKeyShareRecord?.publicKeyShareRoot ?? null,
         publicKeyShareProofRoot:

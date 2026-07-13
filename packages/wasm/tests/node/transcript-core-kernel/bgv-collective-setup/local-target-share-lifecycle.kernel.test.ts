@@ -16,7 +16,8 @@ import {
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
-import { createVssCommitmentComputers } from '#tests/support/vss-commitment-computer';
+import { withDeterministicWebCryptoRandomness } from '#tests/support/deterministic-web-crypto-randomness';
+import { createVssCommittedMaterialCommitmentComputer } from '#tests/support/vss-commitment-computer';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -53,7 +54,6 @@ type TargetAcceptedRecord = Readonly<{
 type TargetShareProfile = Readonly<{
     objectType: 'TargetDecryptionShareProfile';
     targetDecryptionProfileHash: string;
-    targetDecryptionProfileBindingHash: string;
     decryptionThreshold: number;
     minimumSharesForInterpolation: number;
     decryptionShareQuorum: number;
@@ -62,6 +62,7 @@ type TargetShareProfile = Readonly<{
 
 type TargetArtifacts = Readonly<{
     targetAcceptedRecord: TargetAcceptedRecord;
+    targetCiphertextBindingHash: string;
     targetCiphertextBinding: Readonly<{
         aggregateCiphertextRoot: string;
         topCount: number;
@@ -71,7 +72,6 @@ type TargetArtifacts = Readonly<{
         targetIdCanonicalBytesHex: string;
         targetOrderCanonicalBytesHex: string;
     }>;
-    targetDecryptionCiphertextHash: string;
     targetShareProfile: TargetShareProfile;
 }>;
 
@@ -82,6 +82,14 @@ type LifecycleArtifacts = Readonly<{
 }>;
 
 type LifecycleArtifactsPromise = Promise<LifecycleArtifacts>;
+
+const createEncryptedLocalTrusteeSetupStateFixture = (
+    input: SetupLifecycleArtifacts['localStateInput'],
+): ReturnType<typeof createEncryptedLocalTrusteeSetupStateFromVerifiedShares> =>
+    withDeterministicWebCryptoRandomness(
+        ['61'.repeat(12), '51'.repeat(12)],
+        () => createEncryptedLocalTrusteeSetupStateFromVerifiedShares(input),
+    );
 
 const participantCount = 3;
 const localTrusteeRosterPosition = 0;
@@ -337,8 +345,8 @@ const setupLifecycleArtifacts = async (
                 ...coordinate,
             },
         });
-    const { vssCommittedMaterialCommitmentComputer } =
-        createVssCommitmentComputers(kernel);
+    const vssCommittedMaterialCommitmentComputer =
+        createVssCommittedMaterialCommitmentComputer(kernel);
     const coefficientBundle = createVssPublicCoefficientCommitmentSet({
         setupContext,
         publicMatrixSeedHash,
@@ -611,8 +619,6 @@ const setupLifecycleArtifacts = async (
                 ),
             },
             storageKeyBytesHex: '41'.repeat(32),
-            localStateAeadNonceBytesHex: '51'.repeat(12),
-            sealedAggregateThresholdShareAeadNonceBytesHex: '61'.repeat(12),
         },
         ringDegree,
         setupPackage,
@@ -658,13 +664,9 @@ const targetArtifacts = (
     const targetDecryptionProfileHash = String(
         releaseSetupContext.targetDecryptionParametersHash,
     );
-    const targetDecryptionProfileBindingHash = String(
-        releaseSetupContext.targetDecryptionParametersBindingHash,
-    );
     const targetShareProfileWithoutHash = {
         objectType: 'TargetDecryptionShareProfile',
         targetDecryptionProfileHash,
-        targetDecryptionProfileBindingHash,
         decryptionThreshold: 2,
         minimumSharesForInterpolation: 2,
         decryptionShareQuorum: 2,
@@ -706,9 +708,21 @@ const targetArtifacts = (
             value: targetAcceptedRecordWithoutHash,
         }),
     };
+    const targetCiphertextBindingHash = kernel.deriveCanonicalObjectHash({
+        value: {
+            objectType: 'TargetDecryptionCiphertextBinding',
+            aggregateCiphertextRoot,
+            topCount,
+            targetLayoutHash,
+            targetIdRoot: targetId.ciphertextRoot,
+            targetOrderRoot: targetOrder.ciphertextRoot,
+            targetCiphertextHash,
+        },
+    });
 
     return {
         targetAcceptedRecord,
+        targetCiphertextBindingHash,
         targetCiphertextBinding: {
             aggregateCiphertextRoot,
             topCount,
@@ -718,7 +732,6 @@ const targetArtifacts = (
             targetIdCanonicalBytesHex: targetId.canonicalBytesHex,
             targetOrderCanonicalBytesHex: targetOrder.canonicalBytesHex,
         },
-        targetDecryptionCiphertextHash: targetCiphertextHash,
         targetShareProfile,
     } as const;
 };
@@ -766,7 +779,7 @@ describe('local setup-to-target-share WASM lifecycle', () => {
     it('restores encrypted setup material and generates a target-bound share in WASM', async () => {
         const { kernel, setup, target } = await lifecycleArtifacts();
         const encryptedState =
-            await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
+            await createEncryptedLocalTrusteeSetupStateFixture(
                 setup.localStateInput,
             );
         const preparedWitness =
@@ -778,8 +791,6 @@ describe('local setup-to-target-share WASM lifecycle', () => {
                 storageKeyBytesHex: setup.localStateInput.storageKeyBytesHex,
                 setupPackage: setup.setupPackage,
                 targetAcceptedRecord: target.targetAcceptedRecord,
-                targetDecryptionCiphertextHash:
-                    target.targetDecryptionCiphertextHash,
                 targetShareProfile: target.targetShareProfile,
             });
         await stageBgvTargetDecryptionAggregateOpeningMaterials({
@@ -801,11 +812,11 @@ describe('local setup-to-target-share WASM lifecycle', () => {
         expect(targetDecryptionShare).toMatchObject({
             objectType: 'BgvTargetDecryptionShare',
             trusteeIdentity: localTrusteeIdentity,
-            rosterPosition: localTrusteeRosterPosition,
             targetAcceptedRecordHash:
                 target.targetAcceptedRecord.targetAcceptedRecordHash,
-            targetCiphertextHash:
-                target.targetAcceptedRecord.targetCiphertextHash,
+            targetCiphertextBindingHash: target.targetCiphertextBindingHash,
+            targetShareProfileHash:
+                target.targetShareProfile.targetShareProfileHash,
         });
         expect(targetDecryptionShare.targetDecryptionShareHash).toHaveLength(
             128,
@@ -816,7 +827,7 @@ describe('local setup-to-target-share WASM lifecycle', () => {
     it('rejects altered restored openings and a target ciphertext replay', async () => {
         const { kernel, setup, target } = await lifecycleArtifacts();
         const encryptedState =
-            await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
+            await createEncryptedLocalTrusteeSetupStateFixture(
                 setup.localStateInput,
             );
         const preparedWitness =
@@ -828,8 +839,6 @@ describe('local setup-to-target-share WASM lifecycle', () => {
                 storageKeyBytesHex: setup.localStateInput.storageKeyBytesHex,
                 setupPackage: setup.setupPackage,
                 targetAcceptedRecord: target.targetAcceptedRecord,
-                targetDecryptionCiphertextHash:
-                    target.targetDecryptionCiphertextHash,
                 targetShareProfile: target.targetShareProfile,
             });
         const localTargetShareWitness =

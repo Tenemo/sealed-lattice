@@ -17,23 +17,6 @@ const mlKem768CiphertextByteLength = ml_kem768.lengths.cipherText!;
 const aesGcmKeyByteLength = 32;
 const aesGcmNonceByteLength = 12;
 const aesGcmTagBitLength = 128;
-const encryptedEnvelopeAadBindingFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-    'publicMatrixSeedHash',
-    'vssCoefficientCommitmentRoot',
-    'sourceTrusteeIdentity',
-    'sourceTrusteeRosterPosition',
-    'recipientIdentity',
-    'recipientRosterPosition',
-    'sourceTrusteeCommitmentRoot',
-    'envelopeSequenceNumber',
-    'deliveryPhaseNumber',
-    'verificationPhaseNumber',
-] as const;
 
 export type PrivateVssMailboxKeyPair = {
     readonly publicKeyBytesHex: string;
@@ -45,45 +28,33 @@ export type PrivateVssMailboxEncryptionInput = {
     readonly privateEnvelope: unknown;
     readonly privateEnvelopeAad: unknown;
     readonly recipientMailboxPublicKeyBytesHex: string;
-    readonly encapsulationRandomnessBytesHex?: string;
-    readonly aeadNonceBytesHex?: string;
 };
 
 export type PrivateVssMailboxDecryptionInput = {
     readonly encryptedEnvelope: PrivateVssEncryptedEnvelope;
+    readonly expectedPrivateEnvelopeHash: ProtocolHash;
+    readonly expectedEncryptedEnvelopeHash: ProtocolHash;
     readonly recipientMailboxSecretKeyBytesHex: string;
 };
 
 export type PrivateVssEncryptedEnvelope = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'EncryptedPrivateVssShareEnvelope';
-        readonly privateEnvelopeHash: ProtocolHash;
         readonly privateEnvelopeAad: unknown;
-        readonly privateEnvelopeAadHash: ProtocolHash;
         readonly recipientMailboxPublicKeyHash: ProtocolHash;
-        readonly recipientMailboxPublicKeyBytesHash: ProtocolHash;
         readonly kemCiphertextBytesHex: string;
-        readonly kemCiphertextHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
-        readonly ciphertextBytesHash: ProtocolHash;
-        readonly ciphertextByteLength: number;
-        readonly plaintextByteLength: number;
-        readonly aeadTagLength: typeof aesGcmTagBitLength;
-        readonly encryptedEnvelopeHash: ProtocolHash;
     }
 >;
 
 export type PrivateVssMailboxEncryptionResult = {
     readonly encryptedEnvelope: PrivateVssEncryptedEnvelope;
-    readonly privateEnvelopeHash: ProtocolHash;
-    readonly privateEnvelopeAadHash: ProtocolHash;
+    readonly encryptedEnvelopeHash: ProtocolHash;
 };
 
 export type PrivateVssMailboxDecryptionResult = {
     readonly privateEnvelope: unknown;
-    readonly privateEnvelopeHash: ProtocolHash;
-    readonly privateEnvelopeAadHash: ProtocolHash;
 };
 
 const isLowercaseHex = (value: string): boolean =>
@@ -182,27 +153,6 @@ const importAesGcmKey = async (
         keyUsages,
     );
 
-const aadBindingFields = (
-    privateEnvelopeAad: unknown,
-): Record<string, unknown> => {
-    if (
-        typeof privateEnvelopeAad !== 'object' ||
-        privateEnvelopeAad === null ||
-        Array.isArray(privateEnvelopeAad)
-    ) {
-        return {};
-    }
-    const source = privateEnvelopeAad as Readonly<Record<string, unknown>>;
-
-    return Object.fromEntries(
-        encryptedEnvelopeAadBindingFieldNames.flatMap((fieldName) =>
-            source[fieldName] === undefined
-                ? []
-                : [[fieldName, source[fieldName]] as const],
-        ),
-    );
-};
-
 export const createPrivateVssMailboxKeyPair = (
     seedBytesHex?: string,
 ): PrivateVssMailboxKeyPair => {
@@ -233,34 +183,13 @@ export const encryptPrivateVssMailboxEnvelope = async (
         mlKem768PublicKeyByteLength,
         'recipientMailboxPublicKeyBytesHex',
     );
-    const encapsulationRandomness =
-        input.encapsulationRandomnessBytesHex === undefined
-            ? randomBytes(mlKem768MessageByteLength)
-            : decodeFixedHex(
-                  input.encapsulationRandomnessBytesHex,
-                  mlKem768MessageByteLength,
-                  'encapsulationRandomnessBytesHex',
-              );
-    const aeadNonce =
-        input.aeadNonceBytesHex === undefined
-            ? randomBytes(aesGcmNonceByteLength)
-            : decodeFixedHex(
-                  input.aeadNonceBytesHex,
-                  aesGcmNonceByteLength,
-                  'aeadNonceBytesHex',
-              );
+    const encapsulationRandomness = randomBytes(mlKem768MessageByteLength);
+    const aeadNonce = randomBytes(aesGcmNonceByteLength);
     const privateEnvelopeAadHash = deriveCanonicalObjectHash(
         input.privateEnvelopeAad,
     );
-    const privateEnvelopeHash = deriveCanonicalObjectHash(
-        input.privateEnvelope,
-    );
     const recipientMailboxPublicKeyHash = deriveMailboxPublicKeyHash(
         input.recipientMailboxPublicKeyBytesHex,
-    );
-    const recipientMailboxPublicKeyBytesHash = hashBytes(
-        'sealed-lattice-private-vss-mailbox/ml-kem-768-public-key',
-        recipientPublicKeyBytes,
     );
     const kemResult = ml_kem768.encapsulate(
         recipientPublicKeyBytes,
@@ -296,37 +225,18 @@ export const encryptPrivateVssMailboxEnvelope = async (
             arrayBufferFromBytes(plaintextBytes),
         ),
     );
-    const ciphertextBytesHash = hashBytes(
-        'sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext',
-        ciphertextBytes,
-    );
-    const envelopeWithoutHash = {
+    const encryptedEnvelope = {
         objectType: 'EncryptedPrivateVssShareEnvelope',
-        ...aadBindingFields(input.privateEnvelopeAad),
-        privateEnvelopeHash,
         privateEnvelopeAad: input.privateEnvelopeAad,
-        privateEnvelopeAadHash,
         recipientMailboxPublicKeyHash,
-        recipientMailboxPublicKeyBytesHash,
         kemCiphertextBytesHex: bytesToHex(kemResult.cipherText),
-        kemCiphertextHash,
         aeadNonceHex: bytesToHex(aeadNonce),
         ciphertextBytesHex: bytesToHex(ciphertextBytes),
-        ciphertextBytesHash,
-        ciphertextByteLength: ciphertextBytes.byteLength,
-        plaintextByteLength: plaintextBytes.byteLength,
-        aeadTagLength: aesGcmTagBitLength,
-    } as const;
-
-    const encryptedEnvelope = {
-        ...envelopeWithoutHash,
-        encryptedEnvelopeHash: deriveCanonicalObjectHash(envelopeWithoutHash),
-    };
+    } as const satisfies PrivateVssEncryptedEnvelope;
 
     return {
         encryptedEnvelope,
-        privateEnvelopeHash,
-        privateEnvelopeAadHash,
+        encryptedEnvelopeHash: deriveCanonicalObjectHash(encryptedEnvelope),
     };
 };
 
@@ -360,58 +270,15 @@ export const decryptPrivateVssMailboxEnvelope = async (
         'sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext',
         kemCiphertextBytes,
     );
-    if (
-        expectedKemCiphertextHash !== input.encryptedEnvelope.kemCiphertextHash
-    ) {
-        throw new Error(
-            'encryptedEnvelope.kemCiphertextHash does not match kemCiphertextBytesHex.',
-        );
-    }
-    const expectedCiphertextBytesHash = hashBytes(
-        'sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext',
-        ciphertextBytes,
-    );
-    if (
-        expectedCiphertextBytesHash !==
-        input.encryptedEnvelope.ciphertextBytesHash
-    ) {
-        throw new Error(
-            'encryptedEnvelope.ciphertextBytesHash does not match ciphertextBytesHex.',
-        );
-    }
-    if (
-        ciphertextBytes.byteLength !==
-        input.encryptedEnvelope.ciphertextByteLength
-    ) {
-        throw new Error(
-            'encryptedEnvelope.ciphertextByteLength does not match ciphertextBytesHex.',
-        );
-    }
     const privateEnvelopeAadHash = deriveCanonicalObjectHash(
         input.encryptedEnvelope.privateEnvelopeAad,
     );
-    if (
-        privateEnvelopeAadHash !==
-        input.encryptedEnvelope.privateEnvelopeAadHash
-    ) {
-        throw new Error(
-            'Encrypted private VSS envelope AAD hash does not match its associated-data object.',
-        );
-    }
-    const encryptedEnvelopeWithoutHash = Object.fromEntries(
-        Object.entries(input.encryptedEnvelope).filter(
-            ([fieldName]) => fieldName !== 'encryptedEnvelopeHash',
-        ),
-    );
     const expectedEncryptedEnvelopeHash = deriveCanonicalObjectHash(
-        encryptedEnvelopeWithoutHash,
+        input.encryptedEnvelope,
     );
-    if (
-        expectedEncryptedEnvelopeHash !==
-        input.encryptedEnvelope.encryptedEnvelopeHash
-    ) {
+    if (expectedEncryptedEnvelopeHash !== input.expectedEncryptedEnvelopeHash) {
         throw new Error(
-            'encryptedEnvelope.encryptedEnvelopeHash does not match the canonical encrypted envelope object.',
+            'expectedEncryptedEnvelopeHash does not match the canonical encrypted envelope object.',
         );
     }
     const recipientMailboxPublicKeyHash =
@@ -445,27 +312,15 @@ export const decryptPrivateVssMailboxEnvelope = async (
             arrayBufferFromBytes(ciphertextBytes),
         ),
     );
-    if (
-        plaintextBytes.byteLength !==
-        input.encryptedEnvelope.plaintextByteLength
-    ) {
-        throw new Error(
-            'encryptedEnvelope.plaintextByteLength does not match decrypted plaintext.',
-        );
-    }
     const privateEnvelope = JSON.parse(
         textDecoder.decode(plaintextBytes),
     ) as unknown;
     const privateEnvelopeHash = deriveCanonicalObjectHash(privateEnvelope);
-    if (privateEnvelopeHash !== input.encryptedEnvelope.privateEnvelopeHash) {
+    if (privateEnvelopeHash !== input.expectedPrivateEnvelopeHash) {
         throw new Error(
-            'Decrypted private VSS envelope hash does not match encryptedEnvelope.privateEnvelopeHash.',
+            'Decrypted private VSS envelope hash does not match expectedPrivateEnvelopeHash.',
         );
     }
 
-    return {
-        privateEnvelope,
-        privateEnvelopeHash,
-        privateEnvelopeAadHash,
-    };
+    return { privateEnvelope };
 };

@@ -9,14 +9,12 @@ mod transport_policy;
 mod vss_material;
 
 use self::package_fixtures::{
-    CollectiveSetupVerificationFixture, PUBLIC_KEY_SHARE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
-    VSS_SHARE_LINKAGE_PROOF_TRANSPORT_CERTIFICATE_FIELDS, accepted_vss_coefficient_message_fixture,
+    CollectiveSetupVerificationFixture, accepted_vss_coefficient_message_fixture,
     accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
     collective_public_key_bearing_collective_setup_fixture, collective_setup_phase_package,
     descriptor_backed_vss_collective_setup_fixture, minimal_collective_setup_package,
     minimal_collective_setup_package_for_participant_count,
     public_key_share_succinct_proof_bearing_collective_setup_fixture,
-    replace_setup_proof_material_transport_certificate_objects,
     ten_participant_descriptor_backed_vss_collective_setup_fixture,
 };
 use self::proof_record_fixtures::{
@@ -48,7 +46,6 @@ use super::super::sampling::{dense_public_residues, negacyclic_product_mod};
 use super::super::setup_proof::{
     SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, authenticate_setup_proof_material_stream_for_test,
     authenticate_setup_proof_material_stream_in_session_for_test,
-    canonical_setup_proof_material_transport_accounting,
 };
 use super::super::trustee_evaluation_key_proof::{
     EvaluationKeyShareKind, TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof,
@@ -57,8 +54,7 @@ use super::super::trustee_evaluation_key_proof::{
 use super::*;
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
 use crate::encoding::CanonicalErrorCode;
-use crate::hashing::canonical_json;
-use crate::hashing::{hash512_hex, to_hex};
+use crate::hashing::to_hex;
 use crate::protocol_signatures::{
     create_ml_dsa_public_key_hash_fixture, create_protocol_signature_fixture,
 };
@@ -124,7 +120,6 @@ fn assert_minimal_collective_setup_package_refused(
     );
 }
 
-// Shared elapsed-clock logger for final-package accepted-setup fixture phases.
 pub(super) fn final_package_phase(message: &str) {
     static FINAL_PACKAGE_PHASE_CLOCK: std::sync::OnceLock<std::time::Instant> =
         std::sync::OnceLock::new();

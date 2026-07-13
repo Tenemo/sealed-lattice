@@ -208,5 +208,4 @@ export const deriveConflictingHeadEvidenceHash = (
             evidence.equivocatingWitnessIdentities ?? [],
         leftBoardHeadHash: evidence.leftBoardHeadHash,
         rightBoardHeadHash: evidence.rightBoardHeadHash,
-        targetFinalityScope: evidence.targetFinalityScope ?? null,
     });

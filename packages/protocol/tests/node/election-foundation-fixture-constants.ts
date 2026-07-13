@@ -1,7 +1,4 @@
-import {
-    deriveCanonicalObjectHash,
-    deriveProtocolSignatureHash,
-} from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     CanonicalSignedRootObject,
     ManifestOpaqueBindings,
@@ -13,9 +10,8 @@ import type {
 
 import {
     createMlDsaKeyPairFixture,
-    createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
-} from '#tests/support/protocol-signature-fixtures';
+} from '#packages/crypto/tests/support/protocol-signature-fixtures';
 
 export const deriveFixtureHash = (
     purpose: string,
@@ -28,14 +24,12 @@ export const deriveFixtureHash = (
     });
 
 export const ceremonyId = 'ceremony-main';
-// The single canonical BGV parameter-set identity. This is the value returned by
-// the kernel's describeBgvRnsParameters().bgvParametersHash (namespace
-// "BGVParametersHash" over the full fixed BGV configuration). The manifest binds
-// it opaquely and the trustee setup entry cross-binds the same value, so the
-// fixture pins the kernel-computed hash rather than re-deriving the large
-// parameter value object here.
+// The single canonical BGV parameter-set identity returned by the kernel's
+// describeBgvRnsParameters().bgvParametersHash. The manifest binds it opaquely
+// and the trustee setup entry cross-binds the same value, so the fixture pins the
+// kernel-computed object hash rather than re-deriving the parameter object here.
 export const bgvParametersHash =
-    '9bbab6a0f732f34acc013c999b79b7e857245e223ca348a910f9228eb4ac9ec1a21e52b6b5058ef24d92c23db72f11f58c4fa52728dbb6262d60d17725ff4165';
+    '48309604b3590d164a517d03139bb2d98eae62faeb043599402db3961bc0770bc5dd632ae09f03b0464597190c38d4e0159af40d1278f0490a7c9da966688825';
 export const boardPolicyHash = deriveFixtureHash('fixture-board-policy', {
     policy: 'signed-head-chain',
 });
@@ -43,8 +37,6 @@ export const contextHash = deriveCanonicalObjectHash({
     objectType: 'ActionContext',
     context: 'default',
 });
-export const profile = createMlDsaSignatureProfileFixture();
-
 export const keyFixturesByHash = new Map<
     string,
     ReturnType<typeof createMlDsaKeyPairFixture>
@@ -91,7 +83,6 @@ const witnessPolicyHash = deriveCanonicalObjectHash({
 });
 const targetFinalityPolicyHash = deriveCanonicalObjectHash({
     objectType: 'TargetFinalityPolicy',
-    targetFinalityScope: 'target',
     witnessQuorum: 5,
     totalWitnesses: 7,
 });
@@ -154,7 +145,6 @@ export const createSignature = (
     }
 
     return createProtocolSignatureFixture({
-        profile,
         publicKeyHash,
         publicKeyBytesHex: keyFixture.publicKeyBytesHex,
         secretKeyBytesHex: keyFixture.secretKeyBytesHex,
@@ -178,53 +168,15 @@ export const createSignature = (
 export const replaceSignatureBytes = (
     signature: ProtocolSignatureEnvelope,
     signatureBytesHex: string,
-): ProtocolSignatureEnvelope => {
-    const payload = {
-        profile: signature.profile,
-        publicKeyBytesHex: signature.publicKeyBytesHex,
-        publicKeyHash: signature.publicKeyHash,
-        signatureBytesHex,
-        signedRoot: signature.signedRoot,
-    };
-
-    return {
-        ...payload,
-        signatureHash: deriveProtocolSignatureHash(payload),
-    };
-};
+): ProtocolSignatureEnvelope => ({
+    ...signature,
+    signatureBytesHex,
+});
 
 export const replaceSignaturePublicKeyBytes = (
     signature: ProtocolSignatureEnvelope,
     publicKeyBytesHex: string,
-): ProtocolSignatureEnvelope => {
-    const payload = {
-        profile: signature.profile,
-        publicKeyBytesHex,
-        publicKeyHash: signature.publicKeyHash,
-        signatureBytesHex: signature.signatureBytesHex,
-        signedRoot: signature.signedRoot,
-    };
-
-    return {
-        ...payload,
-        signatureHash: deriveProtocolSignatureHash(payload),
-    };
-};
-
-export const replaceSignatureProfile = (
-    signature: ProtocolSignatureEnvelope,
-    profileOverride: ProtocolSignatureEnvelope['profile'],
-): ProtocolSignatureEnvelope => {
-    const payload = {
-        profile: profileOverride,
-        publicKeyBytesHex: signature.publicKeyBytesHex,
-        publicKeyHash: signature.publicKeyHash,
-        signatureBytesHex: signature.signatureBytesHex,
-        signedRoot: signature.signedRoot,
-    };
-
-    return {
-        ...payload,
-        signatureHash: deriveProtocolSignatureHash(payload),
-    };
-};
+): ProtocolSignatureEnvelope => ({
+    ...signature,
+    publicKeyBytesHex,
+});

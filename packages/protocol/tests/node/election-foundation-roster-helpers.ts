@@ -36,7 +36,6 @@ import {
 
 export const createRosterPollSpec = (): PollSpec => {
     const validation = validatePollSpec({
-        duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
         maxRosterSize: 20,
         minRosterSize: 3,
         options: Array.from(
@@ -45,11 +44,7 @@ export const createRosterPollSpec = (): PollSpec => {
         ),
         pollId: 'poll-main',
         question: 'Choose options',
-        rosterPolicy: 'OpenLinkPublicRoster',
-        scoreDomain: { max: 10, min: 1, skippedOptionScore: 1 },
         smallRosterPolicy: 'AllowMicroRoster',
-        thresholdParametersFamily: 'BalancedDefault',
-        tiePolicy: 'HigherScoreThenLowerOptionIndex',
         topOptionCount: 10,
     });
 

@@ -40,7 +40,6 @@ export type InclusionProof = {
 
 /** Append-only proof represented as a signed board-head chain. */
 export type AppendOnlyConsistencyProof = {
-    readonly proofType: 'SignedHeadChain';
     readonly fromBoardHeadHash: ProtocolHash | null;
     readonly toBoardHeadHash: ProtocolHash;
     readonly signedBoardHeads: readonly SignedBoardHead[];
@@ -148,7 +147,6 @@ export type TargetAcceptedRecord = {
     readonly targetAcceptedRecordHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly electionManifestHash: ProtocolHash;
-    readonly targetFinalityScope: string;
     readonly targetProposalHash: ProtocolHash;
     readonly evaluatorReplayRecordHash: ProtocolHash;
     readonly targetContextHash: ProtocolHash;

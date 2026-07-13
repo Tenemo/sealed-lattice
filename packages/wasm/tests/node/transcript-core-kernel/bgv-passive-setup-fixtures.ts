@@ -18,17 +18,14 @@ export const setupRequest = {
         {
             trusteeIdentity: 'trustee-1',
             rosterPosition: 0,
-            boardPosition: 3,
         },
         {
             trusteeIdentity: 'trustee-2',
             rosterPosition: 1,
-            boardPosition: 4,
         },
         {
             trusteeIdentity: 'trustee-3',
             rosterPosition: 2,
-            boardPosition: 5,
         },
     ],
     setupSeed: 'passive-bgv-setup-test-seed',

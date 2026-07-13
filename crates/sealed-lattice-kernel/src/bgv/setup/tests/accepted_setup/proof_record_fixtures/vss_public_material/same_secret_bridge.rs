@@ -41,10 +41,6 @@ pub(in super::super::super) fn same_secret_bridge_statement_set_object(
         "thresholdDegree": coefficient_set["thresholdDegree"],
         "coefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"],
         "vssCoefficientCommitmentRoot": package["vssCoefficientCommitments"]["vssCoefficientCommitmentRoot"],
-        "integerSupport": SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
-        "signedRepresentativeConvention": SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
-        "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "qShareLimbOrder": SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
         "statementRecords": statement_records,
     });
     statement_set["sameSecretBridgeStatementSetRoot"] = serde_json::json!(
@@ -122,15 +118,9 @@ pub(super) fn same_secret_bridge_statement_record(
         "ringDegree": package["vssPublicCoefficientCommitmentSet"]["ringDegree"],
         "trusteeIdentity": source_trustee_identity,
         "trusteeRosterPosition": source_trustee_roster_position,
-        "dataBasisRelation": SAME_SECRET_RELATION,
-        "integerSupport": SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
-        "signedRepresentativeConvention": SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
-        "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "qShareLimbOrder": SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
         "sourceConstantCoefficientCommitments": source_constant_commitments,
         "targetConstantCoefficientCommitmentRoots": target_constant_roots,
         "targetConstantCoefficientCommitments": target_constant_commitments,
-        "relation": SAME_SECRET_BRIDGE_RELATION,
     });
     statement_record["sameSecretBridgeStatementRoot"] = serde_json::json!(
         derive_canonical_object_hash(&statement_record).expect("same-secret bridge statement root")

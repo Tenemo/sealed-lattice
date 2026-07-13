@@ -113,8 +113,6 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         &coefficient_view,
         participant_count,
     );
-    package["privateVssEnvelopeCommitmentRoot"] =
-        rebuilt_envelopes["privateVssEnvelopeCommitmentRoot"].clone();
     package["privateVssEnvelopeCommitments"] = rebuilt_envelopes;
     package["vssShareAcceptances"] = rebuilt_acceptances;
 
@@ -140,7 +138,7 @@ fn minimal_finalized_collective_setup_fixture() -> CollectiveSetupVerificationFi
 // alongside the committed-material sets, while the prover-only full opening
 // material is omitted. Every downstream phase
 // (private VSS envelopes, share acceptances, public key shares and proofs,
-// evaluator schedule, transport certificate, final objects) binds the relevant
+// evaluator schedule and final objects) binds the relevant
 // roots.
 // Like the full-VSS minimal package this reduced-ring package is pre-terminal (no
 // collective public key runtime material), so it is not fully valid; the check is
@@ -174,8 +172,6 @@ fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
                         refusal["objectPath"].as_str(),
                         Some("setupPackage.publicKeyShareMaterial")
                             | Some("setupPackage.publicKeyShareSuccinctProofs")
-                            | Some("setupPackage.collectivePublicKey")
-                            | Some("setupPackage.collectivePublicKeyRoot")
                     )
             }),
         "only terminal runtime objects may remain missing for the pre-terminal finalized package: {}",

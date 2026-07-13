@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/index';
 import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
+import { withDeterministicWebCryptoRandomness } from '#tests/support/deterministic-web-crypto-randomness';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -37,8 +38,6 @@ describe('private VSS mailbox delivery', () => {
                 qSharePrimes: [65_537],
                 ringDegree: 2,
                 participantCount: 1,
-                deliveryPhaseNumber: 6,
-                verificationPhaseNumber: 7,
                 sourceTrusteeContributionStates: [
                     {
                         sourceTrusteeIdentity: 'trustee-0',
@@ -90,87 +89,98 @@ describe('private VSS mailbox delivery', () => {
             fixtureHash('mailbox-key'),
         );
 
-        const deliverySet = await createPrivateVssMailboxDeliverySet({
-            kernel: {
-                deriveCanonicalObjectHash: ({ value }) =>
-                    deriveCanonicalObjectHash(value),
-                verifyPrivateVssShareEnvelope: (input) => {
-                    observedPrivateEnvelope = input.privateEnvelope as Record<
-                        string,
-                        unknown
-                    >;
-                    observedTransportedProofMaterial =
-                        input.transportedPrivateVssShareProofMaterial as
-                            | Record<string, unknown>
-                            | undefined;
+        const deliverySet = await withDeterministicWebCryptoRandomness(
+            [
+                fixtureHash('mailbox-encapsulation-randomness').slice(0, 64),
+                fixtureHash('mailbox-aead-nonce').slice(0, 24),
+            ],
+            () =>
+                createPrivateVssMailboxDeliverySet({
+                    kernel: {
+                        deriveCanonicalObjectHash: ({ value }) =>
+                            deriveCanonicalObjectHash(value),
+                        verifyPrivateVssShareEnvelope: (input) => {
+                            observedPrivateEnvelope =
+                                input.privateEnvelope as Record<
+                                    string,
+                                    unknown
+                                >;
+                            observedTransportedProofMaterial =
+                                input.transportedPrivateVssShareProofMaterial as
+                                    | Record<string, unknown>
+                                    | undefined;
 
-                    return {
-                        isValid: true,
-                        privateEnvelopeHash: deriveCanonicalObjectHash(
-                            input.privateEnvelope,
-                        ),
-                        localVerificationRoot:
-                            fixtureHash('local-verification'),
-                        refusedObjects: [],
-                    };
-                },
-            },
-            setupContext,
-            phaseOrderHash: fixtureHash('phase-order'),
-            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-            vssCoefficientCommitmentRoot: fixtureHash(
-                'vss-coefficient-commitment',
-            ),
-            qSharePrimes: [65_537],
-            ringDegree: 2,
-            participantCount: 1,
-            deliveryPhaseNumber: 6,
-            verificationPhaseNumber: 7,
-            privateVssShareProofFactory: () =>
-                Promise.resolve({
-                    proofRecord: {
-                        objectType: 'PrivateVssShareProof',
-                        proofId:
-                            'sealed-lattice-private-vss-share-proof-succinct',
-                        proofFamily: 'vss-opening-carry',
-                        proofStatementRoot: fixtureHash('statement-root'),
-                        statementHash: fixtureHash('statement-hash'),
-                        proofBytesHash,
-                        proofMaterialRoot: expectedTransportedMaterialRoot,
+                            return {
+                                isValid: true,
+                                privateEnvelopeHash: deriveCanonicalObjectHash(
+                                    input.privateEnvelope,
+                                ),
+                                localVerificationRoot:
+                                    fixtureHash('local-verification'),
+                                refusedObjects: [],
+                            };
+                        },
                     },
-                    canonicalMaterial: {
-                        descriptorBytes,
-                    },
-                }),
-            sourceTrusteeContributionStates: [
-                {
-                    sourceTrusteeIdentity: 'trustee-0',
-                    sourceTrusteeRosterPosition: 0,
-                    sourceTrusteeCommitmentRoot: fixtureHash(
-                        'source-trustee-root',
+                    setupContext,
+                    phaseOrderHash: fixtureHash('phase-order'),
+                    publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                    vssCoefficientCommitmentRoot: fixtureHash(
+                        'vss-coefficient-commitment',
                     ),
-                    sourceTrusteeCoefficientCommitmentRecord: {},
-                    sourceTrusteeCoefficientCommitmentMaterialRecords: [],
-                    coefficientOpenings: [
+                    qSharePrimes: [65_537],
+                    ringDegree: 2,
+                    participantCount: 1,
+                    privateVssShareProofFactory: () =>
+                        Promise.resolve({
+                            proofRecord: {
+                                objectType: 'PrivateVssShareProof',
+                                proofId:
+                                    'sealed-lattice-private-vss-share-proof-succinct',
+                                proofFamily: 'vss-opening-carry',
+                                proofStatementRoot:
+                                    fixtureHash('statement-root'),
+                                statementHash: fixtureHash('statement-hash'),
+                                proofBytesHash,
+                                proofMaterialRoot:
+                                    expectedTransportedMaterialRoot,
+                            },
+                            canonicalMaterial: {
+                                descriptorBytes,
+                            },
+                        }),
+                    sourceTrusteeContributionStates: [
                         {
-                            rnsLimbIndex: 0,
-                            rnsPrime: 65_537,
-                            shamirCoefficientIndex: 0,
-                            commitmentRoot: fixtureHash('coefficient-root'),
-                            coefficientMessage: [1, 2],
-                            randomnessByColumn: [[0, 1]],
+                            sourceTrusteeIdentity: 'trustee-0',
+                            sourceTrusteeRosterPosition: 0,
+                            sourceTrusteeCommitmentRoot: fixtureHash(
+                                'source-trustee-root',
+                            ),
+                            sourceTrusteeCoefficientCommitmentRecord: {},
+                            sourceTrusteeCoefficientCommitmentMaterialRecords:
+                                [],
+                            coefficientOpenings: [
+                                {
+                                    rnsLimbIndex: 0,
+                                    rnsPrime: 65_537,
+                                    shamirCoefficientIndex: 0,
+                                    commitmentRoot:
+                                        fixtureHash('coefficient-root'),
+                                    coefficientMessage: [1, 2],
+                                    randomnessByColumn: [[0, 1]],
+                                },
+                            ],
                         },
                     ],
-                },
-            ],
-            recipients: [
-                {
-                    recipientIdentity: 'trustee-0',
-                    recipientRosterPosition: 0,
-                    mailboxPublicKeyBytesHex: mailboxKeyPair.publicKeyBytesHex,
-                },
-            ],
-        });
+                    recipients: [
+                        {
+                            recipientIdentity: 'trustee-0',
+                            recipientRosterPosition: 0,
+                            mailboxPublicKeyBytesHex:
+                                mailboxKeyPair.publicKeyBytesHex,
+                        },
+                    ],
+                }),
+        );
 
         expect(observedPrivateEnvelope).toBeDefined();
         const limbOpening = (

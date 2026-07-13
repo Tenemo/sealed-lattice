@@ -6,9 +6,10 @@
 //! target proposal; it does not accept the target, prove the evaluation, or
 //! decrypt the result.
 //!
-//! The development key set and development encryption/decryption helpers exist
-//! only to drive and check the evaluator against the plaintext top-k oracle.
-//! They are never exported through the public package surface.
+//! The development key set drives prototype key synthesis and encryption.
+//! Secret-key decryption helpers compile only in tests, where they check the
+//! evaluator against a plaintext top-k oracle. None of these helpers is
+//! exported through the public package surface.
 
 #[cfg(not(target_arch = "wasm32"))]
 macro_rules! evaluator_parallel_iterator {

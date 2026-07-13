@@ -45,7 +45,7 @@ pub(super) fn verify_public_evaluation_key_material_transport(
         .is_none()
     {
         return Ok(Some(evaluation_key_material_refusal(
-            "publicEvaluationKeyMaterialReferenceIncomplete",
+            "publicEvaluationKeyMaterialRootMissing",
             "evaluationKeys.publicEvaluationKeyMaterialRoot is required when public evaluation-key material is declared",
             "setupPackage.evaluationKeys.publicEvaluationKeyMaterialRoot",
         )?));
@@ -148,11 +148,8 @@ pub(super) fn verify_public_evaluation_key_material_transport(
         };
     let expected_manifest =
         public_evaluation_key_material_manifest(setup_package, evaluation_keys)?;
-    let canonical_material_root = public_evaluation_key_material_reference_root(
-        evaluation_keys,
-        &expected_manifest,
-        &transport_hashes,
-    )?;
+    let canonical_material_root =
+        public_evaluation_key_material_reference_root(&expected_manifest, &transport_hashes)?;
     if expected_material_root != canonical_material_root {
         return Ok(Some(evaluation_key_material_refusal(
             "publicEvaluationKeyMaterialRootMismatch",
@@ -398,7 +395,7 @@ fn verify_public_evaluation_key_material_entry_header(
     Ok(())
 }
 
-pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
+fn public_evaluation_key_material_transport_hashes(
     material: &crate::bgv::setup::BgvProofMaterialBytes,
 ) -> CanonicalResult<PublicEvaluationKeyMaterialTransportHashes> {
     if material.len() == 0 {
@@ -452,30 +449,13 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
             })?;
     let full_object_hash =
         public_evaluation_key_material_full_object_hash(total_byte_length, material);
-    let chunk_hashes = material
-        .chunks()
-        .enumerate()
-        .map(|(chunk_index, chunk)| {
-            public_evaluation_key_material_chunk_hash(&full_object_hash, chunk_index, chunk)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let chunk_root = derive_canonical_object_hash(&json!({
-        "objectType": "PublicEvaluationKeyMaterialChunkManifest",
-        "chunkCount": chunk_hashes.len(),
-        "totalByteLength": total_byte_length,
-        "chunkHashes": chunk_hashes,
-        "fullObjectHash": full_object_hash,
-    }))?;
-
     Ok(PublicEvaluationKeyMaterialTransportHashes {
         full_object_hash,
-        chunk_hashes,
-        chunk_root,
         total_byte_length,
     })
 }
 
-// Prefixing the total length (and folding chunk_index per chunk) makes the chunk concatenation injective, so a re-chunked or reordered stream cannot collide to the same full-object hash.
+// Prefixing the total length makes the concatenated material bytes unambiguous.
 fn public_evaluation_key_material_full_object_hash(
     total_byte_length: u64,
     material: &crate::bgv::setup::BgvProofMaterialBytes,
@@ -493,56 +473,13 @@ fn public_evaluation_key_material_full_object_hash(
     )
 }
 
-fn public_evaluation_key_material_chunk_hash(
-    full_object_hash: &str,
-    chunk_index: usize,
-    chunk: &[u8],
-) -> CanonicalResult<String> {
-    let chunk_index_bytes = u64::try_from(chunk_index)
-        .map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "public evaluation-key material chunk index does not fit u64",
-            )
-        })?
-        .to_le_bytes();
-
-    Ok(hash512_hex(
-        "sealed-lattice/setup/public-evaluation-key-material/chunk",
-        &[full_object_hash.as_bytes(), &chunk_index_bytes, chunk],
-    ))
-}
-
-pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
-    evaluation_keys: &Value,
+fn public_evaluation_key_material_reference_root(
     expected_manifest: &Value,
     transport_hashes: &PublicEvaluationKeyMaterialTransportHashes,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "PublicEvaluationKeyMaterialReference",
-        "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
-        "manifestHash": value_string(evaluation_keys, "manifestHash")?,
-        "rosterHash": value_string(evaluation_keys, "rosterHash")?,
-        "setupParametersHash": value_string(evaluation_keys, "setupParametersHash")?,
-        "setupEpoch": value_string(evaluation_keys, "setupEpoch")?,
-        "evaluatorKeyScheduleRoot": value_string(
-            evaluation_keys,
-            "evaluatorKeyScheduleRoot",
-        )?,
-        "publicKeyShareSuccinctProofSetRoot": value_string(
-            evaluation_keys,
-            "publicKeyShareSuccinctProofSetRoot",
-        )?,
-        "relinearizationKeyShareRoundsRoot": value_string(
-            evaluation_keys,
-            "relinearizationKeyShareRoundsRoot",
-        )?,
-        "requiredGaloisSetHash": value_string(evaluation_keys, "requiredGaloisSetHash")?,
         "expectedMaterialManifest": expected_manifest,
-        "chunkCount": transport_hashes.chunk_hashes.len(),
-        "totalByteLength": transport_hashes.total_byte_length,
         "fullObjectHash": transport_hashes.full_object_hash,
-        "chunkRoot": transport_hashes.chunk_root,
-        "chunkHashes": transport_hashes.chunk_hashes,
     }))
 }

@@ -24,15 +24,6 @@ use super::{
     CONSISTENCY_REPETITIONS, DEEP_EVALUATION_POINT_COUNT, DOMAIN_BLOWUP, LOW_DEGREE_QUERY_COUNT,
 };
 
-// The trustee evaluation-key proof behavioral suite is split by behavior into
-// sibling modules. This module owns the shared imports, fixtures, deterministic
-// seeds, statement/request builders, and the cross-cutting size helper
-// `folded_layer_path_length` (used by both the codec shape test and the size
-// profiler). Each sibling opens with `use super::*;` to reach this surface.
-//
-// `prover` and the command/family items are re-exported here so the sibling
-// tests can keep referencing them through `super::` after the move under this
-// `tests/` directory.
 use super::{
     generate_target_decryption_share_proof_bytes_from_request,
     generate_trustee_evaluation_key_proof_from_request, prover,
@@ -148,6 +139,15 @@ fn rotation(galois_element: usize, level: usize) -> (EvaluationKeyShareKind, usi
 
 fn repeated_hash(byte_pair: &str) -> String {
     byte_pair.repeat(64)
+}
+
+fn foundation_setup_parameters_hash() -> String {
+    describe_collective_bgv_setup_parameters()
+        .expect("setup parameters")
+        .get("setupParametersHash")
+        .and_then(serde_json::Value::as_str)
+        .expect("setup parameters hash")
+        .to_owned()
 }
 
 // A committed-material VSS commitment plus its holder regeneration inputs, for
@@ -408,10 +408,11 @@ fn proof_randomness_fields(request: &mut serde_json::Value) {
     request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 }
 
-fn generated_proof_bytes(generated: &serde_json::Value) -> Vec<u8> {
-    let proof_family = generated["proofFamily"]
-        .as_str()
-        .expect("generated proof family");
+fn generated_proof_bytes(
+    statement: &TrusteeEvaluationKeyStatement,
+    generated: &serde_json::Value,
+) -> Vec<u8> {
+    let proof_family = statement.context.proof_family.as_str();
     let proof_material_root = generated["proofMaterialRoot"]
         .as_str()
         .expect("generated proof material root");
@@ -463,7 +464,7 @@ fn verify_generated_proof(
     statement: &TrusteeEvaluationKeyStatement,
     generated: &serde_json::Value,
 ) -> Vec<u8> {
-    let proof_bytes = generated_proof_bytes(generated);
+    let proof_bytes = generated_proof_bytes(statement, generated);
     verify_proof_bytes(statement, &proof_bytes).expect("generated proof should verify");
     proof_bytes
 }
@@ -496,8 +497,7 @@ fn same_secret_statement_hash_vector_request() -> serde_json::Value {
         },
         "sameSecretBridge": {
             "publicMatrixSeedHash": repeated_hash("40"),
-            "setupParametersHash": crate::bgv::setup::accepted_setup::setup_parameters_hash()
-                .expect("setup parameters hash"),
+            "setupParametersHash": foundation_setup_parameters_hash(),
             "sourceTrusteeIdentity": "statement-vector-trustee",
             "sourceTrusteeRosterPosition": 0,
             "bridgeRnsPrimes": [DATA_PRIMES[0]],
@@ -544,8 +544,7 @@ fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
         }],
         "sameSecretBridge": {
             "publicMatrixSeedHash": repeated_hash("41"),
-            "setupParametersHash": crate::bgv::setup::accepted_setup::setup_parameters_hash()
-                .expect("setup parameters hash"),
+            "setupParametersHash": foundation_setup_parameters_hash(),
             "sourceTrusteeIdentity": "statement-vector-trustee",
             "sourceTrusteeRosterPosition": 0,
             "bridgeRnsPrimes": [DATA_PRIMES[0]],
@@ -572,7 +571,6 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
         "context": vector_context_base(serde_json::json!({
             "requiredGaloisSetHash": repeated_hash("33"),
             "evaluatorKeyScheduleRoot": repeated_hash("34"),
-            "keySwitchDecompositionHash": repeated_hash("35"),
             "sourceConstantCoefficientCommitmentRoot": repeated_hash("36"),
         })),
         "ringDegree": SMALL_RING_DEGREE,

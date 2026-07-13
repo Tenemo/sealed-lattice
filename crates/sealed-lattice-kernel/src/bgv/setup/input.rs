@@ -6,17 +6,7 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
     let roster_hash = read_hash_field(request, "rosterHash")?.to_string();
     let threshold_parameters_hash =
         read_hash_field(request, "thresholdParametersHash")?.to_string();
-    let setup_seed_provided = request.get("setupSeed").is_some();
-    let setup_seed = request
-        .get("setupSeed")
-        .and_then(Value::as_str)
-        .unwrap_or("sealed-lattice-passive-bgv-setup-development-seed");
-    if setup_seed.trim().is_empty() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "setupSeed must not be empty when supplied",
-        ));
-    }
+    let setup_seed = read_non_empty_string(request, "setupSeed")?;
     let setup_seed_hash = passive_setup_seed_hash(
         &ceremony_id,
         &manifest_hash,
@@ -68,7 +58,6 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
         manifest_hash,
         roster_hash,
         threshold_parameters_hash,
-        setup_seed_provided,
         setup_seed_hash,
         private_setup_seed_hash,
         participants,
@@ -191,7 +180,6 @@ fn read_setup_participants(request: &Value) -> CanonicalResult<Vec<SetupParticip
                 Ok(SetupParticipant {
                     trustee_identity: identity.clone(),
                     roster_position: index,
-                    board_position: index,
                     recovery_epoch: 0,
                     device_epoch: 0,
                 })
@@ -202,7 +190,6 @@ fn read_setup_participants(request: &Value) -> CanonicalResult<Vec<SetupParticip
                 Ok(SetupParticipant {
                     trustee_identity,
                     roster_position: read_optional_usize(value, "rosterPosition")?.unwrap_or(index),
-                    board_position: read_optional_usize(value, "boardPosition")?.unwrap_or(index),
                     recovery_epoch: read_optional_u64(value, "recoveryEpoch")?.unwrap_or(0),
                     device_epoch: read_optional_u64(value, "deviceEpoch")?.unwrap_or(0),
                 })

@@ -13,28 +13,9 @@ use crate::bgv::evaluator::top_k::{
 };
 use crate::hashing::hash512_hex;
 
-// End-to-end foundation-profile evidence: ten genuine ballots are aggregated,
-// replayed through the production packed batched-pair evaluator at the
-// twenty-option foundation-profile domain, and the resulting genuine level-6 target
-// pair is released through the proof-backed staged decryption commands. The
-// released per-option identifiers and orders must equal the plaintext oracle,
-// and the one-shot release session must refuse a second finish. This is the
-// evidence closing the "synthetic-target only" clause: every target-decryption
-// binding below is recomputed from a target pair the evaluator actually
-// produced, not from a fixture encryption of chosen slots.
-//
-// The target proposal, context, and finality hashes on the accepted record
-// remain fixture material: the standalone target-acceptance and finality gate
-// is not implemented yet, and this test binds the genuine evaluator-replay
-// record hash, ciphertext hashes, layout, and basis exactly as the share
-// generation and release paths verify them today.
-//
-// The replay leg is minutes-long at the full twenty-option domain and each
-// share proof runs the real succinct prover, so the test is ignored in the
-// fast lanes and runs manually through the focused full-profile-evidence runner,
-// which passes --ignored and pins a warm target directory:
-//
-//   pnpm run test:rust:kernel:full-profile-evidence -- replay_release
+// Exercises a genuine ten-ballot evaluator output through staged target
+// decryption. The released identifiers and order must match the plaintext
+// oracle, and a second finish must be refused.
 #[test]
 #[ignore = "long-running foundation-profile evidence; run via the focused full-profile-evidence runner"]
 fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
@@ -85,7 +66,6 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
             setup_package: &passive_package,
             evaluator_key: &evaluator_key,
             aggregate_ciphertext: &aggregate_ciphertext,
-            aggregate_scores: &aggregate_scores,
             ballot_count,
             top_counts: &[top_count],
             target_finality_policy_hash: None,

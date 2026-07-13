@@ -13,8 +13,11 @@ pub(super) struct LocalTargetDecryptionShareWitness {
 }
 
 pub(super) struct AggregateOpeningWitnessBinding {
+    #[cfg(test)]
     pub(super) public_matrix_seed_hash: String,
+    #[cfg(test)]
     pub(super) share_linkage_statement_root: String,
+    #[cfg(test)]
     pub(super) aggregate_threshold_commitment_root: String,
     pub(super) active_credential_bindings: Vec<AggregateOpeningCredentialBinding>,
 }
@@ -29,6 +32,7 @@ pub(super) struct AggregateOpeningCredentialBinding {
     pub(super) aggregate_material_seed_hex: String,
 }
 
+#[cfg(test)]
 pub(super) struct TargetDecryptionSmudgingCommitmentSet {
     pub(super) value: Value,
     pub(super) root: String,
@@ -43,9 +47,13 @@ pub(super) struct TargetDecryptionSmudgingPolynomialOpening {
 }
 
 struct TargetDecryptionSmudgingCommitmentOpening {
+    #[cfg(test)]
     role: String,
+    #[cfg(test)]
     rns_limb_index: usize,
+    #[cfg(test)]
     rns_prime: u64,
+    #[cfg(test)]
     polynomial_degree: usize,
     message_coefficients: Vec<u64>,
     material_seed_hex: String,
@@ -67,44 +75,25 @@ pub(super) fn generate_target_decryption_share_from_secret_share(
     secret_share: &[Vec<u64>],
     smudging_polynomial_openings: &[TargetDecryptionSmudgingPolynomialOpening],
 ) -> CanonicalResult<Value> {
-    let level = target_ciphertexts.target_id.level;
     let target_id_partials =
         partial_decryption_by_limb(&target_ciphertexts.target_id, secret_share)?;
     let target_order_partials =
         partial_decryption_by_limb(&target_ciphertexts.target_order, secret_share)?;
-    let (target_id_partials, target_id_smudging_report) =
-        apply_plaintext_multiple_zero_share_smudging(
-            target_share_profile,
-            participant,
-            smudging_polynomial_openings,
-            "targetId",
-            &target_id_partials,
-        )?;
-    let (target_order_partials, target_order_smudging_report) =
-        apply_plaintext_multiple_zero_share_smudging(
-            target_share_profile,
-            participant,
-            smudging_polynomial_openings,
-            "targetOrder",
-            &target_order_partials,
-        )?;
-    let smudging_input_report = target_decryption_smudging_input_report_value(
-        setup_binding,
-        target_accepted,
-        target_ciphertexts,
+    let target_id_partials = apply_plaintext_multiple_zero_share_smudging(
         target_share_profile,
         participant,
-        target_id_smudging_report,
-        target_order_smudging_report,
-    );
-    let smudging_input_report_hash = derive_canonical_object_hash(&smudging_input_report)?;
-    let payload = share_payload(
-        level,
+        smudging_polynomial_openings,
+        "targetId",
         &target_id_partials,
-        &target_order_partials,
-        &smudging_input_report,
-        &smudging_input_report_hash,
     )?;
+    let target_order_partials = apply_plaintext_multiple_zero_share_smudging(
+        target_share_profile,
+        participant,
+        smudging_polynomial_openings,
+        "targetOrder",
+        &target_order_partials,
+    )?;
+    let payload = share_payload(&target_id_partials, &target_order_partials)?;
     let share_root = derive_canonical_object_hash(&payload)?;
     let record_hash_input = share_record_hash_input(
         setup_binding,
@@ -120,30 +109,10 @@ pub(super) fn generate_target_decryption_share_from_secret_share(
         "objectType": "BgvTargetDecryptionShare",
         "targetDecryptionShareHash": target_decryption_share_hash,
         "setupPackageHash": setup_binding.setup_package_hash,
-        "ceremonyId": setup_binding.ceremony_id,
-        "electionManifestHash": setup_binding.election_manifest_hash,
         "trusteeIdentity": participant.trustee_identity,
-        "rosterPosition": participant.roster_position,
-        "boardPosition": participant.board_position,
-        "interpolationPoint": participant.interpolation_point,
-        "recoveryEpoch": participant.recovery_epoch,
-        "deviceEpoch": participant.device_epoch,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetProposalHash": target_accepted.target_proposal_hash,
-        "targetPreimageHash": target_accepted.target_preimage_hash,
-        "targetFinalityRecordHash": target_accepted.target_finality_record_hash,
-        "targetFinalityCheckpointHash": target_accepted.target_finality_checkpoint_hash,
-        "evaluatorReplayRecordHash": target_accepted.evaluator_replay_record_hash,
-        "targetContextHash": target_accepted.target_context_hash,
-        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
         "targetCiphertextBindingHash": target_ciphertexts.target_ciphertext_binding_hash,
-        "targetIdRoot": target_ciphertexts.target_id_root,
-        "targetOrderRoot": target_ciphertexts.target_order_root,
-        "targetDecryptionProfileHash": target_accepted.target_decryption_profile_hash,
-        "targetDecryptionProfileBindingHash": setup_binding.target_decryption_profile_binding_hash,
         "targetShareProfileHash": target_share_profile.hash,
-        "targetBasisHash": target_accepted.target_basis_hash,
         "shareRoot": share_root,
         "sharePayload": payload,
     }))
@@ -251,10 +220,6 @@ pub(super) fn derive_threshold_secret_share_limb(
     Ok(share)
 }
 
-// Development target shares now add plaintext-multiple Shamir zero-share masks
-// before release. The report binds numeric parameters, but a production
-// target-decryption path still needs a zero-knowledge proof that the smudged
-// share and opening witness satisfy the stated relation.
 pub(super) fn partial_decryption_by_limb(
     ciphertext: &Ciphertext,
     secret_share_by_limb: &[Vec<u64>],

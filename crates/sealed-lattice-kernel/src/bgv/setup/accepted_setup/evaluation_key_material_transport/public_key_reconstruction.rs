@@ -1,7 +1,7 @@
 use super::material_transport::*;
 use super::*;
 
-pub(in crate::bgv::setup) fn accepted_setup_public_relinearization_keys_from_transport(
+pub(super) fn accepted_setup_public_relinearization_keys_from_transport(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<BTreeMap<usize, KeySwitchKey>> {
@@ -120,7 +120,7 @@ pub(in crate::bgv::setup) fn accepted_setup_public_relinearization_keys_from_tra
     Ok(relinearization_keys)
 }
 
-pub(in crate::bgv::setup) fn accepted_setup_public_galois_keys_from_transport(
+pub(super) fn accepted_setup_public_galois_keys_from_transport(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<BTreeMap<(usize, usize), KeySwitchKey>> {

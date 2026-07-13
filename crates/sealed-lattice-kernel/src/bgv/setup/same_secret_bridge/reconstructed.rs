@@ -188,20 +188,11 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
 pub(super) fn verify_reconstructed_same_secret_bridge_proof(
     proof_verification_request: &Value,
     proof_bytes: &SetupProofMaterialBytes,
-) -> CanonicalResult<Value> {
-    let proof_verification =
-        super::trustee_evaluation_key_proof::verify_same_secret_bridge_proof_source_from_request(
-            proof_verification_request,
-            proof_bytes.as_ref(),
-        )?;
-    compare_required_string(
-        string_at_path(&proof_verification, &["proofFamily"])?,
-        SAME_SECRET_BRIDGE_PROOF_FAMILY,
-        "reconstructed same-secret bridge proof verification proofFamily",
-    )?;
-    hash_at_path(&proof_verification, &["statementHash"])?;
-
-    Ok(proof_verification)
+) -> CanonicalResult<()> {
+    super::trustee_evaluation_key_proof::verify_same_secret_bridge_proof_source_from_request(
+        proof_verification_request,
+        proof_bytes.as_ref(),
+    )
 }
 
 pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_binding_hash(
@@ -221,7 +212,7 @@ pub(in crate::bgv::setup) fn verify_and_retain_same_secret_bridge_proof_binding(
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
     proof_material_root: &str,
     proof_verification_request: &Value,
-) -> CanonicalResult<Value> {
+) -> CanonicalResult<()> {
     let proof_bytes = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
         SAME_SECRET_BRIDGE_PROOF_FAMILY,
         proof_material_root,
@@ -241,8 +232,7 @@ pub(in crate::bgv::setup) fn verify_and_retain_same_secret_bridge_proof_binding(
         )?,
         "same-secret bridge proof material root",
     )?;
-    let verification =
-        verify_reconstructed_same_secret_bridge_proof(proof_verification_request, &proof_bytes)?;
+    verify_reconstructed_same_secret_bridge_proof(proof_verification_request, &proof_bytes)?;
     drop(proof_bytes);
     crate::bgv::setup::retain_accepted_setup_proof_binding(
         proof_binding_session.session_handle,
@@ -255,5 +245,5 @@ pub(in crate::bgv::setup) fn verify_and_retain_same_secret_bridge_proof_binding(
         )?,
     )?;
 
-    Ok(verification)
+    Ok(())
 }

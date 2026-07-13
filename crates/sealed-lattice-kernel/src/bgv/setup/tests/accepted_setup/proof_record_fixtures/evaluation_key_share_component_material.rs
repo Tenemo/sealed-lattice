@@ -139,20 +139,6 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
     let descriptor_bytes = descriptor
         .encode()
         .expect("canonical component material descriptor bytes");
-    let chunk_hashes = descriptor
-        .ordered_chunk_digests
-        .iter()
-        .map(|digest| digest.to_lowercase_hex())
-        .collect::<Vec<_>>();
-    let full_object_hash = descriptor.full_object_digest.to_lowercase_hex();
-    let chunk_root = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "SetupTransportChunkManifest",
-        "chunkCount": chunk_hashes.len(),
-        "totalByteLength": total_byte_length,
-        "chunkHashes": chunk_hashes,
-        "fullObjectHash": full_object_hash,
-    }))
-    .expect("evaluation-key component material chunk root");
 
     authenticate_evaluation_key_share_component_material_stream(
         proof_family,
@@ -164,9 +150,6 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
     );
 
     let level = record["level"].as_u64().expect("component material level");
-    let digit_count = level
-        .checked_add(1)
-        .expect("component material digit count");
     AuthenticatedEvaluationKeyShareComponentMaterialFixture {
         material_root: material_root.clone(),
         transported_material: serde_json::json!({
@@ -179,15 +162,8 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
             "keySwitchSeedHex": record["keySwitchSeedHex"],
             "level": level,
             "ringDegree": record["ringDegree"],
-            "digitCount": digit_count,
-            "rnsLimbCount": digit_count,
             "keySwitchComponentVectorRoot": record["keySwitchComponentVectorRoot"],
             "keySwitchComponentMaterialRoot": material_root,
-            "chunkCount": chunk_hashes.len(),
-            "totalByteLength": total_byte_length,
-            "fullObjectHash": full_object_hash,
-            "chunkRoot": chunk_root,
-            "chunkHashes": chunk_hashes,
         }),
     }
 }
@@ -213,21 +189,13 @@ fn encode_evaluation_key_share_component_material(
 
     let mut bytes = Vec::new();
     bytes.extend_from_slice(COMPONENT_MATERIAL_MAGIC);
-    for word in [level, ring_degree, digit_count, digit_count] {
+    for word in [level, ring_degree] {
         bytes.extend_from_slice(&word.to_le_bytes());
     }
-    for (digit_index, component_b_by_limb) in component_b_by_digit.iter().enumerate() {
+    for component_b_by_limb in component_b_by_digit {
         assert_eq!(component_b_by_limb.len(), expected_digit_count);
-        for (rns_limb_index, coefficients) in component_b_by_limb.iter().enumerate() {
+        for coefficients in component_b_by_limb {
             assert_eq!(coefficients.len(), expected_ring_degree);
-            for word in [
-                u64::try_from(digit_index).expect("digit index fits u64"),
-                u64::try_from(rns_limb_index).expect("RNS limb index fits u64"),
-                DATA_PRIMES[rns_limb_index],
-                ring_degree,
-            ] {
-                bytes.extend_from_slice(&word.to_le_bytes());
-            }
             for coefficient in coefficients {
                 bytes.extend_from_slice(&coefficient.to_le_bytes());
             }
@@ -335,22 +303,10 @@ pub(in super::super) fn evaluation_key_error_coefficients_for_fixture(
     digit_index: usize,
     ring_degree: usize,
 ) -> Vec<i64> {
-    // Roster positions below the fixed n = 10 foundation roster use a
-    // position-independent error (a multiplier of 5 vanishes mod 5), so that
-    // foundation fixture stays byte-identical. The base error aliases with period 5 in the
-    // roster position and the fixture secret aliases with period 3, so a trustee's
-    // key-switch component repeats every LCM(3, 5) = 15 roster positions. Within
-    // n = 10 no two positions are 15 apart, but across the 3..20 supported range
-    // positions (0, 15), (1, 16), ... would emit byte-identical component material
-    // and alias in the setup transport certificate's aggregate chunk hashes.
-    // Positions at or beyond the foundation roster use a position-dependent error
-    // (multiplier coprime to 5): a position-varying error can never equal a
-    // foundation position-constant one, and within the higher positions the
-    // period-15 partners all fall outside the supported range, so every supported
-    // roster carries pairwise-distinct component material. The error stays in the
-    // centered {-2..2} range, so the key-switch noise bound is unchanged.
-    // FOUNDATION_ROSTER_SIZE mirrors package_fixtures' pinned foundation
-    // participant count.
+    // The fixture secret and base error alias with periods three and five, so
+    // their combined material repeats every fifteen roster positions. Using a
+    // different position multiplier from position ten onward separates those
+    // aliases across the supported range while keeping errors in {-2..2}.
     const FOUNDATION_ROSTER_SIZE: u64 = 10;
     let position_multiplier = if trustee_roster_position < FOUNDATION_ROSTER_SIZE {
         5
@@ -402,8 +358,6 @@ fn evaluation_key_component_vector_root(
                         "digitIndex": digit_index,
                         "rnsLimbIndex": rns_limb_index,
                         "rnsPrime": DATA_PRIMES[rns_limb_index],
-                        "component": "b",
-                        "coefficientByteLength": ring_degree * 8,
                         "coefficientVectorHash512": evaluation_key_share_component_vector_hash(coefficients),
                         "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
                     })
@@ -433,7 +387,6 @@ pub(in super::super) fn relinearization_key_switch_seed_for_test(
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "RelinearizationKeySwitchPublicSampleSeed",
         "proofFamily": "relinearization-key-share",
-        "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
         "relinearizationCrpRoot": schedule["relinearizationCrpRoot"],
         "round": round,
@@ -452,7 +405,6 @@ pub(in super::super) fn galois_key_switch_seed_for_test(
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "GaloisKeySwitchPublicSampleSeed",
         "proofFamily": "galois-key-share",
-        "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
         "galoisKeyCrpRoot": schedule["galoisKeyCrpRoot"],
         "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],

@@ -90,11 +90,8 @@ export const foundationProfile = Object.freeze({
     maximumScore: 10,
     maximumIdentifierByteLength: 128,
     streamChunkByteLength: 1_048_576,
-    maximumResidentStreamChunkCount: 2,
     maximumCopiedBufferByteLength: 1_572_864,
     maximumWasmMemoryByteLength: 402_653_184,
-    maximumAdditionalJavaScriptHeapByteLength: 134_217_728,
-    maximumAdditionalBrowserProcessByteLength: 671_088_640,
 } as const);
 
 /** Canonical tuple item identifiers. */
@@ -208,7 +205,7 @@ export const stateCapabilityKinds = Object.freeze({
     setupActionRandomnessRoot: 4,
     setupPublicSeedBranch: 5,
     setupDealerSetBranch: 6,
-    setupRkgRoundOneBranch: 7,
+    setupRelinearizationRoundOneBranch: 7,
     setupTerminalPackage: 8,
 } as const);
 
@@ -219,7 +216,6 @@ export type StateCapabilityKind =
 export const foundationObjectTypes = Object.freeze({
     publicRandomnessCommitment: 0x0001,
     publicRandomnessReveal: 0x0002,
-    publicRandomnessLock: 0x0003,
     setupIntent: 0x0010,
     privateShareAcceptance: 0x0011,
     complaint: 0x0012,

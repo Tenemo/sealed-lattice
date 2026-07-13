@@ -8,7 +8,7 @@ use crate::{
         append_varuint,
     },
     hashing::namespace_root,
-    transcript_core::{decode_hex, encode_hex},
+    transcript_core::encode_hex,
 };
 
 const CANONICAL_MAGIC: &str = "sealed-lattice-bgv-rns-canonical-object";
@@ -120,14 +120,6 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
 
 pub(crate) fn canonical_bytes_hex(bytes: &[u8]) -> String {
     encode_hex(bytes)
-}
-
-pub(crate) fn parse_bgv_object_hex(
-    canonical_bytes_hex: &str,
-) -> CanonicalResult<CanonicalBgvObject> {
-    let bytes = decode_hex(canonical_bytes_hex)?;
-
-    parse_bgv_object(&bytes)
 }
 
 pub(crate) fn plaintext_root(canonical_bytes: &[u8]) -> String {

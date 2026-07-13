@@ -8,7 +8,7 @@ import type {
     FoundationBoardCandidate,
     FoundationBoardSessionInput,
 } from '#packages/sdk/src/index';
-import { createAuthenticatedSetupIntentTestVector } from '#packages/wasm/tests/foundation-board-test-vectors';
+import { createAuthenticatedComplaintTestVector } from '#packages/wasm/tests/foundation-board-test-vectors';
 
 type DeriveCollectiveBgvSetupRosterHash = (
     entries: readonly Readonly<{
@@ -76,19 +76,12 @@ describe('election foundation public package API in Node', () => {
         }
     });
 
-    it('opens the packaged canonical board boundary and keeps refusals non-consuming', async () => {
-        const authenticatedSetupIntent =
-            createAuthenticatedSetupIntentTestVector();
+    it('opens the packaged canonical board boundary with an authenticated complaint carrier', async () => {
+        const authenticatedComplaint = createAuthenticatedComplaintTestVector();
         const opened = await createFoundationBoardSession({
             actionContextHash: new Uint8Array(64).fill(0x33),
-            canonicalRosterBytes: authenticatedSetupIntent.canonicalRosterBytes,
+            canonicalRosterBytes: authenticatedComplaint.canonicalRosterBytes,
             ceremonyContextHash: new Uint8Array(64).fill(0x22),
-            limits: {
-                maximumCarrierByteLength: 131_072,
-                maximumCarrierCount: 32,
-                maximumRetainedCarrierByteLength: 1_048_576,
-                maximumUnresolvedDependencyCount: 128,
-            },
             suiteIdentifier: new Uint8Array(64).fill(0x11),
         });
         expect(opened.isValid).toBe(true);
@@ -101,14 +94,14 @@ describe('election foundation public package API in Node', () => {
                 refusalReason: 'malformedEncoding',
             });
             const accepted = opened.value.ingest(
-                authenticatedSetupIntent.canonicalCarrierBytes,
+                authenticatedComplaint.canonicalCarrierBytes,
             );
             expect(accepted.isValid).toBe(true);
             if (!accepted.isValid) {
                 throw new Error(accepted.refusalReason);
             }
             expect(foundationBoardCandidateObjectHash(accepted.value)).toEqual(
-                authenticatedSetupIntent.objectHash,
+                authenticatedComplaint.objectHash,
             );
             expect(opened.value.requireCompleteCarrierGraph()).toEqual({
                 isValid: true,
@@ -124,7 +117,7 @@ describe('election foundation public package API in Node', () => {
                     typeof foundationBoardCandidateObjectHash
                 >[0],
             ),
-        ).toThrow('was not issued by this SDK instance');
+        ).toThrow('was not issued by this runtime');
     });
 
     it('derives the setup roster hash used by setup package verification', () => {

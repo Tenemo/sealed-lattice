@@ -43,10 +43,6 @@ export const directBallotScores = [
 
 export type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly topCount: number;
-    readonly scoreDomainMax: number;
-    readonly tiePolicy: string;
-    readonly workingLevel: number;
-    readonly evaluationKeyMaterialSource: string;
     readonly targetLayoutHash: string;
     readonly targetIdRoot: string;
     readonly targetOrderRoot: string;
@@ -68,53 +64,27 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
               readonly bgvParametersHash: string;
               readonly targetFinalityPolicyHash: string;
           };
-    readonly replayTimeMilliseconds: string;
 };
 
 export type DirectEncryptedBallotResult = {
-    readonly parameters: {
-        readonly dataPrimeCount: number;
-    };
-    readonly ballotLayout: {
-        readonly optionCount: number;
-    };
-    readonly input: {
-        readonly ballotCount: number;
-    };
     readonly encryptedBallots: {
         readonly encryptedBallotHashes: readonly string[];
         readonly ciphertextRoots: readonly string[];
-        readonly ciphertextCanonicalByteLengths: readonly number[];
     };
-    readonly proofAttempt: {
-        readonly proofCount: number;
-        readonly rnsLimbCount: number;
-        readonly responseEncoding: string;
-        readonly responsePolynomialDegree: number;
-        readonly proofSizeBytes: number;
-        readonly totalProofBytes: number;
+    readonly ballotValidityProofs: readonly {
+        readonly statementHash: string;
         readonly proofBytesHash: string;
-        readonly proofGate: string;
         readonly proofTransport: {
-            readonly encoding: string;
-            readonly chunksPerProof: number;
-            readonly chunksForBatch: number;
-            readonly transportedProofSizeBytes: number;
-            readonly transportedProofBytesHash: string;
-            readonly firstProofChunkMerkleRoot: string;
-            readonly firstProofChunkHashes: readonly string[];
-            readonly firstProofPublicTransportHash: string;
-            readonly firstProofStatementHash: string;
-            readonly proofParametersHash: string;
+            readonly chunkHashes: readonly string[];
+            readonly chunkMerkleRoot: string;
+            readonly publicTransportHash: string;
         };
-    };
+    }[];
     readonly aggregation: {
-        readonly ballotCount: number;
         readonly aggregateCiphertextRoot: string;
-        readonly aggregateCiphertextCanonicalByteLength: number;
     };
     readonly evaluatorReplay:
-        | string
+        | null
         | DirectEncryptedBallotEvaluatorReplayResult
         | readonly DirectEncryptedBallotEvaluatorReplayResult[];
 };
@@ -140,17 +110,14 @@ export const createDirectBallotSetupPackage = (
             {
                 trusteeIdentity: 'trustee-1',
                 rosterPosition: 0,
-                boardPosition: 0,
             },
             {
                 trusteeIdentity: 'trustee-2',
                 rosterPosition: 1,
-                boardPosition: 1,
             },
             {
                 trusteeIdentity: 'trustee-3',
                 rosterPosition: 2,
-                boardPosition: 2,
             },
         ],
         setupSeed: directBallotSetupSeed,
@@ -281,10 +248,7 @@ export const runInternalKernelCommand = async <Result>(
     const exports = instantiatedSource.instance
         .exports as TranscriptCoreKernelExports;
     const memory = resolveMemory(exports);
-    const allocate = resolveNumberExport(
-        exports,
-        'sealed_lattice_allocate',
-    ) as (length: number) => number;
+    const allocate = resolveNumberExport(exports, 'sealed_lattice_allocate');
     const deallocate = resolveNumberExport(
         exports,
         'sealed_lattice_deallocate',
@@ -292,11 +256,7 @@ export const runInternalKernelCommand = async <Result>(
     const commandWithLength = resolveNumberExport(
         exports,
         'sealed_lattice_transcript_core_command_with_length',
-    ) as (
-        pointer: number,
-        length: number,
-        outputLengthPointer: number,
-    ) => number;
+    );
 
     return runKernelCommand<Result>(
         memory,

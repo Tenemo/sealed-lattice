@@ -29,16 +29,6 @@ const verifyConsistencyProofs = (
         const proofHeadHashes = new Set(
             proof.signedBoardHeads.map((head) => head.headHash),
         );
-        if (proof.proofType !== 'SignedHeadChain') {
-            refusedObjects.push(
-                createRefusal(
-                    'BoardConsistencyFailure',
-                    'Consistency proof must use the signed-head chain proof model.',
-                    proof.toBoardHeadHash,
-                    'BoardHead',
-                ),
-            );
-        }
         if (!proofHeadHashes.has(proof.toBoardHeadHash)) {
             refusedObjects.push(
                 createRefusal(

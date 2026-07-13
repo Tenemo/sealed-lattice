@@ -49,6 +49,10 @@ import {
     openFoundationBoardSession as openFoundationBoardSessionInternal,
     stageBgvTargetDecryptionAggregateOpeningMaterials,
     type BgvTargetDecryptionResultReleaseCompletion,
+    type FoundationBoardCandidate,
+    type FoundationBoardSession,
+    type FoundationBoardSessionInput,
+    type FoundationBoardSessionState,
 } from '@sealed-lattice/wasm/published-sdk';
 
 import {
@@ -114,8 +118,6 @@ export type {
     InclusionProof,
     ManifestOpaqueBindings,
     ManifestPolicyHashes,
-    MlDsaSignatureMode,
-    MlDsaSignatureProfile,
     PollSpec,
     PollSpecInput,
     PollSpecValidation,
@@ -137,7 +139,6 @@ export type {
     RosterExternalAcceptanceVerificationInput,
     RosterManifestTranscriptInput,
     RosterManifestTranscriptVerification,
-    ScoreDomain,
     SignedBoardHead,
     SignedObjectType,
     SignerRole,
@@ -153,94 +154,14 @@ export type {
 export type { TargetDecryptionAggregateOpeningMaterialSource } from '@sealed-lattice/protocol';
 
 export { ThresholdParameterDerivationError };
-
-declare const foundationBoardCandidateBrand: unique symbol;
-
-/** An opaque carrier candidate issued only after the kernel's fixed verifier route accepts it. */
-export type FoundationBoardCandidate = Readonly<{
-    readonly [foundationBoardCandidateBrand]: true;
-}>;
-
-export type FoundationBoardIngestionLimits = Readonly<{
-    maximumCarrierByteLength: number;
-    maximumCarrierCount: number;
-    maximumRetainedCarrierByteLength: number;
-    maximumUnresolvedDependencyCount: number;
-}>;
-
-export type FoundationBoardSessionInput = Readonly<{
-    actionContextHash: Uint8Array;
-    canonicalRosterBytes: Uint8Array;
-    ceremonyContextHash: Uint8Array;
-    limits: FoundationBoardIngestionLimits;
-    /** Externally trusted anchor; the board session does not establish its provenance. */
-    publicSetupSeedObjectHash?: Uint8Array;
-    /** Externally trusted anchor; the board session does not establish its provenance. */
-    setupSourceObjectHash?: Uint8Array;
-    suiteIdentifier: Uint8Array;
-}>;
-
-export type FoundationBoardSessionState = 'active' | 'cancelled';
-
-export type FoundationBoardSession = Readonly<{
-    cancel(): void;
-    ingest(
-        canonicalCarrierBytes: Uint8Array,
-    ): VerificationResult<FoundationBoardCandidate>;
-    requireCompleteCarrierGraph(): VerificationResult<undefined>;
-    state(): FoundationBoardSessionState;
-}>;
-
-type InternalFoundationBoardCandidate = Parameters<
-    typeof foundationBoardCandidateObjectHashInternal
->[0];
-type InternalFoundationBoardSession = Extract<
-    ReturnType<typeof openFoundationBoardSessionInternal>,
-    { readonly isValid: true }
->['value'];
-
-const internalCandidates = new WeakMap<
+export type {
     FoundationBoardCandidate,
-    InternalFoundationBoardCandidate
->();
-
-/** Returns a defensive copy of a genuine candidate's recomputed object hash. */
-export const foundationBoardCandidateObjectHash = (
-    candidate: FoundationBoardCandidate,
-): Uint8Array => {
-    const internalCandidate = internalCandidates.get(candidate);
-    if (internalCandidate === undefined) {
-        throw new TypeError(
-            'The foundation board candidate was not issued by this SDK instance.',
-        );
-    }
-    return foundationBoardCandidateObjectHashInternal(internalCandidate);
+    FoundationBoardSession,
+    FoundationBoardSessionInput,
+    FoundationBoardSessionState,
 };
 
-const wrapFoundationBoardSession = (
-    internalSession: InternalFoundationBoardSession,
-): FoundationBoardSession =>
-    Object.freeze({
-        cancel: (): void => {
-            internalSession.cancel();
-        },
-        ingest: (
-            canonicalCarrierBytes: Uint8Array,
-        ): VerificationResult<FoundationBoardCandidate> => {
-            const result = internalSession.ingest(canonicalCarrierBytes);
-            if (!result.isValid) {
-                return result;
-            }
-            const candidate = Object.freeze(
-                Object.create(null) as FoundationBoardCandidate,
-            );
-            internalCandidates.set(candidate, result.value);
-            return Object.freeze({ isValid: true, value: candidate });
-        },
-        requireCompleteCarrierGraph: (): VerificationResult<undefined> =>
-            internalSession.requireCompleteCarrierGraph(),
-        state: (): FoundationBoardSessionState => internalSession.state(),
-    });
+export { foundationBoardCandidateObjectHashInternal as foundationBoardCandidateObjectHash };
 
 /** Opens the sole bounded board-ingestion session in the packaged Rust/WASM kernel. */
 export const createFoundationBoardSession = async (
@@ -251,12 +172,7 @@ export const createFoundationBoardSession = async (
         configuration,
         kernel,
     });
-    return result.isValid
-        ? Object.freeze({
-              isValid: true,
-              value: wrapFoundationBoardSession(result.value),
-          })
-        : result;
+    return result;
 };
 
 export type CollectiveBgvSetupContext = Readonly<{

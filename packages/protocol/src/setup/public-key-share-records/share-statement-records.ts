@@ -1,7 +1,6 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import {
-    publicKeyShareProofFamily,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialSetInput,
     type PublicKeyShareProofRecord,
@@ -54,11 +53,6 @@ const validateShareContribution = (
                     'shareCoefficientVectorHash512ByLimb entries must follow Q_share order.',
                 );
             }
-            if (coefficientHash.component !== 'b_i') {
-                throw new Error(
-                    'shareCoefficientVectorHash512ByLimb component must be b_i.',
-                );
-            }
             assertProtocolHash(
                 coefficientHash.coefficientVectorHash512,
                 'shareCoefficientVectorHash512ByLimb.coefficientVectorHash512',
@@ -92,7 +86,6 @@ export const createPublicKeyShareSet = (
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 publicKeyCrpRoot: input.publicKeyCrpRoot,
                 publicAPolynomialRoot: input.publicAPolynomialRoot,
-                shareComponent: 'component-zero-b_i',
                 rnsLimbCount: input.qSharePrimes.length,
                 shareCoefficientVectorHash512ByLimb:
                     contribution.shareCoefficientVectorHash512ByLimb,
@@ -163,7 +156,6 @@ export const createPublicKeyShareProofSet = (
             }
             const proofRecordWithoutRoot = {
                 objectType: 'PublicKeyShareProof',
-                proofFamily: publicKeyShareProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
                 trusteeRosterPosition: shareRecord.trusteeRosterPosition,
@@ -187,7 +179,6 @@ export const createPublicKeyShareProofSet = (
     );
     const proofSetWithoutRoot = {
         objectType: 'PublicKeyShareProofSet',
-        proofFamily: publicKeyShareProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,

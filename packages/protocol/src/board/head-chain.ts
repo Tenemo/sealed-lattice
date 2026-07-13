@@ -234,7 +234,6 @@ export const verifySuppliedForkEvidence = (
             evidence.equivocatingWitnessIdentities ?? [],
         leftBoardHeadHash: evidence.leftBoardHeadHash,
         rightBoardHeadHash: evidence.rightBoardHeadHash,
-        targetFinalityScope: evidence.targetFinalityScope,
     });
 
     if (evidence.evidenceHash !== expectedHash) {

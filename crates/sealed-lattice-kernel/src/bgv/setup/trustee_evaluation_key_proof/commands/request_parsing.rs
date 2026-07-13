@@ -278,17 +278,9 @@ pub(super) fn vss_share_linkage_witness_from_request(
             request,
             "coefficientMessagesByShamirIndex",
         )?,
-        vss_public_coefficient_opening_randomness_by_shamir_index: read_i64_matrix(
-            request,
-            "coefficientOpeningRandomnessByShamirIndex",
-        )?,
         vss_public_recipient_share_messages_by_item: read_i64_matrix2(
             request,
             "recipientShareMessagesByItem",
-        )?,
-        vss_public_recipient_share_opening_randomness_by_item: read_i64_matrix(
-            request,
-            "recipientShareOpeningRandomnessByItem",
         )?,
         vss_public_carry_witnesses_by_item: read_i64_matrix2(request, "carryWitnessesByItem")?,
         target_decryption_message_vectors: Vec::new(),
@@ -358,9 +350,7 @@ pub(super) fn same_secret_bridge_witness_from_request(
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
         vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         vss_public_recipient_share_messages_by_item: Vec::new(),
-        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),

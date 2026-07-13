@@ -1,8 +1,3 @@
-// Shared vocabulary and types for the VSS coefficient-commitment record
-// builders: parameter and transport constants, the BDLOP commitment shape, the
-// per-source-trustee opening-state and commitment record families, the
-// transported material record shapes, and the bundle input/output contracts.
-// This is the leaf module the other parts build on.
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
@@ -13,12 +8,6 @@ const setupCommitmentModuleRank = 2;
 
 export const setupCommitmentRandomnessWidth = 2 * setupCommitmentModuleRank + 1;
 
-export const setupCommitmentRowCount = setupCommitmentModuleRank + 1;
-
-export const setupCommitmentModulusLimbIndices = [0, 1, 2] as const;
-
-export const acceptedBgvFullRingDegree = 32_768;
-
 export const acceptedBgvSetupQSharePrimes = [
     140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
     140_737_485_864_961, 140_737_484_685_313, 140_737_483_898_881,
@@ -27,14 +16,6 @@ export const acceptedBgvSetupQSharePrimes = [
     140_737_476_100_097, 140_737_472_299_009, 140_737_471_971_329,
     140_737_471_774_721, 140_737_471_578_113,
 ] as const;
-
-export const setupTransportSchemeId =
-    'sealed-lattice-setup-binary-chunked-transport';
-
-export const setupTransportChunkSizeBytes = 1_048_576;
-
-export const vssCoefficientCommitmentMaterialBinaryMagic =
-    new TextEncoder().encode('SLVSSMAT');
 
 export type SetupCommitmentLimbValue = {
     readonly commitmentModulusIndex: number;
@@ -162,14 +143,10 @@ export type VssCoefficientCommitmentMaterialSet = Readonly<
         readonly thresholdDegree: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;
-        readonly materialRecordCount: number;
         readonly coefficientCommitments: readonly VssCoefficientCommitmentMaterialRecord[];
         readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
     }
 >;
-
-export type SetupPackageVssCoefficientCommitmentMaterialSet =
-    VssCoefficientCommitmentMaterialSet;
 
 export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly sourceTrusteeIdentity: string;

@@ -28,25 +28,12 @@ const expectErrorCodes = (
 };
 
 describe('election foundation poll-spec validation', () => {
-    it('normalizes the supported score domain and policies', () => {
-        const validation = validatePollSpec(
-            createValidPollSpecInput({
-                scoreDomain: {
-                    min: 1,
-                    max: 10,
-                    skippedOptionScore: 1,
-                },
-            }),
-        );
+    it('normalizes roster bounds and policy', () => {
+        const validation = validatePollSpec(createValidPollSpecInput());
 
         expect(validation).toEqual({
             isValid: true,
             normalized: createValidPollSpecInput({
-                scoreDomain: {
-                    min: 1,
-                    max: 10,
-                    skippedOptionScore: 1,
-                },
                 maxRosterSize: 20,
                 minRosterSize: 10,
                 smallRosterPolicy: 'ForbidMicroRoster',
@@ -54,7 +41,7 @@ describe('election foundation poll-spec validation', () => {
         });
     });
 
-    it('applies default score and policy choices', () => {
+    it('applies default roster choices', () => {
         const validation = validatePollSpec(
             createValidPollSpecInput({
                 options: ['A', 'B', 'C'],
@@ -65,11 +52,6 @@ describe('election foundation poll-spec validation', () => {
         expect(validation).toMatchObject({
             isValid: true,
             normalized: {
-                scoreDomain: {
-                    min: 1,
-                    max: 10,
-                    skippedOptionScore: 1,
-                },
                 maxRosterSize: 20,
                 minRosterSize: 10,
                 smallRosterPolicy: 'ForbidMicroRoster',
@@ -82,7 +64,7 @@ describe('election foundation poll-spec validation', () => {
             createValidPollSpecInput({
                 maxRosterSize: 20,
                 minRosterSize: 11,
-                smallRosterPolicy: 'WarnMicroRoster',
+                smallRosterPolicy: 'AllowMicroRoster',
             }),
         );
 
@@ -91,30 +73,24 @@ describe('election foundation poll-spec validation', () => {
             normalized: {
                 maxRosterSize: 20,
                 minRosterSize: 11,
-                smallRosterPolicy: 'WarnMicroRoster',
+                smallRosterPolicy: 'AllowMicroRoster',
             },
         });
     });
 
-    it('rejects option count, question, topOptionCount, score, and policy errors', () => {
+    it('rejects option count, question, and topOptionCount errors', () => {
         expectErrorCodes(
             createValidPollSpecInput({
                 pollId: '',
                 question: '',
                 options: [],
                 topOptionCount: 0,
-                scoreDomain: {
-                    min: 1,
-                    max: 9,
-                    skippedOptionScore: 1,
-                } as unknown as PollSpecInput['scoreDomain'],
             }),
             [
                 'EmptyPollId',
                 'EmptyQuestion',
                 'InvalidOptionCount',
                 'InvalidTopOptionCount',
-                'UnsupportedScoreDomain',
             ],
         );
     });

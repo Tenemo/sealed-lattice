@@ -120,22 +120,6 @@ pub(super) fn validate_direct_ballot_preflight(
             "direct encrypted ballot reserved slots must be zero",
         ));
     }
-    let decrypted_slots = evaluator_key.decrypt_to_slots(&ballot.ciphertext)?;
-    if decrypted_slots[..OPTION_COUNT] != ballot.input.scores[..] {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "direct encrypted ballot does not decrypt to the submitted score slots",
-        ));
-    }
-    if decrypted_slots[OPTION_COUNT..]
-        .iter()
-        .any(|slot| *slot != 0)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "direct encrypted ballot decrypts to a non-zero reserved slot",
-        ));
-    }
     validate_encryption_witness_support(&ballot.encryption_witness)?;
     validate_all_limb_encryption_relation(evaluator_key, ballot)
 }

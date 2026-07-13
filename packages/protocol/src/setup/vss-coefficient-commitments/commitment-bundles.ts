@@ -1,9 +1,5 @@
-// VSS coefficient-commitment bundle assembly: common input validation, the
-// per-source-trustee contribution builder and its retained opening-material
-// source, and the embedded bundle constructor.
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
-import { computeSetupCommitmentWithKernel } from './commitment-values.js';
 import {
     type VssCoefficientCommitmentBundle,
     type VssCoefficientCommitmentBundleInput,
@@ -106,7 +102,7 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
                     'source trustee coefficientOpenings must cover every declared coordinate.',
                 );
             }
-            const commitmentComputation = computeSetupCommitmentWithKernel({
+            const commitmentComputation = options.setupCommitmentComputer({
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 sourceRnsLimbIndex: rnsLimbIndex,
                 sourceMessageModulus: rnsPrime,
@@ -114,7 +110,6 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
                 messageCoefficients: openingState.coefficientMessage,
                 randomnessByColumn: openingState.randomnessByColumn,
                 ringDegree: input.ringDegree,
-                setupCommitmentComputer: options.setupCommitmentComputer,
             });
             sourceTrusteePrivateOpenings.push({
                 ...openingState,
@@ -322,7 +317,6 @@ export const createVssCoefficientCommitmentBundle = (
         thresholdDegree: input.thresholdDegree,
         rnsLimbCount: input.qSharePrimes.length,
         ringDegree: input.ringDegree,
-        materialRecordCount: coefficientCommitmentMaterial.length,
         coefficientCommitments: coefficientCommitmentMaterial,
     } as const satisfies Omit<
         VssCoefficientCommitmentMaterialSet,

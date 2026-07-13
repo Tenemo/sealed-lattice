@@ -3,10 +3,8 @@ use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
-// These fixed JSON setup paths predate canonical suite selection and do not
-// yet receive a suite record. Keep their deterministic rejection work finite
-// with a transitional execution ceiling; this is not a security acceptance
-// claim.
+// These JSON setup paths do not receive suite-provided sampling limits, so a
+// fixed cap keeps deterministic rejection work finite.
 const MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
 
 fn candidate_draw_limit_exhausted_error() -> CanonicalError {

@@ -12,11 +12,9 @@ pub(super) use set_verification::{
 };
 
 #[derive(Debug, Clone)]
-pub(in crate::bgv::setup) struct PublicEvaluationKeyMaterialTransportHashes {
-    pub(in crate::bgv::setup) full_object_hash: String,
-    pub(in crate::bgv::setup) chunk_hashes: Vec<String>,
-    pub(in crate::bgv::setup) chunk_root: String,
-    pub(in crate::bgv::setup) total_byte_length: u64,
+struct PublicEvaluationKeyMaterialTransportHashes {
+    full_object_hash: String,
+    total_byte_length: u64,
 }
 
 pub(super) fn evaluation_key_material_refusal(

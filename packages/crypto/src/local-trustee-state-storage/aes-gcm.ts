@@ -3,7 +3,7 @@ import { sha384 } from '@noble/hashes/sha2.js';
 import { hexToBytes } from '@noble/hashes/utils.js';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { canonicalJson, hash512Hex } from '../canonical-json.js';
+import { canonicalJson } from '../canonical-json.js';
 
 import {
     aesGcmKeyByteLength,
@@ -43,51 +43,6 @@ export const arrayBufferFromBytes = (bytes: Uint8Array): ArrayBuffer => {
     return copy.buffer;
 };
 
-export const hashCanonicalValue = (
-    domain: string,
-    value: unknown,
-): ProtocolHash =>
-    hash512Hex(domain, [textEncoder.encode(canonicalJson(value))]);
-
-const hashBytes = (domain: string, bytes: Uint8Array): ProtocolHash =>
-    hash512Hex(domain, [bytes]);
-
-// Key commitment: AES-GCM is not key-committing, so a hash of the storage key is
-// bound into each sealed record to detect a wrong key and to defend against
-// partitioning-oracle attacks. This is a bare hash of the key, so it only hides
-// the key when the key is high-entropy. The caller must therefore supply
-// `storageKeyBytesHex` as uniformly-random 256-bit device key material (for
-// example from a platform keystore), never a password or other low-entropy
-// secret; otherwise the stored commitment becomes an offline brute-force oracle
-// for the storage key, and hence for the sealed threshold-share material. The
-// same requirement applies to `sealedMaterialStorageKeyCommitmentHash` below.
-// See SECURITY.md "Correct use".
-export const localStateStorageKeyCommitmentHash = (
-    storageKeyBytes: Uint8Array,
-): ProtocolHash =>
-    hashBytes(
-        'sealed-lattice-local-trustee-state/storage-key-commitment',
-        storageKeyBytes,
-    );
-
-export const sealedMaterialStorageKeyCommitmentHash = (
-    storageKeyBytes: Uint8Array,
-): ProtocolHash =>
-    hashBytes(
-        'sealed-lattice-local-trustee-state/sealed-material-storage-key-commitment',
-        storageKeyBytes,
-    );
-
-export const assertStorageKeyCommitment = (
-    actualCommitmentHash: string,
-    expectedCommitmentHash: ProtocolHash,
-    fieldName: string,
-): void => {
-    if (actualCommitmentHash !== expectedCommitmentHash) {
-        throw new Error(`${fieldName} does not match storageKeyBytesHex.`);
-    }
-};
-
 export const storageAad = (
     setupContext: unknown,
     localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
@@ -95,16 +50,10 @@ export const storageAad = (
     objectType: 'LocalTrusteeStateStorageAad',
     setupContext,
     localStateCommitment,
-    localStateRoot: localStateCommitment.localStateRoot,
-    localStateCommitmentHash: hashCanonicalValue(
-        'sealed-lattice-local-trustee-state/commitment-hash',
-        localStateCommitment,
-    ),
 });
 
 export const sealedMaterialAad = (
     setupContext: unknown,
-    materialClass: 'aggregate-threshold-share-sealed',
     materialRoot: ProtocolHash,
     localStateBinding: Readonly<{
         readonly trusteeIdentity: string;
@@ -113,7 +62,6 @@ export const sealedMaterialAad = (
     }>,
 ): Readonly<Record<string, unknown>> => ({
     objectType: 'LocalTrusteeSetupSealedMaterialAad',
-    materialClass,
     materialRoot,
     setupContext,
     trusteeIdentity: localStateBinding.trusteeIdentity,
@@ -122,7 +70,8 @@ export const sealedMaterialAad = (
         localStateBinding.thresholdShareCommitmentRecipientRoot,
 });
 
-// GCM safety comes from per-object key separation: the HKDF salt is the unique object root, so even a repeated random nonce never recurs under the same derived key.
+// The object root and AAD hash separate keys across distinct objects.
+// Re-encrypting the same object still requires a fresh random GCM nonce.
 export const deriveAesGcmKeyBytes = (
     storageKeyBytes: Uint8Array,
     localStateRoot: ProtocolHash,

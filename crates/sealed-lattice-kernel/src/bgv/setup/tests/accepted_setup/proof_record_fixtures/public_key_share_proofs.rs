@@ -53,8 +53,6 @@ pub(in super::super) fn collective_public_key_object(
             serde_json::json!({
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": DATA_PRIMES[rns_limb_index],
-                "component": "b",
-                "coefficientByteLength": ring_degree * 8,
                 "coefficientVectorHash512": public_key_share_coefficient_vector_hash(coefficients),
                 "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
             })
@@ -62,7 +60,6 @@ pub(in super::super) fn collective_public_key_object(
         .collect::<Vec<_>>();
     let mut collective_public_key = serde_json::json!({
         "objectType": "CollectivePublicKey",
-        "proofFamily": "public-key-share",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -110,7 +107,6 @@ pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
                 serde_json::json!({
                     "rnsLimbIndex": rns_limb_index,
                     "rnsPrime": DATA_PRIMES[rns_limb_index],
-                    "component": "b_i",
                     "coefficientVectorHash512": public_key_share_coefficient_vector_hash(coefficients),
                 })
             })
@@ -121,10 +117,9 @@ pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
     rebind_collective_public_key_share_roots(package);
     for trustee_roster_position in 0..participant_count as usize {
         package["publicKeyShareProofs"]["proofRecords"][trustee_roster_position]
-            ["publicKeyShareRoot"] =
-            package["publicKeyShares"]["shareRecords"][trustee_roster_position]
-                ["publicKeyShareRoot"]
-                .clone();
+            ["publicKeyShareRoot"] = package["publicKeyShares"]["shareRecords"]
+            [trustee_roster_position]["publicKeyShareRoot"]
+            .clone();
     }
     package["publicKeyShareProofs"]["publicKeyShareSetRoot"] =
         package["publicKeyShares"]["publicKeyShareSetRoot"].clone();
@@ -169,8 +164,6 @@ pub(in super::super) fn public_key_share_material_object(
                 serde_json::json!({
                     "rnsLimbIndex": rns_limb_index,
                     "rnsPrime": DATA_PRIMES[rns_limb_index],
-                    "component": "b_i",
-                    "coefficientByteLength": ring_degree * 8,
                     "coefficientVectorHash512": public_key_share_coefficient_vector_hash(coefficients),
                     "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
                 })
@@ -178,7 +171,6 @@ pub(in super::super) fn public_key_share_material_object(
             .collect::<Vec<_>>();
         let mut material_record = serde_json::json!({
             "objectType": "PublicKeyShareMaterial",
-            "proofFamily": "public-key-share",
             "materialEncoding": "embedded-full-public-key-share-coefficients",
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
@@ -207,7 +199,6 @@ pub(in super::super) fn public_key_share_material_object(
     }
     let mut material_set = serde_json::json!({
         "objectType": "PublicKeyShareMaterialSet",
-        "proofFamily": "public-key-share",
         "materialEncoding": "embedded-full-public-key-share-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -449,9 +440,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
             vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-            vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
             vss_public_recipient_share_messages_by_item: Vec::new(),
-            vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
             vss_public_carry_witnesses_by_item: Vec::new(),
             target_decryption_message_vectors: Vec::new(),
             target_decryption_opening_randomness_by_commitment: Vec::new(),
@@ -485,7 +474,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         let proof_bytes_hash = public_key_share_succinct_proof_bytes_hash(&proof_bytes);
         let mut proof_record = serde_json::json!({
             "objectType": "PublicKeyShareSuccinctProof",
-            "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -511,7 +499,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             derive_canonical_object_hash(&proof_record)
                 .expect("public-key share succinct proof root")
         );
-        let transport_hashes = authenticate_setup_proof_material_stream_for_test(
+        authenticate_setup_proof_material_stream_for_test(
             PUBLIC_KEY_SHARE_PROOF_FAMILY,
             &proof_material_root,
             &proof_bytes,
@@ -521,11 +509,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             "objectType": "SetupTransportedPublicKeyShareProofMaterial",
             "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
             "proofMaterialRoot": proof_material_root,
-            "chunkCount": transport_hashes.chunk_hashes.len(),
-            "totalByteLength": transport_hashes.total_byte_length,
-            "fullObjectHash": transport_hashes.full_object_hash,
-            "chunkRoot": transport_hashes.chunk_root,
-            "chunkHashes": transport_hashes.chunk_hashes,
         });
         final_package_phase(&format!(
             "generated public-key share succinct proof trustee {trustee_roster_position}"
@@ -571,7 +554,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
     }
     let mut proof_set = serde_json::json!({
         "objectType": "PublicKeyShareSuccinctProofSet",
-        "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],

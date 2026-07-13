@@ -1,5 +1,4 @@
 import type { ProtocolHash } from './protocol-hash.js';
-import type { DecodedSparseTopKSelection } from './target-result.js';
 
 /** Canonical object type covered by protocol hash and verification helpers. */
 export type ProtocolObjectType =
@@ -56,16 +55,6 @@ export type SignerRole =
     | 'Trustee'
     | 'Voter';
 
-/** ML-DSA signature mode recorded in signature profiles. */
-export type MlDsaSignatureMode = 'PureMLDSA' | 'HashMLDSA' | 'ExternalMuMLDSA';
-
-/** ML-DSA provider and context profile bound to protocol signatures. */
-export type MlDsaSignatureProfile = {
-    readonly algorithm: 'ML-DSA-65';
-    readonly mode: MlDsaSignatureMode;
-    readonly contextString: string;
-};
-
 /** Canonical root object covered by a protocol signature. */
 export type CanonicalSignedRootObject = {
     readonly objectType: SignedObjectType;
@@ -83,12 +72,10 @@ export type CanonicalSignedRootObject = {
 
 /** Signature envelope attached to signed protocol objects. */
 export type ProtocolSignatureEnvelope = {
-    readonly profile: MlDsaSignatureProfile;
     readonly publicKeyHash: ProtocolHash;
     readonly publicKeyBytesHex: string;
     readonly signedRoot: CanonicalSignedRootObject;
     readonly signatureBytesHex: string;
-    readonly signatureHash: ProtocolHash;
 };
 
 /** Stable refusal code emitted by protocol verification helpers. */
@@ -107,14 +94,12 @@ export type ProtocolRefusalCode =
     | 'ConflictingManifest'
     | 'DecryptionShareInvalid'
     | 'DuplicateEncryptedBallot'
-    | 'DuplicateFirstValidObject'
     | 'DuplicateRegistration'
     | 'DuplicateTrusteeSetupEntry'
     | 'EvaluatorReplayInvalid'
     | 'FirstValidContextMismatch'
     | 'FirstValidPolicyMismatch'
     | 'InclusionProofInvalid'
-    | 'InvalidMlDsaContext'
     | 'InvalidSignature'
     | 'InvalidSignedRoot'
     | 'LateRegistration'
@@ -150,7 +135,6 @@ export type ConflictingHeadEvidence = {
     readonly boardPolicyHash: ProtocolHash;
     readonly leftBoardHeadHash: ProtocolHash;
     readonly rightBoardHeadHash: ProtocolHash;
-    readonly targetFinalityScope?: string;
     readonly equivocatingWitnessIdentities?: readonly string[];
 };
 
@@ -163,10 +147,3 @@ export type StructuredProtocolVerificationResult = {
 
 /** Structured result shape returned by signature verification. */
 export type SignatureVerificationResult = StructuredProtocolVerificationResult;
-
-/** Sparse target decoder result with structured rejection reasons. */
-export type SparseTopKTargetDecoding = StructuredProtocolVerificationResult & {
-    readonly decodedSelections: readonly DecodedSparseTopKSelection[];
-    readonly selectedOptionOrdinals: readonly number[];
-    readonly targetHash?: ProtocolHash;
-};

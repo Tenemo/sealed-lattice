@@ -172,29 +172,29 @@ export const createCanonicalTestRosterBytes = (
     );
 };
 
-export type AuthenticatedSetupIntentTestVector = Readonly<{
+export type AuthenticatedComplaintTestVector = Readonly<{
     canonicalCarrierBytes: Uint8Array;
     canonicalRosterBytes: Uint8Array;
     objectHash: Uint8Array;
 }>;
 
-let cachedAuthenticatedSetupIntentTestVector:
-    | AuthenticatedSetupIntentTestVector
+let cachedAuthenticatedComplaintTestVector:
+    | AuthenticatedComplaintTestVector
     | undefined;
 
-const copyAuthenticatedSetupIntentTestVector = (
-    vector: AuthenticatedSetupIntentTestVector,
-): AuthenticatedSetupIntentTestVector => ({
+const copyAuthenticatedComplaintTestVector = (
+    vector: AuthenticatedComplaintTestVector,
+): AuthenticatedComplaintTestVector => ({
     canonicalCarrierBytes: Uint8Array.from(vector.canonicalCarrierBytes),
     canonicalRosterBytes: Uint8Array.from(vector.canonicalRosterBytes),
     objectHash: Uint8Array.from(vector.objectHash),
 });
 
-export const createAuthenticatedSetupIntentTestVector =
-    (): AuthenticatedSetupIntentTestVector => {
-        if (cachedAuthenticatedSetupIntentTestVector !== undefined) {
-            return copyAuthenticatedSetupIntentTestVector(
-                cachedAuthenticatedSetupIntentTestVector,
+export const createAuthenticatedComplaintTestVector =
+    (): AuthenticatedComplaintTestVector => {
+        if (cachedAuthenticatedComplaintTestVector !== undefined) {
+            return copyAuthenticatedComplaintTestVector(
+                cachedAuthenticatedComplaintTestVector,
             );
         }
 
@@ -213,14 +213,22 @@ export const createAuthenticatedSetupIntentTestVector =
                 'sealed-lattice/foundation/participant-id/v1',
                 rawBytesItem(signingKeyPairs[0].publicKey),
             );
-            const payloadBytes = canonicalTuple(0x1200);
+            const accusedParticipantIdentity = foundationHash512(
+                'sealed-lattice/foundation/participant-id/v1',
+                rawBytesItem(signingKeyPairs[1].publicKey),
+            );
+            const payloadBytes = canonicalTuple(
+                0x1204,
+                canonicalItem(0x07, accusedParticipantIdentity),
+                hashItem(new Uint8Array(64).fill(0x44)),
+                unsigned16Item(0x0007),
+            );
             const canonicalEnvelopeBytes = canonicalTuple(
                 0x0100,
                 asciiItem('sealed-lattice'),
                 unsigned16Item(1),
                 hashItem(new Uint8Array(64).fill(0x11)),
-                unsigned16Item(0x0010),
-                unsigned16Item(1),
+                unsigned16Item(0x0012),
                 hashItem(new Uint8Array(64).fill(0x22)),
                 hashItem(new Uint8Array(64).fill(0x33)),
                 unsigned64Item(0n),
@@ -238,7 +246,7 @@ export const createAuthenticatedSetupIntentTestVector =
                 'sealed-lattice/foundation/signature-message/v1',
                 hashItem(objectHash),
                 hashItem(rosterHash),
-                asciiItem('setup-intent'),
+                asciiItem('setup-complaint'),
             );
             const signature = signFoundationBoardFixtureMessage(
                 signatureMessage,
@@ -249,13 +257,13 @@ export const createAuthenticatedSetupIntentTestVector =
                 variableBytesItem(canonicalEnvelopeBytes),
                 rawBytesItem(signature),
             );
-            cachedAuthenticatedSetupIntentTestVector = {
+            cachedAuthenticatedComplaintTestVector = {
                 canonicalCarrierBytes,
                 canonicalRosterBytes,
                 objectHash,
             };
-            return copyAuthenticatedSetupIntentTestVector(
-                cachedAuthenticatedSetupIntentTestVector,
+            return copyAuthenticatedComplaintTestVector(
+                cachedAuthenticatedComplaintTestVector,
             );
         } finally {
             for (const { secretKey } of signingKeyPairs) {

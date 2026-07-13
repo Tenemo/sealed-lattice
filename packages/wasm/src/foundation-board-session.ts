@@ -12,6 +12,10 @@ const fixedConfigurationByteLength =
     2 + 3 * foundationBoardCandidateHashByteLength + 4 * 4 + 2 + 4;
 const wasm32WordByteLength = 4;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
+const maximumCarrierByteLength = 131_072;
+const maximumCarrierCount = 32;
+const maximumRetainedCarrierByteLength = 1_048_576;
+const maximumUnresolvedDependencyCount = 128;
 
 declare const foundationBoardCandidateBrand: unique symbol;
 
@@ -20,18 +24,10 @@ export type FoundationBoardCandidate = Readonly<{
     readonly [foundationBoardCandidateBrand]: true;
 }>;
 
-export type FoundationBoardIngestionLimits = Readonly<{
-    maximumCarrierByteLength: number;
-    maximumCarrierCount: number;
-    maximumRetainedCarrierByteLength: number;
-    maximumUnresolvedDependencyCount: number;
-}>;
-
 export type FoundationBoardSessionInput = Readonly<{
     actionContextHash: Uint8Array;
     canonicalRosterBytes: Uint8Array;
     ceremonyContextHash: Uint8Array;
-    limits: FoundationBoardIngestionLimits;
     publicSetupSeedObjectHash?: Uint8Array;
     setupSourceObjectHash?: Uint8Array;
     suiteIdentifier: Uint8Array;
@@ -177,17 +173,6 @@ const requireHash = (value: Uint8Array, label: string): Uint8Array => {
     return value;
 };
 
-const requireUnsigned32 = (value: number): number => {
-    if (
-        !Number.isSafeInteger(value) ||
-        value <= 0 ||
-        value > maximumWasm32UnsignedInteger
-    ) {
-        throw new FoundationBoardRefusalError('outsideSupportedProfile');
-    }
-    return value;
-};
-
 const encodeConfiguration = (
     input: FoundationBoardSessionInput,
 ): Uint8Array => {
@@ -226,25 +211,6 @@ const encodeConfiguration = (
     ) {
         throw new FoundationBoardRefusalError('wrongTypeOrLength');
     }
-    if (
-        typeof input.limits !== 'object' ||
-        input.limits === null ||
-        Array.isArray(input.limits)
-    ) {
-        throw new FoundationBoardRefusalError('wrongTypeOrLength');
-    }
-    const maximumCarrierCount = requireUnsigned32(
-        input.limits.maximumCarrierCount,
-    );
-    const maximumCarrierByteLength = requireUnsigned32(
-        input.limits.maximumCarrierByteLength,
-    );
-    const maximumRetainedCarrierByteLength = requireUnsigned32(
-        input.limits.maximumRetainedCarrierByteLength,
-    );
-    const maximumUnresolvedDependencyCount = requireUnsigned32(
-        input.limits.maximumUnresolvedDependencyCount,
-    );
     const anchorByteLength =
         (publicSetupSeedObjectHash === undefined ? 0 : 64) +
         (setupSourceObjectHash === undefined ? 0 : 64);

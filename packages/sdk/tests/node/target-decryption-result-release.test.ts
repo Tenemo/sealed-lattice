@@ -95,7 +95,6 @@ const shareProof = (
         proofMaterialTransport: {
             objectType:
                 'BgvTargetDecryptionShareCanonicalProofMaterialTransport',
-            proofFamily: 'target-decryption-share',
             proofMaterialRoot: proofMaterial.proofMaterialRoot,
             descriptorBytes: canonicalStreamDescriptorFixture(
                 1,
@@ -399,7 +398,6 @@ describe('target-decryption result release session cleanup', () => {
             callerProofMaterial.proofMaterialRoot = protocolHash('8');
             callerProofRecord.proofBytesHash = protocolHash('9');
             callerTransport.objectType = 'MutatedTargetProofTransport';
-            callerTransport.proofFamily = 'mutated-target-proof-family';
             callerTransport.proofMaterialRoot = protocolHash('8');
             callerDescriptor.fill(0xff);
 

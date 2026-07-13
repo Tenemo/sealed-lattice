@@ -8,7 +8,6 @@ const SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD: &str = "sameSecretBridgeStatementS
 const SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD: &str = "sameSecretBridgeProofMaterialSet";
 
 pub(super) enum SameSecretBridgeVerification {
-    Absent,
     Verified(VerifiedSameSecretBridgeMaterial),
     Refused(Value),
 }
@@ -43,7 +42,7 @@ pub(in crate::bgv::setup) struct SameSecretBridgeStatementBinding {
     pub(in crate::bgv::setup) statement: SameSecretBridgeStatement,
 }
 
-pub(super) fn verify_optional_same_secret_bridge_statement_set(
+pub(super) fn verify_same_secret_bridge_statement_set(
     setup_package: &Value,
     request: &Value,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
@@ -57,7 +56,17 @@ pub(super) fn verify_optional_same_secret_bridge_statement_set(
         .filter(|field_name| setup_package.get(**field_name).is_some())
         .count();
     if present_bridge_field_count == 0 {
-        return Ok(SameSecretBridgeVerification::Absent);
+        return Ok(SameSecretBridgeVerification::Refused(
+            verification_response(
+                Some("publicKeyShareProofs"),
+                bridge_material_fields
+                    .iter()
+                    .map(|field_name| (*field_name).to_string())
+                    .collect(),
+                Vec::new(),
+                Vec::new(),
+            )?,
+        ));
     }
 
     let required_bridge_material_fields = [
@@ -441,7 +450,7 @@ mod tests {
     #[test]
     fn optional_same_secret_bridge_refuses_proof_material_without_statement_set()
     -> CanonicalResult<()> {
-        let response = verify_optional_same_secret_bridge_statement_set(
+        let response = verify_same_secret_bridge_statement_set(
             &json!({
                 "sameSecretBridgeProofMaterialSet": {},
             }),
@@ -466,7 +475,7 @@ mod tests {
     #[test]
     fn optional_same_secret_bridge_refuses_statement_set_without_proof_material()
     -> CanonicalResult<()> {
-        let response = verify_optional_same_secret_bridge_statement_set(
+        let response = verify_same_secret_bridge_statement_set(
             &json!({
                 "sameSecretBridgeStatementSet": {},
             }),
@@ -485,7 +494,7 @@ mod tests {
 
     #[test]
     fn optional_same_secret_bridge_rejects_malformed_complete_field_group() -> CanonicalResult<()> {
-        let response = verify_optional_same_secret_bridge_statement_set(
+        let response = verify_same_secret_bridge_statement_set(
             &json!({
                 "sameSecretBridgeStatementSet": {},
                 "sameSecretBridgeProofMaterialSet": {},
@@ -514,9 +523,6 @@ mod tests {
         fn refusal_for_test(self, message: &str) -> Value {
             match self {
                 SameSecretBridgeVerification::Refused(response) => response,
-                SameSecretBridgeVerification::Absent => {
-                    panic!("{message}: bridge evidence was absent")
-                }
                 SameSecretBridgeVerification::Verified(_) => {
                     panic!("{message}: bridge evidence verified")
                 }

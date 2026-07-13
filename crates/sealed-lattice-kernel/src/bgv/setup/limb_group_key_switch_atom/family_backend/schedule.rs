@@ -36,8 +36,6 @@ use crate::hashing::hash512;
 
 const SCHEDULE_MAGIC: &[u8; 8] = b"SLKSATS2";
 const SCHEDULE_SALT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/schedule-salt";
-// 80 queries at rate 1/4 give about 136 conditional classical bits under the
-// CS25 accounting the setup families use; the count is soundness-set.
 pub(crate) const SCHEDULE_QUERY_COUNT: usize = 80;
 // Keys prove independently; bounding the concurrent set keeps the peak
 // working set at a few streamed provers rather than the whole schedule.
@@ -50,8 +48,8 @@ const LIMB_GROUP_CAPACITY: usize = 16;
 fn invalid_schedule(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
-// The mask degree covering the opened evaluations at the schedule query count,
-// mirroring the family benchmark's N/4 budget.
+// Per-column mask degree for scheduled proofs; N/4 stays inside the quotient
+// degree budget.
 fn schedule_mask_degree(ring_degree: usize) -> usize {
     ring_degree / 4
 }

@@ -48,12 +48,6 @@ pub(super) fn expected_relinearization_key_roots_for_evaluation_keys(
                             "relinearization round-two aggregate root was required before evaluation-key assembly",
                         )
                     })?;
-            let decomposition_digit_count = level.checked_add(1).ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "relinearization level overflowed while deriving evaluation-key assembly",
-                )
-            })?;
             let key_root = derive_canonical_object_hash(
                 &json!({
                     "objectType": "RelinearizationKeyAggregate",
@@ -63,8 +57,6 @@ pub(super) fn expected_relinearization_key_roots_for_evaluation_keys(
                         .as_str(),
                     "relinearizationKeyShareRoundsRoot": relinearization_key_share_rounds_root,
                     "level": level,
-                    "decompositionDigitCount": decomposition_digit_count,
-                    "rnsLimbCount": decomposition_digit_count,
                     "roundOneAggregateRoot": round_one_aggregate_root,
                     "roundTwoAggregateRoot": round_two_aggregate_root,
                 }),
@@ -72,8 +64,6 @@ pub(super) fn expected_relinearization_key_roots_for_evaluation_keys(
 
             Ok(json!({
                 "level": level,
-                "decompositionDigitCount": decomposition_digit_count,
-                "rnsLimbCount": decomposition_digit_count,
                 "roundOneAggregateRoot": round_one_aggregate_root,
                 "roundTwoAggregateRoot": round_two_aggregate_root,
                 "relinearizationKeyRoot": key_root,
@@ -151,12 +141,6 @@ pub(super) fn expected_galois_key_roots_for_evaluation_keys(
         .map(|schedule_entry| {
             let rotation = value_u64(schedule_entry, "rotation")?;
             let level = value_u64(schedule_entry, "level")?;
-            let decomposition_digit_count = level.checked_add(1).ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "Galois key level overflowed while deriving evaluation-key assembly",
-                )
-            })?;
             let mut contributing_share_roots = Vec::new();
             for (_, batch) in &ordered_batches {
                 let trustee_identity = value_string(batch, "trusteeIdentity")?;
@@ -179,16 +163,12 @@ pub(super) fn expected_galois_key_roots_for_evaluation_keys(
                 "requiredGaloisSetHash": binding.required_galois_set_hash.as_str(),
                 "rotation": rotation,
                 "level": level,
-                "decompositionDigitCount": decomposition_digit_count,
-                "rnsLimbCount": decomposition_digit_count,
                 "contributingShareRoots": contributing_share_roots,
             }))?;
 
             Ok(json!({
                 "rotation": rotation,
                 "level": level,
-                "decompositionDigitCount": decomposition_digit_count,
-                "rnsLimbCount": decomposition_digit_count,
                 "galoisKeyRoot": galois_key_root,
                 "contributingShareRoots": contributing_share_roots,
             }))

@@ -130,10 +130,10 @@ fn generated_profile_artifact_matches_the_independent_typescript_vector_identity
         ArtifactReference::from_artifact_bytes(ArtifactKind::ProofProfileSet, &canonical_bytes)
             .expect("proof profile artifact reference");
 
-    assert_eq!(canonical_bytes.len(), 26_727);
+    assert_eq!(canonical_bytes.len(), 26_715);
     assert_eq!(
         artifact_reference.artifact_hash.to_lowercase_hex(),
-        "d7239cb60fa46e4d0a994f827e70c154dd139154f0318769b30a5524efabef699fca3bc15ac94f1a2a8a8aff37125fa55e6c7e85ccf1e93ca50f47837b376fe7"
+        "cb56f2d9831d0cd5586cf97665b72a7b3143f07988b51ddc90a6fd82f32b0a6733c7f52454c2566a31da7839e9c9241756c13c514eea8c4b9a8431634c859b76"
     );
 }
 

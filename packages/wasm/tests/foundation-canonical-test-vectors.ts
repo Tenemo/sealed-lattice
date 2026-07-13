@@ -240,13 +240,34 @@ const streamDescriptor = canonicalTuple(
     hashList([0x41]),
     hash(0x42),
 );
+const resetSafeProofApplicationSlot = canonicalTuple(
+    0x0109,
+    unsigned16(1),
+    hash(0x14),
+    hash(0x15),
+    hash(0x16),
+    unsigned16(0x1211),
+    optional(0x03, unsigned16LittleEndian(2)),
+    optional(0x04),
+    optional(0x05),
+);
+const ballotProofApplicationSlot = canonicalTuple(
+    0x0109,
+    unsigned16(1),
+    hash(0x14),
+    hash(0x15),
+    hash(0x16),
+    unsigned16(0x1302),
+    optional(0x03, unsigned16LittleEndian(3)),
+    optional(0x04),
+    optional(0x05, unsigned64LittleEndian(4n)),
+);
 const objectEnvelope = canonicalTuple(
     0x0100,
     ascii('sealed-lattice'),
     unsigned16(1),
     hash(0x11),
     unsigned16(0x0010),
-    unsigned16(1),
     hash(0x12),
     hash(0x13),
     unsigned64(0n),
@@ -274,15 +295,29 @@ const proofFieldSchedule = canonicalTuple(
     unsigned16(3),
     unsigned32(6),
 );
+const proofProfileSetFieldSchedule = canonicalTuple(
+    0x2203,
+    unsigned16(0),
+    unsigned32(4),
+    unsigned64(3n),
+    unsigned16(2),
+    unsigned32(1),
+    unsigned32(4),
+    unsigned16(3),
+    unsigned32(6),
+);
 const proofFamilyStatementIdentifiers = [
     0x1211, 0x1212, 0x1213, 0x1214, 0x1215, 0x1216, 0x1217, 0x1218, 0x1302,
     0x1621, 0x2110, 0x2111,
 ] as const;
-const proofFamilyProfile = (statementSchemaIdentifier: number): Uint8Array =>
+const proofFamilyProfile = (
+    statementSchemaIdentifier: number,
+    fieldSchedule = proofFieldSchedule,
+): Uint8Array =>
     canonicalTuple(
         0x2202,
         unsigned16(statementSchemaIdentifier),
-        nestedTuple(proofFieldSchedule),
+        nestedTuple(fieldSchedule),
     );
 const proofFieldProfile = canonicalTuple(
     0x2201,
@@ -500,9 +535,15 @@ const collectivePublicKeyAggregationRelationPlan = canonicalTuple(
 const proofProfileSet = canonicalTuple(
     0x2200,
     nestedTupleList([proofFieldProfile]),
-    nestedTupleList(proofFamilyStatementIdentifiers.map(proofFamilyProfile)),
+    nestedTupleList(
+        proofFamilyStatementIdentifiers.map((statementSchemaIdentifier) =>
+            proofFamilyProfile(
+                statementSchemaIdentifier,
+                proofProfileSetFieldSchedule,
+            ),
+        ),
+    ),
     nestedTupleList([collectivePublicKeyAggregationRelationPlan]),
-    nestedTupleList([]),
 );
 
 const mailboxKemCiphertext = new Uint8Array(1_088);
@@ -625,7 +666,9 @@ const randomCursor = canonicalTuple(
     unsigned16(0x0116),
     unsigned16(1),
     hash(0x71),
+    rawBytes(repeatedBytes(32, 0x70)),
     unsigned64(2n),
+    optional(0x03, unsigned16LittleEndian(24)),
 );
 
 export type FoundationSchemaObjectVector = Readonly<{
@@ -735,6 +778,21 @@ export const validFoundationSchemaObjectVectors = [
             nestedTupleList([proofAuthenticationNode]),
         ),
     ),
+    schemaObject(
+        'proof application slot',
+        0x0109,
+        resetSafeProofApplicationSlot,
+    ),
+    schemaObject(
+        'proof application binding',
+        0x010a,
+        canonicalTuple(
+            0x010a,
+            nestedTuple(resetSafeProofApplicationSlot),
+            hash(0x28),
+            nestedTuple(streamDescriptor),
+        ),
+    ),
     schemaObject('manifest', 0x0110, manifest),
     schemaObject('option definition', 0x0111, manifestOptions[0]),
     schemaObject(
@@ -835,6 +893,15 @@ export const validFoundationSchemaObjectVectors = [
         ),
     ),
     schemaObject(
+        'persistent proof coin input',
+        0x0401,
+        canonicalTuple(
+            0x0401,
+            nestedTuple(resetSafeProofApplicationSlot),
+            hash(0x45),
+        ),
+    ),
+    schemaObject(
         'action-randomness derivation input',
         0x0402,
         canonicalTuple(
@@ -844,6 +911,16 @@ export const validFoundationSchemaObjectVectors = [
             hash(0x42),
             hash(0x43),
             participantIdentity(0x44),
+        ),
+    ),
+    schemaObject(
+        'ordinary proof coin input',
+        0x0403,
+        canonicalTuple(
+            0x0403,
+            nestedTuple(ballotProofApplicationSlot),
+            hash(0x46),
+            rawBytes(repeatedBytes(32, 0x47)),
         ),
     ),
     schemaObject(

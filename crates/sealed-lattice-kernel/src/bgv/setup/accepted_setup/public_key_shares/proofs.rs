@@ -55,15 +55,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
             "setupPackage.publicKeyShareProofs",
         )?));
     }
-    for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
-        if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_refusal(
-                "publicKeyShareProofSetParametersMismatch",
-                format!("publicKeyShareProofs.{field_name} must be {expected_value}"),
-                format!("setupPackage.publicKeyShareProofs.{field_name}"),
-            )?));
-        }
-    }
     let roster = super::accepted_roster_from_package(setup_package);
     for (field_name, expected_value) in [
         ("participantCount", roster.participant_count),
@@ -199,15 +190,6 @@ fn verify_public_key_share_proof_record(
             "setupPackage.publicKeyShareProofs.proofRecords",
         )?));
     }
-    for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
-        if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_refusal(
-                "publicKeyShareProofParametersMismatch",
-                format!("public-key share proof {field_name} must be {expected_value}"),
-                format!("setupPackage.publicKeyShareProofs.proofRecords.{field_name}"),
-            )?));
-        }
-    }
     if proof_record.get("rnsLimbCount").and_then(Value::as_u64) != Some(DATA_PRIMES.len() as u64) {
         return Ok(Some(public_key_refusal(
             "publicKeyShareProofRnsLimbCountMismatch",
@@ -314,7 +296,6 @@ pub(super) fn verify_public_key_share_limb_hashes(
         let limb_value = &limb_values[rns_limb_index];
         if limb_value.get("rnsLimbIndex").and_then(Value::as_u64) != Some(rns_limb_index as u64)
             || limb_value.get("rnsPrime").and_then(Value::as_u64) != Some(rns_prime)
-            || limb_value.get("component").and_then(Value::as_str) != Some("b_i")
         {
             return Ok(Some(public_key_refusal(
                 "publicKeyShareCoefficientLimbMismatch",

@@ -1,20 +1,16 @@
 //! logUp range lookup proving every digit carry lies in `|c| <= N + 1`.
 //!
-//! The shifted carry `c + (N + 1)` lands in `[0, 2N + 2]`. Instead of the
-//! per-bit decomposition (17 columns per carry, ~272 columns per key), a
-//! log-derivative lookup proves the whole set of carries is contained in the
-//! range table with just one fraction column per digit plus a few table
-//! columns. The identity (Habok, eprint 2022/1530) is
+//! The shifted carry `c + (N + 1)` lands in `[0, 2N + 2]`. One fraction column
+//! per digit plus public table columns enforce the log-derivative identity
+//! (Haboeck, eprint 2022/1530):
 //!
 //! ```text
 //!   sum_lookups 1/(mu - v)  =  sum_table m_v/(mu - v),
 //! ```
 //!
-//! which holds at a random challenge `mu` iff the multiset of looked-up values
-//! equals the table values with the committed multiplicities. Any carry outside
-//! the table contributes a pole `1/(mu - v)` on the left that no table
-//! multiplicity can match, so the identity fails at random `mu` with probability
-//! `1 - (terms)/|F_p|` (`terms ~ 2^19`, negligible against `|F_p| ~ 2^770`).
+//! For matching multisets the identity holds. A carry outside the table adds a
+//! left-side term with no matching public table value; the verifier checks the
+//! resulting balance at the transcript-derived challenge `mu`.
 //!
 //! ## Table split (keeps every column in the single trace domain)
 //!
@@ -27,18 +23,16 @@
 //! - table 2 holds `[2N, 2N + 2]` (three real values) with the remaining rows
 //!   repeating the in-range padding value `2N`.
 //!
-//! Every table column is over the SAME domain `H_N` as the witness columns, so
-//! the whole argument stays within the existing `8N` coset (degree bound `2N`,
-//! FRI rate 1/4 unchanged) and every column is masked uniformly.
+//! Every table column uses the same domain `H_N` as the witness columns, so the
+//! argument stays within the `8N` coset and every column is masked uniformly.
 //!
-//! The table value columns are PUBLIC: both prover and verifier interpolate
+//! The table value columns are public: both prover and verifier interpolate
 //! them and evaluate at query points, exactly like the sumcheck linear forms.
 //! Because they are public and only ever hold values in `[0, 2N + 2]`, a
 //! malicious prover cannot smuggle an out-of-range value into the table (a
 //! padding row's value is in range, so a nonzero padding multiplicity only
 //! inflates that in-range value's count, which then fails the multiset balance
-//! unless it matches real carries). This is the property the reverted base-4
-//! attempt lacked.
+//! unless it matches real carries).
 //!
 //! ## Sums, not accumulators
 //!
@@ -54,17 +48,14 @@
 
 use super::super::proof_field::ProofFieldParameters;
 
-// The shift mapping a signed carry `c` with `|c| <= N + 1` into `[0, 2N + 2]`.
 pub(super) fn carry_shift(ring_degree: usize) -> i64 {
     (ring_degree + 1) as i64
 }
 
-// The largest shifted-carry value, `2N + 2`.
 pub(super) fn max_shifted_value(ring_degree: usize) -> usize {
     2 * ring_degree + 2
 }
 
-// How many size-`N` table chunks cover `[0, 2N + 2]`.
 pub(super) fn table_count(ring_degree: usize) -> usize {
     (max_shifted_value(ring_degree) + 1).div_ceil(ring_degree)
 }
@@ -95,9 +86,8 @@ pub(super) fn table_values<const LIMB_COUNT: usize>(
 
 // Count, for every table value, how many shifted carries equal it, returning one
 // multiplicity column per table chunk (each length `N`, aligned to
-// `table_values`). Every shifted carry MUST be in `[0, 2N + 2]`; a value outside
-// the range is left uncounted, which makes the multiset balance fail - the sound
-// outcome, and the range is exactly what the proof certifies.
+// `table_values`). A shifted carry outside `[0, 2N + 2]` remains uncounted, so
+// the multiset balance fails.
 pub(super) fn multiplicities<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     shifted_carries: &[usize],
@@ -123,9 +113,8 @@ pub(super) fn multiplicities<const LIMB_COUNT: usize>(
 }
 
 // The reciprocal `1/(mu - value)` for one field value. `mu` is drawn from the
-// transcript after the witness and table multiplicities are committed, so
-// `mu - value` is nonzero with overwhelming probability; a zero is a genuine
-// (negligible-probability) prover failure, surfaced as `None`.
+// transcript after the witness and table multiplicities are committed. A zero
+// denominator is surfaced as `None`.
 #[cfg(test)]
 pub(super) fn reciprocal<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
@@ -141,9 +130,8 @@ pub(super) fn reciprocal<const LIMB_COUNT: usize>(
 
 // All reciprocals `1/(mu - v_i)` for one column via Montgomery's batch-inversion
 // trick: one field inversion plus three multiplications per element, instead of
-// one (exponentiation-cost) inversion per element. `None` if any denominator is
-// zero (negligible-probability challenge collision; the prover surfaces it as
-// an error). Tested equal to the per-element `reciprocal`.
+// one exponentiation-cost inversion per element. Returns `None` if any
+// denominator is zero.
 pub(super) fn batch_reciprocals<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     challenge: &[u64; LIMB_COUNT],
@@ -300,9 +288,8 @@ mod tests {
     #[test]
     fn out_of_range_carry_breaks_the_balance() {
         // A shifted value of 2N+3 is one past the table's largest entry. Its
-        // pole 1/(mu - (2N+3)) has no matching table term, so the balance must
-        // fail at a random challenge - the exact soundness the reverted base-4
-        // decomposition lacked.
+        // pole 1/(mu - (2N+3)) has no matching table term, so the balance fails
+        // at the sampled challenges.
         let parameters = sixteen_limb_group_field_parameters();
         let ring_degree = 64;
         let out_of_range = max_shifted_value(ring_degree) + 1;

@@ -5,9 +5,8 @@
 //! little-endian `u64` limbs; digests and salts are byte runs). Decoding is
 //! strict: it bounds-checks every read, rejects a truncated or trailing-byte
 //! stream, rejects field limbs that are not a reduced residue below the
-//! modulus, and rejects salts or digests of the wrong width. This is the byte
-//! form the trustee evaluation-key transport will carry once the backend is
-//! wired into the command path.
+//! modulus, and rejects salts or digests of the wrong width. Trustee
+//! evaluation-key transport carries this byte form.
 
 use super::super::proof_field::ProofFieldParameters;
 use super::super::wide_unsigned::is_less_than;
@@ -117,7 +116,7 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
 
     // Upper bound on how many more elements can possibly remain: every element
     // consumes at least one byte, so a count-prefix larger than this is a
-    // malformed stream. Used to cap `Vec::with_capacity` against the byte budget
+    // malformed stream. This caps `Vec::with_capacity` against the byte budget
     // so an attacker-controlled length prefix cannot force a huge speculative
     // allocation before the elements themselves are read.
     fn remaining_element_bound(&self) -> usize {

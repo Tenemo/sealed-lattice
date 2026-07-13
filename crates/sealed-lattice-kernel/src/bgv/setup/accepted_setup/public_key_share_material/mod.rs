@@ -27,41 +27,16 @@ pub(super) struct PublicKeyShareMaterialBinding {
     pub(super) coefficients_by_limb: Vec<Vec<u64>>,
 }
 
-pub(super) fn verify_collective_public_key_pair_consistency(
-    setup_package: &Value,
-) -> CanonicalResult<Option<Value>> {
-    let has_collective_public_key = setup_package.get("collectivePublicKey").is_some();
-    let has_collective_public_key_root = setup_package.get("collectivePublicKeyRoot").is_some();
-    if has_collective_public_key != has_collective_public_key_root {
-        let object_path = if has_collective_public_key_root {
-            "setupPackage.collectivePublicKey"
-        } else {
-            "setupPackage.collectivePublicKeyRoot"
-        };
-        return Ok(Some(public_key_refusal(
-            "publicKeyMaterialBeforeProofVerification",
-            "collective public-key material is not accepted unless the aggregate object and package root are both present and root-bound",
-            object_path,
-        )?));
-    }
-
-    Ok(None)
-}
-
 pub(super) fn verify_collective_public_key_material(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<Option<Value>> {
-    let aggregate_object = setup_package.get("collectivePublicKey");
-    let aggregate_root = setup_package.get("collectivePublicKeyRoot");
-    if aggregate_object.is_none() && aggregate_root.is_none() {
-        return Ok(None);
-    }
-    let Some(aggregate_object) = aggregate_object else {
-        return Ok(Some(public_key_refusal(
-            "publicKeyMaterialBeforeProofVerification",
-            "collective public-key material is not accepted unless it is root-bound to verified public-key share material and succinct proof records",
-            "setupPackage.collectivePublicKeyRoot",
+    let Some(aggregate_object) = setup_package.get("collectivePublicKey") else {
+        return Ok(Some(verification_response(
+            Some("setupPackageAssembly"),
+            vec!["collectivePublicKey".to_string()],
+            Vec::new(),
+            Vec::new(),
         )?));
     };
     if !aggregate_object.is_object() {
@@ -93,13 +68,6 @@ pub(super) fn verify_collective_public_key_material(
             "collectivePublicKeyContextMismatch",
             error.message,
             "setupPackage.collectivePublicKey",
-        )?));
-    }
-    if aggregate_object.get("proofFamily").and_then(Value::as_str) != Some("public-key-share") {
-        return Ok(Some(public_key_refusal(
-            "collectivePublicKeyParametersMismatch",
-            "collectivePublicKey.proofFamily must be public-key-share",
-            "setupPackage.collectivePublicKey.proofFamily",
         )?));
     }
     let material_set = setup_package.get("publicKeyShareMaterial").ok_or_else(|| {
@@ -236,18 +204,21 @@ pub(super) fn verify_collective_public_key_material(
             "setupPackage.collectivePublicKey",
         )?));
     }
-    let collective_public_key_root = value_string(aggregate_object, "collectivePublicKeyRoot")?;
+    let Some(collective_public_key_root) = aggregate_object
+        .get("collectivePublicKeyRoot")
+        .and_then(Value::as_str)
+    else {
+        return Ok(Some(verification_response(
+            Some("setupPackageAssembly"),
+            vec!["collectivePublicKey.collectivePublicKeyRoot".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    };
     validate_hash_string(
         collective_public_key_root,
         "collectivePublicKey.collectivePublicKeyRoot",
     )?;
-    if aggregate_root.and_then(Value::as_str) != Some(collective_public_key_root) {
-        return Ok(Some(public_key_refusal(
-            "collectivePublicKeyPackageRootMismatch",
-            "setupPackage.collectivePublicKeyRoot must match collectivePublicKey.collectivePublicKeyRoot",
-            "setupPackage.collectivePublicKeyRoot",
-        )?));
-    }
     let mut root_input = aggregate_object.clone();
     root_input
         .as_object_mut()

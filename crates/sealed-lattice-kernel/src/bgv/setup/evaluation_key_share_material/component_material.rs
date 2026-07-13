@@ -35,11 +35,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
         "keySwitchSeedHex": key_switch_seed_hex,
         "level": level,
         "ringDegree": ring_degree,
-        // The gadget decomposition base is the RNS base itself: for a key at
-        // this level there is exactly one digit per active prime, so the
-        // component matrix is square with digitCount = rnsLimbCount = level + 1.
-        "digitCount": level + 1,
-        "rnsLimbCount": level + 1,
         "componentVectors": component_vector_entries,
     }))
 }
@@ -274,9 +269,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
     proof_record: &Value,
 ) -> CanonicalResult<String> {
     let level = value_u64(proof_record, "level")?;
-    let digit_count = level.checked_add(1).ok_or_else(|| {
-        invalid_evaluation_key_share_material("evaluation-key digit count overflowed")
-    })?;
     derive_canonical_object_hash(&json!({
         "objectType": "EvaluationKeyShareComponentMaterialReference",
         "proofFamily": proof_family.proof_family(),
@@ -287,8 +279,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
         "keySwitchSeedHex": string_field(proof_record, "keySwitchSeedHex")?,
         "level": level,
         "ringDegree": value_u64(proof_record, "ringDegree")?,
-        "digitCount": digit_count,
-        "rnsLimbCount": digit_count,
         "keySwitchComponentVectorRoot": string_field(
             proof_record,
             "keySwitchComponentVectorRoot",
@@ -401,21 +391,6 @@ fn verify_evaluation_key_share_component_material_header(
             )));
         }
     }
-    let level = value_u64(record, "level")?;
-    let digit_count = level.checked_add(1).ok_or_else(|| {
-        invalid_evaluation_key_share_material("evaluation-key digit count overflowed")
-    })?;
-    if component_material.get("digitCount").and_then(Value::as_u64) != Some(digit_count)
-        || component_material
-            .get("rnsLimbCount")
-            .and_then(Value::as_u64)
-            != Some(digit_count)
-    {
-        return Err(invalid_evaluation_key_share_material(
-            "transported evaluation-key component material digit and limb counts must match the proof level",
-        ));
-    }
-
     Ok(())
 }
 
@@ -521,25 +496,14 @@ fn decode_evaluation_key_share_component_vectors(
             "evaluation-key component material ringDegree does not fit usize",
         )
     })?;
-    let digit_count = usize::try_from(reader.read_u64()?).map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material digit count does not fit usize",
-        )
+    let digit_count = level.checked_add(1).ok_or_else(|| {
+        invalid_evaluation_key_share_material("evaluation-key digit count overflowed")
     })?;
-    let limb_count = usize::try_from(reader.read_u64()?).map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material limb count does not fit usize",
-        )
-    })?;
+    let limb_count = digit_count;
     if level != value_usize(record, "level")?
         || ring_degree != value_usize(record, "ringDegree")?
         || ring_degree == 0
         || ring_degree > POLYNOMIAL_DEGREE
-        || digit_count
-            != level.checked_add(1).ok_or_else(|| {
-                invalid_evaluation_key_share_material("evaluation-key digit count overflowed")
-            })?
-        || limb_count != digit_count
         || limb_count == 0
         || limb_count > DATA_PRIMES.len()
     {
@@ -552,34 +516,8 @@ fn decode_evaluation_key_share_component_vectors(
     validate_hex_string(key_switch_seed_hex, "keySwitchSeedHex")?;
     let mut component_b_by_digit = vec![vec![Vec::<u64>::new(); limb_count]; digit_count];
     let mut entries = Vec::with_capacity(digit_count * limb_count);
-    for expected_digit_index in 0..digit_count {
-        for expected_rns_limb_index in 0..limb_count {
-            let digit_index = usize::try_from(reader.read_u64()?).map_err(|_| {
-                invalid_evaluation_key_share_material(
-                    "evaluation-key component material digit index does not fit usize",
-                )
-            })?;
-            let rns_limb_index = usize::try_from(reader.read_u64()?).map_err(|_| {
-                invalid_evaluation_key_share_material(
-                    "evaluation-key component material RNS limb index does not fit usize",
-                )
-            })?;
-            let rns_prime = reader.read_u64()?;
-            let coefficient_count = usize::try_from(reader.read_u64()?).map_err(|_| {
-                invalid_evaluation_key_share_material(
-                    "evaluation-key component material coefficient count does not fit usize",
-                )
-            })?;
-            if digit_index != expected_digit_index
-                || rns_limb_index != expected_rns_limb_index
-                || rns_limb_index >= DATA_PRIMES.len()
-                || rns_prime != DATA_PRIMES[rns_limb_index]
-                || coefficient_count != ring_degree
-            {
-                return Err(invalid_evaluation_key_share_material(
-                    "evaluation-key component material record order or metadata is invalid",
-                ));
-            }
+    for digit_index in 0..digit_count {
+        for rns_limb_index in 0..limb_count {
             let mut coefficients = Vec::with_capacity(ring_degree);
             for _ in 0..ring_degree {
                 let coefficient = reader.read_u64()?;
@@ -594,12 +532,6 @@ fn decode_evaluation_key_share_component_vectors(
                 "digitIndex": digit_index,
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": DATA_PRIMES[rns_limb_index],
-                "component": "b",
-                "coefficientByteLength": ring_degree.checked_mul(8).ok_or_else(|| {
-                    invalid_evaluation_key_share_material(
-                        "evaluation-key coefficient byte length overflowed",
-                    )
-                })?,
                 "coefficientVectorHash512": evaluation_key_share_component_vector_hash(&coefficients),
                 "coefficientsLeHex": coefficient_vector_le_hex(&coefficients),
             }));
@@ -686,11 +618,9 @@ pub(in crate::bgv::setup) fn authenticated_evaluation_key_component_stream_summa
     Ok(Some(Arc::clone(&entry.stream_summary)))
 }
 
-// Where verified component material lives after a stream finishes. Native runs
-// stage to a temp file so only one component (about 72.25 MiB) is resident at a
-// time and CI memory stays bounded; the browser wasm runtime has no filesystem,
-// so it holds the verified chunks in memory. The in-memory backing is also
-// compiled under `test` so the native stream tests exercise it without a browser.
+// Native builds stage verified component material in temporary files. Browser
+// WASM has no filesystem and retains the chunks in memory; tests compile that
+// backing on native targets to exercise it without a browser.
 #[derive(Debug, Clone)]
 enum VerifiedComponentMaterialBacking {
     #[cfg(not(target_arch = "wasm32"))]
@@ -699,17 +629,9 @@ enum VerifiedComponentMaterialBacking {
     Memory(Vec<Vec<u8>>),
 }
 
-// Streamed transport for evaluation-key component material. begin records the
-// declared chunk manifest and opens a staging sink, absorb structurally
-// validates each chunk (order, size, and running total) and stages it, and
-// finish reads the staged chunks back, recomputes the component-material
-// transport hashes, verifies them against the declared manifest, and registers
-// the verified handle. One component is about 72.25 MiB and the whole per-roster
-// class is tens of GB, so native stages to a temp file and keeps only one
-// component resident; the browser wasm runtime has no filesystem and stages in
-// memory. The accepted-setup verifier then reads the handle transiently through
-// the shared read path. The material size, not the staging backend, is the open
-// supported-phone runtime constraint (see SEC-008).
+// Stream lifecycle: begin validates the manifest and opens a staging sink,
+// absorb validates and stages each chunk, and finish authenticates the complete
+// stream and registers its verified handle.
 pub(crate) use component_material_stream::{
     CanonicalComponentMaterialStream, absorb_verified_canonical_component_material_chunk,
     begin_verified_canonical_component_material_stream,
@@ -727,10 +649,7 @@ mod component_material_stream {
     static NEXT_COMPONENT_MATERIAL_STREAM_TEMP_FILE_SEQUENCE: std::sync::atomic::AtomicU64 =
         std::sync::atomic::AtomicU64::new(1);
 
-    // Where an in-flight stream stages its chunks before finish verifies them.
-    // Native stages to a temp file; the browser wasm runtime stages in memory.
-    // Compiled under `test` so the native stream tests exercise the in-memory
-    // path without a browser.
+    // Native streams stage to a temporary file; browser WASM stages in memory.
     enum ComponentMaterialStreamSink {
         #[cfg(not(target_arch = "wasm32"))]
         TempFile {
@@ -756,8 +675,6 @@ mod component_material_stream {
         }
     }
 
-    // Open a staging sink for a new stream. Native opens a temp file; the wasm
-    // runtime stages in memory.
     fn open_component_material_stream_sink(
         verification_id: &str,
     ) -> CanonicalResult<ComponentMaterialStreamSink> {
@@ -776,7 +693,6 @@ mod component_material_stream {
         }
     }
 
-    // Append one validated chunk to the staging sink.
     fn stage_component_material_stream_chunk(
         sink: &mut ComponentMaterialStreamSink,
         chunk: &[u8],
@@ -798,9 +714,7 @@ mod component_material_stream {
         }
     }
 
-    // Consume the staging sink into the verified store backing that persists for
-    // downstream reads: native keeps the temp file, the wasm runtime keeps the
-    // in-memory chunks.
+    // Finishing transfers ownership of the staged data to the verified store.
     fn component_material_stream_sink_into_backing(
         sink: ComponentMaterialStreamSink,
     ) -> VerifiedComponentMaterialBacking {
@@ -816,7 +730,7 @@ mod component_material_stream {
         }
     }
 
-    // Discard a staging sink whose stream failed, removing any temp file.
+    // Failed native streams must remove their temporary file.
     fn discard_component_material_stream_sink(sink: &ComponentMaterialStreamSink) {
         match sink {
             #[cfg(not(target_arch = "wasm32"))]

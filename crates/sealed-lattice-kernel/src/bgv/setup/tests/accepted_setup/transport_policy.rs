@@ -57,14 +57,14 @@ fn terminal_transport_policy_accepts_references_and_rejects_embedded_vectors() {
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
     );
 
-    let response = verify_terminal_setup_transport_policy(&package, &serde_json::json!({}))
-        .expect("terminal transport policy");
+    let response =
+        verify_terminal_setup_transport_policy(&package).expect("terminal transport policy");
 
     assert!(response.is_none());
     package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["keySwitchComponentVectors"] =
         serde_json::json!([]);
 
-    let response = verify_terminal_setup_transport_policy(&package, &serde_json::json!({}))
+    let response = verify_terminal_setup_transport_policy(&package)
         .expect("terminal transport policy")
         .expect("embedded key-switch component vector refusal");
 
@@ -106,34 +106,4 @@ fn terminal_transport_policy_package_with_material_encodings(
             "publicEvaluationKeyMaterialRoot": valid_hash('1'),
         },
     })
-}
-
-#[test]
-fn collective_setup_verifier_refuses_invalid_transport_certificates() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_invalid_transport_certificates",
-    );
-    assert_minimal_collective_setup_package_refused(
-        "non-binary setup transport encoding",
-        |package| {
-            package["setupTransportCertificate"]["largeObjectEncoding"] = serde_json::json!("json");
-        },
-        "transportEncodingMismatch",
-    );
-
-    let mut fixture = descriptor_backed_vss_collective_setup_fixture();
-    replace_setup_proof_material_transport_certificate_objects(
-        &mut fixture.package,
-        &serde_json::json!({ "proofMaterials": [] }),
-        VSS_SHARE_LINKAGE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
-    );
-    rebind_collective_setup_package_hash(&mut fixture.package);
-
-    let result = fixture.verify().expect("verification response");
-
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "transportedObjectBindingMissing"
-    );
 }

@@ -21,14 +21,11 @@ fn require_setup_package_shape(setup_package: &Value) -> CanonicalResult<()> {
 pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<SetupBinding> {
     require_setup_package_shape(setup_package)?;
     let setup_context_hashes = collective_bgv_setup_context_hashes_from_package(setup_package)?;
-    // The package carries no setupPackageHash field; recompute the
-    // canonical hash of the whole package. It is the single subsuming anchor -
-    // every package-derived binding the share statement and release context
-    // commit to (participants, public-key-share roots, the VSS graph,
-    // the roster-derived threshold parameters) is committed through this hash,
-    // which is why the passive-dialect per-component setup and threshold-key
-    // hashes are dropped from the statement rather than re-derived.
-    let setup_package_hash = derive_canonical_object_hash(setup_package)?;
+    // Use the accepted setup package's canonical identity. This deliberately
+    // omits its self-hash and relayed encrypted envelope bytes while binding the
+    // package-derived participants, public-key-share roots, VSS graph, and
+    // roster-derived threshold parameters used by target decryption.
+    let setup_package_hash = derive_collective_setup_package_hash(setup_package)?;
     let ceremony_id = string_at_path(setup_package, &["setupContext", "ceremonyId"])?.to_string();
     let setup_epoch = string_at_path(setup_package, &["setupContext", "setupEpoch"])?.to_string();
     let election_manifest_hash =
@@ -37,50 +34,33 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
     // recomputed from the bound BGV parameters rather than read from a package
     // field. The target record's targetDecryptionParametersHash is
     // cross-checked against this value in read_target_accepted_binding.
-    let (target_decryption_profile_hash, target_decryption_profile_binding_hash) =
-        canonical_target_decryption_parameter_hashes()?;
+    let target_decryption_profile_hash = canonical_target_decryption_parameters_hash()?;
     let public_matrix_seed_hash =
         hash_at_path(setup_package, &["commonRandomness", "publicMatrixSeedHash"])?.to_string();
     // The package carries no top-level participants array; identities and
     // roster positions come from registrations inside the caller-supplied
-    // setupIntent. Board position equals the roster index and epochs are 0 in
-    // this setup-package shape, matching the participant construction.
+    // setupIntent. The Shamir abscissa is derived as roster position + 1 so
+    // 0-based roster positions never produce the forbidden x = 0 point.
     let participants = accepted_setup_participant_roster_from_package(setup_package)?
         .into_iter()
-        .map(|(roster_position, trustee_identity)| {
-            // Shamir abscissa = roster_position + 1 so 0-based roster positions never produce the forbidden x = 0 point; share generation and recombination must use the identical mapping.
-            let interpolation_point = u64::try_from(roster_position + 1).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "target decryption interpolation point does not fit u64",
-                )
-            })?;
-            Ok(ParticipantBinding {
-                trustee_identity,
-                roster_position,
-                board_position: roster_position,
-                interpolation_point,
-                recovery_epoch: 0,
-                device_epoch: 0,
-            })
+        .map(|(roster_position, trustee_identity)| ParticipantBinding {
+            trustee_identity,
+            roster_position,
         })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let aggregate_threshold_commitment_set = setup_package
-        .get(VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD)
-        .map(|aggregate_set| {
-            read_aggregate_threshold_commitment_set_binding(
-                aggregate_set,
-                &public_matrix_seed_hash,
-                &participants,
-            )
-        })
-        .transpose()?;
-    let share_linkage_statement_root = setup_package
-        .get(VSS_SHARE_LINKAGE_STATEMENT_FIELD)
-        .map(|statement| {
-            hash_at_path(statement, &["statementRoot"]).map(std::borrow::ToOwned::to_owned)
-        })
-        .transpose()?;
+        .collect::<Vec<_>>();
+    let aggregate_threshold_commitment_set = read_aggregate_threshold_commitment_set_binding(
+        value_at_path(
+            setup_package,
+            &[VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD],
+        )?,
+        &public_matrix_seed_hash,
+        &participants,
+    )?;
+    let share_linkage_statement_root = hash_at_path(
+        setup_package,
+        &[VSS_SHARE_LINKAGE_STATEMENT_FIELD, "statementRoot"],
+    )?
+    .to_string();
 
     Ok(SetupBinding {
         setup_package_hash,
@@ -90,7 +70,6 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         roster_hash: setup_context_hashes.roster_hash,
         setup_parameters_hash: setup_context_hashes.setup_parameters_hash,
         target_decryption_profile_hash,
-        target_decryption_profile_binding_hash,
         public_matrix_seed_hash,
         share_linkage_statement_root,
         participants,
@@ -129,52 +108,19 @@ pub(super) fn read_target_result_release_setup_context(
             Ok(ParticipantBinding {
                 trustee_identity: string_at_path(participant, &["trusteeIdentity"])?.to_string(),
                 roster_position: usize_at_path(participant, &["rosterPosition"])?,
-                board_position: usize_at_path(participant, &["boardPosition"])?,
-                interpolation_point: unsigned_at_path(participant, &["interpolationPoint"])?,
-                recovery_epoch: unsigned_at_path(participant, &["recoveryEpoch"])?,
-                device_epoch: unsigned_at_path(participant, &["deviceEpoch"])?,
             })
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    for participant in &participants {
-        let expected_interpolation_point =
-            u64::try_from(participant.roster_position + 1).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "target decryption interpolation point does not fit u64",
-                )
-            })?;
-        if participant.interpolation_point != expected_interpolation_point {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "release setup context interpolation point does not match the roster position",
-            ));
-        }
-    }
-    let aggregate_threshold_commitment_set = context
-        .get(VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD)
-        .filter(|value| !value.is_null())
-        .map(|aggregate_set| {
-            read_aggregate_threshold_commitment_set_binding(
-                aggregate_set,
-                &public_matrix_seed_hash,
-                &participants,
-            )
-        })
-        .transpose()?;
-    let share_linkage_statement_root = context
-        .get("shareLinkageStatementRoot")
-        .filter(|value| !value.is_null())
-        .map(|value| {
-            value.as_str().ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "shareLinkageStatementRoot must be a hash string",
-                )
-            })
-        })
-        .transpose()?
-        .map(str::to_string);
+    let aggregate_threshold_commitment_set = read_aggregate_threshold_commitment_set_binding(
+        value_at_path(
+            context,
+            &[VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD],
+        )?,
+        &public_matrix_seed_hash,
+        &participants,
+    )?;
+    let share_linkage_statement_root =
+        hash_at_path(context, &["shareLinkageStatementRoot"])?.to_string();
 
     Ok(SetupBinding {
         setup_package_hash: hash_at_path(context, &["setupPackageHash"])?.to_string(),
@@ -185,11 +131,6 @@ pub(super) fn read_target_result_release_setup_context(
         setup_parameters_hash: hash_at_path(context, &["setupParametersHash"])?.to_string(),
         target_decryption_profile_hash: hash_at_path(context, &["targetDecryptionParametersHash"])?
             .to_string(),
-        target_decryption_profile_binding_hash: hash_at_path(
-            context,
-            &["targetDecryptionParametersBindingHash"],
-        )?
-        .to_string(),
         public_matrix_seed_hash,
         share_linkage_statement_root,
         participants,
@@ -209,16 +150,11 @@ fn target_result_release_setup_context_from_binding(
         "rosterHash": setup_binding.roster_hash,
         "setupParametersHash": setup_binding.setup_parameters_hash,
         "targetDecryptionParametersHash": setup_binding.target_decryption_profile_hash,
-        "targetDecryptionParametersBindingHash": setup_binding.target_decryption_profile_binding_hash,
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash,
         "shareLinkageStatementRoot": setup_binding.share_linkage_statement_root,
         "participants": setup_binding.participants.iter().map(|participant| json!({
             "trusteeIdentity": participant.trustee_identity,
             "rosterPosition": participant.roster_position,
-            "boardPosition": participant.board_position,
-            "interpolationPoint": participant.interpolation_point,
-            "recoveryEpoch": participant.recovery_epoch,
-            "deviceEpoch": participant.device_epoch,
         })).collect::<Vec<_>>(),
         VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: aggregate_threshold_commitment_set_value(setup_binding)?,
     });
@@ -237,9 +173,7 @@ fn target_result_release_setup_context_from_binding(
 fn aggregate_threshold_commitment_set_value(
     setup_binding: &SetupBinding,
 ) -> CanonicalResult<Value> {
-    let Some(aggregate_set) = &setup_binding.aggregate_threshold_commitment_set else {
-        return Ok(Value::Null);
-    };
+    let aggregate_set = &setup_binding.aggregate_threshold_commitment_set;
     let mut records = Vec::new();
     for (recipient_index, limb_records) in aggregate_set.recipient_records.iter().enumerate() {
         let participant = setup_binding
@@ -256,7 +190,7 @@ fn aggregate_threshold_commitment_set_value(
                 "objectType": "VssPublicAggregateThresholdCommitment",
                 "recipientIdentity": participant.trustee_identity,
                 "recipientRosterPosition": participant.roster_position,
-                "recipientTrusteePoint": participant.interpolation_point,
+                "recipientTrusteePoint": participant.interpolation_point()?,
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": record.rns_prime,
                 "aggregateCommitmentRoot": record.aggregate_commitment_root,
@@ -277,7 +211,9 @@ fn aggregate_threshold_commitment_set_value(
     }))
 }
 
-fn target_result_release_setup_context_hash(context: &Value) -> CanonicalResult<String> {
+pub(super) fn target_result_release_setup_context_hash(
+    context: &Value,
+) -> CanonicalResult<String> {
     let mut hash_input = context.clone();
     if let Some(object) = hash_input.as_object_mut() {
         object.remove(TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD);
@@ -360,7 +296,7 @@ fn read_aggregate_threshold_commitment_set_binding(
             compare_unsigned_field(
                 record,
                 "recipientTrusteePoint",
-                participant.interpolation_point,
+                participant.interpolation_point()?,
                 "aggregate threshold commitment recipient trustee point",
             )?;
             compare_unsigned_field(
@@ -493,12 +429,6 @@ pub(super) fn read_target_share_profile(
         &setup_binding.target_decryption_profile_hash,
         "target decryption profile hash",
     )?;
-    compare_hash_field(
-        value,
-        "targetDecryptionProfileBindingHash",
-        &setup_binding.target_decryption_profile_binding_hash,
-        "target decryption profile binding hash",
-    )?;
     let decryption_threshold = usize_field(value, "decryptionThreshold")?;
     let minimum_shares_for_interpolation = usize_field(value, "minimumSharesForInterpolation")?;
     let decryption_share_quorum = usize_field(value, "decryptionShareQuorum")?;
@@ -525,7 +455,6 @@ pub(super) fn read_target_share_profile(
     let hash_input = json!({
         "objectType": "TargetDecryptionShareProfile",
         "targetDecryptionProfileHash": setup_binding.target_decryption_profile_hash,
-        "targetDecryptionProfileBindingHash": setup_binding.target_decryption_profile_binding_hash,
         "decryptionThreshold": decryption_threshold,
         "minimumSharesForInterpolation": minimum_shares_for_interpolation,
         "decryptionShareQuorum": decryption_share_quorum,

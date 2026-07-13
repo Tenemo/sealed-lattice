@@ -1,4 +1,7 @@
-import type { ProtocolHash } from '@sealed-lattice/types';
+import type {
+    BgvTargetDecryptionShareProofMaterial,
+    ProtocolHash,
+} from '@sealed-lattice/types';
 
 type BgvJsonRecord = Readonly<Record<string, unknown>>;
 
@@ -8,27 +11,26 @@ type BgvTransportedMaterialObject<ObjectType extends string> = Readonly<
     }
 >;
 
-export type BgvTransportedSetupProofMaterialSet<
-    ObjectType extends string = string,
-> = BgvTransportedMaterialObject<ObjectType> &
-    Readonly<{
-        readonly proofFamily: string;
-        readonly proofMaterials: readonly BgvJsonRecord[];
-    }>;
+type BgvTransportedSetupProofMaterialSet<ObjectType extends string = string> =
+    BgvTransportedMaterialObject<ObjectType> &
+        Readonly<{
+            readonly proofFamily: string;
+            readonly proofMaterials: readonly BgvJsonRecord[];
+        }>;
 
-export type BgvTransportedPublicKeyShareMaterial =
+type BgvTransportedPublicKeyShareMaterial =
     BgvTransportedMaterialObject<'SetupTransportedPublicKeyShareMaterial'> &
         Readonly<{
             readonly publicKeyShareMaterialSetRoot: ProtocolHash;
         }>;
 
-export type BgvTransportedEvaluationKeyShareComponentMaterialSet =
+type BgvTransportedEvaluationKeyShareComponentMaterialSet =
     BgvTransportedMaterialObject<'SetupTransportedEvaluationKeyShareComponentMaterialSet'> &
         Readonly<{
             readonly componentMaterials: readonly BgvJsonRecord[];
         }>;
 
-export type BgvTransportedPublicEvaluationKeyMaterialSet =
+type BgvTransportedPublicEvaluationKeyMaterialSet =
     BgvTransportedMaterialObject<'SetupTransportedPublicEvaluationKeyMaterialSet'> &
         Readonly<{
             readonly publicEvaluationKeyMaterials: readonly BgvJsonRecord[];
@@ -51,17 +53,12 @@ export type BgvRnsParametersDescription = {
         readonly plaintextModulus: number;
         readonly dataPrimes: readonly number[];
         readonly specialPrime: number;
-        readonly dataPrimeBitLength: number;
-        readonly dataLevels: number;
-        readonly extendedLevels: number;
         readonly scoreRange: {
             readonly minimum: number;
             readonly maximum: number;
         };
         readonly bucketCount: number;
         readonly coordinatesPerOption: number;
-        readonly slotCount: number;
-        readonly allowedOperations: readonly string[];
     };
     readonly bgvParametersHash: ProtocolHash;
 };
@@ -77,32 +74,6 @@ export type BgvObjectValidation = {
     readonly plaintextRoot?: ProtocolHash;
     readonly ciphertextRoot?: ProtocolHash;
 };
-
-export type BgvCanonicalObjectAnalysis = {
-    readonly objectKind: 'plaintext' | 'ciphertext';
-    readonly componentCount: number;
-    readonly bgvParametersHash: ProtocolHash;
-    readonly basisId: string;
-    readonly level: number;
-    readonly coefficientCount: number;
-};
-
-export type BgvOperationRejection = {
-    readonly isValid: false;
-    readonly refusedObjects: readonly {
-        readonly code: 'BgvOperationRejected';
-        readonly reasonCode: string;
-        readonly message: string;
-        readonly objectHash?: ProtocolHash;
-    }[];
-};
-
-export type BgvEvaluatorOperationValidation =
-    | {
-          readonly isValid: true;
-          readonly bgvParametersHash: ProtocolHash;
-      }
-    | BgvOperationRejection;
 
 export type BgvBatchPlaintextEncoding = {
     readonly bgvParametersHash: ProtocolHash;
@@ -120,7 +91,6 @@ export type BgvBatchPlaintextEncoding = {
         readonly position: number;
         readonly value: number;
     }[];
-    readonly validation: BgvObjectValidation;
     readonly canonicalBytesHex?: string;
 };
 
@@ -129,25 +99,21 @@ export type BgvPassiveSetupParticipantInput =
     | {
           readonly trusteeIdentity: string;
           readonly rosterPosition?: number;
-          readonly boardPosition?: number;
           readonly recoveryEpoch?: number;
           readonly deviceEpoch?: number;
       };
 
 export type BgvPassiveSetupPackage = {
     readonly objectType: 'BgvPassiveSetupPackage';
-    readonly setupMode: string;
     readonly setupPackageHash: ProtocolHash;
     readonly setupInputs: {
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
         readonly thresholdParametersHash: ProtocolHash;
-        readonly participantCount: number;
-        readonly participantIdentities: readonly string[];
         readonly setupSeedHash: string;
     };
-    readonly parameterBindings: Readonly<Record<string, unknown>>;
+    readonly bgvParametersHash: ProtocolHash;
     readonly participants: readonly unknown[];
     readonly collectivePublicKey: {
         readonly collectivePublicKeyRoot: ProtocolHash;
@@ -158,30 +124,18 @@ export type BgvPassiveSetupPackage = {
     };
     readonly thresholdVerificationMaterial: Readonly<Record<string, unknown>>;
     readonly evaluationKeys: {
-        readonly rotSetHash: ProtocolHash;
         readonly evaluationKeyRoot: ProtocolHash;
-        readonly relinearizationKeyRoot: ProtocolHash;
-        readonly keySwitchKeyRoot: ProtocolHash;
-        readonly keySwitchDecompositionHash: ProtocolHash;
-        readonly rotationKeyRoots: readonly unknown[];
-        readonly record: unknown;
+        readonly record: BgvJsonRecord & {
+            readonly rotSetHash: ProtocolHash;
+        };
         readonly rotSet: unknown;
     };
-    readonly certificates: Readonly<Record<string, unknown>>;
-    readonly targetDecryptionParameters: {
-        readonly targetDecryptionParametersHash: ProtocolHash;
-        readonly targetDecryptionParametersBindingHash: ProtocolHash;
-    };
+    readonly targetDecryptionParametersHash: ProtocolHash;
 };
 
 export type BgvCollectiveSetupParametersDescription = {
     readonly setupParametersHash: ProtocolHash;
     readonly canonicalTargetBasisHash: ProtocolHash;
-    readonly objectType: 'SetupPackage';
-    readonly adversaryModel: 'active-static';
-    readonly livenessModel: 'secure-with-abort';
-    readonly sharingDomain: 'per-rns-prime';
-    readonly completionRule: 'full-roster';
     readonly participantCount: number;
     readonly qSetupComplete: number;
     readonly qBallotRelease: number;
@@ -191,130 +145,25 @@ export type BgvCollectiveSetupParametersDescription = {
         readonly objectType: 'QSharePrimeList';
         readonly primes: readonly number[];
     };
-    readonly carryAwareVssShareRelation: {
-        readonly objectType: 'CarryAwareVssShareRelation';
-        readonly trusteePointRule: 'roster-position-plus-one';
-        readonly coefficientOrder: 'constant-first';
-        readonly relation: string;
-        readonly carryWitnessDomain: 'non-negative-bounded-integer';
-        readonly commitmentReductionRule: 'open-unreduced-lifted-share-with-explicit-carry';
-    };
-    readonly commitment: {
-        readonly objectType: 'BdlopCommitment';
-        readonly construction: string;
-        readonly ring: Readonly<Record<string, unknown>>;
-        readonly matrixShape: Readonly<Record<string, unknown>>;
-        readonly messageEncoding: Readonly<Record<string, unknown>>;
-        readonly openingDistribution: Readonly<Record<string, unknown>>;
-        readonly homomorphism: Readonly<Record<string, unknown>>;
-        readonly assumptions: Readonly<Record<string, unknown>>;
-        readonly serialization: Readonly<Record<string, unknown>>;
-    };
-    readonly setupProof: {
-        readonly objectType: 'SetupProof';
-        readonly relationModel: Readonly<Record<string, unknown>>;
-        readonly witnessBounds: Readonly<Record<string, unknown>>;
-        readonly proofFamilies: readonly Readonly<Record<string, unknown>>[];
-        readonly proofSerialization: Readonly<Record<string, unknown>>;
-    };
-    readonly setupTransport: {
-        readonly objectType: 'SetupTransport';
-        readonly largeObjectEncoding: 'binary';
-        readonly chunking: 'required';
-        readonly streamVerificationOrder: string;
-    };
     readonly evaluatorKeySchedule: {
         readonly objectType: 'EvaluatorKeySchedule';
-        readonly evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay';
-        readonly packingScheme: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
-        readonly participantCount: 10;
-        readonly rnsLimbCount: number;
         readonly relinearizationLevelSchedule: readonly {
             readonly level: number;
-            readonly proofFamily: 'relinearization-key-share';
-            readonly keyShareRounds: readonly ['round-one', 'round-two'];
         }[];
         readonly requiredGaloisKeySchedule: readonly {
             readonly rotation: number;
             readonly level: number;
-            readonly purpose: string;
-            readonly proofFamily: 'galois-key-share';
         }[];
         readonly requiredGaloisSetHash: ProtocolHash;
     };
-    readonly phaseOrder: readonly {
-        readonly phaseId: string;
-        readonly phaseNumber: number;
-    }[];
+    readonly boundedDomainEvaluator: {
+        readonly objectType: 'BoundedDomainEvaluatorParameters';
+        readonly scoreDifferenceBound: number;
+        readonly directComparisonOutputLevel: number;
+        readonly tiePolicy: string;
+    };
+    readonly phaseOrder: readonly string[];
     readonly phaseOrderHash: ProtocolHash;
-    readonly requiredFinalObjects: readonly string[];
-    readonly transportSchemeId: string;
-};
-
-export type BgvCollectiveSetupPublicDerivations = {
-    readonly objectType: 'SetupPublicDerivations';
-    readonly publicMatrixSeedHash: ProtocolHash;
-    readonly bgvPublicA: {
-        readonly objectType: 'BgvPublicAPolynomial';
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly derivationLabel: 'accepted-bgv-public-a';
-        readonly basisId: string;
-        readonly level: number;
-        readonly coefficientCount: number;
-        readonly modulusDerivations: readonly {
-            readonly modulus: number;
-            readonly coefficientDerivationHash: string;
-        }[];
-        readonly sampledResidues: readonly {
-            readonly position: number;
-            readonly modulus: number;
-            readonly value: number;
-        }[];
-        readonly publicPolynomialRoot: ProtocolHash;
-    };
-    readonly publicMatrices: {
-        readonly objectType: 'SetupPublicMatrixMaterial';
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly commitmentMatrix: BgvCollectiveSetupPublicMatrix;
-        readonly publicMatricesRoot: ProtocolHash;
-    };
-    readonly crpRoots: {
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly relinearizationCrpRoot: ProtocolHash;
-        readonly galoisKeyCrpRoot: ProtocolHash;
-        readonly commitmentMatrixCrpRoot: ProtocolHash;
-    };
-    readonly publicDerivationRoot: ProtocolHash;
-};
-
-export type BgvCollectiveSetupPublicMatrix = {
-    readonly objectType: 'SetupPublicMatrix';
-    readonly matrixKind: 'commitment' | 'setupProof';
-    readonly challengeDomainHash?: ProtocolHash;
-    readonly challengeBits?: number;
-    readonly challengeCount?: number;
-    readonly commitmentModulusLimbs?: readonly {
-        readonly commitmentModulusIndex: number;
-        readonly modulus: number;
-    }[];
-    readonly commitmentModuleRank?: number;
-    readonly commitmentRandomnessWidth?: number;
-    readonly publicMatrixSeedHash: ProtocolHash;
-    readonly crpRoot: ProtocolHash;
-    readonly coordinateAxes: readonly string[];
-    readonly rnsLimbCount: number;
-    readonly ringDegree: number;
-    readonly shamirCoefficientCount?: number;
-    readonly proofFamilies?: readonly string[];
-    readonly entryStreamEncoding:
-        | 'xof-entry-derivation-hash'
-        | 'xof-unbiased-residue-from-coordinate';
-    readonly sampledEntries: readonly {
-        readonly coordinate: Readonly<Record<string, string | number>>;
-        readonly coefficientValue?: number;
-        readonly entryDerivationHash: ProtocolHash;
-    }[];
-    readonly matrixRoot: ProtocolHash;
 };
 
 export type BgvCollectiveSetupVerification = {
@@ -394,7 +243,6 @@ export type BgvTrusteeEvaluationKeyStatementContext = {
     | {
           readonly requiredGaloisSetHash: ProtocolHash;
           readonly evaluatorKeyScheduleRoot: ProtocolHash;
-          readonly keySwitchDecompositionHash: ProtocolHash;
           readonly sourceConstantCoefficientCommitmentRoot: ProtocolHash;
       }
     | {
@@ -438,9 +286,7 @@ export type BgvSameSecretBridgeProofContext = {
 };
 
 export type BgvTrusteeEvaluationKeyProofGeneration = {
-    readonly proofFamily: 'trustee-evaluation-key' | 'public-key-share';
     readonly statementHash: ProtocolHash;
-    readonly limbCount: number;
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;
 };
@@ -452,7 +298,7 @@ export type BgvTrusteeEvaluationKeyStatementDescription = {
     readonly statementHash: ProtocolHash;
 };
 
-export type BgvSetupCommitmentValue = {
+type BgvSetupCommitmentValue = {
     readonly objectType: 'SetupCommitment';
     readonly sourceRnsLimbIndex: number;
     readonly sourceMessageModulus: number;
@@ -478,20 +324,13 @@ export type BgvVssCommittedMaterialCommitmentComputation = {
 };
 
 export type BgvVssShareLinkageProofGeneration = {
-    readonly proofFamily: 'vss-share-linkage';
     readonly statementHash: ProtocolHash;
-    readonly limbCount: number;
-    readonly coefficientCommitmentCount: number;
-    readonly coefficientWitnessColumnCount: number;
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;
 };
 
 export type BgvSameSecretBridgeProofGeneration = {
-    readonly proofFamily: 'same-secret-bridge';
     readonly statementHash: ProtocolHash;
-    readonly limbCount: number;
-    readonly bridgeRnsLimbCount: number;
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;
 };
@@ -501,8 +340,6 @@ export type BgvLocalTrusteeSetupStateVerification = {
     readonly trusteeRosterPosition: number;
     readonly trusteePoint: number;
     readonly localStateRoot: ProtocolHash;
-    readonly deletionReceiptRoot: ProtocolHash;
-    readonly deletionBoundary: 'after-private-vss-aggregation';
 };
 
 export type BgvTargetDecryptionShare = Readonly<
@@ -513,28 +350,7 @@ export type BgvTargetDecryptionShare = Readonly<
     }
 >;
 
-export type BgvTargetDecryptionShareProofStatement = Readonly<
-    BgvJsonRecord & {
-        readonly objectType: 'BgvTargetDecryptionShareProofStatement';
-        readonly proofStatementRoot: ProtocolHash;
-    }
->;
-
-export type BgvTargetDecryptionShareProofMaterial = Readonly<
-    BgvJsonRecord & {
-        readonly objectType: 'BgvTargetDecryptionShareProofMaterial';
-        readonly proofRecords: readonly unknown[];
-        readonly proofMaterialRoot: ProtocolHash;
-    }
->;
-
-export type BgvTargetDecryptionShareProofStatementBinding = Readonly<{
-    readonly proofStatementRoot: ProtocolHash;
-}>;
-
-export type BgvTargetDecryptionShareProofMaterialVerification = Readonly<{
-    readonly proofMaterialRoot: ProtocolHash;
-}>;
+export type { BgvTargetDecryptionShareProofMaterial };
 
 // Release context derived from a caller-supplied setup package. This record is
 // not an authority capability. It is round-tripped byte-for-byte as the begin

@@ -23,7 +23,6 @@ fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate key-bearing atom proof");
-    assert_eq!(generated["proofFamily"], "trustee-evaluation-key");
     let proof_bytes = verify_generated_proof(&statement, &generated);
     let mut tampered_proof_bytes = proof_bytes.clone();
     let tamper_position = tampered_proof_bytes.len() / 2;
@@ -172,14 +171,13 @@ fn trustee_proof_commands_reject_noncanonical_public_statement_material() {
 }
 
 #[test]
-fn public_key_share_commands_round_trip_with_family_label() {
+fn public_key_share_commands_round_trip() {
     let generate_request = public_key_share_statement_hash_vector_request();
     let statement = super::super::commands::statement_from_request(&generate_request)
         .expect("public-key share statement");
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate public-key share command");
-    assert_eq!(generated["proofFamily"], "public-key-share");
 
     let _proof_bytes = verify_generated_proof(&statement, &generated);
 
@@ -197,17 +195,19 @@ fn public_key_share_commands_round_trip_with_family_label() {
 fn proof_command_binds_randomness_seed_to_nonce_and_statement() {
     let mut generate_request = public_key_share_statement_hash_vector_request();
     generate_request["proofRandomnessNonceHex"] = serde_json::json!("22".repeat(64));
+    let statement = super::super::commands::statement_from_request(&generate_request)
+        .expect("public-key share statement");
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate with nonce");
-    let first_generated_proof_bytes = generated_proof_bytes(&generated);
+    let first_generated_proof_bytes = generated_proof_bytes(&statement, &generated);
 
     let mut changed_nonce_request = generate_request.clone();
     changed_nonce_request["proofRandomnessNonceHex"] = serde_json::json!("11".repeat(64));
     let changed_nonce_generated =
         super::generate_trustee_evaluation_key_proof_from_request(&changed_nonce_request)
             .expect("generate with changed nonce");
-    let changed_nonce_proof_bytes = generated_proof_bytes(&changed_nonce_generated);
+    let changed_nonce_proof_bytes = generated_proof_bytes(&statement, &changed_nonce_generated);
     assert_ne!(
         generated["proofBytesHash"], changed_nonce_generated["proofBytesHash"],
         "the same seed and statement must not reuse proof masks when the nonce changes"

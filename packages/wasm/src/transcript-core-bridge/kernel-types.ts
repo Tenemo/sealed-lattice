@@ -1,16 +1,13 @@
 import type {
     CanonicalError,
-    FieldElement,
     ParticipantIdentity,
     ProtocolHash,
 } from '@sealed-lattice/types';
 
 import type {
     BgvBatchPlaintextEncoding,
-    BgvCanonicalObjectAnalysis,
     BgvCollectiveSetupTransportCompanions,
     BgvCollectiveSetupParametersDescription,
-    BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeyStatementDescription,
@@ -18,14 +15,12 @@ import type {
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
-    BgvEvaluatorOperationValidation,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
     BgvPassiveSetupPackage,
     BgvPassiveSetupParticipantInput,
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
-    BgvOperationRejection,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofContext,
     BgvSameSecretBridgeProofGeneration,
@@ -36,9 +31,6 @@ import type {
     BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareProofMaterial,
-    BgvTargetDecryptionShareProofMaterialVerification,
-    BgvTargetDecryptionShareProofStatement,
-    BgvTargetDecryptionShareProofStatementBinding,
     BgvTargetDecryptionResultReleaseBegin,
     BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultReleaseCompletion,
@@ -46,9 +38,7 @@ import type {
 
 export type {
     BgvBatchPlaintextEncoding,
-    BgvCanonicalObjectAnalysis,
     BgvCollectiveSetupParametersDescription,
-    BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeyStatementDescription,
@@ -56,14 +46,12 @@ export type {
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
-    BgvEvaluatorOperationValidation,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
     BgvPassiveSetupPackage,
     BgvPassiveSetupParticipantInput,
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
-    BgvOperationRejection,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofContext,
     BgvSameSecretBridgeProofGeneration,
@@ -74,25 +62,11 @@ export type {
     BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareProofMaterial,
-    BgvTargetDecryptionShareProofMaterialVerification,
-    BgvTargetDecryptionShareProofStatement,
-    BgvTargetDecryptionShareProofStatementBinding,
     BgvTargetDecryptionResultReleaseBegin,
     BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultReleaseShareEvidence,
     BgvTargetDecryptionResultReleaseCompletion,
 } from './kernel-types/bgv.js';
-export type TranscriptCoreKernelSharePoint = {
-    readonly rosterPosition: number;
-    readonly value: FieldElement;
-};
-
-export type TranscriptCorePlaintextComparison = {
-    readonly greaterThan: FieldElement;
-    readonly equal: FieldElement;
-    readonly scoreDifference: number;
-};
-
 export type FoundationCanonicalTupleValidation = {
     readonly canonicalTupleHex: string;
     readonly schemaIdentifier: number;
@@ -133,10 +107,6 @@ export type AcceptedSetupSession = Readonly<{
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
     beginAcceptedSetupSession(): AcceptedSetupSession;
-    computeChunkRoot(input: {
-        readonly inputHex: string;
-        readonly chunkSize: number;
-    }): string;
     computeFoundationHash512(input: {
         readonly domain: string;
         readonly canonicalItemsTupleHex: string;
@@ -145,17 +115,6 @@ export type TranscriptCoreKernel = {
         readonly signingVerificationKeyHex: string;
     }): ParticipantIdentity;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
-    evaluatePlaintextComparison(input: {
-        readonly leftTotalScore: number;
-        readonly rightTotalScore: number;
-        readonly rosterSize: number;
-    }): TranscriptCorePlaintextComparison;
-    hashRaw(inputHex: string): string;
-    interpolateShamirConstantTerm(input: {
-        readonly sharePoints: readonly TranscriptCoreKernelSharePoint[];
-    }): FieldElement;
-    listCanonicalErrorCodes(): readonly string[];
-    roundTripBytes(input: Uint8Array): Uint8Array;
     validateFoundationCanonicalTuple(input: {
         readonly canonicalTupleHex: string;
     }): FoundationCanonicalTupleValidation;
@@ -168,13 +127,6 @@ export type TranscriptCoreKernel = {
             readonly localTargetShareWitness: unknown;
         },
     ): BgvTargetDecryptionShare;
-    deriveBgvTargetDecryptionShareProofStatement(
-        input: BgvTargetDecryptionLocalCommandContext & {
-            readonly trusteeIdentity: string;
-            readonly localTargetShareWitness: unknown;
-            readonly targetDecryptionShare: unknown;
-        },
-    ): BgvTargetDecryptionShareProofStatement;
     generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(
         input: BgvTargetDecryptionLocalCommandContext & {
             readonly trusteeIdentity: string;
@@ -185,35 +137,17 @@ export type TranscriptCoreKernel = {
             readonly proofRandomnessNonceHex: string;
         },
     ): BgvTargetDecryptionShareProofMaterial;
-    verifyBgvTargetDecryptionShareProofMaterial(
-        input: BgvTargetDecryptionLocalCommandContext & {
-            readonly targetDecryptionShare: unknown;
-            readonly proofStatement: unknown;
-            readonly proofMaterial: unknown;
-        },
-    ): BgvTargetDecryptionShareProofMaterialVerification;
-    verifyBgvTargetDecryptionShareProofStatementBinding(
-        input: BgvTargetDecryptionLocalCommandContext & {
-            readonly targetDecryptionShare: unknown;
-            readonly proofStatement: unknown;
-        },
-    ): BgvTargetDecryptionShareProofStatementBinding;
     describeBgvRnsParameters(): BgvRnsParametersDescription;
-    describeBgvOperationRegistry(): unknown;
     describeCollectiveBgvSetupParameters(input?: {
         readonly participantCount?: number;
     }): BgvCollectiveSetupParametersDescription;
-    deriveCollectiveBgvSetupPublicDerivations(input: {
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly decryptionThreshold?: number;
-    }): BgvCollectiveSetupPublicDerivations;
     generateBgvPassiveSetup(input: {
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
         readonly thresholdParametersHash: ProtocolHash;
         readonly participants: readonly BgvPassiveSetupParticipantInput[];
-        readonly setupSeed?: string;
+        readonly setupSeed: string;
     }): BgvPassiveSetupPackage;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
@@ -298,9 +232,7 @@ export type TranscriptCoreKernel = {
         readonly ringDegree: number;
         readonly vssShareLinkage: Record<string, unknown>;
         readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-        readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
         readonly recipientShareMessagesByItem: readonly (readonly number[])[];
-        readonly recipientShareOpeningRandomnessByItem: readonly (readonly (readonly number[])[])[];
         readonly carryWitnessesByItem: readonly (readonly number[])[];
         readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
         readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
@@ -346,21 +278,15 @@ export type TranscriptCoreKernel = {
         readonly slots: readonly number[];
         readonly level?: number;
         readonly includeCanonicalBytesHex?: boolean;
-    }): BgvBatchPlaintextEncoding | BgvOperationRejection;
+    }): BgvBatchPlaintextEncoding;
     validateBgvPlaintextObject(input: {
         readonly canonicalBytesHex: string;
         readonly expectedPlaintextRoot?: string;
-    }): BgvObjectValidation | BgvOperationRejection;
+    }): BgvObjectValidation;
     validateBgvCiphertextObject(input: {
         readonly canonicalBytesHex: string;
         readonly expectedCiphertextRoot?: string;
-    }): BgvObjectValidation | BgvOperationRejection;
-    analyzeBgvCanonicalObject(input: {
-        readonly canonicalBytesHex: string;
-    }): BgvCanonicalObjectAnalysis | BgvOperationRejection;
-    validateBgvEvaluatorOperation(input: {
-        readonly operation: string;
-    }): BgvEvaluatorOperationValidation;
+    }): BgvObjectValidation;
 };
 
 export type TranscriptCoreKernelContextOwner = Pick<
@@ -395,7 +321,6 @@ type KernelCommandFromMethod<
 >;
 
 type TranscriptCoreKernelCommand =
-    | KernelCommandFromMethod<'ComputeChunkRoot', 'computeChunkRoot'>
     | KernelCommandFromMethod<
           'ComputeFoundationHash512',
           'computeFoundationHash512'
@@ -409,21 +334,6 @@ type TranscriptCoreKernelCommand =
           'deriveCanonicalObjectHash'
       >
     | KernelCommandFromMethod<
-          'EvaluatePlaintextComparison',
-          'evaluatePlaintextComparison'
-      >
-    | {
-          readonly command: 'HashRaw';
-          readonly inputHex: string;
-      }
-    | KernelCommandFromMethod<
-          'InterpolateShamirConstantTerm',
-          'interpolateShamirConstantTerm'
-      >
-    | {
-          readonly command: 'ListCanonicalErrorCodes';
-      }
-    | KernelCommandFromMethod<
           'ValidateFoundationCanonicalTuple',
           'validateFoundationCanonicalTuple'
       >
@@ -436,38 +346,15 @@ type TranscriptCoreKernelCommand =
           'generateBgvTargetDecryptionShareFromLocalShare'
       >
     | KernelCommandFromMethod<
-          'DeriveBgvTargetDecryptionShareProofStatement',
-          'deriveBgvTargetDecryptionShareProofStatement'
-      >
-    | KernelCommandFromMethod<
           'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
           'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness'
-      >
-    | KernelCommandFromMethod<
-          'VerifyBgvTargetDecryptionShareProofMaterial',
-          'verifyBgvTargetDecryptionShareProofMaterial'
-      >
-    | KernelCommandFromMethod<
-          'VerifyBgvTargetDecryptionShareProofStatementBinding',
-          'verifyBgvTargetDecryptionShareProofStatementBinding'
       >
     | {
           readonly command: 'DescribeBgvRnsParameters';
       }
-    | {
-          readonly command: 'DescribeBgvOperationRegistry';
-      }
-    | KernelCommandFromMethod<
-          'ValidateBgvEvaluatorOperation',
-          'validateBgvEvaluatorOperation'
-      >
     | KernelCommandFromMethod<
           'DescribeCollectiveBgvSetupParameters',
           'describeCollectiveBgvSetupParameters'
-      >
-    | KernelCommandFromMethod<
-          'DeriveCollectiveBgvSetupPublicDerivations',
-          'deriveCollectiveBgvSetupPublicDerivations'
       >
     | KernelCommandFromMethod<
           'GenerateBgvPassiveSetup',
@@ -542,10 +429,6 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'ValidateBgvCiphertextObject',
           'validateBgvCiphertextObject'
-      >
-    | KernelCommandFromMethod<
-          'AnalyzeBgvCanonicalObject',
-          'analyzeBgvCanonicalObject'
       >
     | {
           readonly command: 'RunDirectEncryptedBallot';
@@ -809,7 +692,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         length: number,
         outputLengthPointer: number,
     ) => number;
-    sealed_lattice_roundtrip?: (pointer: number, length: number) => number;
 };
 
 type KernelSuccessResponse<T> = {

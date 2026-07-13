@@ -1,12 +1,5 @@
 import { createHash } from 'node:crypto';
-import {
-    copyFile,
-    mkdir,
-    readdir,
-    readFile,
-    stat,
-    writeFile,
-} from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
@@ -369,23 +362,6 @@ export const runFoundationParserFuzzing = async (): Promise<void> => {
             ...latestProgress,
             retainedArtifacts,
         });
-        await writeFile(
-            path.join(runLog.runDirectoryPath, 'fuzz-diagnostics.json'),
-            `${JSON.stringify(
-                {
-                    campaignDurationMilliseconds,
-                    durationLimitSeconds: durationSeconds,
-                    exitCode,
-                    latestProgress,
-                    retainedArtifacts,
-                    target: 'foundation-schema-object',
-                    toolchain: foundationParserFuzzToolchain,
-                },
-                null,
-                2,
-            )}\n`,
-            'utf8',
-        );
         process.exitCode = exitCode;
     } catch (error) {
         runnerError = error;

@@ -11,7 +11,7 @@ import {
 } from './election-foundation-test-helpers';
 
 describe('first-valid ordering shells', () => {
-    it('orders validated first-valid candidates and deduplicates retransmission', () => {
+    it('orders validated first-valid candidates and deduplicates matching object hashes', () => {
         const recoveryEpochState: RecoveryEpochMapEntry = {
             signerIdentity: 'participant-1',
             currentRecoveryEpoch: 0,
@@ -28,7 +28,6 @@ describe('first-valid ordering shells', () => {
                 deviceEpoch: 0,
                 actionSequence: 0,
                 contextHash,
-                isByteIdenticalRetransmission: false,
             },
             {
                 objectHash: 'object-a',
@@ -40,7 +39,6 @@ describe('first-valid ordering shells', () => {
                 deviceEpoch: 0,
                 actionSequence: 0,
                 contextHash,
-                isByteIdenticalRetransmission: false,
             },
             {
                 objectHash: 'object-a',
@@ -52,7 +50,6 @@ describe('first-valid ordering shells', () => {
                 deviceEpoch: 0,
                 actionSequence: 0,
                 contextHash,
-                isByteIdenticalRetransmission: true,
             },
         ];
         const input: FirstValidOrderingInput = {
@@ -138,7 +135,6 @@ describe('first-valid ordering shells', () => {
                         deviceEpoch: 0,
                         actionSequence: 0,
                         contextHash,
-                        isByteIdenticalRetransmission: false,
                     },
                     {
                         objectHash: 'object-b',
@@ -150,7 +146,6 @@ describe('first-valid ordering shells', () => {
                         deviceEpoch: 0,
                         actionSequence: 1,
                         contextHash,
-                        isByteIdenticalRetransmission: false,
                     },
                 ],
             }).refusedObjects,
@@ -174,7 +169,6 @@ describe('first-valid ordering shells', () => {
             deviceEpoch: 0,
             actionSequence: 0,
             contextHash,
-            isByteIdenticalRetransmission: false,
         };
         const result = deriveValidatedFirstValidOrder({
             requiredContextHash: contextHash,
@@ -201,11 +195,6 @@ describe('first-valid ordering shells', () => {
                     ...baseCandidate,
                     objectHash: '',
                 },
-                {
-                    ...baseCandidate,
-                    objectHash: 'malformed-retransmission-flag',
-                    isByteIdenticalRetransmission: 'yes' as unknown as boolean,
-                },
             ],
         });
 
@@ -222,11 +211,6 @@ describe('first-valid ordering shells', () => {
                     code: 'FirstValidPolicyMismatch',
                     message:
                         'First-valid object string fields must be non-empty canonical strings.',
-                }),
-                expect.objectContaining({
-                    code: 'FirstValidPolicyMismatch',
-                    message:
-                        'First-valid object retransmission flag must be boolean.',
                 }),
             ]),
         );

@@ -149,7 +149,7 @@ fn setup_package_not_reached() -> Value {
 }
 
 fn setup_package_with_seed(setup_seed: &str) -> Value {
-    crate::bgv::commands::generate_bgv_passive_setup_from_request(&json!({
+    crate::bgv::setup::generate_passive_setup_package_from_request(&json!({
         "ceremonyId": "direct-encrypted-ballot-test-ceremony",
         "manifestHash": derive_canonical_object_hash(
             &json!({ "objectType": "ElectionManifestHash", "manifest": "direct encrypted ballot test" }),
@@ -161,9 +161,9 @@ fn setup_package_with_seed(setup_seed: &str) -> Value {
             &json!({ "objectType": "ThresholdParametersHash", "threshold": "direct encrypted ballot test" }),
         ).expect("threshold hash"),
         "participants": [
-            { "trusteeIdentity": "trustee-1", "rosterPosition": 0, "boardPosition": 0 },
-            { "trusteeIdentity": "trustee-2", "rosterPosition": 1, "boardPosition": 1 },
-            { "trusteeIdentity": "trustee-3", "rosterPosition": 2, "boardPosition": 2 }
+            { "trusteeIdentity": "trustee-1", "rosterPosition": 0 },
+            { "trusteeIdentity": "trustee-2", "rosterPosition": 1 },
+            { "trusteeIdentity": "trustee-3", "rosterPosition": 2 }
         ],
         "setupSeed": setup_seed
     }))

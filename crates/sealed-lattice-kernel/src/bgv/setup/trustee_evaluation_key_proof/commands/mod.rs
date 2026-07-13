@@ -112,9 +112,7 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
         vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         vss_public_recipient_share_messages_by_item: Vec::new(),
-        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
@@ -182,9 +180,7 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         proof_bytes,
     )?;
     Ok(json!({
-        "proofFamily": statement.context.proof_family,
         "statementHash": statement_hash,
-        "limbCount": statement.proof_limb_count(),
         "proofBytesHash": proof_bytes_hash,
         "proofMaterialRoot": proof_material_root,
     }))
@@ -250,11 +246,6 @@ pub(crate) fn generate_vss_share_linkage_proof_from_request(
     )?;
     let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
-    let share_linkage_statement = statement
-        .vss_share_linkage
-        .as_ref()
-        .ok_or_else(|| invalid_succinct_setup_proof("share-linkage statement missing"))?;
-
     let proof_bytes_hash = hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
     let proof_material_root = crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
         VSS_SHARE_LINKAGE_PROOF_FAMILY,
@@ -266,11 +257,7 @@ pub(crate) fn generate_vss_share_linkage_proof_from_request(
         proof_bytes,
     )?;
     Ok(json!({
-        "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
-        "limbCount": statement.proof_limb_count(),
-        "coefficientCommitmentCount": share_linkage_statement.total_coefficient_commitment_count(),
-        "coefficientWitnessColumnCount": share_linkage_statement.unique_coefficient_witness_slot_count(),
         "proofBytesHash": proof_bytes_hash,
         "proofMaterialRoot": proof_material_root,
     }))
@@ -279,15 +266,10 @@ pub(crate) fn generate_vss_share_linkage_proof_from_request(
 pub(crate) fn verify_vss_share_linkage_proof_source_from_request(
     request: &Value,
     proof_bytes: &(impl ProofByteSource + ?Sized),
-) -> CanonicalResult<Value> {
+) -> CanonicalResult<()> {
     let statement = vss_share_linkage_statement_from_request(request)?;
     let proof = decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes)?;
-    verify_evaluation_key_share(&statement, &proof)?;
-
-    Ok(json!({
-        "proofFamily": statement.context.proof_family,
-        "statementHash": to_hex(&statement.statement_hash()),
-    }))
+    verify_evaluation_key_share(&statement, &proof)
 }
 
 pub(in crate::bgv::setup) fn vss_share_linkage_proof_verification_binding_hash(
@@ -321,7 +303,7 @@ pub(in crate::bgv::setup) fn verify_and_retain_vss_share_linkage_proof_binding(
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
     proof_material_root: &str,
     verification_request: &Value,
-) -> CanonicalResult<Value> {
+) -> CanonicalResult<()> {
     let proof_bytes = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
         VSS_SHARE_LINKAGE_PROOF_FAMILY,
         proof_material_root,
@@ -340,10 +322,7 @@ pub(in crate::bgv::setup) fn verify_and_retain_vss_share_linkage_proof_binding(
         )?,
         "VSS share-linkage proof material root",
     )?;
-    let verification = verify_vss_share_linkage_proof_source_from_request(
-        verification_request,
-        proof_bytes.as_ref(),
-    )?;
+    verify_vss_share_linkage_proof_source_from_request(verification_request, proof_bytes.as_ref())?;
     drop(proof_bytes);
     crate::bgv::setup::retain_accepted_setup_proof_binding(
         proof_binding_session.session_handle,
@@ -355,7 +334,7 @@ pub(in crate::bgv::setup) fn verify_and_retain_vss_share_linkage_proof_binding(
             verification_request,
         )?,
     )?;
-    Ok(verification)
+    Ok(())
 }
 
 mod bridge_target_commands;

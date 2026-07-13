@@ -14,8 +14,6 @@ import {
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
-const defaultMaxPerIdentity = 1;
-
 // Canonical total order, compared in tuple priority:
 // (boardSequence, boardPosition, actionSequence, objectHash). The objectHash
 // tiebreak guarantees a deterministic order even when the first three match.
@@ -77,17 +75,6 @@ const validateFirstValidObjectShape = (
             ),
         );
     }
-    if (typeof candidate.isByteIdenticalRetransmission !== 'boolean') {
-        refusedObjects.push(
-            createRefusal(
-                'FirstValidPolicyMismatch',
-                'First-valid object retransmission flag must be boolean.',
-                objectHash,
-                objectType,
-            ),
-        );
-    }
-
     return refusedObjects;
 };
 
@@ -208,16 +195,6 @@ const deriveValidatedFirstValidOrderUnchecked = (
         seenConflictKeys.set(conflictKey, candidate);
 
         if (seenObjectHashes.has(candidate.objectHash)) {
-            if (!candidate.isByteIdenticalRetransmission) {
-                refusedObjects.push(
-                    createRefusal(
-                        'DuplicateFirstValidObject',
-                        'Duplicate first-valid object was not marked as byte-identical retransmission.',
-                        candidate.objectHash,
-                        candidate.objectType,
-                    ),
-                );
-            }
             continue;
         }
 
@@ -225,30 +202,15 @@ const deriveValidatedFirstValidOrderUnchecked = (
         deduplicatedCandidates.push(candidate);
     }
 
-    const maxPerIdentity = input.maxPerIdentity ?? defaultMaxPerIdentity;
-    if (!Number.isInteger(maxPerIdentity) || maxPerIdentity < 1) {
-        refusedObjects.push(
-            createRefusal(
-                'FirstValidPolicyMismatch',
-                'First-valid ordering requires a positive maxPerIdentity value.',
-                input.selectionPolicyHash,
-            ),
-        );
-    }
-    // After sorting into canonical order, cap each signer at maxPerIdentity
-    // (default 1) accepted objects per context — enforcing one accepted object
-    // per signer per context, keeping the earliest in canonical order.
-    const countByIdentity = new Map<string, number>();
+    const acceptedIdentities = new Set<string>();
     const orderedCandidates = deduplicatedCandidates
         .sort(compareCandidates)
         .filter((candidate) => {
-            const currentCount =
-                countByIdentity.get(candidate.signerIdentity) ?? 0;
-            if (currentCount >= maxPerIdentity) {
+            if (acceptedIdentities.has(candidate.signerIdentity)) {
                 return false;
             }
 
-            countByIdentity.set(candidate.signerIdentity, currentCount + 1);
+            acceptedIdentities.add(candidate.signerIdentity);
             return true;
         });
     const firstValidOrderHash = deriveFirstValidOrderHash(

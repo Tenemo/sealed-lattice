@@ -1,15 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 use unicode_normalization::UnicodeNormalization;
 
 mod accepted_setup;
 mod canonical_stream_transport;
-mod certificates;
 mod commitment;
 mod evaluation_key_share_material;
 mod input;
 mod key_material;
+mod parameters;
 // The key-switch digit-atom machinery: the limb-group relation substrate and
 // the atom-family proof backend that proves and verifies key-bearing trustee
 // evaluation-key statements (the schedule layer under
@@ -38,29 +38,29 @@ pub(super) const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 #[cfg(test)]
 mod tests;
 
+pub(in crate::bgv) use accepted_setup::derive_collective_setup_package_hash;
 pub(in crate::bgv::setup) use accepted_setup::drain_verified_canonical_public_key_share_materials;
 #[cfg(test)]
 pub(in crate::bgv::setup) use accepted_setup::evict_verified_canonical_public_key_share_materials;
 pub(crate) use accepted_setup::{
-    accepted_setup_participant_roster_from_package,
-    derive_collective_bgv_setup_public_derivations_from_request,
-    describe_collective_bgv_setup_parameters,
+    accepted_setup_participant_roster_from_package, describe_collective_bgv_setup_parameters,
     describe_collective_bgv_setup_parameters_for_participant_count,
     verify_collective_bgv_setup_package_in_session_from_request,
 };
+#[cfg(test)]
+pub(crate) use canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_AGGREGATE_OPENING;
 pub(in crate::bgv::setup) use canonical_stream_transport::{
     AcceptedSetupMaterialStore, AcceptedSetupProofBindingSession,
     accepted_setup_session_owns_material_root,
     authenticated_setup_proof_material_stream_summary_in_session,
-    authenticated_setup_transport_accounting, consume_accepted_setup_proof_binding,
-    evict_verified_canonical_setup_proof_materials, finish_accepted_setup_proof_binding_session,
-    verified_canonical_setup_proof_material_bytes,
+    consume_accepted_setup_proof_binding, evict_verified_canonical_setup_proof_materials,
+    finish_accepted_setup_proof_binding_session, verified_canonical_setup_proof_material_bytes,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use canonical_stream_transport::{
     CanonicalSetupProofBindingLease, accepted_setup_fixture_proof_binding_lease,
-    accepted_setup_fixture_proof_binding_stream_summary, accepted_setup_proof_binding_lease,
-    accepted_setup_proof_binding_stream_summary, authenticated_setup_proof_material_stream_summary,
+    accepted_setup_proof_binding_lease, accepted_setup_proof_binding_stream_summary,
+    authenticated_setup_proof_material_stream_summary,
     begin_accepted_setup_fixture_proof_binding_session,
     cache_accepted_setup_fixture_proof_binding_lease, restore_accepted_setup_proof_binding_lease,
     retain_accepted_setup_proof_binding,
@@ -119,7 +119,7 @@ pub(crate) use vss_commitment::{
     VssCommittedMaterialCommitmentInput, compute_vss_committed_material_commitment,
 };
 // The target-decryption secret-share domain label, bound identically into the
-// target-decryption parameters certificate and the threshold-verification
+// target-decryption parameter record and the threshold-verification
 // material so the two records describe the same secret-share space.
 pub(in crate::bgv::setup) const SECRET_SHARE_DOMAIN: &str =
     "BGV-RNS-secret-share-polynomial-over-selected-Q-data";
@@ -142,11 +142,11 @@ pub(in crate::bgv::setup) fn accepted_setup_final_package_material_store_checkpo
         .join("accepted-setup-final-package-material-store")
 }
 
+use sampling::{dense_public_residues, sample_public_residues};
 use sampling::{
-    dense_public_residues, negacyclic_product_mod,
-    sample_bounded_collective_error_share_distribution,
-    sample_bounded_collective_secret_share_distribution, sample_positions, sample_public_residues,
-    signed_to_modulus_residue, signed_to_plaintext_scaled_residue,
+    negacyclic_product_mod, sample_bounded_collective_error_share_distribution,
+    sample_bounded_collective_secret_share_distribution, signed_to_modulus_residue,
+    signed_to_plaintext_scaled_residue,
 };
 
 use crate::bgv::evaluator::key_switch::key_switch_key_from_public_component_b;
@@ -157,31 +157,32 @@ use crate::{
             key_switch::KeySwitchKey,
             records::MAXIMUM_OPTION_COUNT,
         },
-        modular_arithmetic::{add_mod, mul_mod, sub_mod},
-        ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
-        parameters::{
-            BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash,
-        },
+        modular_arithmetic::add_mod,
+        parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         setup_helpers::{
-            array_at_path, compare_derived_hash, compare_expected_string, compare_hash_at_path,
-            compare_string_at_path, hash_at_path, integer_at_path, read_hash_field,
-            read_non_empty_string, read_optional_u64, read_optional_usize, string_at_path,
-            unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
+            array_at_path, compare_derived_hash, compare_hash_at_path, compare_string_at_path,
+            hash_at_path, integer_at_path, read_non_empty_string, read_optional_u64,
+            string_at_path, unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, chunk_root, derive_canonical_object_hash, hash512, hash512_hex},
+    hashing::{canonical_json, derive_canonical_object_hash, hash512, hash512_hex},
+};
+
+use crate::bgv::setup_helpers::{compare_expected_string, read_hash_field, read_optional_usize};
+use crate::bgv::{
+    modular_arithmetic::{mul_mod, sub_mod},
+    ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
+    parameters::PLAINTEXT_MODULUS,
 };
 
 const MAXIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 50;
 const MINIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 3;
-const EVALUATION_KEY_CHUNK_SIZE_BYTES: usize = 262_144;
 
 #[derive(Clone)]
 struct SetupParticipant {
     trustee_identity: String,
     roster_position: usize,
-    board_position: usize,
     recovery_epoch: u64,
     device_epoch: u64,
 }
@@ -192,7 +193,6 @@ struct PassiveSetupInput {
     manifest_hash: String,
     roster_hash: String,
     threshold_parameters_hash: String,
-    setup_seed_provided: bool,
     setup_seed_hash: String,
     private_setup_seed_hash: String,
     participants: Vec<SetupParticipant>,
@@ -285,7 +285,7 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
     compare_expected_string(
         request,
         "expectedRotSetHash",
-        string_at_path(setup_package, &["evaluationKeys", "rotSetHash"])?,
+        string_at_path(setup_package, &["evaluationKeys", "record", "rotSetHash"])?,
         "rotation set hash",
     )?;
     compare_expected_string(
@@ -404,20 +404,11 @@ pub(crate) fn accepted_setup_target_decryption_setup_parameters_hash(
 // functions of the bound BGV parameters (level 6, K_top = 20 target scope), not
 // caller-supplied package fields, so the target-decryption reader recomputes
 // them rather than trusting a passive `targetDecryptionParameters` block.
-pub(crate) fn canonical_target_decryption_parameter_hashes() -> CanonicalResult<(String, String)> {
+pub(crate) fn canonical_target_decryption_parameters_hash() -> CanonicalResult<String> {
     let bgv_parameters_hash = bgv_parameters_hash()?;
     let target_decryption_parameters =
-        certificates::target_decryption_parameters(&bgv_parameters_hash)?;
-    let target_decryption_parameters_hash =
-        derive_canonical_object_hash(&target_decryption_parameters)?;
-    let target_decryption_parameters_binding_hash = derive_canonical_object_hash(&json!({
-        "objectType": "TargetDecryptionParametersBinding",
-        "targetDecryptionParametersHash": target_decryption_parameters_hash,
-    }))?;
-    Ok((
-        target_decryption_parameters_hash,
-        target_decryption_parameters_binding_hash,
-    ))
+        parameters::target_decryption_parameters(&bgv_parameters_hash)?;
+    derive_canonical_object_hash(&target_decryption_parameters)
 }
 
 use input::read_passive_setup_input;

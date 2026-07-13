@@ -40,8 +40,6 @@ pub(super) fn rebind_collective_private_vss_envelope_commitment_root(
     )
     .expect("private VSS envelope commitment root");
     package["privateVssEnvelopeCommitments"]["privateVssEnvelopeCommitmentRoot"] =
-        serde_json::json!(private_vss_envelope_commitment_root.clone());
-    package["privateVssEnvelopeCommitmentRoot"] =
         serde_json::json!(private_vss_envelope_commitment_root);
 }
 
@@ -91,14 +89,8 @@ pub(super) fn private_vss_envelope_commitment_set_root_input(
 pub(super) fn rebind_first_private_vss_encrypted_envelope_hash(package: &mut serde_json::Value) {
     let encrypted_envelope =
         &mut package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"];
-    encrypted_envelope
-        .as_object_mut()
-        .expect("encrypted envelope")
-        .remove("encryptedEnvelopeHash");
     let encrypted_envelope_hash =
         derive_canonical_object_hash(encrypted_envelope).expect("encrypted envelope hash");
-    encrypted_envelope["encryptedEnvelopeHash"] =
-        serde_json::json!(encrypted_envelope_hash.clone());
     package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelopeHash"] =
         serde_json::json!(encrypted_envelope_hash);
 }
@@ -146,8 +138,6 @@ pub(super) fn rebind_collective_public_key_root(package: &mut serde_json::Value)
         derive_canonical_object_hash(&package["collectivePublicKey"])
             .expect("collective public-key root")
     );
-    package["collectivePublicKeyRoot"] =
-        package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
 }
 
 pub(super) fn rebind_collective_public_key_share_roots(package: &mut serde_json::Value) {

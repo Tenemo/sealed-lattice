@@ -8,6 +8,7 @@ import {
     bytesFromHex,
     bytesToHex,
 } from '../common-fields.js';
+export { coefficientVectorFromLittleEndianHex } from '../coefficient-vector-encoding.js';
 
 import {
     type EvaluationKeyShareMaterial,
@@ -110,37 +111,6 @@ export const freshProofRandomnessHex = (): string => {
     return bytesToHex(bytes);
 };
 
-export const coefficientVectorFromLittleEndianHex = (
-    coefficientsLeHex: string,
-    expectedCoefficientCount: number,
-    fieldName: string,
-): readonly number[] => {
-    const coefficientBytes = bytesFromHex(coefficientsLeHex, fieldName);
-    if (coefficientBytes.byteLength !== expectedCoefficientCount * 8) {
-        throw new Error(`${fieldName} byte length must match ringDegree.`);
-    }
-
-    return Array.from(
-        { length: expectedCoefficientCount },
-        (_unused, coefficientIndex) => {
-            let coefficient = 0n;
-            for (let byteOffset = 7; byteOffset >= 0; byteOffset -= 1) {
-                coefficient <<= 8n;
-                coefficient |= BigInt(
-                    coefficientBytes[coefficientIndex * 8 + byteOffset] ?? 0,
-                );
-            }
-            if (coefficient > BigInt(Number.MAX_SAFE_INTEGER)) {
-                throw new Error(
-                    `${fieldName} contains a coefficient outside the JavaScript safe integer range.`,
-                );
-            }
-
-            return Number(coefficient);
-        },
-    );
-};
-
 const coefficientVectorBytes = (
     coefficients: readonly number[],
 ): Uint8Array => {
@@ -200,8 +170,6 @@ export const evaluationKeyShareComponentVectorRoot = (
         keySwitchSeedHex,
         level,
         ringDegree,
-        digitCount: level + 1,
-        rnsLimbCount: level + 1,
         componentVectors,
     });
 
@@ -222,8 +190,6 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
         keySwitchSeedHex: shareMaterial.keySwitchSeedHex,
         level,
         ringDegree: shareMaterial.ringDegree,
-        digitCount: level + 1,
-        rnsLimbCount: level + 1,
         keySwitchComponentVectorRoot:
             shareMaterial.keySwitchComponentVectorRoot,
     });

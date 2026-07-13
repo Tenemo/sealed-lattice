@@ -41,17 +41,18 @@ pub(in super::super) fn verify_vss_share_acceptances(
     }
 
     let private_vss_envelope_commitment_root = setup_package
-        .get("privateVssEnvelopeCommitmentRoot")
+        .get("privateVssEnvelopeCommitments")
+        .and_then(|commitments| commitments.get("privateVssEnvelopeCommitmentRoot"))
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "privateVssEnvelopeCommitmentRoot was required before VSS share acceptance verification",
+                "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot was required before VSS share acceptance verification",
             )
         })?;
     validate_hash_string(
         private_vss_envelope_commitment_root,
-        "privateVssEnvelopeCommitmentRoot",
+        "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
     )?;
     if acceptance_set
         .get("privateVssEnvelopeCommitmentRoot")
@@ -60,7 +61,7 @@ pub(in super::super) fn verify_vss_share_acceptances(
     {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptancePrivateEnvelopeRootMismatch",
-            "vssShareAcceptances.privateVssEnvelopeCommitmentRoot must match setupPackage.privateVssEnvelopeCommitmentRoot",
+            "vssShareAcceptances.privateVssEnvelopeCommitmentRoot must match privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
             "setupPackage.vssShareAcceptances.privateVssEnvelopeCommitmentRoot",
         )?));
     }
@@ -201,7 +202,7 @@ fn verify_vss_share_acceptance_record(
     {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptancePrivateEnvelopeRootMismatch",
-            "VSS share acceptance must bind setupPackage.privateVssEnvelopeCommitmentRoot",
+            "VSS share acceptance must bind privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
             "setupPackage.vssShareAcceptances.acceptanceRecords.privateVssEnvelopeCommitmentRoot",
         )?));
     }
@@ -452,72 +453,8 @@ fn verify_vss_share_acceptance_record(
         )?));
     }
 
-    let expected_byte_length =
-        u64::try_from(canonical_json(&acceptance_payload)?.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS share acceptance payload byte length does not fit u64",
-            )
-        })?;
-    let Some(acceptance_byte_length) = acceptance_record
-        .get("acceptanceByteLength")
-        .and_then(Value::as_u64)
-    else {
-        return Ok(Some(verification_response(
-            Some("vssAcceptanceOrComplaint"),
-            vec!["vssShareAcceptances.acceptanceRecords.acceptanceByteLength".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
-    };
-    if acceptance_byte_length != expected_byte_length {
-        return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceByteLengthMismatch",
-            "VSS share acceptance byte length does not match the canonical acceptance payload",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.acceptanceByteLength",
-        )?));
-    }
-
     let expected_context_hash =
         vss_share_acceptance_signature_context_hash(acceptance_record, acceptance_root)?;
-    let Some(acceptance_context_hash) = acceptance_record
-        .get("acceptanceContextHash")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(verification_response(
-            Some("vssAcceptanceOrComplaint"),
-            vec!["vssShareAcceptances.acceptanceRecords.acceptanceContextHash".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
-    };
-    validate_hash_string(
-        acceptance_context_hash,
-        "vssShareAcceptances.acceptanceRecords.acceptanceContextHash",
-    )?;
-    if acceptance_context_hash != expected_context_hash {
-        return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceContextHashMismatch",
-            "VSS share acceptance context hash does not match the signed acceptance binding",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.acceptanceContextHash",
-        )?));
-    }
-
-    let Some(signature_envelope_hash) = acceptance_record
-        .get("signatureEnvelopeHash")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(verification_response(
-            Some("vssAcceptanceOrComplaint"),
-            vec!["vssShareAcceptances.acceptanceRecords.signatureEnvelopeHash".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
-    };
-    validate_hash_string(
-        signature_envelope_hash,
-        "vssShareAcceptances.acceptanceRecords.signatureEnvelopeHash",
-    )?;
     let Some(signature_envelope) = acceptance_record.get("signatureEnvelope") else {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptanceSignatureMissing",
@@ -539,20 +476,13 @@ fn verify_vss_share_acceptance_record(
             object_root: Some(acceptance_root),
             chunk_merkle_root: None,
             board_head_hash: None,
-            context_hash: acceptance_context_hash,
+            context_hash: &expected_context_hash,
             recovery_epoch,
             device_epoch,
         },
     )?;
     match verification {
-        Ok(verified_signature_hash) if verified_signature_hash == signature_envelope_hash => {
-            Ok(None)
-        }
-        Ok(_) => Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceSignatureHashMismatch",
-            "VSS share acceptance signature envelope hash does not match the verified envelope",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.signatureEnvelopeHash",
-        )?)),
+        Ok(()) => Ok(None),
         Err(failure) => Ok(Some(vss_share_acceptance_refusal(
             failure.reason_code,
             failure.message,

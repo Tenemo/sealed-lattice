@@ -245,8 +245,7 @@ fn aggregate_threshold_commitment_set_rejects_a_rebound_noncanonical_rns_prime()
 }
 
 #[test]
-fn aggregate_threshold_statement_root_is_recomputed_from_recognized_fields() -> CanonicalResult<()>
-{
+fn aggregate_threshold_statement_root_rejects_changed_bound_fields() -> CanonicalResult<()> {
     let statement_without_root = json!({
         "objectType": "VssShareLinkageStatement",
         "isThresholdAggregate": true,
@@ -282,13 +281,6 @@ fn aggregate_threshold_statement_root_is_recomputed_from_recognized_fields() -> 
         verify_vss_aggregate_threshold_statement_root(&statement)?,
         expected_statement_root,
         "the canonical aggregate statement must round-trip through root verification"
-    );
-
-    statement["unrecognizedRelayMetadata"] = json!({ "ignored": true });
-    assert_eq!(
-        verify_vss_aggregate_threshold_statement_root(&statement)?,
-        expected_statement_root,
-        "unrecognized relay metadata must not influence the accepted statement"
     );
 
     statement["recipientIdentity"] = json!("trustee-2");
@@ -356,10 +348,8 @@ fn share_linkage_bindings_command_verifies_bound_roots() -> CanonicalResult<()> 
         "evidence-backed linkage verification must reject a source root absent from the recipient-share set"
     );
 
-    // The "T = sum" aggregate binding is no longer a public homomorphic sum
-    // checked here; it is a threshold-aggregate proof verified on the
-    // accepted-setup material path. The statement evidence check binds only the
-    // committed roots across the sets.
+    // This check binds the committed roots across the sets. The accepted-setup
+    // material path verifies the threshold-aggregate relation itself.
 
     let mut tampered_statement = statement;
     tampered_statement["aggregateThresholdCommitmentRoot"] = json!("8".repeat(128));

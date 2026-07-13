@@ -3,7 +3,6 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     assertContextMatches,
-    assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
@@ -18,22 +17,16 @@ import type { CollectiveBgvSetupContext } from './vss-share-verification-records
 
 export type RelinearizationLevelScheduleEntry = Readonly<{
     readonly level: number;
-    readonly proofFamily: 'relinearization-key-share';
-    readonly keyShareRounds: readonly ['round-one', 'round-two'];
 }>;
 
 export type RequiredGaloisKeyScheduleEntry = Readonly<{
     readonly rotation: number;
     readonly level: number;
-    readonly purpose: string;
-    readonly proofFamily: 'galois-key-share';
 }>;
 
-export type RequiredGaloisSet = Readonly<
+type RequiredGaloisSet = Readonly<
     JsonRecord & {
         readonly objectType: 'RequiredGaloisSet';
-        readonly evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay';
-        readonly packingScheme: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
         readonly rnsLimbCount: number;
         readonly entries: readonly RequiredGaloisKeyScheduleEntry[];
     }
@@ -42,8 +35,6 @@ export type RequiredGaloisSet = Readonly<
 export type EvaluatorKeySchedule = Readonly<
     JsonRecord & {
         readonly objectType: 'EvaluatorKeySchedule';
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
         readonly galoisKeyCrpRoot: ProtocolHash;
@@ -56,7 +47,7 @@ export type EvaluatorKeySchedule = Readonly<
     }
 >;
 
-export type EvaluatorKeyScheduleInput = {
+type EvaluatorKeyScheduleInput = {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly qSharePrimes: readonly number[];
     readonly participantCount: number;
@@ -82,12 +73,6 @@ const validateRequiredGaloisSchedule = (
     sortedEntries.forEach((entry) => {
         assertPositiveSafeInteger(entry.rotation, 'rotation');
         assertNonNegativeSafeInteger(entry.level, 'level');
-        assertNonEmptyString(entry.purpose, 'purpose');
-        if (entry.proofFamily !== 'galois-key-share') {
-            throw new Error(
-                'requiredGaloisKeySchedule proofFamily must be galois-key-share.',
-            );
-        }
         const key = `${String(entry.rotation)}:${String(entry.level)}`;
         if (seenKeys.has(key)) {
             throw new Error(
@@ -108,9 +93,6 @@ export const createRequiredGaloisSet = (
 
     return {
         objectType: 'RequiredGaloisSet',
-        evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay',
-        packingScheme:
-            'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing',
         rnsLimbCount,
         entries: validateRequiredGaloisSchedule(entries),
     };
@@ -119,11 +101,10 @@ export const createRequiredGaloisSet = (
 // The selected evaluator working level: every evaluation key is generated at
 // this level and lower-level uses reuse the same key through CRT-idempotent
 // truncation, so the frozen schedule carries one relinearization entry per
-// round and no per-level entries. Mirrors the kernel evaluator constant
-// (raised to 16 with the comparison-input cleaning fix).
+// round and no per-level entries. This must match the kernel evaluator constant.
 export const selectedEvaluatorWorkingLevel = 16;
 
-export const createRelinearizationLevelSchedule = (
+const createRelinearizationLevelSchedule = (
     rnsLimbCount: number,
 ): RelinearizationLevelScheduleEntry[] => {
     assertPositiveSafeInteger(rnsLimbCount, 'rnsLimbCount');
@@ -133,13 +114,7 @@ export const createRelinearizationLevelSchedule = (
         );
     }
 
-    return [
-        {
-            level: selectedEvaluatorWorkingLevel,
-            proofFamily: 'relinearization-key-share',
-            keyShareRounds: ['round-one', 'round-two'],
-        },
-    ];
+    return [{ level: selectedEvaluatorWorkingLevel }];
 };
 
 export const createEvaluatorKeySchedule = (
@@ -190,8 +165,6 @@ export const createEvaluatorKeySchedule = (
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
         ...contextFields(input.setupContext),
-        participantCount: input.participantCount,
-        rnsLimbCount,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         relinearizationCrpRoot: input.relinearizationCrpRoot,
         galoisKeyCrpRoot: input.galoisKeyCrpRoot,

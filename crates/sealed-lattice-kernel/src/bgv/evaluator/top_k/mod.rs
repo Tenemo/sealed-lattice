@@ -45,21 +45,14 @@ pub(crate) const TIE_POLICY: &str = "higher-sum-first-then-lower-option-index";
 // the packing/forward rotation keys are generated here (lower levels use the
 // same keys through CRT-idempotent truncation).
 pub(crate) const SELECTED_EVALUATOR_WORKING_LEVEL: usize = 16;
-// Level 16 uses the full data basis. The packing construction leaves the
-// comparison input structurally noisy (about 87 bits before any switch,
-// measured), and the deferred comparison evaluation only decodes when its
-// input noise sits under a ceiling near 22 bits at the foundation-profile domain,
-// so the multi-ballot pipeline spends two modulus switches after packing (the
-// refresh plus one cleaning switch, reaching the switch noise floor) and runs
-// the depth-8 comparison from level 14 down to the level-6 output; the rank
-// lookup budget below level 6 is unchanged. Baby-step 5 is about sqrt of the
-// rank-lookup degree; generator 3 generates the order-N/2 subgroup of odd
-// residues mod 2N.
+// Two post-packing modulus switches followed by the depth-eight comparison take
+// the selected level-16 pipeline to the level-6 output.
 pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
 // The canonical target ciphertext basis: the direct-comparison output level and
 // its data-prime prefix. Setup-time statements (the same-secret bridge) pin their
 // target-basis binding to this one canonical object.
 pub(crate) const CANONICAL_TARGET_CIPHERTEXT_LEVEL: usize = DIRECT_COMPARISON_OUTPUT_LEVEL;
+// Five is near the square root of the degree-19 rank lookup.
 pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
 
 pub(crate) fn canonical_target_basis_primes() -> &'static [u64] {
@@ -91,7 +84,6 @@ pub(crate) struct PackedRankEvaluation {
     pub(crate) packed_ranks: Ciphertext,
 }
 
-// Encrypted sparse target projection result.
 pub(crate) struct EncryptedSparseTarget {
     pub(crate) target_id: Ciphertext,
     pub(crate) target_order: Ciphertext,

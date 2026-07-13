@@ -69,13 +69,10 @@ fn synthetic_key(
     (secret, digits, public)
 }
 
-// The univariate-sumcheck helper `g` must have degree <= trace_size - 2, or a
-// prover can absorb a false sum in the spare coefficient `g_{trace_size-1}`.
-// The fix re-enters `g` into the combined FRI shifted by
-// `g_degree_adjustment_shift` (= trace_size + 1), so the shared coset bound
-// (2 * trace_size) rejects any `g` above that degree. This pins the exact
-// boundary: an honest-degree `g` (trace_size - 2) lands at the bound and
-// passes; a degree-(trace_size - 1) `g` reaches 2 * trace_size and FRI rejects.
+// The univariate-sumcheck helper `g` must have degree at most trace_size - 2;
+// otherwise its spare top coefficient can absorb a false sum. Shifting `g` by
+// `g_degree_adjustment_shift` makes the shared FRI bound enforce that exact
+// boundary.
 #[test]
 fn g_degree_adjustment_rejects_helper_above_the_sumcheck_bound() {
     let parameters = sixteen_limb_group_field_parameters();
@@ -286,9 +283,8 @@ fn one_tampered_digit_error_is_caught_by_the_batch() {
 
 #[test]
 fn honest_committed_component_material_verifies() {
-    // Committing exactly the public material - what the production path always
-    // does - proves and verifies through the dedicated material commitment and
-    // its sumcheck material forms, both unmasked and masked.
+    // The prover commits the public material through its dedicated material
+    // columns and sumcheck forms, both unmasked and masked.
     let parameters = sixteen_limb_group_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) = synthetic_key(ring_degree, 4);
@@ -340,16 +336,10 @@ fn honest_committed_component_material_verifies() {
 
 #[test]
 fn tampered_committed_component_material_is_rejected_by_the_relation() {
-    // The committed material column `B_col_j` is load-bearing: the batched
-    // sumcheck folds it on its left-hand side with `delta_j * gamma`, so it is
-    // the only thing standing in for `B_j` in the atom congruence
-    // `B + A(*)s - t e - G source - Q c = 0`. A proof that commits material
-    // differing from the correct component in a single coefficient - while the
-    // witness, the transcript-bound public data, and every other column are
-    // untouched - is refused: the relation no longer holds, so the sumcheck
-    // remainder constant misses the target and the prover cannot form the
-    // sumcheck (or the verifier's sumcheck query check rejects it). This
-    // exercises the relation binding that replaced the removed per-digit pin.
+    // The batched sumcheck folds committed `B_col_j` with `delta_j * gamma` on
+    // the left side of `B + A(*)s - t e - G source - Q c = 0`. Changing one
+    // coefficient therefore breaks the relation even when every other column
+    // and transcript-bound input is unchanged.
     let parameters = sixteen_limb_group_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) = synthetic_key(ring_degree, 4);
@@ -412,9 +402,7 @@ fn out_of_range_carry_is_rejected() {
     // range table, so its lookup fraction has no matching table term and the
     // multiset balance (the sumcheck-bound terminals plus their cross-check)
     // fails, so the prover or verifier rejects. This guards the carry range
-    // against silently admitting a carry large enough to break the field
-    // no-wrap exactness bound - the exact failure the reverted base-4
-    // decomposition had.
+    // against admitting a carry large enough to break the field no-wrap bound.
     use super::super::super::negacyclic_transform::NegacyclicDomain;
     let parameters = sixteen_limb_group_field_parameters();
     let ring_degree = 64;
@@ -428,7 +416,7 @@ fn out_of_range_carry_is_rejected() {
     let plaintext_modulus = parameters.unsigned_word_to_element(65_537);
     let error: Vec<i64> = (0..ring_degree).map(|i| ((i * 5) % 5) as i64 - 2).collect();
     let mut carry: Vec<i64> = (0..ring_degree).map(|i| (i % 3) as i64 - 1).collect();
-    // Well beyond |c| <= N+1 and beyond the representable decomposition range.
+    // Well beyond `|c| <= N+1` and the relation's no-wrap bound.
     carry[3] = (ring_degree as i64) * 3;
     let error_field: Vec<[u64; 13]> = error
         .iter()

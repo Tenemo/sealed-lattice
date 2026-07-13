@@ -1,12 +1,7 @@
-export {
-    canonicalJson,
-    hash512Hex,
-    setupProofMaterialFullObjectHashHex,
-} from './canonical-json.js';
+export { canonicalJson, hash512Hex } from './canonical-json.js';
 export { deriveCanonicalObjectHash } from './hashes.js';
 export {
     deriveMlDsaPublicKeyHash,
-    deriveProtocolSignatureHash,
     verifySignedObjectSignature,
 } from './signatures.js';
 export type { SignatureExpectation } from './signatures.js';

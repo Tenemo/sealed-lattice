@@ -156,15 +156,6 @@ fn verify_public_key_share_record(
             "setupPackage.publicKeyShares.shareRecords",
         )?));
     }
-    for (field_name, expected_value) in [("shareComponent", "component-zero-b_i")] {
-        if share_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_refusal(
-                "publicKeyShareParametersMismatch",
-                format!("public-key share {field_name} must be {expected_value}"),
-                format!("setupPackage.publicKeyShares.shareRecords.{field_name}"),
-            )?));
-        }
-    }
     if share_record.get("rnsLimbCount").and_then(Value::as_u64) != Some(DATA_PRIMES.len() as u64) {
         return Ok(Some(public_key_refusal(
             "publicKeyShareRnsLimbCountMismatch",

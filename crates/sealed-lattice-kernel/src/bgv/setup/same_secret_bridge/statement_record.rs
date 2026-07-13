@@ -53,37 +53,6 @@ pub(super) fn verify_statement_record(
             })
         })
         .collect::<Vec<_>>();
-    compare_required_string(
-        string_at_path(input.statement_record, &["dataBasisRelation"])?,
-        SAME_SECRET_RELATION,
-        "VSS same-secret bridge statement dataBasisRelation",
-    )?;
-    compare_required_string(
-        string_at_path(input.statement_record, &["integerSupport"])?,
-        VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
-        "VSS same-secret bridge statement integerSupport",
-    )?;
-    compare_required_string(
-        string_at_path(input.statement_record, &["signedRepresentativeConvention"])?,
-        VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
-        "VSS same-secret bridge statement signedRepresentativeConvention",
-    )?;
-    compare_required_string(
-        string_at_path(input.statement_record, &["vssPublicCommitmentEncoding"])?,
-        VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "VSS same-secret bridge statement vssPublicCommitmentEncoding",
-    )?;
-    compare_required_string(
-        string_at_path(input.statement_record, &["qShareLimbOrder"])?,
-        VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
-        "VSS same-secret bridge statement qShareLimbOrder",
-    )?;
-    compare_required_string(
-        string_at_path(input.statement_record, &["relation"])?,
-        VSS_SAME_SECRET_BRIDGE_RELATION,
-        "VSS same-secret bridge statement relation",
-    )?;
-
     let target_constant_roots = array_at_path(
         input.statement_record,
         &["targetConstantCoefficientCommitmentRoots"],
@@ -337,15 +306,9 @@ pub(super) fn verify_statement_record(
         "ringDegree": input.ring_degree,
         "trusteeIdentity": trustee_identity,
         "trusteeRosterPosition": input.expected_position,
-        "dataBasisRelation": SAME_SECRET_RELATION,
-        "integerSupport": VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
-        "signedRepresentativeConvention": VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
-        "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "qShareLimbOrder": VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
         "sourceConstantCoefficientCommitments": verified_source_constant_commitments,
         "targetConstantCoefficientCommitmentRoots": verified_target_constant_roots,
         "targetConstantCoefficientCommitments": verified_target_constant_commitments,
-        "relation": VSS_SAME_SECRET_BRIDGE_RELATION,
     }))?;
     let statement_root = hash_at_path(input.statement_record, &["sameSecretBridgeStatementRoot"])?;
     if expected_statement_root != statement_root {
@@ -369,15 +332,9 @@ pub(super) fn verify_statement_record(
         "ringDegree": input.ring_degree,
         "trusteeIdentity": trustee_identity,
         "trusteeRosterPosition": input.expected_position,
-        "dataBasisRelation": SAME_SECRET_RELATION,
-        "integerSupport": VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
-        "signedRepresentativeConvention": VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
-        "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "qShareLimbOrder": VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
         "sourceConstantCoefficientCommitments": verified_source_constant_commitments,
         "targetConstantCoefficientCommitmentRoots": verified_target_constant_roots,
         "targetConstantCoefficientCommitments": verified_target_constant_commitments,
-        "relation": VSS_SAME_SECRET_BRIDGE_RELATION,
         "sameSecretBridgeStatementRoot": statement_root,
     }))
 }

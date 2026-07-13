@@ -1,10 +1,4 @@
-// Requires Docker. Builds and runs the development-only Lattigo Docker oracle
-// against the committed canonical RNS fixtures to cross-check sealed-lattice
-// BGV-RNS ring, RNS, NTT, and coefficient arithmetic. This oracle is a
-// developer sanity tool: its build, output, and any roots it prints are never
-// runtime code, public SDK inputs, or protocol evidence. The pinned Lattigo
-// module version and checksums live in tools/lattigo-oracle/go.mod + go.sum.
-import { writeFile } from 'node:fs/promises';
+// Docker-backed Lattigo cross-check of the canonical BGV-RNS fixtures.
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
@@ -238,19 +232,6 @@ export const runLattigoOracle = async (): Promise<void> => {
             inspectSignal: inspection.terminationSignal,
             runExitCode: exitCode,
         };
-        await writeFile(
-            path.join(runLog.runDirectoryPath, 'oracle-diagnostics.json'),
-            `${JSON.stringify(
-                {
-                    ...diagnostics,
-                    objectVersion:
-                        'sealed-lattice-lattigo-oracle-diagnostics-v1',
-                },
-                null,
-                2,
-            )}\n`,
-            'utf8',
-        );
         writeEvent('oracle-container-finished', diagnostics);
         process.exitCode = exitCode;
     } catch (error) {

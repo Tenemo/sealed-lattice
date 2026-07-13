@@ -137,29 +137,15 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
 #[test]
 fn target_decryption_share_proof_bytes_round_trips_and_rejects_tampering() {
     let generate_request = target_decryption_share_command_request();
-    let generated =
+    let proof_bytes =
         super::generate_target_decryption_share_proof_bytes_from_request(&generate_request)
             .expect("generate target-decryption share proof bytes");
-    assert_eq!(generated.target_roles, vec!["targetId", "targetOrder"]);
-    assert_eq!(generated.target_rns_limb_indices, vec![0, 1, 2, 3, 4]);
-    assert!(!generated.proof_bytes.is_empty());
+    assert!(!proof_bytes.is_empty());
 
     let verify_request = target_decryption_share_verification_request(&generate_request);
-    let verified = super::verify_target_decryption_share_proof_bytes_from_request(
-        &verify_request,
-        &generated.proof_bytes,
-    )
-    .expect("verify target-decryption share proof bytes");
-    assert_eq!(verified["proofFamily"], json!("target-decryption-share"));
-    assert_eq!(verified["limbCount"], json!(5));
-    assert_eq!(
-        verified["statementHash"]
-            .as_str()
-            .expect("statement hash")
-            .len(),
-        128
-    );
-    let mut tampered_proof_bytes = generated.proof_bytes.clone();
+    super::verify_target_decryption_share_proof_bytes_from_request(&verify_request, &proof_bytes)
+        .expect("verify target-decryption share proof bytes");
+    let mut tampered_proof_bytes = proof_bytes.clone();
     let flip_position = tampered_proof_bytes.len() / 2;
     tampered_proof_bytes[flip_position] ^= 1;
     assert!(
@@ -171,19 +157,7 @@ fn target_decryption_share_proof_bytes_round_trips_and_rejects_tampering() {
         "tampered target-decryption proof bytes must reject"
     );
 
-    let mut tampered_aggregate_commitment_request = verify_request.clone();
-    tampered_aggregate_commitment_request["targetDecryptionShare"]["targetRnsLimbStatements"][0]
-        ["aggregateCommitment"]["commitmentFields"][0]["materialRootHex"] = json!("00".repeat(32));
-    assert!(
-        super::verify_target_decryption_share_proof_bytes_from_request(
-            &tampered_aggregate_commitment_request,
-            &generated.proof_bytes
-        )
-        .is_err(),
-        "tampering with the aggregate commitment material root must reject before proof verification"
-    );
-
-    let mut tampered_partial_request = verify_request.clone();
+    let mut tampered_partial_request = verify_request;
     let target_prime = tampered_partial_request["targetDecryptionShare"]["targetRnsLimbStatements"]
         [0]["targetRnsPrime"]
         .as_u64()
@@ -197,71 +171,10 @@ fn target_decryption_share_proof_bytes_round_trips_and_rejects_tampering() {
     assert!(
         super::verify_target_decryption_share_proof_bytes_from_request(
             &tampered_partial_request,
-            &generated.proof_bytes
+            &proof_bytes
         )
         .is_err(),
         "tampering with the released partial must reject proof verification"
-    );
-
-    let mut tampered_smudging_set_request = verify_request;
-    tampered_smudging_set_request["targetDecryptionShare"]["smudgingCommitmentSet"]["smudgingCoefficientBound"] =
-        json!(15);
-    assert!(
-        super::verify_target_decryption_share_proof_bytes_from_request(
-            &tampered_smudging_set_request,
-            &generated.proof_bytes
-        )
-        .is_err(),
-        "tampering with the smudging commitment set payload must reject its root"
-    );
-
-    let mut missing_limb_request = generate_request.clone();
-    missing_limb_request["targetDecryptionShare"]
-        .as_object_mut()
-        .expect("target-decryption share")
-        .remove("targetRnsLimbStatements");
-    let error =
-        super::generate_target_decryption_share_proof_bytes_from_request(&missing_limb_request)
-            .expect_err("missing target limb statements must reject before proving");
-    assert!(
-        error
-            .message
-            .contains("targetRnsLimbStatements must be present"),
-        "unexpected missing target limb statement error: {}",
-        error.message
-    );
-
-    let mut missing_role_request = generate_request.clone();
-    missing_role_request["targetDecryptionShare"]["targetRnsLimbStatements"][0]
-        .as_object_mut()
-        .expect("target limb statement")
-        .remove("targetRoleStatements");
-    let error =
-        super::generate_target_decryption_share_proof_bytes_from_request(&missing_role_request)
-            .expect_err("missing target role statements must reject before proving");
-    assert!(
-        error
-            .message
-            .contains("targetRoleStatements must be present"),
-        "unexpected missing target role statement error: {}",
-        error.message
-    );
-
-    let mut reordered_role_request = generate_request;
-    reordered_role_request["targetDecryptionShare"]["targetRnsLimbStatements"][0]
-        ["targetRoleStatements"]
-        .as_array_mut()
-        .expect("target role statements")
-        .reverse();
-    let error =
-        super::generate_target_decryption_share_proof_bytes_from_request(&reordered_role_request)
-            .expect_err("noncanonical target role order must reject before proving");
-    assert!(
-        error
-            .message
-            .contains("targetRoleStatements must be in canonical target-role order"),
-        "unexpected target role order error: {}",
-        error.message
     );
 }
 
@@ -815,9 +728,7 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
         vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         vss_public_recipient_share_messages_by_item: Vec::new(),
-        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors,
         target_decryption_opening_randomness_by_commitment: Vec::new(),

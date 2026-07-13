@@ -5,7 +5,6 @@ use super::*;
 pub(in super::super) fn target_decryption_smudging_seed_hex(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
 ) -> String {
     hash512_hex(
@@ -15,7 +14,6 @@ pub(in super::super) fn target_decryption_smudging_seed_hex(
             target_accepted.target_accepted_record_hash.as_bytes(),
             target_accepted.target_context_hash.as_bytes(),
             target_accepted.target_ciphertext_hash.as_bytes(),
-            target_ciphertexts.target_ciphertext_hash.as_bytes(),
             target_share_profile.hash.as_bytes(),
             target_accepted.target_basis_hash.as_bytes(),
         ],
@@ -26,7 +24,6 @@ pub(in super::super) fn target_decryption_smudging_seed_hex(
 pub(in super::super) fn target_decryption_smudging_witness_value(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
 ) -> CanonicalResult<Value> {
@@ -36,60 +33,11 @@ pub(in super::super) fn target_decryption_smudging_witness_value(
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetContextHash": target_accepted.target_context_hash,
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
         "targetShareProfileHash": target_share_profile.hash,
         "targetBasisHash": target_accepted.target_basis_hash,
         "trusteeIdentity": participant.trustee_identity,
         "rosterPosition": participant.roster_position,
-        "interpolationPoint": participant.interpolation_point,
-        "plaintextMultiple": PLAINTEXT_MODULUS,
     }))
-}
-
-pub(in super::super) fn smudging_noise_share_bound(
-    interpolation_point: u64,
-    minimum_shares_for_interpolation: usize,
-) -> CanonicalResult<u64> {
-    let mut evaluation_point_power = i128::from(interpolation_point);
-    let mut accumulated_power_sum = 0_i128;
-    for _ in 1..minimum_shares_for_interpolation {
-        accumulated_power_sum = accumulated_power_sum
-            .checked_add(evaluation_point_power)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    "target-decryption smudging bound overflowed",
-                )
-            })?;
-        evaluation_point_power = evaluation_point_power
-            .checked_mul(i128::from(interpolation_point))
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    "target-decryption smudging bound overflowed",
-                )
-            })?;
-    }
-    let bound = accumulated_power_sum
-        .checked_mul(i128::from(TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "target-decryption smudging bound overflowed",
-            )
-        })?;
-
-    u64::try_from(bound).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "target-decryption smudging bound does not fit a non-negative integer",
-        )
-    })
-}
-
-struct TargetSmudgingNoiseShare {
-    residues: Vec<u64>,
-    maximum_absolute_noise_share: u64,
 }
 
 pub(in super::super) fn apply_plaintext_multiple_zero_share_smudging(
@@ -98,9 +46,8 @@ pub(in super::super) fn apply_plaintext_multiple_zero_share_smudging(
     smudging_polynomial_openings: &[TargetDecryptionSmudgingPolynomialOpening],
     role: &str,
     partials_by_limb: &[Vec<u64>],
-) -> CanonicalResult<(Vec<Vec<u64>>, Value)> {
+) -> CanonicalResult<Vec<Vec<u64>>> {
     let mut smudged_partials = partials_by_limb.to_vec();
-    let mut limb_reports = Vec::with_capacity(smudged_partials.len());
     for (rns_limb_index, limb_partials) in smudged_partials.iter_mut().enumerate() {
         let rns_prime = DATA_PRIMES[rns_limb_index];
         let noise_share = target_decryption_smudging_noise_share_from_openings(
@@ -112,26 +59,14 @@ pub(in super::super) fn apply_plaintext_multiple_zero_share_smudging(
             rns_prime,
         )?;
         let plaintext_multiple = PLAINTEXT_MODULUS % rns_prime;
-        for (partial_coefficient, noise_residue) in
-            limb_partials.iter_mut().zip(noise_share.residues.iter())
+        for (partial_coefficient, noise_residue) in limb_partials.iter_mut().zip(noise_share.iter())
         {
             let smudging_term = mul_mod_fast(*noise_residue, plaintext_multiple, rns_prime);
             *partial_coefficient = add_mod_fast(*partial_coefficient, smudging_term, rns_prime);
         }
-        limb_reports.push(json!({
-            "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
-            "maximumAbsoluteNoiseShare": noise_share.maximum_absolute_noise_share,
-        }));
     }
 
-    Ok((
-        smudged_partials,
-        json!({
-            "role": role,
-            "limbReports": limb_reports,
-        }),
-    ))
+    Ok(smudged_partials)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -142,12 +77,10 @@ fn target_decryption_smudging_noise_share_from_openings(
     role: &str,
     rns_limb_index: usize,
     rns_prime: u64,
-) -> CanonicalResult<TargetSmudgingNoiseShare> {
+) -> CanonicalResult<Vec<u64>> {
     let mut residues = vec![0_u64; POLYNOMIAL_DEGREE];
-    let mut centered_values = vec![0_i128; POLYNOMIAL_DEGREE];
-    let evaluation_point = participant.interpolation_point % rns_prime;
+    let evaluation_point = participant.interpolation_point()? % rns_prime;
     let mut evaluation_point_power_mod = evaluation_point;
-    let mut evaluation_point_power_wide = i128::from(participant.interpolation_point);
     let polynomial_openings = target_decryption_smudging_polynomial_openings_for_limb(
         target_share_profile,
         smudging_polynomial_openings,
@@ -156,9 +89,8 @@ fn target_decryption_smudging_noise_share_from_openings(
         rns_prime,
     )?;
     for polynomial_opening in polynomial_openings {
-        for ((residue, centered_value), sampled_coefficient) in residues
+        for (residue, sampled_coefficient) in residues
             .iter_mut()
-            .zip(centered_values.iter_mut())
             .zip(polynomial_opening.polynomial_coefficients.iter())
         {
             let residue_term = mul_mod_fast(
@@ -167,54 +99,12 @@ fn target_decryption_smudging_noise_share_from_openings(
                 rns_prime,
             );
             *residue = add_mod_fast(*residue, residue_term, rns_prime);
-            let centered_term = i128::from(*sampled_coefficient)
-                .checked_mul(evaluation_point_power_wide)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::ComponentMismatch,
-                        "target-decryption smudging coefficient evaluation overflowed",
-                    )
-                })?;
-            *centered_value = centered_value.checked_add(centered_term).ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    "target-decryption smudging coefficient evaluation overflowed",
-                )
-            })?;
         }
         evaluation_point_power_mod =
             mul_mod(evaluation_point_power_mod, evaluation_point, rns_prime)?;
-        evaluation_point_power_wide = evaluation_point_power_wide
-            .checked_mul(i128::from(participant.interpolation_point))
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    "target-decryption smudging coefficient evaluation overflowed",
-                )
-            })?;
     }
 
-    let centered_i64_values = centered_values
-        .iter()
-        .copied()
-        .map(|coefficient| {
-            i64::try_from(coefficient).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    "target-decryption smudging evaluated share does not fit a signed integer",
-                )
-            })
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let mut maximum_absolute_noise_share = 0_u64;
-    for coefficient in &centered_i64_values {
-        maximum_absolute_noise_share = maximum_absolute_noise_share.max(coefficient.unsigned_abs());
-    }
-
-    Ok(TargetSmudgingNoiseShare {
-        residues,
-        maximum_absolute_noise_share,
-    })
+    Ok(residues)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -386,6 +276,7 @@ fn target_decryption_smudging_polynomial_openings_for_limb<'a>(
         .collect()
 }
 
+#[cfg(test)]
 pub(in super::super) fn target_decryption_smudging_commitment_set_from_polynomial_openings(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -426,7 +317,6 @@ pub(in super::super) fn target_decryption_smudging_commitment_set_from_polynomia
                 let commitment_opening = target_decryption_smudging_commitment_opening(
                     setup_binding,
                     target_accepted,
-                    target_ciphertexts,
                     target_share_profile,
                     smudging_seed_hex,
                     opening,
@@ -445,7 +335,6 @@ pub(in super::super) fn target_decryption_smudging_commitment_set_from_polynomia
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetContextHash": target_accepted.target_context_hash,
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
         "targetShareProfileHash": target_share_profile.hash,
         "targetBasisHash": target_accepted.target_basis_hash,
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash,
@@ -468,7 +357,6 @@ pub(in super::super) fn target_decryption_smudging_commitment_set_from_polynomia
 pub(in super::super) fn target_decryption_smudging_proof_openings_for_slice(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
     smudging_seed_hex: &str,
     smudging_polynomial_openings: &[TargetDecryptionSmudgingPolynomialOpening],
@@ -488,7 +376,6 @@ pub(in super::super) fn target_decryption_smudging_proof_openings_for_slice(
         let commitment_opening = target_decryption_smudging_commitment_opening(
             setup_binding,
             target_accepted,
-            target_ciphertexts,
             target_share_profile,
             smudging_seed_hex,
             polynomial_opening,
@@ -511,7 +398,6 @@ pub(in super::super) fn target_decryption_smudging_proof_openings_for_slice(
 fn target_decryption_smudging_commitment_opening(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
     smudging_seed_hex: &str,
     polynomial_opening: &TargetDecryptionSmudgingPolynomialOpening,
@@ -538,7 +424,6 @@ fn target_decryption_smudging_commitment_opening(
     let material_seed_hex = target_decryption_smudging_commitment_material_seed_hex(
         setup_binding,
         target_accepted,
-        target_ciphertexts,
         target_share_profile,
         smudging_seed_hex,
         &polynomial_opening.role,
@@ -549,7 +434,6 @@ fn target_decryption_smudging_commitment_opening(
     let commitment_context = target_decryption_smudging_commitment_context(
         setup_binding,
         target_accepted,
-        target_ciphertexts,
         target_share_profile,
         &polynomial_opening.role,
         polynomial_opening.rns_limb_index,
@@ -558,9 +442,13 @@ fn target_decryption_smudging_commitment_opening(
     );
 
     Ok(TargetDecryptionSmudgingCommitmentOpening {
+        #[cfg(test)]
         role: polynomial_opening.role.clone(),
+        #[cfg(test)]
         rns_limb_index: polynomial_opening.rns_limb_index,
+        #[cfg(test)]
         rns_prime: polynomial_opening.rns_prime,
+        #[cfg(test)]
         polynomial_degree: polynomial_opening.polynomial_degree,
         message_coefficients,
         material_seed_hex,
@@ -568,6 +456,7 @@ fn target_decryption_smudging_commitment_opening(
     })
 }
 
+#[cfg(test)]
 fn target_decryption_smudging_commitment_record(
     opening: &TargetDecryptionSmudgingCommitmentOpening,
 ) -> CanonicalResult<Value> {
@@ -605,7 +494,6 @@ fn target_decryption_smudging_commitment_record(
 fn target_decryption_smudging_commitment_material_seed_hex(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
     smudging_seed_hex: &str,
     role: &str,
@@ -632,7 +520,6 @@ fn target_decryption_smudging_commitment_material_seed_hex(
             target_accepted.target_accepted_record_hash.as_bytes(),
             target_accepted.target_context_hash.as_bytes(),
             target_accepted.target_ciphertext_hash.as_bytes(),
-            target_ciphertexts.target_ciphertext_hash.as_bytes(),
             target_share_profile.hash.as_bytes(),
             role.as_bytes(),
             &rns_limb_index_bytes,
@@ -646,7 +533,6 @@ fn target_decryption_smudging_commitment_material_seed_hex(
 fn target_decryption_smudging_commitment_context(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
     role: &str,
     rns_limb_index: usize,
@@ -659,7 +545,6 @@ fn target_decryption_smudging_commitment_context(
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetContextHash": target_accepted.target_context_hash,
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
         "targetShareProfileHash": target_share_profile.hash,
         "targetBasisHash": target_accepted.target_basis_hash,
         "role": role,
@@ -667,45 +552,5 @@ fn target_decryption_smudging_commitment_context(
         "rnsPrime": rns_prime,
         "polynomialDegree": polynomial_degree,
         "signedCoefficientOffset": TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND,
-    })
-}
-
-pub(in super::super) fn target_decryption_smudging_input_report_value(
-    setup_binding: &SetupBinding,
-    target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
-    participant: &ParticipantBinding,
-    target_id_smudging_report: Value,
-    target_order_smudging_report: Value,
-) -> Value {
-    json!({
-        "objectType": "TargetDecryptionSmudgingInputReport",
-        "setupPackageHash": setup_binding.setup_package_hash,
-        "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetContextHash": target_accepted.target_context_hash,
-        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
-        "targetShareProfileHash": target_share_profile.hash,
-        "targetBasisHash": target_accepted.target_basis_hash,
-        "targetIdRoot": target_ciphertexts.target_id_root,
-        "targetOrderRoot": target_ciphertexts.target_order_root,
-        "trusteeIdentity": participant.trustee_identity,
-        "rosterPosition": participant.roster_position,
-        "boardPosition": participant.board_position,
-        "interpolationPoint": participant.interpolation_point,
-        "recoveryEpoch": participant.recovery_epoch,
-        "deviceEpoch": participant.device_epoch,
-        "minimumSharesForInterpolation": target_share_profile.minimum_shares_for_interpolation,
-        "decryptionThreshold": target_share_profile.decryption_threshold,
-        "activeRnsLimbCount": target_ciphertexts.target_id.level + 1,
-        "ringDegree": POLYNOMIAL_DEGREE,
-        "smudgingCoefficientBound": TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND,
-        "smudgingPolynomialDegree": target_share_profile.minimum_shares_for_interpolation.saturating_sub(1),
-        "plaintextMultiple": PLAINTEXT_MODULUS,
-        "roleReports": [
-            target_id_smudging_report,
-            target_order_smudging_report,
-        ],
     })
 }

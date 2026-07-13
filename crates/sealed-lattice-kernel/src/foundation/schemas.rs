@@ -53,11 +53,8 @@ pub struct FoundationProfile {
     pub maximum_score: u16,
     pub maximum_identifier_byte_length: usize,
     pub stream_chunk_byte_length: usize,
-    pub maximum_resident_stream_chunk_count: usize,
     pub maximum_copied_buffer_byte_length: usize,
     pub maximum_wasm_memory_byte_length: usize,
-    pub maximum_additional_javascript_heap_byte_length: usize,
-    pub maximum_additional_browser_process_byte_length: usize,
 }
 
 pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
@@ -73,11 +70,8 @@ pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
     maximum_score: 10,
     maximum_identifier_byte_length: 128,
     stream_chunk_byte_length: 1_048_576,
-    maximum_resident_stream_chunk_count: 2,
     maximum_copied_buffer_byte_length: 1_572_864,
     maximum_wasm_memory_byte_length: 402_653_184,
-    maximum_additional_javascript_heap_byte_length: 134_217_728,
-    maximum_additional_browser_process_byte_length: 671_088_640,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -93,6 +87,8 @@ pub enum FoundationSchemaIdentifier {
     ProofAuthenticationNode = 0x0106,
     ProofQueryOpeningRecord = 0x0107,
     ProofAuthenticationFrontier = 0x0108,
+    ProofApplicationSlot = 0x0109,
+    ProofApplicationBinding = 0x010a,
     Manifest = MANIFEST_SCHEMA_IDENTIFIER,
     OptionDefinition = OPTION_DEFINITION_SCHEMA_IDENTIFIER,
     ActionDefinition = ACTION_DEFINITION_SCHEMA_IDENTIFIER,
@@ -116,7 +112,9 @@ pub enum FoundationSchemaIdentifier {
     LocalRecordAuthenticatorInput = 0x0307,
     ActionStorageDerivationInput = 0x0308,
     PrivateRandomBlockInput = PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER,
+    PersistentProofCoinInput = 0x0401,
     ActionRandomnessDerivationInput = 0x0402,
+    OrdinaryProofCoinInput = 0x0403,
     StateReservationIntent = 0x1610,
     StateOutputIntent = 0x1611,
     StateWitnessVote = 0x1612,
@@ -141,7 +139,6 @@ pub enum FoundationSchemaIdentifier {
 pub enum FoundationObjectType {
     PublicRandomnessCommitment = 0x0001,
     PublicRandomnessReveal = 0x0002,
-    PublicRandomnessLock = 0x0003,
     SetupIntent = 0x0010,
     PrivateShareAcceptance = 0x0011,
     Complaint = 0x0012,
@@ -160,10 +157,9 @@ pub enum FoundationObjectType {
 }
 
 impl FoundationObjectType {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 17] = [
         Self::PublicRandomnessCommitment,
         Self::PublicRandomnessReveal,
-        Self::PublicRandomnessLock,
         Self::SetupIntent,
         Self::PrivateShareAcceptance,
         Self::Complaint,
@@ -189,7 +185,6 @@ impl FoundationObjectType {
         match code {
             0x0001 => Some(Self::PublicRandomnessCommitment),
             0x0002 => Some(Self::PublicRandomnessReveal),
-            0x0003 => Some(Self::PublicRandomnessLock),
             0x0010 => Some(Self::SetupIntent),
             0x0011 => Some(Self::PrivateShareAcceptance),
             0x0012 => Some(Self::Complaint),
@@ -552,10 +547,12 @@ pub struct RosterEntry {
 
 impl RosterEntry {
     fn validate(&self) -> SchemaResult<()> {
+        validate_ml_dsa_65_verification_key(&self.signing_verification_key)?;
         validate_ml_kem_768_encapsulation_key(&self.mailbox_encapsulation_key)
     }
 
     pub fn participant_identity(&self) -> SchemaResult<ParticipantIdentity> {
+        validate_ml_dsa_65_verification_key(&self.signing_verification_key)?;
         Ok(derive_participant_identity(&self.signing_verification_key)?)
     }
 
@@ -617,6 +614,8 @@ impl Roster {
         let mut participant_identities = BTreeSet::new();
         for (expected_position, entry) in entries.iter().enumerate() {
             entry.validate()?;
+            let participant_identity =
+                derive_participant_identity(&entry.signing_verification_key)?;
             if usize::from(entry.roster_position) != expected_position {
                 return Err(FoundationSchemaError::new(
                     RefusalReason::WrongTypeOrLength,
@@ -625,7 +624,7 @@ impl Roster {
             }
             if !signing_keys.insert(entry.signing_verification_key.as_slice())
                 || !mailbox_keys.insert(entry.mailbox_encapsulation_key.as_slice())
-                || !participant_identities.insert(entry.participant_identity()?)
+                || !participant_identities.insert(participant_identity)
             {
                 return Err(FoundationSchemaError::new(
                     RefusalReason::DuplicateIdentity,
@@ -1061,7 +1060,6 @@ impl ObjectEnvelope {
                 CanonicalItem::unsigned16(FOUNDATION_PROFILE.protocol_version),
                 CanonicalItem::hash512(self.suite_id.into_bytes()),
                 CanonicalItem::unsigned16(self.object_type.canonical_code()),
-                CanonicalItem::unsigned16(1),
                 CanonicalItem::hash512(self.ceremony_context_hash.into_bytes()),
                 CanonicalItem::hash512(self.action_context_hash.into_bytes()),
                 CanonicalItem::unsigned64(self.recovery_epoch),
@@ -1086,7 +1084,7 @@ impl ObjectEnvelope {
         budget: &mut CanonicalDecodeBudget,
     ) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode_with_budget(bytes, limits, budget)?;
-        require_header(&tuple, OBJECT_ENVELOPE_SCHEMA_IDENTIFIER, 13)?;
+        require_header(&tuple, OBJECT_ENVELOPE_SCHEMA_IDENTIFIER, 12)?;
         if read_ascii(&tuple.items[0])? != FOUNDATION_PROFILE.protocol_name
             || read_u16(&tuple.items[1])? != FOUNDATION_PROFILE.protocol_version
         {
@@ -1095,7 +1093,6 @@ impl ObjectEnvelope {
                 "object protocol name or version is unsupported",
             ));
         }
-        require_version_one(read_u16(&tuple.items[4])?, "object version is unsupported")?;
         let object_type = FoundationObjectType::from_canonical_code(read_u16(&tuple.items[3])?)
             .ok_or_else(|| {
                 FoundationSchemaError::new(
@@ -1106,14 +1103,14 @@ impl ObjectEnvelope {
         Ok(Self {
             suite_id: read_hash(&tuple.items[2])?,
             object_type,
-            ceremony_context_hash: read_hash(&tuple.items[5])?,
-            action_context_hash: read_hash(&tuple.items[6])?,
-            recovery_epoch: read_u64(&tuple.items[7])?,
-            recovery_transition_hash: read_optional_hash(&tuple.items[8])?,
-            producer_participant_id: read_optional_participant_identity(&tuple.items[9])?,
-            producer_sequence: read_u64(&tuple.items[10])?,
-            ordered_prerequisite_hashes: read_hash_list(&tuple.items[11])?,
-            payload_bytes: read_variable_item(&tuple.items[12], CanonicalItemType::RawBytes)?
+            ceremony_context_hash: read_hash(&tuple.items[4])?,
+            action_context_hash: read_hash(&tuple.items[5])?,
+            recovery_epoch: read_u64(&tuple.items[6])?,
+            recovery_transition_hash: read_optional_hash(&tuple.items[7])?,
+            producer_participant_id: read_optional_participant_identity(&tuple.items[8])?,
+            producer_sequence: read_u64(&tuple.items[9])?,
+            ordered_prerequisite_hashes: read_hash_list(&tuple.items[10])?,
+            payload_bytes: read_variable_item(&tuple.items[11], CanonicalItemType::RawBytes)?
                 .to_vec(),
         })
     }
@@ -1357,6 +1354,26 @@ fn validate_ml_kem_768_encapsulation_key(
             ));
         }
     }
+    Ok(())
+}
+
+fn validate_ml_dsa_65_verification_key(
+    key: &[u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+) -> SchemaResult<()> {
+    let verification_key = ml_dsa_65::PublicKey::try_from_bytes(*key).map_err(|_| {
+        FoundationSchemaError::new(
+            RefusalReason::MalformedEncoding,
+            "signing verification key is not a canonical ML-DSA-65 public key",
+        )
+    })?;
+
+    if verification_key.into_bytes() != *key {
+        return Err(FoundationSchemaError::new(
+            RefusalReason::MalformedEncoding,
+            "signing verification key is not a canonical ML-DSA-65 public key",
+        ));
+    }
+
     Ok(())
 }
 
@@ -1664,6 +1681,82 @@ pub(super) fn read_u64(item: &CanonicalItem) -> SchemaResult<u64> {
         .try_into()
         .map_err(|_| FoundationSchemaError::new(RefusalReason::MalformedEncoding, "u64 length"))?;
     Ok(u64::from_le_bytes(bytes))
+}
+
+pub(super) fn optional_u16(value: Option<u16>) -> SchemaResult<CanonicalItem> {
+    optional_fixed_integer(
+        value,
+        CanonicalItemType::Unsigned16,
+        CanonicalItem::unsigned16,
+    )
+}
+
+pub(super) fn optional_u32(value: Option<u32>) -> SchemaResult<CanonicalItem> {
+    optional_fixed_integer(
+        value,
+        CanonicalItemType::Unsigned32,
+        CanonicalItem::unsigned32,
+    )
+}
+
+pub(super) fn optional_u64(value: Option<u64>) -> SchemaResult<CanonicalItem> {
+    optional_fixed_integer(
+        value,
+        CanonicalItemType::Unsigned64,
+        CanonicalItem::unsigned64,
+    )
+}
+
+fn optional_fixed_integer<Value>(
+    value: Option<Value>,
+    item_type: CanonicalItemType,
+    encode: impl FnOnce(Value) -> CanonicalItem,
+) -> SchemaResult<CanonicalItem> {
+    let item = value.map(encode);
+    Ok(CanonicalItem::optional(item_type, item.as_ref())?)
+}
+
+pub(super) fn read_optional_u16(item: &CanonicalItem) -> SchemaResult<Option<u16>> {
+    read_optional_fixed_integer(item, CanonicalItemType::Unsigned16, u16::from_le_bytes)
+}
+
+pub(super) fn read_optional_u32(item: &CanonicalItem) -> SchemaResult<Option<u32>> {
+    read_optional_fixed_integer(item, CanonicalItemType::Unsigned32, u32::from_le_bytes)
+}
+
+pub(super) fn read_optional_u64(item: &CanonicalItem) -> SchemaResult<Option<u64>> {
+    read_optional_fixed_integer(item, CanonicalItemType::Unsigned64, u64::from_le_bytes)
+}
+
+fn read_optional_fixed_integer<const BYTE_LENGTH: usize, Value>(
+    item: &CanonicalItem,
+    expected_type: CanonicalItemType,
+    decode: impl FnOnce([u8; BYTE_LENGTH]) -> Value,
+) -> SchemaResult<Option<Value>> {
+    let bytes = read_item(item, CanonicalItemType::Optional)?;
+    if bytes.len() < 3 || u16::from_le_bytes([bytes[0], bytes[1]]) != expected_type.canonical_code()
+    {
+        return Err(FoundationSchemaError::new(
+            RefusalReason::WrongTypeOrLength,
+            "optional integer has the wrong contained type",
+        ));
+    }
+    match bytes[2] {
+        0 if bytes.len() == 3 => Ok(None),
+        1 if bytes.len() == 3 + BYTE_LENGTH => {
+            let value_bytes: [u8; BYTE_LENGTH] = bytes[3..].try_into().map_err(|_| {
+                FoundationSchemaError::new(
+                    RefusalReason::MalformedEncoding,
+                    "optional integer length is malformed",
+                )
+            })?;
+            Ok(Some(decode(value_bytes)))
+        }
+        _ => Err(FoundationSchemaError::new(
+            RefusalReason::MalformedEncoding,
+            "optional integer encoding is malformed",
+        )),
+    }
 }
 
 pub(super) fn read_ascii(item: &CanonicalItem) -> SchemaResult<&str> {
@@ -1977,6 +2070,78 @@ mod tests {
             Roster::decode(&roster_bytes, &limits).expect("roster decodes"),
             roster
         );
+    }
+
+    #[test]
+    fn roster_entry_accepts_generated_and_boundary_ml_dsa_65_encodings() {
+        let mut signing_verification_keys = vec![
+            [0u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+            [u8::MAX; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+        ];
+        for seed in [[0u8; 32], [0x5a; 32], [u8::MAX; 32]] {
+            let (verification_key, _) = ml_dsa_65::KG::keygen_from_seed(&seed);
+            signing_verification_keys.push(verification_key.into_bytes());
+        }
+
+        for (case_index, signing_verification_key) in
+            signing_verification_keys.into_iter().enumerate()
+        {
+            let entry = RosterEntry {
+                roster_position: u16::try_from(case_index).expect("test case index fits u16"),
+                signing_verification_key,
+                mailbox_encapsulation_key: [u8::try_from(case_index + 1)
+                    .expect("test case index fits u8");
+                    ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
+            };
+
+            let encoded = entry.encode().expect("canonical roster entry encodes");
+            assert_eq!(
+                RosterEntry::decode(&encoded, &CanonicalDecodeLimits::default())
+                    .expect("canonical roster entry decodes"),
+                entry
+            );
+        }
+    }
+
+    #[test]
+    fn roster_entry_refuses_noncanonical_ml_dsa_65_key_carriers() {
+        let (verification_key, _) = ml_dsa_65::KG::keygen_from_seed(&[0x36; 32]);
+        let verification_key_bytes = verification_key.into_bytes();
+        let mailbox_encapsulation_key = [0x03; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH];
+
+        let mut extended_verification_key = verification_key_bytes.to_vec();
+        extended_verification_key.push(0);
+        let length_prefixed_verification_key =
+            CanonicalItem::variable_bytes(verification_key_bytes)
+                .expect("test key fits the canonical item limit")
+                .canonical_bytes()
+                .to_vec();
+
+        for noncanonical_key_bytes in [
+            verification_key_bytes[..verification_key_bytes.len() - 1].to_vec(),
+            extended_verification_key,
+            length_prefixed_verification_key,
+        ] {
+            let encoded = encode_raw_tuple_with_items(
+                ROSTER_ENTRY_SCHEMA_IDENTIFIER,
+                vec![
+                    (CanonicalItemType::Unsigned16, 0u16.to_le_bytes().to_vec()),
+                    (CanonicalItemType::Unsigned16, 1u16.to_le_bytes().to_vec()),
+                    (CanonicalItemType::RawBytes, noncanonical_key_bytes),
+                    (
+                        CanonicalItemType::RawBytes,
+                        mailbox_encapsulation_key.to_vec(),
+                    ),
+                ],
+            );
+
+            assert_eq!(
+                RosterEntry::decode(&encoded, &CanonicalDecodeLimits::default())
+                    .expect_err("noncanonical signing-key carrier must refuse")
+                    .refusal_reason,
+                RefusalReason::WrongTypeOrLength
+            );
+        }
     }
 
     #[test]
@@ -2571,10 +2736,6 @@ mod tests {
             (
                 FoundationObjectType::PublicRandomnessReveal,
                 "public-randomness-reveal",
-            ),
-            (
-                FoundationObjectType::PublicRandomnessLock,
-                "public-randomness-lock",
             ),
             (FoundationObjectType::SetupIntent, "setup-intent"),
             (

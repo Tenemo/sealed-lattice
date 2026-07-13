@@ -359,14 +359,12 @@ fn vss_threshold_aggregate_instance() -> (
                     .collect()
             })
             .collect(),
-        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         vss_public_recipient_share_messages_by_item: vec![
             aggregate_values
                 .iter()
                 .map(|value| i64::try_from(*value).expect("aggregate fits i64"))
                 .collect(),
         ],
-        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: vec![wrap_values],
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
@@ -528,12 +526,8 @@ fn vss_share_linkage_instance() -> (
         8,
         "five unique coefficient trees plus three recipient-share trees are bound"
     );
-    // With Branch 2 the message consistency claims are trit-granular: each of the
-    // eight messages (five coefficient + three item) contributes both digits'
-    // base-three trits (17 + 13 = 30 for this fixture's message modulus), so the
-    // count is the three item carries plus 8 * 30 = 240 message trits. This is
-    // strictly more than the old whole-digit count (3 + 8 * 2 = 19); the wider
-    // claim set with the narrower per-trit witness is what tightens the leakage.
+    // Each of the eight messages contributes both digits' base-three trits
+    // (17 + 13 = 30), and the three item carries bring the total to 243.
     assert_eq!(
         layout.consistency_vector_count(),
         243,
@@ -628,7 +622,6 @@ fn vss_share_linkage_instance() -> (
                     .collect()
             })
             .collect(),
-        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         vss_public_recipient_share_messages_by_item: vec![
             primary_item
                 .recipient_share_values
@@ -646,7 +639,6 @@ fn vss_share_linkage_instance() -> (
                 .map(|value| i64::try_from(*value).expect("share fits i64"))
                 .collect(),
         ],
-        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: vec![
             primary_item.recipient_share_carry_values,
             same_source_additional_item.recipient_share_carry_values,
@@ -894,16 +886,11 @@ fn commitment_computation_for_test(
 // requires a masked claim's CRT lift to leave at least one commitment field
 // unconsumed: the lift pins the centered integer from the consumed fields and
 // the remaining field's residue is the check that catches an inconsistent
-// per-field witness. This probe pins the share-linkage geometry after the
-// Branch 2 change (2026-07-06): message consistency claims are trit-granular
-// (each digit split into base-three trits, witness bound two), and under the
-// standard twenty-repetition eight-bit schedule with the 58-digit mask every
-// claim class still consumes two of the three commitment fields, leaving one
-// check field. The trit witness bound is what narrows the per-claim leakage
-// window; the separate assertion below pins that bound so a regression to
-// whole-digit claims is caught even though the residue count is unchanged. If
-// these pins move, re-derive the check-field decision record in
-// setup-proof-decisions.md.
+// per-field witness. Message consistency claims are trit-granular with witness
+// bound two. Under the twenty-repetition eight-bit schedule and 58-digit mask,
+// every claim class consumes two of the three commitment fields and leaves one
+// check field. The separate assertion below pins the trit witness bound because
+// the residue count alone cannot distinguish it from a wider witness.
 #[test]
 fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
     let (statement, _witness) = vss_share_linkage_instance();
@@ -951,15 +938,9 @@ fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
         );
     }
 
-    // Pin the message-trit witness bound. A message consistency claim lifts a
-    // single base-three trit (bound VSS_PUBLIC_MESSAGE_TRIT_BASE - 1 = 2), not a
-    // whole digit. masked_claim_bounds_for_global_claim returns the clear window
-    // as (-clear, mask + clear) with clear = witness_bound * coefficient_bound *
-    // ring_degree, so the negated lower bound recovers the clear span and pins
-    // witness_bound. The residue-count check above cannot see this pin, because
-    // the 58-digit mask dominates the window for both trit and digit bounds;
-    // without it a silent regression to whole-digit claims (leakage back to
-    // 2^-42 from 2^-68) would pass unnoticed.
+    // A message consistency claim lifts one base-three trit with bound two.
+    // The negated lower claim bound recovers its clear span and pins that witness
+    // bound independently of the residue-count check above.
     let share_linkage = statement
         .vss_share_linkage
         .as_ref()

@@ -1,7 +1,6 @@
 use super::*;
-use crate::bgv::coefficient_codec::{
-    coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
-};
+use crate::bgv::coefficient_codec::coefficient_vector_le_hex;
+use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_hash512};
 use crate::hashing::derive_canonical_object_hash;
 
 const PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN: &str =
@@ -49,10 +48,6 @@ pub(in crate::bgv::setup) fn collective_public_key(
         "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "publicKeyShareRoots": public_key_share_roots,
         "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
-        "aggregationRule": "coefficient-wise-public-key-share-sum-with-shared-crp",
-        "publicKeyComponentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
-        "publicKeyCoefficientMaterialBinding": "public-coefficients-bound-in-setup-package-with-private-share-derivation-unexported",
-        "participantCount": public_key_share_roots.len(),
     });
     let collective_public_key_root = derive_canonical_object_hash(&record_without_roots)?;
     let bgv_public_key_root = derive_canonical_object_hash(&json!({
@@ -196,45 +191,11 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_material(
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(not(target_arch = "wasm32"))]
-    let modulus_summaries = coefficient_tables
-        .par_iter()
-        .map(|table| {
-            collective_public_key_coefficient_derivation_summary(
-                setup_seed_hash,
-                public_common_random_polynomial_root,
-                public_key_share_roots,
-                participant_identities,
-                table,
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let modulus_summaries = coefficient_tables
-        .iter()
-        .map(|table| {
-            collective_public_key_coefficient_derivation_summary(
-                setup_seed_hash,
-                public_common_random_polynomial_root,
-                public_key_share_roots,
-                participant_identities,
-                table,
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-
     Ok(json!({
         "objectType": "BgvCollectivePublicKeyCoefficientMaterial",
-        "level": DATA_PRIMES.len() - 1,
-        "coefficientCount": POLYNOMIAL_DEGREE,
-        "componentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
-        "componentDerivation": "public-coefficients-generated-from-private-setup-witness-and-bound-in-setup-package",
-        "fullCoefficientExpansionOwner": "passive setup package public key material",
         "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "publicKeyShareRoots": public_key_share_roots,
-        "participantCount": participant_identities.len(),
         "participants": participant_descriptors,
-        "modulusSummaries": modulus_summaries,
         "coefficientTables": coefficient_tables,
     }))
 }
@@ -264,65 +225,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_table(
         ),
         "componentZeroCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_zero_coefficients),
         "componentOneCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_one_coefficients),
-        "coefficientByteLength": POLYNOMIAL_DEGREE * 8,
-    }))
-}
-
-pub(in crate::bgv::setup) fn collective_public_key_coefficient_derivation_summary(
-    setup_seed_hash: &str,
-    public_common_random_polynomial_root: &str,
-    public_key_share_roots: &[String],
-    participant_identities: &[String],
-    coefficient_table: &Value,
-) -> CanonicalResult<Value> {
-    let modulus = unsigned_at_path(coefficient_table, &["modulus"])?;
-    let modulus_bytes = modulus.to_le_bytes();
-    let participant_count_bytes = (participant_identities.len() as u64).to_le_bytes();
-    let public_key_share_root_count_bytes = (public_key_share_roots.len() as u64).to_le_bytes();
-    let component_zero_derivation_hash = hash512_hex(
-        "sealed-lattice-bgv-rns/collective-public-key-coefficient-derivation",
-        &[
-            b"component-zero",
-            setup_seed_hash.as_bytes(),
-            public_common_random_polynomial_root.as_bytes(),
-            &modulus_bytes,
-            &participant_count_bytes,
-            &public_key_share_root_count_bytes,
-        ],
-    );
-    let component_one_derivation_hash = hash512_hex(
-        "sealed-lattice-bgv-rns/collective-public-key-coefficient-derivation",
-        &[
-            b"component-one",
-            setup_seed_hash.as_bytes(),
-            public_common_random_polynomial_root.as_bytes(),
-            &modulus_bytes,
-            &participant_count_bytes,
-            &public_key_share_root_count_bytes,
-        ],
-    );
-    let sampled_component_one_coefficients =
-        sample_public_residues(setup_seed_hash, "public-common-random-polynomial", modulus)?;
-    let sampled_component_zero_derivation_residues = sample_public_residues(
-        setup_seed_hash,
-        "collective-public-key-component-zero-derivation-diagnostic",
-        modulus,
-    )?;
-
-    Ok(json!({
-        "modulus": modulus,
-        "componentZeroCoefficientDerivationHash512": component_zero_derivation_hash,
-        "componentOneCoefficientDerivationHash512": component_one_derivation_hash,
-        "sampledComponentZeroDerivationResidues": sampled_component_zero_derivation_residues,
-        "sampledComponentOneCoefficients": sampled_component_one_coefficients,
-        "componentZeroCoefficientHash512": string_at_path(
-            coefficient_table,
-            &["componentZeroCoefficientHash512"],
-        )?,
-        "componentOneCoefficientHash512": string_at_path(
-            coefficient_table,
-            &["componentOneCoefficientHash512"],
-        )?,
     }))
 }
 

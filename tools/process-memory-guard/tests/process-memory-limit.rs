@@ -276,7 +276,6 @@ fn preserves_a_nonzero_child_exit_code_and_records_its_raw_status() {
     assert!(diagnostic_text.contains("\"exitCode\":37"));
     assert!(diagnostic_text.contains("\"rawStatusHex\":"));
     assert!(diagnostic_text.contains("\"memoryEvidence\":\"unknown\""));
-    assert!(!diagnostic_text.contains("\"memoryEvidence\":\"confirmed\""));
 }
 
 #[cfg(target_os = "linux")]

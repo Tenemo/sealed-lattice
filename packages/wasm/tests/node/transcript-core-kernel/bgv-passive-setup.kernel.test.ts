@@ -18,7 +18,7 @@ describe('BGV passive setup kernel command', () => {
                 expectedRosterHash: setupRequest.rosterHash,
                 expectedCollectivePublicKeyRoot:
                     setup.collectivePublicKey.collectivePublicKeyRoot,
-                expectedRotSetHash: setup.evaluationKeys.rotSetHash,
+                expectedRotSetHash: setup.evaluationKeys.record.rotSetHash,
                 expectedEvaluationKeyRoot:
                     setup.evaluationKeys.evaluationKeyRoot,
             }),

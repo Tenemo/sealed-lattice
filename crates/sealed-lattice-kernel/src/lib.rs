@@ -11,7 +11,6 @@ mod encoding;
 pub mod foundation;
 pub(crate) mod hashing;
 pub(crate) mod protocol_signatures;
-pub(crate) mod ring;
 pub(crate) mod transcript_core;
 
 use core::{ptr, slice};
@@ -39,7 +38,7 @@ use foundation::{
 };
 
 use encoding::run_accepted_setup_command;
-pub use encoding::{roundtrip_bytes, run_transcript_core_command};
+pub use encoding::run_transcript_core_command;
 
 fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
     Box::into_raw(bytes.into_boxed_slice()) as *mut u8
@@ -68,7 +67,7 @@ pub extern "C" fn sealed_lattice_allocate(length: usize) -> *mut u8 {
 ///
 /// `pointer` must either be null with `length == 0` or point to an allocation
 /// previously returned by `sealed_lattice_allocate` or
-/// `sealed_lattice_roundtrip` or `sealed_lattice_transcript_core_command_with_length`
+/// `sealed_lattice_transcript_core_command_with_length`
 /// with the same `length`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_deallocate(pointer: *mut u8, length: usize) {
@@ -82,24 +81,6 @@ pub unsafe extern "C" fn sealed_lattice_deallocate(pointer: *mut u8, length: usi
             pointer, length,
         )));
     }
-}
-
-/// # Safety
-///
-/// `pointer` must either be null with `length == 0` or point to readable bytes
-/// for `length` elements in the WebAssembly module's linear memory.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_roundtrip(pointer: *const u8, length: usize) -> *mut u8 {
-    if length == 0 {
-        return ptr::null_mut();
-    }
-    if pointer.is_null() {
-        return ptr::null_mut();
-    }
-
-    let input = unsafe { slice::from_raw_parts(pointer, length) };
-
-    leak_bytes(roundtrip_bytes(input))
 }
 
 /// # Safety
@@ -1105,10 +1086,10 @@ pub unsafe extern "C" fn sealed_lattice_local_storage_root_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        sealed_lattice_allocate, sealed_lattice_deallocate, sealed_lattice_roundtrip,
+        sealed_lattice_allocate, sealed_lattice_deallocate,
         sealed_lattice_transcript_core_command_with_length,
     };
-    use core::{ptr, slice};
+    use core::ptr;
 
     #[test]
     fn exported_allocations_deallocate_with_matching_layout() {
@@ -1117,15 +1098,6 @@ mod tests {
         unsafe {
             ptr::write_bytes(allocated, 0xaa, 4);
             sealed_lattice_deallocate(allocated, 4);
-        }
-
-        let input = [1_u8, 2, 3, 4, 5];
-        let roundtrip = unsafe { sealed_lattice_roundtrip(input.as_ptr(), input.len()) };
-        assert!(!roundtrip.is_null());
-        let roundtrip_bytes = unsafe { slice::from_raw_parts(roundtrip, input.len()) };
-        assert_eq!(roundtrip_bytes, input);
-        unsafe {
-            sealed_lattice_deallocate(roundtrip, input.len());
         }
 
         let mut response_length = 0_usize;

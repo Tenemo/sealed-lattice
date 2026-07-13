@@ -268,7 +268,6 @@ describe('succinct setup statement hash vectors', () => {
             ],
             ...proofRandomnessFields,
         });
-        expect(sameSecret.proofFamily).toBe('same-secret-bridge');
         expect(sameSecret.statementHash).toBe(
             expectedStatementHashes.sameSecret,
         );
@@ -327,7 +326,6 @@ describe('succinct setup statement hash vectors', () => {
             ],
             ...proofRandomnessFields,
         });
-        expect(publicKeyShare.proofFamily).toBe('public-key-share');
         expect(publicKeyShare.statementHash).toBe(
             expectedStatementHashes.publicKeyShare,
         );
@@ -361,7 +359,6 @@ describe('succinct setup statement hash vectors', () => {
                 context: statementContext({
                     requiredGaloisSetHash: repeatedHash('33'),
                     evaluatorKeyScheduleRoot: repeatedHash('34'),
-                    keySwitchDecompositionHash: repeatedHash('35'),
                     sourceConstantCoefficientCommitmentRoot: repeatedHash('36'),
                 }),
                 ringDegree,
@@ -384,7 +381,6 @@ describe('succinct setup statement hash vectors', () => {
                     commitments: [trusteeEvaluationKeySourceCommitment],
                 },
             });
-        expect(trusteeEvaluationKey.proofFamily).toBe('trustee-evaluation-key');
         expect(trusteeEvaluationKey.statementHash).toBe(
             expectedStatementHashes.trusteeEvaluationKey,
         );

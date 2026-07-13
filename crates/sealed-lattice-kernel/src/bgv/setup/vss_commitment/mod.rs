@@ -4,8 +4,6 @@ use crate::bgv::setup_helpers::{
     read_positive_usize_at_path,
 };
 
-pub(super) const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str =
-    "sealed-lattice-vss-public-commitment-binary";
 pub(in crate::bgv::setup) const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/vss-share-linkage/proof-bytes";
 pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_COUNT: usize = 2;

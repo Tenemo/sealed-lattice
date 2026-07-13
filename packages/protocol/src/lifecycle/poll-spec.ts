@@ -5,12 +5,10 @@ import {
     type PollSpecValidation,
     type PollSpecValidationError,
     type ProtocolHash,
-    type ScoreDomain,
     type SmallRosterPolicy,
 } from '@sealed-lattice/types';
 
 import {
-    defaultScoreDomain,
     defaultSmallRosterPolicy,
     maximumSupportedRosterSize,
     minimumSupportedRosterSize,
@@ -60,30 +58,8 @@ const dataPropertyValue = (
     return 'value' in descriptor ? descriptor.value : invalidDataProperty;
 };
 
-const isSupportedScoreDomain = (scoreDomain: unknown): boolean => {
-    if (scoreDomain === undefined) {
-        return true;
-    }
-    const descriptors = ordinaryRecordDescriptors(scoreDomain);
-
-    return (
-        descriptors !== undefined &&
-        dataPropertyValue(descriptors, 'min') === 1 &&
-        dataPropertyValue(descriptors, 'max') === 10 &&
-        dataPropertyValue(descriptors, 'skippedOptionScore') === 1
-    );
-};
-
-const normalizeScoreDomain = (
-    scoreDomain: ScoreDomain | undefined,
-): ScoreDomain =>
-    scoreDomain === undefined
-        ? defaultScoreDomain
-        : { max: 10, min: 1, skippedOptionScore: 1 };
-
 const supportedSmallRosterPolicies = new Set<SmallRosterPolicy>([
     'ForbidMicroRoster',
-    'WarnMicroRoster',
     'AllowMicroRoster',
 ]);
 
@@ -124,7 +100,6 @@ export const derivePollSpecHash = (pollSpec: PollSpec): ProtocolHash =>
         options: pollSpec.options,
         pollId: pollSpec.pollId,
         question: pollSpec.question,
-        scoreDomain: pollSpec.scoreDomain,
         smallRosterPolicy: pollSpec.smallRosterPolicy,
         topOptionCount: pollSpec.topOptionCount,
     });
@@ -149,10 +124,6 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const topOptionCount = dataPropertyValue(
         inputRecordDescriptors,
         'topOptionCount',
-    );
-    const scoreDomain = dataPropertyValue(
-        inputRecordDescriptors,
-        'scoreDomain',
     );
     const smallRosterPolicy = dataPropertyValue(
         inputRecordDescriptors,
@@ -296,19 +267,12 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             message: 'topOptionCount must be between 1 and options.length.',
         });
     }
-    if (!isSupportedScoreDomain(scoreDomain)) {
-        errors.push({
-            code: 'UnsupportedScoreDomain',
-            field: 'scoreDomain',
-            message: 'scoreDomain must be exactly 1..10 with skipped score 1.',
-        });
-    }
     if (!isSupportedSmallRosterPolicy(smallRosterPolicy)) {
         errors.push({
             code: 'UnsupportedSmallRosterPolicy',
             field: 'smallRosterPolicy',
             message:
-                'smallRosterPolicy must be ForbidMicroRoster, WarnMicroRoster, or AllowMicroRoster.',
+                'smallRosterPolicy must be ForbidMicroRoster or AllowMicroRoster.',
         });
     }
 
@@ -347,9 +311,6 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             options: validatedOptions,
             topOptionCount:
                 typeof topOptionCount === 'number' ? topOptionCount : 0,
-            scoreDomain: normalizeScoreDomain(
-                scoreDomain as ScoreDomain | undefined,
-            ),
             minRosterSize: normalizedMinRosterSize,
             maxRosterSize: normalizedMaxRosterSize,
             smallRosterPolicy:

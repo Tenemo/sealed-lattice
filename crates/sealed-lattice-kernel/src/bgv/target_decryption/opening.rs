@@ -16,7 +16,10 @@ pub(super) struct AggregateOpeningCheckInput<'a> {
 }
 
 pub(super) struct AggregateOpeningRootsInput<'a> {
-    pub(super) setup_binding: &'a SetupBinding,
+    pub(super) ceremony_id: &'a str,
+    pub(super) election_manifest_hash: &'a str,
+    pub(super) roster_hash: &'a str,
+    pub(super) setup_parameters_hash: &'a str,
     pub(super) participant: &'a ParticipantBinding,
     pub(super) setup_epoch: &'a str,
     pub(super) rns_limb_index: usize,
@@ -57,7 +60,10 @@ pub(super) fn verify_aggregate_opening_credential(
     let aggregate_share_values =
         derive_aggregate_share_values(&aggregate_commitment_message_values, input.rns_prime)?;
     let computation = compute_aggregate_opening(AggregateOpeningRootsInput {
-        setup_binding: input.setup_binding,
+        ceremony_id: &input.setup_binding.ceremony_id,
+        election_manifest_hash: &input.setup_binding.election_manifest_hash,
+        roster_hash: &input.setup_binding.roster_hash,
+        setup_parameters_hash: &input.setup_binding.setup_parameters_hash,
         participant: input.participant,
         setup_epoch: input.setup_epoch,
         rns_limb_index: input.rns_limb_index,
@@ -93,12 +99,15 @@ pub(super) fn compute_aggregate_opening(
     input: AggregateOpeningRootsInput<'_>,
 ) -> CanonicalResult<AggregateOpeningComputation> {
     let commitment_context = aggregate_commitment_context(
-        input.setup_binding,
+        input.ceremony_id,
+        input.election_manifest_hash,
+        input.roster_hash,
+        input.setup_parameters_hash,
         input.participant,
         input.setup_epoch,
         input.rns_limb_index,
         input.rns_prime,
-    );
+    )?;
     let computation =
         compute_vss_committed_material_commitment(VssCommittedMaterialCommitmentInput {
             commitment_role: VSS_PUBLIC_AGGREGATE_COMMITMENT_ROLE,
@@ -191,23 +200,26 @@ fn derive_aggregate_share_values(
 }
 
 fn aggregate_commitment_context(
-    setup_binding: &SetupBinding,
+    ceremony_id: &str,
+    election_manifest_hash: &str,
+    roster_hash: &str,
+    setup_parameters_hash: &str,
     participant: &ParticipantBinding,
     setup_epoch: &str,
     rns_limb_index: usize,
     rns_prime: u64,
-) -> Value {
-    json!({
+) -> CanonicalResult<Value> {
+    Ok(json!({
         "objectType": "VssPublicAggregateThresholdCommitmentContext",
-        "ceremonyId": setup_binding.ceremony_id.as_str(),
-        "manifestHash": setup_binding.election_manifest_hash.as_str(),
-        "rosterHash": setup_binding.roster_hash.as_str(),
-        "setupParametersHash": setup_binding.setup_parameters_hash.as_str(),
+        "ceremonyId": ceremony_id,
+        "manifestHash": election_manifest_hash,
+        "rosterHash": roster_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "recipientIdentity": participant.trustee_identity.as_str(),
         "recipientRosterPosition": participant.roster_position,
-        "recipientTrusteePoint": participant.interpolation_point,
+        "recipientTrusteePoint": participant.interpolation_point()?,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
-    })
+    }))
 }

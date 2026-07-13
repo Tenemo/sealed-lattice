@@ -1,10 +1,4 @@
-import type { ScoreDomain, SmallRosterPolicy } from '@sealed-lattice/types';
-
-export const defaultScoreDomain = {
-    min: 1,
-    max: 10,
-    skippedOptionScore: 1,
-} as const satisfies ScoreDomain;
+import type { SmallRosterPolicy } from '@sealed-lattice/types';
 
 export const defaultSmallRosterPolicy =
     'ForbidMicroRoster' as const satisfies SmallRosterPolicy;

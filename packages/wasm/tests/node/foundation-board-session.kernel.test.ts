@@ -8,7 +8,7 @@ import {
     type FoundationBoardSessionInput,
 } from '#packages/wasm/src/index';
 import {
-    createAuthenticatedSetupIntentTestVector,
+    createAuthenticatedComplaintTestVector,
     createCanonicalTestRosterBytes,
 } from '#packages/wasm/tests/foundation-board-test-vectors';
 
@@ -18,22 +18,15 @@ const configuration = (
     actionContextHash: new Uint8Array(64).fill(0x33),
     canonicalRosterBytes,
     ceremonyContextHash: new Uint8Array(64).fill(0x22),
-    limits: {
-        maximumCarrierByteLength: 131_072,
-        maximumCarrierCount: 32,
-        maximumRetainedCarrierByteLength: 1_048_576,
-        maximumUnresolvedDependencyCount: 128,
-    },
     publicSetupSeedObjectHash: new Uint8Array(64).fill(0x44),
     suiteIdentifier: new Uint8Array(64).fill(0x11),
     setupSourceObjectHash: new Uint8Array(64).fill(0x55),
 });
 
 describe('foundation board session in Node WASM', () => {
-    it('owns one capability-bound session and keeps malformed carrier refusals non-consuming', async () => {
+    it('owns one capability-bound session and accepts an authenticated complaint carrier', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const authenticatedSetupIntent =
-            createAuthenticatedSetupIntentTestVector();
+        const authenticatedComplaint = createAuthenticatedComplaintTestVector();
         expect(kernel.exportedFunctionNames).toEqual(
             expect.arrayContaining([
                 'sealed_lattice_foundation_board_begin',
@@ -45,7 +38,7 @@ describe('foundation board session in Node WASM', () => {
 
         const opened = openFoundationBoardSession({
             configuration: configuration(
-                authenticatedSetupIntent.canonicalRosterBytes,
+                authenticatedComplaint.canonicalRosterBytes,
             ),
             kernel,
         });
@@ -68,7 +61,7 @@ describe('foundation board session in Node WASM', () => {
                 value: undefined,
             });
             const invalidSignatureCarrier = Uint8Array.from(
-                authenticatedSetupIntent.canonicalCarrierBytes,
+                authenticatedComplaint.canonicalCarrierBytes,
             );
             const signatureByteIndex = invalidSignatureCarrier.length - 1;
             invalidSignatureCarrier[signatureByteIndex] =
@@ -78,20 +71,20 @@ describe('foundation board session in Node WASM', () => {
                 refusalReason: 'invalidSignature',
             });
             const accepted = session.ingest(
-                authenticatedSetupIntent.canonicalCarrierBytes,
+                authenticatedComplaint.canonicalCarrierBytes,
             );
             expect(accepted.isValid).toBe(true);
             if (!accepted.isValid) {
                 throw new Error(accepted.refusalReason);
             }
             expect(foundationBoardCandidateObjectHash(accepted.value)).toEqual(
-                authenticatedSetupIntent.objectHash,
+                authenticatedComplaint.objectHash,
             );
 
             expect(
                 openFoundationBoardSession({
                     configuration: configuration(
-                        authenticatedSetupIntent.canonicalRosterBytes,
+                        authenticatedComplaint.canonicalRosterBytes,
                     ),
                     kernel,
                 }),
@@ -112,7 +105,7 @@ describe('foundation board session in Node WASM', () => {
 
         const reopened = openFoundationBoardSession({
             configuration: configuration(
-                authenticatedSetupIntent.canonicalRosterBytes,
+                authenticatedComplaint.canonicalRosterBytes,
             ),
             kernel,
         });

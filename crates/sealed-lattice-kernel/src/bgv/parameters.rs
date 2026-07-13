@@ -15,14 +15,10 @@ mod root_parameters;
 
 pub(crate) use root_parameters::{
     BgvBasisKind, DATA_PRIMES, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIME,
-    data_prime_bit_length, root_parameters_for_modulus,
+    root_parameters_for_modulus,
 };
-// The single canonical identity for the fixed BGV parameter set, in the style of
-// a SEAL parms_id: one object that unions the full BGV configuration. It binds
-// the ring parameters, the ballot/score/layout data, the aggregate/comparison
-// flags, the ciphertext convention flags, and the evaluator operation policy.
-// Every part is a pure deterministic function of the fixed parameters, so one
-// hash over the whole set is the strongest identity.
+// The single canonical identity for the fixed BGV parameter set. It binds the
+// ring arithmetic and the fixed score and batch layout used by the protocol.
 pub(crate) fn bgv_parameters_value() -> Value {
     json!({
         "objectType": "BgvParameters",
@@ -30,9 +26,6 @@ pub(crate) fn bgv_parameters_value() -> Value {
         "plaintextModulus": PLAINTEXT_MODULUS,
         "dataPrimes": DATA_PRIMES,
         "specialPrime": SPECIAL_PRIME,
-        "dataPrimeBitLength": data_prime_bit_length(),
-        "dataLevels": DATA_PRIMES.len(),
-        "extendedLevels": DATA_PRIMES.len() + 1,
         "nttRootParameters": ROOT_PARAMETERS.iter().map(|parameters| json!({
             "modulus": parameters.modulus,
             "primitiveGenerator": parameters.primitive_generator,
@@ -48,32 +41,11 @@ pub(crate) fn bgv_parameters_value() -> Value {
         },
         "bucketCount": 10,
         "coordinatesPerOption": 11,
-        "slotCount": POLYNOMIAL_DEGREE,
-        "allowedOperations": ALLOWED_EVALUATOR_OPERATIONS,
     })
 }
 
 pub(crate) fn bgv_parameters_hash() -> CanonicalResult<String> {
     derive_canonical_object_hash(&bgv_parameters_value())
-}
-
-const ALLOWED_EVALUATOR_OPERATIONS: &[&str] = &[
-    "encodeDirectEncryptedBallotAggregate",
-    "validateCoefficientDomainPlaintext",
-    "validateCoefficientDomainCiphertext",
-    "homomorphicEncryptedBallotAggregation",
-    "interpolationCoefficientScalarMultiplication",
-    "comparisonInputDerivationCircuitInputPreparation",
-    "encryptedRankAccumulationSupport",
-    "encryptedSparseTargetProjectionSupport",
-    "canonicalTargetCiphertextSelection",
-];
-
-// Operations-list data only. Used by validate_bgv_evaluator_operation.
-pub(crate) fn allowed_operation_registry_value() -> CanonicalResult<Value> {
-    Ok(json!({
-        "allowedOperations": ALLOWED_EVALUATOR_OPERATIONS,
-    }))
 }
 
 #[cfg(test)]

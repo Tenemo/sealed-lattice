@@ -7,7 +7,6 @@ pub(crate) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {
     pub(crate) setup_package: &'a Value,
     pub(crate) evaluator_key: &'a DevelopmentBgvKey,
     pub(crate) aggregate_ciphertext: &'a Ciphertext,
-    pub(crate) aggregate_scores: &'a [u64],
     pub(crate) ballot_count: usize,
     pub(crate) top_counts: &'a [usize],
     pub(crate) target_finality_policy_hash: Option<&'a str>,
@@ -20,7 +19,6 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         setup_package,
         evaluator_key,
         aggregate_ciphertext,
-        aggregate_scores,
         ballot_count,
         top_counts,
         target_finality_policy_hash,
@@ -49,10 +47,8 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         ],
     );
     let working_level = direct_ballot_evaluator_working_level(ballot_count);
-    let evaluation_key_material_source = "development private setup witness key synthesis";
     let context = EvaluatorContext::from_key(evaluator_key.clone(), &replay_seed, working_level)?;
     let working_aggregate = modulus_switch_to(aggregate_ciphertext, context.working_level())?;
-    let replay_started = DirectBallotTimingStart::now();
     let packed_scores =
         pack_direct_score_slots(&context, &working_aggregate, OPTION_COUNT, &replay_seed)?;
     drop(working_aggregate);
@@ -74,7 +70,6 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             OPTION_COUNT,
             *top_count,
         )?;
-        let replay_time_milliseconds = replay_started.elapsed_milliseconds();
         let target_id_root = ciphertext_object_root(&target.target_id)?;
         let target_order_root = ciphertext_object_root(&target.target_order)?;
         let target_ciphertext_hash = direct_target_ciphertext_hash(
@@ -94,7 +89,6 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
                 score_domain_max,
                 working_level: context.working_level(),
                 target_layout_hash: &target_layout_root,
-                evaluation_key_material_source,
             },
         )?;
         let evaluator_replay_record_hash = direct_ballot_evaluator_replay_record_hash(
@@ -104,19 +98,6 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             &target_ciphertext_hash,
             &target_layout_root,
         )?;
-        let target_id_slots = evaluator_key.decrypt_to_slots(&target.target_id)?;
-        let target_order_slots = evaluator_key.decrypt_to_slots(&target.target_order)?;
-        let decoded_target_ids = direct_packed_option_slots(&target_id_slots);
-        let decoded_target_orders = direct_packed_option_slots(&target_order_slots);
-        let (oracle_target_ids, oracle_target_orders) =
-            direct_ballot_plaintext_target_slots(aggregate_scores, *top_count)?;
-        if decoded_target_ids != oracle_target_ids || decoded_target_orders != oracle_target_orders
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "direct encrypted ballot packed batched-pair evaluator did not match the plaintext target oracle",
-            ));
-        }
         let target_proposal = direct_ballot_target_proposal(
             setup_package,
             &aggregate_ciphertext_root,
@@ -129,29 +110,18 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
 
         let evaluation = json!({
             "topCount": top_count,
-            "scoreDomainMax": score_domain_max,
-            "tiePolicy": TIE_POLICY,
-            "workingLevel": context.working_level(),
-            "evaluationKeyMaterialSource": evaluation_key_material_source,
             "targetLayoutHash": target_layout_root,
             "targetIdRoot": target_id_root,
             "targetOrderRoot": target_order_root,
             "targetCiphertextHash": target_ciphertext_hash,
             "evaluatorReplayContextHash": evaluator_replay_context_hash,
             "evaluatorReplayRecordHash": evaluator_replay_record_hash,
-            "targetProposal": target_proposal,
-            "replayTimeMilliseconds": direct_ballot_timing_report_value(replay_time_milliseconds)
+            "targetProposal": target_proposal
         });
         evaluations.push(evaluation);
     }
 
     Ok(evaluations)
-}
-
-pub(super) fn direct_packed_option_slots(slots: &[u64]) -> Vec<u64> {
-    (0..OPTION_COUNT)
-        .map(|option| slots[packed_score_slot(option)])
-        .collect()
 }
 
 pub(crate) fn direct_ballot_evaluator_working_level(ballot_count: usize) -> usize {
@@ -174,6 +144,7 @@ pub(crate) fn direct_ballot_comparison_domain_max(ballot_count: usize) -> Canoni
     })
 }
 
+#[cfg(test)]
 pub(crate) fn direct_ballot_plaintext_target_slots(
     aggregate_scores: &[u64],
     top_count: usize,
@@ -225,16 +196,11 @@ pub(super) struct DirectBallotEvaluatorReplayContextHashInput<'a> {
     score_domain_max: u64,
     working_level: usize,
     target_layout_hash: &'a str,
-    evaluation_key_material_source: &'a str,
 }
 
 pub(super) fn direct_ballot_evaluator_replay_context_hash(
     input: DirectBallotEvaluatorReplayContextHashInput<'_>,
 ) -> CanonicalResult<String> {
-    let evaluation_key_material = json!({
-        "source": input.evaluation_key_material_source,
-    });
-
     derive_canonical_object_hash(&json!({
         "objectType": "DirectEncryptedBallotEvaluatorReplayContext",
         "setupPackageHash": setup_package_hash(input.setup_package)?,
@@ -249,7 +215,6 @@ pub(super) fn direct_ballot_evaluator_replay_context_hash(
         "tiePolicy": TIE_POLICY,
         "workingLevel": input.working_level,
         "bgvParametersHash": bgv_parameters_hash()?,
-        "evaluationKeyMaterial": evaluation_key_material,
         "targetLayoutHash": input.target_layout_hash,
     }))
 }

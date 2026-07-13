@@ -157,7 +157,6 @@ export const deriveRosterExternalAcceptanceHash = (
         objectType: acceptance.objectType,
         participantIdentity: acceptance.participantIdentity,
         rosterHash: acceptance.rosterHash,
-        warningTextVersion: acceptance.warningTextVersion,
     });
 
 export const deriveElectionManifestHash = (

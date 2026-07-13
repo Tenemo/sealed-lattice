@@ -1,7 +1,3 @@
-// VSS public material assembly. Split across the vss-commitments/ modules by
-// domain (commitment sets, linkage and bridge statements/proofs, and proof
-// material transport); this file re-exports the public surface so import paths
-// are unchanged.
 export {
     createVssPublicCoefficientCommitmentSet,
     createVssPublicRecipientShareCommitmentSet,
@@ -11,7 +7,6 @@ export {
 export type {
     VssCommittedMaterialCommitmentValue,
     VssCommittedMaterialCommitmentComputer,
-    VssShareLinkageProofComputer,
     VssAggregateThresholdProofComputer,
     VssPublicCoefficientCommitmentSet,
     VssPublicRecipientShareCommitmentSet,
@@ -25,7 +20,6 @@ export type {
     VssShareLinkageStatement,
     VssSameSecretBridgeProofMaterialSet,
     VssSameSecretBridgeStatementSet,
-    SameSecretBridgeProofComputer,
 } from './vss-commitments/linkage-and-bridge.js';
 export {
     createBinaryChunkedVssShareLinkageProofMaterialTransport,
@@ -35,6 +29,4 @@ export {
 export type {
     TransportedVssShareLinkageProofMaterialSet,
     TransportedSameSecretBridgeProofMaterialSet,
-    BinaryChunkedVssShareLinkageProofMaterialTransport,
-    BinaryChunkedSameSecretBridgeProofMaterialTransport,
 } from './vss-commitments/proof-material-transport.js';

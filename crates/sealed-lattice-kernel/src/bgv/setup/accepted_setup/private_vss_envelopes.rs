@@ -15,7 +15,6 @@ pub(super) type PrivateVssEnvelopeBindingMap = BTreeMap<(u64, u64), PrivateVssEn
 
 struct MailboxPublicKeyBinding {
     public_key_hash: String,
-    public_key_bytes_hash: String,
 }
 
 fn setup_intent_mailbox_public_key_bindings_from_phase_transcript(
@@ -68,20 +67,10 @@ fn setup_intent_mailbox_public_key_bindings_from_phase_transcript(
                     "setupIntent participant object must bind privateVssMailboxPublicKeyHash",
                 )
             })?;
-        let public_key_bytes_hash = participant
-            .get("privateVssMailboxPublicKeyBytesHash")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "setupIntent participant object must bind privateVssMailboxPublicKeyBytesHash",
-                )
-            })?;
         mailbox_public_key_bindings.insert(
             roster_position,
             MailboxPublicKeyBinding {
                 public_key_hash: public_key_hash.to_string(),
-                public_key_bytes_hash: public_key_bytes_hash.to_string(),
             },
         );
     }
@@ -137,18 +126,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
         )?));
     }
 
-    let Some(package_root) = setup_package
-        .get("privateVssEnvelopeCommitmentRoot")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(verification_response(
-            Some("privateVssEnvelopeDelivery"),
-            vec!["privateVssEnvelopeCommitmentRoot".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
-    };
-    validate_hash_string(package_root, "privateVssEnvelopeCommitmentRoot")?;
     let Some(set_root) = commitment_set
         .get("privateVssEnvelopeCommitmentRoot")
         .and_then(Value::as_str)
@@ -164,13 +141,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
         set_root,
         "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
     )?;
-    if set_root != package_root {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeCommitmentRootMismatch",
-            "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot must match setupPackage.privateVssEnvelopeCommitmentRoot",
-            "setupPackage.privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
-        )?));
-    }
 
     let roster = super::accepted_roster_from_package(setup_package);
     if commitment_set
@@ -185,37 +155,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
         )?));
     }
     let expected_envelope_count = roster.participant_count * roster.participant_count;
-    if commitment_set.get("envelopeCount").and_then(Value::as_u64) != Some(expected_envelope_count)
-    {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeCountMismatch",
-            "privateVssEnvelopeCommitments.envelopeCount must cover every source-trustee-recipient trustee pair",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeCount",
-        )?));
-    }
-    if commitment_set
-        .get("deliveryPhaseNumber")
-        .and_then(Value::as_u64)
-        != Some(PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER)
-    {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeDeliveryPhaseMismatch",
-            "privateVssEnvelopeCommitments.deliveryPhaseNumber must match the private envelope delivery phase",
-            "setupPackage.privateVssEnvelopeCommitments.deliveryPhaseNumber",
-        )?));
-    }
-    if commitment_set
-        .get("verificationPhaseNumber")
-        .and_then(Value::as_u64)
-        != Some(PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER)
-    {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeVerificationPhaseMismatch",
-            "privateVssEnvelopeCommitments.verificationPhaseNumber must match the recipient verification phase",
-            "setupPackage.privateVssEnvelopeCommitments.verificationPhaseNumber",
-        )?));
-    }
-
     let public_matrix_seed_hash = setup_package
         .get("commonRandomness")
         .and_then(|common_randomness| common_randomness.get("publicMatrixSeedHash"))
@@ -483,58 +422,6 @@ fn private_vss_envelope_binding_from_reference(
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.objectType",
         )));
     }
-    if let Err(refusal) = verify_private_vss_envelope_context(
-        envelope_reference,
-        setup_context,
-        "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
-    ) {
-        return Ok(Err(refusal));
-    }
-    if envelope_reference
-        .get("publicMatrixSeedHash")
-        .and_then(Value::as_str)
-        != Some(public_matrix_seed_hash)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeReferencePublicMatrixSeedMismatch",
-            "private VSS envelope commitment publicMatrixSeedHash must match common randomness",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.publicMatrixSeedHash",
-        )));
-    }
-    if envelope_reference
-        .get("vssCoefficientCommitmentRoot")
-        .and_then(Value::as_str)
-        != Some(vss_coefficient_commitment_root)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeReferenceVssCommitmentRootMismatch",
-            "private VSS envelope commitment must bind the accepted VSS coefficient commitment root",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.vssCoefficientCommitmentRoot",
-        )));
-    }
-    if envelope_reference
-        .get("deliveryPhaseNumber")
-        .and_then(Value::as_u64)
-        != Some(PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeReferenceDeliveryPhaseMismatch",
-            "private VSS envelope commitment must bind the private envelope delivery phase",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.deliveryPhaseNumber",
-        )));
-    }
-    if envelope_reference
-        .get("verificationPhaseNumber")
-        .and_then(Value::as_u64)
-        != Some(PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeReferenceVerificationPhaseMismatch",
-            "private VSS envelope commitment must bind the recipient verification phase",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.verificationPhaseNumber",
-        )));
-    }
-
     let source_trustee_identity = match envelope_reference
         .get("sourceTrusteeIdentity")
         .and_then(Value::as_str)
@@ -621,46 +508,9 @@ fn private_vss_envelope_binding_from_reference(
     let expected_recipient_mailbox_public_key_hash = expected_recipient_mailbox_public_key_binding
         .public_key_hash
         .as_str();
-    let expected_recipient_mailbox_public_key_bytes_hash =
-        expected_recipient_mailbox_public_key_binding
-            .public_key_bytes_hash
-            .as_str();
-    let Some(recipient_mailbox_public_key_hash) = envelope_reference
-        .get("recipientMailboxPublicKeyHash")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeMailboxPublicKeyMissing",
-            "private VSS envelope commitment must bind recipientMailboxPublicKeyHash",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.recipientMailboxPublicKeyHash",
-        )));
-    };
-    validate_hash_string(
-        recipient_mailbox_public_key_hash,
-        "privateVssEnvelopeCommitments.envelopeReferences.recipientMailboxPublicKeyHash",
-    )?;
-    if recipient_mailbox_public_key_hash != expected_recipient_mailbox_public_key_hash {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeMailboxPublicKeyMismatch",
-            "private VSS envelope commitment recipientMailboxPublicKeyHash must match the setup-intent mailbox key for the recipient",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.recipientMailboxPublicKeyHash",
-        )));
-    }
-    // Source-major sequence number uniquely identifying the ordered (source, recipient) envelope; it is bound into the AEAD associated data to prevent cross-pair ciphertext replay.
     let roster = super::accepted_roster_from_setup_context(setup_context);
     let expected_sequence_number =
         source_trustee_roster_position * roster.participant_count + recipient_roster_position;
-    if envelope_reference
-        .get("envelopeSequenceNumber")
-        .and_then(Value::as_u64)
-        != Some(expected_sequence_number)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeSequenceMismatch",
-            "private VSS envelope commitment envelopeSequenceNumber must follow source-trustee-major roster order",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.envelopeSequenceNumber",
-        )));
-    }
 
     let expected_source_trustee_commitment_root = match source_trustee_commitment_roots
         .get(&source_trustee_roster_position)
@@ -674,22 +524,9 @@ fn private_vss_envelope_binding_from_reference(
             ));
         }
     };
-    if envelope_reference
-        .get("sourceTrusteeCommitmentRoot")
-        .and_then(Value::as_str)
-        != Some(expected_source_trustee_commitment_root)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeSourceTrusteeCommitmentRootMismatch",
-            "private VSS envelope commitment sourceTrusteeCommitmentRoot must match the accepted source trustee coefficient commitments",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.sourceTrusteeCommitmentRoot",
-        )));
-    }
-
     for field_name in [
         "privateEnvelopeHash",
         "localVerificationRoot",
-        "privateEnvelopeAadHash",
         "encryptedEnvelopeHash",
     ] {
         let Some(hash) = envelope_reference.get(field_name).and_then(Value::as_str) else {
@@ -718,50 +555,11 @@ fn private_vss_envelope_binding_from_reference(
         expected_source_trustee_commitment_root,
         expected_sequence_number,
     )?;
-    let Some(private_envelope_aad) = envelope_reference.get("privateEnvelopeAad") else {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeAadMissing",
-            "private VSS envelope commitment must publish its AEAD associated-data object",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.privateEnvelopeAad",
-        )));
-    };
-    if private_envelope_aad != &expected_aad {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeAadMismatch",
-            "private VSS envelope AEAD associated-data object does not match the accepted setup binding",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.privateEnvelopeAad",
-        )));
-    }
-    let expected_aad_hash = derive_canonical_object_hash(private_envelope_aad)?;
-    if envelope_reference
-        .get("privateEnvelopeAadHash")
-        .and_then(Value::as_str)
-        != Some(expected_aad_hash.as_str())
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeAadHashMismatch",
-            "privateEnvelopeAadHash does not match the canonical private VSS envelope associated-data object",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.privateEnvelopeAadHash",
-        )));
-    }
-
     if let Some(encrypted_envelope) = envelope_reference.get("encryptedEnvelope")
         && let Err(refusal) = verify_encrypted_private_vss_envelope(
             encrypted_envelope,
-            setup_context,
             &expected_aad,
-            &expected_aad_hash,
-            public_matrix_seed_hash,
-            vss_coefficient_commitment_root,
-            source_trustee_identity,
-            source_trustee_roster_position,
-            recipient_identity,
-            recipient_roster_position,
             expected_recipient_mailbox_public_key_hash,
-            expected_recipient_mailbox_public_key_bytes_hash,
-            expected_source_trustee_commitment_root,
-            expected_sequence_number,
-            value_string(envelope_reference, "privateEnvelopeHash")?,
             value_string(envelope_reference, "encryptedEnvelopeHash")?,
         )?
     {
@@ -787,7 +585,8 @@ fn private_vss_envelope_binding_from_reference(
         .as_object_mut()
         .expect("private VSS envelope commitment reference object was checked")
         .remove("privateEnvelopeCommitmentRoot");
-    // The commitment root binds the envelope metadata but deliberately excludes encryptedEnvelope (bound separately by encryptedEnvelopeHash), so the same commitment covers re-encryptions.
+    // The commitment root excludes the transported encrypted envelope bytes because
+    // their canonical hash is already bound by encryptedEnvelopeHash.
     record_root_input
         .as_object_mut()
         .expect("private VSS envelope commitment reference object was checked")
@@ -811,23 +610,10 @@ fn private_vss_envelope_binding_from_reference(
     }))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn verify_encrypted_private_vss_envelope(
     encrypted_envelope: &Value,
-    setup_context: &Value,
     expected_aad: &Value,
-    expected_aad_hash: &str,
-    public_matrix_seed_hash: &str,
-    vss_coefficient_commitment_root: &str,
-    source_trustee_identity: &str,
-    source_trustee_roster_position: u64,
-    recipient_identity: &str,
-    recipient_roster_position: u64,
     expected_recipient_mailbox_public_key_hash: &str,
-    expected_recipient_mailbox_public_key_bytes_hash: &str,
-    source_trustee_commitment_root: &str,
-    envelope_sequence_number: u64,
-    private_envelope_hash: &str,
     encrypted_envelope_hash: &str,
 ) -> CanonicalResult<Result<(), Refusal>> {
     if !encrypted_envelope.is_object() {
@@ -846,109 +632,22 @@ fn verify_encrypted_private_vss_envelope(
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.objectType",
         )));
     }
-    if let Err(refusal) = verify_private_vss_envelope_context(
-        encrypted_envelope,
-        setup_context,
-        "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope",
-    ) {
-        return Ok(Err(refusal));
+    if encrypted_envelope
+        .get("recipientMailboxPublicKeyHash")
+        .and_then(Value::as_str)
+        != Some(expected_recipient_mailbox_public_key_hash)
+    {
+        return Ok(Err(Refusal::new(
+            "privateVssEncryptedEnvelopeBindingMismatch",
+            "encryptedEnvelope.recipientMailboxPublicKeyHash must match the accepted recipient mailbox key",
+            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.recipientMailboxPublicKeyHash",
+        )));
     }
-
-    for (field_name, expected_value) in [
-        ("publicMatrixSeedHash", public_matrix_seed_hash),
-        (
-            "vssCoefficientCommitmentRoot",
-            vss_coefficient_commitment_root,
-        ),
-        ("sourceTrusteeIdentity", source_trustee_identity),
-        ("recipientIdentity", recipient_identity),
-        (
-            "recipientMailboxPublicKeyHash",
-            expected_recipient_mailbox_public_key_hash,
-        ),
-        (
-            "sourceTrusteeCommitmentRoot",
-            source_trustee_commitment_root,
-        ),
-        ("privateEnvelopeHash", private_envelope_hash),
-        ("privateEnvelopeAadHash", expected_aad_hash),
-    ] {
-        if encrypted_envelope.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Err(Refusal::new(
-                "privateVssEncryptedEnvelopeBindingMismatch",
-                format!(
-                    "encryptedEnvelope.{field_name} must match the private envelope commitment binding"
-                ),
-                format!(
-                    "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.{field_name}"
-                ),
-            )));
-        }
-    }
-    for (field_name, expected_value) in [
-        (
-            "sourceTrusteeRosterPosition",
-            source_trustee_roster_position,
-        ),
-        ("recipientRosterPosition", recipient_roster_position),
-        ("envelopeSequenceNumber", envelope_sequence_number),
-        (
-            "deliveryPhaseNumber",
-            PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER,
-        ),
-        (
-            "verificationPhaseNumber",
-            PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER,
-        ),
-        ("aeadTagLength", 128),
-    ] {
-        if encrypted_envelope.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
-            return Ok(Err(Refusal::new(
-                "privateVssEncryptedEnvelopeBindingMismatch",
-                format!(
-                    "encryptedEnvelope.{field_name} must match the private envelope commitment binding"
-                ),
-                format!(
-                    "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.{field_name}"
-                ),
-            )));
-        }
-    }
-
     if encrypted_envelope.get("privateEnvelopeAad") != Some(expected_aad) {
         return Ok(Err(Refusal::new(
             "privateVssEncryptedEnvelopeAadMismatch",
             "encryptedEnvelope.privateEnvelopeAad must match the accepted private envelope associated-data object",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.privateEnvelopeAad",
-        )));
-    }
-
-    for field_name in [
-        "recipientMailboxPublicKeyHash",
-        "recipientMailboxPublicKeyBytesHash",
-        "kemCiphertextHash",
-        "ciphertextBytesHash",
-    ] {
-        let Some(hash) = encrypted_envelope.get(field_name).and_then(Value::as_str) else {
-            return Ok(Err(Refusal::new(
-                "privateVssEncryptedEnvelopeHashMissing",
-                format!("encryptedEnvelope.{field_name} must be present"),
-                format!(
-                    "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.{field_name}"
-                ),
-            )));
-        };
-        validate_hash_string(hash, &format!("encryptedEnvelope.{field_name}"))?;
-    }
-    if encrypted_envelope
-        .get("recipientMailboxPublicKeyBytesHash")
-        .and_then(Value::as_str)
-        != Some(expected_recipient_mailbox_public_key_bytes_hash)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEncryptedEnvelopeMailboxPublicKeyBytesHashMismatch",
-            "encryptedEnvelope.recipientMailboxPublicKeyBytesHash must match the setup-intent mailbox key bytes hash for the recipient",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.recipientMailboxPublicKeyBytesHash",
         )));
     }
 
@@ -967,22 +666,6 @@ fn verify_encrypted_private_vss_envelope(
         1088,
         "encryptedEnvelope.kemCiphertextBytesHex",
     )?;
-    let kem_ciphertext_bytes = crate::transcript_core::decode_hex(kem_ciphertext_bytes_hex)?;
-    let expected_kem_ciphertext_hash = hash512_hex(
-        "sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext",
-        &[&kem_ciphertext_bytes],
-    );
-    if encrypted_envelope
-        .get("kemCiphertextHash")
-        .and_then(Value::as_str)
-        != Some(expected_kem_ciphertext_hash.as_str())
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEncryptedEnvelopeKemCiphertextHashMismatch",
-            "encryptedEnvelope.kemCiphertextHash must match kemCiphertextBytesHex",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.kemCiphertextHash",
-        )));
-    }
     let Some(aead_nonce_hex) = encrypted_envelope
         .get("aeadNonceHex")
         .and_then(Value::as_str)
@@ -1005,52 +688,8 @@ fn verify_encrypted_private_vss_envelope(
         )));
     };
     validate_lowercase_hex(ciphertext_bytes_hex, "encryptedEnvelope.ciphertextBytesHex")?;
-    let ciphertext_bytes = crate::transcript_core::decode_hex(ciphertext_bytes_hex)?;
-    let expected_ciphertext_bytes_hash = hash512_hex(
-        "sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext",
-        &[&ciphertext_bytes],
-    );
-    if encrypted_envelope
-        .get("ciphertextBytesHash")
-        .and_then(Value::as_str)
-        != Some(expected_ciphertext_bytes_hash.as_str())
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEncryptedEnvelopeCiphertextBytesHashMismatch",
-            "encryptedEnvelope.ciphertextBytesHash must match ciphertextBytesHex",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.ciphertextBytesHash",
-        )));
-    }
-    if encrypted_envelope
-        .get("ciphertextByteLength")
-        .and_then(Value::as_u64)
-        != Some((ciphertext_bytes_hex.len() / 2) as u64)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEncryptedEnvelopeCiphertextLengthMismatch",
-            "encryptedEnvelope.ciphertextByteLength must match ciphertextBytesHex",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.ciphertextByteLength",
-        )));
-    }
 
-    if encrypted_envelope
-        .get("encryptedEnvelopeHash")
-        .and_then(Value::as_str)
-        != Some(encrypted_envelope_hash)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEncryptedEnvelopeHashMismatch",
-            "encryptedEnvelope.encryptedEnvelopeHash must match the commitment reference",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.encryptedEnvelopeHash",
-        )));
-    }
-    let mut encrypted_envelope_root_input = encrypted_envelope.clone();
-    encrypted_envelope_root_input
-        .as_object_mut()
-        .expect("encrypted envelope object was checked")
-        .remove("encryptedEnvelopeHash");
-    let expected_encrypted_envelope_hash =
-        derive_canonical_object_hash(&encrypted_envelope_root_input)?;
+    let expected_encrypted_envelope_hash = derive_canonical_object_hash(encrypted_envelope)?;
     if encrypted_envelope_hash != expected_encrypted_envelope_hash {
         return Ok(Err(Refusal::new(
             "privateVssEncryptedEnvelopeHashMismatch",
@@ -1091,8 +730,6 @@ fn private_vss_envelope_aad_value(
         "recipientRosterPosition": recipient_roster_position,
         "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
         "envelopeSequenceNumber": envelope_sequence_number,
-        "deliveryPhaseNumber": PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER,
-        "verificationPhaseNumber": PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER,
     }))
 }
 

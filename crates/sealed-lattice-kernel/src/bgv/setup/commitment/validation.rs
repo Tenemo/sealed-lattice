@@ -118,16 +118,6 @@ pub(super) fn signed_message_coefficient_magnitude_bound(
         })
 }
 
-// ceil(log2(value)) via bit_length(value - 1); the minus one makes exact powers
-// of two report b instead of b + 1.
-pub(super) fn ceil_log2_big_uint(value: &BigUint) -> u32 {
-    if value <= &BigUint::from(1_u8) {
-        return 0;
-    }
-    let previous = value - BigUint::from(1_u8);
-    u32::try_from(previous.bits()).expect("setup commitment modulus bit length fits u32")
-}
-
 #[cfg(test)]
 pub(super) fn validate_randomness_by_column(
     randomness_by_column: &[Vec<i128>],

@@ -64,20 +64,12 @@ export const assertJsonRecord = (
     return value;
 };
 
-export const assertExactFields = (
+export const assertRequiredFields = (
     value: JsonRecord,
-    allowedFieldNames: readonly string[],
+    requiredFieldNames: readonly string[],
     objectPath: string,
 ): void => {
-    const allowedFields = new Set(allowedFieldNames);
-    for (const fieldName of Object.keys(value)) {
-        if (!allowedFields.has(fieldName)) {
-            throw new TypeError(
-                `${objectPath}.${fieldName} is not allowed by the local trustee state schema.`,
-            );
-        }
-    }
-    for (const fieldName of allowedFieldNames) {
+    for (const fieldName of requiredFieldNames) {
         if (!(fieldName in value)) {
             throw new TypeError(
                 `${objectPath}.${fieldName} is required by the local trustee state schema.`,

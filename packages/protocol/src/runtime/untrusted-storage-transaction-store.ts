@@ -17,7 +17,7 @@ export type UntrustedStorageTransactionErrorCode =
     | 'MalformedLength'
     | 'QuotaExceeded';
 
-export class UntrustedStorageTransactionError extends Error {
+class UntrustedStorageTransactionError extends Error {
     public readonly code: UntrustedStorageTransactionErrorCode;
     public readonly failureCause: unknown;
 
@@ -85,7 +85,7 @@ export type UntrustedStorageAuthenticator = (
     input: UntrustedStorageAuthenticationInput,
 ) => Promise<void> | void;
 
-export type UntrustedStorageLeaseState =
+type UntrustedStorageLeaseState =
     | 'issued'
     | 'writing'
     | 'sealed'
@@ -93,14 +93,14 @@ export type UntrustedStorageLeaseState =
     | 'consumed'
     | 'cancelled';
 
-export type UntrustedStorageWriteLease = Readonly<{
+type UntrustedStorageWriteLease = Readonly<{
     write(bytes: Uint8Array): Promise<void>;
     seal(authenticate: UntrustedStorageAuthenticator): Promise<void>;
     cancel(): Promise<void>;
     state(): UntrustedStorageLeaseState;
 }>;
 
-export type UntrustedStorageTransaction = Readonly<{
+type UntrustedStorageTransaction = Readonly<{
     issueWriteLease(input: {
         logicalRecordKey: string;
         declaredByteLength: number;

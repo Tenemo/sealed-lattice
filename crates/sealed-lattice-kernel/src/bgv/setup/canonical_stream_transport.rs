@@ -13,9 +13,8 @@ use crate::{
         begin_canonical_stream_verifier, cancel_canonical_stream,
         derive_canonical_stream_descriptor, finish_canonical_stream_verifier_with_summary,
     },
-    hashing::{derive_canonical_object_hash, to_hex},
+    hashing::to_hex,
 };
-use serde_json::json;
 
 use super::{
     accepted_setup::{
@@ -55,40 +54,6 @@ struct VerifiedCanonicalProofMaterial {
     proof_bytes: BgvProofMaterialBytes,
     proof_family: &'static str,
     stream_summary: Arc<VerifiedCanonicalStreamSummary>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::bgv::setup) struct AuthenticatedSetupTransportAccounting {
-    pub(in crate::bgv::setup) total_byte_length: u64,
-    pub(in crate::bgv::setup) full_object_hash: String,
-    pub(in crate::bgv::setup) chunk_root: String,
-    pub(in crate::bgv::setup) chunk_hashes: Vec<String>,
-}
-
-pub(in crate::bgv::setup) fn authenticated_setup_transport_accounting(
-    stream_summary: &VerifiedCanonicalStreamSummary,
-) -> CanonicalResult<AuthenticatedSetupTransportAccounting> {
-    let chunk_hashes = stream_summary
-        .ordered_chunk_digests()
-        .iter()
-        .map(|digest| digest.to_lowercase_hex())
-        .collect::<Vec<_>>();
-    let full_object_hash = stream_summary.full_object_digest().to_lowercase_hex();
-    let total_byte_length = stream_summary.total_byte_length();
-    let chunk_root = derive_canonical_object_hash(&json!({
-        "objectType": "SetupTransportChunkManifest",
-        "chunkCount": chunk_hashes.len(),
-        "totalByteLength": total_byte_length,
-        "chunkHashes": chunk_hashes,
-        "fullObjectHash": full_object_hash,
-    }))?;
-
-    Ok(AuthenticatedSetupTransportAccounting {
-        total_byte_length,
-        full_object_hash,
-        chunk_root,
-        chunk_hashes,
-    })
 }
 
 static VERIFIED_CANONICAL_PROOF_MATERIALS: OnceLock<
@@ -199,23 +164,6 @@ pub(in crate::bgv::setup) fn accepted_setup_fixture_proof_binding_lease(
         .map_err(|_| canonical_proof_store_error())?
         .get(proof_material_root)
         .cloned())
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn accepted_setup_fixture_proof_binding_stream_summary(
-    lease: &CanonicalSetupProofBindingLease,
-    proof_family: &str,
-    proof_material_root: &str,
-) -> CanonicalResult<Arc<VerifiedCanonicalStreamSummary>> {
-    if lease.proof_material_root != proof_material_root
-        || lease.binding.proof_family != proof_family
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "accepted-setup fixture proof binding lease does not match its descriptor",
-        ));
-    }
-    Ok(Arc::clone(&lease.binding.stream_summary))
 }
 
 struct AcceptedSetupProofBindingSessionState {

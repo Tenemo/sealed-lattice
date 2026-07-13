@@ -98,8 +98,8 @@ pub(super) fn verify_setup_context(
     }
 
     // The setup parameters hash is a roster family, so it must match the hash
-    // derived from this setup context's roster. It binds Q_share, the
-    // carry-aware VSS relation, commitment, and BGV parameters.
+    // derived from this setup context's roster. It binds the thresholds,
+    // Q_share, evaluator key schedule, and BGV parameters.
     let setup_parameters_roster =
         super::accepted_setup::accepted_roster_from_setup_context(setup_context);
     if setup_context

@@ -6,8 +6,9 @@ use super::{
     OBJECT_ENVELOPE_SCHEMA_IDENTIFIER, ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster,
     SIGNED_CARRIER_SCHEMA_IDENTIFIER, SignedCarrier, StateCapabilityKind, StateOutputIntentPayload,
     StateRecoveryTransitionPayload, StateReservationIntentPayload, StateWitnessVoteKind,
-    StateWitnessVotePayload, StorageRootCommitmentPayload, VerificationResult, derive_state_key,
-    derive_state_recovery_producer_sequence, derive_state_witness_vote_sequence, hash512,
+    StateWitnessVotePayload, StorageRootCommitmentPayload, StreamDescriptor, VerificationResult,
+    derive_state_key, derive_state_recovery_producer_sequence, derive_state_witness_vote_sequence,
+    hash512,
 };
 
 const FOUNDATION_PAYLOAD_VERSION: u16 = 1;
@@ -16,7 +17,6 @@ const PUBLIC_RANDOMNESS_COMMITMENT_SCHEMA_IDENTIFIER: u16 = 0x1201;
 const PUBLIC_RANDOMNESS_REVEAL_SCHEMA_IDENTIFIER: u16 = 0x1202;
 const PRIVATE_SHARE_ACCEPTANCE_SCHEMA_IDENTIFIER: u16 = 0x1203;
 const COMPLAINT_SCHEMA_IDENTIFIER: u16 = 0x1204;
-const PUBLIC_RANDOMNESS_LOCK_SCHEMA_IDENTIFIER: u16 = 0x1206;
 const SETUP_INTENT_SCHEMA_IDENTIFIER: u16 = 0x1200;
 const PUBLIC_SETUP_RECORD_SCHEMA_IDENTIFIER: u16 = 0x2100;
 const BALLOT_PACKAGE_SCHEMA_IDENTIFIER: u16 = 0x1301;
@@ -33,7 +33,6 @@ const HARD_MAXIMUM_FOUNDATION_CARRIER_COUNT: usize = 65_536;
 const HARD_MAXIMUM_RETAINED_FOUNDATION_CARRIER_BYTE_LENGTH: usize = 128 * 1024 * 1024;
 const HARD_MAXIMUM_UNRESOLVED_FOUNDATION_DEPENDENCY_COUNT: usize = 65_536;
 
-const EMPTY_ITEMS: &[CanonicalItemType] = &[];
 const HASH_AND_HASH_LIST_ITEMS: &[CanonicalItemType] = &[
     CanonicalItemType::Hash512,
     CanonicalItemType::HomogeneousList,
@@ -43,10 +42,10 @@ const PARTICIPANT_HASH_AND_BYTES_ITEMS: &[CanonicalItemType] = &[
     CanonicalItemType::Hash512,
     CanonicalItemType::RawBytes,
 ];
-const HASH_HASH_LIST_AND_BYTES_ITEMS: &[CanonicalItemType] = &[
+const HASH_HASH_LIST_AND_STREAM_ITEMS: &[CanonicalItemType] = &[
     CanonicalItemType::Hash512,
     CanonicalItemType::HomogeneousList,
-    CanonicalItemType::RawBytes,
+    CanonicalItemType::NestedTuple,
 ];
 const PARTICIPANT_HASH_AND_REASON_ITEMS: &[CanonicalItemType] = &[
     CanonicalItemType::ParticipantIdentity,
@@ -58,7 +57,7 @@ const PUBLIC_SETUP_RECORD_ITEMS: &[CanonicalItemType] = &[
     CanonicalItemType::HomogeneousList,
     CanonicalItemType::HomogeneousList,
     CanonicalItemType::HomogeneousList,
-    CanonicalItemType::RawBytes,
+    CanonicalItemType::NestedTuple,
 ];
 const TWO_BYTES_ITEMS: &[CanonicalItemType] =
     &[CanonicalItemType::RawBytes, CanonicalItemType::RawBytes];
@@ -111,6 +110,9 @@ pub enum FoundationPrerequisiteRule {
     RosterOrderedObjects {
         object_type: FoundationObjectType,
     },
+    RosterOrderedStateReservations {
+        capability_kind: StateCapabilityKind,
+    },
     OneObject {
         object_type: FoundationObjectType,
     },
@@ -123,6 +125,7 @@ pub enum FoundationPrerequisiteRule {
 pub enum FoundationProducerSequenceRule {
     Any,
     Zero,
+    PublicRandomnessRevealSource,
     RecoveryEpochPlusOne,
     DerivedStateWitnessVote,
 }
@@ -177,7 +180,7 @@ pub struct FoundationEnvelopePolicy {
     pub verification_requirement: FoundationObjectVerificationRequirement,
 }
 
-pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
+pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 17] = [
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::PublicRandomnessCommitment,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
@@ -185,7 +188,7 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
         prerequisite_rule: FoundationPrerequisiteRule::RosterOrderedObjects {
             object_type: FoundationObjectType::SetupIntent,
         },
-        producer_sequence_rule: FoundationProducerSequenceRule::Any,
+        producer_sequence_rule: FoundationProducerSequenceRule::Zero,
         recovery_rule: FoundationRecoveryRule::None,
         producer_slot_rule: FoundationProducerSlotRule::ProducerSequence,
         payload_schema_identifier: PUBLIC_RANDOMNESS_COMMITMENT_SCHEMA_IDENTIFIER,
@@ -197,10 +200,10 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
         object_type: FoundationObjectType::PublicRandomnessReveal,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("public-randomness-reveal"),
-        prerequisite_rule: FoundationPrerequisiteRule::RosterOrderedObjects {
-            object_type: FoundationObjectType::PublicRandomnessLock,
+        prerequisite_rule: FoundationPrerequisiteRule::RosterOrderedStateReservations {
+            capability_kind: StateCapabilityKind::SetupPublicSeedBranch,
         },
-        producer_sequence_rule: FoundationProducerSequenceRule::Any,
+        producer_sequence_rule: FoundationProducerSequenceRule::PublicRandomnessRevealSource,
         recovery_rule: FoundationRecoveryRule::None,
         producer_slot_rule: FoundationProducerSlotRule::PublicRandomnessRevealSource,
         payload_schema_identifier: PUBLIC_RANDOMNESS_REVEAL_SCHEMA_IDENTIFIER,
@@ -209,45 +212,29 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
         verification_requirement: FoundationObjectVerificationRequirement::PublicRandomnessRelation,
     },
     FoundationEnvelopePolicy {
-        object_type: FoundationObjectType::PublicRandomnessLock,
-        carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
-        signature_purpose: Some("public-randomness-lock"),
-        prerequisite_rule: FoundationPrerequisiteRule::RosterOrderedObjects {
-            object_type: FoundationObjectType::PublicRandomnessCommitment,
-        },
-        producer_sequence_rule: FoundationProducerSequenceRule::Any,
-        recovery_rule: FoundationRecoveryRule::None,
-        producer_slot_rule: FoundationProducerSlotRule::ProducerSequence,
-        payload_schema_identifier: PUBLIC_RANDOMNESS_LOCK_SCHEMA_IDENTIFIER,
-        payload_schema_version: FOUNDATION_PAYLOAD_VERSION,
-        payload_item_types: EMPTY_ITEMS,
-        verification_requirement: FoundationObjectVerificationRequirement::PublicRandomnessRelation,
-    },
-    FoundationEnvelopePolicy {
         object_type: FoundationObjectType::SetupIntent,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("setup-intent"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
-        producer_sequence_rule: FoundationProducerSequenceRule::Any,
+        producer_sequence_rule: FoundationProducerSequenceRule::Zero,
         recovery_rule: FoundationRecoveryRule::None,
         producer_slot_rule: FoundationProducerSlotRule::ProducerSequence,
         payload_schema_identifier: SETUP_INTENT_SCHEMA_IDENTIFIER,
         payload_schema_version: FOUNDATION_PAYLOAD_VERSION,
-        payload_item_types: EMPTY_ITEMS,
-        verification_requirement:
-            FoundationObjectVerificationRequirement::CanonicalCarrierAuthentication,
+        payload_item_types: ONE_HASH_ITEM,
+        verification_requirement: FoundationObjectVerificationRequirement::StateAuthorization,
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::PrivateShareAcceptance,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("private-share-acceptance"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
-        producer_sequence_rule: FoundationProducerSequenceRule::Any,
+        producer_sequence_rule: FoundationProducerSequenceRule::Zero,
         recovery_rule: FoundationRecoveryRule::None,
         producer_slot_rule: FoundationProducerSlotRule::ProducerSequence,
         payload_schema_identifier: PRIVATE_SHARE_ACCEPTANCE_SCHEMA_IDENTIFIER,
         payload_schema_version: FOUNDATION_PAYLOAD_VERSION,
-        payload_item_types: HASH_HASH_LIST_AND_BYTES_ITEMS,
+        payload_item_types: HASH_HASH_LIST_AND_STREAM_ITEMS,
         verification_requirement: FoundationObjectVerificationRequirement::CommonProof,
     },
     FoundationEnvelopePolicy {
@@ -255,7 +242,7 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("setup-complaint"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
-        producer_sequence_rule: FoundationProducerSequenceRule::Any,
+        producer_sequence_rule: FoundationProducerSequenceRule::Zero,
         recovery_rule: FoundationRecoveryRule::None,
         producer_slot_rule: FoundationProducerSlotRule::ProducerSequence,
         payload_schema_identifier: COMPLAINT_SCHEMA_IDENTIFIER,
@@ -271,7 +258,7 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
         prerequisite_rule: FoundationPrerequisiteRule::OneExternal {
             prerequisite_kind: FoundationExternalPrerequisiteKind::PublicSetupSeed,
         },
-        producer_sequence_rule: FoundationProducerSequenceRule::Any,
+        producer_sequence_rule: FoundationProducerSequenceRule::Zero,
         recovery_rule: FoundationRecoveryRule::None,
         producer_slot_rule: FoundationProducerSlotRule::ProducerSequence,
         payload_schema_identifier: PUBLIC_SETUP_RECORD_SCHEMA_IDENTIFIER,
@@ -442,22 +429,21 @@ pub const fn foundation_envelope_policy(
     match object_type {
         FoundationObjectType::PublicRandomnessCommitment => &FOUNDATION_ENVELOPE_POLICIES[0],
         FoundationObjectType::PublicRandomnessReveal => &FOUNDATION_ENVELOPE_POLICIES[1],
-        FoundationObjectType::PublicRandomnessLock => &FOUNDATION_ENVELOPE_POLICIES[2],
-        FoundationObjectType::SetupIntent => &FOUNDATION_ENVELOPE_POLICIES[3],
-        FoundationObjectType::PrivateShareAcceptance => &FOUNDATION_ENVELOPE_POLICIES[4],
-        FoundationObjectType::Complaint => &FOUNDATION_ENVELOPE_POLICIES[5],
-        FoundationObjectType::PublicSetupRecord => &FOUNDATION_ENVELOPE_POLICIES[6],
-        FoundationObjectType::BallotPackage => &FOUNDATION_ENVELOPE_POLICIES[7],
-        FoundationObjectType::BallotCandidateList => &FOUNDATION_ENVELOPE_POLICIES[8],
-        FoundationObjectType::Aggregate => &FOUNDATION_ENVELOPE_POLICIES[9],
-        FoundationObjectType::EvaluatorReplay => &FOUNDATION_ENVELOPE_POLICIES[10],
-        FoundationObjectType::FinalitySignature => &FOUNDATION_ENVELOPE_POLICIES[11],
-        FoundationObjectType::StateReservation => &FOUNDATION_ENVELOPE_POLICIES[12],
-        FoundationObjectType::StateOutputIntent => &FOUNDATION_ENVELOPE_POLICIES[13],
-        FoundationObjectType::StateWitnessVote => &FOUNDATION_ENVELOPE_POLICIES[14],
-        FoundationObjectType::RecoveryTransition => &FOUNDATION_ENVELOPE_POLICIES[15],
-        FoundationObjectType::TargetDecryptionShare => &FOUNDATION_ENVELOPE_POLICIES[16],
-        FoundationObjectType::StorageRootCommitment => &FOUNDATION_ENVELOPE_POLICIES[17],
+        FoundationObjectType::SetupIntent => &FOUNDATION_ENVELOPE_POLICIES[2],
+        FoundationObjectType::PrivateShareAcceptance => &FOUNDATION_ENVELOPE_POLICIES[3],
+        FoundationObjectType::Complaint => &FOUNDATION_ENVELOPE_POLICIES[4],
+        FoundationObjectType::PublicSetupRecord => &FOUNDATION_ENVELOPE_POLICIES[5],
+        FoundationObjectType::BallotPackage => &FOUNDATION_ENVELOPE_POLICIES[6],
+        FoundationObjectType::BallotCandidateList => &FOUNDATION_ENVELOPE_POLICIES[7],
+        FoundationObjectType::Aggregate => &FOUNDATION_ENVELOPE_POLICIES[8],
+        FoundationObjectType::EvaluatorReplay => &FOUNDATION_ENVELOPE_POLICIES[9],
+        FoundationObjectType::FinalitySignature => &FOUNDATION_ENVELOPE_POLICIES[10],
+        FoundationObjectType::StateReservation => &FOUNDATION_ENVELOPE_POLICIES[11],
+        FoundationObjectType::StateOutputIntent => &FOUNDATION_ENVELOPE_POLICIES[12],
+        FoundationObjectType::StateWitnessVote => &FOUNDATION_ENVELOPE_POLICIES[13],
+        FoundationObjectType::RecoveryTransition => &FOUNDATION_ENVELOPE_POLICIES[14],
+        FoundationObjectType::TargetDecryptionShare => &FOUNDATION_ENVELOPE_POLICIES[15],
+        FoundationObjectType::StorageRootCommitment => &FOUNDATION_ENVELOPE_POLICIES[16],
     }
 }
 
@@ -867,6 +853,7 @@ impl FoundationBoardIngestor {
         }
         self.validate_envelope_context_and_shape(&envelope, policy)?;
         let payload_tuple = self.validate_payload(&envelope, policy)?;
+        self.validate_producer_sequence(&envelope, policy, &payload_tuple)?;
         self.validate_family_payload_bindings(&envelope, &payload_tuple)?;
         Ok(envelope)
     }
@@ -912,11 +899,33 @@ impl FoundationBoardIngestor {
                 }
             }
         }
+        Ok(())
+    }
+
+    fn validate_producer_sequence(
+        &self,
+        envelope: &ObjectEnvelope,
+        policy: &FoundationEnvelopePolicy,
+        payload_tuple: &CanonicalTuple,
+    ) -> Result<(), RefusalReason> {
         match policy.producer_sequence_rule {
             FoundationProducerSequenceRule::Any
             | FoundationProducerSequenceRule::DerivedStateWitnessVote => {}
             FoundationProducerSequenceRule::Zero => {
                 if envelope.producer_sequence != 0 {
+                    return Err(RefusalReason::WrongTypeOrLength);
+                }
+            }
+            FoundationProducerSequenceRule::PublicRandomnessRevealSource => {
+                let source_participant_id = read_participant_identity(&payload_tuple.items[0])?;
+                let source_roster_position = self
+                    .roster_identities
+                    .iter()
+                    .position(|participant_identity| *participant_identity == source_participant_id)
+                    .ok_or(RefusalReason::WrongContext)?;
+                let expected_sequence = u64::try_from(source_roster_position)
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+                if envelope.producer_sequence != expected_sequence {
                     return Err(RefusalReason::WrongTypeOrLength);
                 }
             }
@@ -1003,11 +1012,42 @@ impl FoundationBoardIngestor {
                 if envelope.producer_participant_id.as_ref() != Some(expected_producer) {
                     return Err(RefusalReason::WrongContext);
                 }
+                super::schemas::read_list_header(
+                    &payload_tuple.items[1],
+                    CanonicalItemType::Hash512,
+                )
+                .map_err(|error| error.refusal_reason)?;
+                super::schemas::read_list_header(
+                    &payload_tuple.items[2],
+                    CanonicalItemType::Hash512,
+                )
+                .map_err(|error| error.refusal_reason)?;
                 require_homogeneous_list_count_and_type(
                     &payload_tuple.items[3],
                     usize::from(FOUNDATION_PROFILE.participant_count),
                     CanonicalItemType::Hash512,
                 )?;
+                let descriptor_tuple = super::schemas::read_nested_tuple(
+                    &payload_tuple.items[4],
+                    &self.canonical_decode_limits,
+                )
+                .map_err(|error| error.refusal_reason)?;
+                StreamDescriptor::from_tuple(&descriptor_tuple)
+                    .map_err(|error| error.refusal_reason)?;
+            }
+            FoundationObjectType::PrivateShareAcceptance => {
+                super::schemas::read_list_header(
+                    &payload_tuple.items[1],
+                    CanonicalItemType::Hash512,
+                )
+                .map_err(|error| error.refusal_reason)?;
+                let descriptor_tuple = super::schemas::read_nested_tuple(
+                    &payload_tuple.items[2],
+                    &self.canonical_decode_limits,
+                )
+                .map_err(|error| error.refusal_reason)?;
+                StreamDescriptor::from_tuple(&descriptor_tuple)
+                    .map_err(|error| error.refusal_reason)?;
             }
             FoundationObjectType::Aggregate => {
                 require_homogeneous_list_count_and_type(
@@ -1051,9 +1091,7 @@ impl FoundationBoardIngestor {
                 )
                 .map_err(|error| error.refusal_reason)?;
             }
-            FoundationObjectType::PublicRandomnessLock
-            | FoundationObjectType::SetupIntent
-            | FoundationObjectType::PrivateShareAcceptance
+            FoundationObjectType::SetupIntent
             | FoundationObjectType::BallotPackage
             | FoundationObjectType::BallotCandidateList
             | FoundationObjectType::EvaluatorReplay
@@ -1152,6 +1190,42 @@ impl FoundationBoardIngestor {
                         dependencies,
                         missing_dependency_count,
                     )?;
+                }
+            }
+            FoundationPrerequisiteRule::RosterOrderedStateReservations { capability_kind } => {
+                if envelope.ordered_prerequisite_hashes.len() != self.roster_identities.len() {
+                    return Err(RefusalReason::WrongTypeOrLength);
+                }
+                let mut distinct_hashes = BTreeSet::new();
+                for (roster_position, prerequisite_hash) in envelope
+                    .ordered_prerequisite_hashes
+                    .iter()
+                    .copied()
+                    .enumerate()
+                {
+                    if !distinct_hashes.insert(prerequisite_hash.into_bytes()) {
+                        return Err(RefusalReason::WrongHashOrRoot);
+                    }
+                    let Some(reservation) = self.evaluate_object_dependency(
+                        prerequisite_hash,
+                        Some((
+                            FoundationObjectType::StateReservation,
+                            Some(self.roster_identities[roster_position]),
+                        )),
+                        dependencies,
+                        missing_dependency_count,
+                    )?
+                    else {
+                        continue;
+                    };
+                    let reservation_payload = StateReservationIntentPayload::decode(
+                        &reservation.envelope.payload_bytes,
+                        &self.canonical_decode_limits,
+                    )
+                    .map_err(|error| error.refusal_reason)?;
+                    if reservation_payload.capability_kind != capability_kind {
+                        return Err(RefusalReason::WrongTypeOrLength);
+                    }
                 }
             }
         }
@@ -1855,7 +1929,14 @@ mod tests {
                         Some(roster_position),
                         0,
                         Vec::new(),
-                        empty_payload(SETUP_INTENT_SCHEMA_IDENTIFIER),
+                        payload(
+                            SETUP_INTENT_SCHEMA_IDENTIFIER,
+                            vec![CanonicalItem::hash512(
+                                [u8::try_from(roster_position + 1)
+                                    .expect("test roster position fits in one byte");
+                                    Hash512::BYTE_LENGTH],
+                            )],
+                        ),
                     );
                     let object_hash = envelope.object_hash().expect("test object hash derives");
                     let carrier = self.signed_carrier(
@@ -1868,12 +1949,37 @@ mod tests {
                 })
                 .collect()
         }
-    }
 
-    fn empty_payload(schema_identifier: u16) -> Vec<u8> {
-        CanonicalTuple::new(schema_identifier, FOUNDATION_PAYLOAD_VERSION, Vec::new())
-            .encode()
-            .expect("test empty payload encodes")
+        fn state_reservations(
+            &self,
+            capability_kind: StateCapabilityKind,
+            authorization_hash: Hash512,
+        ) -> Vec<(Hash512, Vec<u8>)> {
+            (0..self.participant_identities.len())
+                .map(|roster_position| {
+                    let envelope = self.envelope(
+                        FoundationObjectType::StateReservation,
+                        Some(roster_position),
+                        0,
+                        Vec::new(),
+                        StateReservationIntentPayload {
+                            capability_kind,
+                            authorization_hash,
+                        }
+                        .encode()
+                        .expect("test state reservation payload encodes"),
+                    );
+                    let object_hash = envelope
+                        .object_hash()
+                        .expect("test state reservation hash derives");
+                    let signature_seed_byte = u8::try_from(0x90usize + roster_position)
+                        .expect("test signature seed fits in one byte");
+                    let carrier =
+                        self.signed_carrier(roster_position, envelope, signature_seed_byte);
+                    (object_hash, carrier)
+                })
+                .collect()
+        }
     }
 
     fn hash_list(values: &[Hash512]) -> CanonicalItem {
@@ -1889,6 +1995,19 @@ mod tests {
         CanonicalTuple::new(schema_identifier, FOUNDATION_PAYLOAD_VERSION, items)
             .encode()
             .expect("test payload encodes")
+    }
+
+    fn stream_descriptor_item(digest_byte: u8) -> CanonicalItem {
+        let descriptor = StreamDescriptor::new(
+            1,
+            vec![Hash512::from_bytes([digest_byte; Hash512::BYTE_LENGTH])],
+            Hash512::from_bytes([digest_byte.wrapping_add(1); Hash512::BYTE_LENGTH]),
+        )
+        .expect("test stream descriptor is valid");
+        let encoded = descriptor.encode().expect("test stream descriptor encodes");
+        let tuple = CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("test stream descriptor decodes as a tuple");
+        CanonicalItem::nested_tuple(&tuple).expect("test nested stream descriptor encodes")
     }
 
     fn assert_refused<Value>(
@@ -1936,6 +2055,31 @@ mod tests {
     }
 
     #[test]
+    fn setup_intent_requires_state_authorization_after_carrier_authentication() {
+        let fixture = TestFixture::new();
+        let setup_intents = fixture.setup_intents();
+        let (setup_intent_hash, setup_intent_carrier) = &setup_intents[0];
+        let mut ingestor = fixture.ingestor(&[]);
+
+        assert_refused(
+            ingestor.ingest_canonical_carrier(setup_intent_carrier),
+            RefusalReason::MissingPrerequisite,
+        );
+        let authenticated_setup_intent = ingestor
+            .authenticated_carrier_with_present_prerequisites(*setup_intent_hash)
+            .into_result()
+            .expect("setup intent carrier authentication succeeds");
+        assert_eq!(
+            authenticated_setup_intent.policy().verification_requirement,
+            FoundationObjectVerificationRequirement::StateAuthorization
+        );
+        assert_eq!(
+            authenticated_setup_intent.canonical_carrier_bytes(),
+            setup_intent_carrier
+        );
+    }
+
+    #[test]
     fn unordered_prerequisites_resolve_and_identical_retransmission_is_idempotent() {
         let fixture = TestFixture::new();
         let setup_intents = fixture.setup_intents();
@@ -1976,7 +2120,10 @@ mod tests {
         );
 
         for (_, carrier) in setup_intents.iter().rev() {
-            assert!(ingestor.ingest_canonical_carrier(carrier).is_valid());
+            assert_refused(
+                ingestor.ingest_canonical_carrier(carrier),
+                RefusalReason::MissingPrerequisite,
+            );
         }
         let authenticated_commitment = ingestor
             .authenticated_carrier_with_present_prerequisites(commitment_hash)
@@ -2007,10 +2154,9 @@ mod tests {
 
         let mut wrong_order_ingestor = fixture.ingestor(&[]);
         for (_, carrier) in &setup_intents {
-            assert!(
-                wrong_order_ingestor
-                    .ingest_canonical_carrier(carrier)
-                    .is_valid()
+            assert_refused(
+                wrong_order_ingestor.ingest_canonical_carrier(carrier),
+                RefusalReason::MissingPrerequisite,
             );
         }
         let wrong_order_envelope = fixture.envelope(
@@ -2028,6 +2174,371 @@ mod tests {
     }
 
     #[test]
+    fn public_randomness_reveal_requires_roster_ordered_public_seed_reservations() {
+        let fixture = TestFixture::new();
+        let authorization_hash = Hash512::from_bytes([0x61; Hash512::BYTE_LENGTH]);
+        let reservations = fixture.state_reservations(
+            StateCapabilityKind::SetupPublicSeedBranch,
+            authorization_hash,
+        );
+        let ordered_reservation_hashes = reservations
+            .iter()
+            .map(|(object_hash, _)| *object_hash)
+            .collect::<Vec<_>>();
+        let reveal_payload = payload(
+            PUBLIC_RANDOMNESS_REVEAL_SCHEMA_IDENTIFIER,
+            vec![
+                CanonicalItem::participant_identity(fixture.participant_identities[3].into_bytes()),
+                CanonicalItem::hash512([0x71; Hash512::BYTE_LENGTH]),
+                CanonicalItem::fixed_bytes([0x72; Hash512::BYTE_LENGTH])
+                    .expect("test recovery share encodes"),
+            ],
+        );
+        let reveal_envelope = fixture.envelope(
+            FoundationObjectType::PublicRandomnessReveal,
+            Some(4),
+            3,
+            ordered_reservation_hashes.clone(),
+            reveal_payload.clone(),
+        );
+        let reveal_hash = reveal_envelope
+            .object_hash()
+            .expect("test reveal hash derives");
+        let reveal_carrier = fixture.signed_carrier(4, reveal_envelope, 0x73);
+
+        let mut ingestor = fixture.ingestor(&[]);
+        assert_refused(
+            ingestor.ingest_canonical_carrier(&reveal_carrier),
+            RefusalReason::MissingPrerequisite,
+        );
+        for (_, reservation_carrier) in reservations.iter().rev() {
+            assert_refused(
+                ingestor.ingest_canonical_carrier(reservation_carrier),
+                RefusalReason::MissingPrerequisite,
+            );
+        }
+        let authenticated_reveal = ingestor
+            .authenticated_carrier_with_present_prerequisites(reveal_hash)
+            .into_result()
+            .expect("all roster-ordered reservation carriers are present");
+        assert_eq!(
+            authenticated_reveal.policy().verification_requirement,
+            FoundationObjectVerificationRequirement::PublicRandomnessRelation
+        );
+
+        let wrong_capability_reservations = fixture.state_reservations(
+            StateCapabilityKind::SetupDealerSetBranch,
+            authorization_hash,
+        );
+        let wrong_capability_hashes = wrong_capability_reservations
+            .iter()
+            .map(|(object_hash, _)| *object_hash)
+            .collect::<Vec<_>>();
+        let mut wrong_capability_ingestor = fixture.ingestor(&[]);
+        for (_, reservation_carrier) in &wrong_capability_reservations {
+            assert_refused(
+                wrong_capability_ingestor.ingest_canonical_carrier(reservation_carrier),
+                RefusalReason::MissingPrerequisite,
+            );
+        }
+        let wrong_capability_reveal = fixture.signed_carrier(
+            4,
+            fixture.envelope(
+                FoundationObjectType::PublicRandomnessReveal,
+                Some(4),
+                3,
+                wrong_capability_hashes,
+                reveal_payload.clone(),
+            ),
+            0x74,
+        );
+        assert_refused(
+            wrong_capability_ingestor.ingest_canonical_carrier(&wrong_capability_reveal),
+            RefusalReason::WrongTypeOrLength,
+        );
+
+        let mut wrong_order_ingestor = fixture.ingestor(&[]);
+        for (_, reservation_carrier) in &reservations {
+            assert_refused(
+                wrong_order_ingestor.ingest_canonical_carrier(reservation_carrier),
+                RefusalReason::MissingPrerequisite,
+            );
+        }
+        let wrong_order_reveal = fixture.signed_carrier(
+            4,
+            fixture.envelope(
+                FoundationObjectType::PublicRandomnessReveal,
+                Some(4),
+                3,
+                ordered_reservation_hashes.iter().rev().copied().collect(),
+                reveal_payload.clone(),
+            ),
+            0x75,
+        );
+        assert_refused(
+            wrong_order_ingestor.ingest_canonical_carrier(&wrong_order_reveal),
+            RefusalReason::WrongContext,
+        );
+
+        let mut duplicate_hashes = ordered_reservation_hashes.clone();
+        duplicate_hashes[1] = duplicate_hashes[0];
+        let duplicate_reservation_reveal = fixture.signed_carrier(
+            4,
+            fixture.envelope(
+                FoundationObjectType::PublicRandomnessReveal,
+                Some(4),
+                3,
+                duplicate_hashes,
+                reveal_payload.clone(),
+            ),
+            0x76,
+        );
+        assert_refused(
+            fixture
+                .ingestor(&[])
+                .ingest_canonical_carrier(&duplicate_reservation_reveal),
+            RefusalReason::WrongHashOrRoot,
+        );
+
+        let wrong_sequence_reveal = fixture.signed_carrier(
+            4,
+            fixture.envelope(
+                FoundationObjectType::PublicRandomnessReveal,
+                Some(4),
+                2,
+                ordered_reservation_hashes,
+                reveal_payload,
+            ),
+            0x77,
+        );
+        assert_refused(
+            fixture
+                .ingestor(&[])
+                .ingest_canonical_carrier(&wrong_sequence_reveal),
+            RefusalReason::WrongTypeOrLength,
+        );
+    }
+
+    #[test]
+    fn setup_proof_descriptors_are_nested_canonical_stream_descriptors() {
+        let fixture = TestFixture::new();
+        let private_acceptance_payload = payload(
+            PRIVATE_SHARE_ACCEPTANCE_SCHEMA_IDENTIFIER,
+            vec![
+                CanonicalItem::hash512([0x81; Hash512::BYTE_LENGTH]),
+                hash_list(&[Hash512::from_bytes([0x82; Hash512::BYTE_LENGTH])]),
+                stream_descriptor_item(0x83),
+            ],
+        );
+        let private_acceptance_envelope = fixture.envelope(
+            FoundationObjectType::PrivateShareAcceptance,
+            Some(0),
+            0,
+            Vec::new(),
+            private_acceptance_payload,
+        );
+        let private_acceptance_hash = private_acceptance_envelope
+            .object_hash()
+            .expect("test private acceptance hash derives");
+        let private_acceptance_carrier =
+            fixture.signed_carrier(0, private_acceptance_envelope, 0x84);
+        let mut private_acceptance_ingestor = fixture.ingestor(&[]);
+        assert_refused(
+            private_acceptance_ingestor.ingest_canonical_carrier(&private_acceptance_carrier),
+            RefusalReason::MissingPrerequisite,
+        );
+        assert!(
+            private_acceptance_ingestor
+                .authenticated_carrier_with_present_prerequisites(private_acceptance_hash)
+                .is_valid()
+        );
+
+        let raw_private_descriptor = fixture.signed_carrier(
+            0,
+            fixture.envelope(
+                FoundationObjectType::PrivateShareAcceptance,
+                Some(0),
+                0,
+                Vec::new(),
+                payload(
+                    PRIVATE_SHARE_ACCEPTANCE_SCHEMA_IDENTIFIER,
+                    vec![
+                        CanonicalItem::hash512([0x85; Hash512::BYTE_LENGTH]),
+                        hash_list(&[Hash512::from_bytes([0x86; Hash512::BYTE_LENGTH])]),
+                        CanonicalItem::variable_bytes([0x87])
+                            .expect("test raw descriptor bytes encode"),
+                    ],
+                ),
+            ),
+            0x88,
+        );
+        assert_refused(
+            fixture
+                .ingestor(&[])
+                .ingest_canonical_carrier(&raw_private_descriptor),
+            RefusalReason::WrongTypeOrLength,
+        );
+
+        let public_setup_seed = Hash512::from_bytes([0x89; Hash512::BYTE_LENGTH]);
+        let external_prerequisites = [FoundationExternalPrerequisite {
+            prerequisite_kind: FoundationExternalPrerequisiteKind::PublicSetupSeed,
+            object_hash: public_setup_seed,
+        }];
+        let public_setup_payload = payload(
+            PUBLIC_SETUP_RECORD_SCHEMA_IDENTIFIER,
+            vec![
+                CanonicalItem::unsigned16(1),
+                hash_list(&[Hash512::from_bytes([0x8a; Hash512::BYTE_LENGTH])]),
+                hash_list(&[Hash512::from_bytes([0x8b; Hash512::BYTE_LENGTH])]),
+                hash_list(&vec![
+                    Hash512::from_bytes([0x8c; Hash512::BYTE_LENGTH]);
+                    usize::from(FOUNDATION_PROFILE.participant_count)
+                ]),
+                stream_descriptor_item(0x8d),
+            ],
+        );
+        let public_setup_envelope = fixture.envelope(
+            FoundationObjectType::PublicSetupRecord,
+            Some(1),
+            0,
+            vec![public_setup_seed],
+            public_setup_payload,
+        );
+        let public_setup_hash = public_setup_envelope
+            .object_hash()
+            .expect("test public setup hash derives");
+        let public_setup_carrier = fixture.signed_carrier(1, public_setup_envelope, 0x8e);
+        let mut public_setup_ingestor = fixture.ingestor(&external_prerequisites);
+        assert_refused(
+            public_setup_ingestor.ingest_canonical_carrier(&public_setup_carrier),
+            RefusalReason::MissingPrerequisite,
+        );
+        assert!(
+            public_setup_ingestor
+                .authenticated_carrier_with_present_prerequisites(public_setup_hash)
+                .is_valid()
+        );
+
+        let raw_public_descriptor = fixture.signed_carrier(
+            1,
+            fixture.envelope(
+                FoundationObjectType::PublicSetupRecord,
+                Some(1),
+                0,
+                vec![public_setup_seed],
+                payload(
+                    PUBLIC_SETUP_RECORD_SCHEMA_IDENTIFIER,
+                    vec![
+                        CanonicalItem::unsigned16(1),
+                        hash_list(&[Hash512::from_bytes([0x8f; Hash512::BYTE_LENGTH])]),
+                        hash_list(&[Hash512::from_bytes([0x90; Hash512::BYTE_LENGTH])]),
+                        hash_list(&vec![
+                            Hash512::from_bytes([0x91; Hash512::BYTE_LENGTH]);
+                            usize::from(FOUNDATION_PROFILE.participant_count)
+                        ]),
+                        CanonicalItem::variable_bytes([0x92])
+                            .expect("test raw descriptor bytes encode"),
+                    ],
+                ),
+            ),
+            0x93,
+        );
+        assert_refused(
+            fixture
+                .ingestor(&external_prerequisites)
+                .ingest_canonical_carrier(&raw_public_descriptor),
+            RefusalReason::WrongTypeOrLength,
+        );
+    }
+
+    #[test]
+    fn setup_material_root_lists_require_hash_elements() {
+        let fixture = TestFixture::new();
+        let unsigned_16_list = || {
+            CanonicalItem::homogeneous_list(
+                CanonicalItemType::Unsigned16,
+                &[CanonicalItem::unsigned16(1)],
+            )
+            .expect("test unsigned-16 list encodes")
+        };
+
+        let private_acceptance_with_wrong_root_type = fixture.signed_carrier(
+            0,
+            fixture.envelope(
+                FoundationObjectType::PrivateShareAcceptance,
+                Some(0),
+                0,
+                Vec::new(),
+                payload(
+                    PRIVATE_SHARE_ACCEPTANCE_SCHEMA_IDENTIFIER,
+                    vec![
+                        CanonicalItem::hash512([0x94; Hash512::BYTE_LENGTH]),
+                        unsigned_16_list(),
+                        stream_descriptor_item(0x95),
+                    ],
+                ),
+            ),
+            0x96,
+        );
+        assert_refused(
+            fixture
+                .ingestor(&[])
+                .ingest_canonical_carrier(&private_acceptance_with_wrong_root_type),
+            RefusalReason::WrongTypeOrLength,
+        );
+
+        let public_setup_seed = Hash512::from_bytes([0x97; Hash512::BYTE_LENGTH]);
+        let external_prerequisites = [FoundationExternalPrerequisite {
+            prerequisite_kind: FoundationExternalPrerequisiteKind::PublicSetupSeed,
+            object_hash: public_setup_seed,
+        }];
+        let ordered_recipient_envelope_hashes =
+            hash_list(&vec![
+                Hash512::from_bytes([0x98; Hash512::BYTE_LENGTH]);
+                usize::from(FOUNDATION_PROFILE.participant_count)
+            ]);
+        for (coefficient_roots, recipient_share_roots, signature_randomness) in [
+            (
+                unsigned_16_list(),
+                hash_list(&[Hash512::from_bytes([0x99; Hash512::BYTE_LENGTH])]),
+                0x9a,
+            ),
+            (
+                hash_list(&[Hash512::from_bytes([0x9b; Hash512::BYTE_LENGTH])]),
+                unsigned_16_list(),
+                0x9c,
+            ),
+        ] {
+            let public_setup_record_with_wrong_root_type = fixture.signed_carrier(
+                1,
+                fixture.envelope(
+                    FoundationObjectType::PublicSetupRecord,
+                    Some(1),
+                    0,
+                    vec![public_setup_seed],
+                    payload(
+                        PUBLIC_SETUP_RECORD_SCHEMA_IDENTIFIER,
+                        vec![
+                            CanonicalItem::unsigned16(1),
+                            coefficient_roots,
+                            recipient_share_roots,
+                            ordered_recipient_envelope_hashes.clone(),
+                            stream_descriptor_item(0x9d),
+                        ],
+                    ),
+                ),
+                signature_randomness,
+            );
+            assert_refused(
+                fixture
+                    .ingestor(&external_prerequisites)
+                    .ingest_canonical_carrier(&public_setup_record_with_wrong_root_type),
+                RefusalReason::WrongTypeOrLength,
+            );
+        }
+    }
+
+    #[test]
     fn malformed_context_key_and_carrier_kind_inputs_fail_closed() {
         let fixture = TestFixture::new();
         let setup_envelope = fixture.envelope(
@@ -2035,7 +2546,10 @@ mod tests {
             Some(0),
             0,
             Vec::new(),
-            empty_payload(SETUP_INTENT_SCHEMA_IDENTIFIER),
+            payload(
+                SETUP_INTENT_SCHEMA_IDENTIFIER,
+                vec![CanonicalItem::hash512([0x41; Hash512::BYTE_LENGTH])],
+            ),
         );
         let mut valid_carrier = fixture.signed_carrier(0, setup_envelope.clone(), 0x31);
 
@@ -2150,7 +2664,7 @@ mod tests {
         let first_envelope = fixture.envelope(
             FoundationObjectType::Complaint,
             Some(0),
-            7,
+            0,
             Vec::new(),
             complaint_payload(0x41),
         );
@@ -2161,7 +2675,7 @@ mod tests {
         let second_envelope = fixture.envelope(
             FoundationObjectType::Complaint,
             Some(0),
-            7,
+            0,
             Vec::new(),
             complaint_payload(0x42),
         );
@@ -2195,7 +2709,10 @@ mod tests {
             Some(2),
             0,
             Vec::new(),
-            empty_payload(SETUP_INTENT_SCHEMA_IDENTIFIER),
+            payload(
+                SETUP_INTENT_SCHEMA_IDENTIFIER,
+                vec![CanonicalItem::hash512([0x42; Hash512::BYTE_LENGTH])],
+            ),
         );
         let same_hash = same_envelope
             .object_hash()
@@ -2203,10 +2720,9 @@ mod tests {
         let first_randomized_signature = fixture.signed_carrier(2, same_envelope.clone(), 0x61);
         let second_randomized_signature = fixture.signed_carrier(2, same_envelope, 0x62);
         let mut ingestor = fixture.ingestor(&[]);
-        assert!(
-            ingestor
-                .ingest_canonical_carrier(&first_randomized_signature)
-                .is_valid()
+        assert_refused(
+            ingestor.ingest_canonical_carrier(&first_randomized_signature),
+            RefusalReason::MissingPrerequisite,
         );
         assert_refused(
             ingestor.ingest_canonical_carrier(&second_randomized_signature),
@@ -2218,7 +2734,7 @@ mod tests {
             RefusalReason::Equivocation,
         );
 
-        let unresolved_locks = (0..FOUNDATION_PROFILE.participant_count)
+        let unresolved_reservations = (0..FOUNDATION_PROFILE.participant_count)
             .map(|roster_position| {
                 let mut hash_bytes = [0x77; 64];
                 hash_bytes[0] = u8::try_from(roster_position)
@@ -2243,8 +2759,8 @@ mod tests {
             fixture.envelope(
                 FoundationObjectType::PublicRandomnessReveal,
                 Some(4),
-                0,
-                unresolved_locks.clone(),
+                3,
+                unresolved_reservations.clone(),
                 reveal_payload(0x91),
             ),
             0x63,
@@ -2254,8 +2770,8 @@ mod tests {
             fixture.envelope(
                 FoundationObjectType::PublicRandomnessReveal,
                 Some(4),
-                9,
-                unresolved_locks,
+                3,
+                unresolved_reservations,
                 reveal_payload(0x92),
             ),
             0x64,
@@ -2560,10 +3076,9 @@ mod tests {
         )
         .expect("test one-carrier limits are valid");
         let mut one_carrier_ingestor = fixture.ingestor_with_limits(&[], one_carrier_limits);
-        assert!(
-            one_carrier_ingestor
-                .ingest_canonical_carrier(first_setup_carrier)
-                .is_valid()
+        assert_refused(
+            one_carrier_ingestor.ingest_canonical_carrier(first_setup_carrier),
+            RefusalReason::MissingPrerequisite,
         );
         assert_refused(
             one_carrier_ingestor.ingest_canonical_carrier(&setup_intents[1].1),

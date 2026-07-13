@@ -26,9 +26,7 @@ use num_bigint::{BigInt, Sign};
 use num_traits::Zero;
 use serde_json::{Value, json};
 
-use super::{
-    DirectEncryptedBallot, MAXIMUM_SCORE, OPTION_COUNT, SCORE_BUCKET_COUNT, setup_package_hash,
-};
+use super::{DirectEncryptedBallot, OPTION_COUNT, SCORE_BUCKET_COUNT, setup_package_hash};
 use crate::{
     bgv::{
         evaluator::engine::{DevelopmentBgvKey, encode_slots_to_coefficients, negacyclic_mul},
@@ -56,13 +54,8 @@ const RELATION_PROOF_BYTES_HASH_DOMAIN: &str =
 #[derive(Clone)]
 pub(super) struct DirectBallotRelationProofGeneration {
     pub(super) proof_bytes: Vec<u8>,
-    pub(super) proof_size_bytes: usize,
     pub(super) proof_bytes_hash: String,
     pub(super) statement_hash_hex: String,
-    pub(super) relation_commitment_hash_hex: String,
-    pub(super) challenge: String,
-    pub(super) relation_commitment_bytes: usize,
-    pub(super) response_bytes: usize,
 }
 
 #[derive(Clone)]

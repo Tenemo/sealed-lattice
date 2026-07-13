@@ -1,30 +1,27 @@
 use super::*;
 
-use crate::hashing::derive_canonical_object_hash;
-
 #[test]
 fn foundation_setup_parameters_hash_is_byte_stable() {
     // Byte-identity guard for the fixed n=10 foundation setup parameters. This
-    // pin tracks the full n=10 binding, including the inlined sub-configuration
-    // values, the bounded-domain evaluator profile, and the BGV parameters. If
-    // those binding inputs intentionally change, re-pin to the new n=10 value
-    // and treat stale proof corpora as invalid.
+    // pin tracks the participant count, evaluator key schedule, bounded-domain
+    // evaluator parameters, and BGV parameters. If those binding inputs
+    // intentionally change, re-pin and treat stale proof corpora as invalid.
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
     assert_eq!(
         setup_parameters["setupParametersHash"]
             .as_str()
             .expect("setup parameters hash"),
-        "9af5fe53da591fea6bf8b9210b09810706e962ec99f7148eb669ac24f794864d08a50cfbb192a2ee42906a112f5e0e37c36a5b8e80301d9b314e0c5796ebc096",
+        "064c26fdfe51bdd6ea4ae1136475f64eb330b13e90692c2cbd1f34abacd28ecd89c19a70d3f9578b03e8c3d105e5e80de3f6a95703c39ac6a47b1485b011db26",
     );
 }
 
 #[test]
-fn collective_setup_parameters_expose_foundation_state_machine() {
-    let _accepted_setup_test_timing =
-        accepted_setup_test_timing("collective_setup_parameters_expose_foundation_state_machine");
+fn collective_setup_parameters_expose_operative_foundation_parameters() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_parameters_expose_operative_foundation_parameters",
+    );
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
 
-    assert_eq!(setup_parameters["objectType"], "SetupPackage");
     assert_eq!(setup_parameters["participantCount"], 10);
     assert_eq!(setup_parameters["qSetupComplete"], 10);
     assert_eq!(setup_parameters["qBallotRelease"], 10);
@@ -38,54 +35,6 @@ fn collective_setup_parameters_expose_foundation_state_machine() {
             .len(),
         DATA_PRIMES.len()
     );
-    assert_eq!(
-        setup_parameters["carryAwareVssShareRelation"]["objectType"],
-        "CarryAwareVssShareRelation"
-    );
-    assert_eq!(
-        setup_parameters["commitment"]["objectType"],
-        "BdlopCommitment"
-    );
-    assert_eq!(
-        setup_parameters["commitment"]["assumptions"]["hiding"],
-        "Module-LWE over the selected commitment modulus limbs with short centered-ternary openings"
-    );
-    assert_eq!(
-        setup_parameters["commitment"]["assumptions"]["binding"],
-        "Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix"
-    );
-    assert_eq!(setup_parameters["setupProof"]["objectType"], "SetupProof");
-    let setup_proof_families = setup_parameters["setupProof"]["proofFamilies"]
-        .as_array()
-        .expect("setup proof family parameters");
-    assert_eq!(setup_proof_families.len(), 3);
-    for expected_family in [
-        "public-key-share",
-        "vss-opening-carry",
-        "trustee-evaluation-key",
-    ] {
-        assert!(
-            setup_proof_families.iter().any(|family_parameters| {
-                family_parameters["proofFamily"]
-                    .as_str()
-                    .is_some_and(|proof_family| proof_family == expected_family)
-            }),
-            "setup proof parameters must list {expected_family}"
-        );
-    }
-    assert_eq!(
-        setup_parameters["setupTransport"]["objectType"],
-        "SetupTransport"
-    );
-    assert_eq!(
-        setup_parameters["setupTransport"]["largeObjectEncoding"],
-        "binary"
-    );
-    assert_eq!(
-        setup_parameters["setupTransport"]["streamVerificationOrder"],
-        "ascending-chunk-index"
-    );
-    assert_eq!(setup_parameters["setupTransport"]["chunking"], "required");
     assert_eq!(
         setup_parameters["evaluatorKeySchedule"]["objectType"],
         "EvaluatorKeySchedule"
@@ -135,7 +84,7 @@ fn collective_setup_parameters_expose_foundation_state_machine() {
             .as_array()
             .expect("phase order")
             .iter()
-            .any(|phase| phase["phaseId"] == "trusteeEvaluationKeyProofs")
+            .any(|phase| phase == "trusteeEvaluationKeyProofs")
     );
     assert!(setup_parameters["setupParametersHash"].as_str().is_some());
     assert!(setup_parameters["phaseOrderHash"].as_str().is_some());
@@ -229,8 +178,7 @@ fn collective_setup_verifier_detects_phase_forks_and_wrong_order() {
     let mut forked_package = collective_setup_phase_package();
     let first_phase = forked_package["phaseTranscript"][0].clone();
     let mut forked_phase = first_phase.clone();
-    forked_phase["participantPhaseObjects"][0]["signatureEnvelopeHash"] =
-        serde_json::json!(valid_hash('2'));
+    forked_phase["phaseRoot"] = serde_json::json!(valid_hash('2'));
     forked_package["phaseTranscript"] = serde_json::json!([first_phase, forked_phase]);
     rebind_collective_setup_package_hash(&mut forked_package);
     let forked_result =
@@ -245,7 +193,7 @@ fn collective_setup_verifier_detects_phase_forks_and_wrong_order() {
 
     let mut wrong_order_package = collective_setup_phase_package();
     wrong_order_package["phaseTranscript"] = serde_json::json!([
-        { "phaseId": "setupIntent", "phaseNumber": 2, "phaseRoot": valid_hash('3') }
+        { "phaseId": "setupIntent", "phaseRoot": valid_hash('3') }
     ]);
     rebind_collective_setup_package_hash(&mut wrong_order_package);
     let wrong_order_result =
@@ -315,17 +263,6 @@ fn collective_setup_verifier_refuses_tampered_phase_signature_after_rebinding() 
     let mut tampered_signature_bytes_hex = signature_bytes_hex;
     tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
     signature_envelope["signatureBytesHex"] = serde_json::json!(tampered_signature_bytes_hex);
-    let signature_envelope_hash = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "ProtocolSignatureEnvelope",
-        "profile": signature_envelope["profile"],
-        "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
-        "publicKeyHash": signature_envelope["publicKeyHash"],
-        "signatureBytesHex": signature_envelope["signatureBytesHex"],
-        "signedRoot": signature_envelope["signedRoot"],
-    }))
-    .expect("signature envelope hash");
-    signature_envelope["signatureHash"] = serde_json::json!(signature_envelope_hash.clone());
-    participant["signatureEnvelopeHash"] = serde_json::json!(signature_envelope_hash);
     rebind_collective_phase_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
@@ -386,21 +323,6 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
     assert_eq!(wrong_derivation_result["isValid"], false);
     assert_eq!(
         wrong_derivation_result["refusedObjects"][0]["reasonCode"],
-        "setupPublicDerivationsMismatch"
-    );
-
-    let mut wrong_matrix_package = collective_setup_phase_package();
-    wrong_matrix_package["commonRandomness"]["publicDerivations"]["publicMatrices"]["commitmentMatrix"]
-        ["sampledEntries"][0]["entryDerivationHash"] = serde_json::json!(valid_hash('3'));
-    rebind_collective_setup_package_hash(&mut wrong_matrix_package);
-
-    let wrong_matrix_result =
-        verify_collective_bgv_setup_package(&wrong_matrix_package, &serde_json::json!({}))
-            .expect("verification response");
-
-    assert_eq!(wrong_matrix_result["isValid"], false);
-    assert_eq!(
-        wrong_matrix_result["refusedObjects"][0]["reasonCode"],
         "setupPublicDerivationsMismatch"
     );
 }

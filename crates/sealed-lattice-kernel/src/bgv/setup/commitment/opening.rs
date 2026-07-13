@@ -94,8 +94,6 @@ pub(super) fn verify_setup_signed_lifted_commitment_opening(
         commitment_root: setup_commitment_root(&computed_commitment)?,
         randomness_infinity_bound,
         message_coefficient_bound,
-        commitment_modulus_product_decimal: setup_commitment_modulus_product_decimal(),
-        commitment_modulus_product_ceil_bits: setup_commitment_modulus_product_ceil_bits(),
     })
 }
 
@@ -144,8 +142,6 @@ fn verify_setup_commitment_opening_with_message_bound(
         commitment_root: setup_commitment_root(&computed_commitment)?,
         randomness_infinity_bound,
         message_coefficient_bound,
-        commitment_modulus_product_decimal: setup_commitment_modulus_product_decimal(),
-        commitment_modulus_product_ceil_bits: setup_commitment_modulus_product_ceil_bits(),
     })
 }
 

@@ -10,12 +10,13 @@ use crate::encoding::{
 };
 
 mod chunk_tree;
-mod namespaces;
 
 pub use chunk_tree::chunk_root;
-pub use namespaces::*;
 
 pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/hash512";
+// Canonical objects are separated by their mandatory `objectType`
+// discriminator inside canonical JSON rather than per-type domain strings.
+pub const CANONICAL_OBJECT_HASH_NAMESPACE: &str = "sealed-lattice-root/canonical-object";
 
 pub fn to_hex(bytes: &[u8]) -> String {
     const LOWER_HEX: &[u8; 16] = b"0123456789abcdef";

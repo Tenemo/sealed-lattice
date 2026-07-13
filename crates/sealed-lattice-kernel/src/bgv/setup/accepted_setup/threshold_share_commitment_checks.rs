@@ -56,11 +56,8 @@ fn threshold_share_refusal(
     )
 }
 
-// Accept a threshold-share commitment binding only when its root recomputes
-// from the proof-verified VSS public material and the whole object matches its
-// canonical form. There is no self-attested field: the binding carries only the
-// roots the earlier public-material phase already verified, and this phase
-// recomputes their canonical binding root.
+// Accept the binding only when its root recomputes from verified VSS public
+// material and the complete object matches its canonical form.
 fn verify_threshold_share_commitment_binding(
     threshold_share_commitments: &Value,
     verified_vss_public_material: Option<&VerifiedVssPublicMaterial>,

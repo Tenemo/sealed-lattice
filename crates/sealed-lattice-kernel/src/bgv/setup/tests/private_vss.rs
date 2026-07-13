@@ -44,7 +44,6 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
         .expect("private VSS envelope verification");
 
     assert_eq!(result["isValid"], true);
-    assert_eq!(result["isValid"], true);
     assert_eq!(result["refusedObjects"], serde_json::json!([]));
     assert_eq!(
         result["limbVerifications"]
@@ -96,9 +95,8 @@ fn private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_privat
             .len(),
         DATA_PRIMES.len()
     );
-    // The recipient-local verification root and envelope hash are the integration
-    // handles a signed VssShareAcceptance commits to, so the foundation-roster path
-    // produces the same accepted evidence the reduced-ring path does at scale.
+    // A signed VSS share acceptance commits to the recipient-local verification
+    // root and envelope hash, so both handles must be populated at full size.
     assert_eq!(
         result["localVerificationRoot"]
             .as_str()
@@ -258,21 +256,10 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
     );
 }
 
-// Multi-recipient consistency is what makes the reduced message-claim set sound:
-// a single recipient's proof does not pin the Shamir coefficients across the RNS
-// commitment fields, so soundness comes from >= t honest recipients each
-// verifying the same source commitment. This test exercises that structure: one
-// committed degree-(t-1) polynomial, verified at four distinct recipient points
-// for threshold t = 4, all accepting. The shares differ per recipient (distinct
-// evaluation points) yet every proof binds the identical coefficient commitments.
-//
-// The dual negative direction - a single recipient accepting an inconsistent or
-// out-of-range coefficient set that >= t honest recipients would jointly reject -
-// cannot be expressed through this generation path: the witness API carries one
-// integer message per coefficient, reduced consistently into each commitment
-// field, so it structurally cannot emit per-field-inconsistent messages.
-// Demonstrating that requires constructing the committed columns below the prover
-// (bypassing validate_private_vss_witness).
+// Threshold-many recipients bind one source polynomial across the RNS
+// commitment fields. This test verifies the same degree-three commitment at
+// four distinct recipient points and confirms that every proof binds identical
+// coefficient commitments despite carrying a different share.
 #[test]
 fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients() {
     let ring_degree = PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE;
@@ -426,19 +413,10 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
     }
 }
 
-// The Shamir coefficient message columns carry no per-field consistency
-// assertion, so the commitment opening lincheck is the message column's only
-// binding. This test confirms that binding is required: a coefficient message
-// that disagrees with what its commitment opens to cannot be packaged into an
-// accepted proof. The tamper keeps the recipient-share Shamir relation satisfied
-// (so the witness-relation self-check and shape checks pass) and leaves the
-// randomness, the carry, and the commitments themselves intact; only the witness
-// message diverges from the zero message the commitment binds. Proof construction
-// enforces exactly the lincheck the verifier checks, so an inconsistent message
-// is rejected at the sumcheck/lincheck stage. If this ever succeeded, the message
-// would be unbound.
-// The honest baseline (identical setup, untampered) is covered by
-// private_vss_succinct_proof_verifier_accepts_canonical_record above.
+// The commitment-opening lincheck binds each Shamir coefficient message. This
+// tamper preserves the recipient-share relation, randomness, carry, and
+// commitments while changing only the witness message, so proof construction
+// must reject it at the sumcheck/lincheck stage.
 #[test]
 fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_opening() {
     let ring_degree = PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE;

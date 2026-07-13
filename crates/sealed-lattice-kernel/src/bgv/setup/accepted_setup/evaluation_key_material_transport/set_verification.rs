@@ -63,7 +63,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             "setupContext was required before evaluation-key assembly verification",
         )
     })?;
-    let roster = super::super::accepted_roster_from_package(setup_package);
     if let Err(error) =
         verify_context_fields_match(evaluation_keys, setup_context, "evaluationKeys")
     {
@@ -72,18 +71,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             error.message,
             "setupPackage.evaluationKeys",
         )?));
-    }
-    for (field_name, expected_value) in [
-        ("participantCount", roster.participant_count),
-        ("rnsLimbCount", DATA_PRIMES.len() as u64),
-    ] {
-        if evaluation_keys.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
-            return Ok(Some(evaluation_key_material_refusal(
-                "evaluationKeysCountMismatch",
-                format!("evaluationKeys.{field_name} must be {expected_value}"),
-                format!("setupPackage.evaluationKeys.{field_name}"),
-            )?));
-        }
     }
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let relinearization_key_share_rounds_root = setup_package
@@ -121,24 +108,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
                 format!("setupPackage.evaluationKeys.{field_name}"),
             )?));
         }
-    }
-    if evaluation_keys.get("relinearizationLevelSchedule")
-        != Some(&expected_relinearization_level_schedule())
-    {
-        return Ok(Some(evaluation_key_material_refusal(
-            "evaluationKeysRelinearizationScheduleMismatch",
-            "evaluationKeys.relinearizationLevelSchedule must match the frozen evaluator schedule",
-            "setupPackage.evaluationKeys.relinearizationLevelSchedule",
-        )?));
-    }
-    if evaluation_keys.get("requiredGaloisKeySchedule")
-        != Some(&expected_required_galois_key_schedule()?)
-    {
-        return Ok(Some(evaluation_key_material_refusal(
-            "evaluationKeysGaloisScheduleMismatch",
-            "evaluationKeys.requiredGaloisKeySchedule must match the frozen evaluator schedule",
-            "setupPackage.evaluationKeys.requiredGaloisKeySchedule",
-        )?));
     }
     let expected_relinearization_key_roots =
         expected_relinearization_key_roots_for_evaluation_keys(setup_package, &binding)?;

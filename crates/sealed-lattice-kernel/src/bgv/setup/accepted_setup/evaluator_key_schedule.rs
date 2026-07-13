@@ -36,7 +36,6 @@ pub(super) fn verify_evaluator_key_schedule(
             "setupContext was required before evaluator-key schedule verification",
         )
     })?;
-    let roster = super::accepted_roster_from_package(setup_package);
     if let Err(error) = verify_context_fields_match(schedule, setup_context, "evaluatorKeySchedule")
     {
         return Ok(Some(evaluator_key_schedule_refusal(
@@ -45,19 +44,6 @@ pub(super) fn verify_evaluator_key_schedule(
             "setupPackage.evaluatorKeySchedule",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("participantCount", roster.participant_count),
-        ("rnsLimbCount", DATA_PRIMES.len() as u64),
-    ] {
-        if schedule.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
-            return Ok(Some(evaluator_key_schedule_refusal(
-                "evaluatorKeyScheduleCountMismatch",
-                format!("evaluatorKeySchedule.{field_name} must be {expected_value}"),
-                format!("setupPackage.evaluatorKeySchedule.{field_name}"),
-            )?));
-        }
-    }
-
     let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -246,10 +232,10 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<Option<Value>> {
-    if let Some(response) = verify_relinearization_key_share_rounds(setup_package, request)? {
+    if let Some(response) = verify_relinearization_key_share_rounds(setup_package)? {
         return Ok(Some(response));
     }
-    if let Some(response) = verify_galois_key_share_batches(setup_package, request)? {
+    if let Some(response) = verify_galois_key_share_batches(setup_package)? {
         return Ok(Some(response));
     }
     if let Some(response) = verify_trustee_evaluation_key_proofs(

@@ -313,19 +313,11 @@ pub(crate) fn build_private_vss_public_vectors(
     Ok((relation_claim, vectors))
 }
 
-// Centered bound for a published masked consistency claim: the clear sum is
-// bounded by max witness magnitude * ring degree * (2^bits - 1), and the
-// smudging mask lies in the family-selected base-3 range.
-// Family-aware clear bound: private VSS masks only the carry and ternary
-// opening-randomness columns. Share-linkage masks per-item carries and
-// message digits; carry claims use the lifted carry bound and digit
-// claims use the digit bound. Every other family uses 2
-// (centered-binomial magnitude).
-// The mask is one-sided in [0, CLAIM_MASK_RADIX^mask_digit_count), so the centered claim
-// lies in [-clear_bound, mask_bound + clear_bound]. The carry's range bound is
-// required by the implemented relation: it keeps the pinned evaluation a
-// bounded centered lift. This bound does not by itself establish a
-// ceremony-wide zero-knowledge claim.
+// The clear contribution is bounded by maximum witness magnitude times ring
+// degree times (2^bits - 1). Private VSS uses carry and ternary-randomness
+// bounds; share linkage uses its carry and message-digit bounds; other families
+// use the centered-binomial bound of two. A one-sided base-3 mask places the
+// centered claim in [-clear_bound, mask_bound + clear_bound].
 pub(crate) fn claim_mask_digit_count_for_global_claim(
     statement: &TrusteeEvaluationKeyStatement,
     global_claim_id: u64,

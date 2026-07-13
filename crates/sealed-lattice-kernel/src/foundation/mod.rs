@@ -16,6 +16,7 @@ mod local_storage_runtime;
 mod mailbox;
 mod participant_identity;
 mod private_randomness;
+mod proof_applications;
 mod proof_attempts;
 mod proof_commitments;
 mod proof_profiles;
@@ -77,14 +78,11 @@ pub use local_encrypted_storage::{
 };
 pub(crate) use local_storage_runtime::run_local_storage_root_command;
 pub use mailbox::{
-    AES_256_KEY_BYTE_LENGTH, AES_GCM_NONCE_BYTE_LENGTH, AES_GCM_TAG_BYTE_LENGTH,
-    AuthenticatedMailboxEnvelope, MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH,
-    ML_DSA_65_SIGNATURE_BYTE_LENGTH, ML_DSA_65_SIGNING_KEY_BYTE_LENGTH,
-    ML_KEM_768_CIPHERTEXT_BYTE_LENGTH, ML_KEM_768_DECAPSULATION_KEY_BYTE_LENGTH,
-    ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH, MailboxAssociatedData, MailboxBindingExpectation,
-    MailboxDecapsulationKey, MailboxKeyScheduleInput, MailboxPayloadType, MailboxSealingRandomness,
-    MailboxSigningKey, PreparedMailboxOpening, SealedMailboxPayload, SignedMailboxEnvelope,
-    kem_ciphertext_hash, seal_mailbox_payload,
+    AES_GCM_TAG_BYTE_LENGTH, AuthenticatedMailboxEnvelope,
+    MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH, ML_DSA_65_SIGNATURE_BYTE_LENGTH,
+    ML_KEM_768_CIPHERTEXT_BYTE_LENGTH, ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH,
+    MailboxAssociatedData, MailboxBindingExpectation, MailboxKeyScheduleInput, MailboxPayloadType,
+    SignedMailboxEnvelope, kem_ciphertext_hash,
 };
 pub use participant_identity::{
     ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, ParticipantIdentity, ParticipantIdentityParseError,
@@ -95,9 +93,15 @@ pub use private_randomness::{
     ActionRandomnessDerivationInput, EntropySourceError, FallibleEntropySource,
     PrivateRandomAttempt, PrivateRandomDomain, PrivateRandomStreamContext,
     PrivateRandomnessActionBinding, PrivateRandomnessError, PrivateRandomnessResumeSnapshot,
-    SuiteSamplingPurpose, TargetFloodingRole, VerifiableSecretSharingExpansionRole,
+    SuiteSamplingPurpose, TargetFloodingRole,
 };
-pub use proof_attempts::ProofFamily;
+pub use proof_applications::{
+    ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, OrdinaryProofCoinInput,
+    PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER,
+    PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER, PersistentProofCoinInput, ProofApplicationBinding,
+    ProofApplicationSlot, derive_application_statement_hash,
+};
+pub use proof_attempts::{ProofFamily, ProofPrivateCoinClassification};
 pub use proof_commitments::{
     CommonProofTreeOpeningVerification, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
     PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER, PROOF_MERKLE_NODE_SCHEMA_IDENTIFIER,

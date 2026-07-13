@@ -89,7 +89,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
             let round_one_share_root = fixture_material.component_vector_root.clone();
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundOne",
-                "proofFamily": "relinearization-key-share",
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],
                 "rosterHash": setup_context["rosterHash"],
@@ -196,7 +195,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
             let round_two_share_root = fixture_material.component_vector_root.clone();
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundTwo",
-                "proofFamily": "relinearization-key-share",
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],
                 "rosterHash": setup_context["rosterHash"],
@@ -276,7 +274,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
 
     let mut rounds = serde_json::json!({
         "objectType": "RelinearizationKeyShareRounds",
-        "proofFamily": "relinearization-key-share",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],

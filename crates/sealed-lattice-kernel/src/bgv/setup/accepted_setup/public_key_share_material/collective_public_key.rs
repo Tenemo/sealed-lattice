@@ -22,11 +22,8 @@ pub(in crate::bgv::setup) fn accepted_setup_collective_public_key_from_package(
             "collective public key must bind the accepted public matrix seed",
         ));
     }
-    let roster = super::accepted_roster_from_package(setup_package);
-    let expected_public_derivations = derive_collective_bgv_setup_public_derivations(
-        public_matrix_seed_hash,
-        roster.decryption_threshold,
-    )?;
+    let expected_public_derivations =
+        derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash)?;
     if common_randomness.get("publicDerivations") != Some(&expected_public_derivations) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -83,11 +80,6 @@ pub(super) fn collective_public_key_component_b_from_aggregate_object(
         if aggregate_limb.get("rnsLimbIndex").and_then(Value::as_u64) != Some(rns_limb_index as u64)
             || aggregate_limb.get("rnsPrime").and_then(Value::as_u64)
                 != Some(DATA_PRIMES[rns_limb_index])
-            || aggregate_limb.get("component").and_then(Value::as_str) != Some("b")
-            || aggregate_limb
-                .get("coefficientByteLength")
-                .and_then(Value::as_u64)
-                != Some((POLYNOMIAL_DEGREE * 8) as u64)
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
@@ -175,11 +167,6 @@ pub(super) fn verify_collective_public_key_coefficients(
         if aggregate_limb.get("rnsLimbIndex").and_then(Value::as_u64) != Some(rns_limb_index as u64)
             || aggregate_limb.get("rnsPrime").and_then(Value::as_u64)
                 != Some(DATA_PRIMES[rns_limb_index])
-            || aggregate_limb.get("component").and_then(Value::as_str) != Some("b")
-            || aggregate_limb
-                .get("coefficientByteLength")
-                .and_then(Value::as_u64)
-                != Some((ring_degree * 8) as u64)
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,

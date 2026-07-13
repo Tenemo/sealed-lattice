@@ -46,14 +46,14 @@ describe('Foundation schema object WASM boundary', () => {
     it('derives schema identity and re-encodes every accepted schema byte-identically', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(validFoundationSchemaObjectVectors).toHaveLength(48);
+        expect(validFoundationSchemaObjectVectors).toHaveLength(52);
         expect(
             new Set(
                 validFoundationSchemaObjectVectors.map(
                     (vector) => vector.schemaIdentifier,
                 ),
             ).size,
-        ).toBe(48);
+        ).toBe(52);
         for (const vector of validFoundationSchemaObjectVectors) {
             const canonicalBytes = vector.canonicalBytes;
             const result = validate(kernel, canonicalBytes);

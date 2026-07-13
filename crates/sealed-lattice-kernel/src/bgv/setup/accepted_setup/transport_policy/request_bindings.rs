@@ -1,25 +1,46 @@
-use super::binary_material::*;
-use super::certificate::*;
 use super::*;
+
+struct SetupTransportExpectedObject {
+    object_root: String,
+    object_path: String,
+}
+
+#[derive(Clone, Copy)]
+struct SetupTransportMaterialDescriptor {
+    object_root: &'static str,
+}
+
+pub(in super::super) fn verify_transport_request_bindings(
+    setup_package: &Value,
+    request: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
+) -> CanonicalResult<Option<Value>> {
+    match verify_setup_transport_request_bindings_in_session(
+        setup_package,
+        request,
+        proof_binding_session,
+    )? {
+        Ok(()) => Ok(None),
+        Err(refusal) => Ok(Some(verification_response(
+            None,
+            Vec::new(),
+            vec![refusal],
+            Vec::new(),
+        )?)),
+    }
+}
 
 #[cfg(test)]
 pub(super) fn verify_setup_transport_request_bindings(
     setup_package: &Value,
     request: &Value,
-    transported_objects: &[SetupTransportedObjectBinding],
 ) -> CanonicalResult<Result<(), Refusal>> {
-    verify_setup_transport_request_bindings_in_session(
-        setup_package,
-        request,
-        transported_objects,
-        None,
-    )
+    verify_setup_transport_request_bindings_in_session(setup_package, request, None)
 }
 
-pub(super) fn verify_setup_transport_request_bindings_in_session(
+fn verify_setup_transport_request_bindings_in_session(
     setup_package: &Value,
     request: &Value,
-    transported_objects: &[SetupTransportedObjectBinding],
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Result<(), Refusal>> {
     macro_rules! transport_canonical_try {
@@ -31,19 +52,13 @@ pub(super) fn verify_setup_transport_request_bindings_in_session(
         };
     }
 
-    let mut expected_transport_object_roots = BTreeSet::new();
     let referenced_public_key_material_roots =
         setup_transport_referenced_public_key_share_material_roots(setup_package)?;
-    expected_transport_object_roots.extend(referenced_public_key_material_roots.iter().cloned());
     transport_canonical_try!(require_setup_transport_single_material_entry(
-        transported_objects,
         request.get("transportedPublicKeyShareMaterial"),
         "transportedPublicKeyShareMaterial",
         SetupTransportMaterialDescriptor {
-            object_name: SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME,
-            object_role: SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE,
             object_root: "publicKeyShareMaterialSetRoot",
-            hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
         },
         &referenced_public_key_material_roots,
         AuthenticatedSetupTransportMaterialSource::PublicKeyShareMaterial,
@@ -56,16 +71,11 @@ pub(super) fn verify_setup_transport_request_bindings_in_session(
         "proofRecords",
         "proofMaterialRoot",
     )?;
-    expected_transport_object_roots.extend(referenced_public_key_proof_roots.iter().cloned());
     transport_canonical_try!(require_setup_transport_proof_material_entries(
-        transported_objects,
         request.get("transportedPublicKeyShareProofMaterial"),
         "transportedPublicKeyShareProofMaterial",
         SetupTransportMaterialDescriptor {
-            object_name: SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_NAME,
-            object_role: SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_ROLE,
             object_root: "proofMaterialRoot",
-            hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
         },
         &referenced_public_key_proof_roots,
         AuthenticatedSetupTransportMaterialSource::SetupProof(PUBLIC_KEY_SHARE_PROOF_FAMILY),
@@ -84,16 +94,11 @@ pub(super) fn verify_setup_transport_request_bindings_in_session(
         "aggregateThresholdProofs",
         "proofMaterialRoot",
     )?);
-    expected_transport_object_roots.extend(referenced_vss_share_linkage_roots.iter().cloned());
     transport_canonical_try!(require_setup_transport_proof_material_entries(
-        transported_objects,
         request.get("transportedVssShareLinkageProofMaterial"),
         "transportedVssShareLinkageProofMaterial",
         SetupTransportMaterialDescriptor {
-            object_name: SETUP_TRANSPORTED_VSS_SHARE_LINKAGE_PROOF_MATERIAL_NAME,
-            object_role: SETUP_TRANSPORTED_VSS_SHARE_LINKAGE_PROOF_MATERIAL_ROLE,
             object_root: "proofMaterialRoot",
-            hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
         },
         &referenced_vss_share_linkage_roots,
         AuthenticatedSetupTransportMaterialSource::SetupProof(VSS_SHARE_LINKAGE_PROOF_FAMILY),
@@ -106,16 +111,11 @@ pub(super) fn verify_setup_transport_request_bindings_in_session(
         "proofRecords",
         "proofMaterialRoot",
     )?;
-    expected_transport_object_roots.extend(referenced_same_secret_bridge_roots.iter().cloned());
     transport_canonical_try!(require_setup_transport_proof_material_entries(
-        transported_objects,
         request.get("transportedSameSecretBridgeProofMaterial"),
         "transportedSameSecretBridgeProofMaterial",
         SetupTransportMaterialDescriptor {
-            object_name: SETUP_TRANSPORTED_SAME_SECRET_BRIDGE_PROOF_MATERIAL_NAME,
-            object_role: SETUP_TRANSPORTED_SAME_SECRET_BRIDGE_PROOF_MATERIAL_ROLE,
             object_root: "proofMaterialRoot",
-            hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
         },
         &referenced_same_secret_bridge_roots,
         AuthenticatedSetupTransportMaterialSource::SetupProof(SAME_SECRET_BRIDGE_PROOF_FAMILY),
@@ -128,16 +128,11 @@ pub(super) fn verify_setup_transport_request_bindings_in_session(
         "proofRecords",
         "proofMaterialRoot",
     )?;
-    expected_transport_object_roots.extend(referenced_evaluation_key_proof_roots.iter().cloned());
     transport_canonical_try!(require_setup_transport_proof_material_entries(
-        transported_objects,
         request.get("transportedEvaluationKeyShareProofMaterial"),
         "transportedEvaluationKeyShareProofMaterial",
         SetupTransportMaterialDescriptor {
-            object_name: SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_NAME,
-            object_role: SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_ROLE,
             object_root: "proofMaterialRoot",
-            hash_fields: SETUP_TRANSPORT_PROOF_PREFIXED_HASH_FIELDS,
         },
         &referenced_evaluation_key_proof_roots,
         AuthenticatedSetupTransportMaterialSource::SetupProof(TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,),
@@ -149,20 +144,14 @@ pub(super) fn verify_setup_transport_request_bindings_in_session(
             setup_package,
             "keySwitchComponentMaterialRoot",
         )?;
-    expected_transport_object_roots
-        .extend(referenced_evaluation_key_component_roots.iter().cloned());
     transport_canonical_try!(require_setup_transport_material_entries(
-        transported_objects,
         request.get("transportedEvaluationKeyShareComponentMaterial"),
         SetupTransportMaterialSetLocation {
             material_set_path: "transportedEvaluationKeyShareComponentMaterial",
             material_array_field_name: "componentMaterials",
         },
         SetupTransportMaterialDescriptor {
-            object_name: SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_NAME,
-            object_role: SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ROLE,
             object_root: "keySwitchComponentMaterialRoot",
-            hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
         },
         &referenced_evaluation_key_component_roots,
         AuthenticatedSetupTransportMaterialSource::EvaluationKeyComponent,
@@ -171,23 +160,14 @@ pub(super) fn verify_setup_transport_request_bindings_in_session(
 
     let referenced_public_evaluation_key_material_roots =
         setup_transport_referenced_public_evaluation_key_material_roots(setup_package)?;
-    expected_transport_object_roots.extend(
-        referenced_public_evaluation_key_material_roots
-            .iter()
-            .cloned(),
-    );
     transport_canonical_try!(require_setup_transport_material_entries(
-        transported_objects,
         request.get("transportedPublicEvaluationKeyMaterial"),
         SetupTransportMaterialSetLocation {
             material_set_path: "transportedPublicEvaluationKeyMaterial",
             material_array_field_name: "publicEvaluationKeyMaterials",
         },
         SetupTransportMaterialDescriptor {
-            object_name: SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_NAME,
-            object_role: SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_ROLE,
             object_root: "publicEvaluationKeyMaterialRoot",
-            hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
         },
         &referenced_public_evaluation_key_material_roots,
         AuthenticatedSetupTransportMaterialSource::SetupProof(
@@ -195,47 +175,6 @@ pub(super) fn verify_setup_transport_request_bindings_in_session(
         ),
         proof_binding_session,
     ));
-
-    transport_canonical_try!(require_exact_setup_transport_object_set(
-        transported_objects,
-        &expected_transport_object_roots,
-    ));
-
-    Ok(Ok(()))
-}
-
-fn require_exact_setup_transport_object_set(
-    transported_objects: &[SetupTransportedObjectBinding],
-    expected_object_roots: &BTreeSet<String>,
-) -> CanonicalResult<Result<(), Refusal>> {
-    let transported_object_roots = transported_objects
-        .iter()
-        .map(|transported_object| transported_object.object_root.clone())
-        .collect::<BTreeSet<_>>();
-    if let Some(unexpected_root) = transported_object_roots
-        .difference(expected_object_roots)
-        .next()
-    {
-        return Ok(Err(Refusal::new(
-            "transportedObjectUnexpected",
-            format!(
-                "setupTransportCertificate.transportedObjects contains unreferenced object root {unexpected_root}"
-            ),
-            "setupPackage.setupTransportCertificate.transportedObjects",
-        )));
-    }
-    if let Some(missing_root) = expected_object_roots
-        .difference(&transported_object_roots)
-        .next()
-    {
-        return Ok(Err(Refusal::new(
-            "transportedObjectBindingMissing",
-            format!(
-                "setupTransportCertificate.transportedObjects is missing referenced object root {missing_root}"
-            ),
-            "setupPackage.setupTransportCertificate.transportedObjects",
-        )));
-    }
 
     Ok(Ok(()))
 }
@@ -371,7 +310,6 @@ fn setup_transport_collect_optional_record_roots(
 }
 
 fn require_setup_transport_proof_material_entries(
-    transported_objects: &[SetupTransportedObjectBinding],
     material_set: Option<&Value>,
     material_set_path: &'static str,
     descriptor: SetupTransportMaterialDescriptor,
@@ -417,18 +355,8 @@ fn require_setup_transport_proof_material_entries(
                 object_path,
             )));
         }
-        let expected_material = setup_transport_expected_material_with_root(
-            proof_material,
-            object_root,
-            descriptor.object_name,
-            descriptor.object_role,
-            descriptor.hash_fields,
-            object_path,
-        )?;
-        if let Err(refusal) = require_setup_transport_entry(transported_objects, &expected_material)
-        {
-            return Ok(Err(refusal));
-        }
+        let expected_material =
+            setup_transport_expected_material_with_root(object_root, object_path);
         if let Err(refusal) = require_authenticated_setup_transport_entry(
             proof_material,
             &expected_material,
@@ -454,7 +382,6 @@ struct SetupTransportMaterialSetLocation {
 }
 
 fn require_setup_transport_material_entries(
-    transported_objects: &[SetupTransportedObjectBinding],
     material_set: Option<&Value>,
     material_set_location: SetupTransportMaterialSetLocation,
     descriptor: SetupTransportMaterialDescriptor,
@@ -510,18 +437,8 @@ fn require_setup_transport_material_entries(
                 object_path,
             )));
         }
-        let expected_material = setup_transport_expected_material_with_root(
-            material,
-            object_root,
-            descriptor.object_name,
-            descriptor.object_role,
-            descriptor.hash_fields,
-            object_path,
-        )?;
-        if let Err(refusal) = require_setup_transport_entry(transported_objects, &expected_material)
-        {
-            return Ok(Err(refusal));
-        }
+        let expected_material =
+            setup_transport_expected_material_with_root(object_root, object_path);
         if let Err(refusal) = require_authenticated_setup_transport_entry(
             material,
             &expected_material,
@@ -542,7 +459,6 @@ fn require_setup_transport_material_entries(
 }
 
 fn require_setup_transport_single_material_entry(
-    transported_objects: &[SetupTransportedObjectBinding],
     material: Option<&Value>,
     material_path: &'static str,
     descriptor: SetupTransportMaterialDescriptor,
@@ -573,17 +489,8 @@ fn require_setup_transport_single_material_entry(
             )));
         }
     };
-    let expected_material = setup_transport_expected_material_with_root(
-        material,
-        object_root,
-        descriptor.object_name,
-        descriptor.object_role,
-        descriptor.hash_fields,
-        material_path.to_string(),
-    )?;
-    if let Err(refusal) = require_setup_transport_entry(transported_objects, &expected_material) {
-        return Ok(Err(refusal));
-    }
+    let expected_material =
+        setup_transport_expected_material_with_root(object_root, material_path.to_string());
     require_authenticated_setup_transport_entry(
         material,
         &expected_material,
@@ -652,8 +559,8 @@ fn require_authenticated_setup_transport_entry(
             )
         }
     };
-    let stream_summary = match stream_summary {
-        Ok(Some(summary)) => summary,
+    match stream_summary {
+        Ok(Some(_summary)) => {}
         Ok(None) => {
             return Ok(Err(Refusal::new(
                 "transportedObjectAuthenticatedMaterialMissing",
@@ -675,21 +582,6 @@ fn require_authenticated_setup_transport_entry(
             )));
         }
         Err(error) => return Err(error),
-    };
-    let authenticated_accounting = authenticated_setup_transport_accounting(&stream_summary)?;
-    if authenticated_accounting.total_byte_length != expected.byte_length
-        || authenticated_accounting.full_object_hash != expected.full_object_hash
-        || authenticated_accounting.chunk_root != expected.chunk_root
-        || authenticated_accounting.chunk_hashes != expected.chunk_hashes
-    {
-        return Ok(Err(Refusal::new(
-            "transportedObjectAuthenticatedBindingMismatch",
-            format!(
-                "{} transport accounting must match the bytes authenticated by the canonical stream verifier",
-                expected.object_path
-            ),
-            &expected.object_path,
-        )));
     }
 
     Ok(Ok(()))
@@ -713,81 +605,19 @@ fn referenced_material_root(
 }
 
 fn setup_transport_expected_material_with_root(
-    material: &Value,
     object_root: String,
-    object_name: &'static str,
-    object_role: &'static str,
-    hash_fields: SetupTransportHashFieldNames,
     object_path: String,
-) -> CanonicalResult<SetupTransportExpectedObject> {
-    let byte_length = value_u64(material, hash_fields.byte_length)?;
-    let full_object_hash = value_string(material, hash_fields.full_object_hash)?.to_string();
-    validate_hash_string(
-        &full_object_hash,
-        &format!("{object_path}.{}", hash_fields.full_object_hash),
-    )?;
-    let chunk_root = value_string(material, hash_fields.chunk_root)?.to_string();
-    validate_hash_string(
-        &chunk_root,
-        &format!("{object_path}.{}", hash_fields.chunk_root),
-    )?;
-    let chunk_hashes =
-        setup_transport_expected_hash_array(material, hash_fields.chunk_hashes, &object_path)?;
-
-    Ok(SetupTransportExpectedObject {
-        object_name,
-        object_role,
+) -> SetupTransportExpectedObject {
+    SetupTransportExpectedObject {
         object_root,
-        byte_length,
-        chunk_root,
-        chunk_hashes,
-        full_object_hash,
         object_path,
-    })
-}
-
-fn require_setup_transport_entry(
-    transported_objects: &[SetupTransportedObjectBinding],
-    expected: &SetupTransportExpectedObject,
-) -> Result<(), Refusal> {
-    let Some(transported_object) = transported_objects
-        .iter()
-        .find(|transported_object| transported_object.object_root == expected.object_root)
-    else {
-        return Err(Refusal::new(
-            "transportedObjectBindingMissing",
-            format!(
-                "setupTransportCertificate.transportedObjects must bind {}",
-                expected.object_path
-            ),
-            "setupPackage.setupTransportCertificate.transportedObjects",
-        ));
-    };
-    if transported_object.object_name != expected.object_name
-        || transported_object.object_role != expected.object_role
-        || transported_object.byte_length != expected.byte_length
-        || transported_object.chunk_root != expected.chunk_root
-        || transported_object.chunk_hashes != expected.chunk_hashes
-        || transported_object.full_object_hash != expected.full_object_hash
-    {
-        return Err(Refusal::new(
-            "transportedObjectBindingMismatch",
-            format!(
-                "setupTransportCertificate.transportedObjects metadata must match {}",
-                expected.object_path
-            ),
-            "setupPackage.setupTransportCertificate.transportedObjects",
-        ));
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        bgv::setup::canonical_stream_transport::AuthenticatedSetupTransportAccounting,
         encoding::append_varuint,
         foundation::{
             CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalStreamDomain, FOUNDATION_PROFILE,
@@ -799,43 +629,13 @@ mod tests {
         character.to_string().repeat(128)
     }
 
-    fn producer_transport_accounting(
-        stream_domain: CanonicalStreamDomain,
-        material_bytes: &[u8],
-    ) -> AuthenticatedSetupTransportAccounting {
-        let descriptor = derive_canonical_stream_descriptor(stream_domain, material_bytes)
-            .expect("canonical material descriptor");
-        let chunk_hashes = descriptor
-            .ordered_chunk_digests
-            .iter()
-            .map(|digest| digest.to_lowercase_hex())
-            .collect::<Vec<_>>();
-        let full_object_hash = descriptor.full_object_digest.to_lowercase_hex();
-        let total_byte_length = descriptor.total_byte_length;
-        let chunk_root = derive_canonical_object_hash(&json!({
-            "objectType": "SetupTransportChunkManifest",
-            "chunkCount": chunk_hashes.len(),
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }))
-        .expect("canonical material chunk manifest root");
-
-        AuthenticatedSetupTransportAccounting {
-            total_byte_length,
-            full_object_hash,
-            chunk_root,
-            chunk_hashes,
-        }
-    }
-
     fn authenticate_bgv_material_stream(
         family_code: u32,
         stream_domain: CanonicalStreamDomain,
         material_root: &str,
         material_bytes: &[u8],
         capability_byte: u8,
-    ) -> AuthenticatedSetupTransportAccounting {
+    ) {
         let descriptor = derive_canonical_stream_descriptor(stream_domain, material_bytes)
             .expect("canonical material descriptor");
         let descriptor_bytes = descriptor.encode().expect("encode material descriptor");
@@ -863,26 +663,6 @@ mod tests {
         }
         crate::bgv::setup::finish_bgv_canonical_stream(stream.handle, &capability)
             .expect("finish BGV canonical material stream");
-
-        producer_transport_accounting(stream_domain, material_bytes)
-    }
-
-    fn transport_binding(
-        object_name: &'static str,
-        object_role: &'static str,
-        material_root: &str,
-        accounting: &AuthenticatedSetupTransportAccounting,
-    ) -> SetupTransportedObjectBinding {
-        SetupTransportedObjectBinding {
-            object_name: object_name.to_string(),
-            object_role: object_role.to_string(),
-            object_root: material_root.to_string(),
-            byte_length: accounting.total_byte_length,
-            chunk_count: accounting.chunk_hashes.len() as u64,
-            chunk_root: accounting.chunk_root.clone(),
-            chunk_hashes: accounting.chunk_hashes.clone(),
-            full_object_hash: accounting.full_object_hash.clone(),
-        }
     }
 
     fn public_key_share_material_bytes() -> Vec<u8> {
@@ -960,7 +740,7 @@ mod tests {
         ];
 
         for package in packages {
-            let refusal = verify_setup_transport_request_bindings(&package, &json!({}), &[])
+            let refusal = verify_setup_transport_request_bindings(&package, &json!({}))
                 .expect("transport request binding verification")
                 .expect_err("a referenced binary material without its sidecar must refuse");
 
@@ -969,79 +749,34 @@ mod tests {
     }
 
     #[test]
-    fn transport_certificate_refuses_an_unreferenced_self_consistent_object() {
-        let transported_object = SetupTransportedObjectBinding {
-            object_name: "unreferencedMaterial".to_string(),
-            object_role: "unreferenced-material".to_string(),
-            object_root: protocol_hash('e'),
-            byte_length: 64,
-            chunk_count: 1,
-            chunk_root: protocol_hash('f'),
-            chunk_hashes: vec![protocol_hash('1')],
-            full_object_hash: protocol_hash('2'),
-        };
-
-        let refusal =
-            verify_setup_transport_request_bindings(&json!({}), &json!({}), &[transported_object])
-                .expect("transport request binding verification")
-                .expect_err("an unreferenced certificate object must refuse");
-        assert_eq!(refusal.reason_code, "transportedObjectUnexpected");
-    }
-
-    #[test]
-    fn transport_accounting_must_match_the_authenticated_canonical_stream_summary() {
+    fn request_material_must_have_an_authenticated_canonical_stream() {
         let authenticated_material_root = protocol_hash('a');
         let authenticated_bytes = &[0x41_u8; 64];
-        let alternate_bytes = &[0x42_u8; 64];
-        let authenticated_accounting = authenticate_bgv_material_stream(
+        authenticate_bgv_material_stream(
             crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_PUBLIC_EVALUATION_KEY_MATERIAL,
             CanonicalStreamDomain::PublicEvaluationKeyMaterial,
             &authenticated_material_root,
             authenticated_bytes,
             0x91,
         );
-        let alternate_accounting = producer_transport_accounting(
-            CanonicalStreamDomain::PublicEvaluationKeyMaterial,
-            alternate_bytes,
-        );
         let package = json!({
             "evaluationKeys": {
                 "publicEvaluationKeyMaterialRoot": authenticated_material_root,
             },
         });
-
-        let request_and_binding = |accounting: &AuthenticatedSetupTransportAccounting| {
-            let request = json!({
-                "transportedPublicEvaluationKeyMaterial": {
-                    "publicEvaluationKeyMaterials": [{
-                        "publicEvaluationKeyMaterialRoot": authenticated_material_root,
-                        "totalByteLength": accounting.total_byte_length,
-                        "fullObjectHash": accounting.full_object_hash,
-                        "chunkRoot": accounting.chunk_root,
-                        "chunkHashes": accounting.chunk_hashes,
-                    }],
-                },
-            });
-            let binding = transport_binding(
-                SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_NAME,
-                SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_ROLE,
-                &authenticated_material_root,
-                accounting,
-            );
-            (request, binding)
-        };
-
-        let (authenticated_request, authenticated_binding) =
-            request_and_binding(&authenticated_accounting);
+        let authenticated_request = json!({
+            "transportedPublicEvaluationKeyMaterial": {
+                "publicEvaluationKeyMaterials": [{
+                    "publicEvaluationKeyMaterialRoot": authenticated_material_root,
+                }],
+            },
+        });
         {
             let _eviction_guard =
                 VerifiedSetupProofMaterialEvictionGuard::for_request(&authenticated_request);
-            let authenticated_result = verify_setup_transport_request_bindings(
-                &package,
-                &authenticated_request,
-                &[authenticated_binding],
-            )
-            .expect("authenticated transport request binding verification");
+            let authenticated_result =
+                verify_setup_transport_request_bindings(&package, &authenticated_request)
+                    .expect("authenticated transport request binding verification");
             assert!(authenticated_result.is_ok());
         }
         assert!(
@@ -1053,36 +788,12 @@ mod tests {
             .is_none()
         );
 
-        authenticate_bgv_material_stream(
-            crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_PUBLIC_EVALUATION_KEY_MATERIAL,
-            CanonicalStreamDomain::PublicEvaluationKeyMaterial,
-            &authenticated_material_root,
-            authenticated_bytes,
-            0x92,
-        );
-        let (alternate_request, alternate_binding) = request_and_binding(&alternate_accounting);
-        {
-            let _eviction_guard =
-                VerifiedSetupProofMaterialEvictionGuard::for_request(&alternate_request);
-            let refusal = verify_setup_transport_request_bindings(
-                &package,
-                &alternate_request,
-                &[alternate_binding],
-            )
-            .expect("alternate transport request binding verification")
-            .expect_err("self-consistent accounting for different bytes must refuse");
-            assert_eq!(
-                refusal.reason_code,
-                "transportedObjectAuthenticatedBindingMismatch"
-            );
-        }
-        assert!(
-            authenticated_setup_proof_material_stream_summary(
-                PUBLIC_EVALUATION_KEY_MATERIAL_STREAM_FAMILY,
-                &authenticated_material_root,
-            )
-            .expect("post-refusal material lookup")
-            .is_none()
+        let refusal = verify_setup_transport_request_bindings(&package, &authenticated_request)
+            .expect("missing stream verification")
+            .expect_err("an unauthenticated material reference must refuse");
+        assert_eq!(
+            refusal.reason_code,
+            "transportedObjectAuthenticatedMaterialMissing"
         );
     }
 
@@ -1090,17 +801,12 @@ mod tests {
     fn authenticated_summary_dispatch_covers_component_and_public_key_material_stores() {
         let component_material_root = protocol_hash('c');
         let component_bytes = [0x31_u8; 96];
-        let alternate_component_bytes = [0x32_u8; 96];
-        let component_accounting = authenticate_bgv_material_stream(
+        authenticate_bgv_material_stream(
             crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT,
             CanonicalStreamDomain::EvaluatorKeyStore,
             &component_material_root,
             &component_bytes,
             0xa1,
-        );
-        let alternate_component_accounting = producer_transport_accounting(
-            CanonicalStreamDomain::EvaluatorKeyStore,
-            &alternate_component_bytes,
         );
         let component_package = json!({
             "relinearizationKeyShareRounds": {
@@ -1109,40 +815,24 @@ mod tests {
                 }],
             },
         });
-        let component_request_and_binding =
-            |accounting: &AuthenticatedSetupTransportAccounting, proof_family: &str| {
-                let request = json!({
-                    "transportedEvaluationKeyShareComponentMaterial": {
-                        "componentMaterials": [{
-                            "proofFamily": proof_family,
-                            "keySwitchComponentMaterialRoot": component_material_root,
-                            "totalByteLength": accounting.total_byte_length,
-                            "fullObjectHash": accounting.full_object_hash,
-                            "chunkRoot": accounting.chunk_root,
-                            "chunkHashes": accounting.chunk_hashes,
-                        }],
-                    },
-                });
-                let binding = transport_binding(
-                    SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_NAME,
-                    SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ROLE,
-                    &component_material_root,
-                    accounting,
-                );
-                (request, binding)
-            };
+        let component_request_for_family = |proof_family: &str| {
+            json!({
+                "transportedEvaluationKeyShareComponentMaterial": {
+                    "componentMaterials": [{
+                        "proofFamily": proof_family,
+                        "keySwitchComponentMaterialRoot": component_material_root,
+                    }],
+                },
+            })
+        };
 
-        let (component_request, component_binding) =
-            component_request_and_binding(&component_accounting, "relinearization-key-share");
+        let component_request = component_request_for_family("relinearization-key-share");
         {
             let _eviction_guard =
                 VerifiedComponentMaterialEvictionGuard::for_request(&component_request);
-            let result = verify_setup_transport_request_bindings(
-                &component_package,
-                &component_request,
-                &[component_binding],
-            )
-            .expect("authenticated component transport verification");
+            let result =
+                verify_setup_transport_request_bindings(&component_package, &component_request)
+                    .expect("authenticated component transport verification");
             assert!(result.is_ok());
         }
         assert!(
@@ -1161,54 +851,14 @@ mod tests {
             &component_bytes,
             0xa2,
         );
-        let (alternate_component_request, alternate_component_binding) =
-            component_request_and_binding(
-                &alternate_component_accounting,
-                "relinearization-key-share",
-            );
-        {
-            let _eviction_guard =
-                VerifiedComponentMaterialEvictionGuard::for_request(&alternate_component_request);
-            let refusal = verify_setup_transport_request_bindings(
-                &component_package,
-                &alternate_component_request,
-                &[alternate_component_binding],
-            )
-            .expect("alternate component transport verification")
-            .expect_err("component accounting for different bytes must refuse");
-            assert_eq!(
-                refusal.reason_code,
-                "transportedObjectAuthenticatedBindingMismatch"
-            );
-        }
-        assert!(
-            authenticated_evaluation_key_component_stream_summary(
-                "relinearization-key-share",
-                &component_material_root,
-            )
-            .expect("post-refusal component material lookup")
-            .is_none()
-        );
-
-        authenticate_bgv_material_stream(
-            crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT,
-            CanonicalStreamDomain::EvaluatorKeyStore,
-            &component_material_root,
-            &component_bytes,
-            0xa3,
-        );
-        let (wrong_family_request, wrong_family_binding) =
-            component_request_and_binding(&component_accounting, "galois-key-share");
+        let wrong_family_request = component_request_for_family("galois-key-share");
         {
             let _eviction_guard =
                 VerifiedComponentMaterialEvictionGuard::for_request(&wrong_family_request);
-            let refusal = verify_setup_transport_request_bindings(
-                &component_package,
-                &wrong_family_request,
-                &[wrong_family_binding],
-            )
-            .expect("wrong-family component transport verification")
-            .expect_err("a component root owned by another proof family must refuse");
+            let refusal =
+                verify_setup_transport_request_bindings(&component_package, &wrong_family_request)
+                    .expect("wrong-family component transport verification")
+                    .expect_err("a component root owned by another proof family must refuse");
             assert_eq!(
                 refusal.reason_code,
                 "transportedObjectAuthenticatedMaterialMismatch"
@@ -1228,10 +878,9 @@ mod tests {
             CanonicalStreamDomain::EvaluatorKeyStore,
             &component_material_root,
             &component_bytes,
-            0xa4,
+            0xa3,
         );
-        let (mut missing_family_request, missing_family_binding) =
-            component_request_and_binding(&component_accounting, "relinearization-key-share");
+        let mut missing_family_request = component_request_for_family("relinearization-key-share");
         missing_family_request["transportedEvaluationKeyShareComponentMaterial"]
             ["componentMaterials"][0]
             .as_object_mut()
@@ -1243,7 +892,6 @@ mod tests {
             let refusal = verify_setup_transport_request_bindings(
                 &component_package,
                 &missing_family_request,
-                &[missing_family_binding],
             )
             .expect("missing-family component transport verification")
             .expect_err("component material without its proof family must refuse");
@@ -1260,20 +908,12 @@ mod tests {
 
         let public_key_material_root = protocol_hash('d');
         let public_key_material_bytes = public_key_share_material_bytes();
-        let mut alternate_public_key_material_bytes = public_key_material_bytes.clone();
-        *alternate_public_key_material_bytes
-            .last_mut()
-            .expect("public-key share material is nonempty") ^= 1;
-        let public_key_material_accounting = authenticate_bgv_material_stream(
+        authenticate_bgv_material_stream(
             crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE_MATERIAL,
             CanonicalStreamDomain::PublicKeyShareMaterial,
             &public_key_material_root,
             &public_key_material_bytes,
             0xb1,
-        );
-        let alternate_public_key_material_accounting = producer_transport_accounting(
-            CanonicalStreamDomain::PublicKeyShareMaterial,
-            &alternate_public_key_material_bytes,
         );
         let public_key_package = json!({
             "publicKeyShareMaterial": {
@@ -1281,72 +921,22 @@ mod tests {
                 "publicKeyShareMaterialSetRoot": public_key_material_root,
             },
         });
-        let public_key_request_and_binding =
-            |accounting: &AuthenticatedSetupTransportAccounting| {
-                let request = json!({
-                    "transportedPublicKeyShareMaterial": {
-                        "publicKeyShareMaterialSetRoot": public_key_material_root,
-                        "totalByteLength": accounting.total_byte_length,
-                        "fullObjectHash": accounting.full_object_hash,
-                        "chunkRoot": accounting.chunk_root,
-                        "chunkHashes": accounting.chunk_hashes,
-                    },
-                });
-                let binding = transport_binding(
-                    SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME,
-                    SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE,
-                    &public_key_material_root,
-                    accounting,
-                );
-                (request, binding)
-            };
-
-        let (public_key_request, public_key_binding) =
-            public_key_request_and_binding(&public_key_material_accounting);
+        let public_key_request = json!({
+            "transportedPublicKeyShareMaterial": {
+                "publicKeyShareMaterialSetRoot": public_key_material_root,
+            },
+        });
         {
             let _eviction_guard =
                 VerifiedSetupProofMaterialEvictionGuard::for_request(&public_key_request);
-            let result = verify_setup_transport_request_bindings(
-                &public_key_package,
-                &public_key_request,
-                &[public_key_binding],
-            )
-            .expect("authenticated public-key material transport verification");
+            let result =
+                verify_setup_transport_request_bindings(&public_key_package, &public_key_request)
+                    .expect("authenticated public-key material transport verification");
             assert!(result.is_ok());
         }
         assert!(
             authenticated_public_key_share_material_stream_summary(&public_key_material_root)
                 .expect("post-accept public-key material lookup")
-                .is_none()
-        );
-
-        authenticate_bgv_material_stream(
-            crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE_MATERIAL,
-            CanonicalStreamDomain::PublicKeyShareMaterial,
-            &public_key_material_root,
-            &public_key_material_bytes,
-            0xb2,
-        );
-        let (alternate_public_key_request, alternate_public_key_binding) =
-            public_key_request_and_binding(&alternate_public_key_material_accounting);
-        {
-            let _eviction_guard =
-                VerifiedSetupProofMaterialEvictionGuard::for_request(&alternate_public_key_request);
-            let refusal = verify_setup_transport_request_bindings(
-                &public_key_package,
-                &alternate_public_key_request,
-                &[alternate_public_key_binding],
-            )
-            .expect("alternate public-key material transport verification")
-            .expect_err("public-key material accounting for different bytes must refuse");
-            assert_eq!(
-                refusal.reason_code,
-                "transportedObjectAuthenticatedBindingMismatch"
-            );
-        }
-        assert!(
-            authenticated_public_key_share_material_stream_summary(&public_key_material_root)
-                .expect("post-refusal public-key material lookup")
                 .is_none()
         );
     }

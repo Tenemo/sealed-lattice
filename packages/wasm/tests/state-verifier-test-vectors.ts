@@ -121,7 +121,6 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
                 unsigned16Item(1),
                 hashItem(suiteIdentifier),
                 unsigned16Item(input.objectType),
-                unsigned16Item(1),
                 hashItem(ceremonyContextHash),
                 hashItem(actionContextHash),
                 unsigned64Item(input.recoveryEpoch),

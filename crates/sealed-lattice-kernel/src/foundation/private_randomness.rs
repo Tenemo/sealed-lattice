@@ -19,12 +19,14 @@ const ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/private-randomness/action-key-hierarchy/v1";
 const ACTION_RANDOMNESS_ROOT_BYTE_LENGTH: usize = 64;
 const ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH: usize = 64;
+// KMAC binds its requested output length, so retaining the established length
+// preserves the active commitment-preimage and stream-key derivations.
 const ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH: usize =
     3 * ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH;
 const ACTION_RANDOMNESS_DERIVATION_INPUT_CANONICAL_BYTE_LENGTH: usize = 296;
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const RANDOM_BLOCK_BYTE_LENGTH: usize = 64;
-const PROOF_LEAF_SALT_PURPOSE: u16 = 0xfffe;
+const RANDOM_BLOCK_BIT_LENGTH: usize = RANDOM_BLOCK_BYTE_LENGTH * 8;
 
 /// An entropy provider injected by the browser or native host.
 ///
@@ -54,9 +56,10 @@ pub enum PrivateRandomnessError {
     CandidateDrawLimitExhausted,
     EntropyUnavailable,
     RepeatedAttemptIdentifier,
-    UnassignedDomain,
     InvalidModulus,
     InvalidCandidateDrawLimit,
+    InvalidBitLength,
+    InvalidConsumptionGrammar,
     CounterExhausted,
     ResumeBindingMismatch,
     ResumeAttemptMismatch,
@@ -65,6 +68,7 @@ pub enum PrivateRandomnessError {
     InvalidResumeSecretState,
     PendingResumeAttempt,
     MissingResumeAttempt,
+    FoundationSchema(FoundationSchemaError),
     CanonicalEncoding(CanonicalCodecError),
 }
 
@@ -80,14 +84,17 @@ impl fmt::Display for PrivateRandomnessError {
             Self::RepeatedAttemptIdentifier => {
                 formatter.write_str("the entropy source repeated an attempt identifier")
             }
-            Self::UnassignedDomain => {
-                formatter.write_str("the private-randomness family and purpose are unassigned")
-            }
             Self::InvalidModulus => {
                 formatter.write_str("the sampling modulus must be greater than one")
             }
             Self::InvalidCandidateDrawLimit => formatter
                 .write_str("the private-randomness candidate-draw limit must be positive"),
+            Self::InvalidBitLength => formatter.write_str(
+                "the packed private-randomness destination does not match the requested bit length",
+            ),
+            Self::InvalidConsumptionGrammar => formatter.write_str(
+                "the private-randomness stream was consumed with the wrong byte or bit grammar",
+            ),
             Self::CounterExhausted => {
                 formatter.write_str("the private-randomness block counter is exhausted")
             }
@@ -112,6 +119,7 @@ impl fmt::Display for PrivateRandomnessError {
             Self::MissingResumeAttempt => {
                 formatter.write_str("there is no restored private-randomness attempt to resume")
             }
+            Self::FoundationSchema(error) => error.fmt(formatter),
             Self::CanonicalEncoding(error) => error.fmt(formatter),
         }
     }
@@ -120,6 +128,7 @@ impl fmt::Display for PrivateRandomnessError {
 impl std::error::Error for PrivateRandomnessError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::FoundationSchema(error) => Some(error),
             Self::CanonicalEncoding(error) => Some(error),
             _ => None,
         }
@@ -129,6 +138,12 @@ impl std::error::Error for PrivateRandomnessError {
 impl From<CanonicalCodecError> for PrivateRandomnessError {
     fn from(error: CanonicalCodecError) -> Self {
         Self::CanonicalEncoding(error)
+    }
+}
+
+impl From<FoundationSchemaError> for PrivateRandomnessError {
+    fn from(error: FoundationSchemaError) -> Self {
+        Self::FoundationSchema(error)
     }
 }
 
@@ -247,7 +262,6 @@ impl ActionRandomnessDerivationInput {
 struct ActionRandomnessKeyHierarchy {
     action_randomness_commitment_preimage: Zeroizing<[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]>,
     private_randomness_stream_key: Zeroizing<[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]>,
-    proof_coin_key: Zeroizing<[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -271,20 +285,14 @@ impl SuiteSamplingPurpose {
     pub const fn canonical_code(self) -> u16 {
         self as u16
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(u16)]
-pub enum VerifiableSecretSharingExpansionRole {
-    Coefficient = 1,
-    RecipientShare = 2,
-    AggregateThresholdShare = 3,
-}
-
-impl VerifiableSecretSharingExpansionRole {
-    pub const fn canonical_code(self) -> u16 {
-        self as u16
+    pub const fn uses_centered_binomial_bits(self) -> bool {
+        suite_sampling_purpose_uses_centered_binomial_bits(self.canonical_code())
     }
+}
+
+pub(super) const fn suite_sampling_purpose_uses_centered_binomial_bits(purpose: u16) -> bool {
+    matches!(purpose, 2 | 4 | 5 | 6 | 7 | 9 | 10 | 12)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -315,49 +323,11 @@ impl PrivateRandomDomain {
         }
     }
 
-    pub const fn verifiable_secret_sharing_expansion(
-        role: VerifiableSecretSharingExpansionRole,
-    ) -> Self {
-        Self {
-            family: 0x2120,
-            purpose: role.canonical_code(),
-        }
-    }
-
     pub const fn target_flooding(role: TargetFloodingRole) -> Self {
         Self {
             family: 0x1630,
             purpose: role.canonical_code(),
         }
-    }
-
-    /// Constructs the fixed proof-leaf-salt domain for a verified statement
-    /// schema. Proof-mask domains remain owned by immutable relation plans so
-    /// this module never accepts a caller-selected mask purpose.
-    pub fn proof_leaf_salt(
-        statement_schema_identifier: u16,
-    ) -> Result<Self, PrivateRandomnessError> {
-        if !matches!(
-            statement_schema_identifier,
-            0x1211
-                | 0x1212
-                | 0x1213
-                | 0x1214
-                | 0x1215
-                | 0x1216
-                | 0x1217
-                | 0x1218
-                | 0x1302
-                | 0x1621
-                | 0x2110
-                | 0x2111
-        ) {
-            return Err(PrivateRandomnessError::UnassignedDomain);
-        }
-        Ok(Self {
-            family: statement_schema_identifier,
-            purpose: PROOF_LEAF_SALT_PURPOSE,
-        })
     }
 
     pub const fn family(self) -> u16 {
@@ -366,6 +336,10 @@ impl PrivateRandomDomain {
 
     pub const fn purpose(self) -> u16 {
         self.purpose
+    }
+
+    const fn uses_centered_binomial_bits(self) -> bool {
+        self.family == 0x0116 && suite_sampling_purpose_uses_centered_binomial_bits(self.purpose)
     }
 }
 
@@ -412,8 +386,9 @@ pub struct PrivateRandomnessResumeSnapshot {
 
 impl PrivateRandomnessResumeSnapshot {
     /// Derives the complete public cursor list from the secret stream state.
-    /// `next_counter` is the next block counter that may be generated. Any
-    /// unread suffix of the previously generated block remains only here.
+    /// `next_counter` is the next block counter that may be generated. The
+    /// public cursor exposes only the next unread bit offset; buffered random
+    /// bytes remain secret in this snapshot.
     pub fn try_derive_random_cursors(&self) -> Result<Vec<RandomCursor>, PrivateRandomnessError> {
         self.streams
             .iter()
@@ -422,7 +397,9 @@ impl PrivateRandomnessResumeSnapshot {
                     stream.stream_key.family,
                     stream.stream_key.purpose,
                     Hash512::from_bytes(stream.stream_key.derivation_context_hash),
+                    *self.attempt_identifier,
                     stream.next_counter,
+                    stream.try_next_unread_bit_offset()?,
                 )
                 .map_err(|_| PrivateRandomnessError::InvalidResumeSecretState)
             })
@@ -447,7 +424,21 @@ struct PrivateRandomStreamSnapshot {
     stream_key: PrivateRandomStreamKey,
     next_counter: u64,
     unread_block: Zeroizing<[u8; RANDOM_BLOCK_BYTE_LENGTH]>,
-    unread_block_offset: usize,
+    next_unread_bit_offset: usize,
+}
+
+impl PrivateRandomStreamSnapshot {
+    fn try_next_unread_bit_offset(&self) -> Result<Option<u16>, PrivateRandomnessError> {
+        if self.next_unread_bit_offset == RANDOM_BLOCK_BIT_LENGTH {
+            return Ok(None);
+        }
+        if self.next_unread_bit_offset > RANDOM_BLOCK_BIT_LENGTH {
+            return Err(PrivateRandomnessError::InvalidResumeSecretState);
+        }
+        let bit_offset = u16::try_from(self.next_unread_bit_offset)
+            .map_err(|_| PrivateRandomnessError::InvalidResumeSecretState)?;
+        Ok(Some(bit_offset))
+    }
 }
 
 struct PendingPrivateRandomAttempt {
@@ -497,14 +488,7 @@ impl ActionPrivateRandomness {
             &binding,
             &key_hierarchy.action_randomness_commitment_preimage,
         )?;
-        let ActionRandomnessKeyHierarchy {
-            private_randomness_stream_key,
-            proof_coin_key,
-            ..
-        } = key_hierarchy;
-        // No closed proof-attempt derivation consumes this child yet. Keep it
-        // inaccessible and erase it instead of exposing a raw-key interface.
-        drop(proof_coin_key);
+        let private_randomness_stream_key = key_hierarchy.private_randomness_stream_key;
         Ok(Self {
             binding,
             action_randomness_root,
@@ -526,6 +510,17 @@ impl ActionPrivateRandomness {
         entropy_source
             .try_fill_bytes(attempt_identifier.as_mut())
             .map_err(|_| PrivateRandomnessError::EntropyUnavailable)?;
+
+        self.try_start_attempt_with_identifier(attempt_identifier)
+    }
+
+    fn try_start_attempt_with_identifier<'action>(
+        &'action mut self,
+        attempt_identifier: Zeroizing<[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]>,
+    ) -> Result<PrivateRandomAttempt<'action>, PrivateRandomnessError> {
+        if self.pending_resume_attempt.is_some() {
+            return Err(PrivateRandomnessError::PendingResumeAttempt);
+        }
 
         if self
             .used_attempt_identifiers
@@ -576,7 +571,7 @@ impl ActionPrivateRandomness {
                     PrivateRandomStreamCursor {
                         next_counter: stream.next_counter,
                         unread_block: stream.unread_block,
-                        unread_block_offset: stream.unread_block_offset,
+                        next_unread_bit_offset: stream.next_unread_bit_offset,
                     },
                 )
             })
@@ -673,8 +668,8 @@ impl PrivateRandomAttempt<'_> {
                         || Zeroizing::new([0u8; RANDOM_BLOCK_BYTE_LENGTH]),
                         |cursor| zeroizing_copy(&cursor.unread_block),
                     ),
-                    unread_block_offset: cursor.map_or(RANDOM_BLOCK_BYTE_LENGTH, |cursor| {
-                        cursor.unread_block_offset
+                    next_unread_bit_offset: cursor.map_or(RANDOM_BLOCK_BIT_LENGTH, |cursor| {
+                        cursor.next_unread_bit_offset
                     }),
                 }
             })
@@ -709,6 +704,12 @@ impl PrivateRandomAttempt<'_> {
         derivation_context_hash: Hash512,
         destination: &mut [u8],
     ) -> Result<(), PrivateRandomnessError> {
+        if domain.uses_centered_binomial_bits() {
+            return Err(PrivateRandomnessError::InvalidConsumptionGrammar);
+        }
+        if destination.is_empty() {
+            return Ok(());
+        }
         let stream_key = PrivateRandomStreamKey::new(domain, derivation_context_hash);
         let binding = self.owner.binding;
         let private_randomness_stream_key = &*self.owner.private_randomness_stream_key;
@@ -720,6 +721,42 @@ impl PrivateRandomAttempt<'_> {
             attempt_identifier,
             stream_key,
             destination,
+        )
+    }
+
+    /// Consumes an exact number of centered-binomial stream bits in increasing
+    /// byte order and least-significant-bit-first order within each byte.
+    /// `destination` is packed in the same order and must have exactly
+    /// `bit_length.div_ceil(8)` bytes; unused high bits in its last byte are
+    /// zero.
+    pub fn try_fill_little_endian_bits(
+        &mut self,
+        domain: PrivateRandomDomain,
+        derivation_context_hash: Hash512,
+        destination: &mut [u8],
+        bit_length: usize,
+    ) -> Result<(), PrivateRandomnessError> {
+        if !domain.uses_centered_binomial_bits() {
+            return Err(PrivateRandomnessError::InvalidConsumptionGrammar);
+        }
+        if destination.len() != bit_length.div_ceil(8) {
+            return Err(PrivateRandomnessError::InvalidBitLength);
+        }
+        if bit_length == 0 {
+            return Ok(());
+        }
+        let stream_key = PrivateRandomStreamKey::new(domain, derivation_context_hash);
+        let binding = self.owner.binding;
+        let private_randomness_stream_key = &*self.owner.private_randomness_stream_key;
+        let attempt_identifier = &*self.attempt_identifier;
+        let cursor = self.streams.entry(stream_key).or_default();
+        cursor.try_fill_little_endian_bits(
+            &binding,
+            private_randomness_stream_key,
+            attempt_identifier,
+            stream_key,
+            destination,
+            bit_length,
         )
     }
 
@@ -803,7 +840,7 @@ impl PrivateRandomStreamKey {
 struct PrivateRandomStreamCursor {
     next_counter: u64,
     unread_block: Zeroizing<[u8; RANDOM_BLOCK_BYTE_LENGTH]>,
-    unread_block_offset: usize,
+    next_unread_bit_offset: usize,
 }
 
 impl Default for PrivateRandomStreamCursor {
@@ -811,7 +848,7 @@ impl Default for PrivateRandomStreamCursor {
         Self {
             next_counter: 0,
             unread_block: Zeroizing::new([0u8; RANDOM_BLOCK_BYTE_LENGTH]),
-            unread_block_offset: RANDOM_BLOCK_BYTE_LENGTH,
+            next_unread_bit_offset: RANDOM_BLOCK_BIT_LENGTH,
         }
     }
 }
@@ -825,7 +862,16 @@ impl PrivateRandomStreamCursor {
         stream_key: PrivateRandomStreamKey,
         destination: &mut [u8],
     ) -> Result<(), PrivateRandomnessError> {
-        self.preflight_counter_capacity(destination.len())?;
+        if self.next_unread_bit_offset > RANDOM_BLOCK_BIT_LENGTH
+            || self.next_unread_bit_offset % 8 != 0
+        {
+            return Err(PrivateRandomnessError::InvalidConsumptionGrammar);
+        }
+        let requested_bit_length = destination
+            .len()
+            .checked_mul(8)
+            .ok_or(PrivateRandomnessError::CounterExhausted)?;
+        self.preflight_counter_capacity(requested_bit_length)?;
         if let Err(error) = self.try_fill_bytes_after_preflight(
             binding,
             private_randomness_stream_key,
@@ -839,13 +885,43 @@ impl PrivateRandomStreamCursor {
         Ok(())
     }
 
+    fn try_fill_little_endian_bits(
+        &mut self,
+        binding: &PrivateRandomnessActionBinding,
+        private_randomness_stream_key: &[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
+        attempt_identifier: &[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+        stream_key: PrivateRandomStreamKey,
+        destination: &mut [u8],
+        bit_length: usize,
+    ) -> Result<(), PrivateRandomnessError> {
+        if self.next_unread_bit_offset > RANDOM_BLOCK_BIT_LENGTH {
+            return Err(PrivateRandomnessError::InvalidConsumptionGrammar);
+        }
+        if destination.len() != bit_length.div_ceil(8) {
+            return Err(PrivateRandomnessError::InvalidBitLength);
+        }
+        self.preflight_counter_capacity(bit_length)?;
+        if let Err(error) = self.try_fill_bits_after_preflight(
+            binding,
+            private_randomness_stream_key,
+            attempt_identifier,
+            stream_key,
+            destination,
+            bit_length,
+        ) {
+            destination.zeroize();
+            return Err(error);
+        }
+        Ok(())
+    }
+
     fn preflight_counter_capacity(
         &self,
-        requested_byte_length: usize,
+        requested_bit_length: usize,
     ) -> Result<(), PrivateRandomnessError> {
-        let unread_byte_length = RANDOM_BLOCK_BYTE_LENGTH - self.unread_block_offset;
-        let required_new_byte_length = requested_byte_length.saturating_sub(unread_byte_length);
-        let required_new_block_count = required_new_byte_length.div_ceil(RANDOM_BLOCK_BYTE_LENGTH);
+        let unread_bit_length = RANDOM_BLOCK_BIT_LENGTH - self.next_unread_bit_offset;
+        let required_new_bit_length = requested_bit_length.saturating_sub(unread_bit_length);
+        let required_new_block_count = required_new_bit_length.div_ceil(RANDOM_BLOCK_BIT_LENGTH);
         let required_new_block_count = u64::try_from(required_new_block_count)
             .map_err(|_| PrivateRandomnessError::CounterExhausted)?;
         if required_new_block_count > u64::MAX - self.next_counter {
@@ -863,28 +939,83 @@ impl PrivateRandomStreamCursor {
         mut destination: &mut [u8],
     ) -> Result<(), PrivateRandomnessError> {
         while !destination.is_empty() {
-            if self.unread_block_offset == RANDOM_BLOCK_BYTE_LENGTH {
-                self.unread_block = derive_private_random_block(
+            if self.next_unread_bit_offset == RANDOM_BLOCK_BIT_LENGTH {
+                self.derive_next_block(
                     binding,
                     private_randomness_stream_key,
                     attempt_identifier,
                     stream_key,
-                    self.next_counter,
                 )?;
-                self.next_counter += 1;
-                self.unread_block_offset = 0;
             }
 
-            let available_byte_length = RANDOM_BLOCK_BYTE_LENGTH - self.unread_block_offset;
+            let block_start = self.next_unread_bit_offset / 8;
+            let available_byte_length = RANDOM_BLOCK_BYTE_LENGTH - block_start;
             let copied_byte_length = destination.len().min(available_byte_length);
-            let block_start = self.unread_block_offset;
-            let block_end = self.unread_block_offset + copied_byte_length;
+            let block_end = block_start + copied_byte_length;
             destination[..copied_byte_length]
                 .copy_from_slice(&self.unread_block[block_start..block_end]);
             self.unread_block[block_start..block_end].zeroize();
-            self.unread_block_offset = block_end;
+            self.next_unread_bit_offset += copied_byte_length * 8;
             destination = &mut destination[copied_byte_length..];
         }
+        Ok(())
+    }
+
+    fn try_fill_bits_after_preflight(
+        &mut self,
+        binding: &PrivateRandomnessActionBinding,
+        private_randomness_stream_key: &[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
+        attempt_identifier: &[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+        stream_key: PrivateRandomStreamKey,
+        destination: &mut [u8],
+        bit_length: usize,
+    ) -> Result<(), PrivateRandomnessError> {
+        destination.zeroize();
+        for output_bit_index in 0..bit_length {
+            if self.next_unread_bit_offset == RANDOM_BLOCK_BIT_LENGTH {
+                self.derive_next_block(
+                    binding,
+                    private_randomness_stream_key,
+                    attempt_identifier,
+                    stream_key,
+                )?;
+            }
+
+            let source_byte_index = self.next_unread_bit_offset / 8;
+            let source_bit_index = self.next_unread_bit_offset % 8;
+            let source_mask = 1u8 << source_bit_index;
+            let source_bit =
+                (self.unread_block[source_byte_index] & source_mask) >> source_bit_index;
+            let destination_byte_index = output_bit_index / 8;
+            let destination_bit_index = output_bit_index % 8;
+            destination[destination_byte_index] |= source_bit << destination_bit_index;
+            self.unread_block[source_byte_index] &= !source_mask;
+            self.next_unread_bit_offset += 1;
+        }
+        Ok(())
+    }
+
+    fn derive_next_block(
+        &mut self,
+        binding: &PrivateRandomnessActionBinding,
+        private_randomness_stream_key: &[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
+        attempt_identifier: &[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+        stream_key: PrivateRandomStreamKey,
+    ) -> Result<(), PrivateRandomnessError> {
+        let incremented_counter = self
+            .next_counter
+            .checked_add(1)
+            .ok_or(PrivateRandomnessError::CounterExhausted)?;
+        let next_block = derive_private_random_block(
+            binding,
+            private_randomness_stream_key,
+            attempt_identifier,
+            stream_key,
+            self.next_counter,
+        )?;
+        self.unread_block = next_block;
+        self.next_counter = incremented_counter;
+        self.next_unread_bit_offset = 0;
         Ok(())
     }
 }
@@ -924,6 +1055,12 @@ fn validate_private_randomness_resume(
     {
         return Err(PrivateRandomnessError::InvalidResumeStreamSet);
     }
+    if snapshot.streams.iter().any(|stream| {
+        stream.next_unread_bit_offset > RANDOM_BLOCK_BIT_LENGTH
+            || (stream.next_unread_bit_offset < RANDOM_BLOCK_BIT_LENGTH && stream.next_counter == 0)
+    }) {
+        return Err(PrivateRandomnessError::InvalidResumeSecretState);
+    }
 
     if expected_random_cursors.len() != snapshot.streams.len() {
         return Err(PrivateRandomnessError::InvalidResumeCursorSet);
@@ -933,11 +1070,16 @@ fn validate_private_randomness_resume(
             random_cursor.family,
             random_cursor.purpose,
             random_cursor.derivation_context_hash,
+            random_cursor.stream_attempt_identifier,
             random_cursor.next_counter,
+            random_cursor.next_unread_bit_offset_in_buffered_block,
         )
         .map_err(|_| PrivateRandomnessError::InvalidResumeCursorSet)?;
         if PrivateRandomStreamKey::from_random_cursor(random_cursor) != stream.stream_key
+            || random_cursor.stream_attempt_identifier != *expected_attempt_identifier
             || random_cursor.next_counter != stream.next_counter
+            || random_cursor.next_unread_bit_offset_in_buffered_block
+                != stream.try_next_unread_bit_offset()?
         {
             return Err(PrivateRandomnessError::InvalidResumeCursorSet);
         }
@@ -980,14 +1122,13 @@ fn validate_private_random_stream_snapshot(
     private_randomness_stream_key: &[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
     attempt_identifier: &[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
 ) -> Result<(), PrivateRandomnessError> {
-    if stream.unread_block_offset > RANDOM_BLOCK_BYTE_LENGTH
-        || stream.unread_block[..stream.unread_block_offset]
-            .iter()
-            .any(|byte| *byte != 0)
-    {
+    if stream.next_unread_bit_offset > RANDOM_BLOCK_BIT_LENGTH {
         return Err(PrivateRandomnessError::InvalidResumeSecretState);
     }
-    if stream.unread_block_offset == RANDOM_BLOCK_BYTE_LENGTH {
+    if stream.next_unread_bit_offset == RANDOM_BLOCK_BIT_LENGTH {
+        if stream.unread_block.iter().any(|byte| *byte != 0) {
+            return Err(PrivateRandomnessError::InvalidResumeSecretState);
+        }
         return Ok(());
     }
     let previous_counter = stream
@@ -1001,12 +1142,21 @@ fn validate_private_random_stream_snapshot(
         stream.stream_key,
         previous_counter,
     )?;
-    if stream.unread_block[stream.unread_block_offset..]
-        != expected_block[stream.unread_block_offset..]
-    {
-        return Err(PrivateRandomnessError::InvalidResumeSecretState);
+    for bit_index in 0..RANDOM_BLOCK_BIT_LENGTH {
+        let expected_bit = if bit_index < stream.next_unread_bit_offset {
+            0
+        } else {
+            little_endian_bit(&expected_block, bit_index)
+        };
+        if little_endian_bit(&stream.unread_block, bit_index) != expected_bit {
+            return Err(PrivateRandomnessError::InvalidResumeSecretState);
+        }
     }
     Ok(())
+}
+
+fn little_endian_bit(bytes: &[u8; RANDOM_BLOCK_BYTE_LENGTH], bit_index: usize) -> u8 {
+    (bytes[bit_index / 8] >> (bit_index % 8)) & 1
 }
 
 fn zeroizing_copy<const BYTE_LENGTH: usize>(
@@ -1090,12 +1240,9 @@ fn derive_action_randomness_key_hierarchy(
         &key_material
             [ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH..2 * ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
     );
-    let mut proof_coin_key = Zeroizing::new([0u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]);
-    proof_coin_key.copy_from_slice(&key_material[2 * ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH..]);
     Ok(ActionRandomnessKeyHierarchy {
         action_randomness_commitment_preimage,
         private_randomness_stream_key,
-        proof_coin_key,
     })
 }
 
@@ -1208,6 +1355,32 @@ mod tests {
         output
     }
 
+    fn packed_little_endian_bit(bytes: &[u8], bit_index: usize) -> u8 {
+        (bytes[bit_index / 8] >> (bit_index % 8)) & 1
+    }
+
+    fn assert_packed_bit_segment(
+        actual: &[u8],
+        actual_bit_length: usize,
+        expected: &[u8],
+        expected_start_bit: usize,
+    ) {
+        for actual_bit_index in 0..actual_bit_length {
+            assert_eq!(
+                packed_little_endian_bit(actual, actual_bit_index),
+                packed_little_endian_bit(expected, expected_start_bit + actual_bit_index),
+                "packed bit differs at segment position {actual_bit_index}"
+            );
+        }
+        for unused_bit_index in actual_bit_length..actual.len() * 8 {
+            assert_eq!(
+                packed_little_endian_bit(actual, unused_bit_index),
+                0,
+                "unused packed output bits must be zero"
+            );
+        }
+    }
+
     fn deterministic_action_and_attempt() -> (ActionPrivateRandomness, DeterministicTestEntropy) {
         let mut entropy_bytes = Vec::new();
         entropy_bytes.extend_from_slice(&[0x51; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]);
@@ -1267,6 +1440,50 @@ mod tests {
         let random_cursors = snapshot
             .try_derive_random_cursors()
             .expect("snapshot derives assigned public cursors");
+        assert!(
+            random_cursors
+                .iter()
+                .all(|cursor| cursor.stream_attempt_identifier == [0x62; 32])
+        );
+        assert_eq!(
+            random_cursors
+                .iter()
+                .map(|cursor| cursor.next_unread_bit_offset_in_buffered_block)
+                .collect::<Vec<_>>(),
+            vec![Some(40), None, None]
+        );
+        (snapshot, live_streams, random_cursors)
+    }
+
+    fn partially_consumed_bit_resume_snapshot() -> (
+        PrivateRandomnessResumeSnapshot,
+        Vec<PrivateRandomStreamContext>,
+        Vec<RandomCursor>,
+    ) {
+        let domain =
+            PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::BallotEncryptionErrorZero);
+        let derivation_context_hash = Hash512::from_bytes([0x42; 64]);
+        let live_streams = vec![PrivateRandomStreamContext::new(
+            domain,
+            derivation_context_hash,
+        )];
+        let (mut action, mut entropy) = deterministic_action_and_attempt();
+        let mut attempt = action
+            .try_start_attempt(&mut entropy)
+            .expect("test attempt identifier is available");
+        attempt
+            .try_fill_little_endian_bits(domain, derivation_context_hash, &mut [0u8; 1], 3)
+            .expect("three centered-binomial bits derive");
+        let snapshot = attempt
+            .try_create_resume_snapshot(&live_streams)
+            .expect("the partial-bit stream creates a snapshot");
+        let random_cursors = snapshot
+            .try_derive_random_cursors()
+            .expect("the snapshot derives its public cursor");
+        assert_eq!(
+            random_cursors[0].next_unread_bit_offset_in_buffered_block,
+            Some(3)
+        );
         (snapshot, live_streams, random_cursors)
     }
 
@@ -1303,14 +1520,13 @@ mod tests {
         let hierarchy = derive_action_randomness_key_hierarchy(&binding, &root)
             .expect("action key hierarchy derives");
         let mut combined_key_material =
-            Vec::with_capacity(ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH);
+            Vec::with_capacity(2 * ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH);
         combined_key_material
             .extend_from_slice(hierarchy.action_randomness_commitment_preimage.as_slice());
         combined_key_material.extend_from_slice(hierarchy.private_randomness_stream_key.as_slice());
-        combined_key_material.extend_from_slice(hierarchy.proof_coin_key.as_slice());
         assert_eq!(
             lowercase_hexadecimal(&combined_key_material),
-            "95fd3c9109de226d218b1a33d438e91f63fcbf8fa3fb53c42aa3593da68e547c2ab7479129b8a1f05a4797cbd35dddbbf52037b8d337ebddf934630fcb437fbaeb5dab1dc7a488b6d7f10f675ce3400dde2e048be6c713e28b2447356c0cdecc93b8b8522d19ade4c732f3d431bbcf36aad895045814d2eb086e96bc44981e85384ddb46cc8a18da84dea567c0c7506e0688c21376c517cc5293c892faae96b2dbb0bb8d22e326d7e52f474db44f286babb3746b69bc124f415889efc972cefd"
+            "95fd3c9109de226d218b1a33d438e91f63fcbf8fa3fb53c42aa3593da68e547c2ab7479129b8a1f05a4797cbd35dddbbf52037b8d337ebddf934630fcb437fbaeb5dab1dc7a488b6d7f10f675ce3400dde2e048be6c713e28b2447356c0cdecc93b8b8522d19ade4c732f3d431bbcf36aad895045814d2eb086e96bc44981e85"
         );
 
         let commitment = derive_action_randomness_commitment(
@@ -1393,10 +1609,6 @@ mod tests {
             assert_ne!(
                 base_hierarchy.private_randomness_stream_key.as_slice(),
                 changed_hierarchy.private_randomness_stream_key.as_slice(),
-            );
-            assert_ne!(
-                base_hierarchy.proof_coin_key.as_slice(),
-                changed_hierarchy.proof_coin_key.as_slice(),
             );
         }
     }
@@ -1528,7 +1740,7 @@ mod tests {
             .get(&stream_key)
             .expect("the semantic stream has one cursor");
         assert_eq!(cursor.next_counter, 2);
-        assert_eq!(cursor.unread_block_offset, 3);
+        assert_eq!(cursor.next_unread_bit_offset, 24);
         assert_eq!(
             &cursor.unread_block[..3],
             &[0u8; 3],
@@ -1538,12 +1750,200 @@ mod tests {
     }
 
     #[test]
+    fn centered_binomial_cursor_resumes_exact_bits_across_bytes_and_blocks() {
+        let domain =
+            PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::BallotEncryptionErrorZero);
+        let derivation_context_hash = Hash512::from_bytes([0x82; 64]);
+        let live_streams = vec![PrivateRandomStreamContext::new(
+            domain,
+            derivation_context_hash,
+        )];
+
+        let (mut uninterrupted_action, mut uninterrupted_entropy) =
+            deterministic_action_and_attempt();
+        let mut uninterrupted_attempt = uninterrupted_action
+            .try_start_attempt(&mut uninterrupted_entropy)
+            .expect("uninterrupted attempt starts");
+        let mut expected = [0u8; 66];
+        uninterrupted_attempt
+            .try_fill_little_endian_bits(domain, derivation_context_hash, &mut expected, 521)
+            .expect("uninterrupted bit stream derives");
+
+        let (mut action, mut entropy) = deterministic_action_and_attempt();
+        let mut attempt = action
+            .try_start_attempt(&mut entropy)
+            .expect("checkpointed attempt starts");
+        let mut first_segment = [0xff; 1];
+        attempt
+            .try_fill_little_endian_bits(domain, derivation_context_hash, &mut first_segment, 3)
+            .expect("first three bits derive");
+        assert_packed_bit_segment(&first_segment, 3, &expected, 0);
+        let snapshot = attempt
+            .try_create_resume_snapshot(&live_streams)
+            .expect("three-bit boundary snapshots");
+        let cursors = snapshot
+            .try_derive_random_cursors()
+            .expect("cursors derive");
+        assert_eq!(cursors[0].next_counter, 1);
+        assert_eq!(cursors[0].next_unread_bit_offset_in_buffered_block, Some(3));
+        drop(attempt);
+        drop(action);
+
+        let mut action = ActionPrivateRandomness::try_restore_from_snapshot(
+            test_binding(),
+            &[0x62; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+            &live_streams,
+            &cursors,
+            snapshot,
+        )
+        .expect("three-bit boundary restores");
+        let mut attempt = action.try_resume_attempt().expect("attempt resumes");
+        let mut second_segment = [0xff; 1];
+        attempt
+            .try_fill_little_endian_bits(domain, derivation_context_hash, &mut second_segment, 6)
+            .expect("next six bits derive");
+        assert_packed_bit_segment(&second_segment, 6, &expected, 3);
+        let snapshot = attempt
+            .try_create_resume_snapshot(&live_streams)
+            .expect("nine-bit boundary snapshots");
+        let cursors = snapshot
+            .try_derive_random_cursors()
+            .expect("cursors derive");
+        assert_eq!(cursors[0].next_unread_bit_offset_in_buffered_block, Some(9));
+        drop(attempt);
+        drop(action);
+
+        let mut action = ActionPrivateRandomness::try_restore_from_snapshot(
+            test_binding(),
+            &[0x62; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+            &live_streams,
+            &cursors,
+            snapshot,
+        )
+        .expect("nine-bit boundary restores");
+        let mut attempt = action.try_resume_attempt().expect("attempt resumes");
+        let mut third_segment = [0xff; 63];
+        attempt
+            .try_fill_little_endian_bits(domain, derivation_context_hash, &mut third_segment, 502)
+            .expect("stream advances to the final block bit");
+        assert_packed_bit_segment(&third_segment, 502, &expected, 9);
+        let snapshot = attempt
+            .try_create_resume_snapshot(&live_streams)
+            .expect("final-bit boundary snapshots");
+        let cursors = snapshot
+            .try_derive_random_cursors()
+            .expect("cursors derive");
+        assert_eq!(
+            cursors[0].next_unread_bit_offset_in_buffered_block,
+            Some(511)
+        );
+        drop(attempt);
+        drop(action);
+
+        let mut action = ActionPrivateRandomness::try_restore_from_snapshot(
+            test_binding(),
+            &[0x62; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+            &live_streams,
+            &cursors,
+            snapshot,
+        )
+        .expect("final-bit boundary restores");
+        let mut attempt = action.try_resume_attempt().expect("attempt resumes");
+        let mut fourth_segment = [0xff; 1];
+        attempt
+            .try_fill_little_endian_bits(domain, derivation_context_hash, &mut fourth_segment, 1)
+            .expect("final bit derives");
+        assert_packed_bit_segment(&fourth_segment, 1, &expected, 511);
+        let snapshot = attempt
+            .try_create_resume_snapshot(&live_streams)
+            .expect("consumed block boundary snapshots");
+        let cursors = snapshot
+            .try_derive_random_cursors()
+            .expect("cursors derive");
+        assert_eq!(cursors[0].next_unread_bit_offset_in_buffered_block, None);
+        drop(attempt);
+        drop(action);
+
+        let mut action = ActionPrivateRandomness::try_restore_from_snapshot(
+            test_binding(),
+            &[0x62; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+            &live_streams,
+            &cursors,
+            snapshot,
+        )
+        .expect("consumed block boundary restores");
+        let mut attempt = action.try_resume_attempt().expect("attempt resumes");
+        let mut fifth_segment = [0xff; 2];
+        attempt
+            .try_fill_little_endian_bits(domain, derivation_context_hash, &mut fifth_segment, 9)
+            .expect("next block begins without reuse");
+        assert_packed_bit_segment(&fifth_segment, 9, &expected, 512);
+        let snapshot = attempt
+            .try_create_resume_snapshot(&live_streams)
+            .expect("second-block boundary snapshots");
+        let cursors = snapshot
+            .try_derive_random_cursors()
+            .expect("cursors derive");
+        assert_eq!(cursors[0].next_counter, 2);
+        assert_eq!(cursors[0].next_unread_bit_offset_in_buffered_block, Some(9));
+    }
+
+    #[test]
+    fn private_random_streams_reject_wrong_consumption_grammar_and_packing() {
+        let (mut action, mut entropy) = deterministic_action_and_attempt();
+        let mut attempt = action
+            .try_start_attempt(&mut entropy)
+            .expect("test attempt starts");
+        let centered_domain =
+            PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::BallotEncryptionErrorZero);
+        let byte_domain = PrivateRandomDomain::suite_sampling(
+            SuiteSamplingPurpose::BallotEncryptionEphemeralSecret,
+        );
+        let context = Hash512::from_bytes([0x83; 64]);
+
+        let mut byte_destination = [0xa5; 1];
+        assert_eq!(
+            attempt.try_fill_bytes(centered_domain, context, &mut byte_destination),
+            Err(PrivateRandomnessError::InvalidConsumptionGrammar)
+        );
+        assert_eq!(byte_destination, [0xa5]);
+
+        let mut bit_destination = [0xa6; 1];
+        assert_eq!(
+            attempt.try_fill_little_endian_bits(byte_domain, context, &mut bit_destination, 1,),
+            Err(PrivateRandomnessError::InvalidConsumptionGrammar)
+        );
+        assert_eq!(bit_destination, [0xa6]);
+
+        let mut malformed_destination = [0xa7; 2];
+        assert_eq!(
+            attempt.try_fill_little_endian_bits(
+                centered_domain,
+                context,
+                &mut malformed_destination,
+                1,
+            ),
+            Err(PrivateRandomnessError::InvalidBitLength)
+        );
+        assert_eq!(malformed_destination, [0xa7; 2]);
+        assert!(attempt.streams.is_empty());
+
+        attempt
+            .try_fill_bytes(byte_domain, context, &mut [])
+            .expect("an empty byte request is a no-op");
+        attempt
+            .try_fill_little_endian_bits(centered_domain, context, &mut [], 0)
+            .expect("an empty bit request is a no-op");
+        assert!(attempt.streams.is_empty());
+    }
+
+    #[test]
     fn rejection_sampling_is_unbiased_consumes_rejections_and_handles_full_u64() {
         let (mut action, mut entropy) = deterministic_action_and_attempt();
         let mut attempt = action
             .try_start_attempt(&mut entropy)
             .expect("test attempt identifier is available");
-        let domain = PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::PublicKeyError);
+        let domain = PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::SecretContribution);
         let derivation_context_hash = Hash512::from_bytes([0x91; 64]);
         let stream_key = PrivateRandomStreamKey::new(domain, derivation_context_hash);
         let mut scripted_block = [0u8; RANDOM_BLOCK_BYTE_LENGTH];
@@ -1553,7 +1953,7 @@ mod tests {
             PrivateRandomStreamCursor {
                 next_counter: 1,
                 unread_block: Zeroizing::new(scripted_block),
-                unread_block_offset: 0,
+                next_unread_bit_offset: 0,
             },
         );
 
@@ -1568,8 +1968,8 @@ mod tests {
                 .streams
                 .get(&stream_key)
                 .expect("scripted stream remains open")
-                .unread_block_offset,
-            3,
+                .next_unread_bit_offset,
+            24,
             "both rejected bytes and the accepted byte are permanently consumed"
         );
 
@@ -1582,7 +1982,7 @@ mod tests {
             PrivateRandomStreamCursor {
                 next_counter: 1,
                 unread_block: Zeroizing::new(second_block),
-                unread_block_offset: 0,
+                next_unread_bit_offset: 0,
             },
         );
         assert_eq!(
@@ -1596,8 +1996,8 @@ mod tests {
                 .streams
                 .get(&second_key)
                 .expect("two-byte stream remains open")
-                .unread_block_offset,
-            2,
+                .next_unread_bit_offset,
+            16,
             "bitLength(257) requires exactly two bytes"
         );
 
@@ -1617,7 +2017,7 @@ mod tests {
             PrivateRandomStreamCursor {
                 next_counter: 1,
                 unread_block: Zeroizing::new(full_width_block),
-                unread_block_offset: 0,
+                next_unread_bit_offset: 0,
             },
         );
 
@@ -1632,8 +2032,8 @@ mod tests {
                 .streams
                 .get(&full_width_stream_key)
                 .expect("full-width stream remains open")
-                .unread_block_offset,
-            16
+                .next_unread_bit_offset,
+            128
         );
     }
 
@@ -1663,7 +2063,7 @@ mod tests {
             .try_start_attempt(&mut limited_entropy)
             .expect("test attempt identifier is available");
         let limited_domain =
-            PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::PublicKeyError);
+            PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::SecretContribution);
         let limited_context = Hash512::from_bytes([0xb2; 64]);
         let limited_stream_key = PrivateRandomStreamKey::new(limited_domain, limited_context);
         let mut scripted_block = [0u8; RANDOM_BLOCK_BYTE_LENGTH];
@@ -1673,7 +2073,7 @@ mod tests {
             PrivateRandomStreamCursor {
                 next_counter: 1,
                 unread_block: Zeroizing::new(scripted_block),
-                unread_block_offset: 0,
+                next_unread_bit_offset: 0,
             },
         );
 
@@ -1686,8 +2086,8 @@ mod tests {
                 .streams
                 .get(&limited_stream_key)
                 .expect("scripted stream remains open")
-                .unread_block_offset,
-            2,
+                .next_unread_bit_offset,
+            16,
             "every rejected candidate is permanently consumed"
         );
     }
@@ -1697,7 +2097,7 @@ mod tests {
         let mut cursor = PrivateRandomStreamCursor {
             next_counter: u64::MAX,
             unread_block: Zeroizing::new([0xc1; RANDOM_BLOCK_BYTE_LENGTH]),
-            unread_block_offset: RANDOM_BLOCK_BYTE_LENGTH,
+            next_unread_bit_offset: RANDOM_BLOCK_BIT_LENGTH,
         };
         let stream_key = PrivateRandomStreamKey::new(
             PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::SecretContribution),
@@ -1716,14 +2116,14 @@ mod tests {
         );
         assert_eq!(destination, [0xff], "preflight leaves output untouched");
         assert_eq!(cursor.next_counter, u64::MAX);
-        assert_eq!(cursor.unread_block_offset, RANDOM_BLOCK_BYTE_LENGTH);
+        assert_eq!(cursor.next_unread_bit_offset, RANDOM_BLOCK_BIT_LENGTH);
 
         let mut block = [0u8; RANDOM_BLOCK_BYTE_LENGTH];
         block[RANDOM_BLOCK_BYTE_LENGTH - 1] = 0xd1;
         let mut suffix_cursor = PrivateRandomStreamCursor {
             next_counter: u64::MAX,
             unread_block: Zeroizing::new(block),
-            unread_block_offset: RANDOM_BLOCK_BYTE_LENGTH - 1,
+            next_unread_bit_offset: RANDOM_BLOCK_BIT_LENGTH - 8,
         };
         let stream_key = PrivateRandomStreamKey::new(
             PrivateRandomDomain::target_flooding(TargetFloodingRole::Identifier),
@@ -1799,10 +2199,11 @@ mod tests {
             )
             .expect("first stream consumes all but one byte of its first block");
         attempt
-            .try_fill_bytes(
+            .try_fill_little_endian_bits(
                 error_domain,
                 error_context,
                 &mut [0u8; RANDOM_BLOCK_BYTE_LENGTH],
+                RANDOM_BLOCK_BIT_LENGTH,
             )
             .expect("second stream consumes exactly one complete block");
 
@@ -1821,15 +2222,23 @@ mod tests {
             "a public counter names the next block to generate while the secret snapshot retains any unread suffix"
         );
         assert_eq!(
+            random_cursors
+                .iter()
+                .map(|cursor| cursor.next_unread_bit_offset_in_buffered_block)
+                .collect::<Vec<_>>(),
+            vec![Some(504), None, None],
+            "the public cursor reveals the exact resume position without revealing buffered bytes"
+        );
+        assert_eq!(
             snapshot
                 .streams
                 .iter()
-                .map(|stream| stream.unread_block_offset)
+                .map(|stream| stream.next_unread_bit_offset)
                 .collect::<Vec<_>>(),
             vec![
-                RANDOM_BLOCK_BYTE_LENGTH - 1,
-                RANDOM_BLOCK_BYTE_LENGTH,
-                RANDOM_BLOCK_BYTE_LENGTH
+                RANDOM_BLOCK_BIT_LENGTH - 8,
+                RANDOM_BLOCK_BIT_LENGTH,
+                RANDOM_BLOCK_BIT_LENGTH
             ]
         );
         assert!(
@@ -1849,6 +2258,7 @@ mod tests {
         let mut expected_ephemeral_secret_continuation = [0u8; 5];
         let mut expected_error_continuation = [0u8; 3];
         let mut expected_flooding_continuation = [0u8; 4];
+        let error_continuation_bit_length = expected_error_continuation.len() * 8;
         attempt
             .try_fill_bytes(
                 ephemeral_secret_domain,
@@ -1857,10 +2267,11 @@ mod tests {
             )
             .expect("uninterrupted first stream crosses its block boundary");
         attempt
-            .try_fill_bytes(
+            .try_fill_little_endian_bits(
                 error_domain,
                 error_context,
                 &mut expected_error_continuation,
+                error_continuation_bit_length,
             )
             .expect("uninterrupted second stream begins its next block");
         attempt
@@ -1895,7 +2306,12 @@ mod tests {
             )
             .expect("restored first stream crosses its block boundary");
         restored_attempt
-            .try_fill_bytes(error_domain, error_context, &mut actual_error_continuation)
+            .try_fill_little_endian_bits(
+                error_domain,
+                error_context,
+                &mut actual_error_continuation,
+                error_continuation_bit_length,
+            )
             .expect("restored second stream begins its next block");
         restored_attempt
             .try_fill_bytes(
@@ -2079,6 +2495,34 @@ mod tests {
         );
 
         let (snapshot, live_streams, mut random_cursors) = populated_resume_snapshot();
+        random_cursors[0].stream_attempt_identifier = [0xa5; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
+        assert_eq!(
+            ActionPrivateRandomness::try_restore_from_snapshot(
+                test_binding(),
+                &[0x62; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+                &live_streams,
+                &random_cursors,
+                snapshot,
+            )
+            .expect_err("a wrong stream attempt binding must refuse"),
+            PrivateRandomnessError::InvalidResumeCursorSet
+        );
+
+        let (snapshot, live_streams, mut random_cursors) = populated_resume_snapshot();
+        random_cursors[0].next_unread_bit_offset_in_buffered_block = Some(48);
+        assert_eq!(
+            ActionPrivateRandomness::try_restore_from_snapshot(
+                test_binding(),
+                &[0x62; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+                &live_streams,
+                &random_cursors,
+                snapshot,
+            )
+            .expect_err("a changed buffered-block position must refuse"),
+            PrivateRandomnessError::InvalidResumeCursorSet
+        );
+
+        let (snapshot, live_streams, mut random_cursors) = populated_resume_snapshot();
         random_cursors[0].family = 0;
         assert_eq!(
             ActionPrivateRandomness::try_restore_from_snapshot(
@@ -2093,7 +2537,7 @@ mod tests {
         );
 
         let (mut snapshot, live_streams, random_cursors) = populated_resume_snapshot();
-        snapshot.streams[0].unread_block_offset = RANDOM_BLOCK_BYTE_LENGTH + 1;
+        snapshot.streams[0].next_unread_bit_offset = RANDOM_BLOCK_BIT_LENGTH + 1;
         assert_eq!(
             ActionPrivateRandomness::try_restore_from_snapshot(
                 test_binding(),
@@ -2138,8 +2582,8 @@ mod tests {
         );
 
         let (mut snapshot, live_streams, random_cursors) = populated_resume_snapshot();
-        let unread_offset = snapshot.streams[0].unread_block_offset;
-        snapshot.streams[0].unread_block[unread_offset] ^= 1;
+        let unread_byte_offset = snapshot.streams[0].next_unread_bit_offset / 8;
+        snapshot.streams[0].unread_block[unread_byte_offset] ^= 1;
         assert_eq!(
             ActionPrivateRandomness::try_restore_from_snapshot(
                 test_binding(),
@@ -2177,6 +2621,37 @@ mod tests {
                 snapshot,
             )
             .expect_err("an unused stream cannot carry unread bytes"),
+            PrivateRandomnessError::InvalidResumeSecretState
+        );
+    }
+
+    #[test]
+    fn restore_rejects_consumed_and_unread_bit_tampering_in_one_partial_byte() {
+        let (mut snapshot, live_streams, random_cursors) = partially_consumed_bit_resume_snapshot();
+        snapshot.streams[0].unread_block[0] ^= 1 << 1;
+        assert_eq!(
+            ActionPrivateRandomness::try_restore_from_snapshot(
+                test_binding(),
+                &[0x62; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+                &live_streams,
+                &random_cursors,
+                snapshot,
+            )
+            .expect_err("a consumed bit retained in a partial byte must refuse"),
+            PrivateRandomnessError::InvalidResumeSecretState
+        );
+
+        let (mut snapshot, live_streams, random_cursors) = partially_consumed_bit_resume_snapshot();
+        snapshot.streams[0].unread_block[0] ^= 1 << 5;
+        assert_eq!(
+            ActionPrivateRandomness::try_restore_from_snapshot(
+                test_binding(),
+                &[0x62; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+                &live_streams,
+                &random_cursors,
+                snapshot,
+            )
+            .expect_err("a changed unread bit in a partial byte must refuse"),
             PrivateRandomnessError::InvalidResumeSecretState
         );
     }

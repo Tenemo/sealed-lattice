@@ -92,15 +92,8 @@ pub(super) fn same_secret_bridge_committed_material_regeneration_inputs_from_fix
     )
 }
 
-const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str = "sealed-lattice-vss-public-commitment-binary";
 const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
-const SAME_SECRET_RELATION: &str =
-    "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";
-const SAME_SECRET_BRIDGE_RELATION: &str = "public constant coefficient commitments bind to the same signed ternary trustee secret as the source VSS constant commitments across Q_share";
-const SAME_SECRET_BRIDGE_INTEGER_SUPPORT: &str = "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound source and public commitment over Q_share";
-const SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION: &str = "coefficients are interpreted as signed representatives before reduction into each Q_share RNS prime";
-const SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER: &str = "target constant roots are ordered by contiguous Q_share rnsLimbIndex values starting at zero and bind the listed Q_share prime";
 pub(in super::super) const VSS_SHARE_LINKAGE_PROOF_CHECKPOINT_DIRECTORY: &str =
     "vss-share-linkage-proof-material";
 

@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
-import { deriveCanonicalObjectHash } from '#packages/crypto/src/index.js';
 import type {
     verifyPrivateVssShare,
     verifySetupPackage,
@@ -158,38 +157,6 @@ const setupVerificationBindings = {
     expectedRosterHash,
 } as const;
 
-const descriptorAccounting = (
-    totalByteLength: number,
-    chunkHashByte: number,
-    fullObjectHashByte = 0x42,
-): Readonly<{
-    totalByteLength: number;
-    fullObjectHash: string;
-    chunkRoot: string;
-    chunkHashes: readonly string[];
-}> => {
-    const chunkHashes = [
-        chunkHashByte.toString(16).padStart(2, '0').repeat(64),
-    ];
-    const fullObjectHash = fullObjectHashByte
-        .toString(16)
-        .padStart(2, '0')
-        .repeat(64);
-
-    return {
-        totalByteLength,
-        fullObjectHash,
-        chunkRoot: deriveCanonicalObjectHash({
-            objectType: 'SetupTransportChunkManifest',
-            chunkCount: chunkHashes.length,
-            totalByteLength,
-            chunkHashes,
-            fullObjectHash,
-        }),
-        chunkHashes,
-    };
-};
-
 describe('canonical setup material streaming in the public package', () => {
     beforeEach(() => {
         lifecycleEvents = [];
@@ -275,7 +242,7 @@ describe('canonical setup material streaming in the public package', () => {
         },
     );
 
-    it('authenticates public-key share material and forwards descriptor accounting', async () => {
+    it('authenticates public-key share material before terminal verification', async () => {
         const source = proofMaterialSource(publicKeyShareMaterialRoot, 19);
 
         await publicPackage.verifySetupPackage({
@@ -302,7 +269,6 @@ describe('canonical setup material streaming in the public package', () => {
             .verifyCollectiveBgvSetup.mock.calls[0]?.[0] as JsonRecord;
         expect(kernelInput.transportedPublicKeyShareMaterial).toMatchObject({
             publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
-            ...descriptorAccounting(3, 8, 9),
         });
     });
 
@@ -347,7 +313,7 @@ describe('canonical setup material streaming in the public package', () => {
         expect(mockKernel.verifyPrivateVssShareEnvelope).toHaveBeenCalledOnce();
     });
 
-    it('refuses a component source whose family does not match its semantic reference', async () => {
+    it('refuses a component reference with a non-string proof family', async () => {
         await expect(
             publicPackage.verifySetupPackage({
                 setupPackage: { objectType: 'SetupPackage' },
@@ -357,7 +323,7 @@ describe('canonical setup material streaming in the public package', () => {
                         'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     componentMaterials: [
                         {
-                            proofFamily: 'relinearization-key-share',
+                            proofFamily: 42,
                             keySwitchComponentMaterialRoot: proofMaterialRoot,
                             descriptorBytes: canonicalStreamDescriptorFixture(
                                 3,
@@ -369,13 +335,12 @@ describe('canonical setup material streaming in the public package', () => {
                 evaluationKeyShareComponentMaterialChunkSources: [
                     {
                         keySwitchComponentMaterialRoot: proofMaterialRoot,
-                        proofFamily: 'galois-key-share',
                         pullChunk: proofMaterialSource(proofMaterialRoot, 47)
                             .pullChunk,
                     },
                 ],
             }),
-        ).rejects.toThrow(/must match exactly one transported reference/u);
+        ).rejects.toThrow(/must carry its proof family/u);
         expect(readMaterial).not.toHaveBeenCalled();
     });
 

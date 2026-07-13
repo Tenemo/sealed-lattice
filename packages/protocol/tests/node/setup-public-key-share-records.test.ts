@@ -39,7 +39,6 @@ const shareContribution = (
         (rnsPrime, rnsLimbIndex) => ({
             rnsLimbIndex,
             rnsPrime,
-            component: 'b_i',
             coefficientVectorHash512: fixtureHash(
                 `share-coefficient-${String(trusteeRosterPosition)}-${String(
                     rnsLimbIndex,
@@ -104,8 +103,6 @@ const shareMaterialContribution = (
             return {
                 rnsLimbIndex,
                 rnsPrime,
-                component: 'b_i',
-                coefficientByteLength: ringDegree * 8,
                 coefficientVectorHash512:
                     publicKeyShareCoefficientVectorHash(coefficients),
                 coefficientsLeHex: coefficientVectorLeHex(coefficients),
@@ -148,7 +145,6 @@ const createSuccinctProofFixture = (): PublicKeyShareSuccinctProofSetInput => {
                     (coefficientVector) => ({
                         rnsLimbIndex: coefficientVector.rnsLimbIndex,
                         rnsPrime: coefficientVector.rnsPrime,
-                        component: coefficientVector.component,
                         coefficientVectorHash512:
                             coefficientVector.coefficientVectorHash512,
                     }),
@@ -209,7 +205,6 @@ const createSuccinctProofFixture = (): PublicKeyShareSuccinctProofSetInput => {
         sameSecretBridgeProofMaterialSet,
         proofMaterials: publicKeyShareProofs.proofRecords.map(
             (proofRecord) => ({
-                proofFamily: 'public-key-share',
                 trusteeIdentity: proofRecord.trusteeIdentity,
                 trusteeRosterPosition: proofRecord.trusteeRosterPosition,
                 statementHash: fixtureHash(
@@ -345,7 +340,6 @@ describe('public-key share statement builders', () => {
                         (coefficientVector) => ({
                             rnsLimbIndex: coefficientVector.rnsLimbIndex,
                             rnsPrime: coefficientVector.rnsPrime,
-                            component: coefficientVector.component,
                             coefficientVectorHash512:
                                 coefficientVector.coefficientVectorHash512,
                         }),

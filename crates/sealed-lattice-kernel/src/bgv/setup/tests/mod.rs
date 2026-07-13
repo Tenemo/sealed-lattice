@@ -16,9 +16,8 @@ use super::{
 };
 use super::{
     commitment::{
-        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-        compute_setup_commitment_for_tests, parse_setup_commitment_full_value,
-        setup_commitment_full_value, setup_commitment_root,
+        SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_tests,
+        parse_setup_commitment_full_value, setup_commitment_full_value, setup_commitment_root,
     },
     private_vss_share_proof::{
         PrivateVssShareSuccinctProofGenerationInput, PrivateVssShareSuccinctProofVerificationInput,
@@ -27,21 +26,15 @@ use super::{
     },
     vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},
 };
-use crate::bgv::evaluator::{
-    circuit::modulus_switch_to,
-    engine::{DevelopmentBgvKey, ciphertext_tensor, encode_slots_to_coefficients},
-    key_switch::{generate_galois_key, generate_relinearization_key, relinearize, rotate},
-    top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
-};
+use crate::bgv::evaluator::engine::DevelopmentBgvKey;
 use crate::bgv::modular_arithmetic::{add_mod, mul_mod, sub_mod};
-use crate::bgv::ntt::forward_negacyclic_ntt;
 use crate::bgv::parameters::PLAINTEXT_MODULUS;
 use crate::hashing::{derive_canonical_object_hash, hash512};
 use std::sync::OnceLock;
 
 mod accepted_setup;
 mod evaluation_key_schedule;
-mod generation_and_certificate;
+mod generation;
 mod local_trustee_state;
 mod payload_rejection;
 mod private_vss;
@@ -53,6 +46,7 @@ type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
+const TEST_SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND: i128 = 1;
 
 fn request() -> serde_json::Value {
     serde_json::json!({
@@ -67,9 +61,9 @@ fn request() -> serde_json::Value {
             &serde_json::json!({ "objectType": "ThresholdParametersHash", "threshold": "passive-bgv-setup-test" }),
         ).expect("threshold hash"),
         "participants": [
-            { "trusteeIdentity": "trustee-1", "rosterPosition": 0, "boardPosition": 3 },
-            { "trusteeIdentity": "trustee-2", "rosterPosition": 1, "boardPosition": 4 },
-            { "trusteeIdentity": "trustee-3", "rosterPosition": 2, "boardPosition": 5 }
+            { "trusteeIdentity": "trustee-1", "rosterPosition": 0 },
+            { "trusteeIdentity": "trustee-2", "rosterPosition": 1 },
+            { "trusteeIdentity": "trustee-3", "rosterPosition": 2 }
         ],
         "setupSeed": "passive-bgv-setup-test-seed",
     })
@@ -145,24 +139,6 @@ fn setup_derived_evaluator_key_from_package(package: &serde_json::Value) -> Deve
 
     DevelopmentBgvKey::from_collective_components(collective_secret, public_b, public_a)
         .expect("setup-derived evaluator key")
-}
-
-fn automorphism_residues(input: &[u64], galois_element: usize, modulus: u64) -> Vec<u64> {
-    let ring_order = 2 * POLYNOMIAL_DEGREE;
-    let mut output = vec![0_u64; POLYNOMIAL_DEGREE];
-    for (coefficient_index, value) in input.iter().enumerate() {
-        let exponent = (coefficient_index * galois_element) % ring_order;
-        if exponent < POLYNOMIAL_DEGREE {
-            output[exponent] =
-                add_mod(output[exponent], *value, modulus).expect("automorphism add");
-        } else {
-            output[exponent - POLYNOMIAL_DEGREE] =
-                sub_mod(output[exponent - POLYNOMIAL_DEGREE], *value, modulus)
-                    .expect("automorphism subtract");
-        }
-    }
-
-    output
 }
 
 fn assert_setup_package_payload_is_rejected(

@@ -5,15 +5,12 @@ import { deriveCanonicalObjectHash } from '../hashes.js';
 
 import {
     arrayBufferFromBytes,
-    assertStorageKeyCommitment,
+    decodeCanonicalHex,
     deriveAesGcmKeyBytes,
     deriveSealedMaterialAesGcmKeyBytes,
-    hashCanonicalValue,
     importAesGcmKey,
-    localStateStorageKeyCommitmentHash,
     randomBytes,
     sealedMaterialAad,
-    sealedMaterialStorageKeyCommitmentHash,
     storageAad,
     subtleCrypto,
 } from './aes-gcm.js';
@@ -42,6 +39,7 @@ import {
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertProtocolHash,
+    assertJsonRecord,
     decodeFixedHex,
 } from './validation.js';
 
@@ -62,20 +60,12 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
         aesGcmKeyByteLength,
         'storageKeyBytesHex',
     );
-    const nonceBytes =
-        input.aeadNonceBytesHex === undefined
-            ? randomBytes(aesGcmNonceByteLength)
-            : decodeFixedHex(
-                  input.aeadNonceBytesHex,
-                  aesGcmNonceByteLength,
-                  'aeadNonceBytesHex',
-              );
+    const nonceBytes = randomBytes(aesGcmNonceByteLength);
     const materialPlaintextJson = canonicalJson(input.materialPlaintext);
     const materialPlaintextBytes = textEncoder.encode(materialPlaintextJson);
     const materialRoot = deriveCanonicalObjectHash(input.materialPlaintext);
     const associatedData = sealedMaterialAad(
         input.setupContext,
-        input.materialClass,
         materialRoot,
         input,
     );
@@ -104,45 +94,17 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
             arrayBufferFromBytes(materialPlaintextBytes),
         ),
     );
-    const encryptedMaterialWithoutHash = {
+    const sealedMaterial = {
         objectType: 'EncryptedLocalTrusteeSetupMaterial',
-        materialClass: input.materialClass,
         materialRoot,
         materialAad: associatedData,
-        materialAadHash,
-        keyCommitmentHash:
-            sealedMaterialStorageKeyCommitmentHash(storageKeyBytes),
         aeadNonceHex: bytesToHex(nonceBytes),
         ciphertextBytesHex: bytesToHex(ciphertextBytes),
-        plaintextByteLength: materialPlaintextBytes.byteLength,
-        aeadTagLength: aesGcmTagBitLength,
-    } as const satisfies Omit<
-        EncryptedLocalTrusteeSetupMaterial,
-        'encryptedMaterialHash'
-    >;
-    // Self-hash convention: a record's root is the protocol hash of the same record with its own root field removed; verification strips that field and recomputes.
-    const encryptedMaterial = {
-        ...encryptedMaterialWithoutHash,
-        encryptedMaterialHash: hashCanonicalValue(
-            'sealed-lattice-local-trustee-state/sealed-material-envelope-hash',
-            encryptedMaterialWithoutHash,
-        ),
-    } satisfies EncryptedLocalTrusteeSetupMaterial;
+    } as const satisfies EncryptedLocalTrusteeSetupMaterial;
 
     return {
-        sealedMaterial: {
-            objectType: 'LocalTrusteeSetupStateSealedMaterial',
-            materialClass: input.materialClass,
-            materialRoot,
-            ciphertextReference: encryptedMaterial.encryptedMaterialHash,
-            encryptedMaterial,
-        },
+        sealedMaterial,
         materialRoot,
-        materialPlaintextHash: hash512Hex(
-            'sealed-lattice-local-trustee-state/sealed-material-plaintext-hash',
-            [materialPlaintextBytes],
-        ),
-        materialAadHash,
     };
 };
 
@@ -158,29 +120,30 @@ export const decryptLocalTrusteeSetupSealedMaterial = async (
     );
     const sealedMaterial = validateSealedMaterial(
         input.sealedMaterial,
-        'aggregate-threshold-share-sealed',
         input.expectedMaterialRoot,
         input.setupContext,
         input.localStateCommitment,
-        storageKeyBytes,
         'sealedMaterial',
     );
-    const encryptedMaterial = sealedMaterial.encryptedMaterial;
     const associatedDataBytes = textEncoder.encode(
-        canonicalJson(encryptedMaterial.materialAad),
+        canonicalJson(sealedMaterial.materialAad),
+    );
+    const materialAadHash = hash512Hex(
+        'sealed-lattice-local-trustee-state/sealed-material-aad-hash',
+        [associatedDataBytes],
     );
     const keyBytes = deriveSealedMaterialAesGcmKeyBytes(
         storageKeyBytes,
         input.expectedMaterialRoot,
-        encryptedMaterial.materialAadHash,
+        materialAadHash,
     );
     const key = await importAesGcmKey(keyBytes, ['decrypt']);
     const nonceBytes = decodeFixedHex(
-        encryptedMaterial.aeadNonceHex,
+        sealedMaterial.aeadNonceHex,
         aesGcmNonceByteLength,
-        'sealedMaterial.encryptedMaterial.aeadNonceHex',
+        'sealedMaterial.aeadNonceHex',
     );
-    const ciphertextBytes = hexToBytes(encryptedMaterial.ciphertextBytesHex);
+    const ciphertextBytes = hexToBytes(sealedMaterial.ciphertextBytesHex);
     const plaintextBytes = new Uint8Array(
         await subtleCrypto().decrypt(
             {
@@ -193,11 +156,6 @@ export const decryptLocalTrusteeSetupSealedMaterial = async (
             arrayBufferFromBytes(ciphertextBytes),
         ),
     );
-    if (plaintextBytes.byteLength !== encryptedMaterial.plaintextByteLength) {
-        throw new Error(
-            'decrypted sealed material byte length does not match plaintextByteLength.',
-        );
-    }
     const plaintextJson = textDecoder.decode(plaintextBytes);
     const materialPlaintext: unknown = JSON.parse(plaintextJson);
     if (canonicalJson(materialPlaintext) !== plaintextJson) {
@@ -205,21 +163,14 @@ export const decryptLocalTrusteeSetupSealedMaterial = async (
     }
     if (
         deriveCanonicalObjectHash(materialPlaintext) !==
-        sealedMaterial.materialRoot
+        input.expectedMaterialRoot
     ) {
         throw new Error(
-            'decrypted sealed material does not match sealedMaterial.materialRoot.',
+            'decrypted sealed material does not match expectedMaterialRoot.',
         );
     }
 
-    return {
-        materialPlaintext,
-        materialPlaintextHash: hash512Hex(
-            'sealed-lattice-local-trustee-state/sealed-material-plaintext-hash',
-            [plaintextBytes],
-        ),
-        materialAadHash: encryptedMaterial.materialAadHash,
-    };
+    return { materialPlaintext };
 };
 
 export const encryptLocalTrusteeState = async (
@@ -235,16 +186,8 @@ export const encryptLocalTrusteeState = async (
         input.localStatePlaintext,
         input.localStateCommitment,
         input.setupContext,
-        storageKeyBytes,
     );
-    const nonceBytes =
-        input.aeadNonceBytesHex === undefined
-            ? randomBytes(aesGcmNonceByteLength)
-            : decodeFixedHex(
-                  input.aeadNonceBytesHex,
-                  aesGcmNonceByteLength,
-                  'aeadNonceBytesHex',
-              );
+    const nonceBytes = randomBytes(aesGcmNonceByteLength);
     const associatedData = storageAad(
         input.setupContext,
         input.localStateCommitment,
@@ -254,10 +197,6 @@ export const encryptLocalTrusteeState = async (
     const storageAadHash = hash512Hex(
         'sealed-lattice-local-trustee-state/aad-hash',
         [associatedDataBytes],
-    );
-    const localStateCommitmentHash = hashCanonicalValue(
-        'sealed-lattice-local-trustee-state/commitment-hash',
-        input.localStateCommitment,
     );
     const plaintextJson = canonicalJson(localStatePlaintext);
     const plaintextBytes = textEncoder.encode(plaintextJson);
@@ -279,33 +218,14 @@ export const encryptLocalTrusteeState = async (
             arrayBufferFromBytes(plaintextBytes),
         ),
     );
-    const envelopeWithoutHash = {
+    const encryptedLocalState = {
         objectType: 'EncryptedLocalTrusteeSetupState',
-        localStateRoot: input.localStateCommitment.localStateRoot,
-        localStateCommitmentHash,
         storageAad: associatedData,
-        storageAadHash,
-        keyCommitmentHash: localStateStorageKeyCommitmentHash(storageKeyBytes),
         aeadNonceHex: bytesToHex(nonceBytes),
         ciphertextBytesHex: bytesToHex(ciphertextBytes),
-        plaintextByteLength: plaintextBytes.byteLength,
-        aeadTagLength: aesGcmTagBitLength,
     } as const;
 
-    return {
-        encryptedLocalState: {
-            ...envelopeWithoutHash,
-            encryptedLocalStateHash: hashCanonicalValue(
-                'sealed-lattice-local-trustee-state/envelope-hash',
-                envelopeWithoutHash,
-            ),
-        },
-        localStatePlaintextHash: hash512Hex(
-            'sealed-lattice-local-trustee-state/plaintext-hash',
-            [plaintextBytes],
-        ),
-        storageAadHash,
-    };
+    return { encryptedLocalState };
 };
 
 export const decryptLocalTrusteeState = async (
@@ -313,36 +233,33 @@ export const decryptLocalTrusteeState = async (
 ): Promise<LocalTrusteeStateStorageDecryptionResult> => {
     assertProtocolHash(input.expectedLocalStateRoot, 'expectedLocalStateRoot');
     if (
-        input.encryptedLocalState.localStateRoot !==
-        input.expectedLocalStateRoot
+        input.encryptedLocalState.objectType !==
+        'EncryptedLocalTrusteeSetupState'
     ) {
-        throw new Error(
-            'encryptedLocalState.localStateRoot does not match expectedLocalStateRoot.',
+        throw new TypeError(
+            'encryptedLocalState.objectType must be EncryptedLocalTrusteeSetupState.',
         );
     }
-    const envelopeWithoutHash = {
-        ...input.encryptedLocalState,
-    } as Record<string, unknown>;
-    delete envelopeWithoutHash.encryptedLocalStateHash;
-    const expectedEnvelopeHash = hashCanonicalValue(
-        'sealed-lattice-local-trustee-state/envelope-hash',
-        envelopeWithoutHash,
+    const actualAssociatedData = assertJsonRecord(
+        input.encryptedLocalState.storageAad,
+        'encryptedLocalState.storageAad',
     );
-    if (
-        input.encryptedLocalState.encryptedLocalStateHash !==
-        expectedEnvelopeHash
-    ) {
+    const localStateCommitment = assertJsonRecord(
+        actualAssociatedData.localStateCommitment,
+        'encryptedLocalState.storageAad.localStateCommitment',
+    ) as LocalTrusteeStateStorageEncryptionInput['localStateCommitment'];
+    assertCommitmentHeader(localStateCommitment);
+    if (localStateCommitment.localStateRoot !== input.expectedLocalStateRoot) {
         throw new Error(
-            'encryptedLocalState.encryptedLocalStateHash does not match the canonical envelope.',
+            'encryptedLocalState.storageAad.localStateCommitment.localStateRoot does not match expectedLocalStateRoot.',
         );
     }
     const expectedAssociatedData = storageAad(
         input.setupContext,
-        input.encryptedLocalState.storageAad
-            .localStateCommitment as LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
+        localStateCommitment,
     );
     if (
-        canonicalJson(input.encryptedLocalState.storageAad) !==
+        canonicalJson(actualAssociatedData) !==
         canonicalJson(expectedAssociatedData)
     ) {
         throw new Error(
@@ -352,29 +269,19 @@ export const decryptLocalTrusteeState = async (
     const associatedDataBytes = textEncoder.encode(
         canonicalJson(expectedAssociatedData),
     );
-    const expectedAadHash = hash512Hex(
+    const storageAadHash = hash512Hex(
         'sealed-lattice-local-trustee-state/aad-hash',
         [associatedDataBytes],
     );
-    if (input.encryptedLocalState.storageAadHash !== expectedAadHash) {
-        throw new Error(
-            'encryptedLocalState.storageAadHash does not match storageAad.',
-        );
-    }
     const storageKeyBytes = decodeFixedHex(
         input.storageKeyBytesHex,
         aesGcmKeyByteLength,
         'storageKeyBytesHex',
     );
-    assertStorageKeyCommitment(
-        input.encryptedLocalState.keyCommitmentHash,
-        localStateStorageKeyCommitmentHash(storageKeyBytes),
-        'encryptedLocalState.keyCommitmentHash',
-    );
     const keyBytes = deriveAesGcmKeyBytes(
         storageKeyBytes,
         input.expectedLocalStateRoot,
-        expectedAadHash,
+        storageAadHash,
     );
     const key = await importAesGcmKey(keyBytes, ['decrypt']);
     const nonceBytes = decodeFixedHex(
@@ -382,8 +289,9 @@ export const decryptLocalTrusteeState = async (
         aesGcmNonceByteLength,
         'encryptedLocalState.aeadNonceHex',
     );
-    const ciphertextBytes = hexToBytes(
+    const ciphertextBytes = decodeCanonicalHex(
         input.encryptedLocalState.ciphertextBytesHex,
+        'encryptedLocalState.ciphertextBytesHex',
     );
     const plaintextBytes = new Uint8Array(
         await subtleCrypto().decrypt(
@@ -397,33 +305,14 @@ export const decryptLocalTrusteeState = async (
             arrayBufferFromBytes(ciphertextBytes),
         ),
     );
-    if (
-        plaintextBytes.byteLength !==
-        input.encryptedLocalState.plaintextByteLength
-    ) {
-        throw new Error(
-            'decrypted local trustee state byte length does not match plaintextByteLength.',
-        );
-    }
     const parsedLocalStatePlaintext: unknown = JSON.parse(
         textDecoder.decode(plaintextBytes),
     );
-    const localStateCommitment = input.encryptedLocalState.storageAad
-        .localStateCommitment as LocalTrusteeStateStorageEncryptionInput['localStateCommitment'];
-    assertCommitmentHeader(localStateCommitment);
     const localStatePlaintext = validateLocalStatePlaintext(
         parsedLocalStatePlaintext,
         localStateCommitment,
         input.setupContext,
-        storageKeyBytes,
     );
 
-    return {
-        localStatePlaintext,
-        localStatePlaintextHash: hash512Hex(
-            'sealed-lattice-local-trustee-state/plaintext-hash',
-            [plaintextBytes],
-        ),
-        storageAadHash: expectedAadHash,
-    };
+    return { localStatePlaintext };
 };

@@ -1,8 +1,7 @@
+import { foundationProfile } from '@sealed-lattice/types';
+
 import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js';
-import {
-    type CanonicalProofMaterialChunkPull,
-    setupProofTransportChunkSizeBytes,
-} from '../setup-proof-material-transport.js';
+import type { CanonicalProofMaterialChunkPull } from '../setup-proof-material-transport.js';
 
 import {
     type BinaryChunkedEvaluationKeyShareMaterialTransport,
@@ -86,14 +85,12 @@ type CanonicalComponentVector = Readonly<{
     readonly digitIndex: number;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
-    readonly coefficientByteLength: number;
     readonly coefficientVectorHash512: string;
     readonly coefficientsLeHex: string;
 }>;
 
 type ValidatedComponentMaterial = Readonly<{
     readonly componentVectors: readonly CanonicalComponentVector[];
-    readonly digitCount: number;
     readonly totalByteLength: number;
 }>;
 
@@ -135,8 +132,7 @@ const validatedEvaluationKeyShareComponentMaterial = (
                     componentVector,
                     'rnsLimbIndex',
                     vectorPath,
-                ) !== rnsLimbIndex ||
-                componentVector.component !== 'b'
+                ) !== rnsLimbIndex
             ) {
                 throw new Error(
                     'evaluation-key component material vectors must be ordered by digit and RNS limb.',
@@ -147,16 +143,6 @@ const validatedEvaluationKeyShareComponentMaterial = (
                 'rnsPrime',
                 vectorPath,
             );
-            const coefficientByteLength = nonNegativeIntegerRecordField(
-                componentVector,
-                'coefficientByteLength',
-                vectorPath,
-            );
-            if (coefficientByteLength !== shareMaterial.ringDegree * 8) {
-                throw new Error(
-                    'evaluation-key component material coefficientByteLength must match ringDegree.',
-                );
-            }
             const coefficientsLeHex = stringRecordField(
                 componentVector,
                 'coefficientsLeHex',
@@ -189,7 +175,6 @@ const validatedEvaluationKeyShareComponentMaterial = (
                 digitIndex,
                 rnsLimbIndex,
                 rnsPrime,
-                coefficientByteLength,
                 coefficientVectorHash512: coefficientVectorHash,
                 coefficientsLeHex,
             });
@@ -201,10 +186,7 @@ const validatedEvaluationKeyShareComponentMaterial = (
         shareMaterial.keySwitchSeedHex,
         level,
         shareMaterial.ringDegree,
-        canonicalComponentVectors.map((vector) => ({
-            ...vector,
-            component: 'b',
-        })),
+        canonicalComponentVectors,
     );
     if (componentVectorRoot !== shareMaterial.keySwitchComponentVectorRoot) {
         throw new Error(
@@ -212,11 +194,10 @@ const validatedEvaluationKeyShareComponentMaterial = (
         );
     }
 
-    const componentVectorByteLength = 4 * 8 + shareMaterial.ringDegree * 8;
     const totalByteLength =
         evaluationKeyShareComponentMaterialMagic.byteLength +
-        4 * 8 +
-        canonicalComponentVectors.length * componentVectorByteLength;
+        2 * 8 +
+        canonicalComponentVectors.length * shareMaterial.ringDegree * 8;
     if (!Number.isSafeInteger(totalByteLength) || totalByteLength <= 0) {
         throw new Error(
             'evaluation-key component material byte length is outside the JavaScript safe integer range.',
@@ -225,7 +206,6 @@ const validatedEvaluationKeyShareComponentMaterial = (
 
     return {
         componentVectors: canonicalComponentVectors,
-        digitCount,
         totalByteLength,
     };
 };
@@ -249,16 +229,11 @@ const evaluationKeyShareComponentMaterialSegments = function* (
     validatedMaterial: ValidatedComponentMaterial,
 ): Generator<Uint8Array> {
     const header = new Uint8Array(
-        evaluationKeyShareComponentMaterialMagic.byteLength + 4 * 8,
+        evaluationKeyShareComponentMaterialMagic.byteLength + 2 * 8,
     );
     header.set(evaluationKeyShareComponentMaterialMagic);
     let headerOffset = evaluationKeyShareComponentMaterialMagic.byteLength;
-    for (const value of [
-        level,
-        ringDegree,
-        validatedMaterial.digitCount,
-        validatedMaterial.digitCount,
-    ]) {
+    for (const value of [level, ringDegree]) {
         writeUnsignedWord(header, headerOffset, value);
         headerOffset += 8;
     }
@@ -269,22 +244,12 @@ const evaluationKeyShareComponentMaterialSegments = function* (
             componentVector.coefficientsLeHex,
             'evaluation-key component coefficientsLeHex',
         );
-        if (
-            coefficientBytes.byteLength !==
-            componentVector.coefficientByteLength
-        ) {
+        if (coefficientBytes.byteLength !== ringDegree * 8) {
             throw new Error(
-                'evaluation-key component coefficient bytes must match coefficientByteLength.',
+                'evaluation-key component coefficient bytes must match ringDegree.',
             );
         }
-        const encodedVector = new Uint8Array(4 * 8 + coefficientBytes.length);
-        writeUnsignedWord(encodedVector, 0, componentVector.digitIndex);
-        writeUnsignedWord(encodedVector, 8, componentVector.rnsLimbIndex);
-        writeUnsignedWord(encodedVector, 16, componentVector.rnsPrime);
-        writeUnsignedWord(encodedVector, 24, ringDegree);
-        encodedVector.set(coefficientBytes, 4 * 8);
-        coefficientBytes.fill(0);
-        yield encodedVector;
+        yield coefficientBytes;
     }
 };
 
@@ -315,7 +280,7 @@ const sequentialChunkPull = (
             }
             const remainingByteLength = totalByteLength - emittedByteLength;
             const requiredByteLength = Math.min(
-                setupProofTransportChunkSizeBytes,
+                foundationProfile.streamChunkByteLength,
                 remainingByteLength,
             );
             if (expectedByteLength !== requiredByteLength) {
@@ -422,8 +387,6 @@ const transportEvaluationKeyShareComponentMaterial = async (
             keySwitchSeedHex: workItem.shareMaterial.keySwitchSeedHex,
             level: workItem.level,
             ringDegree: workItem.shareMaterial.ringDegree,
-            digitCount: workItem.level + 1,
-            rnsLimbCount: workItem.level + 1,
             keySwitchComponentVectorRoot:
                 workItem.shareMaterial.keySwitchComponentVectorRoot,
             keySwitchComponentMaterialRoot,

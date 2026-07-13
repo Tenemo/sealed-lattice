@@ -6,7 +6,6 @@ import {
 import { createWasmBrowserActionStorageWorkerKernel } from './local-storage-root-worker-kernel.js';
 import {
     canonicalErrorCodes,
-    createPublishedSdkKernelLoader,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
     type AcceptedSetupSession,
@@ -20,10 +19,7 @@ import {
     type BgvTargetDecryptionResultReleaseCompletion,
     type FoundationCanonicalTupleValidation,
     type FoundationSchemaObjectValidation,
-    type PublishedSdkKernel,
     type TranscriptCoreKernelLoaderOptions,
-    type TranscriptCoreKernelSharePoint,
-    type TranscriptCorePlaintextComparison,
     type TranscriptCoreKernel,
 } from './transcript-core-bridge.js';
 
@@ -36,7 +32,6 @@ export {
     canonicalErrorCodes,
     bgvCanonicalStreamFamilies,
     createWasmBrowserActionStorageWorkerKernel,
-    createPublishedSdkKernelLoader,
     createTranscriptCoreKernelLoader,
     openBgvCanonicalStreamRuntime,
     stageBgvTargetDecryptionAggregateOpeningMaterials,
@@ -55,10 +50,7 @@ export type {
     BgvTargetDecryptionResultReleaseCompletion,
     FoundationCanonicalTupleValidation,
     FoundationSchemaObjectValidation,
-    PublishedSdkKernel,
     TranscriptCoreKernelLoaderOptions,
-    TranscriptCoreKernelSharePoint,
-    TranscriptCorePlaintextComparison,
 };
 export type {
     BgvCanonicalStreamFamily,
@@ -74,7 +66,6 @@ export {
 } from './foundation-board-session.js';
 export type {
     FoundationBoardCandidate,
-    FoundationBoardIngestionLimits,
     FoundationBoardSession,
     FoundationBoardSessionInput,
     FoundationBoardSessionState,

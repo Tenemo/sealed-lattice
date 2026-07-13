@@ -1588,10 +1588,6 @@ impl LocalRecordPlaintext {
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_ref()
     }
-
-    pub fn into_zeroizing_bytes(self) -> Zeroizing<Vec<u8>> {
-        self.0
-    }
 }
 
 impl fmt::Debug for LocalRecordPlaintext {

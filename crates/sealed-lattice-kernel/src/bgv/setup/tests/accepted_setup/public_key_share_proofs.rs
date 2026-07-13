@@ -41,14 +41,10 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
     let refused_objects = result["refusedObjects"]
         .as_array()
         .expect("missing public-key objects must be typed refusals");
-    assert_eq!(refused_objects.len(), 2);
+    assert_eq!(refused_objects.len(), 1);
     assert!(refused_objects.iter().all(|refusal| {
         refusal["reasonCode"] == "setupObjectMissing"
-            && matches!(
-                refusal["objectPath"].as_str(),
-                Some("setupPackage.collectivePublicKey")
-                    | Some("setupPackage.collectivePublicKeyRoot")
-            )
+            && refusal["objectPath"] == "setupPackage.collectivePublicKey"
     }));
 }
 
@@ -88,7 +84,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
         .expect("setup package")
         .remove("publicKeyShareSuccinctProofs");
     remove_public_key_share_proof_transport(
-        &mut missing_succinct_proofs_package,
         &mut missing_succinct_proofs_fixture.verification_request,
     );
     rebind_collective_setup_package_hash(&mut missing_succinct_proofs_package);
@@ -144,7 +139,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
             .remove(field_name);
         let mut verification_request = fixture.verification_request.clone();
         if proof_set_name == "publicKeyShareSuccinctProofs" && field_name == "proofRecords" {
-            remove_public_key_share_proof_transport(&mut package, &mut verification_request);
+            remove_public_key_share_proof_transport(&mut verification_request);
         }
         rebind_collective_setup_package_hash(&mut package);
 
@@ -161,19 +156,11 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
     }
 }
 
-fn remove_public_key_share_proof_transport(
-    package: &mut serde_json::Value,
-    verification_request: &mut serde_json::Value,
-) {
+fn remove_public_key_share_proof_transport(verification_request: &mut serde_json::Value) {
     verification_request
         .as_object_mut()
         .expect("setup verification request")
         .remove("transportedPublicKeyShareProofMaterial");
-    replace_setup_proof_material_transport_certificate_objects(
-        package,
-        &serde_json::json!({ "proofMaterials": [] }),
-        PUBLIC_KEY_SHARE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
-    );
 }
 
 #[test]
@@ -221,7 +208,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let proof_binding_session = fixture.begin_proof_binding_session();
     let mut package = fixture.package.clone();
     let mut verification_request = fixture.verification_request.clone();
-    // The descriptor, hashes, certificate, and package roots below are rebound,
+    // The descriptor, hashes, and package roots below are rebound,
     // so these deliberately malformed proof bytes reach the semantic decoder.
     // The fixture itself retains only opaque verifier bindings, never a second
     // copy of every trustee's proof merely to support this negative test.
@@ -240,22 +227,9 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
     rebind_collective_public_key_succinct_proof_roots(&mut package);
 
-    let transport_hashes = canonical_setup_proof_material_transport_accounting(
-        crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
-        &proof_bytes,
-    )
-    .expect("tampered public-key proof transport hashes");
     let transported_proof_material =
         &mut verification_request["transportedPublicKeyShareProofMaterial"]["proofMaterials"][0];
     transported_proof_material["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
-    transported_proof_material["chunkCount"] =
-        serde_json::json!(transport_hashes.chunk_hashes.len());
-    transported_proof_material["totalByteLength"] =
-        serde_json::json!(transport_hashes.total_byte_length);
-    transported_proof_material["fullObjectHash"] =
-        serde_json::json!(transport_hashes.full_object_hash);
-    transported_proof_material["chunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
-    transported_proof_material["chunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes);
     authenticate_setup_proof_material_stream_in_session_for_test(
         crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
         &proof_material_root,
@@ -263,11 +237,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         proof_binding_session,
     )
     .expect("authenticate tampered public-key proof material stream");
-    replace_setup_proof_material_transport_certificate_objects(
-        &mut package,
-        &verification_request["transportedPublicKeyShareProofMaterial"],
-        PUBLIC_KEY_SHARE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
-    );
     rebind_collective_setup_package_hash(&mut package);
 
     let result = fixture
@@ -338,25 +307,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
 }
 
 #[test]
-fn collective_setup_verifier_refuses_public_key_material_before_proof_verification() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_public_key_material_before_proof_verification",
-    );
-    assert_minimal_collective_setup_package_refused(
-        "collective public-key root present before proof verification",
-        |package| {
-            package["collectivePublicKeyRoot"] = serde_json::json!(valid_hash('8'));
-        },
-        "publicKeyMaterialBeforeProofVerification",
-    );
-}
-
-#[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key_and_package_root()
-{
+fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key_and_nested_root() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key_and_package_root",
+        "heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key_and_nested_root",
     );
     let missing_object_fixture = collective_public_key_bearing_collective_setup_fixture();
     let mut missing_object_package = missing_object_fixture.package.clone();
@@ -376,7 +330,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
     assert_eq!(missing_object_result["isValid"], false);
     assert_eq!(
         missing_object_result["refusedObjects"][0]["reasonCode"],
-        "publicKeyMaterialBeforeProofVerification"
+        "setupObjectMissing"
     );
     assert_eq!(
         missing_object_result["refusedObjects"][0]["objectPath"],
@@ -385,9 +339,9 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
 
     let missing_root_fixture = collective_public_key_bearing_collective_setup_fixture();
     let mut missing_root_package = missing_root_fixture.package.clone();
-    missing_root_package
+    missing_root_package["collectivePublicKey"]
         .as_object_mut()
-        .expect("setup package")
+        .expect("collective public key")
         .remove("collectivePublicKeyRoot");
     rebind_collective_setup_package_hash(&mut missing_root_package);
 
@@ -401,10 +355,10 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
     assert_eq!(missing_root_result["isValid"], false);
     assert_eq!(
         missing_root_result["refusedObjects"][0]["reasonCode"],
-        "publicKeyMaterialBeforeProofVerification"
+        "setupObjectMissing"
     );
     assert_eq!(
         missing_root_result["refusedObjects"][0]["objectPath"],
-        "setupPackage.collectivePublicKeyRoot"
+        "setupPackage.collectivePublicKey.collectivePublicKeyRoot"
     );
 }

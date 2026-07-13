@@ -37,7 +37,6 @@ describe('collective BGV setup kernel commands', () => {
             trusteeRosterPosition: 3,
             trusteePoint: 4,
             localStateRoot: localStateCommitment.localStateRoot,
-            deletionReceiptRoot: localStateCommitment.deletionReceiptRoot,
         });
     });
 });

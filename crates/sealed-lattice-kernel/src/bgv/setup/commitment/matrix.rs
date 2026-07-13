@@ -26,55 +26,6 @@ struct SetupCommitmentMatrixNttKey {
     modulus: u64,
 }
 
-pub(in super::super) fn setup_commitment_matrix_sampled_entries(
-    public_matrix_seed_hash: &str,
-    source_rns_limb_indices: &[usize],
-    ring_coefficient_positions: &[usize],
-) -> CanonicalResult<Vec<Value>> {
-    let mut entries = Vec::new();
-    for source_rns_limb_index in source_rns_limb_indices {
-        for commitment_modulus_index in SETUP_COMMITMENT_MODULUS_LIMB_INDICES {
-            let modulus = DATA_PRIMES[commitment_modulus_index];
-            for matrix_row_index in 0..SETUP_COMMITMENT_ROW_COUNT {
-                for randomness_column_index in 0..SETUP_COMMITMENT_RANDOMNESS_WIDTH {
-                    for ring_coefficient_position in ring_coefficient_positions {
-                        let coefficient_value = setup_commitment_matrix_coefficient(
-                            public_matrix_seed_hash,
-                            *source_rns_limb_index,
-                            commitment_modulus_index,
-                            matrix_row_index,
-                            randomness_column_index,
-                            *ring_coefficient_position,
-                            modulus,
-                        )?;
-                        let coordinate = json!({
-                            "rnsLimbIndex": source_rns_limb_index,
-                            "rnsPrime": DATA_PRIMES[*source_rns_limb_index],
-                            "commitmentModulusIndex": commitment_modulus_index,
-                            "commitmentModulus": modulus,
-                            "matrixRowIndex": matrix_row_index,
-                            "randomnessColumnIndex": randomness_column_index,
-                            "ringCoefficientPosition": ring_coefficient_position,
-                        });
-                        let entry_derivation_hash = setup_commitment_matrix_entry_hash(
-                            public_matrix_seed_hash,
-                            &coordinate,
-                            coefficient_value,
-                        )?;
-                        entries.push(json!({
-                            "coordinate": coordinate,
-                            "coefficientValue": coefficient_value,
-                            "entryDerivationHash": entry_derivation_hash,
-                        }));
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(entries)
-}
-
 pub(in super::super) fn setup_commitment_matrix_polynomial(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
@@ -312,17 +263,4 @@ fn sample_commitment_matrix_residue(
             .checked_add(1)
             .ok_or_else(|| invalid_commitment_input("matrix sampling block index overflow"))?;
     }
-}
-
-fn setup_commitment_matrix_entry_hash(
-    public_matrix_seed_hash: &str,
-    coordinate: &Value,
-    coefficient_value: u64,
-) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "SetupCommitmentMatrixEntryDerivation",
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "coordinate": coordinate,
-        "coefficientValue": coefficient_value,
-    }))
 }

@@ -357,20 +357,13 @@ impl ProofFamilyProfile {
     }
 }
 
-/// The canonical suite artifact that maps every version-one proof family to an
-/// immutable field schedule.
-///
-/// The current artifact embeds the exact deterministic public-only collective
-/// public-key aggregation plan. It deliberately does not claim coverage for
-/// the other proof families, common-proof acceptance, witness extraction, a
-/// security level, or complete FRI soundness. Those remain separate work from
-/// this first relation-plan slice.
+/// Canonical suite mapping from version-one proof families to immutable field
+/// schedules and relation plans.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofProfileSet {
     pub proof_fields: Vec<ProofFieldProfile>,
     pub proof_families: Vec<ProofFamilyProfile>,
     relation_plans: Vec<CanonicalTuple>,
-    root_compatibility_edges: Vec<CanonicalTuple>,
 }
 
 impl ProofProfileSet {
@@ -383,7 +376,6 @@ impl ProofProfileSet {
             proof_fields,
             proof_families,
             relation_plans: Vec::new(),
-            root_compatibility_edges: Vec::new(),
         };
         profile_set.validate_profile_catalog()?;
         let relation_plan =
@@ -398,7 +390,7 @@ impl ProofProfileSet {
 
     pub fn validate_intrinsic(&self) -> SchemaResult<()> {
         self.validate_profile_catalog()?;
-        validate_relation_plan_catalog(&self.relation_plans, &self.root_compatibility_edges)
+        validate_relation_plan_catalog(&self.relation_plans)
     }
 
     fn validate_profile_catalog(&self) -> SchemaResult<()> {
@@ -467,11 +459,6 @@ impl ProofProfileSet {
         Ok(())
     }
 
-    pub fn collective_public_key_aggregation_relation_plan_bytes(&self) -> SchemaResult<Vec<u8>> {
-        self.validate_intrinsic()?;
-        Ok(self.relation_plans[0].encode()?)
-    }
-
     pub fn field_and_schedule_for_family(
         &self,
         proof_family: ProofFamily,
@@ -515,11 +502,6 @@ impl ProofProfileSet {
             .iter()
             .map(|relation_plan| CanonicalItem::nested_tuple(relation_plan).map_err(Into::into))
             .collect::<SchemaResult<Vec<_>>>()?;
-        let root_compatibility_edge_items = self
-            .root_compatibility_edges
-            .iter()
-            .map(|edge| CanonicalItem::nested_tuple(edge).map_err(Into::into))
-            .collect::<SchemaResult<Vec<_>>>()?;
         Ok(CanonicalTuple::new(
             PROOF_PROFILE_SET_SCHEMA_IDENTIFIER,
             PROOF_PROFILE_SCHEMA_VERSION,
@@ -529,10 +511,6 @@ impl ProofProfileSet {
                 CanonicalItem::homogeneous_list(
                     CanonicalItemType::NestedTuple,
                     &relation_plan_items,
-                )?,
-                CanonicalItem::homogeneous_list(
-                    CanonicalItemType::NestedTuple,
-                    &root_compatibility_edge_items,
                 )?,
             ],
         ))
@@ -554,7 +532,7 @@ impl ProofProfileSet {
             .maximum_item_byte_length
             .min(PROOF_PROFILE_SET_MAXIMUM_BYTE_LENGTH);
         let tuple = CanonicalTuple::decode(bytes, &bounded_limits)?;
-        require_header(&tuple, PROOF_PROFILE_SET_SCHEMA_IDENTIFIER, 4)?;
+        require_header(&tuple, PROOF_PROFILE_SET_SCHEMA_IDENTIFIER, 3)?;
         require_nested_tuple_count(
             &tuple.items[0],
             1,
@@ -573,12 +551,6 @@ impl ProofProfileSet {
             1,
             "proof profile relation-plan count must be exactly one in the implemented slice",
         )?;
-        require_nested_tuple_count(
-            &tuple.items[3],
-            0,
-            0,
-            "proof profile root compatibility edges require producer relation plans",
-        )?;
         let proof_fields = read_nested_tuple_list(&tuple.items[0], &bounded_limits)?
             .iter()
             .map(ProofFieldProfile::from_tuple)
@@ -591,7 +563,6 @@ impl ProofProfileSet {
             proof_fields,
             proof_families,
             relation_plans: read_nested_tuple_list(&tuple.items[2], &bounded_limits)?,
-            root_compatibility_edges: read_nested_tuple_list(&tuple.items[3], &bounded_limits)?,
         };
         profile_set.validate_intrinsic()?;
         Ok(profile_set)
@@ -628,10 +599,7 @@ impl ProofProfileSet {
     }
 }
 
-fn validate_relation_plan_catalog(
-    relation_plans: &[CanonicalTuple],
-    root_compatibility_edges: &[CanonicalTuple],
-) -> SchemaResult<()> {
+fn validate_relation_plan_catalog(relation_plans: &[CanonicalTuple]) -> SchemaResult<()> {
     if relation_plans.len() != 1 {
         return Err(schema_error(
             RefusalReason::OutsideSupportedProfile,
@@ -657,12 +625,6 @@ fn validate_relation_plan_catalog(
         ));
     }
     require_header(&variants[0], RELATION_PLAN_VARIANT_SCHEMA_IDENTIFIER, 15)?;
-    if !root_compatibility_edges.is_empty() {
-        return Err(schema_error(
-            RefusalReason::OutsideSupportedProfile,
-            "root compatibility edges require their producer relation plans",
-        ));
-    }
     Ok(())
 }
 

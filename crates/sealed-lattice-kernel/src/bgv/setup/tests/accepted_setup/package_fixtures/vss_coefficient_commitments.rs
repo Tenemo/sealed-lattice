@@ -130,7 +130,6 @@ pub(super) fn vss_coefficient_commitments_object(
         "thresholdDegree": decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
-        "materialRecordCount": coefficient_commitment_material.len(),
         "coefficientCommitments": coefficient_commitment_material,
     });
     material_set["vssCoefficientCommitmentMaterialRoot"] = serde_json::json!(

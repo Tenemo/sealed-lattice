@@ -1,4 +1,3 @@
-// This file is one targeted part of the split test suite.
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -17,12 +16,7 @@ describe('transcript-core kernel in Node', () => {
             createMockKernelExports();
         const kernel = await loadMockKernel();
 
-        expect(
-            kernel.computeChunkRoot({
-                inputHex: '00ff',
-                chunkSize: 2,
-            }),
-        ).toBe('abc123');
+        kernel.describeBgvRnsParameters();
         expect(deallocate).toHaveBeenCalledWith(
             128,
             encodedCommandResponseLength,
@@ -37,7 +31,7 @@ describe('transcript-core kernel in Node', () => {
         });
         const kernel = await loadMockKernel();
 
-        expect(() => kernel.roundTripBytes(Uint8Array.from([1]))).toThrow(
+        expect(() => kernel.describeBgvRnsParameters()).toThrow(
             'The transcript-core kernel returned a null pointer for a non-empty allocation.',
         );
     });
@@ -48,12 +42,7 @@ describe('transcript-core kernel in Node', () => {
         });
         const kernel = await loadMockKernel();
 
-        expect(() =>
-            kernel.computeChunkRoot({
-                inputHex: '00ff',
-                chunkSize: 2,
-            }),
-        ).toThrow(
+        expect(() => kernel.describeBgvRnsParameters()).toThrow(
             'The transcript-core kernel returned an out-of-bounds transcript-core command memory range.',
         );
     });
@@ -64,12 +53,7 @@ describe('transcript-core kernel in Node', () => {
         });
         const kernel = await loadMockKernel();
 
-        expect(() =>
-            kernel.computeChunkRoot({
-                inputHex: '00ff',
-                chunkSize: 2,
-            }),
-        ).toThrow(
+        expect(() => kernel.describeBgvRnsParameters()).toThrow(
             'The transcript-core kernel returned a null pointer for the output-length allocation.',
         );
     });
@@ -78,16 +62,13 @@ describe('transcript-core kernel in Node', () => {
         const loadedKernelReference: { current?: TranscriptCoreKernel } = {};
         const { loadMockKernel } = createMockKernelExports({
             onCommand: () => {
-                loadedKernelReference.current?.hashRaw('00');
+                loadedKernelReference.current?.describeBgvRnsParameters();
             },
         });
         loadedKernelReference.current = await loadMockKernel();
 
         expect(() =>
-            loadedKernelReference.current?.computeChunkRoot({
-                inputHex: '00ff',
-                chunkSize: 2,
-            }),
+            loadedKernelReference.current?.describeBgvRnsParameters(),
         ).toThrow(
             'The transcript-core kernel cannot run overlapping command operations on one instance.',
         );
@@ -148,12 +129,7 @@ describe('transcript-core kernel in Node', () => {
         });
         const kernel = await loadMockKernel();
 
-        expect(() =>
-            kernel.computeChunkRoot({
-                inputHex: '00ff',
-                chunkSize: 2,
-            }),
-        ).toThrow(
+        expect(() => kernel.describeBgvRnsParameters()).toThrow(
             'The transcript-core kernel returned an invalid command response.',
         );
     });

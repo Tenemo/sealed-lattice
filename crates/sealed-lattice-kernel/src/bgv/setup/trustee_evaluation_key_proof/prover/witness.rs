@@ -412,12 +412,6 @@ pub(super) fn validate_witness_support(
             || !witness
                 .vss_public_recipient_share_messages_by_item
                 .is_empty()
-            || !witness
-                .vss_public_coefficient_opening_randomness_by_shamir_index
-                .is_empty()
-            || !witness
-                .vss_public_recipient_share_opening_randomness_by_item
-                .is_empty()
             || !witness.vss_public_carry_witnesses_by_item.is_empty()
             || statement.same_secret_bridge.is_some()
             || !witness.target_decryption_message_vectors.is_empty()
@@ -471,12 +465,6 @@ pub(super) fn validate_witness_support(
             || !witness
                 .vss_public_recipient_share_messages_by_item
                 .is_empty()
-            || !witness
-                .vss_public_coefficient_opening_randomness_by_shamir_index
-                .is_empty()
-            || !witness
-                .vss_public_recipient_share_opening_randomness_by_item
-                .is_empty()
             || !witness.vss_public_carry_witnesses_by_item.is_empty()
             || !witness.target_decryption_message_vectors.is_empty()
             || !witness
@@ -517,12 +505,6 @@ pub(super) fn validate_witness_support(
                 .is_empty()
             || !witness
                 .vss_public_recipient_share_messages_by_item
-                .is_empty()
-            || !witness
-                .vss_public_coefficient_opening_randomness_by_shamir_index
-                .is_empty()
-            || !witness
-                .vss_public_recipient_share_opening_randomness_by_item
                 .is_empty()
             || !witness.vss_public_carry_witnesses_by_item.is_empty()
         {
@@ -606,12 +588,6 @@ pub(super) fn validate_witness_support(
                     .is_empty()
                 || !witness
                     .vss_public_recipient_share_messages_by_item
-                    .is_empty()
-                || !witness
-                    .vss_public_coefficient_opening_randomness_by_shamir_index
-                    .is_empty()
-                || !witness
-                    .vss_public_recipient_share_opening_randomness_by_item
                     .is_empty()
                 || !witness.vss_public_carry_witnesses_by_item.is_empty()
                 || statement.same_secret_bridge.is_some()
@@ -849,12 +825,6 @@ fn validate_vss_public_witness(
         .vss_public_coefficient_messages_by_shamir_index
         .len()
         != coefficient_count
-        || !witness
-            .vss_public_coefficient_opening_randomness_by_shamir_index
-            .is_empty()
-        || !witness
-            .vss_public_recipient_share_opening_randomness_by_item
-            .is_empty()
         || coefficient_slot_indices_by_item.len() != item_count
         || recipient_share_messages_by_item.len() != item_count
         || carry_witnesses_by_item.len() != item_count

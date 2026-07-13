@@ -69,12 +69,6 @@ pub(in super::super) fn public_coefficient_commitment_ring_degree_from_fixture_p
     .expect("public VSS coefficient commitment ring degree fits usize")
 }
 
-// The proof-bearing fixtures are split by proof family. Sub-modules use
-// `super::*` to reach the shared work-item types here and sibling fixture
-// builders, and only import the accepted_setup test glob when they need it.
-// The pub(super) re-exports keep every builder reachable through the
-// accepted_setup glob so package_fixtures / material_transport_fixtures and the
-// consuming tests import them unchanged.
 mod evaluation_key_share_component_material;
 mod galois_key_share_batches;
 mod proof_checkpointing;

@@ -2,7 +2,6 @@ use super::*;
 
 pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
     setup_package: &Value,
-    _request: &Value,
 ) -> CanonicalResult<Option<Value>> {
     if !setup_package
         .get("publicKeyShareMaterial")

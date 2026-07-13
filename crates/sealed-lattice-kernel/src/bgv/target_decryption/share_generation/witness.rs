@@ -78,10 +78,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
             "targetCiphertextHash",
             target_accepted.target_ciphertext_hash.as_str(),
         ),
-        (
-            "targetDecryptionCiphertextHash",
-            target_ciphertexts.target_ciphertext_hash.as_str(),
-        ),
         ("targetShareProfileHash", target_share_profile.hash.as_str()),
         (
             "targetBasisHash",
@@ -107,24 +103,8 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
         participant.roster_position as u64,
         "local target-decryption smudging witness roster position",
     )?;
-    compare_unsigned_field(
-        smudging_witness,
-        "interpolationPoint",
-        participant.interpolation_point,
-        "local target-decryption smudging witness interpolation point",
-    )?;
-    compare_unsigned_field(
-        smudging_witness,
-        "plaintextMultiple",
-        PLAINTEXT_MODULUS,
-        "local target-decryption smudging witness plaintext multiple",
-    )?;
-    let smudging_seed_hex = target_decryption_smudging_seed_hex(
-        setup_binding,
-        target_accepted,
-        target_ciphertexts,
-        target_share_profile,
-    );
+    let smudging_seed_hex =
+        target_decryption_smudging_seed_hex(setup_binding, target_accepted, target_share_profile);
     let smudging_polynomial_openings = target_decryption_smudging_polynomial_openings(
         setup_binding,
         target_accepted,
@@ -153,35 +133,19 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
         &setup_binding.public_matrix_seed_hash,
         "local target-decryption share witness public matrix seed hash",
     )?;
+    #[cfg(test)]
     let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
     let share_linkage_statement_root =
         hash_at_path(opening, &["shareLinkageStatementRoot"])?.to_string();
     let aggregate_threshold_commitment_root =
         hash_at_path(opening, &["aggregateThresholdCommitmentRoot"])?.to_string();
-    let accepted_share_linkage_statement_root = setup_binding
-        .share_linkage_statement_root
-        .as_ref()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "local target-decryption aggregate opening requires the accepted share-linkage statement",
-            )
-        })?;
-    if &share_linkage_statement_root != accepted_share_linkage_statement_root {
+    if share_linkage_statement_root != setup_binding.share_linkage_statement_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
             "local target-decryption share-linkage statement root does not match the accepted setup statement",
         ));
     }
-    let aggregate_threshold_commitment_set = setup_binding
-        .aggregate_threshold_commitment_set
-        .as_ref()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "local target-decryption aggregate opening requires the accepted aggregate threshold commitment set",
-            )
-        })?;
+    let aggregate_threshold_commitment_set = &setup_binding.aggregate_threshold_commitment_set;
     if aggregate_threshold_commitment_root
         != aggregate_threshold_commitment_set.aggregate_threshold_commitment_root
     {
@@ -225,7 +189,7 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
         compare_unsigned_field(
             credential,
             "recipientTrusteePoint",
-            participant.interpolation_point,
+            participant.interpolation_point()?,
             "aggregate opening credential recipient trustee point",
         )?;
         let limb_index = usize_at_path(credential, &["rnsLimbIndex"])?;
@@ -335,8 +299,11 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
         smudging_seed_hex,
         smudging_polynomial_openings,
         opening: AggregateOpeningWitnessBinding {
+            #[cfg(test)]
             public_matrix_seed_hash,
+            #[cfg(test)]
             share_linkage_statement_root,
+            #[cfg(test)]
             aggregate_threshold_commitment_root,
             active_credential_bindings,
         },

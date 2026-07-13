@@ -4,7 +4,6 @@ use crate::hashing::derive_canonical_object_hash;
 
 struct PhaseParticipantPayloadInput<'a> {
     phase_identifier: &'a str,
-    phase_number: u64,
     setup_context: &'a Value,
     trustee_identity: &'a str,
     roster_position: u64,
@@ -12,7 +11,6 @@ struct PhaseParticipantPayloadInput<'a> {
     device_epoch: u64,
     signing_public_key_hash: &'a str,
     private_vss_mailbox_public_key_hash: Option<&'a str>,
-    private_vss_mailbox_public_key_bytes_hash: Option<&'a str>,
 }
 
 #[derive(Clone)]
@@ -35,7 +33,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
     };
 
     let mut seen_phase_hashes = BTreeMap::<String, String>::new();
-    let mut seen_phase_numbers = BTreeSet::<u64>::new();
     let mut required_phase_index = 0_usize;
     let mut previous_phase_root: Option<String> = None;
     let mut setup_intent_registrations: Option<BTreeMap<u64, SetupIntentTrusteeRegistration>> =
@@ -50,18 +47,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
                     "phaseIdMissing",
                     "phaseTranscript entries must include phaseId",
                     "setupPackage.phaseTranscript".to_string(),
-                )],
-                Vec::new(),
-            )?));
-        };
-        let Some(phase_number) = phase_value.get("phaseNumber").and_then(Value::as_u64) else {
-            return Ok(Some(verification_response(
-                Some(phase_identifier),
-                Vec::new(),
-                vec![Refusal::new(
-                    "phaseNumberMissing",
-                    "phaseTranscript entries must include phaseNumber",
-                    format!("setupPackage.phaseTranscript.{phase_identifier}"),
                 )],
                 Vec::new(),
             )?));
@@ -92,9 +77,7 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
             )?));
         }
 
-        let Some((expected_phase_identifier, expected_phase_number)) =
-            REQUIRED_PHASES.get(required_phase_index)
-        else {
+        let Some(expected_phase_identifier) = REQUIRED_PHASES.get(required_phase_index) else {
             return Ok(Some(verification_response(
                 Some(phase_identifier),
                 Vec::new(),
@@ -106,28 +89,13 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
                 Vec::new(),
             )?));
         };
-        if phase_identifier != *expected_phase_identifier || phase_number != *expected_phase_number
-        {
+        if phase_identifier != *expected_phase_identifier {
             return Ok(Some(verification_response(
                 Some(*expected_phase_identifier),
                 Vec::new(),
                 vec![Refusal::new(
                     "phaseOrderMismatch",
-                    format!(
-                        "expected phase {expected_phase_identifier} number {expected_phase_number}, got {phase_identifier} number {phase_number}"
-                    ),
-                    "setupPackage.phaseTranscript".to_string(),
-                )],
-                Vec::new(),
-            )?));
-        }
-        if !seen_phase_numbers.insert(phase_number) {
-            return Ok(Some(verification_response(
-                Some(phase_identifier),
-                Vec::new(),
-                vec![Refusal::new(
-                    "phaseNumberForkDetected",
-                    format!("phase number {phase_number} is used by more than one phase"),
+                    format!("expected phase {expected_phase_identifier}, got {phase_identifier}"),
                     "setupPackage.phaseTranscript".to_string(),
                 )],
                 Vec::new(),
@@ -137,7 +105,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
             setup_package,
             phase_value,
             phase_identifier,
-            phase_number,
             previous_phase_root.as_deref(),
             setup_intent_registrations.as_ref(),
         )? {
@@ -158,7 +125,7 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
     }
 
     if required_phase_index < REQUIRED_PHASES.len() {
-        let (next_phase_identifier, _) = REQUIRED_PHASES[required_phase_index];
+        let next_phase_identifier = REQUIRED_PHASES[required_phase_index];
         return Ok(Some(verification_response(
             Some(next_phase_identifier),
             vec![format!("phaseTranscript.{next_phase_identifier}")],
@@ -174,7 +141,6 @@ fn verify_phase_object_binding(
     setup_package: &Value,
     phase_value: &Value,
     phase_identifier: &str,
-    phase_number: u64,
     previous_phase_root: Option<&str>,
     setup_intent_registrations: Option<&BTreeMap<u64, SetupIntentTrusteeRegistration>>,
 ) -> CanonicalResult<Option<Value>> {
@@ -295,7 +261,6 @@ fn verify_phase_object_binding(
         if let Some(response) = verify_participant_phase_object(
             participant_phase_object,
             phase_identifier,
-            phase_number,
             setup_context,
             setup_intent_registrations,
         )? {
@@ -320,7 +285,6 @@ fn verify_phase_object_binding(
 fn verify_participant_phase_object(
     participant_phase_object: &Value,
     phase_identifier: &str,
-    phase_number: u64,
     setup_context: &Value,
     setup_intent_registrations: Option<&BTreeMap<u64, SetupIntentTrusteeRegistration>>,
 ) -> CanonicalResult<Option<Value>> {
@@ -349,15 +313,11 @@ fn verify_participant_phase_object(
         .get("phaseId")
         .and_then(Value::as_str)
         != Some(phase_identifier)
-        || participant_phase_object
-            .get("phaseNumber")
-            .and_then(Value::as_u64)
-            != Some(phase_number)
     {
         return Ok(Some(phase_refusal(
             phase_identifier,
             "phaseParticipantPhaseMismatch",
-            "participant phase object must bind the enclosing phase id and number",
+            "participant phase object must bind the enclosing phase id",
             format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
         )?));
     }
@@ -376,18 +336,6 @@ fn verify_participant_phase_object(
                 format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
             )?));
         }
-    }
-    if participant_phase_object
-        .get("signerRole")
-        .and_then(Value::as_str)
-        != Some("Trustee")
-    {
-        return Ok(Some(phase_refusal(
-            phase_identifier,
-            "phaseParticipantSignerRoleMismatch",
-            "participant phase object signerRole must be Trustee",
-            format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
-        )?));
     }
     let Some(trustee_identity) = participant_phase_object
         .get("trusteeIdentity")
@@ -496,55 +444,33 @@ fn verify_participant_phase_object(
             )?));
         }
     }
-    let (private_vss_mailbox_public_key_hash, private_vss_mailbox_public_key_bytes_hash) =
-        if phase_identifier == "setupIntent" {
-            let Some(public_key_hash) = participant_phase_object
-                .get("privateVssMailboxPublicKeyHash")
-                .and_then(Value::as_str)
-            else {
-                return Ok(Some(phase_refusal(
-                    phase_identifier,
-                    "phaseParticipantMailboxKeyMissing",
-                    "setup intent participant object must bind privateVssMailboxPublicKeyHash",
-                    format!(
-                        "setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects.privateVssMailboxPublicKeyHash"
-                    ),
-                )?));
-            };
-            validate_hash_string(
-                public_key_hash,
-                &format!(
-                    "phaseTranscript.{phase_identifier}.participantPhaseObjects.privateVssMailboxPublicKeyHash"
+    let private_vss_mailbox_public_key_hash = if phase_identifier == "setupIntent" {
+        let Some(public_key_hash) = participant_phase_object
+            .get("privateVssMailboxPublicKeyHash")
+            .and_then(Value::as_str)
+        else {
+            return Ok(Some(phase_refusal(
+                phase_identifier,
+                "phaseParticipantMailboxKeyMissing",
+                "setup intent participant object must bind privateVssMailboxPublicKeyHash",
+                format!(
+                    "setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects.privateVssMailboxPublicKeyHash"
                 ),
-            )?;
-            let Some(public_key_bytes_hash) = participant_phase_object
-                .get("privateVssMailboxPublicKeyBytesHash")
-                .and_then(Value::as_str)
-            else {
-                return Ok(Some(phase_refusal(
-                    phase_identifier,
-                    "phaseParticipantMailboxKeyMissing",
-                    "setup intent participant object must bind privateVssMailboxPublicKeyBytesHash",
-                    format!(
-                        "setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects.privateVssMailboxPublicKeyBytesHash"
-                    ),
-                )?));
-            };
-            validate_hash_string(
-                public_key_bytes_hash,
-                &format!(
-                    "phaseTranscript.{phase_identifier}.participantPhaseObjects.privateVssMailboxPublicKeyBytesHash"
-                ),
-            )?;
-
-            (Some(public_key_hash), Some(public_key_bytes_hash))
-        } else {
-            (None, None)
+            )?));
         };
+        validate_hash_string(
+            public_key_hash,
+            &format!(
+                "phaseTranscript.{phase_identifier}.participantPhaseObjects.privateVssMailboxPublicKeyHash"
+            ),
+        )?;
+        Some(public_key_hash)
+    } else {
+        None
+    };
 
     let phase_object_payload = phase_participant_payload_value(PhaseParticipantPayloadInput {
         phase_identifier,
-        phase_number,
         setup_context,
         trustee_identity,
         roster_position,
@@ -552,19 +478,10 @@ fn verify_participant_phase_object(
         device_epoch,
         signing_public_key_hash,
         private_vss_mailbox_public_key_hash,
-        private_vss_mailbox_public_key_bytes_hash,
     })?;
     let expected_phase_object_root = derive_canonical_object_hash(&phase_object_payload)?;
-    let expected_phase_object_byte_length =
-        u64::try_from(canonical_json(&phase_object_payload)?.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "phase participant payload length does not fit u64",
-            )
-        })?;
     let expected_phase_signature_context_hash = phase_signature_context_hash(
         phase_identifier,
-        phase_number,
         setup_context,
         trustee_identity,
         roster_position,
@@ -595,69 +512,6 @@ fn verify_participant_phase_object(
         )?));
     }
 
-    let Some(phase_object_byte_length) = participant_phase_object
-        .get("phaseObjectByteLength")
-        .and_then(Value::as_u64)
-    else {
-        return Ok(Some(phase_refusal(
-            phase_identifier,
-            "phaseParticipantByteLengthMissing",
-            "participant phase object must bind phaseObjectByteLength",
-            format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
-        )?));
-    };
-    if phase_object_byte_length != expected_phase_object_byte_length {
-        return Ok(Some(phase_refusal(
-            phase_identifier,
-            "phaseParticipantByteLengthMismatch",
-            "participant phase object byte length does not match the canonical signed payload",
-            format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
-        )?));
-    }
-
-    let Some(phase_signature_context_hash) = participant_phase_object
-        .get("phaseSignatureContextHash")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(phase_refusal(
-            phase_identifier,
-            "phaseParticipantHashMissing",
-            "participant phase object must bind phaseSignatureContextHash",
-            format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
-        )?));
-    };
-    validate_hash_string(
-        phase_signature_context_hash,
-        &format!(
-            "phaseTranscript.{phase_identifier}.participantPhaseObjects.phaseSignatureContextHash"
-        ),
-    )?;
-    if phase_signature_context_hash != expected_phase_signature_context_hash {
-        return Ok(Some(phase_refusal(
-            phase_identifier,
-            "phaseParticipantContextHashMismatch",
-            "participant phase signature context hash does not match the setup phase binding",
-            format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
-        )?));
-    }
-
-    let Some(signature_envelope_hash) = participant_phase_object
-        .get("signatureEnvelopeHash")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(phase_refusal(
-            phase_identifier,
-            "phaseParticipantHashMissing",
-            "participant phase object must bind signatureEnvelopeHash",
-            format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
-        )?));
-    };
-    validate_hash_string(
-        signature_envelope_hash,
-        &format!(
-            "phaseTranscript.{phase_identifier}.participantPhaseObjects.signatureEnvelopeHash"
-        ),
-    )?;
     let Some(signature_envelope) = participant_phase_object.get("signatureEnvelope") else {
         return Ok(Some(phase_refusal(
             phase_identifier,
@@ -680,21 +534,13 @@ fn verify_participant_phase_object(
             object_root: Some(phase_object_root),
             chunk_merkle_root: None,
             board_head_hash: None,
-            context_hash: phase_signature_context_hash,
+            context_hash: &expected_phase_signature_context_hash,
             recovery_epoch,
             device_epoch,
         },
     )?;
     match verification {
-        Ok(verified_signature_hash) if verified_signature_hash == signature_envelope_hash => {
-            Ok(None)
-        }
-        Ok(_) => Ok(Some(phase_refusal(
-            phase_identifier,
-            "phaseSignatureHashMismatch",
-            "participant phase signature envelope hash does not match the verified envelope",
-            format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
-        )?)),
+        Ok(()) => Ok(None),
         Err(failure) => Ok(Some(phase_refusal(
             phase_identifier,
             failure.reason_code,
@@ -709,7 +555,6 @@ fn phase_participant_payload_value(
 ) -> CanonicalResult<Value> {
     let PhaseParticipantPayloadInput {
         phase_identifier,
-        phase_number,
         setup_context,
         trustee_identity,
         roster_position,
@@ -717,18 +562,15 @@ fn phase_participant_payload_value(
         device_epoch,
         signing_public_key_hash,
         private_vss_mailbox_public_key_hash,
-        private_vss_mailbox_public_key_bytes_hash,
     } = input;
     let mut payload = json!({
         "objectType": "SetupPhaseParticipantObject",
         "phaseId": phase_identifier,
-        "phaseNumber": phase_number,
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
         "manifestHash": setup_context_string(setup_context, "manifestHash")?,
         "rosterHash": setup_context_string(setup_context, "rosterHash")?,
         "setupParametersHash": setup_context_string(setup_context, "setupParametersHash")?,
         "setupEpoch": setup_context_string(setup_context, "setupEpoch")?,
-        "signerRole": "Trustee",
         "trusteeIdentity": trustee_identity,
         "rosterPosition": roster_position,
         "recoveryEpoch": recovery_epoch,
@@ -738,16 +580,11 @@ fn phase_participant_payload_value(
     if let Some(public_key_hash) = private_vss_mailbox_public_key_hash {
         payload["privateVssMailboxPublicKeyHash"] = json!(public_key_hash);
     }
-    if let Some(public_key_bytes_hash) = private_vss_mailbox_public_key_bytes_hash {
-        payload["privateVssMailboxPublicKeyBytesHash"] = json!(public_key_bytes_hash);
-    }
-
     Ok(payload)
 }
 
 fn phase_signature_context_hash(
     phase_identifier: &str,
-    phase_number: u64,
     setup_context: &Value,
     trustee_identity: &str,
     roster_position: u64,
@@ -758,7 +595,6 @@ fn phase_signature_context_hash(
     derive_canonical_object_hash(&json!({
         "objectType": "SetupPhaseSignatureContext",
         "phaseId": phase_identifier,
-        "phaseNumber": phase_number,
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
         "manifestHash": setup_context_string(setup_context, "manifestHash")?,
         "rosterHash": setup_context_string(setup_context, "rosterHash")?,

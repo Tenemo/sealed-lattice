@@ -1,8 +1,3 @@
-// Stateless encoding, assertion, hashing, and sampling primitives shared across
-// the VSS coefficient-commitment builders: integer guards, centered ternary and
-// uniform residue sampling, varuint helpers, the setup-context field
-// projection, and the binary material byte-length accounting.
-
 export {
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
@@ -10,13 +5,8 @@ export {
     setupContextFieldNames,
 } from '../common-fields.js';
 
-import { appendVaruint } from '../varuint-encoding.js';
-
 import {
-    setupCommitmentModulusLimbIndices,
     setupCommitmentRandomnessWidth,
-    setupCommitmentRowCount,
-    vssCoefficientCommitmentMaterialBinaryMagic,
     type VssOpeningRandomByteSource,
 } from './constants-and-types.js';
 
@@ -221,51 +211,3 @@ export const sampleCommitmentOpeningRandomness = (
     Array.from({ length: setupCommitmentRandomnessWidth }, () =>
         sampleCenteredTernaryVector(sampler, ringDegree),
     );
-
-const varuintBytes = (value: number): Uint8Array => {
-    const outputBytes: number[] = [];
-    appendVaruint(outputBytes, value);
-
-    return Uint8Array.from(outputBytes);
-};
-
-const varuintByteLength = (value: number): number =>
-    varuintBytes(value).byteLength;
-
-const setupCommitmentBinaryRecordByteLength = (ringDegree: number): number => {
-    if (
-        !Number.isSafeInteger(ringDegree) ||
-        ringDegree <= 0 ||
-        ringDegree > Number.MAX_SAFE_INTEGER
-    ) {
-        throw new TypeError('ringDegree must be a positive safe integer.');
-    }
-    const rowCoefficientBytes = setupCommitmentRowCount * ringDegree * 8;
-    const commitmentLimbBytes = 1 + 8 + rowCoefficientBytes;
-
-    return 3 + setupCommitmentModulusLimbIndices.length * commitmentLimbBytes;
-};
-
-export const binaryVssCoefficientCommitmentMaterialByteLength = (input: {
-    readonly participantCount: number;
-    readonly thresholdDegree: number;
-    readonly rnsLimbCount: number;
-    readonly ringDegree: number;
-}): number => {
-    const headerByteLength =
-        vssCoefficientCommitmentMaterialBinaryMagic.byteLength +
-        varuintByteLength(1) +
-        varuintByteLength(input.participantCount) +
-        varuintByteLength(input.thresholdDegree) +
-        varuintByteLength(input.rnsLimbCount) +
-        varuintByteLength(input.ringDegree) +
-        varuintByteLength(setupCommitmentModulusLimbIndices.length) +
-        varuintByteLength(setupCommitmentRowCount);
-    const materialRecordCount =
-        input.participantCount * input.rnsLimbCount * input.thresholdDegree;
-    const recordByteLength = setupCommitmentBinaryRecordByteLength(
-        input.ringDegree,
-    );
-
-    return headerByteLength + materialRecordCount * recordByteLength;
-};

@@ -73,8 +73,6 @@ pub(super) struct SetupCommitmentOpeningVerification {
     pub(super) commitment_root: String,
     pub(super) randomness_infinity_bound: i128,
     pub(super) message_coefficient_bound: u128,
-    pub(super) commitment_modulus_product_decimal: String,
-    pub(super) commitment_modulus_product_ceil_bits: u32,
 }
 
 fn invalid_commitment_input(message: impl Into<String>) -> CanonicalError {
@@ -83,17 +81,15 @@ fn invalid_commitment_input(message: impl Into<String>) -> CanonicalError {
 
 #[cfg(test)]
 mod tests {
-    use num_bigint::BigUint;
     use serde_json::json;
 
     use super::{
-        SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_degree,
         compute_setup_commitment_from_opening_request,
         compute_setup_signed_lifted_commitment_for_degree,
-        setup_coefficient_fits_commitment_modulus_product, setup_commitment_parameters_value,
-        setup_commitment_root, verify_setup_commitment_opening,
-        verify_setup_lifted_commitment_opening, verify_setup_signed_lifted_commitment_opening,
+        setup_coefficient_fits_commitment_modulus_product, setup_commitment_root,
+        verify_setup_commitment_opening, verify_setup_lifted_commitment_opening,
+        verify_setup_signed_lifted_commitment_opening,
     };
     use crate::{
         bgv::{
@@ -104,35 +100,13 @@ mod tests {
     };
 
     const TEST_RING_DEGREE: usize = 8;
-
-    #[test]
-    fn commitment_parameters_bind_crt_lifted_message_space() {
-        let commitment_parameters = setup_commitment_parameters_value().expect("parameters");
-
-        assert_eq!(commitment_parameters["objectType"], "BdlopCommitment");
-        assert_eq!(
-            commitment_parameters["messageEncoding"]["integerEncoding"],
-            "crt-lifted-integer-coefficients"
-        );
-        assert_eq!(
-            commitment_parameters["matrixShape"]["moduleRank"],
-            SETUP_COMMITMENT_MODULE_RANK
-        );
-        assert!(
-            commitment_parameters["messageEncoding"]["commitmentModulusProductDecimal"]
-                .as_str()
-                .expect("product decimal")
-                .parse::<BigUint>()
-                .expect("product should parse")
-                > BigUint::from(DATA_PRIMES[0]) * BigUint::from(1000_u16)
-        );
-    }
+    const TEST_RANDOMNESS_INFINITY_BOUND: i128 = 1;
 
     #[test]
     fn commitment_opening_verifies_and_rejects_tampering() -> CanonicalResult<()> {
         let public_matrix_seed_hash = valid_hash('a');
         let message = message_coefficients();
-        let randomness = randomness_columns(SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND);
+        let randomness = randomness_columns(TEST_RANDOMNESS_INFINITY_BOUND);
         let commitment = compute_setup_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
@@ -148,7 +122,7 @@ mod tests {
             &commitment,
             &message,
             &randomness,
-            SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+            TEST_RANDOMNESS_INFINITY_BOUND,
         )?;
 
         assert_eq!(
@@ -166,7 +140,7 @@ mod tests {
                 &tampered_commitment,
                 &message,
                 &randomness,
-                SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+                TEST_RANDOMNESS_INFINITY_BOUND,
             )
             .is_err()
         );
@@ -179,7 +153,7 @@ mod tests {
                 &commitment,
                 &out_of_range_message,
                 &randomness,
-                SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+                TEST_RANDOMNESS_INFINITY_BOUND,
             )
             .is_err()
         );

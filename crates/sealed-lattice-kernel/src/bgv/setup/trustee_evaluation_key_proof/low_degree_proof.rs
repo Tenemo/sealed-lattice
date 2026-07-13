@@ -19,9 +19,7 @@ use merkle_commitment::{
 // in coefficient form.
 //
 // The evaluation domain stays in the base limb field, but codeword values
-// and every fold challenge live in the degree-four challenge extension, so
-// each fold round's soundness error is governed by the extension size
-// instead of the 47-bit base field.
+// and every fold challenge live in the degree-four challenge extension.
 pub(super) struct LowDegreeParameters {
     pub(super) modulus: u64,
     pub(super) initial_domain_size: usize,
@@ -161,10 +159,8 @@ fn fold_layer(
 }
 
 // Fold-layer values are deterministic functions of the batched codeword, so
-// their leaves carry no independent witness information and stay unsalted.
-// Fold layers need only binding so their leaves are unsalted; phase-tree leaves
-// commit raw witness rows and must be salted to stay hiding -- the asymmetry is
-// intentional.
+// their leaves are unsalted. Phase-tree leaves commit witness rows and remain
+// salted.
 fn pair_leaf_hashes(layer: &[ChallengeExtensionElement]) -> Vec<MerkleDigest> {
     let half = layer.len() / 2;
     (0..half)

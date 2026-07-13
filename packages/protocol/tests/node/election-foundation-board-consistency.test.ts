@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
     type BoardConsistencyInput,
-    boardKeyFixture,
     boardPolicyHash,
     boardPublicKeyHash,
     ceremonyId,
@@ -11,16 +10,13 @@ import {
     createBoardHeadWithObjects,
     createInclusionProof,
     createKeyFixture,
-    createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
     createSignature,
     deriveFixtureHash,
     deriveConflictingHeadEvidenceHash,
     deriveInclusionProofHash,
     deriveCanonicalObjectHash,
-    profile,
     replaceSignatureBytes,
-    replaceSignatureProfile,
     replaceSignaturePublicKeyBytes,
     verifyBoardConsistency,
 } from './election-foundation-test-helpers';
@@ -51,7 +47,6 @@ describe('board consistency', () => {
             inclusionProofs: [inclusionProof],
             consistencyProofs: [
                 {
-                    proofType: 'SignedHeadChain',
                     fromBoardHeadHash: head0.headHash,
                     toBoardHeadHash: head2.headHash,
                     signedBoardHeads: [head0, head1, head2],
@@ -160,7 +155,6 @@ describe('board consistency', () => {
                 ...createBoardEvidence([head0, head1]),
                 consistencyProofs: [
                     {
-                        proofType: 'SignedHeadChain',
                         fromBoardHeadHash: head1.headHash,
                         toBoardHeadHash: head0.headHash,
                         signedBoardHeads: [head0, head1],
@@ -284,26 +278,10 @@ describe('board consistency', () => {
         const validWrongPublicKeyHead = {
             ...head1,
             signature: createProtocolSignatureFixture({
-                profile,
                 publicKeyBytesHex: replacementKey.publicKeyBytesHex,
                 publicKeyHash: replacementKey.publicKeyHash,
                 secretKeyBytesHex: replacementKey.secretKeyBytesHex,
                 signedRoot: head1.signature.signedRoot,
-            }),
-        };
-        const unsupportedModeHead = {
-            ...head1,
-            signature: createProtocolSignatureFixture({
-                profile: createMlDsaSignatureProfileFixture({
-                    mode: 'HashMLDSA',
-                }),
-                publicKeyBytesHex: boardKeyFixture.publicKeyBytesHex,
-                publicKeyHash: boardPublicKeyHash,
-                secretKeyBytesHex: boardKeyFixture.secretKeyBytesHex,
-                signedRoot: {
-                    ...head1.signature.signedRoot,
-                    objectRoot: head1.headHash,
-                },
             }),
         };
         const wrongCeremonySignatureHead = {
@@ -317,28 +295,6 @@ describe('board consistency', () => {
                 { ceremonyId: 'ceremony-other' },
             ),
         };
-        const wrongContextHead = {
-            ...head1,
-            signature: createProtocolSignatureFixture({
-                profile: createMlDsaSignatureProfileFixture({
-                    contextString: 'sealed-lattice:wrong-context',
-                }),
-                publicKeyBytesHex: boardKeyFixture.publicKeyBytesHex,
-                publicKeyHash: boardPublicKeyHash,
-                secretKeyBytesHex: boardKeyFixture.secretKeyBytesHex,
-                signedRoot: head1.signature.signedRoot,
-            }),
-        };
-        const oversizedContextHead = {
-            ...head1,
-            signature: replaceSignatureProfile(
-                head1.signature,
-                createMlDsaSignatureProfileFixture({
-                    contextString: 'x'.repeat(256),
-                }),
-            ),
-        };
-
         expect(
             verifyBoardConsistency({
                 ...createBoardEvidence([head0, head1]),
@@ -388,38 +344,11 @@ describe('board consistency', () => {
         );
         expect(
             verifyBoardConsistency(
-                createBoardEvidence([head0, unsupportedModeHead]),
-            ).refusedObjects,
-        ).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ code: 'InvalidSignature' }),
-            ]),
-        );
-        expect(
-            verifyBoardConsistency(
                 createBoardEvidence([head0, wrongCeremonySignatureHead]),
             ).refusedObjects,
         ).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'WrongCeremony' }),
-            ]),
-        );
-        expect(
-            verifyBoardConsistency(
-                createBoardEvidence([head0, wrongContextHead]),
-            ).refusedObjects,
-        ).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ code: 'InvalidMlDsaContext' }),
-            ]),
-        );
-        expect(
-            verifyBoardConsistency(
-                createBoardEvidence([head0, oversizedContextHead]),
-            ).refusedObjects,
-        ).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ code: 'InvalidMlDsaContext' }),
             ]),
         );
     });

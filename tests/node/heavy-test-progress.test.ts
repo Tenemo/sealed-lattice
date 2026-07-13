@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
     createHeavyTestProgressReporter,
     parseRustTestTimingLine,
+    resolveFocusedRustTestRunResult,
 } from '#tools/ci/heavy-test-progress';
 
 const invocation = {
@@ -178,7 +179,55 @@ describe('createHeavyTestProgressReporter', () => {
         expect(lines[0]).toContain('accepted_setup::split (ok)');
         expect(lines[1]).toContain('2/3 done, 1 failed');
         expect(lines[1]).toContain('accepted_setup::with_output (FAILED)');
+        expect(reporter.executedTestCount()).toBe(2);
         reporter.stop();
+    });
+
+    it('distinguishes executed tests from filtered or ignored tests', () => {
+        const reporter = createHeavyTestProgressReporter({
+            label: 'focused',
+            threadCount: 1,
+            write: () => undefined,
+        });
+
+        startRun(reporter);
+        feedOutput(reporter, 'running 2 tests\n');
+        feedOutput(reporter, 'test module::ignored ... ignored\n');
+        expect(reporter.executedTestCount()).toBe(0);
+        feedOutput(reporter, 'test module::executed ... ok\n');
+        expect(reporter.executedTestCount()).toBe(1);
+        finishRun(reporter);
+    });
+
+    it('refuses zero focused matches without masking command failures', () => {
+        expect(
+            resolveFocusedRustTestRunResult({
+                commandExitCode: 0,
+                executedTestCount: 0,
+                runnerName: 'Rust kernel fast',
+                testFilter: 'misspelled_test',
+            }),
+        ).toEqual({
+            exitCode: 1,
+            failureMessage:
+                'Rust kernel fast filter "misspelled_test" matched zero tests.',
+        });
+        expect(
+            resolveFocusedRustTestRunResult({
+                commandExitCode: 101,
+                executedTestCount: 0,
+                runnerName: 'Rust kernel fast',
+                testFilter: 'candidate',
+            }),
+        ).toEqual({ exitCode: 101 });
+        expect(
+            resolveFocusedRustTestRunResult({
+                commandExitCode: 0,
+                executedTestCount: 1,
+                runnerName: 'Rust kernel fast',
+                testFilter: 'candidate',
+            }),
+        ).toEqual({ exitCode: 0 });
     });
 
     it('keeps output streams independent and flushes both journals on exit', async () => {

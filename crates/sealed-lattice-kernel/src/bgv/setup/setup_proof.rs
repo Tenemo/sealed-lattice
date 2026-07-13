@@ -1,6 +1,5 @@
 pub(in crate::bgv::setup) mod material_transport;
 
-pub(super) use self::material_transport::setup_proof_record_binding_value;
 pub(crate) use self::material_transport::{
     BgvProofMaterialBytes, CanonicalProofMaterialBytes, ProofByteSource,
 };
@@ -11,7 +10,6 @@ pub(in crate::bgv::setup) use self::material_transport::{
 pub(in crate::bgv::setup) use self::material_transport::{
     VerifiedSetupProofMaterialEvictionGuard, authenticate_setup_proof_material_stream_for_test,
     authenticate_setup_proof_material_stream_in_session_for_test,
-    canonical_setup_proof_material_transport_accounting,
 };
 
 use serde_json::{Value, json};
@@ -21,24 +19,7 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_canonical_object_hash,
 };
-pub(super) const SETUP_PROOF_BYTES_DOMAIN: &str =
-    "sealed-lattice/collective-bgv-setup/succinct-proof-bytes";
-pub(super) const SETUP_PROOF_SERIALIZATION: &str = "binary";
 pub(crate) const SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
-const SETUP_PROOF_BYTE_DECODER: &str = "sealed-lattice-succinct-setup-proof-byte-decoder";
-// Families whose proof bytes ride the chunked setup proof-material transport.
-pub(super) const SETUP_PROOF_TRANSPORT_FAMILIES: &[&str] = &[
-    "vss-opening-carry",
-    "public-key-share",
-    "trustee-evaluation-key",
-    // Public VSS material proof families. At production roster sizes the
-    // share-linkage and same-secret bridge proof material are the largest
-    // objects in the setup package, so they stream through the same sidecar
-    // transport as the families above instead of riding embedded in the
-    // package JSON (which overflows the canonical string encoder at n=10).
-    "vss-share-linkage",
-    "same-secret-bridge",
-];
 
 fn setup_proof_error(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::ComponentMismatch, message)

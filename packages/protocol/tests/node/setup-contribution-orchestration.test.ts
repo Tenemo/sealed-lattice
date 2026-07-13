@@ -26,27 +26,24 @@ const contextFields = {
     setupEpoch: setupContext.setupEpoch,
 } as const;
 
-const phaseObject = (phaseNumber: number): SetupPhaseParticipantObject =>
+const phaseObject = (
+    phaseId: string,
+    fixtureSequenceNumber: number,
+): SetupPhaseParticipantObject =>
     ({
         objectType: 'SetupPhaseParticipantObject',
-        phaseId: `phase-${String(phaseNumber)}`,
-        phaseNumber,
+        phaseId,
         trusteeIdentity: 'trustee-3',
         rosterPosition: 3,
         recoveryEpoch: 0,
         deviceEpoch: 0,
-        signingPublicKeyHash: fixtureHash(`signing-key-${String(phaseNumber)}`),
-        phaseObjectRoot: fixtureHash(`phase-root-${String(phaseNumber)}`),
-        phaseObjectByteLength: 100 + phaseNumber,
-        phaseSignatureContextHash: fixtureHash(
-            `phase-context-${String(phaseNumber)}`,
+        signingPublicKeyHash: fixtureHash(
+            `signing-key-${String(fixtureSequenceNumber)}`,
         ),
-        signatureEnvelopeHash: fixtureHash(
-            `phase-signature-${String(phaseNumber)}`,
+        phaseObjectRoot: fixtureHash(
+            `phase-root-${String(fixtureSequenceNumber)}`,
         ),
-        signatureEnvelope: {
-            signatureHash: fixtureHash(`signature-${String(phaseNumber)}`),
-        },
+        signatureEnvelope: {},
         ceremonyId: setupContext.ceremonyId,
     }) as unknown as SetupPhaseParticipantObject;
 
@@ -110,8 +107,6 @@ const localStateCommitment = {
     aggregateThresholdShareRoot: fixtureHash('aggregate-share'),
     issuedVssAcceptanceRoot: fixtureHash('issued-acceptance'),
     issuedVssComplaintRoots: [],
-    deletionReceiptRoot: fixtureHash('deletion-receipt'),
-    deletionReceipt: {},
     localStateRoot: fixtureHash('local-state'),
 } as unknown as LocalTrusteeSetupStateCommitment;
 
@@ -121,7 +116,10 @@ describe('setup contribution orchestration', () => {
             setupContext,
             trusteeIdentity: 'trustee-3',
             trusteeRosterPosition: 3,
-            setupPhaseParticipantObjects: [phaseObject(2), phaseObject(1)],
+            setupPhaseParticipantObjects: [
+                phaseObject('setupIntent', 1),
+                phaseObject('commonRandomnessCommit', 2),
+            ],
             commonRandomnessCommitRoot: fixtureHash('common-commit'),
             commonRandomnessRevealRoot: fixtureHash('common-reveal'),
             vssSourceTrusteeRecord: sourceTrusteeRecord,
@@ -159,7 +157,7 @@ describe('setup contribution orchestration', () => {
                 setupContext,
                 trusteeIdentity: 'trustee-3',
                 trusteeRosterPosition: 3,
-                setupPhaseParticipantObjects: [phaseObject(1)],
+                setupPhaseParticipantObjects: [phaseObject('setupIntent', 1)],
                 vssShareAcceptanceRecords: [
                     {
                         ...acceptanceRecord,

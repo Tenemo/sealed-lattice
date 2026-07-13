@@ -35,7 +35,6 @@ const shareContribution = (
         (rnsPrime, rnsLimbIndex) => ({
             rnsLimbIndex,
             rnsPrime,
-            component: 'b_i',
             coefficientVectorHash512: fixtureHash(
                 `share-coefficient-${String(trusteeRosterPosition)}-${String(
                     rnsLimbIndex,
@@ -77,14 +76,10 @@ const requiredGaloisKeySchedule = [
     {
         rotation: 7,
         level: 1,
-        purpose: 'packed-rank-return-basis',
-        proofFamily: 'galois-key-share',
     },
     {
         rotation: 3,
         level: 1,
-        purpose: 'direct-score-packing-basis',
-        proofFamily: 'galois-key-share',
     },
 ] as const satisfies readonly RequiredGaloisKeyScheduleEntry[];
 
@@ -112,11 +107,7 @@ describe('evaluator key schedule builder', () => {
             ),
         ).toEqual([3, 7]);
         expect(evaluatorKeySchedule.relinearizationLevelSchedule).toEqual([
-            {
-                level: selectedEvaluatorWorkingLevel,
-                proofFamily: 'relinearization-key-share',
-                keyShareRounds: ['round-one', 'round-two'],
-            },
+            { level: selectedEvaluatorWorkingLevel },
         ]);
         expect(evaluatorKeySchedule.requiredGaloisSetHash).toBe(
             deriveCanonicalObjectHash(

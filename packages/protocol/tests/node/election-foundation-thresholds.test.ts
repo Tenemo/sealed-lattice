@@ -18,11 +18,6 @@ const pollSpec = {
     options: ['Alpha', 'Beta'],
     pollId: 'threshold-parameters-test',
     question: 'Choose one',
-    scoreDomain: {
-        max: 10,
-        min: 1,
-        skippedOptionScore: 1,
-    },
     smallRosterPolicy: 'ForbidMicroRoster',
     topOptionCount: 1,
 } as const satisfies PollSpec;

@@ -5,7 +5,6 @@ use crate::hashing::derive_canonical_object_hash;
 pub(in crate::bgv::setup) fn threshold_verification_material(
     input: &PassiveSetupInput,
     target_decryption_parameters_hash: &str,
-    target_decryption_parameters_binding_hash: &str,
     participant_setup_record_hashes: &[String],
     trustee_threshold_verification_key_hashes: &[String],
 ) -> CanonicalResult<Value> {
@@ -25,34 +24,17 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
     let verification_key_set = json!({
         "objectType": "ThresholdShareVerificationKeySet",
         "targetDecryptionParametersHash": target_decryption_parameters_hash,
-        "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "participantSetupRecordHashes": participant_setup_record_hashes,
         "trusteeThresholdVerificationKeyHashes": trustee_threshold_verification_key_hashes,
         "participantInterpolationUniverse": participant_points,
-        "secretShareDomain": crate::bgv::setup::SECRET_SHARE_DOMAIN,
-        "passiveSetupVerificationScope": [
-            "transcript-binding",
-            "identity-binding",
-            "roster-binding",
-            "parameters-binding",
-            "recovery-device-epoch-binding"
-        ],
     });
     let threshold_share_verification_key_root =
         derive_canonical_object_hash(&verification_key_set)?;
-    let threshold_share_verification_key_hash = derive_canonical_object_hash(&json!({
-        "objectType": "ThresholdShareVerificationKeyBinding",
-        "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-        "targetDecryptionParametersHash": target_decryption_parameters_hash,
-        "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
-    }))?;
 
     Ok(json!({
         "verificationKeySet": verification_key_set,
         "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-        "thresholdShareVerificationKeyHash": threshold_share_verification_key_hash,
-        "trusteeThresholdVerificationKeyHashes": trustee_threshold_verification_key_hashes,
     }))
 }

@@ -12,7 +12,6 @@ import {
 import {
     canonicalGeneratedSetupProofMaterialDescriptor,
     setupProofMaterialReferenceSetForVerificationInput,
-    setupTransportedProofMaterialFields,
     type CanonicalGeneratedSetupProofMaterial,
 } from './setup-proof-material-transport.js';
 
@@ -28,7 +27,7 @@ type PrivateVssSetupContext = Readonly<
     }
 >;
 
-export type PrivateVssCoefficientOpeningState = {
+type PrivateVssCoefficientOpeningState = {
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly shamirCoefficientIndex: number;
@@ -37,7 +36,7 @@ export type PrivateVssCoefficientOpeningState = {
     readonly randomnessByColumn: readonly (readonly number[])[];
 };
 
-export type PrivateVssSourceTrusteeContributionState = {
+type PrivateVssSourceTrusteeContributionState = {
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly sourceTrusteeCommitmentRoot: ProtocolHash;
@@ -46,13 +45,13 @@ export type PrivateVssSourceTrusteeContributionState = {
     readonly coefficientOpenings: readonly PrivateVssCoefficientOpeningState[];
 };
 
-export type PrivateVssMailboxRecipient = {
+type PrivateVssMailboxRecipient = {
     readonly recipientIdentity: string;
     readonly recipientRosterPosition: number;
     readonly mailboxPublicKeyBytesHex: string;
 };
 
-export type PrivateVssShareProofFactoryInput = {
+type PrivateVssShareProofFactoryInput = {
     readonly setupContext: PrivateVssSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly privateEnvelopeAadHash: ProtocolHash;
@@ -65,7 +64,7 @@ export type PrivateVssShareProofFactoryInput = {
     readonly coefficientCommitmentRoots: readonly ProtocolHash[];
 };
 
-export type PrivateVssShareProofFactory = (
+type PrivateVssShareProofFactory = (
     input: PrivateVssShareProofFactoryInput,
 ) => Promise<
     Readonly<{
@@ -74,7 +73,7 @@ export type PrivateVssShareProofFactory = (
     }>
 >;
 
-export type PrivateVssMailboxDeliveryKernel = {
+type PrivateVssMailboxDeliveryKernel = {
     readonly deriveCanonicalObjectHash: (input: {
         readonly value: unknown;
     }) => ProtocolHash;
@@ -135,7 +134,7 @@ export type PrivateVssMailboxDeliveryKernel = {
     };
 };
 
-export type PrivateVssMailboxDeliverySetInput = {
+type PrivateVssMailboxDeliverySetInput = {
     readonly kernel: PrivateVssMailboxDeliveryKernel;
     readonly setupContext: PrivateVssSetupContext;
     readonly phaseOrderHash: ProtocolHash;
@@ -144,14 +143,12 @@ export type PrivateVssMailboxDeliverySetInput = {
     readonly qSharePrimes: readonly number[];
     readonly ringDegree: number;
     readonly participantCount: number;
-    readonly deliveryPhaseNumber: number;
-    readonly verificationPhaseNumber: number;
     readonly privateVssShareProofFactory?: PrivateVssShareProofFactory;
     readonly sourceTrusteeContributionStates: readonly PrivateVssSourceTrusteeContributionState[];
     readonly recipients: readonly PrivateVssMailboxRecipient[];
 };
 
-export type PrivateVssMailboxSourceTrusteeDeliveryInput = Omit<
+type PrivateVssMailboxSourceTrusteeDeliveryInput = Omit<
     PrivateVssMailboxDeliverySetInput,
     'sourceTrusteeContributionStates'
 > & {
@@ -187,7 +184,7 @@ const privateVssEnvelopeCommitmentSetRootInput = (
     ),
 });
 
-export type PrivateVssMailboxDeliverySet = Readonly<
+type PrivateVssMailboxDeliverySet = Readonly<
     JsonRecord & {
         readonly objectType: 'PrivateVssEnvelopeCommitmentSet';
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
@@ -198,12 +195,13 @@ export type PrivateVssMailboxDeliverySet = Readonly<
 export type PrivateVssEnvelopeCommitment = Readonly<
     JsonRecord & {
         readonly objectType: 'PrivateVssEnvelopeCommitment';
+        readonly sourceTrusteeIdentity: string;
+        readonly sourceTrusteeRosterPosition: number;
+        readonly recipientIdentity: string;
+        readonly recipientRosterPosition: number;
         readonly privateEnvelopeHash: ProtocolHash;
         readonly encryptedEnvelopeHash: ProtocolHash;
-        readonly privateEnvelopeAad: JsonRecord;
-        readonly privateEnvelopeAadHash: ProtocolHash;
         readonly encryptedEnvelope?: PrivateVssEncryptedEnvelope;
-        readonly recipientMailboxPublicKeyHash: ProtocolHash;
         readonly localVerificationRoot: ProtocolHash;
         readonly transportedPrivateVssShareProofMaterial?: TransportedPrivateVssShareProofMaterialSet;
         readonly privateEnvelopeCommitmentRoot: ProtocolHash;
@@ -217,13 +215,11 @@ type PrivateVssMailboxDeliverySetFromReferencesInput = Pick<
     | 'publicMatrixSeedHash'
     | 'vssCoefficientCommitmentRoot'
     | 'participantCount'
-    | 'deliveryPhaseNumber'
-    | 'verificationPhaseNumber'
 > & {
     readonly envelopeReferences: readonly PrivateVssEnvelopeCommitment[];
 };
 
-export type TransportedPrivateVssShareProofMaterial = Readonly<
+type TransportedPrivateVssShareProofMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportedPrivateVssShareProofMaterial';
         readonly proofFamily: typeof privateVssShareProofFamily;
@@ -232,7 +228,7 @@ export type TransportedPrivateVssShareProofMaterial = Readonly<
     }
 >;
 
-export type TransportedPrivateVssShareProofMaterialSet = Readonly<
+type TransportedPrivateVssShareProofMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportedPrivateVssShareProofMaterialSet';
         readonly proofFamily: typeof privateVssShareProofFamily;
@@ -502,8 +498,6 @@ const privateEnvelopeAad = (
     recipientRosterPosition: recipient.recipientRosterPosition,
     sourceTrusteeCommitmentRoot: sourceTrusteeState.sourceTrusteeCommitmentRoot,
     envelopeSequenceNumber,
-    deliveryPhaseNumber: input.deliveryPhaseNumber,
-    verificationPhaseNumber: input.verificationPhaseNumber,
 });
 
 const transportPrivateVssShareProofMaterial = (
@@ -541,7 +535,7 @@ const transportPrivateVssShareProofMaterial = (
     }
     const transportedProofRecord = {
         ...proofRecord,
-        ...setupTransportedProofMaterialFields(proofMaterialRoot),
+        proofMaterialRoot,
     };
 
     return {
@@ -549,7 +543,7 @@ const transportPrivateVssShareProofMaterial = (
         proofMaterial: {
             objectType: 'SetupTransportedPrivateVssShareProofMaterial',
             proofFamily: privateVssShareProofFamily,
-            ...setupTransportedProofMaterialFields(proofMaterialRoot),
+            proofMaterialRoot,
             descriptorBytes:
                 canonicalGeneratedSetupProofMaterialDescriptor(
                     canonicalMaterial,
@@ -796,43 +790,16 @@ const createEnvelopeCommitment = async (
         privateEnvelopeAad: associatedData,
         recipientMailboxPublicKeyBytesHex: recipient.mailboxPublicKeyBytesHex,
     });
-    if (
-        encryptedDelivery.privateEnvelopeHash !==
-            localVerification.privateEnvelopeHash ||
-        encryptedDelivery.privateEnvelopeAadHash !== associatedDataHash
-    ) {
-        throw new Error(
-            'Private VSS mailbox encryption did not preserve the verified envelope binding.',
-        );
-    }
-
     const commitmentWithoutRoot = {
         objectType: 'PrivateVssEnvelopeCommitment',
-        ceremonyId: input.setupContext.ceremonyId,
-        manifestHash: input.setupContext.manifestHash,
-        rosterHash: input.setupContext.rosterHash,
-        setupParametersHash: input.setupContext.setupParametersHash,
-        setupEpoch: input.setupContext.setupEpoch,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        vssCoefficientCommitmentRoot: input.vssCoefficientCommitmentRoot,
         sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
         sourceTrusteeRosterPosition:
             sourceTrusteeState.sourceTrusteeRosterPosition,
         recipientIdentity: recipient.recipientIdentity,
         recipientRosterPosition: recipient.recipientRosterPosition,
-        sourceTrusteeCommitmentRoot:
-            sourceTrusteeState.sourceTrusteeCommitmentRoot,
-        envelopeSequenceNumber,
-        deliveryPhaseNumber: input.deliveryPhaseNumber,
-        verificationPhaseNumber: input.verificationPhaseNumber,
         privateEnvelopeHash: localVerification.privateEnvelopeHash,
-        encryptedEnvelopeHash:
-            encryptedDelivery.encryptedEnvelope.encryptedEnvelopeHash,
-        privateEnvelopeAad: associatedData,
-        privateEnvelopeAadHash: associatedDataHash,
+        encryptedEnvelopeHash: encryptedDelivery.encryptedEnvelopeHash,
         encryptedEnvelope: encryptedDelivery.encryptedEnvelope,
-        recipientMailboxPublicKeyHash:
-            encryptedDelivery.encryptedEnvelope.recipientMailboxPublicKeyHash,
         localVerificationRoot: localVerification.localVerificationRoot,
         ...(privateShareEnvelopeBuild.transportedPrivateVssShareProofMaterial ===
         undefined
@@ -851,7 +818,7 @@ const createEnvelopeCommitment = async (
     } satisfies PrivateVssEnvelopeCommitment;
 };
 
-export const createPrivateVssMailboxSourceTrusteeDeliveryReferences = async (
+const createPrivateVssMailboxSourceTrusteeDeliveryReferences = async (
     input: PrivateVssMailboxSourceTrusteeDeliveryInput,
 ): Promise<readonly PrivateVssEnvelopeCommitment[]> => {
     validatePositiveSafeInteger(input.participantCount, 'participantCount');
@@ -915,9 +882,6 @@ const createPrivateVssMailboxDeliverySetFromReferences = (
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         vssCoefficientCommitmentRoot: input.vssCoefficientCommitmentRoot,
         participantCount: input.participantCount,
-        envelopeCount: input.participantCount * input.participantCount,
-        deliveryPhaseNumber: input.deliveryPhaseNumber,
-        verificationPhaseNumber: input.verificationPhaseNumber,
         envelopeReferences,
     } as const satisfies JsonRecord;
 
@@ -978,8 +942,6 @@ export const createPrivateVssMailboxDeliverySet = async (
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         vssCoefficientCommitmentRoot: input.vssCoefficientCommitmentRoot,
         participantCount: input.participantCount,
-        deliveryPhaseNumber: input.deliveryPhaseNumber,
-        verificationPhaseNumber: input.verificationPhaseNumber,
         envelopeReferences,
     });
 };

@@ -5,34 +5,6 @@ import {
     TranscriptCoreKernelCommandError,
 } from '#packages/wasm/src/index';
 
-type BgvParametersRejected = {
-    readonly isValid: false;
-    readonly refusedObjects: readonly {
-        readonly code: 'BgvOperationRejected';
-        readonly reasonCode: string;
-        readonly message: string;
-    }[];
-};
-
-const expectBgvParametersRejected = (
-    value: unknown,
-    reasonCode?: string,
-): BgvParametersRejected => {
-    expect(value).toMatchObject({ isValid: false });
-    const rejection = value as BgvParametersRejected;
-    expect(Array.isArray(rejection.refusedObjects)).toBe(true);
-    expect(
-        rejection.refusedObjects.some(
-            (refusedObject) => refusedObject.code === 'BgvOperationRejected',
-        ),
-    ).toBe(true);
-    if (reasonCode !== undefined) {
-        expect(rejection.refusedObjects[0]?.reasonCode).toBe(reasonCode);
-    }
-
-    return rejection;
-};
-
 const expectKernelCommandError = (
     command: () => unknown,
     code: TranscriptCoreKernelCommandError['code'],
@@ -56,17 +28,11 @@ const expectProtocolHash = (value: string, label: string): void => {
 describe('BGV-RNS backend kernel commands', () => {
     it('encodes direct encrypted ballot aggregate slots and validates roots byte-identically', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const encodedResult = kernel.encodeBgvBatchPlaintext({
+        const encoded = kernel.encodeBgvBatchPlaintext({
             slots: [0, 1, 65_536, 17, 99],
             level: 0,
             includeCanonicalBytesHex: true,
         });
-
-        const encoded = encodedResult as Exclude<
-            typeof encodedResult,
-            BgvParametersRejected
-        >;
-        expect(encoded.validation.isValid).toBe(true);
         expect(encoded.canonicalBytesHex).toMatch(/^[a-f0-9]+$/u);
         expectProtocolHash(encoded.plaintextRoot, 'encoded plaintext root');
         expectProtocolHash(encoded.bgvParametersHash, 'BGV parameters hash');
@@ -82,21 +48,11 @@ describe('BGV-RNS backend kernel commands', () => {
             canonicalBytesHex: encoded.canonicalBytesHex ?? '',
             expectedPlaintextRoot: encoded.plaintextRoot,
         });
-        const analyzed = kernel.analyzeBgvCanonicalObject({
-            canonicalBytesHex: encoded.canonicalBytesHex ?? '',
-        }) as {
-            readonly objectKind: string;
-            readonly coefficientCount: number;
-        };
 
         expect(validated).toMatchObject({
             isValid: true,
             objectKind: 'plaintext',
             plaintextRoot: encoded.plaintextRoot,
-        });
-        expect(analyzed).toMatchObject({
-            objectKind: 'plaintext',
-            coefficientCount: 32_768,
         });
         expectKernelCommandError(
             () =>
@@ -106,36 +62,6 @@ describe('BGV-RNS backend kernel commands', () => {
                 }),
             'ComponentMismatch',
             /plaintext root/u,
-        );
-    });
-
-    it('rejects evaluator operations outside the selected registry', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        expect(
-            kernel.validateBgvEvaluatorOperation({
-                operation: 'homomorphicEncryptedBallotAggregation',
-            }),
-        ).toMatchObject({
-            isValid: true,
-        });
-        expectBgvParametersRejected(
-            kernel.validateBgvEvaluatorOperation({
-                operation: 'scalarDegree360Comparator',
-            }),
-            'UncertifiedEvaluatorOperation',
-        );
-        expectBgvParametersRejected(
-            kernel.validateBgvEvaluatorOperation({
-                operation: 'uncertifiedScoreBitDerivationOperation',
-            }),
-            'UncertifiedEvaluatorOperation',
-        );
-        expectBgvParametersRejected(
-            kernel.validateBgvEvaluatorOperation({
-                operation: 'adHocEncryptedComparator',
-            }),
-            'UncertifiedEvaluatorOperation',
         );
     });
 });

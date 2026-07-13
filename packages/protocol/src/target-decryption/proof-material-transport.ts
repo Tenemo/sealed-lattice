@@ -1,24 +1,18 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
+import type {
+    BgvTargetDecryptionShareProofMaterial,
+    ProtocolHash,
+} from '@sealed-lattice/types';
 
 import { protocolHashPattern } from '../common/verification-helpers.js';
 import { copyCanonicalStreamDescriptor } from '../setup/canonical-stream-descriptor.js';
 
 type JsonRecord = Record<string, unknown>;
 
-export const targetDecryptionShareProofFamily = 'target-decryption-share';
-
-export type BgvTargetDecryptionShareProofMaterial = Readonly<
-    JsonRecord & {
-        readonly objectType: 'BgvTargetDecryptionShareProofMaterial';
-        readonly proofRecords: readonly unknown[];
-        readonly proofMaterialRoot: ProtocolHash;
-    }
->;
+export type { BgvTargetDecryptionShareProofMaterial };
 
 export type BgvTargetDecryptionShareCanonicalProofMaterialTransport = Readonly<{
     readonly objectType: 'BgvTargetDecryptionShareCanonicalProofMaterialTransport';
-    readonly proofFamily: typeof targetDecryptionShareProofFamily;
     readonly proofMaterialRoot: ProtocolHash;
     readonly descriptorBytes: Uint8Array;
 }>;
@@ -101,7 +95,6 @@ export const createBgvTargetDecryptionShareCanonicalProofMaterialTransport = (
 
     return {
         objectType: 'BgvTargetDecryptionShareCanonicalProofMaterialTransport',
-        proofFamily: targetDecryptionShareProofFamily,
         proofMaterialRoot,
         descriptorBytes: copyCanonicalStreamDescriptor(
             materialExport.descriptorBytes,

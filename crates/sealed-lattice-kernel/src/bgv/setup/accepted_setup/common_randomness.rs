@@ -139,7 +139,8 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
         )?));
     }
 
-    // Commit-then-reveal coin toss: commits bind each reveal before any are opened (no last-mover bias), and folding the roster-ordered reveals yields a canonical unbiased CRS seed that anchors every public derivation below.
+    // Commitments bind each reveal before opening. Folding the roster-ordered
+    // reveal hashes derives the canonical public-matrix seed.
     let ordered_reveal_hash_values = ordered_reveal_hashes
         .values()
         .cloned()
@@ -165,11 +166,9 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
             "setupPackage.commonRandomness.publicMatrixSeedHash",
         )?));
     }
-    if let Some(response) = verify_public_derivations(
-        common_randomness,
-        &expected_public_matrix_seed_hash,
-        roster.decryption_threshold,
-    )? {
+    if let Some(response) =
+        verify_public_derivations(common_randomness, &expected_public_matrix_seed_hash)?
+    {
         return Ok(Some(response));
     }
 
@@ -209,7 +208,6 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
 fn verify_public_derivations(
     common_randomness: &Value,
     public_matrix_seed_hash: &str,
-    decryption_threshold: u64,
 ) -> CanonicalResult<Option<Value>> {
     let Some(public_derivations) = common_randomness.get("publicDerivations") else {
         return Ok(Some(verification_response(
@@ -219,10 +217,8 @@ fn verify_public_derivations(
             Vec::new(),
         )?));
     };
-    let expected_public_derivations = derive_collective_bgv_setup_public_derivations(
-        public_matrix_seed_hash,
-        decryption_threshold,
-    )?;
+    let expected_public_derivations =
+        derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash)?;
     if public_derivations != &expected_public_derivations {
         return Ok(Some(common_randomness_refusal(
             "setupPublicDerivationsMismatch",
@@ -236,27 +232,18 @@ fn verify_public_derivations(
 
 pub(in crate::bgv::setup) fn derive_collective_bgv_setup_public_derivations(
     public_matrix_seed_hash: &str,
-    decryption_threshold: u64,
 ) -> CanonicalResult<Value> {
     let bgv_public_a = derive_bgv_public_a_polynomial(public_matrix_seed_hash)?;
-    let public_matrices =
-        derive_setup_public_matrices(public_matrix_seed_hash, decryption_threshold)?;
-    let mut derivations = json!({
+    Ok(json!({
         "objectType": "SetupPublicDerivations",
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "bgvPublicA": bgv_public_a,
-        "publicMatrices": public_matrices,
         "crpRoots": {
             "publicKeyCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "public-key-crp")?,
             "relinearizationCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "relinearization-crp")?,
             "galoisKeyCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "galois-key-crp")?,
-            "commitmentMatrixCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "commitment-matrix-crp")?,
         },
-    });
-    let derivation_root = derive_canonical_object_hash(&derivations)?;
-    derivations["publicDerivationRoot"] = Value::String(derivation_root);
-
-    Ok(derivations)
+    }))
 }
 
 pub(super) fn derive_bgv_public_a_polynomial(
@@ -296,65 +283,6 @@ pub(super) fn derive_bgv_public_a_polynomial(
     public_a["publicPolynomialRoot"] = Value::String(public_polynomial_root);
 
     Ok(public_a)
-}
-
-fn derive_setup_public_matrices(
-    public_matrix_seed_hash: &str,
-    decryption_threshold: u64,
-) -> CanonicalResult<Value> {
-    let commitment_matrix =
-        derive_setup_commitment_matrix(public_matrix_seed_hash, decryption_threshold)?;
-    let mut public_matrices = json!({
-        "objectType": "SetupPublicMatrixMaterial",
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "commitmentMatrix": commitment_matrix,
-    });
-    let public_matrices_root = derive_canonical_object_hash(&public_matrices)?;
-    public_matrices["publicMatricesRoot"] = Value::String(public_matrices_root);
-
-    Ok(public_matrices)
-}
-
-fn derive_setup_commitment_matrix(
-    public_matrix_seed_hash: &str,
-    decryption_threshold: u64,
-) -> CanonicalResult<Value> {
-    let crp_root = setup_public_derivation_root(public_matrix_seed_hash, "commitment-matrix-crp")?;
-    let sampled_entries = commitment_matrix_sampled_entries(public_matrix_seed_hash)?;
-    let mut matrix = json!({
-        "objectType": "SetupPublicMatrix",
-        "matrixKind": "commitment",
-        "commitmentModulusLimbs": setup_commitment_modulus_limb_values(),
-        "commitmentModuleRank": SETUP_COMMITMENT_MODULE_RANK,
-        "commitmentRandomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "crpRoot": crp_root,
-        "coordinateAxes": [
-            "rnsLimbIndex",
-            "commitmentModulusIndex",
-            "matrixRowIndex",
-            "randomnessColumnIndex",
-            "ringCoefficientPosition"
-        ],
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "shamirCoefficientCount": decryption_threshold,
-        "ringDegree": POLYNOMIAL_DEGREE,
-        "entryStreamEncoding": "xof-unbiased-residue-from-coordinate",
-        "sampledEntries": sampled_entries,
-    });
-    let matrix_root = derive_canonical_object_hash(&matrix)?;
-    matrix["matrixRoot"] = Value::String(matrix_root);
-
-    Ok(matrix)
-}
-
-fn commitment_matrix_sampled_entries(public_matrix_seed_hash: &str) -> CanonicalResult<Vec<Value>> {
-    let limb_indices = [0_usize, DATA_PRIMES.len() - 1];
-    setup_commitment_matrix_sampled_entries(
-        public_matrix_seed_hash,
-        &limb_indices,
-        &sample_positions(),
-    )
 }
 
 // The CRP root is a seed-bound label tag, not a commitment to coefficients; the actual relinearization/Galois a is bound downstream through keySwitchSeedHex, which folds this root in.
@@ -431,9 +359,7 @@ fn verify_common_randomness_commit_record(
         setup_context,
         &CommonRandomnessSignatureExpectation {
             object_type: "CommonRandomnessCommit",
-            context_purpose: "common-randomness-commit-signature-context",
             object_root: commit_hash,
-            object_path: "commonRandomness.commitRecords",
             trustee_registrations,
         },
     )?;
@@ -485,9 +411,7 @@ fn verify_common_randomness_reveal_record(
         setup_context,
         &CommonRandomnessSignatureExpectation {
             object_type: "CommonRandomnessReveal",
-            context_purpose: "common-randomness-reveal-signature-context",
             object_root: reveal_hash,
-            object_path: "commonRandomness.revealRecords",
             trustee_registrations,
         },
     )?;
@@ -534,12 +458,6 @@ fn verify_common_randomness_participant_record_shape(
             ));
         }
     }
-    if record.get("signerRole").and_then(Value::as_str) != Some("Trustee") {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{object_type}.signerRole must be Trustee"),
-        ));
-    }
     let Some(trustee_identity) = record.get("trusteeIdentity").and_then(Value::as_str) else {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -585,18 +503,6 @@ fn verify_common_randomness_participant_record_shape(
             ));
         }
     }
-    let Some(signature_envelope_hash) = record.get("signatureEnvelopeHash").and_then(Value::as_str)
-    else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{object_type}.signatureEnvelopeHash is required"),
-        ));
-    };
-    validate_hash_string(
-        signature_envelope_hash,
-        &format!("{object_type}.signatureEnvelopeHash"),
-    )?;
-
     Ok(())
 }
 
@@ -608,7 +514,6 @@ fn common_randomness_commit_payload_value(record: &Value) -> CanonicalResult<Val
         "rosterHash": value_string(record, "rosterHash")?,
         "setupParametersHash": value_string(record, "setupParametersHash")?,
         "setupEpoch": value_string(record, "setupEpoch")?,
-        "signerRole": "Trustee",
         "trusteeIdentity": value_string(record, "trusteeIdentity")?,
         "rosterPosition": value_u64(record, "rosterPosition")?,
         "recoveryEpoch": value_u64(record, "recoveryEpoch")?,
@@ -625,7 +530,6 @@ fn common_randomness_reveal_payload_value(record: &Value) -> CanonicalResult<Val
         "rosterHash": value_string(record, "rosterHash")?,
         "setupParametersHash": value_string(record, "setupParametersHash")?,
         "setupEpoch": value_string(record, "setupEpoch")?,
-        "signerRole": "Trustee",
         "trusteeIdentity": value_string(record, "trusteeIdentity")?,
         "rosterPosition": value_u64(record, "rosterPosition")?,
         "recoveryEpoch": value_u64(record, "recoveryEpoch")?,
@@ -636,9 +540,7 @@ fn common_randomness_reveal_payload_value(record: &Value) -> CanonicalResult<Val
 
 struct CommonRandomnessSignatureExpectation<'a> {
     object_type: &'static str,
-    context_purpose: &'static str,
     object_root: &'a str,
-    object_path: &'static str,
     trustee_registrations:
         &'a BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
 }
@@ -664,7 +566,6 @@ fn verify_common_randomness_signature(
         })?;
     let context_hash = derive_canonical_object_hash(&json!({
         "objectType": format!("{}SignatureContext", expectation.object_type),
-        "purpose": expectation.context_purpose,
         "ceremonyId": value_string(record, "ceremonyId")?,
         "manifestHash": value_string(record, "manifestHash")?,
         "rosterHash": value_string(record, "rosterHash")?,
@@ -674,20 +575,6 @@ fn verify_common_randomness_signature(
         "rosterPosition": roster_position,
         "objectRoot": expectation.object_root,
     }))?;
-    let Some(signature_envelope_hash) = record.get("signatureEnvelopeHash").and_then(Value::as_str)
-    else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "{}.signatureEnvelopeHash is required",
-                expectation.object_type,
-            ),
-        ));
-    };
-    validate_hash_string(
-        signature_envelope_hash,
-        &format!("{}.signatureEnvelopeHash", expectation.object_type),
-    )?;
     let signature_envelope = record.get("signatureEnvelope").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -714,14 +601,7 @@ fn verify_common_randomness_signature(
         },
     )?;
     match verification {
-        Ok(verified_signature_hash) if verified_signature_hash == signature_envelope_hash => Ok(()),
-        Ok(_) => Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "{} signature envelope hash does not match the verified envelope",
-                expectation.object_path,
-            ),
-        )),
+        Ok(()) => Ok(()),
         Err(failure) => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             failure.message,

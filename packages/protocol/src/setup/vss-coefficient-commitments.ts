@@ -1,42 +1,21 @@
-// Barrel for the VSS coefficient-commitment record builders. The implementation
-// lives in the cohesive sub-modules under ./vss-coefficient-commitments/, grouped
-// by the domain problem each part solves: shared vocabulary and types, stateless
-// encoding and sampling primitives, per-source-trustee opening-state generation,
-// BDLOP commitment value shaping, and the embedded commitment bundle constructor.
-// The commitments built here are the data basis the same-secret bridge opens;
-// the VSS commitment sets replace them as the transported public setup
-// material.
+// These embedded coefficient commitments supply openings for the same-secret
+// bridge; transported public setup material uses the VSS commitment sets.
 export {
-    setupCommitmentRandomnessWidth,
-    acceptedBgvFullRingDegree,
     acceptedBgvSetupQSharePrimes,
-    setupTransportSchemeId,
-    setupTransportChunkSizeBytes,
-    type SetupCommitmentLimbValue,
+    setupCommitmentRandomnessWidth,
     type SetupCommitmentValue,
-    type VssCoefficientOpeningInput,
-    type VssCoefficientOpeningMaterial,
-    type VssSourceTrusteeCoefficientOpeningState,
-    type VssSourceTrusteeCoefficientOpeningStateReference,
-    type VssSourceTrusteeCoefficientOpeningStateProvider,
-    type VssOpeningRandomByteSource,
-    type VssCoefficientCommitmentRecord,
-    type VssSourceTrusteeCoefficientCommitmentRecord,
-    type VssCoefficientCommitmentMaterialRecord,
-    type VssCoefficientCommitmentSet,
     type VssCoefficientCommitmentMaterialSet,
-    type SetupPackageVssCoefficientCommitmentMaterialSet,
-    type VssSourceTrusteeOpeningMaterial,
-    type VssSourceTrusteeOpeningMaterialReference,
-    type VssSourceTrusteeOpeningMaterialSource,
-    type VssCoefficientCommitmentBundle,
+    type VssCoefficientCommitmentSet,
+    type VssCoefficientOpeningInput,
+    type VssOpeningRandomByteSource,
+    type VssSourceTrusteeCoefficientCommitmentRecord,
+    type VssSourceTrusteeCoefficientOpeningState,
 } from './vss-coefficient-commitments/constants-and-types.js';
-export { binaryVssCoefficientCommitmentMaterialByteLength } from './vss-coefficient-commitments/encoding.js';
 export {
     createVssSourceTrusteeCoefficientOpeningState,
     createVssSourceTrusteeCoefficientOpeningStateProvider,
 } from './vss-coefficient-commitments/opening-state.js';
 export {
-    createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
+    createVssSourceTrusteeCoefficientCommitmentContribution,
 } from './vss-coefficient-commitments/commitment-bundles.js';

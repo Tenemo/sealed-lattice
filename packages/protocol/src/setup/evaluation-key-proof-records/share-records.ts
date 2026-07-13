@@ -152,7 +152,6 @@ const relinearizationKeySwitchSeed = (
     deriveCanonicalObjectHash({
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
         proofFamily: 'relinearization-key-share',
-        keySwitchSampleScope: 'shared-by-scheduled-level-and-round',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
         relinearizationCrpRoot: evaluatorKeySchedule.relinearizationCrpRoot,
         round,
@@ -167,7 +166,6 @@ const galoisKeySwitchSeed = (
     deriveCanonicalObjectHash({
         objectType: 'GaloisKeySwitchPublicSampleSeed',
         proofFamily: 'galois-key-share',
-        keySwitchSampleScope: 'shared-by-scheduled-rotation-and-level',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
         galoisKeyCrpRoot: evaluatorKeySchedule.galoisKeyCrpRoot,
         requiredGaloisSetHash: evaluatorKeySchedule.requiredGaloisSetHash,
@@ -273,15 +271,6 @@ export const validateCommonInput = (
         input.evaluatorKeySchedule,
         'evaluatorKeySchedule',
     );
-    if (
-        input.evaluatorKeySchedule.participantCount !==
-            input.participantCount ||
-        input.evaluatorKeySchedule.rnsLimbCount !== input.qSharePrimes.length
-    ) {
-        throw new Error(
-            'evaluatorKeySchedule must match participant and RNS limb counts.',
-        );
-    }
     for (const [fieldName, hashValue] of [
         [
             'evaluatorKeyScheduleRoot',
@@ -392,7 +381,6 @@ export const createRelinearizationKeyShareRounds = (
                 );
                 const recordWithoutRoot = {
                     objectType: 'RelinearizationKeyShareRoundOne',
-                    proofFamily: 'relinearization-key-share',
                     ...contextFields(input.setupContext),
                     trusteeIdentity: trusteeReference.trusteeIdentity,
                     trusteeRosterPosition:
@@ -480,7 +468,6 @@ export const createRelinearizationKeyShareRounds = (
                 );
                 const recordWithoutRoot = {
                     objectType: 'RelinearizationKeyShareRoundTwo',
-                    proofFamily: 'relinearization-key-share',
                     ...contextFields(input.setupContext),
                     trusteeIdentity: trusteeReference.trusteeIdentity,
                     trusteeRosterPosition:
@@ -536,7 +523,6 @@ export const createRelinearizationKeyShareRounds = (
 
     const roundsWithoutRoot = {
         objectType: 'RelinearizationKeyShareRounds',
-        proofFamily: 'relinearization-key-share',
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -642,7 +628,6 @@ export const createGaloisKeyShareBatches = (
 
                 return {
                     objectType: 'GaloisKeyShareMaterial',
-                    proofFamily: 'galois-key-share',
                     trusteeIdentity: trusteeReference.trusteeIdentity,
                     trusteeRosterPosition:
                         trusteeReference.trusteeRosterPosition,
@@ -657,7 +642,6 @@ export const createGaloisKeyShareBatches = (
         );
         const batchWithoutRoot = {
             objectType: 'GaloisKeyShareBatch',
-            proofFamily: 'galois-key-share',
             ...contextFields(input.setupContext),
             trusteeIdentity: trusteeReference.trusteeIdentity,
             trusteeRosterPosition: trusteeReference.trusteeRosterPosition,

@@ -9,15 +9,6 @@ use crate::bgv::setup_helpers::{
     array_at_path, compare_required_string, hash_at_path, string_at_path, value_at_path,
 };
 
-#[cfg(test)]
-#[derive(Debug, Clone)]
-pub(crate) struct SetupProofMaterialTransportHashes {
-    pub(crate) full_object_hash: String,
-    pub(crate) chunk_hashes: Vec<String>,
-    pub(crate) chunk_root: String,
-    pub(crate) total_byte_length: u64,
-}
-
 enum CanonicalProofMaterialBacking {
     Contiguous(Vec<u8>),
     StreamChunks(Vec<Vec<u8>>),
@@ -289,10 +280,8 @@ pub(in crate::bgv::setup) fn resolve_transported_setup_proof_material(
             ));
         }
         matching_material = Some(verified_setup_proof_material_bytes_from_request(
-            request,
             family.proof_family,
             expected_proof_material_root,
-            proof_material,
             &format!("{}.proofMaterials", family.transport_field),
         )?);
     }
@@ -308,30 +297,11 @@ pub(in crate::bgv::setup) fn resolve_transported_setup_proof_material(
     })
 }
 
-pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
-    setup_parameters_hash: &str,
-) -> CanonicalResult<Value> {
-    Ok(json!({
-        "objectType": "SetupProofRecordBinding",
-        "setupParametersHash": setup_parameters_hash,
-        "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
-        "proofSerialization": SETUP_PROOF_SERIALIZATION,
-        "proofByteDecoder": SETUP_PROOF_BYTE_DECODER,
-    }))
-}
-
 pub(in crate::bgv::setup) fn verified_setup_proof_material_bytes_from_request(
-    _request: &Value,
     proof_family: &str,
     expected_proof_material_root: &str,
-    _transported_proof_material: &Value,
     transported_material_path: &str,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    if !SETUP_PROOF_TRANSPORT_FAMILIES.contains(&proof_family) {
-        return Err(setup_proof_error(
-            "setup proof material proof family is not in the fixed setup-proof parameters",
-        ));
-    }
     validate_hash_string(
         expected_proof_material_root,
         &format!("{transported_material_path}.proofMaterialRoot"),
@@ -450,5 +420,4 @@ mod verification;
 pub(crate) use verification::{
     authenticate_setup_proof_material_stream_for_test,
     authenticate_setup_proof_material_stream_in_session_for_test,
-    canonical_setup_proof_material_transport_accounting,
 };

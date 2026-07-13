@@ -50,18 +50,8 @@ export type ThresholdParameters = {
     readonly setupCompletionQuorum: number;
 };
 
-/** Supported score domain for additive score ballots. */
-export type ScoreDomain = {
-    readonly min: 1;
-    readonly max: 10;
-    readonly skippedOptionScore: 1;
-};
-
 /** Poll policy for frozen rosters containing fewer than ten participants. */
-export type SmallRosterPolicy =
-    | 'ForbidMicroRoster'
-    | 'WarnMicroRoster'
-    | 'AllowMicroRoster';
+export type SmallRosterPolicy = 'ForbidMicroRoster' | 'AllowMicroRoster';
 
 /** Untrusted poll specification input accepted by validation helpers. */
 export type PollSpecInput = {
@@ -69,7 +59,6 @@ export type PollSpecInput = {
     readonly question: string;
     readonly options: readonly string[];
     readonly topOptionCount: number;
-    readonly scoreDomain?: ScoreDomain;
     readonly minRosterSize?: number;
     readonly maxRosterSize?: number;
     readonly smallRosterPolicy?: SmallRosterPolicy;
@@ -81,7 +70,6 @@ export type PollSpec = {
     readonly question: string;
     readonly options: readonly string[];
     readonly topOptionCount: number;
-    readonly scoreDomain: ScoreDomain;
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
     readonly smallRosterPolicy: SmallRosterPolicy;
@@ -109,7 +97,6 @@ export type PollSpecValidationErrorCode =
     | 'EmptyOptionLabel'
     | 'DuplicateOptionLabel'
     | 'InvalidTopOptionCount'
-    | 'UnsupportedScoreDomain'
     | 'InvalidRosterBounds'
     | 'UnsupportedSmallRosterPolicy';
 

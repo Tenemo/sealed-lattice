@@ -110,7 +110,6 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
             let smudging_openings = target_decryption_smudging_proof_openings_for_slice(
                 input.setup_binding,
                 input.target_accepted,
-                input.target_ciphertexts,
                 input.target_share_profile,
                 &local_witness.smudging_seed_hex,
                 &local_witness.smudging_polynomial_openings,
@@ -291,7 +290,7 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
             "trusteeIdentity": input.participant.trustee_identity,
             "trusteeRosterPosition": input.participant.roster_position,
             "activeCredentialBindingRoot": active_credential_binding_root,
-            "interpolationPoint": input.participant.interpolation_point,
+            "interpolationPoint": input.participant.interpolation_point()?,
             "targetRnsLimbStatements": limb_statements,
             "aggregateMessageCoefficientBound": aggregate_message_coefficient_bound,
             "smudgingCommitmentSet": smudging_commitment_set,

@@ -36,10 +36,7 @@ const sanitizeVerificationDiagnostic = (value: string): string =>
         .trim()
         .slice(0, maximumVerificationDiagnosticLength);
 
-// Verifier contract (repo-wide): a public `verifyX`/`deriveX` runs an inner
-// `…Unchecked` and wraps it in try/catch, converting any thrown error into a
-// structured refusal via this helper, so public verifiers never throw to the
-// caller — failures always come back as a RefusalRecord, never an exception.
+// Public verifiers include this sanitized detail in structured refusals.
 export const verificationExceptionMessage = (
     summary: string,
     error: unknown,

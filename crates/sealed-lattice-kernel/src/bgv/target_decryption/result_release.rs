@@ -11,13 +11,9 @@ static TARGET_RESULT_RELEASE_SESSIONS: OnceLock<
     Mutex<BTreeMap<String, TargetResultReleaseSession>>,
 > = OnceLock::new();
 
-// A released target is consumed one-shot: once its verified-share quorum has been
-// recombined into a plaintext result, the same target binding can never be
-// released again, even under a fresh release verification id or a fresh quorum
-// with different smudging. This in-process registry holds the canonical
-// target-binding key of every target a finish has released and enforces that
-// bound. Persistent consumed-state across process restarts remains an open
-// obligation (see SEC-002).
+// A successful finish consumes the canonical target-binding key for this
+// process, preventing another release under any verification id or smudging
+// quorum. A process restart clears the registry.
 static TARGET_RESULT_RELEASE_CONSUMED_TARGETS: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
 
 pub(super) struct TargetDecryptionResultReleaseBeginInput<'a> {
@@ -38,6 +34,7 @@ pub(super) struct TargetDecryptionResultReleaseFinishInput<'a> {
 }
 
 struct VerifiedTargetShareRelease {
+    roster_position: usize,
     interpolation_point: u64,
     target_id_partials: Vec<Vec<u64>>,
     target_order_partials: Vec<Vec<u64>>,
@@ -49,8 +46,7 @@ struct TargetResultReleaseSession {
     target_accepted: TargetAcceptedBinding,
     target_ciphertexts: TargetCiphertextPair,
     target_share_profile: TargetShareProfile,
-    seen_roster_positions: BTreeSet<u64>,
-    seen_interpolation_points: BTreeSet<u64>,
+    seen_roster_positions: BTreeSet<usize>,
     verified_shares: Vec<VerifiedTargetShareRelease>,
 }
 
@@ -60,11 +56,8 @@ pub(super) fn begin_target_decryption_result_release(
     let release_verification_id =
         target_result_release_verification_id(input.release_verification_id)?.to_string();
     validate_target_result_release_profile(input.target_share_profile)?;
-    let consumption_key = target_release_consumption_key(
-        input.setup_binding,
-        input.target_accepted,
-        input.target_ciphertexts,
-    )?;
+    let consumption_key =
+        target_release_consumption_key(input.setup_binding, input.target_accepted)?;
     // Reject a target that a prior release already consumed before opening a new
     // session. This is an early check; finish holds the registry lock across the
     // recombination and is the authoritative one-shot gate.
@@ -105,7 +98,6 @@ pub(super) fn begin_target_decryption_result_release(
             target_ciphertexts: input.target_ciphertexts.clone(),
             target_share_profile: input.target_share_profile.clone(),
             seen_roster_positions: BTreeSet::new(),
-            seen_interpolation_points: BTreeSet::new(),
             verified_shares: Vec::with_capacity(input.target_share_profile.decryption_share_quorum),
         },
     );
@@ -114,7 +106,7 @@ pub(super) fn begin_target_decryption_result_release(
         "releaseVerificationId": release_verification_id,
         "setupPackageHash": input.setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": input.target_accepted.target_accepted_record_hash,
-        "targetDecryptionCiphertextHash": input.target_ciphertexts.target_ciphertext_hash,
+        "targetCiphertextHash": input.target_accepted.target_ciphertext_hash,
         "targetShareProfileHash": input.target_share_profile.hash,
         "requiredShareCount": input.target_share_profile.decryption_share_quorum,
     }))
@@ -176,11 +168,8 @@ pub(super) fn finish_target_decryption_result_release(
         session.verified_shares.len(),
     )?;
 
-    let consumption_key = target_release_consumption_key(
-        &session.setup_binding,
-        &session.target_accepted,
-        &session.target_ciphertexts,
-    )?;
+    let consumption_key =
+        target_release_consumption_key(&session.setup_binding, &session.target_accepted)?;
     // Hold the consumed-target registry across the check, the recombination, and
     // the insert so the one-shot property is race-free: two finishes that both
     // reached quorum for the same target serialize here, the first recombines and
@@ -230,20 +219,11 @@ fn absorb_target_result_release_share(
         &session.target_share_profile,
         target_share_proof,
     )?;
-    let roster_position = unsigned_at_path(&verified_share.evidence, &["rosterPosition"])?;
+    let roster_position = verified_share.roster_position;
     if !session.seen_roster_positions.insert(roster_position) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
             "target result release share quorum repeats a trustee",
-        ));
-    }
-    if !session
-        .seen_interpolation_points
-        .insert(verified_share.interpolation_point)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "target result release share quorum repeats an interpolation point",
         ));
     }
     let proof_material_root =
@@ -301,22 +281,21 @@ fn target_result_release_consumed_targets() -> &'static Mutex<BTreeSet<String>> 
 }
 
 // The canonical one-shot consumption key for a target release binds the supplied
-// setup-package hash, caller-supplied target-binding hash, and exact target
-// ciphertext-pair hash. These hashes are structurally checked here; this key does
-// not authenticate accepted board or state capabilities. Repeating the same
-// supplied bindings collides on this key. The target-share profile is deliberately
-// excluded, so changing a still-valid (minimum, quorum) profile cannot mint a
-// fresh key and escape the one-shot bound.
+// setup-package hash and canonical accepted-target record. The accepted record
+// already commits to the exact target ciphertext hash. This key does not
+// authenticate accepted board or state capabilities. Repeating the same supplied
+// bindings collides on this key. The target-share profile is deliberately excluded,
+// so changing a still-valid (minimum, quorum) profile cannot mint a fresh key and
+// escape the one-shot bound.
 fn target_release_consumption_key(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "BgvTargetDecryptionResultReleaseConsumptionKey",
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
+        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
     }))
 }
 
@@ -378,7 +357,6 @@ fn release_verified_target_shares(
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
         "targetShareProfileHash": target_share_profile.hash,
         "targetBasisHash": target_accepted.target_basis_hash,
         "topCount": target_ciphertexts.top_count,
@@ -438,15 +416,16 @@ fn verify_target_share_release_entry(
         "targetOrder",
         target_ciphertexts.target_order.level,
     )?;
+    let interpolation_point = participant.interpolation_point()?;
 
     Ok(VerifiedTargetShareRelease {
-        interpolation_point: participant.interpolation_point,
+        roster_position: participant.roster_position,
+        interpolation_point,
         target_id_partials,
         target_order_partials,
         evidence: json!({
             "trusteeIdentity": participant.trustee_identity,
             "rosterPosition": participant.roster_position,
-            "interpolationPoint": participant.interpolation_point,
             "targetDecryptionShareHash": hash_at_path(target_decryption_share, &["targetDecryptionShareHash"])?,
             "proofStatementRoot": hash_at_path(proof_statement, &["proofStatementRoot"])?,
             "proofMaterialRoot": hash_at_path(proof_material, &["proofMaterialRoot"])?,

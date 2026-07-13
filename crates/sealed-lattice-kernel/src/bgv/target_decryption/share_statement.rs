@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn derive_target_decryption_share_proof_statement(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -35,6 +36,7 @@ pub(super) fn derive_target_decryption_share_proof_statement(
     Ok(statement)
 }
 
+#[cfg(test)]
 pub(super) fn verify_target_decryption_share_proof_statement_binding(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -61,17 +63,14 @@ pub(super) fn verify_target_decryption_share_proof_statement_binding(
         target_decryption_share,
     )?;
 
-    // This development introspection command validates only the statement
-    // binding (it errors above on any mismatch); it does not verify the succinct
-    // proof itself, which is the job of the result-release absorb path via
-    // `verify_target_decryption_share_proof_material`. It returns the recomputed
-    // statement root as evidence of the binding it checked, and carries no
-    // self-attested status/verdict/refusal field.
+    // Return the validated, recomputed statement root. Result-release absorption
+    // verifies the associated proof material.
     Ok(json!({
         "proofStatementRoot": hash_at_path(proof_statement, &["proofStatementRoot"])?,
     }))
 }
 
+#[cfg(test)]
 fn target_decryption_share_proof_statement_value(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -81,19 +80,7 @@ fn target_decryption_share_proof_statement_value(
     local_witness: &LocalTargetDecryptionShareWitness,
     target_decryption_share: &Value,
 ) -> CanonicalResult<Value> {
-    let smudging_input_report_hash = hash_at_path(
-        target_decryption_share,
-        &["sharePayload", "smudgingInputReportHash"],
-    )?;
-    let accepted_aggregate_set = setup_binding
-        .aggregate_threshold_commitment_set
-        .as_ref()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "target decryption aggregate opening statement requires the accepted aggregate threshold commitment set",
-            )
-        })?;
+    let accepted_aggregate_set = &setup_binding.aggregate_threshold_commitment_set;
     let credential_bindings = local_witness
         .opening
         .active_credential_bindings
@@ -147,17 +134,12 @@ fn target_decryption_share_proof_statement_value(
         "setupEpoch": setup_binding.setup_epoch,
         "electionManifestHash": setup_binding.election_manifest_hash,
         "targetDecryptionProfileHash": target_accepted.target_decryption_profile_hash,
-        "targetDecryptionProfileBindingHash": setup_binding.target_decryption_profile_binding_hash,
         "targetShareProfileHash": target_share_profile.hash,
         "decryptionThreshold": target_share_profile.decryption_threshold,
         "minimumSharesForInterpolation": target_share_profile.minimum_shares_for_interpolation,
         "decryptionShareQuorum": target_share_profile.decryption_share_quorum,
         "trusteeIdentity": participant.trustee_identity,
         "rosterPosition": participant.roster_position,
-        "boardPosition": participant.board_position,
-        "interpolationPoint": participant.interpolation_point,
-        "recoveryEpoch": participant.recovery_epoch,
-        "deviceEpoch": participant.device_epoch,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetProposalHash": target_accepted.target_proposal_hash,
         "targetPreimageHash": target_accepted.target_preimage_hash,
@@ -166,7 +148,6 @@ fn target_decryption_share_proof_statement_value(
         "evaluatorReplayRecordHash": target_accepted.evaluator_replay_record_hash,
         "targetContextHash": target_accepted.target_context_hash,
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
         "targetCiphertextBindingHash": target_ciphertexts.target_ciphertext_binding_hash,
         "targetIdRoot": target_ciphertexts.target_id_root,
         "targetOrderRoot": target_ciphertexts.target_order_root,
@@ -175,7 +156,6 @@ fn target_decryption_share_proof_statement_value(
         "ringDegree": POLYNOMIAL_DEGREE,
         "targetDecryptionShareHash": hash_at_path(target_decryption_share, &["targetDecryptionShareHash"])?,
         "shareRoot": hash_at_path(target_decryption_share, &["shareRoot"])?,
-        "smudgingInputReportHash": smudging_input_report_hash,
         "smudgingCommitmentBinding": {
             "objectType": "TargetDecryptionSmudgingCommitmentBinding",
             "smudgingCommitmentSetRoot": smudging_commitment_set.root,
@@ -256,12 +236,6 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
             "targetDecryptionProfileHash",
             target_accepted.target_decryption_profile_hash.as_str(),
         ),
-        (
-            "targetDecryptionProfileBindingHash",
-            setup_binding
-                .target_decryption_profile_binding_hash
-                .as_str(),
-        ),
         ("targetShareProfileHash", target_share_profile.hash.as_str()),
         ("trusteeIdentity", participant.trustee_identity.as_str()),
         (
@@ -297,10 +271,6 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
             target_accepted.target_ciphertext_hash.as_str(),
         ),
         (
-            "targetDecryptionCiphertextHash",
-            target_ciphertexts.target_ciphertext_hash.as_str(),
-        ),
-        (
             "targetCiphertextBindingHash",
             target_ciphertexts.target_ciphertext_binding_hash.as_str(),
         ),
@@ -320,13 +290,6 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
         (
             "shareRoot",
             hash_at_path(target_decryption_share, &["shareRoot"])?,
-        ),
-        (
-            "smudgingInputReportHash",
-            hash_at_path(
-                target_decryption_share,
-                &["sharePayload", "smudgingInputReportHash"],
-            )?,
         ),
     ] {
         if field_name == "ceremonyId" || field_name == "trusteeIdentity" {
@@ -365,10 +328,6 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
             target_share_profile.decryption_share_quorum as u64,
         ),
         ("rosterPosition", participant.roster_position as u64),
-        ("boardPosition", participant.board_position as u64),
-        ("interpolationPoint", participant.interpolation_point),
-        ("recoveryEpoch", participant.recovery_epoch),
-        ("deviceEpoch", participant.device_epoch),
         (
             "targetCiphertextLevel",
             target_ciphertexts.target_id.level as u64,
@@ -465,10 +424,6 @@ fn validate_target_decryption_smudging_commitment_set(
             "targetCiphertextHash",
             target_accepted.target_ciphertext_hash.as_str(),
         ),
-        (
-            "targetDecryptionCiphertextHash",
-            target_ciphertexts.target_ciphertext_hash.as_str(),
-        ),
         ("targetShareProfileHash", target_share_profile.hash.as_str()),
         (
             "targetBasisHash",
@@ -544,7 +499,6 @@ fn validate_target_decryption_smudging_commitment_set(
             for polynomial_degree_index in 1..=polynomial_degree {
                 validate_smudging_commitment_record(
                     &records[record_index],
-                    setup_binding,
                     role,
                     rns_limb_index,
                     rns_prime,
@@ -582,7 +536,6 @@ fn validate_target_decryption_smudging_commitment_set(
 
 fn validate_smudging_commitment_record(
     record: &Value,
-    setup_binding: &SetupBinding,
     expected_role: &str,
     expected_limb_index: usize,
     expected_rns_prime: u64,
@@ -619,12 +572,7 @@ fn validate_smudging_commitment_record(
         "target decryption smudging commitment polynomial degree",
     )?;
     let commitment = value_at_path(record, &["commitment"])?;
-    validate_smudging_commitment_shape(
-        commitment,
-        setup_binding,
-        expected_limb_index,
-        expected_rns_prime,
-    )?;
+    validate_smudging_commitment_shape(commitment, expected_limb_index, expected_rns_prime)?;
     let commitment_root = derive_canonical_object_hash(commitment)?;
     compare_hash_field(
         record,
@@ -636,7 +584,6 @@ fn validate_smudging_commitment_record(
 
 fn validate_smudging_commitment_shape(
     commitment: &Value,
-    _setup_binding: &SetupBinding,
     expected_limb_index: usize,
     expected_rns_prime: u64,
 ) -> CanonicalResult<()> {
@@ -690,30 +637,13 @@ fn validate_aggregate_opening_statement_binding(
         &setup_binding.public_matrix_seed_hash,
         "target decryption aggregate opening binding public matrix seed hash",
     )?;
-    let accepted_share_linkage_statement_root = setup_binding
-        .share_linkage_statement_root
-        .as_ref()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "target decryption aggregate opening binding requires the accepted share-linkage statement",
-            )
-        })?;
     compare_hash_field(
         binding,
         "shareLinkageStatementRoot",
-        accepted_share_linkage_statement_root,
+        &setup_binding.share_linkage_statement_root,
         "target decryption aggregate opening binding share-linkage statement root",
     )?;
-    let accepted_aggregate_set = setup_binding
-        .aggregate_threshold_commitment_set
-        .as_ref()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "target decryption aggregate opening binding requires the accepted aggregate threshold commitment set",
-            )
-        })?;
+    let accepted_aggregate_set = &setup_binding.aggregate_threshold_commitment_set;
     compare_hash_field(
         binding,
         "aggregateThresholdCommitmentRoot",

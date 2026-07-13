@@ -76,7 +76,6 @@ const mobileBrowserTestGlobs = [
     'packages/sdk/tests/browser/election-foundation-public-api.browser.test.ts',
     'packages/wasm/tests/browser/canonical-stream-runtime.browser.test.ts',
     'packages/wasm/tests/browser/local-storage-root-worker-kernel.browser.test.ts',
-    'packages/wasm/tests/browser/owned-kernel-worker-channel.browser.test.ts',
     'packages/wasm/tests/browser/state-verifier-runtime.browser.test.ts',
 ] as const;
 
@@ -164,7 +163,6 @@ const mobileBrowserInstances: BrowserInstanceOption[] = [
 ];
 
 type NodeProjectInput = {
-    readonly disableConsoleIntercept?: boolean;
     readonly exclude?: readonly string[];
     readonly fileParallelism?: boolean;
     readonly include: readonly string[];
@@ -173,7 +171,6 @@ type NodeProjectInput = {
 };
 
 const makeNodeProject = ({
-    disableConsoleIntercept,
     exclude,
     fileParallelism,
     include,
@@ -190,9 +187,6 @@ const makeNodeProject = ({
             ? {}
             : { execArgv: nodeDiagnosticReportArguments }),
         ...(fileParallelism === undefined ? {} : { fileParallelism }),
-        ...(disableConsoleIntercept === undefined
-            ? {}
-            : { disableConsoleIntercept }),
         testTimeout,
         hookTimeout: nodeHookTimeoutMs,
     },
@@ -202,14 +196,12 @@ type BrowserProjectInput = {
     readonly include: readonly string[];
     readonly instances: BrowserInstanceOption[];
     readonly projectName: string;
-    readonly provider?: ReturnType<typeof playwright>;
 };
 
 const makeBrowserProject = ({
     include,
     instances,
     projectName,
-    provider = playwright(),
 }: BrowserProjectInput): UserWorkspaceConfig => ({
     resolve: testResolve,
     test: {
@@ -230,7 +222,7 @@ const makeBrowserProject = ({
                 port: browserServerBasePort,
                 strictPort: false,
             },
-            provider,
+            provider: playwright(),
             headless: true,
             instances,
             ...(testAttachmentDirectoryPath === undefined
@@ -259,7 +251,6 @@ export default defineConfig({
     },
     resolve: testResolve,
     test: {
-        alias: rootPrivateAliases,
         ...(testResultFilePath === undefined
             ? {
                   reporters: [

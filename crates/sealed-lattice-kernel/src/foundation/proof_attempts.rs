@@ -16,6 +16,13 @@ pub enum ProofFamily {
     PairedTargetShare = 0x1621,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProofPrivateCoinClassification {
+    PublicOnly,
+    ResetSafeSecretBearing,
+    OrdinarySecretBearing,
+}
+
 impl ProofFamily {
     pub const ALL: [Self; 12] = [
         Self::SourceBatchedVerifiableSecretSharingLinkage,
@@ -53,6 +60,23 @@ impl ProofFamily {
             _ => None,
         }
     }
+
+    pub const fn private_coin_classification(self) -> ProofPrivateCoinClassification {
+        match self {
+            Self::CollectivePublicKeyAggregate
+            | Self::RelinearizationRoundOneAggregate
+            | Self::EvaluatorKeyAggregate => ProofPrivateCoinClassification::PublicOnly,
+            Self::BallotValidity => ProofPrivateCoinClassification::OrdinarySecretBearing,
+            Self::SourceBatchedVerifiableSecretSharingLinkage
+            | Self::AggregateThresholdShare
+            | Self::SameSecretLinkage
+            | Self::PublicKeyShare
+            | Self::RelinearizationRoundOne
+            | Self::RelinearizationRoundTwo
+            | Self::GaloisKeyShare
+            | Self::PairedTargetShare => ProofPrivateCoinClassification::ResetSafeSecretBearing,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -68,5 +92,33 @@ mod tests {
             );
         }
         assert_eq!(ProofFamily::from_statement_schema_identifier(0), None);
+    }
+
+    #[test]
+    fn private_coin_classification_is_closed_for_every_family() {
+        let public_only_count = ProofFamily::ALL
+            .iter()
+            .filter(|family| {
+                family.private_coin_classification() == ProofPrivateCoinClassification::PublicOnly
+            })
+            .count();
+        let reset_safe_count = ProofFamily::ALL
+            .iter()
+            .filter(|family| {
+                family.private_coin_classification()
+                    == ProofPrivateCoinClassification::ResetSafeSecretBearing
+            })
+            .count();
+        let ordinary_count = ProofFamily::ALL
+            .iter()
+            .filter(|family| {
+                family.private_coin_classification()
+                    == ProofPrivateCoinClassification::OrdinarySecretBearing
+            })
+            .count();
+        assert_eq!(
+            (public_only_count, reset_safe_count, ordinary_count),
+            (3, 8, 1)
+        );
     }
 }

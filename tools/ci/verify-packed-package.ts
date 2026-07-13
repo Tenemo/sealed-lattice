@@ -633,11 +633,6 @@ const runPackedPackageSmoke = async (
                 .update(tarballBytes)
                 .digest('hex'),
         };
-        await writeFile(
-            path.join(runLog.runDirectoryPath, 'package-smoke-evidence.json'),
-            `${JSON.stringify(packageEvidence, null, 2)}\n`,
-            'utf8',
-        );
         runLog.writeEvent({
             details: packageEvidence,
             eventType: 'package-smoke-evidence-recorded',

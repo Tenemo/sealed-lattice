@@ -1,11 +1,10 @@
 import path from 'node:path';
 
-import {
-    createFocusedRustTestMatchTracker,
-    resolveFocusedRustTestRunResult,
-} from './focused-rust-test-match.js';
 import { withLocalHeavyLaneLease } from './heavy-lane-lease.js';
-import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
+import {
+    createHeavyTestProgressReporter,
+    resolveFocusedRustTestRunResult,
+} from './heavy-test-progress.js';
 import {
     runWithLocalRunLog,
     safeLogSlug,
@@ -17,49 +16,12 @@ import {
     resolveProcessMemoryLimitGigabytes,
     type ProcessMemoryGuard,
 } from './process-memory-guard.js';
-import {
-    runCommandsInSeries,
-    type CommandInvocation,
-    type CommandRunObserver,
-} from './run-command.js';
+import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
 import {
     acceptedSetupTestModulePattern,
     normalizeRustTestFilter,
 } from './rust-kernel-test-arguments.js';
-
-// One implementation for the Rust accepted-setup proof-test runs. The heavy
-// accepted-setup suite contains the routine tests in the accepted-setup test
-// module, including its ignored proof tests, and shares one memoized package
-// fixture. The ten-participant proof-bearing evidence test is deliberately
-// excluded: it has a dedicated exact-filter command so routine proof changes
-// do not regenerate the maximum-roster corpus. The
-// entrypoint also accepts a single positional test or file-stem filter for a
-// focused local run. The default mode is
-// accelerated local execution. GitHub CI passes `--ci` to request the
-// conservative prove-fresh run:
-//
-//   default (no positional filter): accelerated local runs. They build the
-//     accepted-setup test module in a pinned warm target directory
-//     (`target/accepted-setup-accelerated/`), keep incremental compilation on,
-//     resume deterministic proof checkpoints from `temp/test-checkpoints/`, and
-//     run under a hard process-memory ceiling with serialized libtest, prover,
-//     and Rayon execution. Run logs stay under `logs/`; proof checkpoints stay
-//     under `temp/test-checkpoints/`.
-//
-//   --ci: authoritative CI-style runs. They build the accepted-setup test
-//     module cleanly in the shared `target/` (CARGO_INCREMENTAL=0), prove every
-//     proof family fresh (no checkpoint resume), under the same hard memory
-//     ceiling and serialized execution used by local runs.
-//
-//   <filter>: the fast developer inner loop. It runs only the filtered test or
-//     module in a separate pinned `target/accepted-setup-focused/`
-//     (CARGO_INCREMENTAL=1) so an edit recompiles incrementally (measured ~16s
-//     versus ~44s for a full rebuild) without contending for the gate's build
-//     lock, and resumes the
-//     on-disk proof checkpoints so each family's corpus loads from
-//     `temp/test-checkpoints/` instead of being re-proved. That trades the
-//     authoritative prove-fresh guarantee for speed.
 
 export { acceptedSetupTestModulePattern };
 
@@ -337,26 +299,6 @@ const writeRunnerSetupMessages = (
     }
 };
 
-const combineCommandRunObservers = (
-    observers: readonly CommandRunObserver[],
-): CommandRunObserver => ({
-    onCommandExit: (event): void => {
-        for (const observer of observers) {
-            observer.onCommandExit?.(event);
-        }
-    },
-    onCommandOutput: (event): void => {
-        for (const observer of observers) {
-            observer.onCommandOutput?.(event);
-        }
-    },
-    onCommandStart: (event): void => {
-        for (const observer of observers) {
-            observer.onCommandStart?.(event);
-        }
-    },
-});
-
 export const buildGuardedRustKernelDiagnosticFileNames = (input: {
     readonly commandIndex: number;
     readonly progressLabel: string;
@@ -396,10 +338,6 @@ export const runGuardedRustKernelCommands = async (input: {
             if (exitCode !== 0) return exitCode;
 
             for (const [commandIndex, command] of input.commands.entries()) {
-                const testMatchTracker =
-                    command.expectedTestFilter === undefined
-                        ? undefined
-                        : createFocusedRustTestMatchTracker();
                 const diagnosticFileNames =
                     buildGuardedRustKernelDiagnosticFileNames({
                         commandIndex,
@@ -425,13 +363,7 @@ export const runGuardedRustKernelCommands = async (input: {
                 });
                 try {
                     exitCode = await runCommandsInSeries([guardedCommand], {
-                        observer:
-                            testMatchTracker === undefined
-                                ? progressReporter.observer
-                                : combineCommandRunObservers([
-                                      progressReporter.observer,
-                                      testMatchTracker.observer,
-                                  ]),
+                        observer: progressReporter.observer,
                         outputMode: 'inherit',
                         runLog,
                         terminalOutputFilter:
@@ -440,13 +372,10 @@ export const runGuardedRustKernelCommands = async (input: {
                 } finally {
                     progressReporter.stop();
                 }
-                if (
-                    testMatchTracker !== undefined &&
-                    command.expectedTestFilter !== undefined
-                ) {
+                if (command.expectedTestFilter !== undefined) {
                     const focusedRunResult = resolveFocusedRustTestRunResult({
                         commandExitCode: exitCode,
-                        matchedTestCount: testMatchTracker.matchedTestCount(),
+                        executedTestCount: progressReporter.executedTestCount(),
                         runnerName: input.laneLabel,
                         testFilter: command.expectedTestFilter,
                     });

@@ -1,9 +1,7 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+import { foundationProfile } from '@sealed-lattice/types';
 
-import {
-    canonicalGeneratedSetupProofMaterialDescriptor,
-    setupProofTransportChunkSizeBytes,
-} from '../setup-proof-material-transport.js';
+import { canonicalGeneratedSetupProofMaterialDescriptor } from '../setup-proof-material-transport.js';
 
 import {
     type EvaluationKeyShareComponentMaterialChunkSource,
@@ -163,7 +161,7 @@ class BoundedComponentMaterialReader {
             return;
         }
         const expectedByteLength = Math.min(
-            setupProofTransportChunkSizeBytes,
+            foundationProfile.streamChunkByteLength,
             this.#totalByteLength - this.#consumedByteLength,
         );
         const chunk = await this.#pullChunk({
@@ -281,14 +279,7 @@ const componentBVectorsFromMaterial = async (
             }
             if (
                 nonNegativeIntegerRecordField(entry, 'rnsPrime', entryPath) !==
-                    qSharePrimes[rnsLimbIndex] ||
-                entry.component !== 'b' ||
-                nonNegativeIntegerRecordField(
-                    entry,
-                    'coefficientByteLength',
-                    entryPath,
-                ) !==
-                    ringDegree * 8
+                qSharePrimes[rnsLimbIndex]
             ) {
                 throw new Error(
                     `${entryPath} component vector metadata does not match the proof level.`,
@@ -381,6 +372,11 @@ const componentBVectorsFromMaterial = async (
         matchingMaterials[0],
         'componentMaterial',
     );
+    if (componentMaterial.proofFamily !== proofFamily) {
+        throw new Error(
+            `${objectPath} transported component material must match its proof family.`,
+        );
+    }
     const descriptorBytes = componentMaterial.descriptorBytes;
     if (
         !ArrayBuffer.isView(descriptorBytes) ||
@@ -394,7 +390,7 @@ const componentBVectorsFromMaterial = async (
     }
     const componentMaterialSource =
         componentMaterialSourcesByRoot.get(expectedMaterialRoot);
-    if (componentMaterialSource?.proofFamily !== proofFamily) {
+    if (componentMaterialSource === undefined) {
         throw new Error(
             `${objectPath} transported component material must match exactly one bounded component source.`,
         );
@@ -402,8 +398,8 @@ const componentBVectorsFromMaterial = async (
     usedComponentMaterialRoots.add(expectedMaterialRoot);
     const totalByteLength =
         evaluationKeyShareComponentMaterialMagic.byteLength +
-        4 * 8 +
-        digitCount * digitCount * (4 * 8 + ringDegree * 8);
+        2 * 8 +
+        digitCount * digitCount * ringDegree * 8;
     if (!Number.isSafeInteger(totalByteLength) || totalByteLength <= 0) {
         throw new Error(
             `${objectPath} transported component material length is outside the JavaScript safe integer range.`,
@@ -431,18 +427,8 @@ const componentBVectorsFromMaterial = async (
         }
     }
     magic.fill(0);
-    const [
-        decodedLevel,
-        decodedRingDegree,
-        decodedDigitCount,
-        decodedLimbCount,
-    ] = await reader.readUnsignedWords(4);
-    if (
-        decodedLevel !== level ||
-        decodedRingDegree !== ringDegree ||
-        decodedDigitCount !== digitCount ||
-        decodedLimbCount !== digitCount
-    ) {
+    const [decodedLevel, decodedRingDegree] = await reader.readUnsignedWords(2);
+    if (decodedLevel !== level || decodedRingDegree !== ringDegree) {
         throw new Error(
             'transported component material shape does not match the share record.',
         );
@@ -455,22 +441,6 @@ const componentBVectorsFromMaterial = async (
             rnsLimbIndex < digitCount;
             rnsLimbIndex += 1
         ) {
-            const [
-                decodedDigitIndex,
-                decodedRnsLimbIndex,
-                decodedRnsPrime,
-                decodedCoefficientCount,
-            ] = await reader.readUnsignedWords(4);
-            if (
-                decodedDigitIndex !== digitIndex ||
-                decodedRnsLimbIndex !== rnsLimbIndex ||
-                decodedRnsPrime !== qSharePrimes[rnsLimbIndex] ||
-                decodedCoefficientCount !== ringDegree
-            ) {
-                throw new Error(
-                    'transported component material record order or metadata is invalid.',
-                );
-            }
             const coefficients = await reader.readUnsignedWords(ringDegree);
             if (
                 coefficients.some(
@@ -603,10 +573,6 @@ export const createTrusteeEvaluationKeyProofs = async (
     input: TrusteeEvaluationKeyProofsInput,
 ): Promise<TrusteeEvaluationKeyProofMaterialTransport> => {
     const trusteeReferences = validateCommonInput(input);
-    assertProtocolHash(
-        input.keySwitchDecompositionHash,
-        'keySwitchDecompositionHash',
-    );
     assertContextMatches(
         input.setupContext,
         input.relinearizationKeyShareRounds,
@@ -990,7 +956,6 @@ export const createTrusteeEvaluationKeyProofs = async (
                     input.evaluatorKeySchedule.requiredGaloisSetHash,
                 evaluatorKeyScheduleRoot:
                     input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                keySwitchDecompositionHash: input.keySwitchDecompositionHash,
                 sourceConstantCoefficientCommitmentRoot:
                     sourceConstantCoefficientCommitmentRoot,
             },
@@ -1043,7 +1008,6 @@ export const createTrusteeEvaluationKeyProofs = async (
         });
         const recordWithoutRoot = {
             objectType: 'TrusteeEvaluationKeyProof',
-            proofFamily: trusteeEvaluationKeyProofFamily,
             ...contextFields(input.setupContext),
             trusteeIdentity: trusteeReference.trusteeIdentity,
             trusteeRosterPosition: trusteeReference.trusteeRosterPosition,
@@ -1078,14 +1042,12 @@ export const createTrusteeEvaluationKeyProofs = async (
     }));
     const proofSetWithoutRoot = {
         objectType: 'TrusteeEvaluationKeyProofSet',
-        proofFamily: trusteeEvaluationKeyProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
         evaluatorKeyScheduleRoot:
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
         requiredGaloisSetHash: input.evaluatorKeySchedule.requiredGaloisSetHash,
-        keySwitchDecompositionHash: input.keySwitchDecompositionHash,
         publicKeyShareSetRoot: input.evaluatorKeySchedule.publicKeyShareSetRoot,
         publicKeyShareSuccinctProofSetRoot:
             input.publicKeyShareSuccinctProofSetRoot,
@@ -1119,7 +1081,7 @@ export const createTrusteeEvaluationKeyProofs = async (
     };
 };
 
-export type TrusteeEvaluationKeyProofMaterialTransport = Readonly<{
+type TrusteeEvaluationKeyProofMaterialTransport = Readonly<{
     readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;
     readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
 }>;

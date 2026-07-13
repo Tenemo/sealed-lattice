@@ -433,7 +433,7 @@ export const snapshotSetupPackageVerificationInput = (
                 'evaluationKeyShareComponentMaterialChunkSources',
             ),
             'evaluationKeyShareComponentMaterialChunkSources',
-            ['keySwitchComponentMaterialRoot', 'proofFamily'],
+            ['keySwitchComponentMaterialRoot'],
             state,
         );
     const publicEvaluationKeyMaterialChunkSources =
@@ -717,9 +717,9 @@ const streamEvaluationKeyShareComponentMaterial = async (
             );
         }
         const source = sourcesByRoot.get(root);
-        if (source?.proofFamily !== componentMaterial.proofFamily) {
+        if (source === undefined) {
             throw new TypeError(
-                'An evaluation-key component material source must match exactly one transported reference and proof family.',
+                'An evaluation-key component material source must match exactly one transported reference.',
             );
         }
         await runtime.readMaterial({
@@ -880,17 +880,6 @@ export const prepareSnapshottedSetupPackageVerificationInputForKernel = async (
 
     return setupPackageVerificationInput(descriptorSnapshotInput);
 };
-
-export const prepareSetupPackageVerificationInputForKernel = (
-    kernel: PublishedSdkKernel,
-    acceptedSetupSession: AcceptedSetupSession,
-    input: VerifySetupPackageInput,
-): Promise<KernelSetupPackageVerificationInput> =>
-    prepareSnapshottedSetupPackageVerificationInputForKernel(
-        kernel,
-        snapshotSetupPackageVerificationInput(input),
-        acceptedSetupSession,
-    );
 
 export const snapshotPrivateVssShareVerificationInput = (
     input: VerifyPrivateVssShareInput,

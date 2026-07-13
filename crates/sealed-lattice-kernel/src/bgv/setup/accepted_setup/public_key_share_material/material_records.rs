@@ -110,11 +110,6 @@ pub(super) fn decode_public_key_share_material_bindings(
                     != Some(modulus)
                 || share_hashes
                     .get(rns_limb_index)
-                    .and_then(|share_hash| share_hash.get("component"))
-                    .and_then(Value::as_str)
-                    != Some("b_i")
-                || share_hashes
-                    .get(rns_limb_index)
                     .and_then(|share_hash| share_hash.get("coefficientVectorHash512"))
                     .and_then(Value::as_str)
                     != Some(coefficient_hash.as_str())
@@ -127,8 +122,6 @@ pub(super) fn decode_public_key_share_material_bindings(
             limb_records.push(json!({
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": modulus,
-                "component": "b_i",
-                "coefficientByteLength": ring_degree * 8,
                 "coefficientVectorHash512": coefficient_hash,
                 "coefficientsLeHex": coefficient_vector_le_hex(&transported_limb.coefficients),
             }));
@@ -136,7 +129,6 @@ pub(super) fn decode_public_key_share_material_bindings(
         }
         let material_record = json!({
             "objectType": PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE,
-            "proofFamily": "public-key-share",
             "materialEncoding": PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
             "ceremonyId": value_string(setup_context, "ceremonyId")?,
             "manifestHash": value_string(setup_context, "manifestHash")?,
@@ -199,14 +191,6 @@ pub(in super::super) fn verify_public_key_share_material_set(
         ));
     }
     verify_context_fields_match(material_set, setup_context, "publicKeyShareMaterial")?;
-    for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
-        if material_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("publicKeyShareMaterial.{field_name} must be {expected_value}"),
-            ));
-        }
-    }
     let material_encoding = value_string(material_set, "materialEncoding")?;
     if ![
         PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
@@ -335,19 +319,15 @@ pub(super) fn verify_public_key_share_material_record(
         setup_context,
         "publicKeyShareMaterial.materialRecords",
     )?;
-    for (field_name, expected_value) in [
-        ("proofFamily", "public-key-share"),
-        (
-            "materialEncoding",
-            "embedded-full-public-key-share-coefficients",
-        ),
-    ] {
-        if material_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("public-key share material {field_name} must be {expected_value}"),
-            ));
-        }
+    if material_record
+        .get("materialEncoding")
+        .and_then(Value::as_str)
+        != Some("embedded-full-public-key-share-coefficients")
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "public-key share material materialEncoding must be embedded-full-public-key-share-coefficients",
+        ));
     }
     if material_record.get("ringDegree").and_then(Value::as_u64) != Some(ring_degree as u64)
         || material_record.get("rnsLimbCount").and_then(Value::as_u64)
@@ -426,9 +406,6 @@ pub(super) fn verify_public_key_share_material_record(
     for (rns_limb_index, limb) in limbs.iter().enumerate() {
         if limb.get("rnsLimbIndex").and_then(Value::as_u64) != Some(rns_limb_index as u64)
             || limb.get("rnsPrime").and_then(Value::as_u64) != Some(DATA_PRIMES[rns_limb_index])
-            || limb.get("component").and_then(Value::as_str) != Some("b_i")
-            || limb.get("coefficientByteLength").and_then(Value::as_u64)
-                != Some((ring_degree * 8) as u64)
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,

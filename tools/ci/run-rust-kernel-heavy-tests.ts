@@ -1,21 +1,16 @@
 import path from 'node:path';
 
-import {
-    createFocusedRustTestMatchTracker,
-    resolveFocusedRustTestRunResult,
-} from './focused-rust-test-match.js';
 import { withLocalHeavyLaneLease } from './heavy-lane-lease.js';
-import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
+import {
+    createHeavyTestProgressReporter,
+    resolveFocusedRustTestRunResult,
+} from './heavy-test-progress.js';
 import { runWithLocalRunLog } from './local-run-log.js';
 import {
     createProcessMemoryGuard,
     type ProcessMemoryGuard,
 } from './process-memory-guard.js';
-import {
-    runCommandsInSeries,
-    type CommandInvocation,
-    type CommandRunObserver,
-} from './run-command.js';
+import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
 import {
     cargoTestArgumentsForRustKernelHeavy,
@@ -29,20 +24,6 @@ export type ParsedRustKernelHeavyArguments = Readonly<{
 
 const usage = 'Usage: run-rust-kernel-heavy-tests.ts [<heavy Rust test name>].';
 let rustKernelHeavyProcessMemoryGuard: ProcessMemoryGuard | undefined;
-
-const combineObservers = (
-    observers: readonly CommandRunObserver[],
-): CommandRunObserver => ({
-    onCommandExit: (event): void => {
-        for (const observer of observers) observer.onCommandExit?.(event);
-    },
-    onCommandOutput: (event): void => {
-        for (const observer of observers) observer.onCommandOutput?.(event);
-    },
-    onCommandStart: (event): void => {
-        for (const observer of observers) observer.onCommandStart?.(event);
-    },
-});
 
 const getRustKernelHeavyProcessMemoryGuard = (): ProcessMemoryGuard => {
     rustKernelHeavyProcessMemoryGuard ??= createProcessMemoryGuard({
@@ -128,7 +109,6 @@ export const runRustKernelHeavyTests = async (
                     testFilter: parsedArguments.testFilter,
                 });
             }
-            const testMatchTracker = createFocusedRustTestMatchTracker();
             const progressReporter = createHeavyTestProgressReporter({
                 eventFilePath: path.join(
                     runLog.runDirectoryPath,
@@ -154,10 +134,7 @@ export const runRustKernelHeavyTests = async (
                         if (exitCode !== 0) return exitCode;
 
                         exitCode = await runCommandsInSeries([command], {
-                            observer: combineObservers([
-                                progressReporter.observer,
-                                testMatchTracker.observer,
-                            ]),
+                            observer: progressReporter.observer,
                             outputMode: 'inherit',
                             runLog,
                             terminalOutputFilter:
@@ -165,8 +142,8 @@ export const runRustKernelHeavyTests = async (
                         });
                         const runResult = resolveFocusedRustTestRunResult({
                             commandExitCode: exitCode,
-                            matchedTestCount:
-                                testMatchTracker.matchedTestCount(),
+                            executedTestCount:
+                                progressReporter.executedTestCount(),
                             runnerName: 'Rust kernel heavy',
                             testFilter: parsedArguments.testFilter,
                         });

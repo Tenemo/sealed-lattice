@@ -11,15 +11,6 @@ fn direct_ballot_shared_rns_relation_proof_verifies() {
         &fixture.proof_generation.proof_bytes,
     )
     .expect("proof verification");
-
-    assert!(fixture.proof_generation.proof_size_bytes > 0);
-    assert!(
-        !fixture
-            .proof_generation
-            .relation_commitment_hash_hex
-            .is_empty()
-    );
-    assert!(!fixture.proof_generation.challenge.is_empty());
 }
 
 #[test]

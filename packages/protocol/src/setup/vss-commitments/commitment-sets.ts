@@ -14,12 +14,12 @@ import {
 } from '../setup-proof-material-transport.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
-export type VssCommittedMaterialCommitmentRole =
+type VssCommittedMaterialCommitmentRole =
     | 'coefficient'
     | 'recipient-share'
     | 'aggregate-threshold-share';
 
-export type VssCommittedMaterialCommitmentField = {
+type VssCommittedMaterialCommitmentField = {
     readonly commitmentModulusIndex: number;
     readonly modulus: number;
     readonly materialRootHex: string;
@@ -40,7 +40,7 @@ export type VssCommittedMaterialCommitmentValue = {
     readonly commitmentFields: readonly VssCommittedMaterialCommitmentField[];
 };
 
-export type VssCommittedMaterialCommitmentComputation = {
+type VssCommittedMaterialCommitmentComputation = {
     readonly commitment: VssCommittedMaterialCommitmentValue;
     readonly commitmentRoot: ProtocolHash;
     readonly openingRoot: ProtocolHash;
@@ -83,7 +83,7 @@ type VssCommittedMaterialSeedProvider = (
     input: VssCommittedMaterialSeedRequest,
 ) => string;
 
-export type VssShareLinkageProofContext = {
+type VssShareLinkageProofContext = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
@@ -99,14 +99,12 @@ export type VssShareLinkageProofContext = {
 // The committed-material commitments carry no algebraic opening randomness,
 // so the randomness arrays are always empty; the bound-message seed and
 // context-hash arrays let the prover regenerate the committed trees.
-export type VssShareLinkageProofInput = {
+type VssShareLinkageProofInput = {
     readonly context: VssShareLinkageProofContext;
     readonly ringDegree: number;
     readonly vssShareLinkage: Record<string, unknown>;
     readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-    readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
     readonly recipientShareMessagesByItem: readonly (readonly number[])[];
-    readonly recipientShareOpeningRandomnessByItem: readonly (readonly (readonly number[])[])[];
     readonly carryWitnessesByItem: readonly (readonly number[])[];
     readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
     readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
@@ -120,10 +118,6 @@ export type VssGeneratedCanonicalProofMaterial = {
     readonly canonicalMaterial: CanonicalGeneratedSetupProofMaterial;
 };
 
-export type VssShareLinkageProofComputer = (
-    input: VssShareLinkageProofInput,
-) => Promise<VssGeneratedCanonicalProofMaterial>;
-
 // Aggregate-threshold proofs use the share-linkage relation, but their local
 // setup path receives only the canonical stream reference and its external
 // descriptor. The proof bytes never cross the Rust/WASM boundary as a
@@ -136,7 +130,7 @@ export type VssAggregateThresholdProofComputer = (
 // accepted-setup verifier recomputes canonical roots over, so downstream
 // builders (share-linkage statement and proof material) read them type-safely
 // instead of casting through untyped records.
-export type VssPublicCoefficientCommitment = {
+type VssPublicCoefficientCommitment = {
     readonly objectType: 'VssPublicCoefficientCommitment';
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -149,7 +143,7 @@ export type VssPublicCoefficientCommitment = {
     readonly commitment: VssCommittedMaterialCommitmentValue;
 };
 
-export type VssPublicSourceCoefficientCommitments = {
+type VssPublicSourceCoefficientCommitments = {
     readonly objectType: string;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -169,7 +163,7 @@ export type VssPublicCoefficientCommitmentSet = {
     readonly coefficientCommitmentRoot: ProtocolHash;
 };
 
-export type VssPublicRecipientShareCommitment = {
+type VssPublicRecipientShareCommitment = {
     readonly objectType: 'VssPublicRecipientShareCommitment';
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -183,7 +177,7 @@ export type VssPublicRecipientShareCommitment = {
     readonly commitment: VssCommittedMaterialCommitmentValue;
 };
 
-export type VssPublicSourceRecipientShareCommitments = {
+type VssPublicSourceRecipientShareCommitments = {
     readonly objectType: string;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -201,7 +195,7 @@ export type VssPublicRecipientShareCommitmentSet = {
     readonly recipientShareCommitmentRoot: ProtocolHash;
 };
 
-export type VssPublicAggregateThresholdCommitment = {
+type VssPublicAggregateThresholdCommitment = {
     readonly objectType: 'VssPublicAggregateThresholdCommitment';
     readonly recipientIdentity: string;
     readonly recipientRosterPosition: number;
@@ -213,11 +207,7 @@ export type VssPublicAggregateThresholdCommitment = {
     readonly commitment: VssCommittedMaterialCommitmentValue;
 };
 
-// The proven "aggregate equals modular sum of the source shares" binding for
-// one aggregate record: a share-linkage proof with a unit evaluation point
-// whose "coefficients" are the source recipient-share commitments and whose
-// "recipient share" is the aggregate commitment.
-export type VssAggregateThresholdProofRecord = {
+type VssAggregateThresholdProofRecord = {
     readonly objectType: 'VssAggregateThresholdProofRecord';
     readonly proofFamily: string;
     readonly recipientRosterPosition: number;
@@ -291,7 +281,7 @@ export type LocalTrusteeVssPublicAggregateThresholdCommitmentBundle = {
     readonly localTrusteeAggregateOpeningCredentialHandoff: LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
 };
 
-export type VssPublicCoefficientOpening = {
+type VssPublicCoefficientOpening = {
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly shamirCoefficientIndex: number;
@@ -825,9 +815,6 @@ const coefficientVectorToLittleEndianHex = (
     return bytesToHex(bytes);
 };
 
-// The aggregate proofs reuse the share-linkage proof family: each one is a
-// unit-evaluation-point share-linkage proof showing the committed threshold
-// share is the modular sum of the committed source recipient shares.
 const vssAggregateThresholdProofFamily = 'vss-share-linkage';
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
@@ -868,9 +855,8 @@ const assertCanonicalAggregateProofMaterial = (
     };
 };
 
-// Fresh prover blinding randomness per aggregate proof record. The proof is
-// zero-knowledge, so this is independent per (recipient, RNS limb) and binds
-// nothing the verifier recomputes.
+// Use independent prover randomness for each recipient and RNS limb. It is not
+// part of the public statement.
 type VssAggregateThresholdProofRandomnessProvider = (input: {
     readonly recipientRosterPosition: number;
     readonly rnsLimbIndex: number;
@@ -891,11 +877,9 @@ type VssPublicAggregateThresholdCredential = {
     readonly record: VssPublicAggregateThresholdCommitment;
 };
 
-// One aggregate threshold proof record: a unit-evaluation-point share-linkage
-// statement whose "coefficients" are the source recipient-share commitments
-// and whose "recipient share" is the aggregate commitment. The semantic record
-// retains only the proof hash and canonical stream material root; the external
-// descriptor travels as its sibling transport material.
+// The unit-evaluation-point relation binds the aggregate commitment as the
+// modular sum of the source recipient-share commitments. The semantic record
+// retains the proof hash and material root; its descriptor remains external.
 const createVssAggregateThresholdProofRecord = async (input: {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
@@ -1010,9 +994,7 @@ const createVssAggregateThresholdProofRecord = async (input: {
         coefficientMessagesByShamirIndex: sourceCredentials.map(
             (credential) => credential.shareValues,
         ),
-        coefficientOpeningRandomnessByShamirIndex: [],
         recipientShareMessagesByItem: [aggregateCredential.aggregateMessage],
-        recipientShareOpeningRandomnessByItem: [],
         carryWitnessesByItem: [aggregateCredential.wrapWitnesses],
         vssCommittedMaterialSeedsByBoundMessage,
         vssCommittedMaterialContextHashesByBoundMessage,

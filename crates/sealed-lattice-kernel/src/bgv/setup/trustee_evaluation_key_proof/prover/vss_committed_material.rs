@@ -1,35 +1,19 @@
 //! Deterministic committed-material trees for the VSS commitment family.
 //!
 //! One tree per commitment field commits a VSS message's canonical digit
-//! columns in exactly the layout the succinct setup proofs open: TRACE_SPLIT
-//! half-columns over the field's trace domain, each masked by a Z_H multiple,
-//! evaluated over the DOMAIN_BLOWUP extension coset, and committed as salted
-//! phase-pair leaves. Binding is SHAKE256 collision resistance of the salted
-//! Merkle root; hiding is the per-pair leaf salt plus the column mask. No
-//! lattice assumption is involved.
+//! columns as masked `TRACE_SPLIT` half-columns over the `DOMAIN_BLOWUP` coset.
+//! Salted phase-pair Merkle leaves bind the extension values; leaf salts and
+//! `Z_H`-multiple column masks hide unopened values.
 //!
-//! Persistence: the mask and salt streams derive deterministically from the
-//! holder's private material seed and the commitment-context hash, so the
-//! holder regenerates byte-identical trees in any later phase (share-linkage
-//! proving, threshold-aggregate opening, same-secret bridging, target
-//! decryption) while nobody else can rebuild or unmask them.
+//! Mask and salt streams derive from the holder's private material seed and the
+//! commitment-context hash, so later phases regenerate byte-identical trees.
 //!
-//! Zero-knowledge budget: every proof that opens one of these trees reveals at
-//! most `2 * LOW_DEGREE_QUERY_COUNT` opened evaluations plus the DEEP points
-//! per column, 339 at the selected parameters. Unlike per-proof witness
-//! columns, a persistent tree is opened by every proof over its lifetime, so
-//! its mask degree carries a dedicated budget instead of the
-//! `column_mask_degree` cap: the accounted lifetime openings are the batched
-//! share-linkage proof, the mu-batched threshold-aggregate opening, and (for
-//! constant-coefficient and threshold-share roles) one downstream opening
-//! (same-secret bridge or target-decryption share), at most three, 1017
-//! opened evaluations. The material columns appear only in linear rows (the
-//! lincheck rows and the Z_H-divisibility binding row), never in the cubic
-//! row-check composition, so the larger mask stays inside the committed
-//! degree bound `COMMITMENT_BOUND_FACTOR * trace` as long as the mask degree
-//! does not exceed the trace size. Development ring sizes whose trace falls
-//! below the budget are not zero-knowledge evidence, matching the existing
-//! witness-mask policy.
+//! A persistent tree is opened by at most three proof flows, each exposing at
+//! most `2 * LOW_DEGREE_QUERY_COUNT` evaluations plus the DEEP points: 1017
+//! evaluations total. At the full trace, the mask cap covers that total; at
+//! every trace it remains at most the trace size. These columns enter only
+//! linear rows, preserving the committed degree bound
+//! `COMMITMENT_BOUND_FACTOR * trace`.
 
 use super::super::evaluation_domain::EvaluationDomainPlan;
 use super::super::merkle_commitment::MerkleDigest;
@@ -48,10 +32,8 @@ const VSS_COMMITTED_MATERIAL_COLUMN_MASK_DOMAIN: &str =
 const VSS_COMMITTED_MATERIAL_LEAF_SALT_DOMAIN: &str =
     "sealed-lattice/setup/vss-committed-material/leaf-salt";
 
-// The dedicated committed-material mask budget: covers the accounted three
-// lifetime openings (3 * 339 = 1017) with a margin of two further openings,
-// and stays under the trace size so the masked column keeps its committed
-// degree bound (see the module documentation).
+// Covers three 339-evaluation opening sets plus two additional sets. The
+// trace-size minimum below preserves the committed degree bound.
 pub(crate) const VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP: usize = 2048;
 
 pub(crate) fn vss_committed_material_column_mask_degree(trace_size: usize) -> usize {

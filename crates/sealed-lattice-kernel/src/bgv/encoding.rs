@@ -1,7 +1,9 @@
+#[cfg(test)]
+use crate::bgv::ntt::forward_negacyclic_ntt;
 use crate::{
     bgv::{
         base_conversion::lift_plaintext_coefficients_to_basis,
-        ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
+        ntt::inverse_negacyclic_ntt,
         parameters::{BgvBasisKind, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         rns::RnsPolynomial,
     },
@@ -52,6 +54,7 @@ pub(crate) fn encode_batch_plaintext_slots(
 
 // Decoding is the inverse of encoding: recover the plaintext coefficients from
 // any limb, then run the forward NTT (coefficients -> slots).
+#[cfg(test)]
 pub(crate) fn decode_batch_plaintext_polynomial(
     polynomial: &RnsPolynomial,
 ) -> CanonicalResult<Vec<u64>> {

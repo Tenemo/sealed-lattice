@@ -17,11 +17,8 @@ import type { CollectiveBgvSetupContext } from '../setup/vss-share-verification-
 
 type JsonRecord = Record<string, unknown>;
 
-const targetDecryptionSmudgingProfileId =
-    'sealed-lattice-target-decryption-zero-share-smudging';
 const targetDecryptionSmudgingSeedHashDomain =
     'sealed-lattice-bgv-rns/target-decryption-smudging-seed';
-const targetDecryptionPlaintextMultiple = 65_537;
 const maximumAggregateOpeningCredentialCount = 17;
 const maximumAggregateOpeningRingDegree = 32_768;
 
@@ -30,25 +27,21 @@ const textEncoder = new TextEncoder();
 type TargetDecryptionSmudgingSeedDerivationInput = Readonly<{
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
-    readonly targetDecryptionCiphertextHash: ProtocolHash;
     readonly targetShareProfile: unknown;
 }>;
 
 type LocalTrusteeTargetDecryptionSmudgingWitness = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeTargetDecryptionSmudgingWitness';
-        readonly profileId: typeof targetDecryptionSmudgingProfileId;
         readonly setupPackageHash: ProtocolHash;
         readonly targetAcceptedRecordHash: ProtocolHash;
         readonly targetContextHash: ProtocolHash;
         readonly targetCiphertextHash: ProtocolHash;
-        readonly targetDecryptionCiphertextHash: ProtocolHash;
         readonly targetShareProfileHash: ProtocolHash;
         readonly targetBasisHash: ProtocolHash;
         readonly trusteeIdentity: string;
         readonly rosterPosition: number;
         readonly interpolationPoint: number;
-        readonly plaintextMultiple: typeof targetDecryptionPlaintextMultiple;
     }
 >;
 
@@ -56,7 +49,6 @@ type LocalTargetDecryptionShareWitnessPreparationInput = Readonly<{
     readonly restoredLocalTargetShareWitness: unknown;
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
-    readonly targetDecryptionCiphertextHash: ProtocolHash;
     readonly targetShareProfile: unknown;
     readonly trusteeIdentity: string;
 }>;
@@ -87,7 +79,6 @@ export type RestoredLocalTargetDecryptionShareWitnessInput = Readonly<{
     readonly storageKeyBytesHex: string;
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
-    readonly targetDecryptionCiphertextHash: ProtocolHash;
     readonly targetShareProfile: unknown;
 }>;
 
@@ -181,14 +172,12 @@ const encoded = (value: string): Uint8Array => textEncoder.encode(value);
 const targetBindingHashes = (
     setupPackageValue: unknown,
     targetAcceptedRecordValue: unknown,
-    targetDecryptionCiphertextHashValue: ProtocolHash,
     targetShareProfileValue: unknown,
 ): Readonly<{
     readonly setupPackageHash: ProtocolHash;
     readonly targetAcceptedRecordHash: ProtocolHash;
     readonly targetContextHash: ProtocolHash;
     readonly targetCiphertextHash: ProtocolHash;
-    readonly targetDecryptionCiphertextHash: ProtocolHash;
     readonly targetShareProfileHash: ProtocolHash;
     readonly targetBasisHash: ProtocolHash;
 }> => {
@@ -201,12 +190,6 @@ const targetBindingHashes = (
         targetShareProfileValue,
         'targetShareProfile',
     );
-    if (!isProtocolHashString(targetDecryptionCiphertextHashValue)) {
-        throw new Error(
-            'targetDecryptionCiphertextHash must be a protocol hash.',
-        );
-    }
-
     return {
         setupPackageHash: deriveCanonicalObjectHash(setupPackage),
         targetAcceptedRecordHash: protocolHashField(
@@ -224,7 +207,6 @@ const targetBindingHashes = (
             'targetCiphertextHash',
             'targetAcceptedRecord',
         ),
-        targetDecryptionCiphertextHash: targetDecryptionCiphertextHashValue,
         targetShareProfileHash: protocolHashField(
             targetShareProfile,
             'targetShareProfileHash',
@@ -657,7 +639,6 @@ export const deriveTargetDecryptionSmudgingSeedHex = (
     const bindingHashes = targetBindingHashes(
         input.setupPackage,
         input.targetAcceptedRecord,
-        input.targetDecryptionCiphertextHash,
         input.targetShareProfile,
     );
 
@@ -666,7 +647,6 @@ export const deriveTargetDecryptionSmudgingSeedHex = (
         encoded(bindingHashes.targetAcceptedRecordHash),
         encoded(bindingHashes.targetContextHash),
         encoded(bindingHashes.targetCiphertextHash),
-        encoded(bindingHashes.targetDecryptionCiphertextHash),
         encoded(bindingHashes.targetShareProfileHash),
         encoded(bindingHashes.targetBasisHash),
     ]);
@@ -683,25 +663,20 @@ const createLocalTrusteeTargetDecryptionSmudgingWitness = (
     const bindingHashes = targetBindingHashes(
         input.setupPackage,
         input.targetAcceptedRecord,
-        input.targetDecryptionCiphertextHash,
         input.targetShareProfile,
     );
 
     return {
         objectType: 'LocalTrusteeTargetDecryptionSmudgingWitness',
-        profileId: targetDecryptionSmudgingProfileId,
         setupPackageHash: bindingHashes.setupPackageHash,
         targetAcceptedRecordHash: bindingHashes.targetAcceptedRecordHash,
         targetContextHash: bindingHashes.targetContextHash,
         targetCiphertextHash: bindingHashes.targetCiphertextHash,
-        targetDecryptionCiphertextHash:
-            bindingHashes.targetDecryptionCiphertextHash,
         targetShareProfileHash: bindingHashes.targetShareProfileHash,
         targetBasisHash: bindingHashes.targetBasisHash,
         trusteeIdentity: participant.trusteeIdentity,
         rosterPosition: participant.rosterPosition,
         interpolationPoint: participant.interpolationPoint,
-        plaintextMultiple: targetDecryptionPlaintextMultiple,
     };
 };
 
@@ -1004,7 +979,6 @@ export const restoreAndPrepareLocalTargetDecryptionShareWitness = async (
         restoredLocalTargetShareWitness,
         setupPackage,
         targetAcceptedRecord,
-        targetDecryptionCiphertextHash: input.targetDecryptionCiphertextHash,
         targetShareProfile: input.targetShareProfile,
         trusteeIdentity,
     });

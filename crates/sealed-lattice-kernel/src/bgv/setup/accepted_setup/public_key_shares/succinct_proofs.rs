@@ -20,14 +20,13 @@ pub(super) fn public_key_share_proofs_have_terminal_dependents(setup_package: &V
 
 fn public_key_share_succinct_proofs_have_terminal_dependents(setup_package: &Value) -> bool {
     setup_package.get("collectivePublicKey").is_some()
-        || setup_package.get("collectivePublicKeyRoot").is_some()
         || setup_package.get("relinearizationKeyShareRounds").is_some()
         || setup_package.get("galoisKeyShareBatches").is_some()
         || setup_package.get("trusteeEvaluationKeyProofs").is_some()
         || setup_package.get("evaluationKeys").is_some()
 }
 
-pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
+pub(in super::super) fn verify_public_key_share_succinct_proofs(
     setup_package: &Value,
     request: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
@@ -36,7 +35,15 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     let material_set = setup_package.get("publicKeyShareMaterial");
     let proof_set = setup_package.get("publicKeyShareSuccinctProofs");
     if material_set.is_none() && proof_set.is_none() {
-        return Ok(None);
+        return Ok(Some(verification_response(
+            Some("publicKeyShareProofs"),
+            vec![
+                "publicKeyShareMaterial".to_string(),
+                "publicKeyShareSuccinctProofs".to_string(),
+            ],
+            Vec::new(),
+            Vec::new(),
+        )?));
     }
     let Some(material_set) = material_set else {
         return Ok(Some(verification_response(
@@ -47,14 +54,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         )?));
     };
     let Some(proof_set) = proof_set else {
-        if public_key_share_succinct_proofs_have_terminal_dependents(setup_package) {
-            return Ok(Some(public_key_refusal(
-                "publicKeyShareSuccinctProofsMissing",
-                "publicKeyShareSuccinctProofs must be present before terminal public-key or evaluation-key material can be accepted",
-                "setupPackage.publicKeyShareSuccinctProofs",
-            )?));
-        }
-
         return Ok(Some(verification_response(
             Some("publicKeyShareProofs"),
             vec!["publicKeyShareSuccinctProofs".to_string()],
@@ -152,15 +151,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
             error.message,
             "setupPackage.publicKeyShareSuccinctProofs",
         )?));
-    }
-    for (field_name, expected_value) in [("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY)] {
-        if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_refusal(
-                "publicKeyShareSuccinctProofSetParametersMismatch",
-                format!("publicKeyShareSuccinctProofs.{field_name} must be {expected_value}"),
-                format!("setupPackage.publicKeyShareSuccinctProofs.{field_name}"),
-            )?));
-        }
     }
     let roster = super::accepted_roster_from_package(setup_package);
     for (field_name, expected_value) in [
@@ -318,14 +308,6 @@ fn verify_public_key_share_succinct_proof_record(
         context.setup_context,
         "publicKeyShareSuccinctProofs.proofRecords",
     )?;
-    for (field_name, expected_value) in [("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY)] {
-        if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("public-key share succinct proof {field_name} must be {expected_value}"),
-            ));
-        }
-    }
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
     if roster_position_counts
         .get(&trustee_roster_position)

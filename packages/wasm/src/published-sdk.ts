@@ -13,6 +13,12 @@ export {
     openFoundationBoardSession,
 } from './foundation-board-session.js';
 export type {
+    FoundationBoardCandidate,
+    FoundationBoardSession,
+    FoundationBoardSessionInput,
+    FoundationBoardSessionState,
+} from './foundation-board-session.js';
+export type {
     AcceptedSetupSession,
     BgvTargetDecryptionResultReleaseCompletion,
     PublishedSdkKernel,

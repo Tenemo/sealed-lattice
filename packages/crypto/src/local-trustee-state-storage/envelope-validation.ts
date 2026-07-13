@@ -1,33 +1,24 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { canonicalJson, hash512Hex } from '../canonical-json.js';
+import { canonicalJson } from '../canonical-json.js';
 
-import {
-    assertStorageKeyCommitment,
-    decodeCanonicalHex,
-    hashCanonicalValue,
-    sealedMaterialAad,
-    sealedMaterialStorageKeyCommitmentHash,
-} from './aes-gcm.js';
+import { decodeCanonicalHex, sealedMaterialAad } from './aes-gcm.js';
 import {
     aesGcmNonceByteLength,
-    aesGcmTagBitLength,
     encryptedSealedMaterialFieldNames,
     localTrusteeSealedPayloadFieldNames,
-    sealedMaterialFieldNames,
     setupContextFieldNames,
-    textEncoder,
     type EncryptedLocalTrusteeSetupMaterial,
     type LocalTrusteeSetupStateSealedMaterial,
     type LocalTrusteeSetupStateSealedPayload,
     type LocalTrusteeStateStorageEncryptionInput,
 } from './constants-and-types.js';
 import {
-    assertExactFields,
     assertJsonRecord,
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertProtocolHash,
+    assertRequiredFields,
     decodeFixedHex,
     numberField,
     protocolHashArrayField,
@@ -118,17 +109,16 @@ const assertSetupContextBinding = (
     }
 };
 
-function validateEncryptedSealedMaterialEnvelope(
+export const validateSealedMaterial = (
     value: unknown,
-    expectedMaterialClass: 'aggregate-threshold-share-sealed',
     expectedMaterialRoot: ProtocolHash,
     setupContext: unknown,
     localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
-    storageKeyBytes: Uint8Array,
     objectPath: string,
-): EncryptedLocalTrusteeSetupMaterial {
+): LocalTrusteeSetupStateSealedMaterial => {
+    assertSetupContextBinding(setupContext, localStateCommitment);
     const encryptedMaterial = assertJsonRecord(value, objectPath);
-    assertExactFields(
+    assertRequiredFields(
         encryptedMaterial,
         encryptedSealedMaterialFieldNames,
         objectPath,
@@ -136,11 +126,6 @@ function validateEncryptedSealedMaterialEnvelope(
     if (encryptedMaterial.objectType !== 'EncryptedLocalTrusteeSetupMaterial') {
         throw new TypeError(
             `${objectPath}.objectType must be EncryptedLocalTrusteeSetupMaterial.`,
-        );
-    }
-    if (encryptedMaterial.materialClass !== expectedMaterialClass) {
-        throw new TypeError(
-            `${objectPath}.materialClass must be ${expectedMaterialClass}.`,
         );
     }
     const materialRoot = stringField(
@@ -156,7 +141,6 @@ function validateEncryptedSealedMaterialEnvelope(
     }
     const expectedMaterialAad = sealedMaterialAad(
         setupContext,
-        expectedMaterialClass,
         expectedMaterialRoot,
         localStateCommitment,
     );
@@ -166,32 +150,6 @@ function validateEncryptedSealedMaterialEnvelope(
     ) {
         throw new Error(`${objectPath}.materialAad does not match bindings.`);
     }
-    const materialAadBytes = textEncoder.encode(
-        canonicalJson(expectedMaterialAad),
-    );
-    const expectedMaterialAadHash = hash512Hex(
-        'sealed-lattice-local-trustee-state/sealed-material-aad-hash',
-        [materialAadBytes],
-    );
-    if (encryptedMaterial.materialAadHash !== expectedMaterialAadHash) {
-        throw new Error(
-            `${objectPath}.materialAadHash does not match materialAad.`,
-        );
-    }
-    stringField(
-        encryptedMaterial,
-        'keyCommitmentHash',
-        `${objectPath}.keyCommitmentHash`,
-    );
-    assertProtocolHash(
-        encryptedMaterial.keyCommitmentHash as string,
-        `${objectPath}.keyCommitmentHash`,
-    );
-    assertStorageKeyCommitment(
-        encryptedMaterial.keyCommitmentHash as string,
-        sealedMaterialStorageKeyCommitmentHash(storageKeyBytes),
-        `${objectPath}.keyCommitmentHash`,
-    );
     decodeFixedHex(
         stringField(
             encryptedMaterial,
@@ -209,103 +167,21 @@ function validateEncryptedSealedMaterialEnvelope(
         ),
         `${objectPath}.ciphertextBytesHex`,
     );
-    assertNonNegativeSafeInteger(
-        numberField(encryptedMaterial, 'plaintextByteLength'),
-        `${objectPath}.plaintextByteLength`,
-    );
-    if (encryptedMaterial.aeadTagLength !== aesGcmTagBitLength) {
-        throw new TypeError(
-            `${objectPath}.aeadTagLength must be ${String(aesGcmTagBitLength)}.`,
-        );
-    }
-    const envelopeWithoutHash = {
-        ...encryptedMaterial,
-    } as Record<string, unknown>;
-    delete envelopeWithoutHash.encryptedMaterialHash;
-    const expectedEnvelopeHash = hashCanonicalValue(
-        'sealed-lattice-local-trustee-state/sealed-material-envelope-hash',
-        envelopeWithoutHash,
-    );
-    if (encryptedMaterial.encryptedMaterialHash !== expectedEnvelopeHash) {
-        throw new Error(
-            `${objectPath}.encryptedMaterialHash does not match the canonical sealed material envelope.`,
-        );
-    }
 
     return encryptedMaterial as EncryptedLocalTrusteeSetupMaterial;
-}
-
-export const validateSealedMaterial = (
-    value: unknown,
-    expectedMaterialClass: LocalTrusteeSetupStateSealedMaterial['materialClass'],
-    expectedMaterialRoot: ProtocolHash,
-    setupContext: unknown,
-    localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
-    storageKeyBytes: Uint8Array,
-    objectPath: string,
-): LocalTrusteeSetupStateSealedMaterial => {
-    const material = assertJsonRecord(value, objectPath);
-    assertExactFields(material, sealedMaterialFieldNames, objectPath);
-    if (material.objectType !== 'LocalTrusteeSetupStateSealedMaterial') {
-        throw new TypeError(
-            `${objectPath}.objectType must be LocalTrusteeSetupStateSealedMaterial.`,
-        );
-    }
-    if (material.materialClass !== expectedMaterialClass) {
-        throw new TypeError(
-            `${objectPath}.materialClass must be ${expectedMaterialClass}.`,
-        );
-    }
-    const materialRoot = stringField(
-        material,
-        'materialRoot',
-        `${objectPath}.materialRoot`,
-    );
-    assertProtocolHash(materialRoot, `${objectPath}.materialRoot`);
-    if (materialRoot !== expectedMaterialRoot) {
-        throw new Error(
-            `${objectPath}.materialRoot must match the local state commitment.`,
-        );
-    }
-    const ciphertextReference = stringField(
-        material,
-        'ciphertextReference',
-        `${objectPath}.ciphertextReference`,
-    );
-    assertProtocolHash(
-        ciphertextReference,
-        `${objectPath}.ciphertextReference`,
-    );
-    const encryptedMaterial = validateEncryptedSealedMaterialEnvelope(
-        material.encryptedMaterial,
-        expectedMaterialClass,
-        expectedMaterialRoot,
-        setupContext,
-        localStateCommitment,
-        storageKeyBytes,
-        `${objectPath}.encryptedMaterial`,
-    );
-    if (ciphertextReference !== encryptedMaterial.encryptedMaterialHash) {
-        throw new Error(
-            `${objectPath}.ciphertextReference must match encryptedMaterial.encryptedMaterialHash.`,
-        );
-    }
-
-    return material as LocalTrusteeSetupStateSealedMaterial;
 };
 
 export const validateLocalStatePlaintext = (
     localStatePlaintext: unknown,
     localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
     setupContext: unknown,
-    storageKeyBytes: Uint8Array,
 ): LocalTrusteeSetupStateSealedPayload => {
     assertSetupContextBinding(setupContext, localStateCommitment);
     const plaintext = assertJsonRecord(
         localStatePlaintext,
         'localStatePlaintext',
     );
-    assertExactFields(
+    assertRequiredFields(
         plaintext,
         localTrusteeSealedPayloadFieldNames,
         'localStatePlaintext',
@@ -367,11 +243,9 @@ export const validateLocalStatePlaintext = (
     }
     validateSealedMaterial(
         plaintext.sealedAggregateThresholdShare,
-        'aggregate-threshold-share-sealed',
         localStateCommitment.aggregateThresholdShareRoot,
         setupContext,
         localStateCommitment,
-        storageKeyBytes,
         'localStatePlaintext.sealedAggregateThresholdShare',
     );
     const issuedVssAcceptanceRoots = protocolHashArrayField(

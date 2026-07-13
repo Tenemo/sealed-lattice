@@ -6,26 +6,6 @@ use crate::{
     transcript_core::decode_hex,
 };
 
-pub(crate) fn bgv_operation_rejection(
-    reason_code: &str,
-    message: impl Into<String>,
-    object_hash: Option<&str>,
-) -> Value {
-    let mut refused_object = json!({
-        "code": "BgvOperationRejected",
-        "reasonCode": reason_code,
-        "message": message.into(),
-    });
-    if let Some(hash) = object_hash {
-        refused_object["objectHash"] = Value::String(hash.to_string());
-    }
-
-    json!({
-        "isValid": false,
-        "refusedObjects": [refused_object],
-    })
-}
-
 pub(crate) fn validate_plaintext_hex(
     canonical_bytes_hex: &str,
     expected_plaintext_root: Option<&str>,

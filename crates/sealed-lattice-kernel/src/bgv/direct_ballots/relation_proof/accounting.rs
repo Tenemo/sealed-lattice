@@ -8,25 +8,16 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
     hash512_hex(RELATION_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes])
 }
 
-// Binds the operative shape of the internal direct-ballot validity relation proof: statement
-// hash domain, encoding, challenge size and domain, proof-bytes domain, relation shape, ring
-// degree, and data prime count.
-//
-// Scope, kept in prose rather than a bound field: this is an internal relation-shape proof.
-// Its claim soundness and support zero-knowledge are not established. The weakest checked
-// subrelation runs modulo the about 16-bit plaintext modulus 65537, so a single transcript
-// yields only about 16 soundness bits against the 192-bit nominal challenge. See the README
-// safety boundaries for the full scope statement.
+// Binds the operative identity of the internal direct-ballot validity relation proof: statement
+// hash domain, challenge size and domain, proof-bytes domain, ring degree, and data prime count.
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_parameters_hash()
 -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "BallotValidityProofParameters",
         "statementHashDomain": RELATION_STATEMENT_HASH_DOMAIN,
-        "proofEncoding": "binary relation transcript",
         "challengeBits": RELATION_PROOF_CHALLENGE_BITS,
         "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge",
         "proofBytesDomain": RELATION_PROOF_BYTES_HASH_DOMAIN,
-        "relation": "BGV all-limb encryption equations, score encoding, one-hot constraints, randomizer support, and error support",
         "sourceRingDegree": POLYNOMIAL_DEGREE,
         "dataPrimeCount": DATA_PRIMES.len(),
     }))

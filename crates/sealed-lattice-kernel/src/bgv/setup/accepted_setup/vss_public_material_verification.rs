@@ -22,12 +22,11 @@ pub(super) struct VerifiedVssPublicMaterial {
 
 #[derive(Debug, Clone)]
 pub(super) enum VssPublicMaterialVerification {
-    Absent,
     Verified(VerifiedVssPublicMaterial),
     Refused(Value),
 }
 
-pub(super) fn verify_optional_vss_public_material(
+pub(super) fn verify_vss_public_material(
     setup_package: &Value,
     request: &Value,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
@@ -44,7 +43,17 @@ pub(super) fn verify_optional_vss_public_material(
         .filter(|field_name| setup_package.get(**field_name).is_some())
         .count();
     if present_field_count == 0 {
-        return Ok(VssPublicMaterialVerification::Absent);
+        return Ok(VssPublicMaterialVerification::Refused(
+            verification_response(
+                Some("vssCoefficientCommitments"),
+                public_material_fields
+                    .iter()
+                    .map(|field_name| (*field_name).to_string())
+                    .collect(),
+                Vec::new(),
+                Vec::new(),
+            )?,
+        ));
     }
 
     if present_field_count != public_material_fields.len() {
@@ -234,7 +243,7 @@ mod tests {
 
     #[test]
     fn optional_vss_public_material_requires_complete_field_group() -> CanonicalResult<()> {
-        let VssPublicMaterialVerification::Refused(response) = verify_optional_vss_public_material(
+        let VssPublicMaterialVerification::Refused(response) = verify_vss_public_material(
             &json!({
                 "vssPublicCoefficientCommitmentSet": {},
             }),
@@ -255,7 +264,7 @@ mod tests {
 
     #[test]
     fn optional_vss_public_material_requires_proof_material() -> CanonicalResult<()> {
-        let VssPublicMaterialVerification::Refused(response) = verify_optional_vss_public_material(
+        let VssPublicMaterialVerification::Refused(response) = verify_vss_public_material(
             &json!({
                 "vssPublicCoefficientCommitmentSet": {},
                 "vssPublicRecipientShareCommitmentSet": {},
@@ -286,7 +295,7 @@ mod tests {
     #[test]
     fn optional_vss_public_material_rejects_malformed_complete_field_group() -> CanonicalResult<()>
     {
-        let VssPublicMaterialVerification::Refused(response) = verify_optional_vss_public_material(
+        let VssPublicMaterialVerification::Refused(response) = verify_vss_public_material(
             &json!({
                 "vssPublicCoefficientCommitmentSet": {},
                 "vssPublicRecipientShareCommitmentSet": {},

@@ -3,13 +3,10 @@ import {
     deriveCanonicalObjectHash,
     hash512Hex,
 } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
+import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
 
 import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js';
-import {
-    type CanonicalProofMaterialChunkPull,
-    setupProofTransportChunkSizeBytes,
-} from '../setup-proof-material-transport.js';
+import type { CanonicalProofMaterialChunkPull } from '../setup-proof-material-transport.js';
 
 import {
     type BinaryChunkedPublicEvaluationKeyMaterialTransport,
@@ -19,7 +16,6 @@ import {
     type GaloisKeyShareBatchRootReference,
     type GaloisKeyShareMaterialRecord,
     type JsonRecord,
-    type PublicEvaluationKeyMaterialReference,
     type PublicEvaluationKeyMaterialTransportInput,
     type PublicEvaluationKeySet,
     type PublicEvaluationKeySetInput,
@@ -104,7 +100,6 @@ export function createPublicEvaluationKeySet(
                         'relinearizationKeyShareRounds is missing a scheduled aggregate root.',
                     );
                 }
-                const decompositionDigitCount = level + 1;
                 const relinearizationKeyRoot = deriveCanonicalObjectHash({
                     objectType: 'RelinearizationKeyAggregate',
                     evaluatorKeyScheduleRoot:
@@ -115,16 +110,12 @@ export function createPublicEvaluationKeySet(
                         input.relinearizationKeyShareRounds
                             .relinearizationKeyShareRoundsRoot,
                     level,
-                    decompositionDigitCount,
-                    rnsLimbCount: decompositionDigitCount,
                     roundOneAggregateRoot,
                     roundTwoAggregateRoot,
                 });
 
                 return {
                     level,
-                    decompositionDigitCount,
-                    rnsLimbCount: decompositionDigitCount,
                     roundOneAggregateRoot,
                     roundTwoAggregateRoot,
                     relinearizationKeyRoot,
@@ -170,7 +161,6 @@ export function createPublicEvaluationKeySet(
         input.evaluatorKeySchedule.requiredGaloisKeySchedule.map(
             (scheduleEntry) => {
                 const { rotation, level } = scheduleEntry;
-                const decompositionDigitCount = level + 1;
                 const contributingShareRoots = sortedGaloisBatches.map(
                     (batch) => {
                         const materialRecord = galoisShareMaterialForSchedule(
@@ -199,25 +189,20 @@ export function createPublicEvaluationKeySet(
                         input.evaluatorKeySchedule.requiredGaloisSetHash,
                     rotation,
                     level,
-                    decompositionDigitCount,
-                    rnsLimbCount: decompositionDigitCount,
                     contributingShareRoots,
                 });
 
                 return {
                     rotation,
                     level,
-                    decompositionDigitCount,
-                    rnsLimbCount: decompositionDigitCount,
                     galoisKeyRoot,
                     contributingShareRoots,
                 } satisfies GaloisKeyRootReference;
             },
         );
-    if (input.publicEvaluationKeyMaterialReference !== undefined) {
-        const reference = input.publicEvaluationKeyMaterialReference;
+    if (input.publicEvaluationKeyMaterialRoot !== undefined) {
         assertProtocolHash(
-            reference.publicEvaluationKeyMaterialRoot,
+            input.publicEvaluationKeyMaterialRoot,
             'publicEvaluationKeyMaterialRoot',
         );
     }
@@ -225,8 +210,6 @@ export function createPublicEvaluationKeySet(
     const evaluationKeysWithoutHash = {
         objectType: 'PublicEvaluationKeySet',
         ...contextFields(input.setupContext),
-        participantCount: input.participantCount,
-        rnsLimbCount: input.qSharePrimes.length,
         evaluatorKeyScheduleRoot:
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
         publicKeyShareSuccinctProofSetRoot:
@@ -234,15 +217,16 @@ export function createPublicEvaluationKeySet(
         relinearizationKeyShareRoundsRoot:
             input.relinearizationKeyShareRounds
                 .relinearizationKeyShareRoundsRoot,
-        relinearizationLevelSchedule:
-            input.evaluatorKeySchedule.relinearizationLevelSchedule,
         relinearizationKeyRoots,
         requiredGaloisSetHash: input.evaluatorKeySchedule.requiredGaloisSetHash,
-        requiredGaloisKeySchedule:
-            input.evaluatorKeySchedule.requiredGaloisKeySchedule,
         galoisKeyShareBatchRoots,
         galoisKeyRoots,
-        ...(input.publicEvaluationKeyMaterialReference ?? {}),
+        ...(input.publicEvaluationKeyMaterialRoot === undefined
+            ? {}
+            : {
+                  publicEvaluationKeyMaterialRoot:
+                      input.publicEvaluationKeyMaterialRoot,
+              }),
     } as const satisfies Omit<PublicEvaluationKeySet, 'evaluationKeySetHash'>;
 
     return {
@@ -296,8 +280,13 @@ const relinearizationShareMaterialManifest = (
                     keySwitchSeedHex: record.keySwitchSeedHex,
                     keySwitchComponentVectorRoot:
                         record.keySwitchComponentVectorRoot,
-                    keySwitchComponentMaterialRoot:
-                        recordFields.keySwitchComponentMaterialRoot ?? null,
+                    ...(recordFields.keySwitchComponentMaterialRoot ===
+                    undefined
+                        ? {}
+                        : {
+                              keySwitchComponentMaterialRoot:
+                                  recordFields.keySwitchComponentMaterialRoot,
+                          }),
                     shareRoot: recordFields[group.shareRootFieldName],
                     recordRoot: recordFields[group.recordRootFieldName],
                 },
@@ -342,8 +331,13 @@ const galoisShareMaterialManifest = (
                     keySwitchSeedHex: materialRecord.keySwitchSeedHex,
                     keySwitchComponentVectorRoot:
                         materialRecord.keySwitchComponentVectorRoot,
-                    keySwitchComponentMaterialRoot:
-                        materialFields.keySwitchComponentMaterialRoot ?? null,
+                    ...(materialFields.keySwitchComponentMaterialRoot ===
+                    undefined
+                        ? {}
+                        : {
+                              keySwitchComponentMaterialRoot:
+                                  materialFields.keySwitchComponentMaterialRoot,
+                          }),
                     galoisKeyShareRoot: materialRecord.galoisKeyShareRoot,
                 },
             });
@@ -366,20 +360,16 @@ const publicEvaluationKeyMaterialManifest = (
 ): JsonRecord => ({
     objectType: 'PublicEvaluationKeyMaterialManifest',
     ...contextFields(input.setupContext),
-    participantCount: input.participantCount,
-    rnsLimbCount: input.qSharePrimes.length,
     evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
     publicKeyShareSuccinctProofSetRoot:
         evaluationKeys.publicKeyShareSuccinctProofSetRoot,
     relinearizationKeyShareRoundsRoot:
         evaluationKeys.relinearizationKeyShareRoundsRoot,
-    relinearizationLevelSchedule: evaluationKeys.relinearizationLevelSchedule,
     relinearizationKeyRoots: evaluationKeys.relinearizationKeyRoots,
     relinearizationShareMaterialRoots: relinearizationShareMaterialManifest(
         input.relinearizationKeyShareRounds,
     ),
     requiredGaloisSetHash: evaluationKeys.requiredGaloisSetHash,
-    requiredGaloisKeySchedule: evaluationKeys.requiredGaloisKeySchedule,
     galoisKeyShareBatchRoots: evaluationKeys.galoisKeyShareBatchRoots,
     galoisKeyRoots: evaluationKeys.galoisKeyRoots,
     galoisShareMaterialRoots: galoisShareMaterialManifest(
@@ -412,12 +402,12 @@ const publicEvaluationKeyMaterialChunkViews = (
     for (
         let byteOffset = 0;
         byteOffset < materialBytes.byteLength;
-        byteOffset += setupProofTransportChunkSizeBytes
+        byteOffset += foundationProfile.streamChunkByteLength
     ) {
         chunkViews.push(
             materialBytes.subarray(
                 byteOffset,
-                byteOffset + setupProofTransportChunkSizeBytes,
+                byteOffset + foundationProfile.streamChunkByteLength,
             ),
         );
     }
@@ -433,7 +423,7 @@ const repeatablePublicEvaluationKeyMaterialChunkPull =
                 'public evaluation-key material chunkIndex must be a non-negative safe integer.',
             );
         }
-        const byteOffset = chunkIndex * setupProofTransportChunkSizeBytes;
+        const byteOffset = chunkIndex * foundationProfile.streamChunkByteLength;
         if (!Number.isSafeInteger(byteOffset)) {
             throw new RangeError(
                 'public evaluation-key material chunk offset exceeds the JavaScript safe integer range.',
@@ -448,7 +438,7 @@ const repeatablePublicEvaluationKeyMaterialChunkPull =
             );
         }
         const chunkByteLength = Math.min(
-            setupProofTransportChunkSizeBytes,
+            foundationProfile.streamChunkByteLength,
             materialBytes.byteLength - byteOffset,
         );
         if (expectedByteLength !== chunkByteLength) {
@@ -475,23 +465,10 @@ const publicEvaluationKeyMaterialFullObjectHash = (
         ],
     );
 
-const publicEvaluationKeyMaterialChunkHash = (
-    fullObjectHash: ProtocolHash,
-    chunkIndex: number,
-    chunk: Uint8Array,
-): ProtocolHash =>
-    hash512Hex('sealed-lattice/setup/public-evaluation-key-material/chunk', [
-        textEncoder.encode(fullObjectHash),
-        u64LittleEndianBytes(chunkIndex, 'chunkIndex'),
-        chunk,
-    ]);
-
 const publicEvaluationKeyMaterialTransportHashes = (
     materialBytes: Uint8Array,
 ): Readonly<{
     readonly fullObjectHash: ProtocolHash;
-    readonly chunkHashes: readonly ProtocolHash[];
-    readonly chunkRoot: ProtocolHash;
     readonly totalByteLength: number;
 }> => {
     const chunkViews = publicEvaluationKeyMaterialChunkViews(materialBytes);
@@ -507,14 +484,14 @@ const publicEvaluationKeyMaterialTransportHashes = (
                     'public evaluation-key material chunks must be non-empty.',
                 );
             }
-            if (chunk.byteLength > setupProofTransportChunkSizeBytes) {
+            if (chunk.byteLength > foundationProfile.streamChunkByteLength) {
                 throw new Error(
                     'public evaluation-key material chunk exceeds the accepted chunk size.',
                 );
             }
             if (
                 chunkIndex + 1 < chunkViews.length &&
-                chunk.byteLength !== setupProofTransportChunkSizeBytes
+                chunk.byteLength !== foundationProfile.streamChunkByteLength
             ) {
                 throw new Error(
                     'public evaluation-key material contains a short non-final chunk.',
@@ -529,27 +506,14 @@ const publicEvaluationKeyMaterialTransportHashes = (
         totalByteLength,
         chunkViews,
     );
-    const chunkHashes = chunkViews.map((chunk, chunkIndex) =>
-        publicEvaluationKeyMaterialChunkHash(fullObjectHash, chunkIndex, chunk),
-    );
-    const chunkRoot = deriveCanonicalObjectHash({
-        objectType: 'PublicEvaluationKeyMaterialChunkManifest',
-        chunkCount: chunkHashes.length,
-        totalByteLength,
-        chunkHashes,
-        fullObjectHash,
-    });
 
     return {
         fullObjectHash,
-        chunkHashes,
-        chunkRoot,
         totalByteLength,
     };
 };
 
-const publicEvaluationKeyMaterialReferenceRoot = (
-    evaluationKeys: PublicEvaluationKeySet,
+const derivePublicEvaluationKeyMaterialRoot = (
     expectedMaterialManifest: JsonRecord,
     transportHashes: ReturnType<
         typeof publicEvaluationKeyMaterialTransportHashes
@@ -557,23 +521,8 @@ const publicEvaluationKeyMaterialReferenceRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'PublicEvaluationKeyMaterialReference',
-        ceremonyId: evaluationKeys.ceremonyId,
-        manifestHash: evaluationKeys.manifestHash,
-        rosterHash: evaluationKeys.rosterHash,
-        setupParametersHash: evaluationKeys.setupParametersHash,
-        setupEpoch: evaluationKeys.setupEpoch,
-        evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
-        publicKeyShareSuccinctProofSetRoot:
-            evaluationKeys.publicKeyShareSuccinctProofSetRoot,
-        relinearizationKeyShareRoundsRoot:
-            evaluationKeys.relinearizationKeyShareRoundsRoot,
-        requiredGaloisSetHash: evaluationKeys.requiredGaloisSetHash,
         expectedMaterialManifest,
-        chunkCount: transportHashes.chunkHashes.length,
-        totalByteLength: transportHashes.totalByteLength,
         fullObjectHash: transportHashes.fullObjectHash,
-        chunkRoot: transportHashes.chunkRoot,
-        chunkHashes: transportHashes.chunkHashes,
     });
 
 const expectedPublicEvaluationKeyComponentMaterialRoots = (
@@ -669,27 +618,20 @@ const assertPublicEvaluationKeyComponentMaterialCoverage = (
 export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = async (
     input: PublicEvaluationKeyMaterialTransportInput,
 ): Promise<BinaryChunkedPublicEvaluationKeyMaterialTransport> => {
-    const evaluationKeysWithoutMaterialReference =
+    const evaluationKeysWithoutMaterialRoot =
         createPublicEvaluationKeySet(input);
     const manifest = publicEvaluationKeyMaterialManifest(
         input,
-        evaluationKeysWithoutMaterialReference,
+        evaluationKeysWithoutMaterialRoot,
     );
     const materialBytes = encodePublicEvaluationKeyMaterialManifest(manifest);
     const transportHashes =
         publicEvaluationKeyMaterialTransportHashes(materialBytes);
     const publicEvaluationKeyMaterialRoot =
-        publicEvaluationKeyMaterialReferenceRoot(
-            evaluationKeysWithoutMaterialReference,
-            manifest,
-            transportHashes,
-        );
-    const publicEvaluationKeyMaterialReference = {
-        publicEvaluationKeyMaterialRoot,
-    } satisfies PublicEvaluationKeyMaterialReference;
+        derivePublicEvaluationKeyMaterialRoot(manifest, transportHashes);
     const evaluationKeys = createPublicEvaluationKeySet({
         ...input,
-        publicEvaluationKeyMaterialReference,
+        publicEvaluationKeyMaterialRoot,
     });
     assertPublicEvaluationKeyComponentMaterialCoverage(input);
     const descriptorBytes = copyCanonicalStreamDescriptor(
@@ -716,7 +658,6 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = async (
 
     return {
         evaluationKeys,
-        publicEvaluationKeyMaterialReference,
         transportedPublicEvaluationKeyMaterial,
     };
 };

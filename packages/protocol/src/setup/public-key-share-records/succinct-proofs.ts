@@ -2,7 +2,6 @@ import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    publicKeyShareProofFamily,
     type PublicKeyShareMaterialRootReference,
     type PublicKeyShareMaterialSet,
     type PublicKeyShareProofRecord,
@@ -291,9 +290,6 @@ const validatePublicKeyShareSuccinctProofMaterial = (
     material: PublicKeyShareSuccinctProofMaterial,
     fieldName: string,
 ): void => {
-    if (material.proofFamily !== publicKeyShareProofFamily) {
-        throw new Error(`${fieldName}.proofFamily must be public-key share.`);
-    }
     assertNonEmptyString(
         material.trusteeIdentity,
         `${fieldName}.trusteeIdentity`,
@@ -421,7 +417,6 @@ export const createPublicKeyShareSuccinctProofSet = (
             }
             const proofRecordWithoutRoot = {
                 objectType: 'PublicKeyShareSuccinctProof',
-                proofFamily: publicKeyShareProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
                 trusteeRosterPosition: shareRecord.trusteeRosterPosition,
@@ -453,7 +448,6 @@ export const createPublicKeyShareSuccinctProofSet = (
     );
     const proofSetWithoutRoot = {
         objectType: 'PublicKeyShareSuccinctProofSet',
-        proofFamily: publicKeyShareProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,

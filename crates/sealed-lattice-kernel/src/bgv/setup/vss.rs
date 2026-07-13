@@ -1,5 +1,3 @@
-use serde_json::{Value, json};
-
 #[cfg(test)]
 use crate::encoding::CanonicalResult;
 #[cfg(test)]
@@ -46,17 +44,6 @@ pub(super) struct CarryAwareVssCommitmentOpeningInput<'a> {
     pub(super) carry_witnesses: &'a [u128],
     pub(super) modulus: u64,
     pub(super) fresh_randomness_bound: i128,
-}
-
-pub(super) fn carry_aware_vss_share_relation_value() -> Value {
-    json!({
-        "objectType": "CarryAwareVssShareRelation",
-        "trusteePointRule": "roster-position-plus-one",
-        "coefficientOrder": "constant-first",
-        "relation": "sum(alpha_j^k * F_i,l,k) - sigma_i_to_j,l = q_l * z_i_to_j,l",
-        "carryWitnessDomain": "non-negative-bounded-integer",
-        "commitmentReductionRule": "prove-unreduced-lifted-share-with-hidden-carry-and-opening",
-    })
 }
 
 #[cfg(test)]

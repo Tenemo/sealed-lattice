@@ -33,7 +33,6 @@ pub(in super::super) fn public_key_shares_object(
                 serde_json::json!({
                     "rnsLimbIndex": rns_limb_index,
                     "rnsPrime": rns_prime,
-                    "component": "b_i",
                     "coefficientVectorHash512": derive_canonical_object_hash(&serde_json::json!({
                         "objectType": "PublicKeyShareRoot",
                         "fixture": "public-key-share-coefficient-vector",
@@ -56,7 +55,6 @@ pub(in super::super) fn public_key_shares_object(
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "publicKeyCrpRoot": public_key_crp_root,
             "publicAPolynomialRoot": public_a_polynomial_root,
-            "shareComponent": "component-zero-b_i",
             "rnsLimbCount": DATA_PRIMES.len(),
             "shareCoefficientVectorHash512ByLimb": share_coefficient_hashes,
         });
@@ -117,7 +115,6 @@ pub(in super::super) fn public_key_share_proofs_object(
         let share_record = &share_records[trustee_roster_position as usize];
         let mut proof_record = serde_json::json!({
             "objectType": "PublicKeyShareProof",
-            "proofFamily": "public-key-share",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -138,7 +135,6 @@ pub(in super::super) fn public_key_share_proofs_object(
     }
     let mut proof_set = serde_json::json!({
         "objectType": "PublicKeyShareProofSet",
-        "proofFamily": "public-key-share",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,

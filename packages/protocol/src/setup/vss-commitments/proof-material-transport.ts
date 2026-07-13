@@ -105,7 +105,7 @@ const canonicalProofMaterialsToTransport = (
     };
 };
 
-export type BinaryChunkedVssShareLinkageProofMaterialTransport = Readonly<{
+type BinaryChunkedVssShareLinkageProofMaterialTransport = Readonly<{
     readonly proofMaterialSet: JsonRecord;
     readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
 }>;
@@ -200,7 +200,7 @@ export const createBinaryChunkedVssShareLinkageProofMaterialTransport = (
     };
 };
 
-export type BinaryChunkedSameSecretBridgeProofMaterialTransport = Readonly<{
+type BinaryChunkedSameSecretBridgeProofMaterialTransport = Readonly<{
     readonly proofMaterialSet: JsonRecord;
     readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
 }>;

@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn duplicate_fields_refuse_at_every_object_depth() {
         for request in [
-            br#"{"command":"HashRaw","command":"ListCanonicalErrorCodes"}"#.as_slice(),
+            br#"{"command":"DescribeBgvRnsParameters","command":"DeriveCanonicalObjectHash"}"#.as_slice(),
             br#"{"command":"DeriveCanonicalObjectHash","value":{"objectType":"PollSpec","objectType":"Other"}}"#.as_slice(),
         ] {
             let error = parse_transcript_core_request(request)
@@ -239,9 +239,8 @@ mod tests {
     #[test]
     fn non_interoperable_integer_literals_refuse_before_command_dispatch() {
         for unsafe_integer in ["9007199254740992", "-9007199254740992", "1e20"] {
-            let request = format!(
-                "{{\"command\":\"EvaluatePlaintextComparison\",\"leftTotalScore\":{unsafe_integer}}}"
-            );
+            let request =
+                format!("{{\"command\":\"DescribeBgvRnsParameters\",\"value\":{unsafe_integer}}}");
             let error = parse_transcript_core_request(request.as_bytes())
                 .expect_err("unsafe JSON integer must refuse");
             assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
@@ -256,7 +255,7 @@ mod tests {
 
         for scalar_request in [
             b"null".as_slice(),
-            br#""HashRaw""#.as_slice(),
+            br#""DescribeBgvRnsParameters""#.as_slice(),
             b"[]".as_slice(),
         ] {
             let error = parse_transcript_core_request(scalar_request)
@@ -269,7 +268,7 @@ mod tests {
     fn request_nesting_depth_accepts_the_exact_boundary_and_refuses_one_more_container() {
         let request_with_array_depth = |array_depth: usize| {
             format!(
-                "{{\"command\":\"HashRaw\",\"nested\":{}null{}}}",
+                "{{\"command\":\"DescribeBgvRnsParameters\",\"nested\":{}null{}}}",
                 "[".repeat(array_depth),
                 "]".repeat(array_depth),
             )
@@ -289,7 +288,7 @@ mod tests {
 
     #[test]
     fn request_limit_accepts_the_exact_boundary_and_refuses_one_byte_over() {
-        let request = br#"{"command":"ListCanonicalErrorCodes"}"#;
+        let request = br#"{"command":"DescribeBgvRnsParameters"}"#;
         assert!(
             parse_transcript_core_request_with_limit(request, request.len()).is_ok(),
             "the exact request boundary must be accepted"

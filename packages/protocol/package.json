@@ -10,19 +10,9 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./browser-action-storage-custody": {
-      "types": "./dist/runtime/browser-action-storage-custody.d.ts",
-      "import": "./dist/runtime/browser-action-storage-custody.js"
-    },
-    "./browser-action-storage-worker-kernel": {
-      "types": "./dist/runtime/browser-action-storage-custody-internal.d.ts",
-      "import": "./dist/runtime/browser-action-storage-custody-internal.js"
     }
   },
   "imports": {
-    "#packages/protocol/src/*.js": "./src/*.ts",
-    "#packages/protocol/tests/*.js": "./tests/*.ts",
     "#packages/protocol/src/*": "./src/*.ts",
     "#packages/protocol/tests/*": "./tests/*.ts"
   },

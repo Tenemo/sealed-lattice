@@ -1,10 +1,7 @@
 use super::*;
-use crate::{
-    foundation::{
-        CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalStreamDomain, FOUNDATION_PROFILE,
-        derive_canonical_stream_descriptor,
-    },
-    hashing::derive_canonical_object_hash,
+use crate::foundation::{
+    CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalStreamDomain, FOUNDATION_PROFILE,
+    derive_canonical_stream_descriptor,
 };
 
 fn setup_proof_stream_family(proof_family: &str) -> CanonicalResult<(u32, CanonicalStreamDomain)> {
@@ -37,52 +34,11 @@ fn setup_proof_stream_family(proof_family: &str) -> CanonicalResult<(u32, Canoni
     }
 }
 
-pub(crate) fn canonical_setup_proof_material_transport_accounting(
-    proof_family: &str,
-    proof_bytes: &[u8],
-) -> CanonicalResult<SetupProofMaterialTransportHashes> {
-    if !SETUP_PROOF_TRANSPORT_FAMILIES.contains(&proof_family) {
-        return Err(setup_proof_error(
-            "setup proof material proof family is not in the fixed setup-proof parameters",
-        ));
-    }
-    let (_, stream_domain) = setup_proof_stream_family(proof_family)?;
-    let descriptor = derive_canonical_stream_descriptor(stream_domain, proof_bytes).map_err(
-        |refusal_reason| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                format!("setup proof canonical stream descriptor was refused: {refusal_reason:?}"),
-            )
-        },
-    )?;
-    let chunk_hashes = descriptor
-        .ordered_chunk_digests
-        .iter()
-        .map(|digest| digest.to_lowercase_hex())
-        .collect::<Vec<_>>();
-    let full_object_hash = descriptor.full_object_digest.to_lowercase_hex();
-    let total_byte_length = descriptor.total_byte_length;
-    let chunk_root = derive_canonical_object_hash(&json!({
-        "objectType": "SetupTransportChunkManifest",
-        "chunkCount": chunk_hashes.len(),
-        "totalByteLength": total_byte_length,
-        "chunkHashes": chunk_hashes,
-        "fullObjectHash": full_object_hash,
-    }))?;
-
-    Ok(SetupProofMaterialTransportHashes {
-        full_object_hash,
-        chunk_hashes,
-        chunk_root,
-        total_byte_length,
-    })
-}
-
 pub(crate) fn authenticate_setup_proof_material_stream_for_test(
     proof_family: &str,
     proof_material_root: &str,
     proof_bytes: &[u8],
-) -> CanonicalResult<SetupProofMaterialTransportHashes> {
+) -> CanonicalResult<()> {
     authenticate_setup_proof_material_stream_for_test_inner(
         proof_family,
         proof_material_root,
@@ -96,7 +52,7 @@ pub(crate) fn authenticate_setup_proof_material_stream_in_session_for_test(
     proof_material_root: &str,
     proof_bytes: &[u8],
     accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
-) -> CanonicalResult<SetupProofMaterialTransportHashes> {
+) -> CanonicalResult<()> {
     authenticate_setup_proof_material_stream_for_test_inner(
         proof_family,
         proof_material_root,
@@ -110,7 +66,7 @@ fn authenticate_setup_proof_material_stream_for_test_inner(
     proof_material_root: &str,
     proof_bytes: &[u8],
     accepted_setup_session: Option<crate::bgv::setup::AcceptedSetupProofBindingSession>,
-) -> CanonicalResult<SetupProofMaterialTransportHashes> {
+) -> CanonicalResult<()> {
     let (family_code, stream_domain) = setup_proof_stream_family(proof_family)?;
     let descriptor = derive_canonical_stream_descriptor(stream_domain, proof_bytes).map_err(
         |refusal_reason| {
@@ -180,5 +136,5 @@ fn authenticate_setup_proof_material_stream_for_test_inner(
         },
     )?;
 
-    canonical_setup_proof_material_transport_accounting(proof_family, proof_bytes)
+    Ok(())
 }

@@ -26,7 +26,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
         .iter()
         .map(|level_entry| {
             let level = level_entry["level"].as_u64().expect("relinearization level");
-            let decomposition_digit_count = level + 1;
             let round_one_aggregate_root = relinearization_rounds["roundOneAggregateRoots"]
                 .as_array()
                 .expect("round-one aggregate roots")
@@ -47,16 +46,12 @@ pub(in super::super) fn public_evaluation_key_set_object(
                 "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
                 "relinearizationKeyShareRoundsRoot": relinearization_rounds_root,
                 "level": level,
-                "decompositionDigitCount": decomposition_digit_count,
-                "rnsLimbCount": decomposition_digit_count,
                 "roundOneAggregateRoot": round_one_aggregate_root,
                 "roundTwoAggregateRoot": round_two_aggregate_root,
             }))
             .expect("relinearization key root");
             serde_json::json!({
                 "level": level,
-                "decompositionDigitCount": decomposition_digit_count,
-                "rnsLimbCount": decomposition_digit_count,
                 "roundOneAggregateRoot": round_one_aggregate_root,
                 "roundTwoAggregateRoot": round_two_aggregate_root,
                 "relinearizationKeyRoot": relinearization_key_root,
@@ -91,7 +86,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
         .map(|schedule_entry| {
             let rotation = schedule_entry["rotation"].as_u64().expect("rotation");
             let level = schedule_entry["level"].as_u64().expect("level");
-            let decomposition_digit_count = level + 1;
             let contributing_share_roots = galois_batches
                 .iter()
                 .map(|batch| {
@@ -119,16 +113,12 @@ pub(in super::super) fn public_evaluation_key_set_object(
                 "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],
                 "rotation": rotation,
                 "level": level,
-                "decompositionDigitCount": decomposition_digit_count,
-                "rnsLimbCount": decomposition_digit_count,
                 "contributingShareRoots": contributing_share_roots,
             }))
             .expect("Galois key root");
             serde_json::json!({
                 "rotation": rotation,
                 "level": level,
-                "decompositionDigitCount": decomposition_digit_count,
-                "rnsLimbCount": decomposition_digit_count,
                 "galoisKeyRoot": galois_key_root,
                 "contributingShareRoots": contributing_share_roots,
             })

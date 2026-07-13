@@ -1,20 +1,10 @@
 use core::fmt;
 
-use aes_gcm::{
-    Aes256Gcm, Nonce, Tag,
-    aead::{AeadInPlace, KeyInit},
-};
-use fips203::{
-    ml_kem_768,
-    traits::{Decaps as KemDecaps, Encaps as KemEncaps, SerDes as KemSerDes},
-};
+use fips203::ml_kem_768;
 use fips204::{
     ml_dsa_65,
-    traits::{SerDes as SignatureSerDes, Signer, Verifier},
+    traits::{SerDes as SignatureSerDes, Verifier},
 };
-use hkdf::Hkdf;
-use sha2::Sha384;
-use zeroize::{Zeroize, Zeroizing};
 
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::schemas::{
@@ -23,32 +13,25 @@ use super::schemas::{
     read_hash_list, read_item, read_u16, read_u64, read_variable_item, require_header,
 };
 use super::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalStreamDomain,
-    CanonicalStreamVerifier, CanonicalTuple, FOUNDATION_PROFILE, FoundationSchemaError, Hash512,
-    ParticipantIdentity, RefusalReason, Roster, StreamDescriptor, VerificationResult,
-    derive_canonical_stream_descriptor, hash512,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FoundationSchemaError,
+    Hash512, ParticipantIdentity, RefusalReason, Roster, StreamDescriptor, VerificationResult,
+    hash512,
 };
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 const MAILBOX_PROTOCOL_VERSION: u16 = 1;
 const MAILBOX_KEY_SCHEDULE_DOMAIN: &str = "sealed-lattice/mailbox/key-schedule/v1";
 const MAILBOX_DIRECTION: &str = "source-to-recipient";
+const MAILBOX_PAYLOAD_VERSION: u16 = 1;
 const MAILBOX_ENVELOPE_VERSION: u16 = 1;
 const MAILBOX_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/mailbox-signature/v1";
 const KEM_CIPHERTEXT_HASH_DOMAIN: &str = "sealed-lattice/mailbox/kem-ciphertext/v1";
-const HKDF_EXTRACT_SALT_DOMAIN: &str = "sealed-lattice/mailbox/hkdf-extract-salt/v1";
 const MAILBOX_ENVELOPE_HASH_DOMAIN: &str = "sealed-lattice/mailbox/envelope/v1";
-const ML_KEM_768_DECAPSULATION_PKE_KEY_BYTE_LENGTH: usize = 1_152;
-const MAILBOX_HKDF_OUTPUT_BYTE_LENGTH: usize = 44;
 
 pub const ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH: usize = ml_kem_768::EK_LEN;
-pub const ML_KEM_768_DECAPSULATION_KEY_BYTE_LENGTH: usize = ml_kem_768::DK_LEN;
 pub const ML_KEM_768_CIPHERTEXT_BYTE_LENGTH: usize = ml_kem_768::CT_LEN;
 pub const ML_DSA_65_SIGNATURE_BYTE_LENGTH: usize = ml_dsa_65::SIG_LEN;
-pub const ML_DSA_65_SIGNING_KEY_BYTE_LENGTH: usize = ml_dsa_65::SK_LEN;
 pub const MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
-pub const AES_256_KEY_BYTE_LENGTH: usize = 32;
-pub const AES_GCM_NONCE_BYTE_LENGTH: usize = 12;
 pub const AES_GCM_TAG_BYTE_LENGTH: usize = 16;
 
 type MailboxResult<Value> = Result<Value, FoundationSchemaError>;
@@ -80,7 +63,7 @@ impl MailboxPayloadType {
     }
 }
 
-/// Canonical input to the fixed HKDF-SHA-384 mailbox key schedule.
+/// Canonical mailbox key-schedule input carried by the authenticated envelope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailboxKeyScheduleInput {
     pub suite_id: Hash512,
@@ -138,7 +121,7 @@ impl MailboxKeyScheduleInput {
             CanonicalItem::fixed_bytes(self.envelope_attempt_identifier)?,
             CanonicalItem::nonempty_ascii(MAILBOX_DIRECTION)?,
             CanonicalItem::unsigned16(self.payload_type.canonical_code()),
-            CanonicalItem::unsigned16(1),
+            CanonicalItem::unsigned16(MAILBOX_PAYLOAD_VERSION),
             CanonicalItem::hash512(self.statement_hash.into_bytes()),
             CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &material_roots)?,
             CanonicalItem::hash512(self.kem_ciphertext_hash.into_bytes()),
@@ -173,7 +156,7 @@ impl MailboxKeyScheduleInput {
                     "mailbox payload type is not assigned",
                 )
             })?;
-        if read_u16(&items[12])? != 1 {
+        if read_u16(&items[12])? != MAILBOX_PAYLOAD_VERSION {
             return Err(mailbox_error(
                 RefusalReason::UnsupportedVersionOrSuite,
                 "mailbox payload version is unsupported",
@@ -368,8 +351,7 @@ impl SignedMailboxEnvelope {
         expected_binding.verify(key_schedule_input)?;
 
         let source_roster_entry = roster_entry(roster, key_schedule_input.source_participant_id)?;
-        let recipient_roster_entry =
-            roster_entry(roster, key_schedule_input.recipient_participant_id)?;
+        roster_entry(roster, key_schedule_input.recipient_participant_id)?;
         let source_verification_key =
             ml_dsa_65::PublicKey::try_from_bytes(source_roster_entry.signing_verification_key)
                 .map_err(|_| RefusalReason::InvalidSignature)?;
@@ -382,10 +364,7 @@ impl SignedMailboxEnvelope {
             return Err(RefusalReason::InvalidSignature);
         }
 
-        Ok(AuthenticatedMailboxEnvelope {
-            envelope: self,
-            recipient_encapsulation_key: recipient_roster_entry.mailbox_encapsulation_key,
-        })
+        Ok(AuthenticatedMailboxEnvelope { envelope: self })
     }
 
     fn validate_bindings(&self) -> MailboxResult<()> {
@@ -448,265 +427,10 @@ impl MailboxBindingExpectation {
     }
 }
 
-/// A validated ML-KEM-768 decapsulation key kept out of debug output and
-/// zeroized when dropped.
-pub struct MailboxDecapsulationKey {
-    bytes: Box<[u8; ML_KEM_768_DECAPSULATION_KEY_BYTE_LENGTH]>,
-}
-
-impl MailboxDecapsulationKey {
-    pub fn try_from_bytes(
-        mut bytes: [u8; ML_KEM_768_DECAPSULATION_KEY_BYTE_LENGTH],
-    ) -> MailboxResult<Self> {
-        let decoded_key = ml_kem_768::DecapsKey::try_from_bytes(bytes)
-            .map(|decoded_key| Self {
-                bytes: Box::new(decoded_key.into_bytes()),
-            })
-            .map_err(|_| {
-                mailbox_error(
-                    RefusalReason::MalformedEncoding,
-                    "ML-KEM-768 decapsulation key is not canonical",
-                )
-            });
-        bytes.zeroize();
-        decoded_key
-    }
-
-    fn embedded_encapsulation_key(&self) -> &[u8] {
-        &self.bytes[ML_KEM_768_DECAPSULATION_PKE_KEY_BYTE_LENGTH
-            ..ML_KEM_768_DECAPSULATION_PKE_KEY_BYTE_LENGTH
-                + ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH]
-    }
-}
-
-impl Drop for MailboxDecapsulationKey {
-    fn drop(&mut self) {
-        self.bytes.zeroize();
-    }
-}
-
-impl fmt::Debug for MailboxDecapsulationKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("MailboxDecapsulationKey([redacted])")
-    }
-}
-
-/// A validated ML-DSA-65 signing key kept out of serializable protocol values,
-/// debug output, and public carriers.
-pub struct MailboxSigningKey {
-    bytes: Box<[u8; ML_DSA_65_SIGNING_KEY_BYTE_LENGTH]>,
-}
-
-impl MailboxSigningKey {
-    pub fn try_from_bytes(
-        mut bytes: [u8; ML_DSA_65_SIGNING_KEY_BYTE_LENGTH],
-    ) -> MailboxResult<Self> {
-        let decoded_key = ml_dsa_65::PrivateKey::try_from_bytes(bytes)
-            .map(|decoded_key| Self {
-                bytes: Box::new(decoded_key.into_bytes()),
-            })
-            .map_err(|_| {
-                mailbox_error(
-                    RefusalReason::MalformedEncoding,
-                    "ML-DSA-65 signing key is not canonical",
-                )
-            });
-        bytes.zeroize();
-        decoded_key
-    }
-
-    fn decode(&self) -> MailboxResult<ml_dsa_65::PrivateKey> {
-        let mut signing_key_bytes = *self.bytes;
-        let signing_key = ml_dsa_65::PrivateKey::try_from_bytes(signing_key_bytes).map_err(|_| {
-            mailbox_error(
-                RefusalReason::MalformedEncoding,
-                "ML-DSA-65 signing key is not canonical",
-            )
-        });
-        signing_key_bytes.zeroize();
-        signing_key
-    }
-}
-
-impl Drop for MailboxSigningKey {
-    fn drop(&mut self) {
-        self.bytes.zeroize();
-    }
-}
-
-impl fmt::Debug for MailboxSigningKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("MailboxSigningKey([redacted])")
-    }
-}
-
-/// Fresh producer material derived from the action-private randomness tree.
-/// It is single-use and wiped on drop; callers cache the resulting signed
-/// envelope and ciphertext bytes for byte-identical retransmission.
-pub struct MailboxSealingRandomness {
-    envelope_attempt_identifier: [u8; MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH],
-    kem_encapsulation_seed: [u8; 32],
-    signature_randomness_seed: [u8; 32],
-}
-
-impl MailboxSealingRandomness {
-    pub const fn new(
-        envelope_attempt_identifier: [u8; MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH],
-        kem_encapsulation_seed: [u8; 32],
-        signature_randomness_seed: [u8; 32],
-    ) -> Self {
-        Self {
-            envelope_attempt_identifier,
-            kem_encapsulation_seed,
-            signature_randomness_seed,
-        }
-    }
-}
-
-impl Drop for MailboxSealingRandomness {
-    fn drop(&mut self) {
-        self.envelope_attempt_identifier.zeroize();
-        self.kem_encapsulation_seed.zeroize();
-        self.signature_randomness_seed.zeroize();
-    }
-}
-
-impl fmt::Debug for MailboxSealingRandomness {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("MailboxSealingRandomness([redacted])")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SealedMailboxPayload {
-    pub signed_envelope: SignedMailboxEnvelope,
-    pub ciphertext: Vec<u8>,
-}
-
-/// Seals and signs one bounded mailbox payload with keys selected only from the
-/// external roster. This producer returns bytes or an error; only the opening
-/// path returns a verification result.
-pub fn seal_mailbox_payload(
-    roster: &Roster,
-    expected_binding: &MailboxBindingExpectation,
-    source_signing_key: &MailboxSigningKey,
-    randomness: MailboxSealingRandomness,
-    plaintext: &[u8],
-) -> MailboxResult<SealedMailboxPayload> {
-    let plaintext_byte_length = u64::try_from(plaintext.len()).map_err(|_| {
-        mailbox_error(
-            RefusalReason::OutsideSupportedProfile,
-            "mailbox plaintext length does not fit u64",
-        )
-    })?;
-    validate_plaintext_byte_length(plaintext_byte_length)?;
-    if plaintext.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
-        return Err(mailbox_error(
-            RefusalReason::OutsideSupportedProfile,
-            "in-memory mailbox sealing exceeds the copied-buffer profile",
-        ));
-    }
-
-    let roster_hash = roster.roster_hash()?;
-    let source_roster_entry = roster_entry(roster, expected_binding.source_participant_id)
-        .map_err(|reason| mailbox_error(reason, "mailbox source is absent from the roster"))?;
-    let recipient_roster_entry = roster_entry(roster, expected_binding.recipient_participant_id)
-        .map_err(|reason| mailbox_error(reason, "mailbox recipient is absent from the roster"))?;
-    let signing_key = source_signing_key.decode()?;
-    if signing_key.get_public_key().into_bytes() != source_roster_entry.signing_verification_key {
-        return Err(mailbox_error(
-            RefusalReason::WrongContext,
-            "mailbox signing key does not match the roster source",
-        ));
-    }
-    let recipient_encapsulation_key =
-        ml_kem_768::EncapsKey::try_from_bytes(recipient_roster_entry.mailbox_encapsulation_key)
-            .map_err(|_| {
-                mailbox_error(
-                    RefusalReason::MalformedEncoding,
-                    "roster mailbox encapsulation key is not canonical",
-                )
-            })?;
-    let (shared_secret, kem_ciphertext) =
-        recipient_encapsulation_key.encaps_from_seed(&randomness.kem_encapsulation_seed);
-    let kem_ciphertext = kem_ciphertext.into_bytes();
-    let shared_secret_bytes = Zeroizing::new(shared_secret.into_bytes());
-    let key_schedule_input = MailboxKeyScheduleInput {
-        suite_id: expected_binding.suite_id,
-        ceremony_context_hash: expected_binding.ceremony_context_hash,
-        action_context_hash: expected_binding.action_context_hash,
-        roster_hash,
-        source_participant_id: expected_binding.source_participant_id,
-        recipient_participant_id: expected_binding.recipient_participant_id,
-        producer_sequence: expected_binding.producer_sequence,
-        envelope_attempt_identifier: randomness.envelope_attempt_identifier,
-        payload_type: expected_binding.payload_type,
-        statement_hash: expected_binding.statement_hash,
-        ordered_material_roots: expected_binding.ordered_material_roots.clone(),
-        kem_ciphertext_hash: kem_ciphertext_hash(&kem_ciphertext)?,
-    };
-    let associated_data =
-        MailboxAssociatedData::new(key_schedule_input.clone(), plaintext_byte_length)?;
-    let associated_data_bytes = associated_data.encode()?;
-    let key_material = derive_mailbox_key_material(&key_schedule_input, &shared_secret_bytes)?;
-    let cipher =
-        Aes256Gcm::new_from_slice(&key_material[..AES_256_KEY_BYTE_LENGTH]).map_err(|_| {
-            mailbox_error(
-                RefusalReason::OutsideSupportedProfile,
-                "mailbox AES-256-GCM key length is unsupported",
-            )
-        })?;
-    let nonce = Nonce::from_slice(&key_material[AES_256_KEY_BYTE_LENGTH..]);
-    let mut ciphertext = plaintext.to_vec();
-    let gcm_tag =
-        match cipher.encrypt_in_place_detached(nonce, &associated_data_bytes, &mut ciphertext) {
-            Ok(tag) => tag.into(),
-            Err(_) => {
-                ciphertext.zeroize();
-                return Err(mailbox_error(
-                    RefusalReason::OutsideSupportedProfile,
-                    "mailbox AES-256-GCM sealing failed",
-                ));
-            }
-        };
-    let ciphertext_descriptor = derive_canonical_stream_descriptor(
-        CanonicalStreamDomain::PrivateMailboxCiphertext,
-        &ciphertext,
-    )
-    .map_err(|reason| mailbox_error(reason, "mailbox ciphertext stream is outside the profile"))?;
-    let mut signed_envelope = SignedMailboxEnvelope {
-        associated_data,
-        kem_ciphertext,
-        ciphertext_descriptor,
-        gcm_tag,
-        source_signature: [0u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
-    };
-    let envelope_hash = signed_envelope.envelope_hash()?;
-    signed_envelope.source_signature = signing_key
-        .try_sign_with_seed(
-            &randomness.signature_randomness_seed,
-            envelope_hash.as_bytes(),
-            MAILBOX_SIGNATURE_CONTEXT,
-        )
-        .map_err(|_| {
-            mailbox_error(
-                RefusalReason::OutsideSupportedProfile,
-                "ML-DSA-65 mailbox signing failed",
-            )
-        })?;
-    signed_envelope.validate_bindings()?;
-
-    Ok(SealedMailboxPayload {
-        signed_envelope,
-        ciphertext,
-    })
-}
-
 /// A mailbox envelope whose source signature and complete public binding have
-/// already been verified. This is the only type that exposes decapsulation.
+/// already been verified.
 pub struct AuthenticatedMailboxEnvelope {
     envelope: SignedMailboxEnvelope,
-    recipient_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
 }
 
 impl AuthenticatedMailboxEnvelope {
@@ -723,62 +447,6 @@ impl AuthenticatedMailboxEnvelope {
             .key_schedule_input
             .envelope_attempt_identifier
     }
-
-    /// Performs ML-KEM decapsulation only after the source signature gate and
-    /// binds the private key to the external roster's recipient key.
-    pub fn decapsulate(
-        self,
-        recipient_decapsulation_key: &MailboxDecapsulationKey,
-    ) -> VerificationResult<PreparedMailboxOpening> {
-        match self.decapsulate_internal(recipient_decapsulation_key) {
-            Ok(prepared_opening) => VerificationResult::valid(prepared_opening),
-            Err(refusal_reason) => VerificationResult::refused(refusal_reason),
-        }
-    }
-
-    fn decapsulate_internal(
-        self,
-        recipient_decapsulation_key: &MailboxDecapsulationKey,
-    ) -> Result<PreparedMailboxOpening, RefusalReason> {
-        if recipient_decapsulation_key.embedded_encapsulation_key()
-            != self.recipient_encapsulation_key
-        {
-            return Err(RefusalReason::WrongContext);
-        }
-        let mut decapsulation_key_bytes = *recipient_decapsulation_key.bytes;
-        let decapsulation_key = ml_kem_768::DecapsKey::try_from_bytes(decapsulation_key_bytes)
-            .map_err(|_| RefusalReason::MalformedEncoding);
-        decapsulation_key_bytes.zeroize();
-        let decapsulation_key = decapsulation_key?;
-        let kem_ciphertext = ml_kem_768::CipherText::try_from_bytes(self.envelope.kem_ciphertext)
-            .map_err(|_| RefusalReason::MalformedEncoding)?;
-        let shared_secret = decapsulation_key
-            .try_decaps(&kem_ciphertext)
-            .map_err(|_| RefusalReason::MalformedEncoding)?;
-        let shared_secret_bytes = Zeroizing::new(shared_secret.into_bytes());
-        let associated_data_bytes = self
-            .envelope
-            .associated_data
-            .encode()
-            .map_err(|error| error.refusal_reason)?;
-        let key_material = derive_mailbox_key_material(
-            &self.envelope.associated_data.key_schedule_input,
-            &shared_secret_bytes,
-        )
-        .map_err(|error| error.refusal_reason)?;
-        let mut aes_key = [0u8; AES_256_KEY_BYTE_LENGTH];
-        aes_key.copy_from_slice(&key_material[..AES_256_KEY_BYTE_LENGTH]);
-        let mut gcm_nonce = [0u8; AES_GCM_NONCE_BYTE_LENGTH];
-        gcm_nonce.copy_from_slice(&key_material[AES_256_KEY_BYTE_LENGTH..]);
-
-        Ok(PreparedMailboxOpening {
-            aes_key: Zeroizing::new(aes_key),
-            gcm_nonce,
-            associated_data_bytes,
-            ciphertext_descriptor: self.envelope.ciphertext_descriptor,
-            gcm_tag: self.envelope.gcm_tag,
-        })
-    }
 }
 
 impl fmt::Debug for AuthenticatedMailboxEnvelope {
@@ -793,71 +461,6 @@ impl fmt::Debug for AuthenticatedMailboxEnvelope {
     }
 }
 
-/// Derived AES-256-GCM material and authenticated metadata for one opening.
-/// The plaintext is returned only after the stream descriptor and GCM tag both
-/// verify; failed staging bytes are zeroized.
-pub struct PreparedMailboxOpening {
-    aes_key: Zeroizing<[u8; AES_256_KEY_BYTE_LENGTH]>,
-    gcm_nonce: [u8; AES_GCM_NONCE_BYTE_LENGTH],
-    associated_data_bytes: Vec<u8>,
-    ciphertext_descriptor: StreamDescriptor,
-    gcm_tag: [u8; AES_GCM_TAG_BYTE_LENGTH],
-}
-
-impl PreparedMailboxOpening {
-    pub fn open_ciphertext(self, ciphertext: &[u8]) -> VerificationResult<Vec<u8>> {
-        match self.open_ciphertext_internal(ciphertext) {
-            Ok(plaintext) => VerificationResult::valid(plaintext),
-            Err(refusal_reason) => VerificationResult::refused(refusal_reason),
-        }
-    }
-
-    fn open_ciphertext_internal(self, ciphertext: &[u8]) -> Result<Vec<u8>, RefusalReason> {
-        if ciphertext.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
-            return Err(RefusalReason::OutsideSupportedProfile);
-        }
-        let mut stream_verifier = CanonicalStreamVerifier::new(
-            CanonicalStreamDomain::PrivateMailboxCiphertext,
-            self.ciphertext_descriptor,
-        )?;
-        for (chunk_index, chunk_bytes) in ciphertext
-            .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
-            .enumerate()
-        {
-            stream_verifier
-                .absorb_chunk(chunk_index, chunk_bytes)
-                .into_result()?;
-        }
-        stream_verifier.finish().into_result()?;
-
-        let cipher = Aes256Gcm::new_from_slice(self.aes_key.as_ref())
-            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-        let mut plaintext = ciphertext.to_vec();
-        if cipher
-            .decrypt_in_place_detached(
-                Nonce::from_slice(&self.gcm_nonce),
-                &self.associated_data_bytes,
-                &mut plaintext,
-                Tag::from_slice(&self.gcm_tag),
-            )
-            .is_err()
-        {
-            plaintext.zeroize();
-            return Err(RefusalReason::WrongHashOrRoot);
-        }
-        Ok(plaintext)
-    }
-}
-
-impl fmt::Debug for PreparedMailboxOpening {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("PreparedMailboxOpening")
-            .field("ciphertext_descriptor", &self.ciphertext_descriptor)
-            .finish_non_exhaustive()
-    }
-}
-
 pub fn kem_ciphertext_hash(
     kem_ciphertext: &[u8; ML_KEM_768_CIPHERTEXT_BYTE_LENGTH],
 ) -> MailboxResult<Hash512> {
@@ -865,41 +468,6 @@ pub fn kem_ciphertext_hash(
         KEM_CIPHERTEXT_HASH_DOMAIN,
         &[CanonicalItem::fixed_bytes(kem_ciphertext)?],
     )?)
-}
-
-fn derive_mailbox_key_material(
-    key_schedule_input: &MailboxKeyScheduleInput,
-    shared_secret: &[u8; 32],
-) -> MailboxResult<Zeroizing<[u8; MAILBOX_HKDF_OUTPUT_BYTE_LENGTH]>> {
-    let extract_salt_hash = hash512(
-        HKDF_EXTRACT_SALT_DOMAIN,
-        &[
-            CanonicalItem::hash512(key_schedule_input.suite_id.into_bytes()),
-            CanonicalItem::hash512(key_schedule_input.ceremony_context_hash.into_bytes()),
-            CanonicalItem::hash512(key_schedule_input.action_context_hash.into_bytes()),
-            CanonicalItem::hash512(key_schedule_input.roster_hash.into_bytes()),
-            CanonicalItem::participant_identity(
-                key_schedule_input.source_participant_id.into_bytes(),
-            ),
-            CanonicalItem::participant_identity(
-                key_schedule_input.recipient_participant_id.into_bytes(),
-            ),
-            CanonicalItem::unsigned64(key_schedule_input.producer_sequence),
-            CanonicalItem::fixed_bytes(key_schedule_input.envelope_attempt_identifier)?,
-            CanonicalItem::hash512(key_schedule_input.kem_ciphertext_hash.into_bytes()),
-        ],
-    )?;
-    let extract_salt = &extract_salt_hash.as_bytes()[..48];
-    let hkdf = Hkdf::<Sha384>::new(Some(extract_salt), shared_secret);
-    let mut output = Zeroizing::new([0u8; MAILBOX_HKDF_OUTPUT_BYTE_LENGTH]);
-    hkdf.expand(&key_schedule_input.encode()?, output.as_mut())
-        .map_err(|_| {
-            mailbox_error(
-                RefusalReason::OutsideSupportedProfile,
-                "mailbox HKDF output length is unsupported",
-            )
-        })?;
-    Ok(output)
 }
 
 fn validate_plaintext_byte_length(plaintext_byte_length: u64) -> MailboxResult<()> {
@@ -945,86 +513,38 @@ fn mailbox_error(refusal_reason: RefusalReason, message: &'static str) -> Founda
 
 #[cfg(test)]
 mod tests {
-    use aes_gcm::aead::AeadInPlace;
-    use fips203::traits::{
-        Decaps as KemDecaps, Encaps as KemEncaps, KeyGen as KemKeyGen, SerDes as KemSerDes,
-    };
+    use fips203::traits::{KeyGen as KemKeyGen, SerDes as KemSerDes};
     use fips204::traits::{KeyGen as SignatureKeyGen, Signer};
-    use serde::Deserialize;
     use sha2::{Digest, Sha256};
 
     use super::*;
     use crate::foundation::{
-        ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, RosterEntry, derive_canonical_stream_descriptor,
+        CanonicalStreamDomain, FOUNDATION_PROFILE, RosterEntry, derive_canonical_stream_descriptor,
     };
 
     struct TestMailbox {
         roster: Roster,
         source_signing_key: ml_dsa_65::PrivateKey,
-        recipient_decapsulation_key: MailboxDecapsulationKey,
         source_participant_id: ParticipantIdentity,
         recipient_participant_id: ParticipantIdentity,
-        recipient_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
-    }
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct NistMlKemEncapsulationVector {
-        source: String,
-        source_revision: String,
-        group_id: u64,
-        test_case_id: u64,
-        encapsulation_key: String,
-        decapsulation_key: String,
-        encapsulation_randomness: String,
-        ciphertext: String,
-        shared_secret: String,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct NistMlDsaVerificationVector {
-        source: String,
-        source_revision: String,
-        group_id: u64,
-        verification_key: String,
-        tests: Vec<NistMlDsaVerificationCase>,
-    }
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct NistMlDsaVerificationCase {
-        test_case_id: u64,
-        message: String,
-        signature: String,
-        expected_valid: bool,
     }
 
     fn test_mailbox() -> TestMailbox {
         let mut roster_entries =
             Vec::with_capacity(usize::from(FOUNDATION_PROFILE.participant_count));
         let mut source_signing_key = None;
-        let mut recipient_decapsulation_key = None;
-        let mut recipient_encapsulation_key = None;
         for roster_position in 0..FOUNDATION_PROFILE.participant_count {
             let signature_seed =
                 [u8::try_from(roster_position + 1).expect("test roster position fits"); 32];
             let (signing_verification_key, signing_key) =
                 ml_dsa_65::KG::keygen_from_seed(&signature_seed);
-            let (encapsulation_key, decapsulation_key) = ml_kem_768::KG::keygen_from_seed(
+            let (encapsulation_key, _) = ml_kem_768::KG::keygen_from_seed(
                 [u8::try_from(roster_position + 31).expect("test seed fits"); 32],
                 [u8::try_from(roster_position + 61).expect("test seed fits"); 32],
             );
             let encapsulation_key_bytes = encapsulation_key.into_bytes();
             if roster_position == 0 {
                 source_signing_key = Some(signing_key);
-            }
-            if roster_position == 1 {
-                recipient_decapsulation_key = Some(
-                    MailboxDecapsulationKey::try_from_bytes(decapsulation_key.into_bytes())
-                        .expect("test decapsulation key is canonical"),
-                );
-                recipient_encapsulation_key = Some(encapsulation_key_bytes);
             }
             roster_entries.push(RosterEntry {
                 roster_position,
@@ -1042,12 +562,8 @@ mod tests {
         TestMailbox {
             roster,
             source_signing_key: source_signing_key.expect("source signing key"),
-            recipient_decapsulation_key: recipient_decapsulation_key
-                .expect("recipient decapsulation key"),
             source_participant_id,
             recipient_participant_id,
-            recipient_encapsulation_key: recipient_encapsulation_key
-                .expect("recipient encapsulation key"),
         }
     }
 
@@ -1088,45 +604,24 @@ mod tests {
         }
     }
 
-    fn signed_envelope(
-        test_mailbox: &TestMailbox,
-        plaintext: &[u8],
-    ) -> (SignedMailboxEnvelope, Vec<u8>) {
-        let recipient_encapsulation_key =
-            ml_kem_768::EncapsKey::try_from_bytes(test_mailbox.recipient_encapsulation_key)
-                .expect("recipient encapsulation key is canonical");
-        let (shared_secret, kem_ciphertext) =
-            recipient_encapsulation_key.encaps_from_seed(&[0x88; 32]);
-        let kem_ciphertext = kem_ciphertext.into_bytes();
+    fn signed_envelope(test_mailbox: &TestMailbox, ciphertext: &[u8]) -> SignedMailboxEnvelope {
+        let kem_ciphertext = [0x88; ML_KEM_768_CIPHERTEXT_BYTE_LENGTH];
         let key_schedule_input = mailbox_key_schedule_input(test_mailbox, &kem_ciphertext);
         let associated_data = MailboxAssociatedData::new(
-            key_schedule_input.clone(),
-            u64::try_from(plaintext.len()).expect("test plaintext length fits"),
+            key_schedule_input,
+            u64::try_from(ciphertext.len()).expect("test ciphertext length fits"),
         )
         .expect("associated data");
-        let key_material =
-            derive_mailbox_key_material(&key_schedule_input, &shared_secret.into_bytes())
-                .expect("key material");
-        let cipher = Aes256Gcm::new_from_slice(&key_material[..AES_256_KEY_BYTE_LENGTH])
-            .expect("AES-256 key length");
-        let mut ciphertext = plaintext.to_vec();
-        let tag = cipher
-            .encrypt_in_place_detached(
-                Nonce::from_slice(&key_material[AES_256_KEY_BYTE_LENGTH..]),
-                &associated_data.encode().expect("associated data bytes"),
-                &mut ciphertext,
-            )
-            .expect("test encryption");
         let ciphertext_descriptor = derive_canonical_stream_descriptor(
             CanonicalStreamDomain::PrivateMailboxCiphertext,
-            &ciphertext,
+            ciphertext,
         )
         .expect("mailbox descriptor");
         let mut envelope = SignedMailboxEnvelope {
             associated_data,
             kem_ciphertext,
             ciphertext_descriptor,
-            gcm_tag: tag.into(),
+            gcm_tag: [0x5a; AES_GCM_TAG_BYTE_LENGTH],
             source_signature: [0u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
         };
         let envelope_hash = envelope.envelope_hash().expect("envelope hash");
@@ -1138,89 +633,14 @@ mod tests {
                 MAILBOX_SIGNATURE_CONTEXT,
             )
             .expect("test mailbox signature");
-        (envelope, ciphertext)
-    }
-
-    #[test]
-    fn production_sealing_round_trips_and_retransmits_byte_identically() {
-        let test_mailbox = test_mailbox();
-        let binding_template =
-            mailbox_key_schedule_input(&test_mailbox, &[0u8; ML_KEM_768_CIPHERTEXT_BYTE_LENGTH]);
-        let expected_binding = expected_binding(&binding_template);
-        let signing_key =
-            MailboxSigningKey::try_from_bytes(test_mailbox.source_signing_key.into_bytes())
-                .expect("test signing key is canonical");
-        let plaintext = b"producer-sealed private mailbox payload";
-
-        let seal_once = || {
-            seal_mailbox_payload(
-                &test_mailbox.roster,
-                &expected_binding,
-                &signing_key,
-                MailboxSealingRandomness::new([0x44; 32], [0x88; 32], [0x99; 32]),
-                plaintext,
-            )
-            .expect("mailbox sealing succeeds")
-        };
-        let first = seal_once();
-        let retransmission = seal_once();
-        assert_eq!(first, retransmission);
-        assert_eq!(
-            first.signed_envelope.encode().expect("envelope encodes"),
-            retransmission
-                .signed_envelope
-                .encode()
-                .expect("retransmitted envelope encodes")
-        );
-
-        let authenticated = first
-            .signed_envelope
-            .authenticate(&test_mailbox.roster, &expected_binding)
-            .into_result()
-            .expect("source signature and binding verify");
-        let prepared = authenticated
-            .decapsulate(&test_mailbox.recipient_decapsulation_key)
-            .into_result()
-            .expect("recipient decapsulation succeeds");
-        assert_eq!(
-            prepared
-                .open_ciphertext(&first.ciphertext)
-                .into_result()
-                .expect("ciphertext authenticates"),
-            plaintext
-        );
-    }
-
-    #[test]
-    fn production_sealing_refuses_a_signing_handle_for_another_roster_identity() {
-        let test_mailbox = test_mailbox();
-        let binding_template =
-            mailbox_key_schedule_input(&test_mailbox, &[0u8; ML_KEM_768_CIPHERTEXT_BYTE_LENGTH]);
-        let expected_binding = expected_binding(&binding_template);
-        let (_, unrelated_signing_key) = ml_dsa_65::KG::keygen_from_seed(&[0xfe; 32]);
-        let unrelated_signing_key =
-            MailboxSigningKey::try_from_bytes(unrelated_signing_key.into_bytes())
-                .expect("unrelated signing key is canonical");
-
-        assert_eq!(
-            seal_mailbox_payload(
-                &test_mailbox.roster,
-                &expected_binding,
-                &unrelated_signing_key,
-                MailboxSealingRandomness::new([1; 32], [2; 32], [3; 32]),
-                b"must not seal",
-            )
-            .expect_err("wrong roster signing handle must refuse")
-            .refusal_reason,
-            RefusalReason::WrongContext
-        );
+        envelope
     }
 
     #[test]
     fn all_mailbox_schemas_round_trip_with_exact_field_order() {
         let test_mailbox = test_mailbox();
         let plaintext = b"canonical private mailbox payload";
-        let (envelope, _) = signed_envelope(&test_mailbox, plaintext);
+        let envelope = signed_envelope(&test_mailbox, plaintext);
         let limits = CanonicalDecodeLimits::default();
 
         let key_schedule_bytes = envelope
@@ -1415,7 +835,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_mailbox_key_schedule_vector_pins_framing_extract_and_expand() {
+    fn fixed_mailbox_key_schedule_vector_pins_canonical_framing() {
         let key_schedule_input = MailboxKeyScheduleInput {
             suite_id: Hash512::from_bytes([0x11; 64]),
             ceremony_context_hash: Hash512::from_bytes([0x22; 64]),
@@ -1439,40 +859,32 @@ mod tests {
             lowercase_hex(&Sha256::digest(&encoded_key_schedule)),
             "a7070312302e1b0e6d9746c925bdc0c209af29c7f73677552f3f61d0b76d76dd"
         );
-
-        let key_material = derive_mailbox_key_material(&key_schedule_input, &[0xcc; 32])
-            .expect("fixed key schedule derives");
-        assert_eq!(
-            lowercase_hex(key_material.as_ref()),
-            "8939e904a457474bfe2317c32ae4f6061a80945f9e5bad27fb4433d138984fa9fedc06372a7c9b5f92b2e27b"
-        );
     }
 
     #[test]
-    fn signature_gate_precedes_decapsulation_and_plaintext_release() {
+    fn signature_gate_authenticates_the_bound_envelope() {
         let test_mailbox = test_mailbox();
-        let plaintext = (0..70_003)
+        let ciphertext = (0..70_003)
             .map(|index| ((index * 193) & 0xff) as u8)
             .collect::<Vec<_>>();
-        let (envelope, ciphertext) = signed_envelope(&test_mailbox, &plaintext);
+        let envelope = signed_envelope(&test_mailbox, &ciphertext);
+        let expected_descriptor = envelope.ciphertext_descriptor.clone();
+        let expected_attempt_identifier = envelope
+            .associated_data
+            .key_schedule_input
+            .envelope_attempt_identifier;
         let expectation = expected_binding(&envelope.associated_data.key_schedule_input);
         let authenticated = envelope
             .authenticate(&test_mailbox.roster, &expectation)
             .into_result()
             .expect("source signature authenticates");
-        let prepared = authenticated
-            .decapsulate(&test_mailbox.recipient_decapsulation_key)
-            .into_result()
-            .expect("recipient key decapsulates only after authentication");
+        assert_eq!(authenticated.ciphertext_descriptor(), &expected_descriptor);
         assert_eq!(
-            prepared
-                .open_ciphertext(&ciphertext)
-                .into_result()
-                .expect("descriptor and GCM tag authenticate"),
-            plaintext
+            authenticated.envelope_attempt_identifier(),
+            &expected_attempt_identifier
         );
 
-        let (mut forged, _) = signed_envelope(&test_mailbox, b"forged carrier");
+        let mut forged = signed_envelope(&test_mailbox, b"forged carrier");
         forged.source_signature[17] ^= 1;
         let forged_expectation = expected_binding(&forged.associated_data.key_schedule_input);
         assert!(matches!(
@@ -1484,9 +896,9 @@ mod tests {
     }
 
     #[test]
-    fn context_roster_key_stream_and_tag_substitutions_refuse() {
+    fn context_roster_and_tag_substitutions_refuse() {
         let test_mailbox = test_mailbox();
-        let (envelope, ciphertext) = signed_envelope(&test_mailbox, b"authenticated plaintext");
+        let envelope = signed_envelope(&test_mailbox, b"authenticated ciphertext");
 
         let mut wrong_context = expected_binding(&envelope.associated_data.key_schedule_input);
         wrong_context.producer_sequence += 1;
@@ -1511,67 +923,13 @@ mod tests {
             }
         ));
 
-        let (alternate_encapsulation_key, alternate_decapsulation_key) =
-            ml_kem_768::KG::keygen_from_seed([0xb1; 32], [0xb2; 32]);
-        let wrong_private_key =
-            MailboxDecapsulationKey::try_from_bytes(alternate_decapsulation_key.into_bytes())
-                .expect("alternate private key is canonical");
-        let _ = alternate_encapsulation_key;
-        let authenticated = envelope
-            .clone()
-            .authenticate(&test_mailbox.roster, &expectation)
-            .into_result()
-            .expect("envelope authenticates");
-        assert!(matches!(
-            authenticated.decapsulate(&wrong_private_key),
-            VerificationResult::Refused {
-                refusal_reason: RefusalReason::WrongContext
-            }
-        ));
-
-        let authenticated = envelope
-            .authenticate(&test_mailbox.roster, &expectation)
-            .into_result()
-            .expect("envelope authenticates");
-        let prepared = authenticated
-            .decapsulate(&test_mailbox.recipient_decapsulation_key)
-            .into_result()
-            .expect("recipient key decapsulates");
-        let mut substituted_ciphertext = ciphertext.clone();
-        substituted_ciphertext[0] ^= 1;
-        assert!(matches!(
-            prepared.open_ciphertext(&substituted_ciphertext),
-            VerificationResult::Refused {
-                refusal_reason: RefusalReason::WrongHashOrRoot
-            }
-        ));
-
-        let (mut wrong_tag_envelope, ciphertext) =
-            signed_envelope(&test_mailbox, b"tag substitution");
+        let mut wrong_tag_envelope = signed_envelope(&test_mailbox, b"tag substitution");
         wrong_tag_envelope.gcm_tag[0] ^= 1;
-        let envelope_hash = wrong_tag_envelope
-            .envelope_hash()
-            .expect("mutated envelope hash");
-        wrong_tag_envelope.source_signature = test_mailbox
-            .source_signing_key
-            .try_sign_with_seed(
-                &[0xc1; 32],
-                envelope_hash.as_bytes(),
-                MAILBOX_SIGNATURE_CONTEXT,
-            )
-            .expect("valid source signature over the wrong tag");
         let expectation = expected_binding(&wrong_tag_envelope.associated_data.key_schedule_input);
-        let prepared = wrong_tag_envelope
-            .authenticate(&test_mailbox.roster, &expectation)
-            .into_result()
-            .expect("source did authenticate this tag")
-            .decapsulate(&test_mailbox.recipient_decapsulation_key)
-            .into_result()
-            .expect("recipient key decapsulates");
         assert!(matches!(
-            prepared.open_ciphertext(&ciphertext),
+            wrong_tag_envelope.authenticate(&test_mailbox.roster, &expectation),
             VerificationResult::Refused {
-                refusal_reason: RefusalReason::WrongHashOrRoot
+                refusal_reason: RefusalReason::InvalidSignature
             }
         ));
     }
@@ -1579,19 +937,8 @@ mod tests {
     #[test]
     fn malformed_versions_lengths_hashes_and_hostile_sizes_refuse() {
         let test_mailbox = test_mailbox();
-        let (envelope, _) = signed_envelope(&test_mailbox, b"mailbox boundaries");
+        let envelope = signed_envelope(&test_mailbox, b"mailbox boundaries");
         let limits = CanonicalDecodeLimits::default();
-
-        let mut decapsulation_key_with_wrong_public_key_hash =
-            *test_mailbox.recipient_decapsulation_key.bytes;
-        decapsulation_key_with_wrong_public_key_hash[ML_KEM_768_DECAPSULATION_PKE_KEY_BYTE_LENGTH
-            + ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH] ^= 1;
-        assert_eq!(
-            MailboxDecapsulationKey::try_from_bytes(decapsulation_key_with_wrong_public_key_hash)
-                .expect_err("a decapsulation key with the wrong public-key hash must refuse")
-                .refusal_reason,
-            RefusalReason::MalformedEncoding
-        );
 
         let mut wrong_kem_hash = envelope.clone();
         wrong_kem_hash
@@ -1658,165 +1005,6 @@ mod tests {
                 .refusal_reason,
             RefusalReason::OutsideSupportedProfile
         );
-    }
-
-    #[test]
-    fn nist_acvp_ml_dsa_65_key_generation_vector_is_pinned() {
-        // NIST ACVP-Server, ML-DSA-keyGen-FIPS204 internal projection,
-        // ML-DSA-65 group 2, tcId 26.
-        let seed =
-            decode_32_byte_hex("70cefb9aed5b68e018b079da8284b9d5cad5499ed9c265ff73588005d85c225c");
-        let (verification_key, signing_key) = ml_dsa_65::KG::keygen_from_seed(&seed);
-        assert_eq!(
-            lowercase_hex(&Sha256::digest(verification_key.into_bytes())),
-            "646b26b8d09dbc9e865b6a006c693a3127b065e62fab5fbe8b159c416462feb6"
-        );
-        assert_eq!(
-            lowercase_hex(&Sha256::digest(signing_key.into_bytes())),
-            "3894dc56a4553781d68ff0d1b6fcf1b4876085ea602fb6f8738def50ed7d4c75"
-        );
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn nist_acvp_ml_dsa_65_internal_verification_vectors_are_pinned() {
-        // NIST currently publishes these ACVP cases for ML-DSA.Verify_internal,
-        // before the external API's 0x00 || context-length || context prefix.
-        // Keep this primitive pin distinct from the production API round-trip tests.
-        let vector: NistMlDsaVerificationVector = serde_json::from_str(include_str!(
-            "../../../../test-vectors/nist-ml-dsa-65-verification.json"
-        ))
-        .expect("selected NIST ACVP vectors are valid JSON");
-        assert_eq!(
-            vector.source,
-            "NIST ACVP-Server ML-DSA-sigVer-FIPS204 internalProjection"
-        );
-        assert_eq!(
-            vector.source_revision,
-            "65370b861b96efd30dfe0daae607bde26a78a5c8"
-        );
-        assert_eq!(vector.group_id, 2);
-        assert_eq!(vector.tests.len(), 2);
-
-        let verification_key_bytes: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH] =
-            decode_hex(&vector.verification_key)
-                .try_into()
-                .expect("ACVP verification key has the assigned length");
-        let verification_key = ml_dsa_65::PublicKey::try_from_bytes(verification_key_bytes)
-            .expect("ACVP verification key is canonical");
-
-        for test_case in vector.tests {
-            assert!(matches!(test_case.test_case_id, 25 | 26));
-            let message = decode_hex(&test_case.message);
-            let signature: [u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH] = decode_hex(&test_case.signature)
-                .try_into()
-                .expect("ACVP signature has the assigned length");
-            assert_eq!(
-                ml_dsa_65::_internal_verify(&verification_key, &message, &signature, &[]),
-                test_case.expected_valid,
-                "ML-DSA-65 ACVP tcId {}",
-                test_case.test_case_id
-            );
-        }
-    }
-
-    #[test]
-    fn nist_acvp_ml_kem_768_key_generation_vector_is_pinned() {
-        // NIST ACVP-Server, ML-KEM-keyGen-FIPS203 internal projection,
-        // ML-KEM-768 tcId 26.
-        let d =
-            decode_32_byte_hex("e582b7d75e6c80b05ae392a1fc9f7153b12390fd99930368cc67a768baebc8a0");
-        let z =
-            decode_32_byte_hex("1cdacb8740c0b87c4a379575f187b367cbfa3b300bf591b109f79816e9cbe8f0");
-        let (encapsulation_key, decapsulation_key) = ml_kem_768::KG::keygen_from_seed(d, z);
-        assert_eq!(
-            lowercase_hex(&Sha256::digest(encapsulation_key.into_bytes())),
-            "4158f6afb5e516c99f1da07da8c651348422b17c1f4e9a08ad73fb1f91249b3e"
-        );
-        assert_eq!(
-            lowercase_hex(&Sha256::digest(decapsulation_key.into_bytes())),
-            "7aab35839207f72b310abe36e2daa1cc7ff6f7fa8941e439967cd47d9b437079"
-        );
-    }
-
-    #[test]
-    fn nist_acvp_ml_kem_768_encapsulation_and_decapsulation_vector_is_pinned() {
-        let vector: NistMlKemEncapsulationVector = serde_json::from_str(include_str!(
-            "../../../../test-vectors/nist-ml-kem-768-encapsulation.json"
-        ))
-        .expect("selected NIST ACVP vector is valid JSON");
-        assert_eq!(
-            vector.source,
-            "NIST ACVP-Server ML-KEM-encapDecap-FIPS203 internalProjection"
-        );
-        assert_eq!(
-            vector.source_revision,
-            "65370b861b96efd30dfe0daae607bde26a78a5c8"
-        );
-        assert_eq!((vector.group_id, vector.test_case_id), (2, 26));
-
-        let encapsulation_key_bytes: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH] =
-            decode_hex(&vector.encapsulation_key)
-                .try_into()
-                .expect("ACVP encapsulation key has the assigned length");
-        let decapsulation_key_bytes: [u8; ML_KEM_768_DECAPSULATION_KEY_BYTE_LENGTH] =
-            decode_hex(&vector.decapsulation_key)
-                .try_into()
-                .expect("ACVP decapsulation key has the assigned length");
-        let encapsulation_randomness = decode_32_byte_hex(&vector.encapsulation_randomness);
-        let expected_ciphertext: [u8; ML_KEM_768_CIPHERTEXT_BYTE_LENGTH] =
-            decode_hex(&vector.ciphertext)
-                .try_into()
-                .expect("ACVP ciphertext has the assigned length");
-        let expected_shared_secret = decode_32_byte_hex(&vector.shared_secret);
-
-        let encapsulation_key = ml_kem_768::EncapsKey::try_from_bytes(encapsulation_key_bytes)
-            .expect("ACVP encapsulation key is canonical");
-        let (encapsulated_shared_secret, ciphertext) =
-            encapsulation_key.encaps_from_seed(&encapsulation_randomness);
-        assert_eq!(ciphertext.into_bytes(), expected_ciphertext);
-        assert_eq!(
-            encapsulated_shared_secret.into_bytes(),
-            expected_shared_secret
-        );
-
-        let decapsulation_key = ml_kem_768::DecapsKey::try_from_bytes(decapsulation_key_bytes)
-            .expect("ACVP decapsulation key is canonical");
-        let ciphertext = ml_kem_768::CipherText::try_from_bytes(expected_ciphertext)
-            .expect("ACVP ciphertext has the assigned length");
-        assert_eq!(
-            decapsulation_key
-                .try_decaps(&ciphertext)
-                .expect("ACVP ciphertext decapsulates")
-                .into_bytes(),
-            expected_shared_secret
-        );
-    }
-
-    #[test]
-    fn secret_types_redact_debug_output() {
-        let test_mailbox = test_mailbox();
-        assert_eq!(
-            format!("{:?}", test_mailbox.recipient_decapsulation_key),
-            "MailboxDecapsulationKey([redacted])"
-        );
-        assert_eq!(ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, ml_dsa_65::PK_LEN);
-    }
-
-    fn decode_32_byte_hex(value: &str) -> [u8; 32] {
-        decode_hex(value)
-            .try_into()
-            .expect("test vector contains exactly 32 bytes")
-    }
-
-    fn decode_hex(value: &str) -> Vec<u8> {
-        assert!(value.len().is_multiple_of(2));
-        (0..value.len())
-            .step_by(2)
-            .map(|index| {
-                u8::from_str_radix(&value[index..index + 2], 16).expect("test vector hex is valid")
-            })
-            .collect()
     }
 
     fn lowercase_hex(bytes: &[u8]) -> String {

@@ -15,26 +15,28 @@ describe('direct encrypted ballot kernel command', () => {
             setupPackage,
         });
 
-        expect(result.input.ballotCount).toBe(1);
-        expect(result.ballotLayout.optionCount).toBe(20);
-        expect(result.parameters.dataPrimeCount).toBe(17);
-        expect(result.proofAttempt).toMatchObject({
-            proofCount: 1,
-            rnsLimbCount: 17,
-        });
         expect(result.encryptedBallots.encryptedBallotHashes).toHaveLength(1);
         expect(result.encryptedBallots.ciphertextRoots).toHaveLength(1);
+        expect(result.ballotValidityProofs).toHaveLength(1);
+        const ballotValidityProof = result.ballotValidityProofs[0];
         expect(
-            result.encryptedBallots.ciphertextCanonicalByteLengths[0],
+            ballotValidityProof.proofTransport.chunkHashes.length,
         ).toBeGreaterThan(0);
-        expect(result.proofAttempt.proofSizeBytes).toBeGreaterThan(0);
-        expect(result.proofAttempt.totalProofBytes).toBe(
-            result.proofAttempt.proofSizeBytes,
+        expect(
+            ballotValidityProof.proofTransport.chunkHashes.every(
+                (chunkHash) => chunkHash.length === 128,
+            ),
+        ).toBe(true);
+        expect(
+            new Set([
+                ballotValidityProof.statementHash,
+                ballotValidityProof.proofBytesHash,
+                ballotValidityProof.proofTransport.chunkMerkleRoot,
+                ballotValidityProof.proofTransport.publicTransportHash,
+            ]).size,
+        ).toBe(4);
+        expect(result.aggregation.aggregateCiphertextRoot).toBe(
+            result.encryptedBallots.ciphertextRoots[0],
         );
-        expect(result.aggregation.ballotCount).toBe(1);
-        expect(result.aggregation.aggregateCiphertextRoot).toHaveLength(128);
-        expect(
-            result.aggregation.aggregateCiphertextCanonicalByteLength,
-        ).toBeGreaterThan(0);
     });
 });

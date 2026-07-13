@@ -11,28 +11,15 @@ export type JsonRecord = Record<string, unknown>;
 export type EncryptedLocalTrusteeSetupMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'EncryptedLocalTrusteeSetupMaterial';
-        readonly materialClass: 'aggregate-threshold-share-sealed';
         readonly materialRoot: ProtocolHash;
         readonly materialAad: Readonly<Record<string, unknown>>;
-        readonly materialAadHash: ProtocolHash;
-        readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
-        readonly plaintextByteLength: number;
-        readonly aeadTagLength: typeof aesGcmTagBitLength;
-        readonly encryptedMaterialHash: ProtocolHash;
     }
 >;
 
-export type LocalTrusteeSetupStateSealedMaterial = Readonly<
-    JsonRecord & {
-        readonly objectType: 'LocalTrusteeSetupStateSealedMaterial';
-        readonly materialClass: 'aggregate-threshold-share-sealed';
-        readonly materialRoot: ProtocolHash;
-        readonly ciphertextReference: ProtocolHash;
-        readonly encryptedMaterial: EncryptedLocalTrusteeSetupMaterial;
-    }
->;
+export type LocalTrusteeSetupStateSealedMaterial =
+    EncryptedLocalTrusteeSetupMaterial;
 
 export type LocalTrusteeSetupStateSealedPayload = Readonly<
     JsonRecord & {
@@ -71,7 +58,6 @@ export type LocalTrusteeStateStorageEncryptionInput = {
     >;
     readonly setupContext: unknown;
     readonly storageKeyBytesHex: string;
-    readonly aeadNonceBytesHex?: string;
 };
 
 export type LocalTrusteeStateStorageDecryptionInput = {
@@ -84,47 +70,32 @@ export type LocalTrusteeStateStorageDecryptionInput = {
 export type EncryptedLocalTrusteeSetupState = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'EncryptedLocalTrusteeSetupState';
-        readonly localStateRoot: ProtocolHash;
-        readonly localStateCommitmentHash: ProtocolHash;
         readonly storageAad: Readonly<Record<string, unknown>>;
-        readonly storageAadHash: ProtocolHash;
-        readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
-        readonly plaintextByteLength: number;
-        readonly aeadTagLength: typeof aesGcmTagBitLength;
-        readonly encryptedLocalStateHash: ProtocolHash;
     }
 >;
 
 export type LocalTrusteeStateStorageEncryptionResult = {
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
-    readonly localStatePlaintextHash: ProtocolHash;
-    readonly storageAadHash: ProtocolHash;
 };
 
 export type LocalTrusteeStateStorageDecryptionResult = {
     readonly localStatePlaintext: LocalTrusteeSetupStateSealedPayload;
-    readonly localStatePlaintextHash: ProtocolHash;
-    readonly storageAadHash: ProtocolHash;
 };
 
 export type LocalTrusteeSetupSealedMaterialEncryptionInput = {
-    readonly materialClass: 'aggregate-threshold-share-sealed';
     readonly materialPlaintext: unknown;
     readonly setupContext: unknown;
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
     readonly storageKeyBytesHex: string;
-    readonly aeadNonceBytesHex?: string;
 };
 
 export type LocalTrusteeSetupSealedMaterialEncryptionResult = {
     readonly sealedMaterial: LocalTrusteeSetupStateSealedMaterial;
     readonly materialRoot: ProtocolHash;
-    readonly materialPlaintextHash: ProtocolHash;
-    readonly materialAadHash: ProtocolHash;
 };
 
 export type LocalTrusteeSetupSealedMaterialDecryptionInput = {
@@ -137,8 +108,6 @@ export type LocalTrusteeSetupSealedMaterialDecryptionInput = {
 
 export type LocalTrusteeSetupSealedMaterialDecryptionResult = {
     readonly materialPlaintext: unknown;
-    readonly materialPlaintextHash: ProtocolHash;
-    readonly materialAadHash: ProtocolHash;
 };
 
 export const protocolHashPattern = /^[0-9a-f]{128}$/u;
@@ -165,24 +134,10 @@ export const localTrusteeSealedPayloadFieldNames = [
     'issuedVssComplaintRoots',
 ] as const;
 
-export const sealedMaterialFieldNames = [
-    'objectType',
-    'materialClass',
-    'materialRoot',
-    'ciphertextReference',
-    'encryptedMaterial',
-] as const;
-
 export const encryptedSealedMaterialFieldNames = [
     'objectType',
-    'materialClass',
     'materialRoot',
     'materialAad',
-    'materialAadHash',
-    'keyCommitmentHash',
     'aeadNonceHex',
     'ciphertextBytesHex',
-    'plaintextByteLength',
-    'aeadTagLength',
-    'encryptedMaterialHash',
 ] as const;

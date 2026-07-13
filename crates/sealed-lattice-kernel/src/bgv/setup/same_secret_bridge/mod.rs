@@ -2,15 +2,11 @@ use super::setup_proof::SetupProofMaterialBytes;
 use super::setup_proof::material_transport::{
     SetupProofMaterialTransportFamily, resolve_transported_setup_proof_material,
 };
-use super::vss_commitment::VSS_PUBLIC_COMMITMENT_BINARY_FORMAT;
 use super::*;
 use crate::bgv::setup_helpers::{
     compare_required_string, compare_required_u64, read_positive_u64_at_path,
     read_positive_usize_at_path,
 };
-const SAME_SECRET_RELATION: &str =
-    "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";
-const VSS_SAME_SECRET_BRIDGE_RELATION: &str = "public constant coefficient commitments bind to the same signed ternary trustee secret as the source VSS constant commitments across Q_share";
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 pub(in crate::bgv::setup) const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/same-secret-bridge/proof-bytes";
@@ -18,9 +14,6 @@ const SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedSameSecretBridgeProofMaterialSet";
 const SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedSameSecretBridgeProofMaterial";
-const VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT: &str = "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound source and public commitment over Q_share";
-const VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION: &str = "coefficients are interpreted as signed representatives before reduction into each Q_share RNS prime";
-const VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER: &str = "target constant roots are ordered by contiguous Q_share rnsLimbIndex values starting at zero and bind the listed Q_share prime";
 const SETUP_CONTEXT_FIELD_NAMES: [&str; 5] = [
     "ceremonyId",
     "manifestHash",
@@ -107,27 +100,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
             &format!("VSS same-secret bridge authoritative {field_name}"),
         )?;
     }
-    compare_required_string(
-        string_at_path(statement_set, &["integerSupport"])?,
-        VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
-        "VSS same-secret bridge statement set integerSupport",
-    )?;
-    compare_required_string(
-        string_at_path(statement_set, &["signedRepresentativeConvention"])?,
-        VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
-        "VSS same-secret bridge statement set signedRepresentativeConvention",
-    )?;
-    compare_required_string(
-        string_at_path(statement_set, &["vssPublicCommitmentEncoding"])?,
-        VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "VSS same-secret bridge statement set vssPublicCommitmentEncoding",
-    )?;
-    compare_required_string(
-        string_at_path(statement_set, &["qShareLimbOrder"])?,
-        VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
-        "VSS same-secret bridge statement set qShareLimbOrder",
-    )?;
-
     let statement_records = array_at_path(statement_set, &["statementRecords"])?;
     if statement_records.len() != participant_count {
         return Err(CanonicalError::new(
@@ -174,10 +146,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "thresholdDegree": threshold_degree,
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-        "integerSupport": VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
-        "signedRepresentativeConvention": VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
-        "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "qShareLimbOrder": VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
         "statementRecords": verified_statement_records,
     }))?;
     let statement_set_root = hash_at_path(statement_set, &["sameSecretBridgeStatementSetRoot"])?;
@@ -196,10 +164,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "ringDegree": ring_degree,
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-        "integerSupport": VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
-        "signedRepresentativeConvention": VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
-        "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "qShareLimbOrder": VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
     }))
 }
 

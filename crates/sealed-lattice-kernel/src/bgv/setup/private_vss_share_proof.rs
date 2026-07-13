@@ -7,7 +7,6 @@ use crate::{
 };
 
 use super::{
-    accepted_setup::setup_parameters_hash,
     commitment::{SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue, setup_commitment_root},
     setup_proof::SetupProofMaterialBytes,
     sharing::canonical_trustee_point,
@@ -402,8 +401,6 @@ fn private_vss_share_succinct_statement_value(
             })
         })
         .collect::<Vec<_>>();
-    let setup_proof_binding =
-        super::setup_proof::setup_proof_record_binding_value(&setup_parameters_hash()?)?;
     let carry_bound = private_vss_share_lifted_carry_bound(
         input.recipient_roster_position,
         input.coefficient_commitments.len(),
@@ -411,7 +408,6 @@ fn private_vss_share_succinct_statement_value(
 
     Ok(json!({
         "objectType": "PrivateVssShareSuccinctProofStatement",
-        "setupProofBinding": setup_proof_binding,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "setupContext": input.setup_context,
         "publicMatrixSeedHash": input.public_matrix_seed_hash,
@@ -616,9 +612,7 @@ pub(super) fn private_vss_share_succinct_proof_record(
             })
             .collect::<CanonicalResult<Vec<i64>>>()?,
         vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         vss_public_recipient_share_messages_by_item: Vec::new(),
-        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),

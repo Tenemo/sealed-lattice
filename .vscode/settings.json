@@ -7,8 +7,6 @@
     "editor.bracketPairColorization.enabled": true,
     "editor.guides.bracketPairs": true,
 
-    "css.validate": false,
-    "scss.validate": false,
     "javascript.validate.enable": false,
 
     "eslint.format.enable": true,

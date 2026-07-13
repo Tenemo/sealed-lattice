@@ -1,5 +1,13 @@
-import type { RefusalReason, VerificationResult } from '@sealed-lattice/types';
-import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
+import type {
+    RefusalReason,
+    StateCapabilityKind,
+    VerificationResult,
+} from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    refusalReasonCodes,
+    stateCapabilityKinds,
+} from '@sealed-lattice/types';
 
 import {
     CanonicalStreamRefusalError,
@@ -11,7 +19,6 @@ import {
 } from './canonical-stream-runtime.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 
-/** Internal bindings for the capability-scoped state verifier WASM exports. */
 type StateVerifierKernelContext = Readonly<{
     allocate(length: number): number;
     begin(
@@ -105,19 +112,8 @@ const wasm32WordByteLength = 4;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
 const fixedConfigurationByteLength = 2 + 3 * stateHashByteLength + 2 + 4;
 
-export const stateCapabilityKinds = Object.freeze({
-    ballotCandidateList: 1,
-    finalitySignature: 2,
-    targetRelease: 3,
-    setupActionRandomnessRoot: 4,
-    setupPublicSeedBranch: 5,
-    setupDealerSetBranch: 6,
-    setupRkgRoundOneBranch: 7,
-    setupTerminalPackage: 8,
-} as const);
-
-export type StateCapabilityKind =
-    (typeof stateCapabilityKinds)[keyof typeof stateCapabilityKinds];
+export { stateCapabilityKinds };
+export type { StateCapabilityKind };
 
 type StateOutputCapabilityKind =
     | typeof stateCapabilityKinds.ballotCandidateList
@@ -272,7 +268,7 @@ const isStateCapabilityKind = (value: unknown): value is StateCapabilityKind =>
     value === stateCapabilityKinds.setupActionRandomnessRoot ||
     value === stateCapabilityKinds.setupPublicSeedBranch ||
     value === stateCapabilityKinds.setupDealerSetBranch ||
-    value === stateCapabilityKinds.setupRkgRoundOneBranch ||
+    value === stateCapabilityKinds.setupRelinearizationRoundOneBranch ||
     value === stateCapabilityKinds.setupTerminalPackage;
 
 const isStateOutputCapabilityKind = (

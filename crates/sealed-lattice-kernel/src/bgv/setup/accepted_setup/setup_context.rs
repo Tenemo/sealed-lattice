@@ -114,11 +114,6 @@ pub(super) fn verify_context(
         }
     }
 
-    // Roster parameters: accept any supported roster size 3 <= n <= 20 by
-    // deriving the canonical full-roster quorums and decryption threshold from
-    // participantCount. n != 10 is implementation-supported but not
-    // benchmarked, not supported-phone evidence, and not part of the fixed
-    // foundation roster.
     let Some(participant_count) = setup_context
         .get("participantCount")
         .and_then(Value::as_u64)
@@ -143,43 +138,10 @@ pub(super) fn verify_context(
         )?));
     }
     let roster = roster_parameters_from_participant_count(participant_count);
-    for (field_name, expected_value) in [
-        ("qSetupComplete", roster.setup_completion_quorum),
-        ("qBallotRelease", roster.ballot_release_quorum),
-        ("qFinal", roster.finality_quorum),
-        ("qDec", roster.decryption_threshold),
-    ] {
-        match setup_context.get(field_name).and_then(Value::as_u64) {
-            Some(actual_value) if actual_value == expected_value => {}
-            Some(_) => {
-                return Ok(Some(verification_response(
-                    Some("setupIntent"),
-                    Vec::new(),
-                    vec![Refusal::new(
-                        "rosterParameterMismatch",
-                        format!(
-                            "setupContext.{field_name} does not match the value derived from participantCount"
-                        ),
-                        format!("setupPackage.setupContext.{field_name}"),
-                    )],
-                    Vec::new(),
-                )?));
-            }
-            None => {
-                return Ok(Some(verification_response(
-                    Some("setupIntent"),
-                    vec![format!("setupContext.{field_name}")],
-                    Vec::new(),
-                    Vec::new(),
-                )?));
-            }
-        }
-    }
     // The setup parameters hash is a roster family (distinct per participant
     // count), so it is compared against the hash derived from this setup
-    // context's roster. It binds Q_share, the carry-aware VSS relation,
-    // commitment, setup proof, transport, evaluator key schedule, and BGV
-    // parameters.
+    // context's roster. It binds the evaluator key schedule and the canonical
+    // BGV parameters, including the exact ordered data-prime basis.
     let expected_setup_parameters_hash = setup_parameters_hash_for_roster(&roster)?;
     if setup_context
         .get("setupParametersHash")
@@ -207,38 +169,6 @@ pub(super) fn verify_context(
     compare_expected_hash(request, setup_context, "expectedRosterHash", "rosterHash")?;
 
     Ok(None)
-}
-
-pub(super) fn verify_q_share(setup_package: &Value) -> CanonicalResult<Option<Value>> {
-    let Some(q_share) = setup_package.get("qShare") else {
-        return Ok(Some(verification_response(
-            Some("setupIntent"),
-            vec!["qShare".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
-    };
-    if q_share != &q_share_value() {
-        return Ok(Some(verification_response(
-            Some("setupIntent"),
-            Vec::new(),
-            vec![Refusal::new(
-                "qShareMismatch",
-                "qShare must be the exact ordered accepted RNS prime list",
-                "setupPackage.qShare".to_string(),
-            )],
-            Vec::new(),
-        )?));
-    }
-
-    Ok(None)
-}
-
-pub(super) fn q_share_value() -> Value {
-    json!({
-        "objectType": "QSharePrimeList",
-        "primes": DATA_PRIMES,
-    })
 }
 
 fn compare_expected_hash(
