@@ -122,23 +122,24 @@ const bundleSdkOutput = (
     }
 };
 
-const normalizeSdkDeclarationEntryMarker = (input: {
+export const normalizeSdkDeclarationSourceMarkers = (input: {
     readonly declarationBundlePath: string;
     readonly declarationEntryPath: string;
     readonly declarationSourceText: string;
 }): string => {
-    const declarationEntryMarkerPath = path
+    const declarationSourceDirectoryMarkerPath = path
         .relative(
             path.dirname(path.dirname(input.declarationBundlePath)),
-            input.declarationEntryPath,
+            path.dirname(input.declarationEntryPath),
         )
         .split(path.sep)
         .join('/');
+    const scratchMarkerPrefix = `//#region ${declarationSourceDirectoryMarkerPath}/`;
 
-    return input.declarationSourceText.replace(
-        `//#region ${declarationEntryMarkerPath}`,
-        '//#region src/index.ts',
-    );
+    return input.declarationSourceText
+        .split(scratchMarkerPrefix)
+        .join('//#region src/')
+        .replace('//#region src/index.d.ts', '//#region src/index.ts');
 };
 
 const normalizeSdkDeclarationBundle = async (
@@ -148,7 +149,7 @@ const normalizeSdkDeclarationBundle = async (
     const declarationSourceText = await readFile(declarationBundlePath, 'utf8');
     await writeFile(
         declarationBundlePath,
-        normalizeSdkDeclarationEntryMarker({
+        normalizeSdkDeclarationSourceMarkers({
             declarationBundlePath,
             declarationEntryPath,
             declarationSourceText,

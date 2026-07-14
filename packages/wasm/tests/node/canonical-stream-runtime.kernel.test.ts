@@ -1,11 +1,14 @@
 import { foundationProfile } from '@sealed-lattice/types';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
     canonicalStreamDomains,
     CanonicalStreamCancellationError,
+    CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
+    invalidateCanonicalStreamWorkerRuntime,
+    openCanonicalStreamVerifierForAtomicFinish,
     openCanonicalStreamWorkerRuntime,
     type CanonicalStreamDomain,
     type CanonicalStreamWorkerRuntime,
@@ -69,13 +72,28 @@ describe('Canonical stream real-WASM runtime', () => {
 
     it('preserves the exact closed canonical stream domain registry', () => {
         expect(canonicalStreamDomains).toEqual({
+            privateMailboxCiphertext: 1,
             dealerVssShareLinkageProof: 2,
             recipientAggregateThresholdShareProof: 3,
             sameSecretProof: 4,
             publicKeyShareProof: 5,
+            collectivePublicKeyAggregateProof: 6,
+            rkgRoundOneProof: 7,
+            rkgRoundOneAggregateProof: 8,
+            rkgRoundTwoProof: 9,
+            galoisShareProof: 10,
             evaluatorKeyAggregateProof: 11,
+            collectivePublicKey: 12,
             evaluatorKeyStore: 13,
+            ballotCiphertext: 14,
+            ballotValidityProof: 15,
+            aggregateCiphertext: 16,
+            replayTargetIdentifierCiphertext: 17,
+            replayTargetOrderCiphertext: 18,
+            targetIdentifierPartialDecryption: 19,
+            targetOrderPartialDecryption: 20,
             maliciousTargetShareProof: 21,
+            checkpointState: 22,
             stateBallotCandidateListExactOutput: 23,
             stateFinalitySignatureExactOutput: 24,
             stateTargetReleaseExactOutput: 25,
@@ -387,6 +405,134 @@ describe('Canonical stream real-WASM runtime', () => {
                 totalByteLength: maximumCanonicalStreamByteLength + 1,
             }),
         ).toThrowError(CanonicalStreamResourceError);
+    });
+
+    it('owns one lease manager per WASM instance and invalidates it on worker teardown', async () => {
+        const isolatedKernel = await loadFreshTranscriptCoreKernel();
+        const firstRuntime = openCanonicalStreamWorkerRuntime({
+            kernel: isolatedKernel,
+        });
+        const secondRuntime = openCanonicalStreamWorkerRuntime({
+            kernel: isolatedKernel,
+        });
+        expect(secondRuntime).toBe(firstRuntime);
+
+        const bytes = createBytes(37, 211);
+        const descriptor = writeDescriptor(
+            firstRuntime,
+            canonicalStreamDomains.evaluatorKeyStore,
+            bytes,
+        );
+        const atomicVerifier = openCanonicalStreamVerifierForAtomicFinish({
+            atomicFinish: () => {
+                throw new Error('The test never finishes the atomic verifier.');
+            },
+            descriptorBytes: descriptor,
+            kernel: isolatedKernel,
+            streamDomain: canonicalStreamDomains.evaluatorKeyStore,
+        });
+        expect(() =>
+            secondRuntime.openWriter({
+                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
+                totalByteLength: 1,
+            }),
+        ).toThrowError(CanonicalStreamResourceError);
+
+        invalidateCanonicalStreamWorkerRuntime({ kernel: isolatedKernel });
+        expect(atomicVerifier.state()).toBe('cancelled');
+        expect(firstRuntime.counterSnapshot()).toMatchObject({
+            activeSessionCount: 0,
+            cancelledSessionCount: 1,
+        });
+        expect(() =>
+            secondRuntime.openWriter({
+                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
+                totalByteLength: 1,
+            }),
+        ).toThrowError(CanonicalStreamInternalError);
+        expect(() =>
+            invalidateCanonicalStreamWorkerRuntime({ kernel: isolatedKernel }),
+        ).not.toThrow();
+    });
+
+    it('issues exact Web Crypto lease identifiers and refuses entropy failure or reuse before begin', async () => {
+        const isolatedKernel = await loadFreshTranscriptCoreKernel();
+        const runtime = openCanonicalStreamWorkerRuntime({
+            kernel: isolatedKernel,
+        });
+        const requestedByteLengths: number[] = [];
+        const randomValuesSpy = vi.spyOn(globalThis.crypto, 'getRandomValues');
+        const failRandomValues: Crypto['getRandomValues'] = <
+            ArrayType extends ArrayBufferView | null,
+        >(
+            destination: ArrayType,
+        ): ArrayType => {
+            if (!(destination instanceof Uint8Array)) {
+                throw new TypeError(
+                    'The stream lease fixture requires a Uint8Array destination.',
+                );
+            }
+            requestedByteLengths.push(destination.byteLength);
+            throw new Error('Injected stream lease entropy failure.');
+        };
+        const repeatRandomValues: Crypto['getRandomValues'] = <
+            ArrayType extends ArrayBufferView | null,
+        >(
+            destination: ArrayType,
+        ): ArrayType => {
+            if (!(destination instanceof Uint8Array)) {
+                throw new TypeError(
+                    'The stream lease fixture requires a Uint8Array destination.',
+                );
+            }
+            requestedByteLengths.push(destination.byteLength);
+            destination.fill(0x5a);
+            return destination;
+        };
+        try {
+            randomValuesSpy.mockImplementation(failRandomValues);
+            let entropyFailure: unknown;
+            try {
+                runtime.openWriter({
+                    streamDomain: canonicalStreamDomains.evaluatorKeyStore,
+                    totalByteLength: 1,
+                });
+            } catch (error) {
+                entropyFailure = error;
+            }
+            expect(entropyFailure).toBeInstanceOf(CanonicalStreamInternalError);
+            if (!(entropyFailure instanceof CanonicalStreamInternalError)) {
+                throw new TypeError(
+                    'The injected entropy failure did not cross the canonical stream boundary.',
+                );
+            }
+            expect(entropyFailure.failureCause).toBeInstanceOf(Error);
+            expect(runtime.counterSnapshot()).toMatchObject({
+                activeSessionCount: 0,
+                startedSessionCount: 0,
+            });
+
+            randomValuesSpy.mockImplementation(repeatRandomValues);
+            const firstLease = runtime.openWriter({
+                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
+                totalByteLength: 1,
+            });
+            firstLease.cancel();
+            expect(() =>
+                runtime.openWriter({
+                    streamDomain: canonicalStreamDomains.evaluatorKeyStore,
+                    totalByteLength: 1,
+                }),
+            ).toThrowError(CanonicalStreamInternalError);
+            expect(requestedByteLengths).toEqual([32, 32, 32]);
+            expect(runtime.counterSnapshot()).toMatchObject({
+                activeSessionCount: 0,
+                cancelledSessionCount: 1,
+                startedSessionCount: 1,
+            });
+        } finally {
+            randomValuesSpy.mockRestore();
+        }
     });
 
     it('never panics on a deterministic hostile descriptor corpus and remains reusable', () => {

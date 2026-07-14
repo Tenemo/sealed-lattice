@@ -126,6 +126,42 @@ export const registerKernelContexts = (
             deallocate: runtime.deallocate,
             finishVerifier: canonicalStreamFinishVerifier,
             finishWriter: canonicalStreamFinishWriter,
+            mailboxGcmAuthenticateChunk: resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_mailbox_gcm_authenticate_chunk',
+            ),
+            mailboxGcmBeginEncryptor: resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_mailbox_gcm_begin_encryptor',
+            ),
+            mailboxGcmBeginVerifier: resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_mailbox_gcm_begin_verifier',
+            ),
+            mailboxGcmCancel: resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_mailbox_gcm_cancel',
+            ),
+            mailboxGcmDecryptChunk: resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_mailbox_gcm_decrypt_chunk',
+            ),
+            mailboxGcmEncryptChunk: resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_mailbox_gcm_encrypt_chunk',
+            ),
+            mailboxGcmFinishAuthentication: resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_mailbox_gcm_finish_authentication',
+            ),
+            mailboxGcmFinishDecryptor: resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_mailbox_gcm_finish_decryptor',
+            ),
+            mailboxGcmFinishEncryptor: resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_mailbox_gcm_finish_encryptor',
+            ),
             memory: runtime.memory,
             runExclusive: runtime.runExclusive,
         });

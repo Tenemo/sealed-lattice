@@ -7,13 +7,29 @@ import type {
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeyStatementDescription,
     BgvLocalTrusteeSetupStateVerification,
-    BgvPrivateVssShareProofGeneration,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofGeneration,
     BgvVssCommittedMaterialCommitmentComputation,
     BgvVssShareLinkageProofGeneration,
+    DecodedActionRandomnessDerivationInput,
     BgvSetupCommitmentOpeningComputation,
     BgvTargetDecryptionShare,
+    BgvTargetDecryptionShareProofMaterial,
+    DecodedMailboxAssociatedData,
+    DecodedMailboxKeyScheduleInput,
+    DecodedPrivateRandomBlockInput,
+    DecodedPrivateRandomCursor,
+    DecodedSignedMailboxEnvelope,
+    DecodedStreamDescriptor,
+    EncodedMailboxAssociatedData,
+    EncodedMailboxKeyScheduleInput,
+    EncodedActionRandomnessDerivationInput,
+    EncodedPrivateRandomBlockInput,
+    EncodedPrivateRandomCursor,
+    EncodedSignedMailboxEnvelope,
+    EncodedStreamDescriptor,
+    GeneratedProofSuiteCandidate,
+    CanonicalFoundationValueValidation,
     TranscriptCoreKernel,
 } from './kernel-contracts.js';
 import type { TranscriptCoreKernelLoaderOptions } from './kernel-runtime.js';
@@ -61,6 +77,14 @@ export const createTranscriptCoreKernelLoader = (
             exports,
             'sealed_lattice_state_verifier_certify_intent',
         );
+        const stateVerifierCertifyUnorderedVotes = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_state_verifier_certify_unordered_votes',
+        );
+        const stateVerifierDescribe = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_state_verifier_describe',
+        );
         const stateVerifierRelease = resolveOptionalNumberExport(
             exports,
             'sealed_lattice_state_verifier_release',
@@ -81,6 +105,14 @@ export const createTranscriptCoreKernelLoader = (
             exports,
             'sealed_lattice_state_verifier_prepare_reservation',
         );
+        const stateVerifierPrepareWitnessVote = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_state_verifier_prepare_witness_vote',
+        );
+        const stateVerifierFinishWitnessVote = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_state_verifier_finish_witness_vote',
+        );
         const stateVerifierVerifyRecovery = resolveOptionalNumberExport(
             exports,
             'sealed_lattice_state_verifier_verify_recovery',
@@ -98,6 +130,128 @@ export const createTranscriptCoreKernelLoader = (
                     command: 'DeriveCanonicalObjectHash',
                     value: input.value,
                 }).canonicalObjectHash,
+            validateCanonicalFoundationValue: (input) =>
+                executeCommand<CanonicalFoundationValueValidation>({
+                    command: 'ValidateCanonicalFoundationValue',
+                    ...input,
+                }),
+            deriveCeremonyContextHash: (value): ProtocolHash =>
+                executeCommand<{
+                    readonly ceremonyContextHash: ProtocolHash;
+                }>({
+                    command: 'DeriveCeremonyContextHash',
+                    value,
+                }).ceremonyContextHash,
+            deriveActionContextHash: (value): ProtocolHash =>
+                executeCommand<{
+                    readonly actionContextHash: ProtocolHash;
+                }>({
+                    command: 'DeriveActionContextHash',
+                    value,
+                }).actionContextHash,
+            encodeMailboxKeyScheduleInput: (value) =>
+                executeCommand<EncodedMailboxKeyScheduleInput>({
+                    command: 'EncodeMailboxKeyScheduleInput',
+                    value,
+                }),
+            decodeMailboxKeyScheduleInput: (input) =>
+                executeCommand<DecodedMailboxKeyScheduleInput>({
+                    command: 'DecodeMailboxKeyScheduleInput',
+                    canonicalBytesHex: input.canonicalBytesHex,
+                }),
+            encodeMailboxAssociatedData: (value) =>
+                executeCommand<EncodedMailboxAssociatedData>({
+                    command: 'EncodeMailboxAssociatedData',
+                    value,
+                }),
+            decodeMailboxAssociatedData: (input) =>
+                executeCommand<DecodedMailboxAssociatedData>({
+                    command: 'DecodeMailboxAssociatedData',
+                    canonicalBytesHex: input.canonicalBytesHex,
+                }),
+            encodeStreamDescriptor: (value) =>
+                executeCommand<EncodedStreamDescriptor>({
+                    command: 'EncodeStreamDescriptor',
+                    value,
+                }),
+            decodeStreamDescriptor: (input) =>
+                executeCommand<DecodedStreamDescriptor>({
+                    command: 'DecodeStreamDescriptor',
+                    canonicalBytesHex: input.canonicalBytesHex,
+                }),
+            deriveSetupMailboxSlotHash: (value): ProtocolHash =>
+                executeCommand<{
+                    readonly setupMailboxSlotHash: ProtocolHash;
+                }>({
+                    command: 'DeriveSetupMailboxSlotHash',
+                    value,
+                }).setupMailboxSlotHash,
+            encodeActionRandomnessDerivationInput: (value) =>
+                executeCommand<EncodedActionRandomnessDerivationInput>({
+                    command: 'EncodeActionRandomnessDerivationInput',
+                    value,
+                }),
+            decodeActionRandomnessDerivationInput: (input) =>
+                executeCommand<DecodedActionRandomnessDerivationInput>({
+                    command: 'DecodeActionRandomnessDerivationInput',
+                    canonicalBytesHex: input.canonicalBytesHex,
+                }),
+            deriveActionRandomnessCommitment: (input): ProtocolHash =>
+                executeCommand<{
+                    readonly actionRandomnessCommitment: ProtocolHash;
+                }>({
+                    command: 'DeriveActionRandomnessCommitment',
+                    actionRandomnessRootHex: input.actionRandomnessRootHex,
+                    value: input.value,
+                }).actionRandomnessCommitment,
+            encodePrivateRandomBlockInput: (value) =>
+                executeCommand<EncodedPrivateRandomBlockInput>({
+                    command: 'EncodePrivateRandomBlockInput',
+                    value,
+                }),
+            decodePrivateRandomBlockInput: (input) =>
+                executeCommand<DecodedPrivateRandomBlockInput>({
+                    command: 'DecodePrivateRandomBlockInput',
+                    canonicalBytesHex: input.canonicalBytesHex,
+                }),
+            encodePrivateRandomCursor: (value) =>
+                executeCommand<EncodedPrivateRandomCursor>({
+                    command: 'EncodePrivateRandomCursor',
+                    value,
+                }),
+            decodePrivateRandomCursor: (input) =>
+                executeCommand<DecodedPrivateRandomCursor>({
+                    command: 'DecodePrivateRandomCursor',
+                    canonicalBytesHex: input.canonicalBytesHex,
+                }),
+            generateProofSuiteCandidate: () =>
+                executeCommand<GeneratedProofSuiteCandidate>({
+                    command: 'GenerateProofSuiteCandidate',
+                }),
+            encodeSignedMailboxEnvelope: (value) =>
+                executeCommand<EncodedSignedMailboxEnvelope>({
+                    command: 'EncodeSignedMailboxEnvelope',
+                    value,
+                }),
+            decodeSignedMailboxEnvelope: (input) =>
+                executeCommand<DecodedSignedMailboxEnvelope>({
+                    command: 'DecodeSignedMailboxEnvelope',
+                    canonicalBytesHex: input.canonicalBytesHex,
+                }),
+            deriveMailboxKemCiphertextHash: (input): ProtocolHash =>
+                executeCommand<{
+                    readonly kemCiphertextHash: ProtocolHash;
+                }>({
+                    command: 'DeriveMailboxKemCiphertextHash',
+                    kemCiphertextHex: input.kemCiphertextHex,
+                }).kemCiphertextHash,
+            deriveMailboxEnvelopeHash: (value): ProtocolHash =>
+                executeCommand<{
+                    readonly envelopeHash: ProtocolHash;
+                }>({
+                    command: 'DeriveMailboxEnvelopeHash',
+                    value,
+                }).envelopeHash,
             generateBgvTargetDecryptionShareFromLocalShare: (
                 input,
             ): BgvTargetDecryptionShare =>
@@ -111,6 +265,24 @@ export const createTranscriptCoreKernelLoader = (
                     trusteeIdentity: input.trusteeIdentity,
                     localTargetShareWitness: input.localTargetShareWitness,
                 }),
+            generateBgvTargetDecryptionShareProofMaterialFromLocalWitness: (
+                input,
+            ): BgvTargetDecryptionShareProofMaterial =>
+                executeCommand<BgvTargetDecryptionShareProofMaterial>({
+                    command:
+                        'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
+                    setupPackage: input.setupPackage,
+                    targetAcceptedRecord: input.targetAcceptedRecord,
+                    targetCiphertexts: input.targetCiphertexts,
+                    targetCiphertextBinding: input.targetCiphertextBinding,
+                    targetShareProfile: input.targetShareProfile,
+                    trusteeIdentity: input.trusteeIdentity,
+                    localTargetShareWitness: input.localTargetShareWitness,
+                    targetDecryptionShare: input.targetDecryptionShare,
+                    proofStatement: input.proofStatement,
+                    proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                    proofRandomnessNonceHex: input.proofRandomnessNonceHex,
+                }),
             describeBgvRnsParameters: (): BgvRnsParametersDescription =>
                 executeCommand<BgvRnsParametersDescription>({
                     command: 'DescribeBgvRnsParameters',
@@ -123,33 +295,6 @@ export const createTranscriptCoreKernelLoader = (
                     ...(input?.participantCount === undefined
                         ? {}
                         : { participantCount: input.participantCount }),
-                }),
-            generatePrivateVssShareProof: (
-                input,
-            ): BgvPrivateVssShareProofGeneration =>
-                executeCommand<BgvPrivateVssShareProofGeneration>({
-                    command: 'GeneratePrivateVssShareProof',
-                    setupContext: input.setupContext,
-                    publicMatrixSeedHash: input.publicMatrixSeedHash,
-                    privateEnvelopeAadHash: input.privateEnvelopeAadHash,
-                    sourceTrusteeCoefficientCommitmentRecord:
-                        input.sourceTrusteeCoefficientCommitmentRecord,
-                    sourceTrusteeCoefficientCommitmentMaterialRecords:
-                        input.sourceTrusteeCoefficientCommitmentMaterialRecords,
-                    recipientIdentity: input.recipientIdentity,
-                    recipientRosterPosition: input.recipientRosterPosition,
-                    rnsLimbIndex: input.rnsLimbIndex,
-                    rnsPrime: input.rnsPrime,
-                    ringDegree: input.ringDegree,
-                    shareValues: input.shareValues,
-                    coefficientCommitmentRoots:
-                        input.coefficientCommitmentRoots,
-                    coefficientMessagesByShamirIndex:
-                        input.coefficientMessagesByShamirIndex,
-                    openingRandomnessByShamirIndex:
-                        input.openingRandomnessByShamirIndex,
-                    proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                    proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                 }),
             generateTrusteeEvaluationKeyProof: (
                 input,
@@ -312,11 +457,15 @@ export const createTranscriptCoreKernelLoader = (
             stateVerifierBegin !== undefined &&
             stateVerifierCancel !== undefined &&
             stateVerifierCertifyIntent !== undefined &&
+            stateVerifierCertifyUnorderedVotes !== undefined &&
+            stateVerifierDescribe !== undefined &&
             stateVerifierRelease !== undefined &&
             stateVerifierFinishOutput !== undefined &&
             stateVerifierPrepareOutput !== undefined &&
             stateVerifierPrepareRecovery !== undefined &&
             stateVerifierPrepareReservation !== undefined &&
+            stateVerifierPrepareWitnessVote !== undefined &&
+            stateVerifierFinishWitnessVote !== undefined &&
             stateVerifierVerifyRecovery !== undefined &&
             stateVerifierVerifyReservation !== undefined
         ) {
@@ -325,14 +474,18 @@ export const createTranscriptCoreKernelLoader = (
                 begin: stateVerifierBegin,
                 cancel: stateVerifierCancel,
                 certifyIntent: stateVerifierCertifyIntent,
+                certifyUnorderedVotes: stateVerifierCertifyUnorderedVotes,
                 deallocate,
+                describe: stateVerifierDescribe,
                 memory,
                 release: stateVerifierRelease,
                 runExclusive: runExclusiveKernelOperation,
                 finishOutput: stateVerifierFinishOutput,
+                finishWitnessVote: stateVerifierFinishWitnessVote,
                 prepareOutput: stateVerifierPrepareOutput,
                 prepareRecovery: stateVerifierPrepareRecovery,
                 prepareReservation: stateVerifierPrepareReservation,
+                prepareWitnessVote: stateVerifierPrepareWitnessVote,
                 verifyRecovery: stateVerifierVerifyRecovery,
                 verifyReservation: stateVerifierVerifyReservation,
             });

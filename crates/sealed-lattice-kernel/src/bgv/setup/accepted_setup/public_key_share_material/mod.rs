@@ -29,6 +29,7 @@ pub(super) struct PublicKeyShareMaterialBinding {
 
 pub(super) fn verify_collective_public_key_material(
     setup_package: &Value,
+    ring_degree: usize,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<Option<Refusals>> {
     let Some(aggregate_object) = setup_package.get("collectivePublicKey") else {
@@ -88,6 +89,7 @@ pub(super) fn verify_collective_public_key_material(
         material_set,
         setup_context,
         &common_binding,
+        ring_degree,
         public_key_share_set_root,
         &share_records,
         proof_binding_session,
@@ -102,7 +104,6 @@ pub(super) fn verify_collective_public_key_material(
         }
     };
     let roster = super::accepted_roster_from_package(setup_package)?;
-    let ring_degree = POLYNOMIAL_DEGREE;
     if let Err(error) = verify_collective_public_key_coefficients(
         aggregate_object,
         &material_bindings,

@@ -12,15 +12,31 @@ const maximumCanonicalStreamDescriptorByteLength =
 const runtimeInternalFailureStatus = 0xffff_ffff;
 const runtimeInvalidSessionStatus = 0xffff_fffe;
 const wasm32WordByteLength = 4;
+const canonicalStreamLeaseIdentifierByteLength = 32;
 
 export const canonicalStreamDomains = Object.freeze({
+    privateMailboxCiphertext: 1,
     dealerVssShareLinkageProof: 2,
     recipientAggregateThresholdShareProof: 3,
     sameSecretProof: 4,
     publicKeyShareProof: 5,
+    collectivePublicKeyAggregateProof: 6,
+    rkgRoundOneProof: 7,
+    rkgRoundOneAggregateProof: 8,
+    rkgRoundTwoProof: 9,
+    galoisShareProof: 10,
     evaluatorKeyAggregateProof: 11,
+    collectivePublicKey: 12,
     evaluatorKeyStore: 13,
+    ballotCiphertext: 14,
+    ballotValidityProof: 15,
+    aggregateCiphertext: 16,
+    replayTargetIdentifierCiphertext: 17,
+    replayTargetOrderCiphertext: 18,
+    targetIdentifierPartialDecryption: 19,
+    targetOrderPartialDecryption: 20,
     maliciousTargetShareProof: 21,
+    checkpointState: 22,
     stateBallotCandidateListExactOutput: 23,
     stateFinalitySignatureExactOutput: 24,
     stateTargetReleaseExactOutput: 25,
@@ -222,6 +238,53 @@ type CanonicalStreamKernelContext = Readonly<{
         outputLengthPointer: number,
     ): number;
     memory: WebAssembly.Memory;
+    mailboxGcmAuthenticateChunk?: (
+        handle: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    mailboxGcmBeginEncryptor?: (
+        keyPointer: number,
+        keyLength: number,
+        noncePointer: number,
+        nonceLength: number,
+        associatedDataPointer: number,
+        associatedDataLength: number,
+        totalByteLength: number,
+        statusPointer: number,
+    ) => number;
+    mailboxGcmBeginVerifier?: (
+        keyPointer: number,
+        keyLength: number,
+        noncePointer: number,
+        nonceLength: number,
+        associatedDataPointer: number,
+        associatedDataLength: number,
+        totalByteLength: number,
+        statusPointer: number,
+    ) => number;
+    mailboxGcmCancel?: (handle: number) => number;
+    mailboxGcmDecryptChunk?: (
+        handle: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    mailboxGcmEncryptChunk?: (
+        handle: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    mailboxGcmFinishAuthentication?: (
+        handle: number,
+        tagPointer: number,
+        tagLength: number,
+    ) => number;
+    mailboxGcmFinishDecryptor?: (handle: number) => number;
+    mailboxGcmFinishEncryptor?: (
+        handle: number,
+        tagPointer: number,
+        tagLength: number,
+    ) => number;
     runExclusive<Result>(
         operationName: string,
         operation: () => Result,
@@ -236,12 +299,18 @@ const contexts = new WeakMap<
     TranscriptCoreKernelContextOwner,
     CanonicalStreamKernelContext
 >();
+const workerRuntimes = new WeakMap<
+    TranscriptCoreKernelContextOwner,
+    CanonicalStreamWorkerRuntimeImplementation
+>();
 
 export const registerCanonicalStreamKernelContext = (
     kernel: TranscriptCoreKernelContextOwner,
     context: CanonicalStreamKernelContext,
 ): void => {
+    workerRuntimes.get(kernel)?.invalidate();
     contexts.set(kernel, context);
+    workerRuntimes.delete(kernel);
 };
 
 export const canonicalStreamKernelContext = (
@@ -254,8 +323,11 @@ type MutableCounters = {
 
 type ActiveLease = {
     atomicVerifierFinish?: CanonicalStreamAtomicVerifierFinish;
+    authorityContext: CanonicalStreamKernelContext;
+    authorityOwner: TranscriptCoreKernelContextOwner;
     chunkCount: number;
     handle: number;
+    identifier: string;
     kind: 'verifier' | 'writer';
     state: CanonicalStreamLeaseState;
     totalByteLength: number;
@@ -285,11 +357,19 @@ const assertSafeNonNegativeInteger = (value: number, label: string): void => {
 };
 
 class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorkerRuntime {
+    readonly #authorityOwner: TranscriptCoreKernelContextOwner;
     readonly #context: CanonicalStreamKernelContext;
     readonly #counters: MutableCounters;
+    readonly #issuedLeaseIdentifiers = new Set<string>();
+    readonly #leaseAuthorities = new Map<string, ActiveLease>();
     #activeLease: ActiveLease | undefined;
+    #invalidated = false;
 
-    public constructor(context: CanonicalStreamKernelContext) {
+    public constructor(
+        authorityOwner: TranscriptCoreKernelContextOwner,
+        context: CanonicalStreamKernelContext,
+    ) {
+        this.#authorityOwner = authorityOwner;
         this.#context = context;
         this.#counters = {
             absorbedPayloadByteLength: 0,
@@ -313,6 +393,17 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         return Object.freeze({ ...this.#counters });
     }
 
+    public invalidate(): void {
+        if (this.#invalidated) {
+            return;
+        }
+        this.#invalidated = true;
+        const activeLease = this.#activeLease;
+        if (activeLease !== undefined) {
+            this.#cancelLease(activeLease);
+        }
+    }
+
     public openWriter(input: {
         readonly streamDomain: CanonicalStreamDomain;
         readonly totalByteLength: number;
@@ -325,6 +416,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         if (input.totalByteLength > maximumCanonicalStreamByteLength) {
             throw new CanonicalStreamResourceError();
         }
+        const leaseIdentifier = this.#issueLeaseIdentifier();
         let handle = 0;
         let metadataPointer = 0;
         try {
@@ -345,8 +437,11 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 );
             }
             const lease: ActiveLease = {
+                authorityContext: this.#context,
+                authorityOwner: this.#authorityOwner,
                 chunkCount: metadata[1],
                 handle,
+                identifier: leaseIdentifier,
                 kind: 'writer',
                 state: 'active',
                 totalByteLength: input.totalByteLength,
@@ -389,6 +484,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 'The canonical stream descriptor exceeds its binary metadata bound.',
             );
         }
+        const leaseIdentifier = this.#issueLeaseIdentifier();
         let descriptorPointer = 0;
         let handle = 0;
         let metadataPointer = 0;
@@ -418,8 +514,11 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 ...(atomicVerifierFinish === undefined
                     ? {}
                     : { atomicVerifierFinish }),
+                authorityContext: this.#context,
+                authorityOwner: this.#authorityOwner,
                 chunkCount: metadata[2],
                 handle,
+                identifier: leaseIdentifier,
                 kind: 'verifier',
                 state: 'active',
                 totalByteLength: metadata[1],
@@ -588,6 +687,11 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
     }
 
     #prepareBegin(streamDomain: number): void {
+        if (this.#invalidated) {
+            throw new CanonicalStreamInternalError(
+                'The canonical stream worker runtime was invalidated.',
+            );
+        }
         if (this.#activeLease !== undefined) {
             throw new CanonicalStreamResourceError(
                 'Only one canonical stream may be active in a WASM instance.',
@@ -623,9 +727,57 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
     }
 
     #activate(lease: ActiveLease): void {
-        this.#activeLease = lease;
+        if (
+            lease.authorityOwner !== this.#authorityOwner ||
+            lease.authorityContext !== this.#context ||
+            !this.#issuedLeaseIdentifiers.has(lease.identifier) ||
+            this.#leaseAuthorities.has(lease.identifier)
+        ) {
+            throw new CanonicalStreamInternalError(
+                'The canonical stream lease authority is invalid.',
+            );
+        }
         this.#charge('startedSessionCount', 1);
+        this.#activeLease = lease;
+        this.#leaseAuthorities.set(lease.identifier, lease);
         this.#counters.activeSessionCount = 1;
+    }
+
+    #issueLeaseIdentifier(): string {
+        const cryptoProvider = globalThis.crypto;
+        if (
+            cryptoProvider === undefined ||
+            typeof cryptoProvider.getRandomValues !== 'function'
+        ) {
+            throw new CanonicalStreamInternalError(
+                'Web Crypto getRandomValues is required for canonical stream leases.',
+            );
+        }
+        const identifierBytes = new Uint8Array(
+            new ArrayBuffer(canonicalStreamLeaseIdentifierByteLength),
+        );
+        try {
+            try {
+                cryptoProvider.getRandomValues(identifierBytes);
+            } catch (error) {
+                throw new CanonicalStreamInternalError(
+                    'Web Crypto failed to issue a canonical stream lease identifier.',
+                    error,
+                );
+            }
+            const identifier = Array.from(identifierBytes, (byte) =>
+                byte.toString(16).padStart(2, '0'),
+            ).join('');
+            if (this.#issuedLeaseIdentifiers.has(identifier)) {
+                throw new CanonicalStreamInternalError(
+                    'Web Crypto repeated a canonical stream lease identifier.',
+                );
+            }
+            this.#issuedLeaseIdentifiers.add(identifier);
+            return identifier;
+        } finally {
+            identifierBytes.fill(0);
+        }
     }
 
     #absorbLeaseChunk(
@@ -775,6 +927,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         if (lease.state !== 'active') {
             return;
         }
+        this.#requireActive(lease);
         try {
             const status = this.#context.runExclusive(
                 'canonical stream cancellation',
@@ -858,13 +1011,20 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
 
     #releaseLease(lease: ActiveLease): void {
         if (this.#activeLease === lease) {
+            this.#leaseAuthorities.delete(lease.identifier);
             this.#activeLease = undefined;
             this.#counters.activeSessionCount = 0;
         }
     }
 
     #requireActive(lease: ActiveLease): void {
-        if (lease.state !== 'active' || this.#activeLease !== lease) {
+        if (
+            lease.state !== 'active' ||
+            lease.authorityOwner !== this.#authorityOwner ||
+            lease.authorityContext !== this.#context ||
+            this.#activeLease !== lease ||
+            this.#leaseAuthorities.get(lease.identifier) !== lease
+        ) {
             throw new CanonicalStreamInternalError(
                 'The canonical stream lease is no longer active.',
             );
@@ -1068,9 +1228,26 @@ export const openCanonicalStreamWorkerRuntime = (input: {
             'The transcript-core kernel has no registered stream boundary.',
         );
     }
-    return Object.freeze(
-        new CanonicalStreamWorkerRuntimeImplementation(context),
-    );
+    let runtime = workerRuntimes.get(input.kernel);
+    if (runtime === undefined) {
+        runtime = new CanonicalStreamWorkerRuntimeImplementation(
+            input.kernel,
+            context,
+        );
+        Object.freeze(runtime);
+        workerRuntimes.set(input.kernel, runtime);
+    }
+    return runtime;
+};
+
+/** Invalidates every process-local stream lease owned by one worker's WASM
+ * instance. A terminated worker realm drops the same authority implicitly;
+ * an orderly worker shutdown calls this hook before releasing the instance.
+ */
+export const invalidateCanonicalStreamWorkerRuntime = (input: {
+    readonly kernel: TranscriptCoreKernelContextOwner;
+}): void => {
+    workerRuntimes.get(input.kernel)?.invalidate();
 };
 
 /** Internal composition hook for consumers that must atomically consume a
@@ -1083,13 +1260,17 @@ export const openCanonicalStreamVerifierForAtomicFinish = (input: {
     readonly kernel: TranscriptCoreKernelContextOwner;
     readonly streamDomain: CanonicalStreamDomain;
 }): CanonicalStreamVerifierLease => {
-    const context = contexts.get(input.kernel);
-    if (context === undefined) {
+    if (contexts.get(input.kernel) === undefined) {
         throw new CanonicalStreamInternalError(
             'The transcript-core kernel has no registered stream boundary.',
         );
     }
-    const runtime = new CanonicalStreamWorkerRuntimeImplementation(context);
+    const runtime = openCanonicalStreamWorkerRuntime({ kernel: input.kernel });
+    if (!(runtime instanceof CanonicalStreamWorkerRuntimeImplementation)) {
+        throw new CanonicalStreamInternalError(
+            'The transcript-core kernel has an invalid stream runtime boundary.',
+        );
+    }
     return runtime.openVerifier(
         {
             descriptorBytes: input.descriptorBytes,

@@ -124,6 +124,7 @@ impl ParticipantBinding {
 #[derive(Clone)]
 struct SetupBinding {
     setup_package_hash: String,
+    setup_context_hash: String,
     ceremony_id: String,
     setup_epoch: String,
     election_manifest_hash: String,

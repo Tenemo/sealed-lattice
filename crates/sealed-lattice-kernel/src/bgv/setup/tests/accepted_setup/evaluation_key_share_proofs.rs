@@ -5,7 +5,7 @@ fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_evaluation_key_material",
     );
-    assert_minimal_collective_setup_package_refused(
+    assert_collective_public_key_bearing_setup_package_refused(
         "relinearization key-share rounds replaced with a malformed object",
         |package| {
             let evaluator_key_schedule_root =
@@ -14,7 +14,7 @@ fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
                 "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
             });
         },
-        "relinearizationKeyShareRoundsTypeMismatch",
+        "wrongTypeOrLength",
     );
 }
 
@@ -23,13 +23,13 @@ fn collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share_records",
     );
-    assert_minimal_collective_setup_package_refused(
+    assert_collective_public_key_bearing_setup_package_refused(
         "trustee evaluation-key proofs object without share records",
         |package| {
             package["trusteeEvaluationKeyProofs"] = serde_json::json!({
                 "objectType": "TrusteeEvaluationKeyProofSet",
             });
         },
-        "trusteeEvaluationKeyProofsWithoutShareRecords",
+        "invalidProof",
     );
 }

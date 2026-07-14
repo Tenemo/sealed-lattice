@@ -9,6 +9,12 @@ import {
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
+import {
+    RandomByteSampler,
+    maximumPrivateSamplerCandidateDrawsPerOutput,
+    sampleCenteredTernaryVector,
+    sampleUniformResidueVector,
+} from '#packages/protocol/src/setup/vss-coefficient-commitments/encoding';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
     makeSetupContext,
@@ -301,6 +307,46 @@ const invalidOpeningStateGenerationCases = [
 >[];
 
 describe('VSS coefficient commitment builders', () => {
+    it('preserves every random byte across internal refill boundaries', () => {
+        let nextByte = 0;
+        const sampler = new RandomByteSampler((byteLength) => {
+            const bytes = new Uint8Array(byteLength);
+            for (let byteIndex = 0; byteIndex < byteLength; byteIndex += 1) {
+                bytes[byteIndex] = nextByte;
+                nextByte = (nextByte + 1) & 0xff;
+            }
+
+            return bytes;
+        });
+
+        sampler.take(4090);
+        expect(sampler.take(16)).toEqual(
+            Uint8Array.from(
+                { length: 16 },
+                (_unused, byteIndex) => (4090 + byteIndex) & 0xff,
+            ),
+        );
+    });
+
+    it('fails rather than looping or reducing with bias at the candidate-draw ceiling', () => {
+        const rejectedBytes = () => new Uint8Array(4096).fill(0xff);
+
+        expect(() =>
+            sampleCenteredTernaryVector(
+                new RandomByteSampler(rejectedBytes),
+                1,
+            ),
+        ).toThrow(/candidate-draw ceiling/u);
+        expect(() =>
+            sampleUniformResidueVector(
+                new RandomByteSampler(rejectedBytes),
+                qSharePrimes[0],
+                1,
+            ),
+        ).toThrow(/candidate-draw ceiling/u);
+        expect(maximumPrivateSamplerCandidateDrawsPerOutput).toBe(64);
+    });
+
     it('generates local openings with one short secret shared across RNS limbs', () => {
         const generatedSourceTrusteeState =
             createVssSourceTrusteeCoefficientOpeningState(

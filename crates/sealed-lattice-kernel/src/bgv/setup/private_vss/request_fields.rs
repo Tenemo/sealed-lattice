@@ -175,22 +175,3 @@ pub(super) fn hash_vector_field(
         })
         .collect()
 }
-
-pub(super) fn validate_exact_randomness_hex(
-    value: &str,
-    expected_byte_length: usize,
-    field_name: &str,
-) -> CanonicalResult<()> {
-    if value.len() == expected_byte_length * 2
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Ok(());
-    }
-
-    Err(CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
-        format!("{field_name} must be {expected_byte_length} bytes of lowercase hex"),
-    ))
-}

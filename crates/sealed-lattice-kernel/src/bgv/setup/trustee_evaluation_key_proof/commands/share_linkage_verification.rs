@@ -1,6 +1,7 @@
 use super::decoding::*;
 use super::share_linkage_transport::*;
 use super::*;
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::trustee_evaluation_key_proof::VSS_SHARE_LINKAGE_PROOF_FAMILY;
 use crate::encoding::CanonicalError;
 
@@ -183,13 +184,6 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
         source_trustee_identity,
         "share-linkage proof sourceTrusteeIdentity",
     )?;
-    for source_record in [coefficient_source_record, recipient_source_record] {
-        compare_u64_value(
-            read_u64(source_record, "sourceTrusteeRosterPosition")?,
-            source_roster_position as u64,
-            "share-linkage proof sourceTrusteeRosterPosition",
-        )?;
-    }
     compare_string_value(
         read_string(item, "sourceCoefficientCommitmentRoot")?,
         read_string(coefficient_source_record, "sourceCoefficientCommitmentRoot")?,
@@ -205,6 +199,19 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
     )?;
 
     let source_message_modulus = read_u64(item, "sourceMessageModulus")?;
+    let expected_source_message_modulus = DATA_PRIMES
+        .get(source_rns_limb_index)
+        .copied()
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "share-linkage item sourceRnsLimbIndex is outside the canonical modulus schedule",
+            )
+        })?;
+    compare_u64_value(
+        source_message_modulus,
+        expected_source_message_modulus,
+        "share-linkage proof sourceMessageModulus",
+    )?;
     let coefficient_commitment_roots = read_string_array(item, "coefficientCommitmentRoots")?;
     let coefficient_commitments = array_field(item, "coefficientCommitments")?;
     if coefficient_commitment_roots.len() != threshold_degree
@@ -234,21 +241,6 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
                     "share-linkage coefficient set is missing a proof item coefficient",
                 )
             })?;
-        compare_u64_value(
-            read_u64(coefficient_record, "rnsLimbIndex")?,
-            source_rns_limb_index as u64,
-            "share-linkage proof coefficient rnsLimbIndex",
-        )?;
-        compare_u64_value(
-            read_u64(coefficient_record, "rnsPrime")?,
-            source_message_modulus,
-            "share-linkage proof coefficient rnsPrime",
-        )?;
-        compare_u64_value(
-            read_u64(coefficient_record, "shamirCoefficientIndex")?,
-            coefficient_index as u64,
-            "share-linkage proof coefficient shamirCoefficientIndex",
-        )?;
         compare_string_value(
             coefficient_commitment_root,
             read_string(coefficient_record, "coefficientCommitmentRoot")?,
@@ -279,21 +271,6 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
         read_string(item, "recipientIdentity")?,
         read_string(recipient_record, "recipientIdentity")?,
         "share-linkage proof recipientIdentity",
-    )?;
-    compare_u64_value(
-        read_u64(recipient_record, "recipientRosterPosition")?,
-        recipient_roster_position as u64,
-        "share-linkage proof recipientRosterPosition",
-    )?;
-    compare_u64_value(
-        read_u64(recipient_record, "rnsLimbIndex")?,
-        source_rns_limb_index as u64,
-        "share-linkage proof recipient rnsLimbIndex",
-    )?;
-    compare_u64_value(
-        read_u64(recipient_record, "rnsPrime")?,
-        source_message_modulus,
-        "share-linkage proof recipient rnsPrime",
     )?;
     compare_string_value(
         read_string(item, "recipientShareCommitmentRoot")?,
@@ -358,6 +335,8 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
             .map_err(|_| invalid_succinct_setup_proof("qShareRnsLimbCount does not fit usize"))?;
     let threshold_degree = usize::try_from(read_u64(statement_verification, "thresholdDegree")?)
         .map_err(|_| invalid_succinct_setup_proof("thresholdDegree does not fit usize"))?;
+    let ring_degree = usize::try_from(read_u64(statement_verification, "ringDegree")?)
+        .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit usize"))?;
     let coefficient_commitment_set = request.get("coefficientCommitmentSet").ok_or_else(|| {
         invalid_succinct_setup_proof(
             "share-linkage material coefficientCommitmentSet must be present",
@@ -369,7 +348,6 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
                 "share-linkage material recipientShareCommitmentSet must be present",
             )
         })?;
-    let ring_degree = crate::bgv::parameters::POLYNOMIAL_DEGREE;
     let proof_material_set = request.get("proofMaterialSet").ok_or_else(|| {
         invalid_succinct_setup_proof("share-linkage proofMaterialSet must be present")
     })?;

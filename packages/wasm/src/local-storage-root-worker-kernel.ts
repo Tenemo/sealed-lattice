@@ -1,8 +1,12 @@
 import {
     BrowserActionStorageCustodyError,
+    type BrowserLocalRecordExpectedContext,
+    type BrowserLocalRecordIdentifierInput,
+    type BrowserLocalRecordOpenInput,
+    type BrowserLocalRecordSealInput,
     type BrowserActionStorageRootBinding,
     type BrowserActionStorageWorkerKernel,
-    type ExternallyVerifiedStorageRootCommitment,
+    type UntrustedExpectedStorageRootCommitment,
     type LocalStorageRecoveryExportMaterial,
     type WorkerPreparedDeviceWrappingState,
     type WorkerPreparedRecoveryState,
@@ -20,6 +24,8 @@ const deviceWrappingNonceByteLength = 12;
 const deviceWrappingTagByteLength = 16;
 const foundationHashByteLength = 64;
 const handleByteLength = 4;
+const localRecordNonceByteLength = 12;
+const maximumLocalRecordPlaintextByteLength = 1_048_576;
 const maximumCommandByteLength = 1_572_864;
 const maximumWrappedStorageRootByteLength = 492;
 const mutationIdentifierByteLength = 32;
@@ -38,6 +44,10 @@ const localStorageRootCommands = Object.freeze({
     encodeDeviceEnvelope: 6,
     prepareRecovery: 11,
     reset: 13,
+    deriveRecordIdentifier: 14,
+    sealRecord: 15,
+    openRecord: 16,
+    hashRecordEnvelope: 17,
     stageNew: 1,
     stageOpened: 2,
     stageRecovery: 3,
@@ -73,6 +83,9 @@ type CommandFailureContext =
     | 'open'
     | 'recoveryConfirmation'
     | 'recoveryImport'
+    | 'recordHash'
+    | 'recordOpen'
+    | 'recordSeal'
     | 'runtime';
 
 type TerminalSetupCheckpointKernelCommandRunner = Readonly<{
@@ -160,6 +173,314 @@ const encodeUnsigned32 = (value: number): Uint8Array<ArrayBuffer> => {
     return bytes;
 };
 
+const encodeCanonicalUnsigned16 = (
+    value: number,
+    label: string,
+): Uint8Array<ArrayBuffer> => {
+    if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            `${label} must be an unsigned 16-bit integer.`,
+        );
+    }
+    const bytes = new Uint8Array(2);
+    new DataView(bytes.buffer).setUint16(0, value, true);
+
+    return bytes;
+};
+
+const encodeCanonicalUnsigned32 = (
+    value: number,
+    label: string,
+): Uint8Array<ArrayBuffer> => {
+    if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff_ffff) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            `${label} must be an unsigned 32-bit integer.`,
+        );
+    }
+    const bytes = new Uint8Array(4);
+    new DataView(bytes.buffer).setUint32(0, value, true);
+
+    return bytes;
+};
+
+const encodeCanonicalUnsigned64 = (
+    value: bigint,
+    label: string,
+): Uint8Array<ArrayBuffer> => {
+    if (
+        typeof value !== 'bigint' ||
+        value < 0n ||
+        value > 0xffff_ffff_ffff_ffffn
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            `${label} must be an unsigned 64-bit integer.`,
+        );
+    }
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, value, true);
+
+    return bytes;
+};
+
+const encodeByteLength = (
+    byteLength: number,
+    label: string,
+): Uint8Array<ArrayBuffer> => encodeCanonicalUnsigned32(byteLength, label);
+
+type EncodedLocalRecordIdentifierInput = Readonly<{
+    context: Uint8Array<ArrayBuffer>;
+    recordTypeCode: number;
+}>;
+
+const encodeLocalRecordIdentifierInput = (
+    input: BrowserLocalRecordIdentifierInput,
+): EncodedLocalRecordIdentifierInput => {
+    if (typeof input !== 'object' || input === null) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The local-record identifier input must be an object.',
+        );
+    }
+    switch (input.recordType) {
+        case 'actionRandomness':
+            return { context: new Uint8Array(0), recordTypeCode: 1 };
+        case 'publicCoinPrivateMaterial':
+            return { context: new Uint8Array(0), recordTypeCode: 2 };
+        case 'sourceVssMaterial':
+            return {
+                context: copyExactBytes(
+                    input.materialContextHash,
+                    foundationHashByteLength,
+                    'Material-context hash',
+                ),
+                recordTypeCode: 3,
+            };
+        case 'aggregateThresholdShare':
+            return {
+                context: copyExactBytes(
+                    input.recipientInputRoot,
+                    foundationHashByteLength,
+                    'Recipient-input root',
+                ),
+                recordTypeCode: 4,
+            };
+        case 'proofAttempt':
+            return {
+                context: copyExactBytes(
+                    input.applicationSlotHash,
+                    foundationHashByteLength,
+                    'Application-slot hash',
+                ),
+                recordTypeCode: 5,
+            };
+        case 'ballotAttempt': {
+            if (
+                !(input.canonicalBallotStatementBytes instanceof Uint8Array) ||
+                input.canonicalBallotStatementBytes.byteLength === 0 ||
+                input.canonicalBallotStatementBytes.byteLength >
+                    maximumCommandByteLength
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The canonical ballot statement has an unsupported length.',
+                );
+            }
+            const statement = input.canonicalBallotStatementBytes.slice();
+            const attemptIdentifier = copyExactBytes(
+                input.ballotEncryptionAttemptIdentifier,
+                32,
+                'Ballot-encryption attempt identifier',
+            );
+
+            return {
+                context: concatenateBytes(
+                    encodeByteLength(
+                        statement.byteLength,
+                        'Ballot-statement byte length',
+                    ),
+                    statement,
+                    attemptIdentifier,
+                ),
+                recordTypeCode: 6,
+            };
+        }
+        case 'exactOutputChunk':
+            return {
+                context: concatenateBytes(
+                    encodeCanonicalUnsigned16(
+                        input.capabilityKind,
+                        'Capability kind',
+                    ),
+                    copyExactBytes(
+                        input.exactOutputHash,
+                        foundationHashByteLength,
+                        'Exact-output hash',
+                    ),
+                    encodeCanonicalUnsigned64(
+                        input.outputChunkIndex,
+                        'Output-chunk index',
+                    ),
+                ),
+                recordTypeCode: 7,
+            };
+        case 'subjectState':
+            return {
+                context: copyExactBytes(
+                    input.stateKey,
+                    foundationHashByteLength,
+                    'Subject-state key',
+                ),
+                recordTypeCode: 8,
+            };
+        case 'witnessState':
+            return {
+                context: copyExactBytes(
+                    input.stateKey,
+                    foundationHashByteLength,
+                    'Witness-state key',
+                ),
+                recordTypeCode: 9,
+            };
+        case 'checkpointManifest': {
+            const orderedSourceDigests: unknown = input.orderedSourceDigests;
+            if (!Array.isArray(orderedSourceDigests)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Ordered checkpoint source digests must be an array.',
+                );
+            }
+            if (orderedSourceDigests.length > 4_096) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Ordered checkpoint source digests exceed the supported count.',
+                );
+            }
+            const sourceDigests = orderedSourceDigests.map((digest) => {
+                if (!(digest instanceof Uint8Array)) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'Each ordered checkpoint source digest must be bytes.',
+                    );
+                }
+
+                return copyExactBytes(
+                    digest,
+                    foundationHashByteLength,
+                    'Checkpoint source digest',
+                );
+            });
+
+            return {
+                context: concatenateBytes(
+                    copyExactBytes(
+                        input.runtimeBuildManifestHash,
+                        foundationHashByteLength,
+                        'Runtime build-manifest hash',
+                    ),
+                    copyExactBytes(
+                        input.checkpointLineageIdentifier,
+                        32,
+                        'Checkpoint-lineage identifier',
+                    ),
+                    encodeCanonicalUnsigned16(
+                        input.operationKind,
+                        'Checkpoint operation kind',
+                    ),
+                    encodeCanonicalUnsigned32(
+                        input.safeBoundaryOrdinal,
+                        'Checkpoint safe-boundary ordinal',
+                    ),
+                    encodeCanonicalUnsigned32(
+                        sourceDigests.length,
+                        'Checkpoint source-digest count',
+                    ),
+                    ...sourceDigests,
+                ),
+                recordTypeCode: 10,
+            };
+        }
+        case 'checkpointChunk':
+            return {
+                context: concatenateBytes(
+                    copyExactBytes(
+                        input.checkpointIdentifier,
+                        foundationHashByteLength,
+                        'Checkpoint identifier',
+                    ),
+                    encodeCanonicalUnsigned32(
+                        input.chunkIndex,
+                        'Checkpoint chunk index',
+                    ),
+                    copyExactBytes(
+                        input.chunkDigest,
+                        foundationHashByteLength,
+                        'Checkpoint chunk digest',
+                    ),
+                ),
+                recordTypeCode: 11,
+            };
+    }
+};
+
+const encodeLocalRecordExpectedContext = (
+    input: BrowserLocalRecordExpectedContext,
+): Uint8Array<ArrayBuffer> => {
+    if (typeof input !== 'object' || input === null) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The local-record expected context must be an object.',
+        );
+    }
+    const encodedIdentifier = encodeLocalRecordIdentifierInput(
+        input.identifierInput,
+    );
+    const predecessorRecordHash =
+        input.predecessorRecordHash === undefined
+            ? undefined
+            : copyExactBytes(
+                  input.predecessorRecordHash,
+                  foundationHashByteLength,
+                  'Predecessor record hash',
+              );
+    if (
+        (input.recordVersion === 0n) !==
+        (predecessorRecordHash === undefined)
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'Predecessor record-hash presence must match the local-record version.',
+        );
+    }
+
+    return concatenateBytes(
+        copyExactBytes(
+            input.actionRandomnessCommitment,
+            foundationHashByteLength,
+            'Action-randomness commitment',
+        ),
+        encodeCanonicalUnsigned16(
+            encodedIdentifier.recordTypeCode,
+            'Local-record type',
+        ),
+        encodeByteLength(
+            encodedIdentifier.context.byteLength,
+            'Record-identifier context length',
+        ),
+        encodedIdentifier.context,
+        encodeCanonicalUnsigned64(input.recordVersion, 'Local-record version'),
+        encodeCanonicalUnsigned64(
+            input.creationRecoveryEpoch,
+            'Local-record creation recovery epoch',
+        ),
+        predecessorRecordHash === undefined
+            ? new Uint8Array([0])
+            : concatenateBytes(new Uint8Array([1]), predecessorRecordHash),
+    );
+};
+
 const decodeUnsigned32 = (bytes: Uint8Array, offset: number): number => {
     if (offset < 0 || offset + wasm32WordByteLength > bytes.byteLength) {
         throw new BrowserActionStorageCustodyError(
@@ -204,13 +525,13 @@ const encodeBinding = (
         ),
     );
 
-const externallyVerifiedCommitmentBytes = (
-    value: ExternallyVerifiedStorageRootCommitment,
+const untrustedExpectedCommitmentBytes = (
+    value: UntrustedExpectedStorageRootCommitment,
 ): Uint8Array<ArrayBuffer> =>
     copyExactBytes(
         value.storageRootCommitment,
         foundationHashByteLength,
-        'Externally verified storage-root commitment',
+        'Untrusted expected storage-root commitment',
     );
 
 class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorkerKernel {
@@ -236,7 +557,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
 
     public stageDeviceWrappingStateOpen(input: {
         binding: BrowserActionStorageRootBinding;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
         state: WorkerPreparedDeviceWrappingState;
     }): Promise<void> {
         return this.#enqueue(() => this.#stageDeviceWrappingOpen(input));
@@ -245,7 +566,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     public stageRecoveryValueImportAndDeviceWrapping(input: {
         binding: BrowserActionStorageRootBinding;
         caseInsensitiveRecoveryText: string;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<WorkerPreparedRecoveryState> {
         return this.#enqueue(() => this.#stageRecoveryAndWrap(input));
     }
@@ -275,6 +596,30 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         confirmedChecksum: Uint8Array;
     }): Promise<void> {
         return this.#enqueue(() => this.#confirmRecovery(input));
+    }
+
+    public deriveActiveLocalRecordIdentifier(
+        input: BrowserLocalRecordIdentifierInput,
+    ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() => this.#deriveLocalRecordIdentifier(input));
+    }
+
+    public sealActiveLocalRecord(
+        input: BrowserLocalRecordSealInput,
+    ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() => this.#sealLocalRecord(input));
+    }
+
+    public openActiveLocalRecord(
+        input: BrowserLocalRecordOpenInput,
+    ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() => this.#openLocalRecord(input));
+    }
+
+    public hashActiveLocalRecordEnvelope(
+        envelope: Uint8Array,
+    ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() => this.#hashLocalRecordEnvelope(envelope));
     }
 
     public runTerminalSetupCheckpointCommand(
@@ -313,6 +658,137 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
 
             return this.#randomBytes(byteLength, label);
         });
+    }
+
+    #deriveLocalRecordIdentifier(
+        input: BrowserLocalRecordIdentifierInput,
+    ): Uint8Array<ArrayBuffer> {
+        const activeLease = this.#requireActiveLease();
+        const encodedIdentifier = encodeLocalRecordIdentifierInput(input);
+        const identifier = this.#runCommand(
+            localStorageRootCommands.deriveRecordIdentifier,
+            this.#leaseCommandInput(
+                activeLease,
+                encodeCanonicalUnsigned16(
+                    encodedIdentifier.recordTypeCode,
+                    'Local-record type',
+                ),
+                encodedIdentifier.context,
+            ),
+            'derive a local-record identifier',
+            'recordSeal',
+        );
+        if (identifier.byteLength !== foundationHashByteLength) {
+            identifier.fill(0);
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'The WASM kernel returned a malformed local-record identifier.',
+            );
+        }
+
+        return identifier;
+    }
+
+    #sealLocalRecord(
+        input: BrowserLocalRecordSealInput,
+    ): Uint8Array<ArrayBuffer> {
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            !(input.plaintext instanceof Uint8Array) ||
+            input.plaintext.byteLength > maximumLocalRecordPlaintextByteLength
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                `The local-record plaintext must contain at most ${maximumLocalRecordPlaintextByteLength} bytes.`,
+            );
+        }
+        const activeLease = this.#requireActiveLease();
+        const nonce = this.#randomBytes(
+            localRecordNonceByteLength,
+            'local-record nonce',
+        );
+        try {
+            const envelope = this.#runCommand(
+                localStorageRootCommands.sealRecord,
+                this.#leaseCommandInput(
+                    activeLease,
+                    encodeLocalRecordExpectedContext(input),
+                    nonce,
+                    input.plaintext,
+                ),
+                'seal a local record',
+                'recordSeal',
+            );
+            if (envelope.byteLength === 0) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The WASM kernel returned an empty local-record envelope.',
+                );
+            }
+
+            return envelope;
+        } finally {
+            nonce.fill(0);
+        }
+    }
+
+    #openLocalRecord(
+        input: BrowserLocalRecordOpenInput,
+    ): Uint8Array<ArrayBuffer> {
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            !(input.envelope instanceof Uint8Array) ||
+            input.envelope.byteLength === 0 ||
+            input.envelope.byteLength > maximumCommandByteLength
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The local-record envelope has an unsupported length.',
+            );
+        }
+        const activeLease = this.#requireActiveLease();
+
+        return this.#runCommand(
+            localStorageRootCommands.openRecord,
+            this.#leaseCommandInput(
+                activeLease,
+                encodeLocalRecordExpectedContext(input),
+                input.envelope,
+            ),
+            'open a local record',
+            'recordOpen',
+        );
+    }
+
+    #hashLocalRecordEnvelope(envelope: Uint8Array): Uint8Array<ArrayBuffer> {
+        if (
+            !(envelope instanceof Uint8Array) ||
+            envelope.byteLength === 0 ||
+            envelope.byteLength > maximumCommandByteLength
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The local-record envelope has an unsupported length.',
+            );
+        }
+        const activeLease = this.#requireActiveLease();
+        const envelopeHash = this.#runCommand(
+            localStorageRootCommands.hashRecordEnvelope,
+            this.#leaseCommandInput(activeLease, envelope),
+            'hash a canonical local-record envelope',
+            'recordHash',
+        );
+        if (envelopeHash.byteLength !== foundationHashByteLength) {
+            envelopeHash.fill(0);
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'The WASM kernel returned a malformed local-record envelope hash.',
+            );
+        }
+
+        return envelopeHash;
     }
 
     async #createAndStage(
@@ -365,11 +841,11 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
 
     async #stageDeviceWrappingOpen(input: {
         binding: BrowserActionStorageRootBinding;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
         state: WorkerPreparedDeviceWrappingState;
     }): Promise<void> {
-        const expectedCommitment = externallyVerifiedCommitmentBytes(
-            input.externallyVerifiedCommitment,
+        const expectedCommitment = untrustedExpectedCommitmentBytes(
+            input.untrustedExpectedCommitment,
         );
         const storedCommitment = copyExactBytes(
             input.state.storageRootCommitment,
@@ -379,7 +855,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         if (!bytesEqual(storedCommitment, expectedCommitment)) {
             throw new BrowserActionStorageCustodyError(
                 'CommitmentMismatch',
-                'The stored storage-root commitment does not match the externally verified commitment.',
+                'The stored storage-root commitment does not match the untrusted expected commitment.',
             );
         }
         this.#assertCompatibleStagedCommitment(expectedCommitment);
@@ -452,7 +928,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             if (!bytesEqual(staged.commitment, expectedCommitment)) {
                 throw new BrowserActionStorageCustodyError(
                     'CommitmentMismatch',
-                    'The opened storage root does not match the externally verified commitment.',
+                    'The opened storage root does not match the expected commitment.',
                 );
             }
             this.#stagedLease = staged.lease;
@@ -476,7 +952,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     async #stageRecoveryAndWrap(input: {
         binding: BrowserActionStorageRootBinding;
         caseInsensitiveRecoveryText: string;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<WorkerPreparedRecoveryState> {
         if (typeof input.caseInsensitiveRecoveryText !== 'string') {
             throw new BrowserActionStorageCustodyError(
@@ -496,8 +972,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 `Recovery material must encode to exactly ${recoveryTextByteLength} bytes.`,
             );
         }
-        const expectedCommitment = externallyVerifiedCommitmentBytes(
-            input.externallyVerifiedCommitment,
+        const expectedCommitment = untrustedExpectedCommitmentBytes(
+            input.untrustedExpectedCommitment,
         );
         this.#assertCompatibleStagedCommitment(expectedCommitment);
         const capability = this.#randomCapability();
@@ -1015,6 +1491,19 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         failureContext: CommandFailureContext,
     ): never {
         if (
+            failureContext === 'recordOpen' &&
+            (status === localStorageRootStatuses.wrongContext ||
+                status === localStorageRootStatuses.wrongHashOrRoot ||
+                status === localStorageRootStatuses.malformedEncoding ||
+                status === localStorageRootStatuses.unsupportedVersionOrSuite ||
+                status === localStorageRootStatuses.wrongTypeOrLength)
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'RecordAuthenticationFailed',
+                'The local record could not be authenticated for its expected context.',
+            );
+        }
+        if (
             status === localStorageRootStatuses.wrongContext ||
             status === localStorageRootStatuses.wrongHashOrRoot
         ) {
@@ -1210,7 +1699,7 @@ class DeferredWasmBrowserActionStorageWorkerKernel implements BrowserActionStora
 
     public async stageDeviceWrappingStateOpen(input: {
         binding: BrowserActionStorageRootBinding;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
         state: WorkerPreparedDeviceWrappingState;
     }): Promise<void> {
         return (await this.#workerKernel).stageDeviceWrappingStateOpen(input);
@@ -1219,7 +1708,7 @@ class DeferredWasmBrowserActionStorageWorkerKernel implements BrowserActionStora
     public async stageRecoveryValueImportAndDeviceWrapping(input: {
         binding: BrowserActionStorageRootBinding;
         caseInsensitiveRecoveryText: string;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<WorkerPreparedRecoveryState> {
         return (
             await this.#workerKernel
@@ -1251,6 +1740,34 @@ class DeferredWasmBrowserActionStorageWorkerKernel implements BrowserActionStora
         confirmedChecksum: Uint8Array;
     }): Promise<void> {
         return (await this.#workerKernel).confirmRecoveryChecksum(input);
+    }
+
+    public async deriveActiveLocalRecordIdentifier(
+        input: BrowserLocalRecordIdentifierInput,
+    ): Promise<Uint8Array> {
+        return (await this.#workerKernel).deriveActiveLocalRecordIdentifier(
+            input,
+        );
+    }
+
+    public async sealActiveLocalRecord(
+        input: BrowserLocalRecordSealInput,
+    ): Promise<Uint8Array> {
+        return (await this.#workerKernel).sealActiveLocalRecord(input);
+    }
+
+    public async openActiveLocalRecord(
+        input: BrowserLocalRecordOpenInput,
+    ): Promise<Uint8Array> {
+        return (await this.#workerKernel).openActiveLocalRecord(input);
+    }
+
+    public async hashActiveLocalRecordEnvelope(
+        envelope: Uint8Array,
+    ): Promise<Uint8Array> {
+        return (await this.#workerKernel).hashActiveLocalRecordEnvelope(
+            envelope,
+        );
     }
 }
 

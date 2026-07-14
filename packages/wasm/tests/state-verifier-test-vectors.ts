@@ -5,6 +5,7 @@ import {
 } from '@sealed-lattice/types';
 
 import {
+    createCanonicalCarrierMailboxKeyPairFixtures,
     createCanonicalCarrierSigningKeyPairFixtures,
     signCanonicalCarrierFixtureMessage,
 } from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
@@ -55,15 +56,19 @@ export type StateVerifierTestVector = Readonly<{
     authorizationHash: Uint8Array;
     canonicalRosterBytes: Uint8Array;
     ceremonyContextHash: Uint8Array;
+    conflictingReservation: CertifiedStateIntentTestVector;
     exactOutputBytes: Uint8Array;
     invalidExtraOutputCertificate: Uint8Array;
     output: CertifiedStateIntentTestVector;
     recoveryFirst: CertifiedStateIntentTestVector;
+    recoveryPreservingOutput: CertifiedStateIntentTestVector;
     recoverySecond: CertifiedStateIntentTestVector;
     reservation: CertifiedStateIntentTestVector;
+    reservationVoteCarriers: readonly Uint8Array[];
     reservationOnly: readonly ReservationOnlyStateIntentTestVector[];
     subjectParticipantIdentity: Uint8Array;
     suiteIdentifier: Uint8Array;
+    witnessParticipantIdentity: Uint8Array;
 }>;
 
 const stateCertificate = (
@@ -96,12 +101,19 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
     const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
         foundationProfile.participantCount,
     );
+    const mailboxKeyPairs = createCanonicalCarrierMailboxKeyPairFixtures(
+        foundationProfile.participantCount,
+    );
     try {
         const suiteIdentifier = new Uint8Array(64).fill(0x11);
         const ceremonyContextHash = new Uint8Array(64).fill(0x22);
         const actionContextHash = new Uint8Array(64).fill(0x33);
         const canonicalRosterBytes = createCanonicalTestRosterBytes(
-            signingKeyPairs.map(({ publicKey }) => publicKey),
+            signingKeyPairs.map(({ publicKey }, rosterPosition) => ({
+                signingVerificationKey: publicKey,
+                mailboxEncapsulationKey:
+                    mailboxKeyPairs[rosterPosition].publicKey,
+            })),
         );
         const rosterHash = foundationHash512(
             'sealed-lattice/foundation/roster/v1',
@@ -221,6 +233,44 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             ),
             objectHash: reservationCarrier.objectHash,
         };
+        const reservationVoteCarriers = [1, 2, 3, 4, 5, 6, 7].map(
+            (producerRosterPosition) =>
+                signedCarrier({
+                    objectType: stateWitnessVoteObjectType,
+                    payloadBytes: canonicalTuple(
+                        0x1612,
+                        hashItem(reservationCarrier.objectHash),
+                    ),
+                    producerRosterPosition,
+                    producerSequence: 1n,
+                    recoveryEpoch: 0n,
+                    signaturePurpose: 'state-witness-vote',
+                }).canonicalCarrierBytes,
+        );
+        const conflictingAuthorizationHash = authorizationHash.slice();
+        conflictingAuthorizationHash[0] ^= 0xff;
+        const conflictingReservationCarrier = signedCarrier({
+            objectType: stateReservationObjectType,
+            payloadBytes: canonicalTuple(
+                0x1610,
+                unsigned16Item(targetReleaseCapabilityKind),
+                hashItem(conflictingAuthorizationHash),
+            ),
+            producerRosterPosition: 0,
+            producerSequence: 0n,
+            recoveryEpoch: 0n,
+            signaturePurpose: 'state-reservation-intent',
+        });
+        const conflictingReservation: CertifiedStateIntentTestVector = {
+            canonicalIntentCarrier:
+                conflictingReservationCarrier.canonicalCarrierBytes,
+            canonicalStateCertificate: certificateFor(
+                conflictingReservationCarrier.objectHash,
+                1n,
+                [1, 2, 3, 4, 5, 6, 7],
+            ),
+            objectHash: conflictingReservationCarrier.objectHash,
+        };
         const reservationOnly = [
             stateCapabilityKinds.setupActionRandomnessRoot,
             stateCapabilityKinds.setupPublicSeedBranch,
@@ -297,6 +347,29 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             true,
         );
 
+        const recoveryPreservingOutputCarrier = signedCarrier({
+            objectType: stateRecoveryTransitionObjectType,
+            payloadBytes: canonicalTuple(
+                0x1614,
+                unsigned16Item(targetReleaseCapabilityKind),
+                presentOptionalItem(0x06, outputCarrier.objectHash),
+            ),
+            producerRosterPosition: 0,
+            producerSequence: 1n,
+            recoveryEpoch: 0n,
+            signaturePurpose: 'state-recovery-transition',
+        });
+        const recoveryPreservingOutput: CertifiedStateIntentTestVector = {
+            canonicalIntentCarrier:
+                recoveryPreservingOutputCarrier.canonicalCarrierBytes,
+            canonicalStateCertificate: certificateFor(
+                recoveryPreservingOutputCarrier.objectHash,
+                3n,
+                [1, 2, 3, 4, 5, 6, 7],
+            ),
+            objectHash: recoveryPreservingOutputCarrier.objectHash,
+        };
+
         const recoveryFirstCarrier = signedCarrier({
             objectType: stateRecoveryTransitionObjectType,
             payloadBytes: canonicalTuple(
@@ -347,18 +420,25 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             authorizationHash,
             canonicalRosterBytes,
             ceremonyContextHash,
+            conflictingReservation,
             exactOutputBytes,
             invalidExtraOutputCertificate,
             output,
             recoveryFirst,
+            recoveryPreservingOutput,
             recoverySecond,
             reservation,
+            reservationVoteCarriers,
             reservationOnly,
             subjectParticipantIdentity: participantIdentities[0],
             suiteIdentifier,
+            witnessParticipantIdentity: participantIdentities[1],
         };
     } finally {
         for (const { secretKey } of signingKeyPairs) {
+            secretKey.fill(0);
+        }
+        for (const { secretKey } of mailboxKeyPairs) {
             secretKey.fill(0);
         }
     }

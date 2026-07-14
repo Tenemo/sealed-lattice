@@ -8,11 +8,33 @@ use crate::hashing::derive_canonical_object_hash;
 #[serde(tag = "command")]
 enum TranscriptCoreCommand {
     DeriveCanonicalObjectHash,
+    ValidateCanonicalFoundationValue,
+    DeriveCeremonyContextHash,
+    DeriveActionContextHash,
+    EncodeMailboxKeyScheduleInput,
+    DecodeMailboxKeyScheduleInput,
+    EncodeMailboxAssociatedData,
+    DecodeMailboxAssociatedData,
+    EncodeStreamDescriptor,
+    DecodeStreamDescriptor,
+    EncodeSignedMailboxEnvelope,
+    DecodeSignedMailboxEnvelope,
+    DeriveMailboxKemCiphertextHash,
+    DeriveMailboxEnvelopeHash,
+    DeriveSetupMailboxSlotHash,
+    EncodeActionRandomnessDerivationInput,
+    DecodeActionRandomnessDerivationInput,
+    DeriveActionRandomnessCommitment,
+    EncodePrivateRandomBlockInput,
+    DecodePrivateRandomBlockInput,
+    EncodePrivateRandomCursor,
+    DecodePrivateRandomCursor,
+    GenerateProofSuiteCandidate,
+    ValidateProofProfileSet,
     DescribeBgvRnsParameters,
     DescribeCollectiveBgvSetupParameters,
     VerifyCollectiveBgvSetup,
     VerifyPrivateVssShareEnvelope,
-    GeneratePrivateVssShareProof,
     GenerateTrusteeEvaluationKeyProof,
     DescribeTrusteeEvaluationKeyStatement,
     ComputeSetupCommitmentFromOpening,
@@ -66,6 +88,75 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
                 "canonicalObjectHash": derive_canonical_object_hash(value)?,
             }))
         }
+        TranscriptCoreCommand::ValidateCanonicalFoundationValue => {
+            super::foundation_command::validate_canonical_foundation_value(&request)
+        }
+        TranscriptCoreCommand::DeriveCeremonyContextHash => {
+            super::foundation_command::derive_ceremony_context_hash(&request)
+        }
+        TranscriptCoreCommand::DeriveActionContextHash => {
+            super::foundation_command::derive_action_context_hash(&request)
+        }
+        TranscriptCoreCommand::EncodeMailboxKeyScheduleInput => {
+            super::mailbox_command::encode_mailbox_key_schedule_input(&request)
+        }
+        TranscriptCoreCommand::DecodeMailboxKeyScheduleInput => {
+            super::mailbox_command::decode_mailbox_key_schedule_input(&request)
+        }
+        TranscriptCoreCommand::EncodeMailboxAssociatedData => {
+            super::mailbox_command::encode_mailbox_associated_data(&request)
+        }
+        TranscriptCoreCommand::DecodeMailboxAssociatedData => {
+            super::mailbox_command::decode_mailbox_associated_data(&request)
+        }
+        TranscriptCoreCommand::EncodeStreamDescriptor => {
+            super::mailbox_command::encode_stream_descriptor(&request)
+        }
+        TranscriptCoreCommand::DecodeStreamDescriptor => {
+            super::mailbox_command::decode_stream_descriptor(&request)
+        }
+        TranscriptCoreCommand::EncodeSignedMailboxEnvelope => {
+            super::mailbox_command::encode_signed_mailbox_envelope(&request)
+        }
+        TranscriptCoreCommand::DecodeSignedMailboxEnvelope => {
+            super::mailbox_command::decode_signed_mailbox_envelope(&request)
+        }
+        TranscriptCoreCommand::DeriveMailboxKemCiphertextHash => {
+            super::mailbox_command::derive_mailbox_kem_ciphertext_hash_command(&request)
+        }
+        TranscriptCoreCommand::DeriveMailboxEnvelopeHash => {
+            super::mailbox_command::derive_mailbox_envelope_hash_command(&request)
+        }
+        TranscriptCoreCommand::DeriveSetupMailboxSlotHash => {
+            super::mailbox_command::derive_setup_mailbox_slot_hash_command(&request)
+        }
+        TranscriptCoreCommand::EncodeActionRandomnessDerivationInput => {
+            super::private_randomness_command::encode_action_randomness_derivation_input(&request)
+        }
+        TranscriptCoreCommand::DecodeActionRandomnessDerivationInput => {
+            super::private_randomness_command::decode_action_randomness_derivation_input(&request)
+        }
+        TranscriptCoreCommand::DeriveActionRandomnessCommitment => {
+            super::private_randomness_command::derive_action_randomness_commitment(&request)
+        }
+        TranscriptCoreCommand::EncodePrivateRandomBlockInput => {
+            super::private_randomness_command::encode_private_random_block_input(&request)
+        }
+        TranscriptCoreCommand::DecodePrivateRandomBlockInput => {
+            super::private_randomness_command::decode_private_random_block_input(&request)
+        }
+        TranscriptCoreCommand::EncodePrivateRandomCursor => {
+            super::private_randomness_command::encode_private_random_cursor(&request)
+        }
+        TranscriptCoreCommand::DecodePrivateRandomCursor => {
+            super::private_randomness_command::decode_private_random_cursor(&request)
+        }
+        TranscriptCoreCommand::GenerateProofSuiteCandidate => {
+            super::proof_suite_command::generate_proof_suite_candidate_command()
+        }
+        TranscriptCoreCommand::ValidateProofProfileSet => {
+            super::proof_suite_command::validate_proof_profile_set_command(&request)
+        }
         TranscriptCoreCommand::VerifyCollectiveBgvSetup => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             "accepted setup verification requires an opaque material-ownership session",
@@ -73,7 +164,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         TranscriptCoreCommand::DescribeBgvRnsParameters
         | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
-        | TranscriptCoreCommand::GeneratePrivateVssShareProof
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
@@ -127,9 +217,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::VerifyPrivateVssShareEnvelope => {
             crate::bgv::setup::verify_private_vss_share_envelope_from_request(request)
-        }
-        TranscriptCoreCommand::GeneratePrivateVssShareProof => {
-            crate::bgv::setup::generate_private_vss_share_proof_from_request(request)
         }
         TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof => {
             crate::bgv::setup::generate_trustee_evaluation_key_proof_from_request(request)

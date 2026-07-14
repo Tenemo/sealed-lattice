@@ -39,10 +39,21 @@ impl CollectiveSetupVerificationFixture {
     pub(super) fn begin_proof_binding_session(
         &self,
     ) -> crate::bgv::setup::AcceptedSetupProofBindingSession {
+        self.begin_proof_binding_session_for_package(&self.package)
+    }
+
+    fn begin_proof_binding_session_for_package(
+        &self,
+        package: &serde_json::Value,
+    ) -> crate::bgv::setup::AcceptedSetupProofBindingSession {
         let proof_binding_session =
             crate::bgv::setup::AcceptedSetupProofBindingSession::begin_fresh()
                 .expect("begin accepted-setup fixture proof binding session");
         self.restore_proof_binding_leases(proof_binding_session);
+        super::proof_record_fixtures::authenticate_public_key_share_material_fixture(
+            package,
+            proof_binding_session,
+        );
         proof_binding_session
     }
 
@@ -68,10 +79,11 @@ impl CollectiveSetupVerificationFixture {
         package: &serde_json::Value,
         verification_request: &serde_json::Value,
     ) -> crate::encoding::CanonicalResult<serde_json::Value> {
-        crate::bgv::setup::accepted_setup::verify_collective_bgv_setup_package_with_proof_binding_leases(
+        let proof_binding_session = self.begin_proof_binding_session_for_package(package);
+        crate::bgv::setup::accepted_setup::verify_collective_bgv_setup_package_in_proof_binding_session(
             package,
             verification_request,
-            &self.proof_binding_leases,
+            proof_binding_session,
         )
     }
 

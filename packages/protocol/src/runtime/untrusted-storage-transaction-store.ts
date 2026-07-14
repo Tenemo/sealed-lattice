@@ -4,7 +4,11 @@ const maximumLogicalRecordKeyByteLength = 1024;
 const identifierByteLength = 32;
 const encodedIdentifierCharacterLength = identifierByteLength * 2;
 const identifierPattern = /^[0-9a-f]{64}$/u;
+const hashPattern = /^[0-9a-f]{128}$/u;
 const namespacePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const canonicalUnsignedDecimalPattern = /^(?:0|[1-9][0-9]*)$/u;
+const maximumUnsigned64 = 0xffff_ffff_ffff_ffffn;
+const authenticatedRecoveryHeadRecordVersion = 1;
 
 export type UntrustedStorageTransactionErrorCode =
     | 'AdapterFailure'
@@ -17,7 +21,7 @@ export type UntrustedStorageTransactionErrorCode =
     | 'MalformedLength'
     | 'QuotaExceeded';
 
-class UntrustedStorageTransactionError extends Error {
+export class UntrustedStorageTransactionError extends Error {
     public readonly code: UntrustedStorageTransactionErrorCode;
     public readonly failureCause: unknown;
 
@@ -71,6 +75,7 @@ export type UntrustedStorageTransactionLimits = Readonly<{
     maximumActiveTransactionCount: number;
     maximumLeaseByteLength: number;
     maximumLeaseCountPerTransaction: number;
+    maximumOwnedRecordCount: number;
     maximumStoredValueByteLength: number;
     maximumTransactionByteLength: number;
     maximumTransactionLifetimeMilliseconds: number;
@@ -93,14 +98,14 @@ type UntrustedStorageLeaseState =
     | 'consumed'
     | 'cancelled';
 
-type UntrustedStorageWriteLease = Readonly<{
+export type UntrustedStorageWriteLease = Readonly<{
     write(bytes: Uint8Array): Promise<void>;
     seal(authenticate: UntrustedStorageAuthenticator): Promise<void>;
     cancel(): Promise<void>;
     state(): UntrustedStorageLeaseState;
 }>;
 
-type UntrustedStorageTransaction = Readonly<{
+export type UntrustedStorageTransaction = Readonly<{
     issueWriteLease(input: {
         logicalRecordKey: string;
         declaredByteLength: number;
@@ -112,6 +117,7 @@ type UntrustedStorageTransaction = Readonly<{
     ): Promise<void>;
     commit(): Promise<void>;
     abort(): Promise<void>;
+    closeAfterFailure(): Promise<void>;
 }>;
 
 export type UntrustedStorageRecoveryReport = Readonly<{
@@ -121,7 +127,7 @@ export type UntrustedStorageRecoveryReport = Readonly<{
     storedValueByteLength: number;
 }>;
 
-type UntrustedStorageTransactionStoreOpenResult = Readonly<{
+export type UntrustedStorageTransactionStoreOpenResult = Readonly<{
     recoveryReport: UntrustedStorageRecoveryReport;
     store: UntrustedStorageTransactionStore;
 }>;
@@ -129,13 +135,46 @@ type UntrustedStorageTransactionStoreOpenResult = Readonly<{
 type IdentifierKind = 'lease' | 'transaction';
 type IdentifierFactory = (kind: IdentifierKind) => string;
 
-type StoreConfiguration = Readonly<{
+export type UntrustedStorageTransactionStoreConfiguration = Readonly<{
     adapter: UntrustedStorageAdapter;
     namespace: string;
     limits: UntrustedStorageTransactionLimits;
     createIdentifier?: IdentifierFactory;
     monotonicClockMilliseconds?: () => number;
 }>;
+
+export type UntrustedStorageAuthenticatedRecoveryProtection = Readonly<{
+    deriveDigest(bytes: Uint8Array): Promise<Uint8Array> | Uint8Array;
+    open(sealedHeadBytes: Uint8Array): Promise<Uint8Array>;
+    protectionIdentity: object;
+    recoveryIdentity: Uint8Array;
+    seal(headPlaintext: Uint8Array): Promise<Uint8Array>;
+}>;
+
+type StoredAuthenticatedRecoveryHeadRecord = Readonly<{
+    lastTransactionIdentifier: string;
+    predecessorHeadDigest: string;
+    recordVersion: number;
+    records: ReadonlyMap<
+        string,
+        Readonly<{ objectKey: string; sealedValueDigest: string }>
+    >;
+    recoveryIdentity: string;
+    transitionSequence: bigint;
+}>;
+
+type AuthenticatedRecoveryPublication = Readonly<{
+    head: StoredAuthenticatedRecoveryHeadRecord;
+    sealedHeadBytes: Uint8Array;
+}>;
+
+type AuthenticatedRecoveryRuntime = {
+    currentHead: StoredAuthenticatedRecoveryHeadRecord | undefined;
+    currentSealedHeadBytes: Uint8Array | undefined;
+    expectedRecoveryIdentity: string;
+    initialized: boolean;
+    protection: UntrustedStorageAuthenticatedRecoveryProtection;
+};
 
 type LeaseRecord = {
     declaredByteLength: number;
@@ -166,10 +205,14 @@ type TransactionState =
     | 'active'
     | 'aborting'
     | 'aborted'
+    | 'closed-after-failure'
     | 'committed-unverified'
     | 'committed';
 
 type TransactionRecord = {
+    authenticatedRecoveryPublication:
+        | AuthenticatedRecoveryPublication
+        | undefined;
     changes: Map<string, TransactionChange>;
     expiresAtMilliseconds: number;
     identifier: string;
@@ -177,6 +220,45 @@ type TransactionRecord = {
     state: TransactionState;
     totalDeclaredByteLength: number;
 };
+
+const hasExactKeys = (
+    value: Record<string, unknown>,
+    expectedKeys: readonly string[],
+): boolean => {
+    const keys = Object.keys(value);
+
+    return (
+        keys.length === expectedKeys.length &&
+        keys.every((key, index) => key === expectedKeys[index])
+    );
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isUint8Array = (value: unknown): value is Uint8Array =>
+    ArrayBuffer.isView(value) &&
+    Object.prototype.toString.call(value) === '[object Uint8Array]';
+
+const encodeAuthenticatedRecoveryHead = (
+    head: StoredAuthenticatedRecoveryHeadRecord,
+): Uint8Array =>
+    textEncoder.encode(
+        JSON.stringify({
+            lastTransactionIdentifier: head.lastTransactionIdentifier,
+            predecessorHeadDigest: head.predecessorHeadDigest,
+            recordVersion: head.recordVersion,
+            records: [...head.records.entries()].map(
+                ([encodedLogicalRecordKey, record]) => ({
+                    logicalRecordKeyHex: encodedLogicalRecordKey,
+                    objectKey: record.objectKey,
+                    sealedValueDigest: record.sealedValueDigest,
+                }),
+            ),
+            recoveryIdentity: head.recoveryIdentity,
+            transitionSequence: head.transitionSequence.toString(10),
+        }),
+    );
 
 const assertSafeNonNegativeInteger = (value: number, label: string): void => {
     if (!Number.isSafeInteger(value) || value < 0) {
@@ -270,6 +352,10 @@ const assertLimits = (limits: UntrustedStorageTransactionLimits): void => {
         'maximumLeaseCountPerTransaction',
     );
     assertSafePositiveInteger(
+        limits.maximumOwnedRecordCount,
+        'maximumOwnedRecordCount',
+    );
+    assertSafePositiveInteger(
         limits.maximumStoredValueByteLength,
         'maximumStoredValueByteLength',
     );
@@ -313,6 +399,114 @@ const assertLogicalRecordKey = (logicalRecordKey: string): Uint8Array => {
     return keyBytes;
 };
 
+const logicalRecordKeyHex = (logicalRecordKey: string): string =>
+    bytesToHex(assertLogicalRecordKey(logicalRecordKey));
+
+const decodeAuthenticatedRecoveryHead = (input: {
+    bytes: Uint8Array;
+    maximumRecordCount: number;
+}): StoredAuthenticatedRecoveryHeadRecord => {
+    let value: unknown;
+    try {
+        value = JSON.parse(fatalTextDecoder.decode(input.bytes));
+    } catch (error) {
+        throw new UntrustedStorageTransactionError(
+            'AuthenticationFailed',
+            'authenticated recovery head is not valid JSON.',
+            error,
+        );
+    }
+    if (
+        !isRecord(value) ||
+        !hasExactKeys(value, [
+            'lastTransactionIdentifier',
+            'predecessorHeadDigest',
+            'recordVersion',
+            'records',
+            'recoveryIdentity',
+            'transitionSequence',
+        ]) ||
+        value.recordVersion !== authenticatedRecoveryHeadRecordVersion ||
+        typeof value.lastTransactionIdentifier !== 'string' ||
+        !identifierPattern.test(value.lastTransactionIdentifier) ||
+        typeof value.predecessorHeadDigest !== 'string' ||
+        !hashPattern.test(value.predecessorHeadDigest) ||
+        typeof value.recoveryIdentity !== 'string' ||
+        !hashPattern.test(value.recoveryIdentity) ||
+        typeof value.transitionSequence !== 'string' ||
+        !canonicalUnsignedDecimalPattern.test(value.transitionSequence) ||
+        !Array.isArray(value.records) ||
+        value.records.length > input.maximumRecordCount
+    ) {
+        throw new UntrustedStorageTransactionError(
+            'AuthenticationFailed',
+            'authenticated recovery head has a noncanonical shape.',
+        );
+    }
+    const transitionSequence = BigInt(value.transitionSequence);
+    if (transitionSequence === 0n || transitionSequence > maximumUnsigned64) {
+        throw new UntrustedStorageTransactionError(
+            'AuthenticationFailed',
+            'authenticated recovery head transition sequence is invalid.',
+        );
+    }
+    const records = new Map<
+        string,
+        Readonly<{ objectKey: string; sealedValueDigest: string }>
+    >();
+    let previousLogicalRecordKeyHex: string | undefined;
+    for (const record of value.records) {
+        if (
+            !isRecord(record) ||
+            !hasExactKeys(record, [
+                'logicalRecordKeyHex',
+                'objectKey',
+                'sealedValueDigest',
+            ]) ||
+            typeof record.logicalRecordKeyHex !== 'string' ||
+            record.logicalRecordKeyHex.length === 0 ||
+            record.logicalRecordKeyHex.length >
+                maximumLogicalRecordKeyByteLength * 2 ||
+            record.logicalRecordKeyHex.length % 2 !== 0 ||
+            !/^[0-9a-f]+$/u.test(record.logicalRecordKeyHex) ||
+            typeof record.objectKey !== 'string' ||
+            typeof record.sealedValueDigest !== 'string' ||
+            !hashPattern.test(record.sealedValueDigest) ||
+            (previousLogicalRecordKeyHex !== undefined &&
+                record.logicalRecordKeyHex <= previousLogicalRecordKeyHex)
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated recovery head record inventory is not canonical.',
+            );
+        }
+        records.set(
+            record.logicalRecordKeyHex,
+            Object.freeze({
+                objectKey: record.objectKey,
+                sealedValueDigest: record.sealedValueDigest,
+            }),
+        );
+        previousLogicalRecordKeyHex = record.logicalRecordKeyHex;
+    }
+    const head = Object.freeze({
+        lastTransactionIdentifier: value.lastTransactionIdentifier,
+        predecessorHeadDigest: value.predecessorHeadDigest,
+        recordVersion: value.recordVersion,
+        records,
+        recoveryIdentity: value.recoveryIdentity,
+        transitionSequence,
+    });
+    if (!bytesEqual(input.bytes, encodeAuthenticatedRecoveryHead(head))) {
+        throw new UntrustedStorageTransactionError(
+            'AuthenticationFailed',
+            'authenticated recovery head is not canonically encoded.',
+        );
+    }
+
+    return head;
+};
+
 export class UntrustedStorageTransactionStore {
     readonly #adapter: UntrustedStorageAdapter;
     readonly #createIdentifier: IdentifierFactory;
@@ -321,7 +515,10 @@ export class UntrustedStorageTransactionStore {
     readonly #rootPrefix: string;
     readonly #indexPrefix: string;
     readonly #maximumIndexValueByteLength: number;
+    readonly #maximumOwnedKeyCharacterLength: number;
     readonly #objectPrefix: string;
+    readonly #recoveryHeadKey: string;
+    readonly #recoveryPrefix: string;
     readonly #transactions = new Map<string, TransactionRecord>();
     readonly #issuedIdentifiers: Readonly<Record<IdentifierKind, Set<string>>> =
         {
@@ -329,8 +526,11 @@ export class UntrustedStorageTransactionStore {
             transaction: new Set<string>(),
         };
     #exclusiveOperationTail: Promise<void> = Promise.resolve();
+    #authenticatedRecovery: AuthenticatedRecoveryRuntime | undefined;
 
-    public constructor(configuration: StoreConfiguration) {
+    public constructor(
+        configuration: UntrustedStorageTransactionStoreConfiguration,
+    ) {
         if (
             configuration.namespace.length > 64 ||
             !namespacePattern.test(configuration.namespace)
@@ -351,11 +551,84 @@ export class UntrustedStorageTransactionStore {
         this.#rootPrefix = `sealed-lattice-runtime-store/${configuration.namespace}/`;
         this.#indexPrefix = `${this.#rootPrefix}indices/`;
         this.#objectPrefix = `${this.#rootPrefix}objects/`;
+        this.#recoveryPrefix = `${this.#rootPrefix}recovery/`;
+        this.#recoveryHeadKey = `${this.#recoveryPrefix}current-head`;
         this.#maximumIndexValueByteLength =
             textEncoder.encode(this.#objectPrefix).byteLength +
             encodedIdentifierCharacterLength +
             1 +
             encodedIdentifierCharacterLength;
+        this.#maximumOwnedKeyCharacterLength = Math.max(
+            this.#indexPrefix.length + maximumLogicalRecordKeyByteLength * 2,
+            this.#maximumIndexValueByteLength,
+            this.#recoveryHeadKey.length,
+        );
+    }
+
+    public configureAuthenticatedRecovery(
+        protection: UntrustedStorageAuthenticatedRecoveryProtection,
+    ): void {
+        if (this.#transactions.size !== 0) {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'authenticated recovery cannot be configured while transactions are live.',
+            );
+        }
+        if (
+            !isUint8Array(protection.recoveryIdentity) ||
+            protection.recoveryIdentity.byteLength !== 64 ||
+            protection.recoveryIdentity.every((byte) => byte === 0) ||
+            typeof protection.deriveDigest !== 'function' ||
+            typeof protection.open !== 'function' ||
+            typeof protection.protectionIdentity !== 'object' ||
+            protection.protectionIdentity === null ||
+            typeof protection.seal !== 'function'
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'MalformedLength',
+                'authenticated recovery protection has an invalid identity or callback.',
+            );
+        }
+        const recoveryIdentity = protection.recoveryIdentity.slice();
+        const expectedRecoveryIdentity = bytesToHex(recoveryIdentity);
+        const configuredProtection = Object.freeze({
+            deriveDigest: protection.deriveDigest,
+            open: protection.open,
+            protectionIdentity: protection.protectionIdentity,
+            recoveryIdentity,
+            seal: protection.seal,
+        });
+        if (this.#authenticatedRecovery !== undefined) {
+            if (
+                this.#authenticatedRecovery.expectedRecoveryIdentity !==
+                expectedRecoveryIdentity
+            ) {
+                recoveryIdentity.fill(0);
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated recovery was reconfigured for another storage authority.',
+                );
+            }
+            if (
+                this.#authenticatedRecovery.protection.protectionIdentity !==
+                configuredProtection.protectionIdentity
+            ) {
+                recoveryIdentity.fill(0);
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated recovery was reconfigured with another record-protection authority.',
+                );
+            }
+            this.#authenticatedRecovery.protection = configuredProtection;
+            return;
+        }
+        this.#authenticatedRecovery = {
+            currentHead: undefined,
+            currentSealedHeadBytes: undefined,
+            expectedRecoveryIdentity,
+            initialized: false,
+            protection: configuredProtection,
+        };
     }
 
     public async recover(): Promise<UntrustedStorageRecoveryReport> {
@@ -367,17 +640,38 @@ export class UntrustedStorageTransactionStore {
                 );
             }
 
+            const authenticatedCleanupCount =
+                await this.#ensureAuthenticatedRecoveryReady();
+
             const indexKeys = await this.#listedKeys(this.#indexPrefix);
             const objectKeys = await this.#listedKeys(this.#objectPrefix);
+            const recoveryKeys = await this.#listedKeys(this.#recoveryPrefix);
+            if (
+                recoveryKeys.length > 1 ||
+                (recoveryKeys.length === 1 &&
+                    recoveryKeys[0] !== this.#recoveryHeadKey)
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'AdapterFailure',
+                    'storage recovery namespace contains an unexpected record.',
+                );
+            }
+            if (
+                indexKeys.length + objectKeys.length + recoveryKeys.length >
+                this.#limits.maximumOwnedRecordCount
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'QuotaExceeded',
+                    'owned storage record count exceeds maximumOwnedRecordCount.',
+                );
+            }
             const objectKeySet = new Set(objectKeys);
-            const indexValues = new Map<string, Uint8Array>();
             const referencedObjectToIndexKeys = new Map<string, string[]>();
             const corruptIndexKeys = new Set<string>();
 
             for (const indexKey of indexKeys) {
                 const indexValue =
                     await this.#requiredListedIndexValue(indexKey);
-                indexValues.set(indexKey, indexValue);
                 let objectKey: string;
                 try {
                     objectKey = this.#decodeIndexValue(indexValue);
@@ -413,21 +707,10 @@ export class UntrustedStorageTransactionStore {
             }
 
             if (corruptIndexKeys.size > 0) {
-                const sortedCorruptIndexKeys = [...corruptIndexKeys].sort();
-                const removed = await this.#adapter.applyAtomicMutation({
-                    expectedValues: sortedCorruptIndexKeys.map((key) => ({
-                        key,
-                        value: indexValues.get(key),
-                    })),
-                    writes: [],
-                    deletes: sortedCorruptIndexKeys,
-                });
-                if (!removed) {
-                    throw new UntrustedStorageTransactionError(
-                        'Conflict',
-                        'storage indices changed during recovery.',
-                    );
-                }
+                throw new UntrustedStorageTransactionError(
+                    'CorruptIndex',
+                    'storage recovery found a malformed, dangling, or aliased committed index.',
+                );
             }
 
             const retainedObjectKeys = new Set<string>();
@@ -435,21 +718,28 @@ export class UntrustedStorageTransactionStore {
                 objectKey,
                 referencingIndexKeys,
             ] of referencedObjectToIndexKeys) {
-                if (
-                    referencingIndexKeys.length === 1 &&
-                    !corruptIndexKeys.has(referencingIndexKeys[0] ?? '')
-                ) {
+                if (referencingIndexKeys.length === 1) {
                     retainedObjectKeys.add(objectKey);
                 }
             }
             const unreferencedObjectKeys = objectKeys.filter(
                 (objectKey) => !retainedObjectKeys.has(objectKey),
             );
-            await this.#deleteKeys(unreferencedObjectKeys, 'recovery cleanup');
+            const authenticatedHeadIsPresent = recoveryKeys.length === 1;
+            if (!authenticatedHeadIsPresent) {
+                await this.#deleteKeys(
+                    unreferencedObjectKeys,
+                    'recovery cleanup',
+                );
+            }
 
             return {
-                removedCorruptIndexCount: corruptIndexKeys.size,
-                removedUnreferencedObjectCount: unreferencedObjectKeys.length,
+                removedCorruptIndexCount: 0,
+                removedUnreferencedObjectCount:
+                    authenticatedCleanupCount +
+                    (authenticatedHeadIsPresent
+                        ? 0
+                        : unreferencedObjectKeys.length),
                 retainedObjectCount: retainedObjectKeys.size,
                 storedValueByteLength:
                     await this.#measureStoredValueByteLength(),
@@ -461,6 +751,7 @@ export class UntrustedStorageTransactionStore {
         lifetimeMilliseconds: number;
     }): Promise<UntrustedStorageTransaction> {
         return this.#runExclusive(async () => {
+            await this.#ensureAuthenticatedRecoveryReady();
             assertSafePositiveInteger(
                 input.lifetimeMilliseconds,
                 'lifetimeMilliseconds',
@@ -505,6 +796,7 @@ export class UntrustedStorageTransactionStore {
                 );
             }
             const transaction: TransactionRecord = {
+                authenticatedRecoveryPublication: undefined,
                 changes: new Map(),
                 expiresAtMilliseconds,
                 identifier,
@@ -523,8 +815,13 @@ export class UntrustedStorageTransactionStore {
         authenticate: UntrustedStorageAuthenticator;
     }): Promise<Uint8Array | undefined> {
         return this.#runExclusive(async () => {
+            await this.#ensureAuthenticatedRecoveryReady();
             const indexKey = this.#indexKey(input.logicalRecordKey);
             const indexValue = await this.#readOwnedIndexValue(indexKey);
+            this.#assertAuthenticatedRecoveryMapping(
+                input.logicalRecordKey,
+                indexValue,
+            );
             if (indexValue === undefined) {
                 return undefined;
             }
@@ -541,6 +838,10 @@ export class UntrustedStorageTransactionStore {
                 input.logicalRecordKey,
                 bytes,
             );
+            await this.#assertAuthenticatedRecoveryObjectDigest(
+                input.logicalRecordKey,
+                bytes,
+            );
             const rereadIndexValue = await this.#readOwnedIndexValue(indexKey);
             if (!bytesEqual(indexValue, rereadIndexValue)) {
                 throw new UntrustedStorageTransactionError(
@@ -548,6 +849,7 @@ export class UntrustedStorageTransactionStore {
                     'storage index changed during authenticated read.',
                 );
             }
+            await this.#assertAuthenticatedRecoveryHeadUnchanged();
 
             return bytes.slice();
         });
@@ -555,6 +857,7 @@ export class UntrustedStorageTransactionStore {
 
     public async cleanupExpiredTransactions(): Promise<number> {
         return this.#runExclusive(async () => {
+            await this.#ensureAuthenticatedRecoveryReady();
             const now = this.#readMonotonicClockMilliseconds();
             const expiredTransactions = [...this.#transactions.values()]
                 .filter(
@@ -602,6 +905,10 @@ export class UntrustedStorageTransactionStore {
                 this.#runExclusive(() => this.#commitTransaction(transaction)),
             abort: () =>
                 this.#runExclusive(() => this.#abortTransaction(transaction)),
+            closeAfterFailure: () =>
+                this.#runExclusive(() =>
+                    this.#closeTransactionAfterFailure(transaction),
+                ),
         });
     }
 
@@ -654,6 +961,10 @@ export class UntrustedStorageTransactionStore {
         }
         const indexKey = this.#indexKey(input.logicalRecordKey);
         const expectedIndexValue = await this.#readOwnedIndexValue(indexKey);
+        this.#assertAuthenticatedRecoveryMapping(
+            input.logicalRecordKey,
+            expectedIndexValue,
+        );
         const existingObjectKey =
             expectedIndexValue === undefined
                 ? undefined
@@ -669,6 +980,12 @@ export class UntrustedStorageTransactionStore {
             throw new UntrustedStorageTransactionError(
                 'CorruptIndex',
                 'storage index references a missing object.',
+            );
+        }
+        if (existingObjectValue !== undefined) {
+            await this.#assertAuthenticatedRecoveryObjectDigest(
+                input.logicalRecordKey,
+                existingObjectValue,
             );
         }
         if (
@@ -855,6 +1172,10 @@ export class UntrustedStorageTransactionStore {
         }
         const indexKey = this.#indexKey(logicalRecordKey);
         const expectedIndexValue = await this.#readOwnedIndexValue(indexKey);
+        this.#assertAuthenticatedRecoveryMapping(
+            logicalRecordKey,
+            expectedIndexValue,
+        );
         const existingObjectKey =
             expectedIndexValue === undefined
                 ? undefined
@@ -870,6 +1191,12 @@ export class UntrustedStorageTransactionStore {
             throw new UntrustedStorageTransactionError(
                 'CorruptIndex',
                 'storage index references a missing object.',
+            );
+        }
+        if (existingObjectValue !== undefined) {
+            await this.#assertAuthenticatedRecoveryObjectDigest(
+                logicalRecordKey,
+                existingObjectValue,
             );
         }
         if (
@@ -893,7 +1220,141 @@ export class UntrustedStorageTransactionStore {
         });
     }
 
+    async #prepareAuthenticatedRecoveryPublication(
+        transaction: TransactionRecord,
+        changes: readonly TransactionChange[],
+    ): Promise<AuthenticatedRecoveryPublication | undefined> {
+        const recovery = this.#authenticatedRecovery;
+        if (recovery === undefined) {
+            return undefined;
+        }
+        await this.#assertAuthenticatedRecoveryHeadUnchanged();
+        const records = new Map(recovery.currentHead?.records ?? []);
+        for (const change of changes) {
+            const record =
+                change.kind === 'write' ? change.lease : change.deletion;
+            const encodedLogicalRecordKey = logicalRecordKeyHex(
+                record.logicalRecordKey,
+            );
+            if (change.kind === 'write') {
+                records.set(
+                    encodedLogicalRecordKey,
+                    Object.freeze({
+                        objectKey: change.lease.objectKey,
+                        sealedValueDigest:
+                            await this.#deriveAuthenticatedRecoveryDigest(
+                                await this.#requiredLeaseBytes(change.lease),
+                            ),
+                    }),
+                );
+            } else {
+                records.delete(encodedLogicalRecordKey);
+            }
+        }
+        const orderedRecords = new Map(
+            [...records.entries()].sort(([left], [right]) =>
+                left.localeCompare(right),
+            ),
+        );
+        const previousTransitionSequence =
+            recovery.currentHead?.transitionSequence ?? 0n;
+        if (previousTransitionSequence >= maximumUnsigned64) {
+            throw new UntrustedStorageTransactionError(
+                'QuotaExceeded',
+                'authenticated recovery transition sequence is exhausted.',
+            );
+        }
+        const predecessorHeadDigest =
+            recovery.currentSealedHeadBytes === undefined
+                ? '0'.repeat(128)
+                : await this.#deriveAuthenticatedRecoveryDigest(
+                      recovery.currentSealedHeadBytes,
+                  );
+        const head = Object.freeze({
+            lastTransactionIdentifier: transaction.identifier,
+            predecessorHeadDigest,
+            recordVersion: authenticatedRecoveryHeadRecordVersion,
+            records: orderedRecords,
+            recoveryIdentity: recovery.expectedRecoveryIdentity,
+            transitionSequence: previousTransitionSequence + 1n,
+        });
+        const sealedHeadBytes = await this.#sealAuthenticatedRecoveryHead(head);
+        const currentStoredValueByteLength =
+            await this.#measureStoredValueByteLength();
+        const headGrowthByteLength = Math.max(
+            0,
+            sealedHeadBytes.byteLength -
+                (recovery.currentSealedHeadBytes?.byteLength ?? 0),
+        );
+        const indexGrowthByteLength = changes.reduce(
+            (total, change) =>
+                change.kind === 'write'
+                    ? checkedAdd(
+                          total,
+                          change.lease.indexValueGrowthByteLength,
+                          'authenticated recovery publication index growth',
+                      )
+                    : total,
+            0,
+        );
+        if (
+            checkedAdd(
+                currentStoredValueByteLength,
+                checkedAdd(
+                    headGrowthByteLength,
+                    indexGrowthByteLength,
+                    'authenticated recovery publication growth',
+                ),
+                'stored value byte length',
+            ) > this.#limits.maximumStoredValueByteLength
+        ) {
+            sealedHeadBytes.fill(0);
+            throw new UntrustedStorageTransactionError(
+                'QuotaExceeded',
+                'authenticated recovery publication exceeds maximumStoredValueByteLength.',
+            );
+        }
+        const currentOwnedKeyCount = (await this.#listedKeys(this.#rootPrefix))
+            .length;
+        const newIndexCount = changes.filter((change) => {
+            const record =
+                change.kind === 'write' ? change.lease : change.deletion;
+            return (
+                change.kind === 'write' &&
+                record.expectedIndexValue === undefined
+            );
+        }).length;
+        const deletedIndexCount = changes.filter(
+            (change) =>
+                change.kind === 'delete' &&
+                change.deletion.expectedIndexValue !== undefined,
+        ).length;
+        const addsRecoveryHead =
+            recovery.currentSealedHeadBytes === undefined ? 1 : 0;
+        if (
+            currentOwnedKeyCount +
+                newIndexCount -
+                deletedIndexCount +
+                addsRecoveryHead >
+            this.#limits.maximumOwnedRecordCount
+        ) {
+            sealedHeadBytes.fill(0);
+            throw new UntrustedStorageTransactionError(
+                'QuotaExceeded',
+                'authenticated recovery publication exceeds maximumOwnedRecordCount.',
+            );
+        }
+
+        return Object.freeze({ head, sealedHeadBytes });
+    }
+
     async #commitTransaction(transaction: TransactionRecord): Promise<void> {
+        if (transaction.state === 'closed-after-failure') {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'a transaction closed after failure cannot commit.',
+            );
+        }
         if (transaction.state === 'committed') {
             await this.#finishCommittedCleanup(transaction);
             return;
@@ -933,6 +1394,13 @@ export class UntrustedStorageTransactionStore {
                 authenticatedLeaseBytes.set(change.lease, leaseBytes.slice());
             }
         }
+        const authenticatedRecoveryPublication =
+            await this.#prepareAuthenticatedRecoveryPublication(
+                transaction,
+                changes,
+            );
+        transaction.authenticatedRecoveryPublication =
+            authenticatedRecoveryPublication;
         const expectedValues: UntrustedStorageExpectedValue[] = [];
         const writes: UntrustedStorageWrite[] = [];
         const deletes: string[] = [];
@@ -966,6 +1434,16 @@ export class UntrustedStorageTransactionStore {
                 );
             }
         }
+        if (authenticatedRecoveryPublication !== undefined) {
+            expectedValues.push({
+                key: this.#recoveryHeadKey,
+                value: this.#authenticatedRecovery?.currentSealedHeadBytes?.slice(),
+            });
+            writes.push({
+                key: this.#recoveryHeadKey,
+                value: authenticatedRecoveryPublication.sealedHeadBytes.slice(),
+            });
+        }
         let committed: boolean;
         try {
             committed = await this.#adapter.applyAtomicMutation({
@@ -984,6 +1462,18 @@ export class UntrustedStorageTransactionStore {
                 'storage index changed before transaction commit.',
             );
         }
+        if (authenticatedRecoveryPublication !== undefined) {
+            const recovery = this.#authenticatedRecovery;
+            if (recovery === undefined) {
+                throw new UntrustedStorageTransactionError(
+                    'InvalidState',
+                    'authenticated recovery protection disappeared after commit.',
+                );
+            }
+            recovery.currentHead = authenticatedRecoveryPublication.head;
+            recovery.currentSealedHeadBytes =
+                authenticatedRecoveryPublication.sealedHeadBytes.slice();
+        }
         transaction.state = 'committed-unverified';
         await this.#verifyCommittedPublication(transaction);
         transaction.state = 'committed';
@@ -1000,6 +1490,7 @@ export class UntrustedStorageTransactionStore {
             }
         }
         transaction.pendingCleanupObjectKeys.clear();
+        transaction.authenticatedRecoveryPublication = undefined;
     }
 
     async #verifyCommittedPublication(
@@ -1042,6 +1533,43 @@ export class UntrustedStorageTransactionStore {
                 );
             }
         }
+        const authenticatedRecoveryPublication =
+            transaction.authenticatedRecoveryPublication;
+        if (authenticatedRecoveryPublication !== undefined) {
+            const observedSealedHeadBytes =
+                await this.#readOwnedRecoveryHeadValue();
+            if (
+                !bytesEqual(
+                    observedSealedHeadBytes,
+                    authenticatedRecoveryPublication.sealedHeadBytes,
+                )
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'committed authenticated recovery head failed publication reread.',
+                );
+            }
+            const observedHead = await this.#openAuthenticatedRecoveryHead(
+                authenticatedRecoveryPublication.sealedHeadBytes,
+            );
+            const expectedHeadBytes = encodeAuthenticatedRecoveryHead(
+                authenticatedRecoveryPublication.head,
+            );
+            const observedHeadBytes =
+                encodeAuthenticatedRecoveryHead(observedHead);
+            const headMatches = bytesEqual(
+                expectedHeadBytes,
+                observedHeadBytes,
+            );
+            expectedHeadBytes.fill(0);
+            observedHeadBytes.fill(0);
+            if (!headMatches) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'committed authenticated recovery head changed during publication.',
+                );
+            }
+        }
         for (const change of transaction.changes.values()) {
             if (change.kind === 'write') {
                 change.lease.state = 'consumed';
@@ -1061,7 +1589,10 @@ export class UntrustedStorageTransactionStore {
     }
 
     async #abortTransaction(transaction: TransactionRecord): Promise<void> {
-        if (transaction.state === 'aborted') {
+        if (
+            transaction.state === 'aborted' ||
+            transaction.state === 'closed-after-failure'
+        ) {
             return;
         }
         if (
@@ -1094,6 +1625,31 @@ export class UntrustedStorageTransactionStore {
         this.#transactions.delete(transaction.identifier);
     }
 
+    async #closeTransactionAfterFailure(
+        transaction: TransactionRecord,
+    ): Promise<void> {
+        if (
+            transaction.state === 'active' ||
+            transaction.state === 'aborting'
+        ) {
+            try {
+                await this.#abortTransaction(transaction);
+            } catch (error) {
+                transaction.state = 'closed-after-failure';
+                this.#transactions.delete(transaction.identifier);
+                throw error;
+            }
+            return;
+        }
+        if (
+            transaction.state === 'committed-unverified' ||
+            transaction.state === 'committed'
+        ) {
+            transaction.state = 'closed-after-failure';
+            this.#transactions.delete(transaction.identifier);
+        }
+    }
+
     #assertActiveTransaction(transaction: TransactionRecord): void {
         if (
             this.#transactions.get(transaction.identifier) !== transaction ||
@@ -1112,6 +1668,305 @@ export class UntrustedStorageTransactionStore {
                 'Expired',
                 'storage transaction lease has expired.',
             );
+        }
+    }
+
+    async #ensureAuthenticatedRecoveryReady(): Promise<number> {
+        const recovery = this.#authenticatedRecovery;
+        if (recovery === undefined) {
+            return 0;
+        }
+        if (recovery.initialized) {
+            await this.#assertAuthenticatedRecoveryHeadUnchanged();
+            return 0;
+        }
+
+        const indexKeys = await this.#listedKeys(this.#indexPrefix);
+        const objectKeys = await this.#listedKeys(this.#objectPrefix);
+        const recoveryKeys = await this.#listedKeys(this.#recoveryPrefix);
+        if (
+            indexKeys.length + objectKeys.length + recoveryKeys.length >
+            this.#limits.maximumOwnedRecordCount
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'QuotaExceeded',
+                'owned storage record count exceeds maximumOwnedRecordCount.',
+            );
+        }
+        if (
+            recoveryKeys.length > 1 ||
+            (recoveryKeys.length === 1 &&
+                recoveryKeys[0] !== this.#recoveryHeadKey)
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated recovery namespace contains an unexpected record.',
+            );
+        }
+        const sealedHeadBytes = await this.#readOwnedRecoveryHeadValue();
+        if (sealedHeadBytes === undefined) {
+            if (indexKeys.length !== 0) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated recovery head is missing for committed storage records.',
+                );
+            }
+            await this.#deleteKeys(
+                objectKeys,
+                'authenticated recovery abandoned-write cleanup',
+            );
+            recovery.currentHead = undefined;
+            recovery.currentSealedHeadBytes = undefined;
+            recovery.initialized = true;
+            return objectKeys.length;
+        }
+
+        const head = await this.#openAuthenticatedRecoveryHead(sealedHeadBytes);
+        if (head.recoveryIdentity !== recovery.expectedRecoveryIdentity) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated recovery head belongs to another storage authority.',
+            );
+        }
+        if (head.records.size !== indexKeys.length) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated recovery head does not match the committed storage index count.',
+            );
+        }
+        const referencedObjectKeys = new Set<string>();
+        for (const indexKey of indexKeys) {
+            const encodedLogicalRecordKey = indexKey.slice(
+                this.#indexPrefix.length,
+            );
+            const expectedRecord = head.records.get(encodedLogicalRecordKey);
+            if (expectedRecord === undefined) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated recovery head omits a committed storage index.',
+                );
+            }
+            const indexValue = await this.#requiredListedIndexValue(indexKey);
+            const objectKey = this.#decodeIndexValue(indexValue);
+            if (objectKey !== expectedRecord.objectKey) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated recovery head conflicts with a committed storage index.',
+                );
+            }
+            const objectValue = await this.#readOwnedObjectValue(objectKey);
+            if (objectValue === undefined) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated recovery head references a missing committed object.',
+                );
+            }
+            if (
+                (await this.#deriveAuthenticatedRecoveryDigest(objectValue)) !==
+                expectedRecord.sealedValueDigest
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated recovery head detects changed committed object bytes.',
+                );
+            }
+            referencedObjectKeys.add(objectKey);
+        }
+        const unreferencedObjectKeys = objectKeys.filter(
+            (objectKey) => !referencedObjectKeys.has(objectKey),
+        );
+        await this.#deleteKeys(
+            unreferencedObjectKeys,
+            'authenticated recovery abandoned-write cleanup',
+        );
+        recovery.currentHead = head;
+        recovery.currentSealedHeadBytes = sealedHeadBytes.slice();
+        recovery.initialized = true;
+
+        return unreferencedObjectKeys.length;
+    }
+
+    async #assertAuthenticatedRecoveryHeadUnchanged(): Promise<void> {
+        const recovery = this.#authenticatedRecovery;
+        if (recovery === undefined || !recovery.initialized) {
+            return;
+        }
+        const observedHeadBytes = await this.#readOwnedRecoveryHeadValue();
+        if (!bytesEqual(observedHeadBytes, recovery.currentSealedHeadBytes)) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated recovery head changed outside the committed transaction chain.',
+            );
+        }
+    }
+
+    #assertAuthenticatedRecoveryMapping(
+        logicalRecordKey: string,
+        indexValue: Uint8Array | undefined,
+    ): void {
+        const recovery = this.#authenticatedRecovery;
+        if (recovery === undefined) {
+            return;
+        }
+        const expectedRecord = recovery.currentHead?.records.get(
+            logicalRecordKeyHex(logicalRecordKey),
+        );
+        const observedObjectKey =
+            indexValue === undefined
+                ? undefined
+                : this.#decodeIndexValue(indexValue);
+        if (expectedRecord?.objectKey !== observedObjectKey) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'logical storage record conflicts with the authenticated recovery head.',
+            );
+        }
+    }
+
+    async #assertAuthenticatedRecoveryObjectDigest(
+        logicalRecordKey: string,
+        sealedValue: Uint8Array,
+    ): Promise<void> {
+        const recovery = this.#authenticatedRecovery;
+        if (recovery === undefined) {
+            return;
+        }
+        const expectedRecord = recovery.currentHead?.records.get(
+            logicalRecordKeyHex(logicalRecordKey),
+        );
+        if (expectedRecord === undefined) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated recovery head omits an opened committed object.',
+            );
+        }
+        if (
+            (await this.#deriveAuthenticatedRecoveryDigest(sealedValue)) !==
+            expectedRecord.sealedValueDigest
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'opened committed object conflicts with the authenticated recovery head.',
+            );
+        }
+    }
+
+    async #openAuthenticatedRecoveryHead(
+        sealedHeadBytes: Uint8Array,
+    ): Promise<StoredAuthenticatedRecoveryHeadRecord> {
+        const recovery = this.#authenticatedRecovery;
+        if (recovery === undefined) {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'authenticated recovery protection is not configured.',
+            );
+        }
+        let plaintext: Uint8Array | undefined;
+        try {
+            plaintext = await recovery.protection.open(sealedHeadBytes.slice());
+            if (
+                !isUint8Array(plaintext) ||
+                plaintext.byteLength > this.#limits.maximumStoredValueByteLength
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated recovery head plaintext has an invalid length.',
+                );
+            }
+            return decodeAuthenticatedRecoveryHead({
+                bytes: plaintext,
+                maximumRecordCount: this.#limits.maximumOwnedRecordCount,
+            });
+        } catch (error) {
+            if (error instanceof UntrustedStorageTransactionError) {
+                throw error;
+            }
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated recovery head could not be opened.',
+                error,
+            );
+        } finally {
+            plaintext?.fill(0);
+        }
+    }
+
+    async #deriveAuthenticatedRecoveryDigest(
+        bytes: Uint8Array,
+    ): Promise<string> {
+        const recovery = this.#authenticatedRecovery;
+        if (recovery === undefined) {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'authenticated recovery protection is not configured.',
+            );
+        }
+        let digest: Uint8Array;
+        try {
+            digest = await recovery.protection.deriveDigest(bytes.slice());
+        } catch (error) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated recovery head digest derivation failed.',
+                error,
+            );
+        }
+        if (!isUint8Array(digest) || digest.byteLength !== 64) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated recovery head digest has an invalid length.',
+            );
+        }
+
+        return bytesToHex(digest);
+    }
+
+    async #sealAuthenticatedRecoveryHead(
+        head: StoredAuthenticatedRecoveryHeadRecord,
+    ): Promise<Uint8Array> {
+        const recovery = this.#authenticatedRecovery;
+        if (recovery === undefined) {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'authenticated recovery protection is not configured.',
+            );
+        }
+        const plaintext = encodeAuthenticatedRecoveryHead(head);
+        if (plaintext.byteLength > this.#limits.maximumStoredValueByteLength) {
+            plaintext.fill(0);
+            throw new UntrustedStorageTransactionError(
+                'QuotaExceeded',
+                'authenticated recovery head exceeds the storage quota.',
+            );
+        }
+        try {
+            const sealedHeadBytes = await recovery.protection.seal(
+                plaintext.slice(),
+            );
+            if (
+                !isUint8Array(sealedHeadBytes) ||
+                sealedHeadBytes.byteLength === 0 ||
+                sealedHeadBytes.byteLength >
+                    this.#limits.maximumStoredValueByteLength
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'QuotaExceeded',
+                    'sealed authenticated recovery head has an invalid length.',
+                );
+            }
+
+            return sealedHeadBytes.slice();
+        } catch (error) {
+            if (error instanceof UntrustedStorageTransactionError) {
+                throw error;
+            }
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated recovery head could not be sealed.',
+                error,
+            );
+        } finally {
+            plaintext.fill(0);
         }
     }
 
@@ -1302,6 +2157,11 @@ export class UntrustedStorageTransactionStore {
                 oversizedErrorCode = 'MalformedLength';
                 oversizedMessage =
                     'stored object exceeds maximumLeaseByteLength.';
+            } else if (key === this.#recoveryHeadKey) {
+                maximumByteLength = this.#limits.maximumStoredValueByteLength;
+                oversizedErrorCode = 'AuthenticationFailed';
+                oversizedMessage =
+                    'authenticated recovery head exceeds maximumStoredValueByteLength.';
             } else {
                 throw new UntrustedStorageTransactionError(
                     'AdapterFailure',
@@ -1331,10 +2191,24 @@ export class UntrustedStorageTransactionStore {
     }
 
     async #listedKeys(prefix: string): Promise<string[]> {
-        const keys = [...(await this.#adapter.listKeys(prefix))];
+        const listedKeys = await this.#adapter.listKeys(prefix);
+        if (
+            !Array.isArray(listedKeys) ||
+            listedKeys.length > this.#limits.maximumOwnedRecordCount
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'QuotaExceeded',
+                'owned storage record count exceeds maximumOwnedRecordCount.',
+            );
+        }
         const uniqueKeys = new Set<string>();
-        for (const key of keys) {
-            if (!key.startsWith(prefix) || uniqueKeys.has(key)) {
+        for (const key of listedKeys) {
+            if (
+                typeof key !== 'string' ||
+                key.length > this.#maximumOwnedKeyCharacterLength ||
+                !key.startsWith(prefix) ||
+                uniqueKeys.has(key)
+            ) {
                 throw new UntrustedStorageTransactionError(
                     'AdapterFailure',
                     'storage adapter returned an invalid key listing.',
@@ -1383,6 +2257,21 @@ export class UntrustedStorageTransactionStore {
             maximumByteLength: this.#limits.maximumLeaseByteLength,
             oversizedErrorCode: 'MalformedLength',
             oversizedMessage: 'stored object exceeds maximumLeaseByteLength.',
+            value,
+        });
+    }
+
+    async #readOwnedRecoveryHeadValue(): Promise<Uint8Array | undefined> {
+        const value = await this.#adapter.read(this.#recoveryHeadKey);
+        if (value === undefined) {
+            return undefined;
+        }
+
+        return this.#copyBoundedAdapterValue({
+            maximumByteLength: this.#limits.maximumStoredValueByteLength,
+            oversizedErrorCode: 'AuthenticationFailed',
+            oversizedMessage:
+                'authenticated recovery head exceeds maximumStoredValueByteLength.',
             value,
         });
     }
@@ -1468,7 +2357,7 @@ export class UntrustedStorageTransactionStore {
 }
 
 export const openUntrustedStorageTransactionStore = async (
-    configuration: StoreConfiguration,
+    configuration: UntrustedStorageTransactionStoreConfiguration,
 ): Promise<UntrustedStorageTransactionStoreOpenResult> => {
     const store = new UntrustedStorageTransactionStore(configuration);
     const recoveryReport = await store.recover();

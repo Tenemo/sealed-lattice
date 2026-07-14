@@ -25,7 +25,7 @@ const verification = await verifyPrivateVssShare({
 
 if (
     verification.isValid !== false ||
-    verification.refusedObjects[0]?.reasonCode !== 'setupParametersHashMismatch'
+    verification.refusalReason !== 'wrongHashOrRoot'
 ) {
     throw new Error(
         'The packed private VSS verifier did not execute the WASM rejection path.',

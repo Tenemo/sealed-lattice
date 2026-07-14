@@ -4,7 +4,10 @@ import {
     type BrowserActionStorageCustodyErrorCode,
     type BrowserActionStorageRootBinding,
     type BrowserActionStorageWorkerKernel,
-    type ExternallyVerifiedStorageRootCommitment,
+    type BrowserLocalRecordIdentifierInput,
+    type BrowserLocalRecordOpenInput,
+    type BrowserLocalRecordSealInput,
+    type UntrustedExpectedStorageRootCommitment,
     type WorkerPreparedDeviceWrappingState,
 } from '@sealed-lattice/types';
 
@@ -14,6 +17,12 @@ import type {
     BrowserRecoveryExportChallenge,
     BrowserRecoveryExportConfirmation,
 } from './browser-action-storage-custody.js';
+import {
+    copyLocalRecordBytes,
+    copyLocalRecordIdentifierInput,
+    copyLocalRecordOpenInput,
+    copyLocalRecordSealInput,
+} from './browser-local-record-validation.js';
 
 export type {
     BrowserActionStorageWorkerKernel,
@@ -136,14 +145,14 @@ const copyStorageRootBinding = (
     });
 };
 
-const copyVerifiedCommitment = (
-    value: ExternallyVerifiedStorageRootCommitment,
+const copyUntrustedExpectedCommitment = (
+    value: UntrustedExpectedStorageRootCommitment,
     errorCode: 'InvalidInput' | 'InvalidState' = 'InvalidInput',
-): ExternallyVerifiedStorageRootCommitment => {
+): UntrustedExpectedStorageRootCommitment => {
     if (typeof value !== 'object' || value === null) {
         throw new BrowserActionStorageCustodyError(
             errorCode,
-            'The externally verified storage-root commitment must be an object.',
+            'The untrusted expected storage-root commitment must be an object.',
         );
     }
 
@@ -152,7 +161,7 @@ const copyVerifiedCommitment = (
             value.storageRootCommitment,
             foundationHashByteLength,
             errorCode,
-            'Externally verified storage-root commitment',
+            'Untrusted expected storage-root commitment',
         ),
     });
 };
@@ -376,7 +385,7 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
     readonly #cryptoProvider: Crypto;
     readonly #storage: BrowserDeviceWrappingStateStorage;
     readonly #workerKernel: BrowserActionStorageWorkerKernel;
-    #externallyVerifiedStorageRootCommitment: Uint8Array | undefined;
+    #expectedStorageRootCommitment: Uint8Array | undefined;
     #closed = false;
     #closing = false;
     #closePromise: Promise<void> | undefined;
@@ -396,7 +405,7 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         this.#cryptoProvider = input.cryptoProvider;
         this.#storage = input.storage;
         this.#workerKernel = input.workerKernel;
-        this.#externallyVerifiedStorageRootCommitment =
+        this.#expectedStorageRootCommitment =
             input.knownStorageRootCommitment === undefined
                 ? undefined
                 : copyBytes(
@@ -409,10 +418,10 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
 
     public initialize(): Promise<BrowserDeviceWrappingSnapshot> {
         return this.#runOperation(async () => {
-            if (this.#externallyVerifiedStorageRootCommitment !== undefined) {
+            if (this.#expectedStorageRootCommitment !== undefined) {
                 throw new BrowserActionStorageCustodyError(
                     'CommitmentRequired',
-                    'Fresh initialization is forbidden after an external storage-root commitment is known; recover the committed root instead.',
+                    'Fresh initialization is forbidden after an expected storage-root commitment is known; recover the committed root instead.',
                 );
             }
             const preparedState = await this.#workerCall(
@@ -459,14 +468,14 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
 
     public openIntoOwnedWorker(input: {
         expectedSnapshot: BrowserDeviceWrappingSnapshot;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<void> {
         let copiedSnapshot: BrowserDeviceWrappingSnapshot;
-        let copiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        let copiedCommitment: UntrustedExpectedStorageRootCommitment;
         try {
             copiedSnapshot = copySnapshot(input.expectedSnapshot);
-            copiedCommitment = copyVerifiedCommitment(
-                input.externallyVerifiedCommitment,
+            copiedCommitment = copyUntrustedExpectedCommitment(
+                input.untrustedExpectedCommitment,
             );
         } catch (error) {
             return Promise.reject(normalizeInputError(error));
@@ -480,14 +489,14 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
 
     public beginRecoveryExport(input: {
         expectedSnapshot: BrowserDeviceWrappingSnapshot;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<BrowserRecoveryExportChallenge> {
         let copiedSnapshot: BrowserDeviceWrappingSnapshot;
-        let copiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        let copiedCommitment: UntrustedExpectedStorageRootCommitment;
         try {
             copiedSnapshot = copySnapshot(input.expectedSnapshot);
-            copiedCommitment = copyVerifiedCommitment(
-                input.externallyVerifiedCommitment,
+            copiedCommitment = copyUntrustedExpectedCommitment(
+                input.untrustedExpectedCommitment,
             );
         } catch (error) {
             return Promise.reject(normalizeInputError(error));
@@ -608,8 +617,8 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
                     () =>
                         this.#workerKernel.stageDeviceWrappingStateOpen({
                             binding: copyStorageRootBinding(this.#binding),
-                            externallyVerifiedCommitment:
-                                this.#verifiedCommitmentForState(replacement),
+                            untrustedExpectedCommitment:
+                                this.#expectedCommitmentForState(replacement),
                             state: {
                                 deviceKey: replacement.deviceKey,
                                 storageRootCommitment:
@@ -683,7 +692,7 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
 
     public recover(input: {
         caseInsensitiveRecoveryText: string;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
         expectedSnapshot?: BrowserDeviceWrappingSnapshot;
     }): Promise<BrowserDeviceWrappingSnapshot> {
         if (typeof input !== 'object' || input === null) {
@@ -695,14 +704,14 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
             );
         }
         let canonicalRecoveryText: string;
-        let externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        let untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
         let expectedSnapshot: BrowserDeviceWrappingSnapshot | undefined;
         try {
             canonicalRecoveryText = assertRecoveryText(
                 input.caseInsensitiveRecoveryText,
             );
-            externallyVerifiedCommitment = copyVerifiedCommitment(
-                input.externallyVerifiedCommitment,
+            untrustedExpectedCommitment = copyUntrustedExpectedCommitment(
+                input.untrustedExpectedCommitment,
             );
             expectedSnapshot =
                 input.expectedSnapshot === undefined
@@ -713,10 +722,10 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         }
 
         return this.#runOperation(async () => {
-            if (this.#externallyVerifiedStorageRootCommitment !== undefined) {
+            if (this.#expectedStorageRootCommitment !== undefined) {
                 this.#assertCommitmentMatches(
-                    this.#externallyVerifiedStorageRootCommitment,
-                    externallyVerifiedCommitment.storageRootCommitment,
+                    this.#expectedStorageRootCommitment,
+                    untrustedExpectedCommitment.storageRootCommitment,
                 );
             }
             const currentState = await this.#readState();
@@ -737,7 +746,7 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
                         {
                             binding: copyStorageRootBinding(this.#binding),
                             caseInsensitiveRecoveryText: canonicalRecoveryText,
-                            externallyVerifiedCommitment,
+                            untrustedExpectedCommitment,
                         },
                     ),
                 'Importing browser recovery material failed inside the owned worker.',
@@ -756,7 +765,7 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
                 const copiedPreparedState = copyPreparedState(preparedState);
                 this.#assertCommitmentMatches(
                     copiedPreparedState.storageRootCommitment,
-                    externallyVerifiedCommitment.storageRootCommitment,
+                    untrustedExpectedCommitment.storageRootCommitment,
                 );
                 const replacement = this.#makeState({
                     ...copiedPreparedState,
@@ -769,8 +778,8 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
                 });
                 stateWasPublished = true;
                 await this.#commitStagedRootForPublishedState(replacement);
-                this.#externallyVerifiedStorageRootCommitment =
-                    externallyVerifiedCommitment.storageRootCommitment.slice();
+                this.#expectedStorageRootCommitment =
+                    untrustedExpectedCommitment.storageRootCommitment.slice();
                 this.#clearPendingRecoveryExport();
 
                 return snapshotFromState(replacement);
@@ -801,6 +810,112 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
             await this.#compareAndSwapOrConflict({
                 expectedMutationIdentifier: state.mutationIdentifier,
                 replacement: undefined,
+            });
+        });
+    }
+
+    public deriveLocalRecordIdentifier(
+        input: BrowserLocalRecordIdentifierInput,
+    ): Promise<Uint8Array> {
+        let copiedInput: BrowserLocalRecordIdentifierInput;
+        try {
+            copiedInput = copyLocalRecordIdentifierInput(input);
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () => {
+            const identifier = await this.#workerCall(
+                () =>
+                    this.#workerKernel.deriveActiveLocalRecordIdentifier(
+                        copiedInput,
+                    ),
+                'Deriving a local-record identifier failed inside the owned worker.',
+            );
+
+            return copyLocalRecordBytes(identifier, {
+                allowEmpty: false,
+                errorCode: 'OwnedWorkerFailure',
+                exactByteLength: foundationHashByteLength,
+                label: 'Worker-derived local-record identifier',
+            });
+        });
+    }
+
+    public sealLocalRecord(
+        input: BrowserLocalRecordSealInput,
+    ): Promise<Uint8Array> {
+        let copiedInput: BrowserLocalRecordSealInput;
+        try {
+            copiedInput = copyLocalRecordSealInput(input);
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () => {
+            const envelope = await this.#workerCall(
+                () => this.#workerKernel.sealActiveLocalRecord(copiedInput),
+                'Sealing a local record failed inside the owned worker.',
+            );
+
+            return copyLocalRecordBytes(envelope, {
+                allowEmpty: false,
+                errorCode: 'OwnedWorkerFailure',
+                label: 'Worker-produced local-record envelope',
+            });
+        });
+    }
+
+    public openLocalRecord(
+        input: BrowserLocalRecordOpenInput,
+    ): Promise<Uint8Array> {
+        let copiedInput: BrowserLocalRecordOpenInput;
+        try {
+            copiedInput = copyLocalRecordOpenInput(input);
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () => {
+            const plaintext = await this.#workerCall(
+                () => this.#workerKernel.openActiveLocalRecord(copiedInput),
+                'Opening a local record failed inside the owned worker.',
+            );
+
+            return copyLocalRecordBytes(plaintext, {
+                allowEmpty: true,
+                errorCode: 'OwnedWorkerFailure',
+                label: 'Worker-opened local-record plaintext',
+            });
+        });
+    }
+
+    public hashLocalRecordEnvelope(envelope: Uint8Array): Promise<Uint8Array> {
+        let copiedEnvelope: Uint8Array;
+        try {
+            copiedEnvelope = copyLocalRecordBytes(envelope, {
+                allowEmpty: false,
+                errorCode: 'InvalidInput',
+                label: 'Local-record envelope',
+            });
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () => {
+            const envelopeHash = await this.#workerCall(
+                () =>
+                    this.#workerKernel.hashActiveLocalRecordEnvelope(
+                        copiedEnvelope,
+                    ),
+                'Hashing a local-record envelope failed inside the owned worker.',
+            );
+
+            return copyLocalRecordBytes(envelopeHash, {
+                allowEmpty: false,
+                errorCode: 'OwnedWorkerFailure',
+                exactByteLength: foundationHashByteLength,
+                label: 'Worker-derived local-record envelope hash',
             });
         });
     }
@@ -948,23 +1063,23 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
 
     async #activateState(
         state: BrowserDeviceWrappingState,
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment,
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment,
     ): Promise<void> {
         this.#assertCommitmentMatches(
             state.storageRootCommitment,
-            externallyVerifiedCommitment.storageRootCommitment,
+            untrustedExpectedCommitment.storageRootCommitment,
         );
-        if (this.#externallyVerifiedStorageRootCommitment !== undefined) {
+        if (this.#expectedStorageRootCommitment !== undefined) {
             this.#assertCommitmentMatches(
-                this.#externallyVerifiedStorageRootCommitment,
-                externallyVerifiedCommitment.storageRootCommitment,
+                this.#expectedStorageRootCommitment,
+                untrustedExpectedCommitment.storageRootCommitment,
             );
         }
         await this.#workerCall(
             () =>
                 this.#workerKernel.stageDeviceWrappingStateOpen({
                     binding: copyStorageRootBinding(this.#binding),
-                    externallyVerifiedCommitment,
+                    untrustedExpectedCommitment,
                     state: {
                         deviceKey: state.deviceKey,
                         storageRootCommitment:
@@ -980,37 +1095,36 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
             await this.#cleanRootAfterFailedPublication(true, error);
             throw error;
         }
-        this.#externallyVerifiedStorageRootCommitment =
-            externallyVerifiedCommitment.storageRootCommitment.slice();
+        this.#expectedStorageRootCommitment =
+            untrustedExpectedCommitment.storageRootCommitment.slice();
     }
 
     #assertCommitmentMatches(left: Uint8Array, right: Uint8Array): void {
         if (!bytesEqual(left, right)) {
             throw new BrowserActionStorageCustodyError(
                 'CommitmentMismatch',
-                'The externally verified storage-root commitment does not match local custody.',
+                'The expected storage-root commitment does not match local custody.',
             );
         }
     }
 
-    #verifiedCommitmentForState(
+    #expectedCommitmentForState(
         state: BrowserDeviceWrappingState,
-    ): ExternallyVerifiedStorageRootCommitment {
-        const verifiedCommitment =
-            this.#externallyVerifiedStorageRootCommitment;
-        if (verifiedCommitment === undefined) {
+    ): UntrustedExpectedStorageRootCommitment {
+        const expectedCommitment = this.#expectedStorageRootCommitment;
+        if (expectedCommitment === undefined) {
             throw new BrowserActionStorageCustodyError(
                 'CommitmentRequired',
-                'An externally verified storage-root commitment is required before opening local custody.',
+                'An expected storage-root commitment is required before opening local custody.',
             );
         }
         this.#assertCommitmentMatches(
             state.storageRootCommitment,
-            verifiedCommitment,
+            expectedCommitment,
         );
 
         return Object.freeze({
-            storageRootCommitment: verifiedCommitment.slice(),
+            storageRootCommitment: expectedCommitment.slice(),
         });
     }
 

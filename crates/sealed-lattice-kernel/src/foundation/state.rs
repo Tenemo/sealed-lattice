@@ -10,8 +10,8 @@ use super::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
     CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError, Hash512,
-    ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster, SignedCarrier, VerificationResult,
-    hash_foundation_tuple_512 as hash512,
+    ML_DSA_65_SIGNATURE_BYTE_LENGTH, ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster,
+    SignedCarrier, VerificationResult, hash_foundation_tuple_512 as hash512, signature_message,
 };
 
 pub const STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER: u16 = 0x1610;
@@ -1303,6 +1303,32 @@ impl StateVerifier {
         }
     }
 
+    pub fn certify_reservation_intent_from_unordered_vote_carriers(
+        &self,
+        verified_intent: &VerifiedStateReservationIntent,
+        canonical_vote_carriers: &[Vec<u8>],
+    ) -> VerificationResult<VerifiedStateReservation> {
+        let binding = verified_intent.binding;
+        let result = self
+            .require_reservation_binding_context(binding)
+            .and_then(|()| {
+                self.verify_unordered_vote_carriers(
+                    canonical_vote_carriers,
+                    &ResolvedStateIntent {
+                        intent_object_hash: binding.intent_object_hash,
+                        subject_participant_id: binding.subject_participant_id,
+                        subject_epoch: binding.recovery_epoch,
+                        vote_kind: StateWitnessVoteKind::Reservation,
+                    },
+                )
+            })
+            .map(|()| VerifiedStateReservation { binding });
+        match result {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
     fn certify_reservation_inner(
         &self,
         verified_intent: &VerifiedStateReservationIntent,
@@ -1442,6 +1468,32 @@ impl StateVerifier {
         canonical_state_certificate: &[u8],
     ) -> VerificationResult<VerifiedStateOutput> {
         match self.certify_output_inner(verified_intent, canonical_state_certificate) {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    pub fn certify_output_intent_from_unordered_vote_carriers(
+        &self,
+        verified_intent: &VerifiedStateOutputIntent,
+        canonical_vote_carriers: &[Vec<u8>],
+    ) -> VerificationResult<VerifiedStateOutput> {
+        let binding = verified_intent.binding;
+        let result = self
+            .require_reservation_binding_context(binding.reservation_binding)
+            .and_then(|()| {
+                self.verify_unordered_vote_carriers(
+                    canonical_vote_carriers,
+                    &ResolvedStateIntent {
+                        intent_object_hash: binding.output_intent_object_hash,
+                        subject_participant_id: binding.reservation_binding.subject_participant_id,
+                        subject_epoch: binding.reservation_binding.recovery_epoch,
+                        vote_kind: StateWitnessVoteKind::Output,
+                    },
+                )
+            })
+            .map(|()| VerifiedStateOutput { binding });
+        match result {
             Ok(value) => VerificationResult::valid(value),
             Err(error) => VerificationResult::refused(error.refusal_reason),
         }
@@ -1619,6 +1671,32 @@ impl StateVerifier {
         }
     }
 
+    pub fn certify_recovery_intent_from_unordered_vote_carriers(
+        &self,
+        verified_intent: &VerifiedStateRecoveryIntent,
+        canonical_vote_carriers: &[Vec<u8>],
+    ) -> VerificationResult<VerifiedStateRecovery> {
+        let binding = verified_intent.binding;
+        let result = self
+            .require_recovery_binding_context(binding)
+            .and_then(|()| {
+                self.verify_unordered_vote_carriers(
+                    canonical_vote_carriers,
+                    &ResolvedStateIntent {
+                        intent_object_hash: binding.transition_object_hash,
+                        subject_participant_id: binding.subject_participant_id,
+                        subject_epoch: binding.new_recovery_epoch,
+                        vote_kind: StateWitnessVoteKind::Recovery,
+                    },
+                )
+            })
+            .map(|()| VerifiedStateRecovery { binding });
+        match result {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
     fn certify_recovery_inner(
         &self,
         verified_intent: &VerifiedStateRecoveryIntent,
@@ -1754,6 +1832,68 @@ impl StateVerifier {
         Ok(())
     }
 
+    pub(crate) fn prepare_state_witness_vote(
+        &self,
+        binding: StateDurableBinding,
+        witness_participant_id: ParticipantIdentity,
+    ) -> StateResult<(ObjectEnvelope, Hash512)> {
+        if binding.suite_id != self.suite_id
+            || binding.ceremony_context_hash != self.ceremony_context_hash
+            || binding.action_context_hash != self.action_context_hash
+        {
+            return Err(StateError::new(
+                RefusalReason::WrongContext,
+                "state vote binding belongs to another verifier context",
+            ));
+        }
+        if witness_participant_id == binding.subject_participant_id {
+            return Err(StateError::new(
+                RefusalReason::WrongContext,
+                "the state subject cannot witness its own intent",
+            ));
+        }
+        self.roster_position(witness_participant_id)?;
+        let envelope = ObjectEnvelope {
+            suite_id: self.suite_id,
+            object_type: FoundationObjectType::StateWitnessVote,
+            ceremony_context_hash: self.ceremony_context_hash,
+            action_context_hash: self.action_context_hash,
+            recovery_epoch: 0,
+            recovery_transition_hash: None,
+            producer_participant_id: Some(witness_participant_id),
+            producer_sequence: binding.witness_vote_sequence()?,
+            ordered_prerequisite_hashes: Vec::new(),
+            payload_bytes: StateWitnessVotePayload {
+                intent_object_hash: binding.intent_object_hash,
+            }
+            .encode()?,
+        };
+        let roster_hash = self.roster.roster_hash().map_err(StateError::from_schema)?;
+        let message = signature_message(&envelope, roster_hash).map_err(StateError::from_schema)?;
+        Ok((envelope, message))
+    }
+
+    pub(crate) fn finish_prepared_state_witness_vote(
+        &self,
+        envelope: ObjectEnvelope,
+        signature: [u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+    ) -> StateResult<Vec<u8>> {
+        let carrier = SignedCarrier {
+            envelope,
+            signature,
+        };
+        carrier
+            .verify_signature(&self.roster)
+            .into_result()
+            .map_err(|refusal_reason| {
+                StateError::new(
+                    refusal_reason,
+                    "state witness vote signature does not verify",
+                )
+            })?;
+        carrier.encode().map_err(StateError::from_schema)
+    }
+
     fn verify_certificate(
         &self,
         canonical_state_certificate: &[u8],
@@ -1761,60 +1901,35 @@ impl StateVerifier {
     ) -> StateResult<()> {
         let certificate =
             StateCertificate::decode(canonical_state_certificate, &self.canonical_decode_limits)?;
+        self.verify_ordered_vote_carriers(
+            certificate.canonical_signed_state_witness_vote_carriers(),
+            expected_intent,
+        )
+    }
+
+    fn verify_ordered_vote_carriers(
+        &self,
+        canonical_vote_carriers: &[Vec<u8>],
+        expected_intent: &ResolvedStateIntent,
+    ) -> StateResult<()> {
         let expected_sequence = derive_state_witness_vote_sequence(
             expected_intent.vote_kind,
             expected_intent.subject_epoch,
         )?;
         let mut previous_roster_position = None;
-        for canonical_vote_carrier in certificate.canonical_signed_state_witness_vote_carriers() {
-            let vote_carrier =
-                SignedCarrier::decode(canonical_vote_carrier, &self.canonical_decode_limits)
-                    .map_err(StateError::from_schema)?;
-            self.require_envelope_context(&vote_carrier.envelope)?;
-            let envelope = &vote_carrier.envelope;
-            if envelope.object_type != FoundationObjectType::StateWitnessVote
-                || envelope.recovery_epoch != 0
-                || envelope.recovery_transition_hash.is_some()
-                || envelope.producer_sequence != expected_sequence
-                || !envelope.ordered_prerequisite_hashes.is_empty()
-            {
-                return Err(StateError::new(
-                    RefusalReason::WrongContext,
-                    "state witness vote does not match the derived producer slot",
-                ));
-            }
-            let witness_participant_id = envelope.producer_participant_id.ok_or_else(|| {
-                StateError::new(
-                    RefusalReason::WrongTypeOrLength,
-                    "state witness vote does not name its producer",
-                )
-            })?;
-            if witness_participant_id == expected_intent.subject_participant_id {
-                return Err(StateError::new(
-                    RefusalReason::WrongContext,
-                    "the state subject cannot witness its own intent",
-                ));
-            }
-            let roster_position = self.roster_position(witness_participant_id)?;
-            let payload = StateWitnessVotePayload::decode(
-                &envelope.payload_bytes,
-                &self.canonical_decode_limits,
+        for canonical_vote_carrier in canonical_vote_carriers {
+            let verified_vote = self.verify_vote_carrier(
+                canonical_vote_carrier,
+                expected_intent,
+                expected_sequence,
             )?;
-            if payload.intent_object_hash != expected_intent.intent_object_hash {
+            if verified_vote.intent_object_hash != expected_intent.intent_object_hash {
                 return Err(StateError::new(
                     RefusalReason::WrongHashOrRoot,
                     "state witness vote does not resolve to the exact expected intent",
                 ));
             }
-            vote_carrier
-                .verify_signature(&self.roster)
-                .into_result()
-                .map_err(|refusal_reason| {
-                    StateError::new(
-                        refusal_reason,
-                        "state witness vote signature does not verify",
-                    )
-                })?;
+            let roster_position = verified_vote.roster_position;
             if let Some(previous_position) = previous_roster_position {
                 if roster_position == previous_position {
                     return Err(StateError::new(
@@ -1832,6 +1947,114 @@ impl StateVerifier {
             previous_roster_position = Some(roster_position);
         }
         Ok(())
+    }
+
+    fn verify_unordered_vote_carriers(
+        &self,
+        canonical_vote_carriers: &[Vec<u8>],
+        expected_intent: &ResolvedStateIntent,
+    ) -> StateResult<()> {
+        const MAXIMUM_UNTRUSTED_STATE_VOTE_CARRIER_COUNT: usize =
+            FOUNDATION_PROFILE.participant_count as usize * 2;
+        if canonical_vote_carriers.is_empty()
+            || canonical_vote_carriers.len() > MAXIMUM_UNTRUSTED_STATE_VOTE_CARRIER_COUNT
+        {
+            return Err(StateError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "untrusted state vote carrier count is outside the supported profile",
+            ));
+        }
+        let expected_sequence = derive_state_witness_vote_sequence(
+            expected_intent.vote_kind,
+            expected_intent.subject_epoch,
+        )?;
+        let mut unique_votes: Vec<VerifiedStateWitnessVote> = Vec::new();
+        for canonical_vote_carrier in canonical_vote_carriers {
+            let verified_vote = self.verify_vote_carrier(
+                canonical_vote_carrier,
+                expected_intent,
+                expected_sequence,
+            )?;
+            if let Some(previous_vote) = unique_votes
+                .iter()
+                .find(|previous| previous.roster_position == verified_vote.roster_position)
+            {
+                if previous_vote.intent_object_hash != verified_vote.intent_object_hash {
+                    return Err(StateError::new(
+                        RefusalReason::Equivocation,
+                        "one authenticated witness slot contains conflicting state votes",
+                    ));
+                }
+                continue;
+            }
+            unique_votes.push(verified_vote);
+        }
+        unique_votes.sort_unstable_by_key(|vote| vote.roster_position);
+        validate_state_certificate_count(unique_votes.len())?;
+        if unique_votes
+            .iter()
+            .any(|vote| vote.intent_object_hash != expected_intent.intent_object_hash)
+        {
+            return Err(StateError::new(
+                RefusalReason::WrongHashOrRoot,
+                "state witness vote does not resolve to the exact expected intent",
+            ));
+        }
+        Ok(())
+    }
+
+    fn verify_vote_carrier(
+        &self,
+        canonical_vote_carrier: &[u8],
+        expected_intent: &ResolvedStateIntent,
+        expected_sequence: u64,
+    ) -> StateResult<VerifiedStateWitnessVote> {
+        let vote_carrier =
+            SignedCarrier::decode(canonical_vote_carrier, &self.canonical_decode_limits)
+                .map_err(StateError::from_schema)?;
+        self.require_envelope_context(&vote_carrier.envelope)?;
+        let envelope = &vote_carrier.envelope;
+        if envelope.object_type != FoundationObjectType::StateWitnessVote
+            || envelope.recovery_epoch != 0
+            || envelope.recovery_transition_hash.is_some()
+            || envelope.producer_sequence != expected_sequence
+            || !envelope.ordered_prerequisite_hashes.is_empty()
+        {
+            return Err(StateError::new(
+                RefusalReason::WrongContext,
+                "state witness vote does not match the derived producer slot",
+            ));
+        }
+        let witness_participant_id = envelope.producer_participant_id.ok_or_else(|| {
+            StateError::new(
+                RefusalReason::WrongTypeOrLength,
+                "state witness vote does not name its producer",
+            )
+        })?;
+        if witness_participant_id == expected_intent.subject_participant_id {
+            return Err(StateError::new(
+                RefusalReason::WrongContext,
+                "the state subject cannot witness its own intent",
+            ));
+        }
+        let roster_position = self.roster_position(witness_participant_id)?;
+        vote_carrier
+            .verify_signature(&self.roster)
+            .into_result()
+            .map_err(|refusal_reason| {
+                StateError::new(
+                    refusal_reason,
+                    "state witness vote signature does not verify",
+                )
+            })?;
+        let payload = StateWitnessVotePayload::decode(
+            &envelope.payload_bytes,
+            &self.canonical_decode_limits,
+        )?;
+        Ok(VerifiedStateWitnessVote {
+            intent_object_hash: payload.intent_object_hash,
+            roster_position,
+        })
     }
 
     fn roster_position(&self, participant_id: ParticipantIdentity) -> StateResult<u16> {
@@ -1855,6 +2078,12 @@ struct ResolvedStateIntent {
     subject_participant_id: ParticipantIdentity,
     subject_epoch: u64,
     vote_kind: StateWitnessVoteKind,
+}
+
+#[derive(Clone, Copy)]
+struct VerifiedStateWitnessVote {
+    intent_object_hash: Hash512,
+    roster_position: u16,
 }
 
 #[cfg(test)]

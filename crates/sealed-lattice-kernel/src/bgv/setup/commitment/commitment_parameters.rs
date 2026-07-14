@@ -1,13 +1,13 @@
 use super::*;
 
-pub(in super::super) const SETUP_COMMITMENT_MODULE_RANK: usize = 2;
+pub(crate) const SETUP_COMMITMENT_MODULE_RANK: usize = 2;
 pub(in super::super) const SETUP_COMMITMENT_RANDOMNESS_WIDTH: usize =
     (2 * SETUP_COMMITMENT_MODULE_RANK) + 1;
 pub(in super::super) const SETUP_COMMITMENT_ROW_COUNT: usize = SETUP_COMMITMENT_MODULE_RANK + 1;
 // Three data-prime limbs set the CRT message-space ceiling; lifted linear
 // combinations must stay below their product or binding breaks, which is why the
 // carry relation is required above one q_l.
-pub(in super::super) const SETUP_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
+pub(crate) const SETUP_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
 
 pub(in super::super) fn setup_commitment_modulus_product() -> BigUint {
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES

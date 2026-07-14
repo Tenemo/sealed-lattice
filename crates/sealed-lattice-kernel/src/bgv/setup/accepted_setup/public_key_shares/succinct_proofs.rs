@@ -16,6 +16,7 @@ use crate::bgv::setup::trustee_evaluation_key_proof::{
 pub(in super::super) fn verify_public_key_share_succinct_proofs(
     setup_package: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
+    ring_degree: usize,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<Option<Refusals>> {
     let material_set = setup_package.get("publicKeyShareMaterial");
@@ -36,10 +37,11 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         )));
     };
     let Some(proof_set) = proof_set else {
-        return Ok(Some(setup_refusals(
-            vec!["publicKeyShareSuccinctProofs".to_string()],
-            Vec::new(),
-        )));
+        return Ok(Some(public_key_refusal(
+            "publicKeyShareSuccinctProofsMissing",
+            "publicKeyShareSuccinctProofs must accompany accepted public-key share material",
+            "setupPackage.publicKeyShareSuccinctProofs",
+        )?));
     };
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
@@ -73,6 +75,7 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         material_set,
         setup_context,
         &common_binding,
+        ring_degree,
         public_key_share_set_root,
         &share_records,
         proof_binding_session,
@@ -86,7 +89,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
             )?));
         }
     };
-    let ring_degree = POLYNOMIAL_DEGREE;
     if !proof_set.is_object() {
         return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetNotObject",

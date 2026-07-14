@@ -91,17 +91,6 @@ impl ProofByteSource for TestChunkedProofBytes {
         }
         destination.is_empty()
     }
-
-    fn byte_at(&self, offset: usize) -> Option<u8> {
-        let mut remaining_offset = offset;
-        for chunk in &self.chunks {
-            if remaining_offset < chunk.len() {
-                return chunk.get(remaining_offset).copied();
-            }
-            remaining_offset -= chunk.len();
-        }
-        None
-    }
 }
 
 fn folded_layer_path_length(extension_size: usize, fold_index: usize) -> usize {

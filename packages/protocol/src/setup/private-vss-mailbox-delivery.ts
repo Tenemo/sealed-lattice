@@ -1,8 +1,25 @@
+import { hexToBytes } from '@noble/hashes/utils.js';
 import {
-    encryptPrivateVssMailboxEnvelope,
-    type PrivateVssEncryptedEnvelope,
+    openCanonicalJsonByteSource,
+    sealResetSafeSetupMailbox,
+    type AuthenticatedMailboxCarrier,
+    type AuthenticatedMailboxKernel,
+    type AuthenticatedMailboxSealInput,
+    type AuthenticatedMailboxStreamBoundary,
+    type BrowserLocalActionRandomnessCapability,
+    type BrowserLocalSigningCapability,
+    type MailboxCiphertextDescriptor,
 } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
+import {
+    type ProtocolHash,
+    type VerificationResult,
+} from '@sealed-lattice/types';
+import {
+    canonicalStreamDomains,
+    openCanonicalStreamWorkerRuntime,
+    openMailboxGcmRuntime,
+    type TranscriptCoreKernel,
+} from '@sealed-lattice/wasm';
 
 import { copyCanonicalStreamDescriptor } from './canonical-stream-descriptor.js';
 import {
@@ -31,7 +48,11 @@ type PrivateVssCoefficientOpeningState = {
 
 type PrivateVssSourceTrusteeContributionState = {
     readonly sourceTrusteeIdentity: string;
+    readonly sourceParticipantId: string;
     readonly sourceTrusteeRosterPosition: number;
+    readonly sourceSigningCapability: BrowserLocalSigningCapability;
+    readonly sourceVerificationKey: Uint8Array;
+    readonly sourceActionRandomnessCapability: BrowserLocalActionRandomnessCapability;
     readonly sourceTrusteeCommitmentRoot: ProtocolHash;
     readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
     readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
@@ -40,34 +61,33 @@ type PrivateVssSourceTrusteeContributionState = {
 
 type PrivateVssMailboxRecipient = {
     readonly recipientIdentity: string;
+    readonly recipientParticipantId: string;
     readonly recipientRosterPosition: number;
-    readonly mailboxPublicKeyBytesHex: string;
+    readonly mailboxEncapsulationKey: Uint8Array;
 };
+
+type PrivateVssMailboxKernel = Pick<
+    TranscriptCoreKernel,
+    | 'decodeSignedMailboxEnvelope'
+    | 'decodeStreamDescriptor'
+    | 'deriveMailboxEnvelopeHash'
+    | 'deriveMailboxKemCiphertextHash'
+    | 'deriveSetupMailboxSlotHash'
+    | 'encodeActionRandomnessDerivationInput'
+    | 'deriveActionRandomnessCommitment'
+    | 'encodePrivateRandomBlockInput'
+    | 'encodeMailboxAssociatedData'
+    | 'encodeMailboxKeyScheduleInput'
+    | 'encodeSignedMailboxEnvelope'
+    | 'encodeStreamDescriptor'
+    | 'exportedFunctionNames'
+> &
+    AuthenticatedMailboxKernel;
 
 type PrivateVssMailboxDeliveryKernel = {
     readonly deriveCanonicalObjectHash: (input: {
         readonly value: unknown;
     }) => ProtocolHash;
-    readonly generatePrivateVssShareProof: (input: {
-        readonly setupContext: unknown;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly privateEnvelopeAadHash: ProtocolHash;
-        readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
-        readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
-        readonly recipientIdentity: string;
-        readonly recipientRosterPosition: number;
-        readonly rnsLimbIndex: number;
-        readonly rnsPrime: number;
-        readonly ringDegree: number;
-        readonly shareValues: readonly number[];
-        readonly coefficientCommitmentRoots: readonly ProtocolHash[];
-        readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-        readonly openingRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-        readonly proofRandomnessSeedHex: string;
-        readonly proofRandomnessNonceHex: string;
-    }) => {
-        readonly privateVssShareProof: JsonRecord;
-    };
     readonly exportCanonicalProofMaterial: (input: {
         readonly proofFamily: typeof privateVssShareProofFamily;
         readonly proofMaterialRoot: ProtocolHash;
@@ -81,20 +101,20 @@ type PrivateVssMailboxDeliveryKernel = {
         readonly transportedPrivateVssShareProofMaterial?: unknown;
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
         readonly expectedLocalVerificationRoot?: ProtocolHash;
-    }) => {
-        readonly isValid: boolean;
-        readonly privateEnvelopeHash: ProtocolHash | null;
-        readonly localVerificationRoot: ProtocolHash | null;
-        readonly refusedObjects: readonly {
-            readonly reasonCode: string;
-            readonly message: string;
-            readonly objectPath: string;
-        }[];
-    };
+    }) => VerificationResult<{
+        readonly privateEnvelopeHash: ProtocolHash;
+        readonly localVerificationRoot: ProtocolHash;
+    }>;
 };
 
 type PrivateVssMailboxDeliverySetInput = {
     readonly kernel: PrivateVssMailboxDeliveryKernel;
+    readonly mailboxKernel: PrivateVssMailboxKernel;
+    readonly foundationContext: Readonly<{
+        readonly suiteId: ProtocolHash;
+        readonly ceremonyContextHash: ProtocolHash;
+        readonly actionContextHash: ProtocolHash;
+    }>;
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly vssCoefficientCommitmentRoot: ProtocolHash;
@@ -103,6 +123,8 @@ type PrivateVssMailboxDeliverySetInput = {
     readonly participantCount: number;
     readonly sourceTrusteeContributionStates: readonly PrivateVssSourceTrusteeContributionState[];
     readonly recipients: readonly PrivateVssMailboxRecipient[];
+    readonly mailboxOutboundCache: AuthenticatedMailboxSealInput['outboundCache'];
+    readonly emitMailboxCiphertextChunk: AuthenticatedMailboxSealInput['emitCiphertextChunk'];
 };
 
 type PrivateVssMailboxSourceTrusteeDeliveryInput = Omit<
@@ -121,12 +143,12 @@ const privateVssEnvelopeCommitmentSetReferenceRootInput = (
     envelopeReference: JsonRecord,
 ): JsonRecord => {
     const {
-        encryptedEnvelope: encryptedEnvelopeForRecipientTransport,
+        mailboxCarrier: mailboxCarrierForRecipientTransport,
         transportedPrivateVssShareProofMaterial:
             transportedPrivateVssShareProofMaterialForRecipientTransport,
         ...rootInput
     } = envelopeReference;
-    void encryptedEnvelopeForRecipientTransport;
+    void mailboxCarrierForRecipientTransport;
     void transportedPrivateVssShareProofMaterialForRecipientTransport;
 
     return rootInput;
@@ -164,8 +186,8 @@ export type PrivateVssEnvelopeCommitment = Readonly<
         readonly recipientIdentity: string;
         readonly recipientRosterPosition: number;
         readonly privateEnvelopeHash: ProtocolHash;
-        readonly encryptedEnvelopeHash: ProtocolHash;
-        readonly encryptedEnvelope?: PrivateVssEncryptedEnvelope;
+        readonly mailboxEnvelopeHash: ProtocolHash;
+        readonly mailboxCarrier?: AuthenticatedMailboxCarrier;
         readonly localVerificationRoot: ProtocolHash;
         readonly transportedPrivateVssShareProofMaterial?: TransportedPrivateVssShareProofMaterialSet;
     }
@@ -199,30 +221,66 @@ type TransportedPrivateVssShareProofMaterialSet = Readonly<
 
 const privateEnvelopeAadObjectType = 'PrivateVssEnvelopeAad';
 const privateVssShareProofFamily = 'vss-opening-carry';
-const proofRandomnessByteLength = 64;
 
-const defaultProofRandomBytes = (byteLength: number): Uint8Array => {
-    const cryptoProvider = globalThis.crypto;
-    if (cryptoProvider === undefined) {
-        throw new Error(
-            'Private VSS share proof generation requires Web Crypto getRandomValues.',
-        );
-    }
-    const bytes = new Uint8Array(byteLength);
-    cryptoProvider.getRandomValues(bytes);
+const mailboxStreamBoundary = (
+    kernel: PrivateVssMailboxKernel,
+): AuthenticatedMailboxStreamBoundary => {
+    const runtime = openCanonicalStreamWorkerRuntime({ kernel });
 
-    return bytes;
-};
-
-const freshProofRandomnessHex = (): string => {
-    const bytes = defaultProofRandomBytes(proofRandomnessByteLength);
-    if (bytes.byteLength !== proofRandomnessByteLength) {
-        throw new Error(
-            'proof randomness byte source must return exactly 64 bytes.',
-        );
-    }
-
-    return bytesToHex(bytes);
+    return Object.freeze({
+        openWriter: (input: { readonly totalByteLength: number }) => {
+            const writer = runtime.openWriter({
+                streamDomain: canonicalStreamDomains.privateMailboxCiphertext,
+                totalByteLength: input.totalByteLength,
+            });
+            return Object.freeze({
+                absorbChunk: (chunkIndex: number, bytes: ArrayBuffer): void =>
+                    writer.absorbChunk(chunkIndex, bytes),
+                cancel: (): void => writer.cancel(),
+                chunkCount: writer.chunkCount,
+                finish: (): MailboxCiphertextDescriptor => {
+                    const descriptorBytes = writer.finish();
+                    try {
+                        return kernel.decodeStreamDescriptor({
+                            canonicalBytesHex: bytesToHex(descriptorBytes),
+                        }).value;
+                    } finally {
+                        descriptorBytes.fill(0);
+                    }
+                },
+                state: () => writer.state(),
+                totalByteLength: writer.totalByteLength,
+            });
+        },
+        openVerifier: (input: {
+            readonly descriptor: MailboxCiphertextDescriptor;
+        }) => {
+            const descriptorBytes = hexToBytes(
+                kernel.encodeStreamDescriptor(input.descriptor)
+                    .canonicalBytesHex,
+            );
+            try {
+                const verifier = runtime.openVerifier({
+                    descriptorBytes,
+                    streamDomain:
+                        canonicalStreamDomains.privateMailboxCiphertext,
+                });
+                return Object.freeze({
+                    absorbChunk: (
+                        chunkIndex: number,
+                        bytes: ArrayBuffer,
+                    ): void => verifier.absorbChunk(chunkIndex, bytes),
+                    cancel: (): void => verifier.cancel(),
+                    chunkCount: verifier.chunkCount,
+                    finish: (): void => verifier.finish(),
+                    state: () => verifier.state(),
+                    totalByteLength: verifier.totalByteLength,
+                });
+            } finally {
+                descriptorBytes.fill(0);
+            }
+        },
+    });
 };
 
 const sortedByRosterPosition = <Entry>(
@@ -477,6 +535,14 @@ type PrivateVssShareEnvelopeBuild = Readonly<{
     readonly transportedPrivateVssShareProofMaterial?: TransportedPrivateVssShareProofMaterialSet;
 }>;
 
+const refuseUnreservedPrivateVssShareProof = (): {
+    readonly privateVssShareProof: JsonRecord;
+} => {
+    throw new Error(
+        'Private VSS envelope generation requires one source-batched durable proof application per source trustee; per-recipient, per-limb proofs are not authorized.',
+    );
+};
+
 const privateEnvelope = async (
     input: PrivateVssMailboxDeliveryContext,
     sourceTrusteeState: PrivateVssSourceTrusteeContributionState,
@@ -530,28 +596,7 @@ const privateEnvelope = async (
         const coefficientCommitmentRoots = coefficientOpenings.map(
             (opening) => opening.commitmentRoot,
         );
-        const generatedProof = input.kernel.generatePrivateVssShareProof({
-            setupContext: input.setupContext,
-            publicMatrixSeedHash: input.publicMatrixSeedHash,
-            privateEnvelopeAadHash,
-            sourceTrusteeCoefficientCommitmentRecord:
-                sourceTrusteeState.sourceTrusteeCoefficientCommitmentRecord,
-            sourceTrusteeCoefficientCommitmentMaterialRecords:
-                sourceTrusteeState.sourceTrusteeCoefficientCommitmentMaterialRecords,
-            recipientIdentity: recipient.recipientIdentity,
-            recipientRosterPosition: recipient.recipientRosterPosition,
-            rnsLimbIndex,
-            rnsPrime,
-            ringDegree: input.ringDegree,
-            shareValues,
-            coefficientCommitmentRoots,
-            coefficientMessagesByShamirIndex,
-            openingRandomnessByShamirIndex: coefficientOpenings.map(
-                (opening) => opening.randomnessByColumn,
-            ),
-            proofRandomnessSeedHex: freshProofRandomnessHex(),
-            proofRandomnessNonceHex: freshProofRandomnessHex(),
-        });
+        const generatedProof = refuseUnreservedPrivateVssShareProof();
         const proofRecord = generatedProof.privateVssShareProof;
         const proofMaterialRoot = assertProtocolHash(
             proofRecord.proofMaterialRoot,
@@ -647,23 +692,67 @@ const createEnvelopeCommitment = async (
                       ),
               }),
     });
-    if (
-        !localVerification.isValid ||
-        localVerification.privateEnvelopeHash === null ||
-        localVerification.localVerificationRoot === null
-    ) {
-        const refusal = localVerification.refusedObjects[0];
+    if (!localVerification.isValid) {
         throw new Error(
-            refusal === undefined
-                ? 'Private VSS envelope failed local verification.'
-                : `Private VSS envelope failed local verification: ${refusal.reasonCode}: ${refusal.message}`,
+            `Private VSS envelope failed local verification: ${localVerification.refusalReason}.`,
         );
     }
-    const encryptedDelivery = await encryptPrivateVssMailboxEnvelope({
-        privateEnvelope: privateShareEnvelopeBuild.privateEnvelope,
-        privateEnvelopeAad: associatedData,
-        recipientMailboxPublicKeyBytesHex: recipient.mailboxPublicKeyBytesHex,
-    });
+    const { privateEnvelopeHash, localVerificationRoot } =
+        localVerification.value;
+    const plaintextSource = openCanonicalJsonByteSource(
+        privateShareEnvelopeBuild.privateEnvelope,
+    );
+    const pullPlaintextChunk: AuthenticatedMailboxSealInput['pullPlaintextChunk'] =
+        ({ chunkIndex, expectedByteLength }) =>
+            Promise.resolve(
+                plaintextSource.pullChunk({
+                    chunkIndex,
+                    expectedByteLength,
+                }),
+            );
+    let mailboxDelivery: AuthenticatedMailboxCarrier;
+    try {
+        mailboxDelivery = await sealResetSafeSetupMailbox({
+            associatedData: {
+                suiteId: input.foundationContext.suiteId,
+                ceremonyContextHash:
+                    input.foundationContext.ceremonyContextHash,
+                actionContextHash: input.foundationContext.actionContextHash,
+                rosterHash: input.setupContext.rosterHash,
+                sourceParticipantId: sourceTrusteeState.sourceParticipantId,
+                recipientParticipantId: recipient.recipientParticipantId,
+                producerSequence: String(
+                    sourceTrusteeState.sourceTrusteeRosterPosition *
+                        input.participantCount +
+                        recipient.recipientRosterPosition,
+                ),
+                payloadType: 2,
+                statementHash: privateEnvelopeHash,
+                orderedMaterialRoots: [
+                    sourceTrusteeState.sourceTrusteeCommitmentRoot,
+                    ...(privateShareEnvelopeBuild.transportedPrivateVssShareProofMaterial?.proofMaterials.map(
+                        (proofMaterial) => proofMaterial.proofMaterialRoot,
+                    ) ?? []),
+                ],
+            },
+            emitCiphertextChunk: input.emitMailboxCiphertextChunk,
+            gcmRuntime: openMailboxGcmRuntime({
+                kernel: input.mailboxKernel,
+            }),
+            kernel: input.mailboxKernel,
+            outboundCache: input.mailboxOutboundCache,
+            plaintextByteLength: plaintextSource.byteLength,
+            pullPlaintextChunk,
+            recipientEncapsulationKey: recipient.mailboxEncapsulationKey,
+            sourceSigningCapability: sourceTrusteeState.sourceSigningCapability,
+            sourceVerificationKey: sourceTrusteeState.sourceVerificationKey,
+            actionRandomnessCapability:
+                sourceTrusteeState.sourceActionRandomnessCapability,
+            streamBoundary: mailboxStreamBoundary(input.mailboxKernel),
+        });
+    } finally {
+        plaintextSource.cancel();
+    }
     const commitmentWithoutRoot = {
         objectType: 'PrivateVssEnvelopeCommitment',
         sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
@@ -671,10 +760,10 @@ const createEnvelopeCommitment = async (
             sourceTrusteeState.sourceTrusteeRosterPosition,
         recipientIdentity: recipient.recipientIdentity,
         recipientRosterPosition: recipient.recipientRosterPosition,
-        privateEnvelopeHash: localVerification.privateEnvelopeHash,
-        encryptedEnvelopeHash: encryptedDelivery.encryptedEnvelopeHash,
-        encryptedEnvelope: encryptedDelivery.encryptedEnvelope,
-        localVerificationRoot: localVerification.localVerificationRoot,
+        privateEnvelopeHash,
+        mailboxEnvelopeHash: mailboxDelivery.envelopeHash,
+        mailboxCarrier: mailboxDelivery,
+        localVerificationRoot,
         ...(privateShareEnvelopeBuild.transportedPrivateVssShareProofMaterial ===
         undefined
             ? {}

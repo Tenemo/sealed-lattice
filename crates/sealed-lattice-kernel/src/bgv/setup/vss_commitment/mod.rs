@@ -1,7 +1,7 @@
 use super::*;
 use crate::bgv::setup_helpers::{
-    compare_required_string, compare_required_u64, read_positive_u64_at_path,
-    read_positive_usize_at_path,
+    compare_required_string, compare_required_u64, is_lowercase_protocol_hash,
+    read_positive_u64_at_path, read_positive_usize_at_path,
 };
 
 pub(in crate::bgv::setup) const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =

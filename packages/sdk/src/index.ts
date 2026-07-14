@@ -1,25 +1,16 @@
 import {
     deriveCollectiveBgvSetupRosterHash as deriveCollectiveBgvSetupRosterHashInternal,
-    deriveValidatedFirstValidOrder as deriveValidatedFirstValidOrderInternal,
     deriveFrozenRosterParameters as deriveFrozenRosterParametersInternal,
     derivePollSpecHash as derivePollSpecHashInternal,
     deriveThresholdParameters as deriveThresholdParametersInternal,
     deriveThresholdParametersHash as deriveThresholdParametersHashInternal,
-    verifyCastReceiptShell as verifyCastReceiptShellInternal,
-    verifyCloseRecordShell as verifyCloseRecordShellInternal,
-    isActionCurrentForRecoveryEpoch as isActionCurrentForRecoveryEpochInternal,
     validatePollSpec as validatePollSpecInternal,
-    verifyBoardConsistency as verifyBoardConsistencyInternal,
-    verifyRecoveryEpochUpdate as verifyRecoveryEpochUpdateInternal,
-    verifyRosterExternalAcceptance as verifyRosterExternalAcceptanceInternal,
-    verifyRosterManifestTranscript as verifyRosterManifestTranscriptInternal,
     createBgvTargetDecryptionShareCanonicalProofMaterialTransport,
 } from '@sealed-lattice/protocol';
 import type {
     BgvTargetDecryptionShareCanonicalProofMaterialTransport,
     BgvTargetDecryptionShareProofMaterial,
     CanonicalProofMaterialChunkPull as ProtocolCanonicalProofMaterialChunkPull,
-    CanonicalProofMaterialChunkSink as ProtocolCanonicalProofMaterialChunkSink,
     SetupProofMaterialChunkSource as ProtocolSetupProofMaterialChunkSource,
     SetupTransportedPublicKeyShareMaterial as ProtocolSetupTransportedPublicKeyShareMaterial,
     PublicKeyShareMaterialChunkSource as ProtocolPublicKeyShareMaterialChunkSource,
@@ -31,18 +22,17 @@ import type {
     TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
     SetupPackage as ProtocolSetupPackage,
     CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput,
-    TargetDecryptionAggregateOpeningMaterialSource as ProtocolTargetDecryptionAggregateOpeningMaterialSource,
 } from '@sealed-lattice/protocol';
 import type {
     PollSpecInput,
     PollSpecValidation,
     ProtocolHash,
+    VerificationResult,
 } from '@sealed-lattice/types';
 import { ThresholdParameterDerivationError } from '@sealed-lattice/types';
 import {
     bgvCanonicalStreamFamilies,
     openBgvCanonicalStreamRuntime,
-    stageBgvTargetDecryptionAggregateOpeningMaterials,
     type BgvTargetDecryptionResultReleaseCompletion,
 } from '@sealed-lattice/wasm/published-sdk';
 
@@ -55,18 +45,46 @@ import {
     snapshotKernelJsonValue,
     type KernelJsonSnapshotState,
 } from './kernel-json-snapshot.js';
-import {
-    loadFreshTranscriptCoreKernel,
-    loadTranscriptCoreKernel,
-} from './kernel.js';
+import { loadFreshTranscriptCoreKernel } from './kernel.js';
 import {
     prepareSnapshottedPrivateVssShareVerificationInputForKernel,
     prepareSnapshottedSetupPackageVerificationInputForKernel,
     snapshotPrivateVssShareVerificationInput,
     snapshotSetupPackageVerificationInput,
 } from './setup-verification-input.js';
+import {
+    issueVerifiedSetup,
+    resolveVerifiedSetup,
+    type VerifiedSetup,
+} from './verified-setup-capability.js';
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
+const targetReleaseSessionIdentifierByteLength = 32;
+const activeTargetReleaseSessionIdentifiers = new Set<string>();
+
+const issueTargetReleaseSessionIdentifier = (): string => {
+    const cryptoProvider = globalThis.crypto;
+    if (cryptoProvider === undefined) {
+        throw new Error(
+            'Target result verification requires Web Crypto getRandomValues.',
+        );
+    }
+    const identifierBytes = new Uint8Array(
+        targetReleaseSessionIdentifierByteLength,
+    );
+    cryptoProvider.getRandomValues(identifierBytes);
+    const identifier = Array.from(identifierBytes, (byte) =>
+        byte.toString(16).padStart(2, '0'),
+    ).join('');
+    if (activeTargetReleaseSessionIdentifiers.has(identifier)) {
+        throw new Error(
+            'Target result verification session identifier collided with an active session.',
+        );
+    }
+    activeTargetReleaseSessionIdentifiers.add(identifier);
+
+    return identifier;
+};
 
 function assertProtocolHash(
     value: unknown,
@@ -85,64 +103,26 @@ const assertSetupPackageVerificationBindings = (
 };
 
 export type {
-    ActionContext,
-    ActionCurrentForRecoveryEpochInput,
-    ActionCurrentForRecoveryEpochResult,
-    AppendOnlyConsistencyProof,
-    BoardConsistencyInput,
-    BoardConsistencyVerification,
-    BoardEntryMerklePathStep,
     CanonicalSignedRootObject,
-    CastReceipt,
-    CastReceiptVerification,
-    CastReceiptVerificationInput,
-    CloseRecord,
-    CloseRecordKind,
-    CloseRecordVerification,
-    CloseRecordVerificationInput,
-    ConflictingHeadEvidence,
-    ConflictingManifestEvidence,
-    ElectionManifest,
-    FirstValidOrderingInput,
-    FirstValidOrderingVerification,
     FrozenRosterParameters,
-    InclusionProof,
-    ManifestOpaqueBindings,
-    ManifestPolicyHashes,
     PollSpec,
     PollSpecInput,
     PollSpecValidation,
     PollSpecValidationError,
     PollSpecValidationErrorCode,
     ProtocolHash,
-    ProtocolObjectType,
-    ProtocolRefusalCode,
     ProtocolSignatureEnvelope,
-    RecoveryEpochMapEntry,
-    RecoveryEpochUpdate,
-    RecoveryEpochVerification,
-    RecoveryEpochVerificationInput,
     RefusalReason,
-    RefusalRecord,
-    RegistrationEntry,
-    RosterExternalAcceptance,
-    RosterExternalAcceptanceVerification,
-    RosterExternalAcceptanceVerificationInput,
-    RosterManifestTranscriptInput,
-    RosterManifestTranscriptVerification,
-    SignedBoardHead,
     SignedObjectType,
     SignerRole,
     SmallRosterPolicy,
-    StructuredProtocolVerificationResult,
     ThresholdParameters,
     ThresholdParametersInput,
     ThresholdParameterDerivationErrorCode,
-    TrusteeSetupEntry,
-    ValidatedFirstValidObject,
+    VerificationResult,
 } from '@sealed-lattice/types';
 
-export type { TargetDecryptionAggregateOpeningMaterialSource } from '@sealed-lattice/protocol';
+export type { VerifiedSetup } from './verified-setup-capability.js';
 
 export { ThresholdParameterDerivationError };
 export type CollectiveBgvSetupContext = Readonly<{
@@ -166,10 +146,9 @@ export type VerifyPrivateVssShareInput = Readonly<{
     readonly expectedLocalVerificationRoot?: ProtocolHash;
 }>;
 
-export type PrivateVssShareVerification = Readonly<{
-    readonly isValid: boolean;
-    readonly privateEnvelopeHash: ProtocolHash | null;
-    readonly localVerificationRoot: ProtocolHash | null;
+export type PrivateVssShareVerification = VerificationResult<{
+    readonly privateEnvelopeHash: ProtocolHash;
+    readonly localVerificationRoot: ProtocolHash;
     readonly limbVerifications: readonly Readonly<{
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
@@ -178,11 +157,6 @@ export type PrivateVssShareVerification = Readonly<{
         readonly shareValuesHash: ProtocolHash;
         readonly privateVssShareProofHash: ProtocolHash;
         readonly limbVerificationRoot: ProtocolHash;
-    }>[];
-    readonly refusedObjects: readonly Readonly<{
-        readonly reasonCode: string;
-        readonly message: string;
-        readonly objectPath: string;
     }>[];
 }>;
 
@@ -208,8 +182,6 @@ export type EvaluationKeyShareComponentMaterialChunkSource =
     ProtocolEvaluationKeyShareComponentMaterialChunkSource;
 export type CanonicalProofMaterialChunkPull =
     ProtocolCanonicalProofMaterialChunkPull;
-export type CanonicalProofMaterialChunkSink =
-    ProtocolCanonicalProofMaterialChunkSink;
 export type SetupProofMaterialChunkSource =
     ProtocolSetupProofMaterialChunkSource;
 export type VerifySetupPackageInput = Readonly<{
@@ -231,34 +203,19 @@ export type VerifySetupPackageInput = Readonly<{
     readonly evaluationKeyShareComponentMaterialChunkSources?: readonly EvaluationKeyShareComponentMaterialChunkSource[];
 }>;
 
-export type SetupPackageVerification = Readonly<
-    {
-        readonly refusedObjects: readonly Readonly<{
-            readonly reasonCode: string;
-            readonly message: string;
-            readonly objectPath: string;
-        }>[];
-    } & (
-        | {
-              readonly isValid: true;
-              readonly acceptedSetupHandle: number;
-          }
-        | {
-              readonly isValid: false;
-          }
-    )
->;
+export type SetupPackageVerification = VerificationResult<{
+    readonly verifiedSetup: VerifiedSetup;
+}>;
 
-// These target-decryption records are opaque at the SDK boundary. The accepted
-// setup handle comes only from successful setup verification in this kernel.
+// These target-decryption records are opaque at the SDK boundary. The setup
+// capability retains the exact kernel instance that performed verification.
 export type TargetDecryptionResultReleaseInput = Readonly<{
     readonly abortSignal?: AbortSignal;
-    readonly acceptedSetupHandle: number;
+    readonly verifiedSetup: VerifiedSetup;
     readonly targetAcceptedRecord: unknown;
     readonly targetCiphertexts: unknown;
     readonly targetCiphertextBinding: unknown;
     readonly targetShareProfile: unknown;
-    readonly releaseVerificationId: string;
     readonly shareProofs: readonly TargetDecryptionShareProof[];
 }>;
 
@@ -384,30 +341,16 @@ const targetDecryptionResultReleaseInputSnapshot = (
         'abortSignal',
         'abortSignal',
     ) as AbortSignal | undefined;
-    const releaseVerificationId = dataPropertyValue(
+    const verifiedSetup = dataPropertyValue(
         descriptors,
-        'releaseVerificationId',
-        'releaseVerificationId',
+        'verifiedSetup',
+        'verifiedSetup',
     );
-    if (typeof releaseVerificationId !== 'string') {
-        throw new TypeError('releaseVerificationId must be a string.');
-    }
-    const acceptedSetupHandle = dataPropertyValue(
-        descriptors,
-        'acceptedSetupHandle',
-        'acceptedSetupHandle',
-    );
-    if (
-        !Number.isInteger(acceptedSetupHandle) ||
-        (acceptedSetupHandle as number) <= 0 ||
-        (acceptedSetupHandle as number) > 0xffff_ffff
-    ) {
-        throw new TypeError('acceptedSetupHandle must be a positive u32.');
-    }
+    resolveVerifiedSetup(verifiedSetup);
 
     return {
         ...(abortSignal === undefined ? {} : { abortSignal }),
-        acceptedSetupHandle: acceptedSetupHandle as number,
+        verifiedSetup: verifiedSetup as VerifiedSetup,
         targetAcceptedRecord: snapshotKernelJsonValue(
             dataPropertyValue(
                 descriptors,
@@ -444,315 +387,12 @@ const targetDecryptionResultReleaseInputSnapshot = (
             'targetShareProfile',
             state,
         ),
-        releaseVerificationId,
         shareProofs: targetDecryptionShareProofListSnapshot(
             dataPropertyValue(descriptors, 'shareProofs', 'shareProofs'),
             state,
         ),
     };
 };
-
-export type TargetDecryptionShareProofMaterialGenerationInput = Readonly<{
-    readonly abortSignal?: AbortSignal;
-    readonly emitProofMaterialChunk: CanonicalProofMaterialChunkSink;
-    readonly setupPackage: unknown;
-    readonly targetAcceptedRecord: unknown;
-    readonly targetCiphertexts: unknown;
-    readonly targetCiphertextBinding: unknown;
-    readonly targetShareProfile: unknown;
-    readonly trusteeIdentity: string;
-    readonly localTargetShareWitness: unknown;
-    readonly aggregateOpeningMaterialSources: readonly ProtocolTargetDecryptionAggregateOpeningMaterialSource[];
-    readonly targetDecryptionShare: unknown;
-    readonly proofStatement: unknown;
-    readonly proofRandomnessSeedHex: string;
-    readonly proofRandomnessNonceHex: string;
-}>;
-
-const targetDecryptionAggregateOpeningByteLength = 32_768 * 8;
-const maximumTargetDecryptionAggregateOpeningSourceCount = 17;
-
-const aggregateOpeningMaterialSourcesSnapshot = (
-    value: unknown,
-): readonly ProtocolTargetDecryptionAggregateOpeningMaterialSource[] => {
-    const { descriptors, length } = ordinaryArrayDescriptors(
-        value,
-        'aggregateOpeningMaterialSources',
-    );
-    if (
-        length === 0 ||
-        length > maximumTargetDecryptionAggregateOpeningSourceCount
-    ) {
-        throw new RangeError(
-            'aggregateOpeningMaterialSources must cover between one and 17 RNS limbs.',
-        );
-    }
-    const seenRoots = new Set<string>();
-    const sources: ProtocolTargetDecryptionAggregateOpeningMaterialSource[] =
-        [];
-    for (let sourceIndex = 0; sourceIndex < length; sourceIndex += 1) {
-        const elementDescriptor = descriptors[String(sourceIndex)];
-        const sourcePath = `aggregateOpeningMaterialSources.${String(sourceIndex)}`;
-        if (elementDescriptor === undefined) {
-            throw new TypeError(
-                'aggregateOpeningMaterialSources cannot contain array holes.',
-            );
-        }
-        if ('get' in elementDescriptor || 'set' in elementDescriptor) {
-            throw new TypeError(
-                `${sourcePath} cannot be an accessor property.`,
-            );
-        }
-        const sourceDescriptors = plainRecordDescriptors(
-            elementDescriptor.value,
-            sourcePath,
-        );
-        const aggregateOpeningRoot = dataPropertyValue(
-            sourceDescriptors,
-            'aggregateOpeningRoot',
-            `${sourcePath}.aggregateOpeningRoot`,
-        );
-        assertProtocolHash(
-            aggregateOpeningRoot,
-            `${sourcePath}.aggregateOpeningRoot`,
-        );
-        if (seenRoots.has(aggregateOpeningRoot)) {
-            throw new TypeError(
-                'aggregateOpeningMaterialSources cannot contain duplicate opening roots.',
-            );
-        }
-        seenRoots.add(aggregateOpeningRoot);
-        const totalByteLength = dataPropertyValue(
-            sourceDescriptors,
-            'totalByteLength',
-            `${sourcePath}.totalByteLength`,
-        );
-        if (totalByteLength !== targetDecryptionAggregateOpeningByteLength) {
-            throw new RangeError(
-                `${sourcePath}.totalByteLength must equal the fixed ring byte length.`,
-            );
-        }
-        const pullChunk = dataPropertyValue(
-            sourceDescriptors,
-            'pullChunk',
-            `${sourcePath}.pullChunk`,
-        );
-        if (typeof pullChunk !== 'function') {
-            throw new TypeError(`${sourcePath}.pullChunk must be a function.`);
-        }
-        sources.push({
-            aggregateOpeningRoot,
-            pullChunk:
-                pullChunk as ProtocolTargetDecryptionAggregateOpeningMaterialSource['pullChunk'],
-            totalByteLength,
-        });
-    }
-    return sources;
-};
-
-const assertAggregateOpeningSourcesMatchWitness = (
-    sources: readonly ProtocolTargetDecryptionAggregateOpeningMaterialSource[],
-    localTargetShareWitness: unknown,
-): void => {
-    const witnessDescriptors = plainRecordDescriptors(
-        localTargetShareWitness,
-        'localTargetShareWitness',
-    );
-    const aggregateOpeningPath = 'localTargetShareWitness.aggregateOpening';
-    const aggregateOpeningDescriptors = plainRecordDescriptors(
-        dataPropertyValue(
-            witnessDescriptors,
-            'aggregateOpening',
-            aggregateOpeningPath,
-        ),
-        aggregateOpeningPath,
-    );
-    const credentialsPath = `${aggregateOpeningPath}.aggregateOpeningCredentials`;
-    const { descriptors, length } = ordinaryArrayDescriptors(
-        dataPropertyValue(
-            aggregateOpeningDescriptors,
-            'aggregateOpeningCredentials',
-            credentialsPath,
-        ),
-        credentialsPath,
-    );
-    if (length !== sources.length) {
-        throw new TypeError(
-            'aggregateOpeningMaterialSources must match the witness aggregate opening credential count.',
-        );
-    }
-    for (
-        let credentialIndex = 0;
-        credentialIndex < length;
-        credentialIndex += 1
-    ) {
-        const credentialPath = `${credentialsPath}.${String(credentialIndex)}`;
-        const credentialDescriptor = descriptors[String(credentialIndex)];
-        if (credentialDescriptor === undefined) {
-            throw new TypeError(
-                `${credentialsPath} cannot contain array holes.`,
-            );
-        }
-        const credentialDescriptors = plainRecordDescriptors(
-            credentialDescriptor.value,
-            credentialPath,
-        );
-        const aggregateOpeningRoot = dataPropertyValue(
-            credentialDescriptors,
-            'aggregateOpeningRoot',
-            `${credentialPath}.aggregateOpeningRoot`,
-        );
-        assertProtocolHash(
-            aggregateOpeningRoot,
-            `${credentialPath}.aggregateOpeningRoot`,
-        );
-        if (
-            aggregateOpeningRoot !==
-            sources[credentialIndex]?.aggregateOpeningRoot
-        ) {
-            throw new TypeError(
-                'aggregateOpeningMaterialSources must match the witness aggregate opening roots in canonical credential order.',
-            );
-        }
-    }
-};
-
-const targetDecryptionShareProofMaterialGenerationInputSnapshot = (
-    input: TargetDecryptionShareProofMaterialGenerationInput,
-): TargetDecryptionShareProofMaterialGenerationInput => {
-    const descriptors = plainRecordDescriptors(input, 'input');
-    const state = createKernelJsonSnapshotState();
-    const abortSignal = dataPropertyValue(
-        descriptors,
-        'abortSignal',
-        'abortSignal',
-    ) as AbortSignal | undefined;
-    const emitProofMaterialChunk = dataPropertyValue(
-        descriptors,
-        'emitProofMaterialChunk',
-        'emitProofMaterialChunk',
-    );
-    if (typeof emitProofMaterialChunk !== 'function') {
-        throw new TypeError('emitProofMaterialChunk must be a function.');
-    }
-    const trusteeIdentity = dataPropertyValue(
-        descriptors,
-        'trusteeIdentity',
-        'trusteeIdentity',
-    );
-    if (typeof trusteeIdentity !== 'string') {
-        throw new TypeError('trusteeIdentity must be a string.');
-    }
-    const proofRandomnessSeedHex = dataPropertyValue(
-        descriptors,
-        'proofRandomnessSeedHex',
-        'proofRandomnessSeedHex',
-    );
-    if (typeof proofRandomnessSeedHex !== 'string') {
-        throw new TypeError('proofRandomnessSeedHex must be a string.');
-    }
-    const proofRandomnessNonceHex = dataPropertyValue(
-        descriptors,
-        'proofRandomnessNonceHex',
-        'proofRandomnessNonceHex',
-    );
-    if (typeof proofRandomnessNonceHex !== 'string') {
-        throw new TypeError('proofRandomnessNonceHex must be a string.');
-    }
-
-    const aggregateOpeningMaterialSources =
-        aggregateOpeningMaterialSourcesSnapshot(
-            dataPropertyValue(
-                descriptors,
-                'aggregateOpeningMaterialSources',
-                'aggregateOpeningMaterialSources',
-            ),
-        );
-    const localTargetShareWitness = snapshotKernelJsonValue(
-        dataPropertyValue(
-            descriptors,
-            'localTargetShareWitness',
-            'localTargetShareWitness',
-        ),
-        'localTargetShareWitness',
-        state,
-    );
-    assertAggregateOpeningSourcesMatchWitness(
-        aggregateOpeningMaterialSources,
-        localTargetShareWitness,
-    );
-
-    return {
-        ...(abortSignal === undefined ? {} : { abortSignal }),
-        emitProofMaterialChunk:
-            emitProofMaterialChunk as CanonicalProofMaterialChunkSink,
-        aggregateOpeningMaterialSources,
-        setupPackage: snapshotKernelJsonValue(
-            dataPropertyValue(descriptors, 'setupPackage', 'setupPackage'),
-            'setupPackage',
-            state,
-        ),
-        targetAcceptedRecord: snapshotKernelJsonValue(
-            dataPropertyValue(
-                descriptors,
-                'targetAcceptedRecord',
-                'targetAcceptedRecord',
-            ),
-            'targetAcceptedRecord',
-            state,
-        ),
-        targetCiphertexts: snapshotKernelJsonValue(
-            dataPropertyValue(
-                descriptors,
-                'targetCiphertexts',
-                'targetCiphertexts',
-            ),
-            'targetCiphertexts',
-            state,
-        ),
-        targetCiphertextBinding: snapshotKernelJsonValue(
-            dataPropertyValue(
-                descriptors,
-                'targetCiphertextBinding',
-                'targetCiphertextBinding',
-            ),
-            'targetCiphertextBinding',
-            state,
-        ),
-        targetShareProfile: snapshotKernelJsonValue(
-            dataPropertyValue(
-                descriptors,
-                'targetShareProfile',
-                'targetShareProfile',
-            ),
-            'targetShareProfile',
-            state,
-        ),
-        trusteeIdentity,
-        localTargetShareWitness,
-        targetDecryptionShare: snapshotKernelJsonValue(
-            dataPropertyValue(
-                descriptors,
-                'targetDecryptionShare',
-                'targetDecryptionShare',
-            ),
-            'targetDecryptionShare',
-            state,
-        ),
-        proofStatement: snapshotKernelJsonValue(
-            dataPropertyValue(descriptors, 'proofStatement', 'proofStatement'),
-            'proofStatement',
-            state,
-        ),
-        proofRandomnessSeedHex,
-        proofRandomnessNonceHex,
-    };
-};
-
-export type TargetDecryptionShareProofMaterialGeneration = Readonly<{
-    readonly proofMaterial: BgvTargetDecryptionShareProofMaterial;
-    readonly proofMaterialTransport: BgvTargetDecryptionShareCanonicalProofMaterialTransport;
-}>;
 
 export type TargetDecryptionResultRelease =
     BgvTargetDecryptionResultReleaseCompletion;
@@ -790,26 +430,6 @@ export function validatePollSpec(input: unknown): PollSpecValidation {
     return validatePollSpecInternal(input);
 }
 
-export const verifyBoardConsistency = verifyBoardConsistencyInternal;
-
-export const verifyCastReceiptShell = verifyCastReceiptShellInternal;
-
-export const verifyCloseRecordShell = verifyCloseRecordShellInternal;
-
-export const deriveValidatedFirstValidOrder =
-    deriveValidatedFirstValidOrderInternal;
-
-export const verifyRosterExternalAcceptance =
-    verifyRosterExternalAcceptanceInternal;
-
-export const verifyRosterManifestTranscript =
-    verifyRosterManifestTranscriptInternal;
-
-export const isActionCurrentForRecoveryEpoch =
-    isActionCurrentForRecoveryEpochInternal;
-
-export const verifyRecoveryEpochUpdate = verifyRecoveryEpochUpdateInternal;
-
 export const verifyPrivateVssShare = async (
     input: VerifyPrivateVssShareInput,
 ): Promise<PrivateVssShareVerification> => {
@@ -817,12 +437,24 @@ export const verifyPrivateVssShare = async (
         snapshotPrivateVssShareVerificationInput(input);
     const kernel = await loadFreshTranscriptCoreKernel();
 
-    return kernel.verifyPrivateVssShareEnvelope(
+    const verification = kernel.verifyPrivateVssShareEnvelope(
         await prepareSnapshottedPrivateVssShareVerificationInputForKernel(
             kernel,
             verificationInputSnapshot,
         ),
     );
+    if (!verification.isValid) {
+        return verification;
+    }
+
+    return {
+        isValid: true,
+        value: {
+            privateEnvelopeHash: verification.value.privateEnvelopeHash,
+            localVerificationRoot: verification.value.localVerificationRoot,
+            limbVerifications: verification.value.limbVerifications,
+        },
+    };
 };
 
 export const verifySetupPackage = async (
@@ -842,122 +474,110 @@ export const verifySetupPackage = async (
                 acceptedSetupSession,
             );
 
-        return acceptedSetupSession.verifyCollectiveBgvSetup(verificationInput);
+        const verification =
+            acceptedSetupSession.verifyCollectiveBgvSetup(verificationInput);
+        if (!verification.isValid) {
+            return verification;
+        }
+
+        const setupPackage = verificationInputSnapshot.setupPackage as Record<
+            string,
+            unknown
+        >;
+        const setupPackageHash = setupPackage.setupPackageHash;
+        assertProtocolHash(setupPackageHash, 'setupPackage.setupPackageHash');
+
+        return {
+            isValid: true,
+            value: {
+                verifiedSetup: issueVerifiedSetup({
+                    acceptedSetupHandle: verification.value.acceptedSetupHandle,
+                    kernel,
+                    setupPackageHash,
+                }),
+            },
+        };
     } catch (error) {
         acceptedSetupSession.cancel();
         throw error;
     }
 };
 
-export const generateTargetDecryptionShareProofMaterial = async (
-    input: TargetDecryptionShareProofMaterialGenerationInput,
-): Promise<TargetDecryptionShareProofMaterialGeneration> => {
-    const inputSnapshot =
-        targetDecryptionShareProofMaterialGenerationInputSnapshot(input);
-    const {
-        abortSignal,
-        aggregateOpeningMaterialSources,
-        emitProofMaterialChunk,
-        ...kernelInputSnapshot
-    } = inputSnapshot;
-    const kernel = await loadFreshTranscriptCoreKernel();
-    // Construct the reader runtime before the kernel retains generated proof
-    // material. This prevents a runtime-construction failure from stranding a
-    // newly generated proof; after reader acquisition, writeMaterial owns
-    // cancellation and eviction on completion or failure.
-    const proofMaterialRuntime = openBgvCanonicalStreamRuntime({ kernel });
-    await stageBgvTargetDecryptionAggregateOpeningMaterials({
-        ...(abortSignal === undefined ? {} : { abortSignal }),
-        kernel,
-        sources: aggregateOpeningMaterialSources,
-    });
-    const proofMaterial =
-        kernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(
-            kernelInputSnapshot,
-        );
-    const descriptorBytes = await proofMaterialRuntime.writeMaterial({
-        ...(abortSignal === undefined ? {} : { abortSignal }),
-        emitChunk: emitProofMaterialChunk,
-        family: bgvCanonicalStreamFamilies.targetDecryptionShare,
-        materialRoot: proofMaterial.proofBytesHash,
-    });
-
-    return {
-        proofMaterial,
-        proofMaterialTransport:
-            createBgvTargetDecryptionShareCanonicalProofMaterialTransport(
-                proofMaterial,
-                { descriptorBytes },
-            ),
-    };
-};
-
-/** Verifies and releases one target result under a verifier-issued setup handle. */
+/** Verifies and releases one target result under a verifier-issued setup capability. */
 export const verifyTargetDecryptionResult = async (
     input: TargetDecryptionResultReleaseInput,
 ): Promise<TargetDecryptionResultRelease> => {
     const inputSnapshot = targetDecryptionResultReleaseInputSnapshot(input);
     const abortSignal = inputSnapshot.abortSignal;
-    const releaseVerificationId = inputSnapshot.releaseVerificationId;
+    const releaseVerificationId = issueTargetReleaseSessionIdentifier();
     const targetShareProofs = inputSnapshot.shareProofs;
-    const kernel = await loadTranscriptCoreKernel();
-    const releaseBegin = kernel.beginBgvTargetDecryptionResultRelease({
-        releaseVerificationId,
-        acceptedSetupHandle: inputSnapshot.acceptedSetupHandle,
-        targetAcceptedRecord: inputSnapshot.targetAcceptedRecord,
-        targetCiphertexts: inputSnapshot.targetCiphertexts,
-        targetCiphertextBinding: inputSnapshot.targetCiphertextBinding,
-        targetShareProfile: inputSnapshot.targetShareProfile,
-    });
-    let absorbedShareCount = 0;
-    let releaseSessionOpen = true;
+    const { acceptedSetupHandle, kernel } = resolveVerifiedSetup(
+        inputSnapshot.verifiedSetup,
+    );
     try {
-        const proofMaterialRuntime = openBgvCanonicalStreamRuntime({ kernel });
-        if (targetShareProofs.length !== releaseBegin.requiredShareCount) {
-            throw new Error(
-                'target-decryption share proof count must equal the required release quorum.',
-            );
-        }
-        for (const targetShareProof of targetShareProofs) {
-            const normalizedTransport = targetShareProof.proofMaterialTransport;
-            await proofMaterialRuntime.readMaterial({
-                ...(abortSignal === undefined ? {} : { abortSignal }),
-                descriptorBytes: normalizedTransport.descriptorBytes,
-                family: bgvCanonicalStreamFamilies.targetDecryptionShare,
-                materialRoot: normalizedTransport.proofBytesHash,
-                pullChunk: targetShareProof.pullProofMaterialChunk,
-            });
-            kernel.absorbBgvTargetDecryptionResultReleaseShare({
-                releaseVerificationId,
-                targetShareProof: {
-                    targetDecryptionShare:
-                        targetShareProof.targetDecryptionShare,
-                    proofStatement: targetShareProof.proofStatement,
-                    proofMaterial: targetShareProof.proofMaterial,
-                },
-            });
-            absorbedShareCount += 1;
-        }
-        releaseSessionOpen = false;
-        return kernel.finishBgvTargetDecryptionResultRelease({
+        const releaseBegin = kernel.beginBgvTargetDecryptionResultRelease({
             releaseVerificationId,
+            acceptedSetupHandle,
+            targetAcceptedRecord: inputSnapshot.targetAcceptedRecord,
+            targetCiphertexts: inputSnapshot.targetCiphertexts,
+            targetCiphertextBinding: inputSnapshot.targetCiphertextBinding,
+            targetShareProfile: inputSnapshot.targetShareProfile,
         });
-    } catch (operationFailure) {
-        if (
-            releaseSessionOpen &&
-            absorbedShareCount < releaseBegin.requiredShareCount
-        ) {
-            try {
-                kernel.finishBgvTargetDecryptionResultRelease({
-                    releaseVerificationId,
-                });
-            } catch (cleanupFailure) {
-                throw new TargetDecryptionResultReleaseCleanupError(
-                    operationFailure,
-                    cleanupFailure,
+        let absorbedShareCount = 0;
+        let releaseSessionOpen = true;
+        try {
+            const proofMaterialRuntime = openBgvCanonicalStreamRuntime({
+                kernel,
+            });
+            if (targetShareProofs.length !== releaseBegin.requiredShareCount) {
+                throw new Error(
+                    'target-decryption share proof count must equal the required release quorum.',
                 );
             }
+            for (const targetShareProof of targetShareProofs) {
+                const normalizedTransport =
+                    targetShareProof.proofMaterialTransport;
+                await proofMaterialRuntime.readMaterial({
+                    ...(abortSignal === undefined ? {} : { abortSignal }),
+                    descriptorBytes: normalizedTransport.descriptorBytes,
+                    family: bgvCanonicalStreamFamilies.targetDecryptionShare,
+                    materialRoot: normalizedTransport.proofBytesHash,
+                    pullChunk: targetShareProof.pullProofMaterialChunk,
+                });
+                kernel.absorbBgvTargetDecryptionResultReleaseShare({
+                    releaseVerificationId,
+                    targetShareProof: {
+                        targetDecryptionShare:
+                            targetShareProof.targetDecryptionShare,
+                        proofStatement: targetShareProof.proofStatement,
+                        proofMaterial: targetShareProof.proofMaterial,
+                    },
+                });
+                absorbedShareCount += 1;
+            }
+            releaseSessionOpen = false;
+            return kernel.finishBgvTargetDecryptionResultRelease({
+                releaseVerificationId,
+            });
+        } catch (operationFailure) {
+            if (
+                releaseSessionOpen &&
+                absorbedShareCount < releaseBegin.requiredShareCount
+            ) {
+                try {
+                    kernel.finishBgvTargetDecryptionResultRelease({
+                        releaseVerificationId,
+                    });
+                } catch (cleanupFailure) {
+                    throw new TargetDecryptionResultReleaseCleanupError(
+                        operationFailure,
+                        cleanupFailure,
+                    );
+                }
+            }
+            throw operationFailure;
         }
-        throw operationFailure;
+    } finally {
+        activeTargetReleaseSessionIdentifiers.delete(releaseVerificationId);
     }
 };

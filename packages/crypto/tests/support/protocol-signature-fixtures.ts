@@ -9,7 +9,6 @@ import type {
 import {
     canonicalJson,
     deriveCanonicalObjectHash,
-    deriveMlDsaPublicKeyHash,
 } from '#packages/crypto/src/index';
 
 const textEncoder = new TextEncoder();
@@ -48,18 +47,8 @@ const canonicalSignedRootValue = (
 ): CanonicalSignedRootObject => ({
     objectType: signedRoot.objectType,
     ceremonyId: signedRoot.ceremonyId,
-    ...(signedRoot.manifestHash === undefined
-        ? {}
-        : { manifestHash: signedRoot.manifestHash }),
-    ...(signedRoot.objectRoot === undefined
-        ? {}
-        : { objectRoot: signedRoot.objectRoot }),
-    ...(signedRoot.chunkMerkleRoot === undefined
-        ? {}
-        : { chunkMerkleRoot: signedRoot.chunkMerkleRoot }),
-    ...(signedRoot.boardHeadHash === undefined
-        ? {}
-        : { boardHeadHash: signedRoot.boardHeadHash }),
+    manifestHash: signedRoot.manifestHash,
+    objectRoot: signedRoot.objectRoot,
     signerRole: signedRoot.signerRole,
     signerIdentity: signedRoot.signerIdentity,
     recoveryEpoch: signedRoot.recoveryEpoch,
@@ -91,7 +80,10 @@ export const createMlDsaKeyPairFixture = (
 
     return {
         publicKeyBytesHex,
-        publicKeyHash: deriveMlDsaPublicKeyHash(publicKeyBytesHex),
+        publicKeyHash: deriveCanonicalObjectHash({
+            objectType: 'MlDsa65PublicKeyHash',
+            publicKeyBytesHex,
+        }),
         secretKeyBytesHex: bytesToHex(keyPair.secretKey),
     };
 };

@@ -51,8 +51,8 @@ const envelopeReference = (
         privateEnvelopeHash: fixtureHash(
             `private-envelope-${trusteePairLabel}`,
         ),
-        encryptedEnvelopeHash: fixtureHash(
-            `encrypted-envelope-${trusteePairLabel}`,
+        mailboxEnvelopeHash: fixtureHash(
+            `mailbox-envelope-${trusteePairLabel}`,
         ),
         localVerificationRoot: fixtureHash(
             `local-verification-${trusteePairLabel}`,
@@ -124,22 +124,12 @@ const complaintRecordInput = (
         deviceEpoch,
     ),
     complaintEvidenceRoot: fixtureHash('complaint-evidence'),
-    complaintReasonCode: 'privateVssEnvelopeInvalidOpening',
+    complaintReasonCode: 'invalidProof',
 });
 
-const localVerificationFailure = (
-    reference: PrivateVssEnvelopeVerificationReference,
-): PrivateVssLocalVerificationFailure => ({
+const localVerificationFailure = (): PrivateVssLocalVerificationFailure => ({
     isValid: false,
-    privateEnvelopeHash: reference.privateEnvelopeHash,
-    localVerificationRoot: null,
-    refusedObjects: [
-        {
-            reasonCode: 'private-vss-opening-verification-failed',
-            message: 'carry-aware private VSS opening did not verify',
-            objectPath: 'privateEnvelope.rnsShareOpenings.0',
-        },
-    ],
+    refusalReason: 'invalidProof',
 });
 
 const localComplaintRecordInput = (
@@ -149,9 +139,7 @@ const localComplaintRecordInput = (
 
     return {
         ...sharedInput,
-        localVerification: localVerificationFailure(
-            sharedInput.envelopeReference,
-        ),
+        localVerification: localVerificationFailure(),
     };
 };
 
@@ -227,43 +215,6 @@ const rejectionCases = [
                         objectRoot: fixtureHash('wrong-acceptance-root'),
                     }),
             }),
-    },
-    {
-        label: 'an empty complaint reason code',
-        expectedMessage: /complaintReasonCode must be non-empty/u,
-        run: (signer) =>
-            createVssShareComplaintRecord({
-                ...complaintRecordInput(signer),
-                complaintReasonCode: '',
-            }),
-    },
-    {
-        label: 'local verification without a refusal',
-        expectedMessage: /refusedObjects/u,
-        run: (signer) => {
-            const input = localComplaintRecordInput(signer);
-            return createVssShareComplaintRecordFromLocalVerification({
-                ...input,
-                localVerification: {
-                    ...input.localVerification,
-                    refusedObjects: [],
-                },
-            });
-        },
-    },
-    {
-        label: 'a mismatched locally verified private-envelope hash',
-        expectedMessage: /privateEnvelopeHash/u,
-        run: (signer) => {
-            const input = localComplaintRecordInput(signer);
-            return createVssShareComplaintRecordFromLocalVerification({
-                ...input,
-                localVerification: {
-                    ...input.localVerification,
-                    privateEnvelopeHash: fixtureHash('wrong-private-envelope'),
-                },
-            });
-        },
     },
 ] as const satisfies readonly AsyncRejectionCase[];
 
@@ -345,18 +296,12 @@ describe('VSS share verification record builders', () => {
         const complaintRecord =
             await createVssShareComplaintRecordFromLocalVerification(input);
 
-        expect(complaintRecord.complaintReasonCode).toBe(
-            'private-vss-opening-verification-failed',
-        );
+        expect(complaintRecord.complaintReasonCode).toBe('invalidProof');
         expect(complaintRecord.complaintEvidenceRoot).toBe(
             deriveCanonicalObjectHash({
                 objectType: 'VssShareComplaintEvidence',
                 ...shareVerificationPayloadFields(input),
-                privateEnvelopeHashFromLocalVerification:
-                    input.localVerification.privateEnvelopeHash,
-                localVerificationRoot:
-                    input.localVerification.localVerificationRoot,
-                refusedObjects: input.localVerification.refusedObjects,
+                refusalReason: input.localVerification.refusalReason,
             }),
         );
     });

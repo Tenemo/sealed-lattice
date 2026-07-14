@@ -111,6 +111,8 @@ pub(in super::super) fn public_key_share_material_object(
     let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     let participant_count = participant_count_from_package(package);
     let mut material_records = Vec::new();
+    let mut material_root_references = Vec::new();
+    let mut material_roots = Vec::new();
     for trustee_roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let (coefficients_by_limb, _) = public_key_share_coefficients_and_errors_for_fixture(
@@ -146,6 +148,12 @@ pub(in super::super) fn public_key_share_material_object(
                 material_root_input["shareCoefficientVectorsByLimb"],
             "publicKeyShareMaterialRoot": public_key_share_material_root,
         });
+        material_root_references.push(serde_json::json!({
+            "trusteeIdentity": trustee_identity,
+            "trusteeRosterPosition": trustee_roster_position,
+            "publicKeyShareMaterialRoot": public_key_share_material_root,
+        }));
+        material_roots.push(public_key_share_material_root);
         material_records.push(material_record);
     }
     let public_key_share_material_set_root = derive_canonical_object_hash(&serde_json::json!({
@@ -154,15 +162,108 @@ pub(in super::super) fn public_key_share_material_object(
         "ringDegree": ring_degree,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
-        "shareMaterialRecords": &material_records,
+        "publicKeyShareMaterialRoots": material_root_references,
     }))
     .expect("public-key share material set root");
 
     serde_json::json!({
         "objectType": "PublicKeyShareMaterialSet",
         "shareMaterialRecords": material_records,
+        "publicKeyShareMaterialRoots": material_roots,
         "publicKeyShareMaterialSetRoot": public_key_share_material_set_root,
     })
+}
+
+pub(in super::super) fn authenticate_public_key_share_material_fixture(
+    package: &serde_json::Value,
+    accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
+) {
+    let Some(material_set) = package.get("publicKeyShareMaterial") else {
+        return;
+    };
+    let Some(material_records) = material_set
+        .get("shareMaterialRecords")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return;
+    };
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
+    let mut material_bytes = Vec::new();
+    material_bytes.extend_from_slice(b"SLPKSMV1");
+    for value in [
+        1_u64,
+        participant_count_from_package(package),
+        DATA_PRIMES.len() as u64,
+        u64::try_from(ring_degree).expect("public-key material ring degree fits u64"),
+    ] {
+        crate::encoding::append_varuint(&mut material_bytes, value);
+    }
+    for (trustee_roster_position, material_record) in material_records.iter().enumerate() {
+        crate::encoding::append_varuint(
+            &mut material_bytes,
+            u64::try_from(trustee_roster_position)
+                .expect("public-key material roster position fits u64"),
+        );
+        for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
+            crate::encoding::append_varuint(
+                &mut material_bytes,
+                u64::try_from(rns_limb_index).expect("public-key material limb index fits u64"),
+            );
+            material_bytes.extend_from_slice(&rns_prime.to_le_bytes());
+            let coefficients = coefficient_vector_from_le_hex(
+                material_record["shareCoefficientVectorsByLimb"][rns_limb_index]
+                    ["coefficientsLeHex"]
+                    .as_str()
+                    .expect("public-key material coefficient bytes"),
+                ring_degree,
+                "public-key material coefficient width",
+            )
+            .expect("public-key material coefficients");
+            for coefficient in coefficients {
+                material_bytes.extend_from_slice(&coefficient.to_le_bytes());
+            }
+        }
+    }
+
+    let chunk_size = crate::foundation::FOUNDATION_PROFILE.stream_chunk_byte_length;
+    let mut descriptor_writer = crate::foundation::CanonicalStreamWriter::new(
+        crate::foundation::CanonicalStreamDomain::PublicKeyShareMaterial,
+        u64::try_from(material_bytes.len()).expect("public-key material byte length fits u64"),
+    )
+    .expect("public-key material descriptor writer");
+    for (chunk_index, chunk) in material_bytes.chunks(chunk_size).enumerate() {
+        descriptor_writer
+            .absorb_chunk(chunk_index, chunk)
+            .expect("public-key material descriptor chunk");
+    }
+    let descriptor_bytes = descriptor_writer
+        .finish()
+        .expect("public-key material descriptor")
+        .encode()
+        .expect("public-key material descriptor bytes");
+    let material_root_bytes = crate::transcript_core::decode_hex(
+        material_set["publicKeyShareMaterialSetRoot"]
+            .as_str()
+            .expect("public-key material set root"),
+    )
+    .expect("public-key material set root bytes");
+    let stream = crate::bgv::setup::begin_accepted_setup_canonical_stream(
+        crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE_MATERIAL,
+        &material_root_bytes,
+        &descriptor_bytes,
+        accepted_setup_session,
+    )
+    .expect("begin authenticated public-key material stream");
+    for (chunk_index, chunk) in material_bytes.chunks(chunk_size).enumerate() {
+        crate::bgv::setup::absorb_bgv_canonical_stream_chunk(
+            stream.handle,
+            u32::try_from(chunk_index).expect("public-key material chunk index fits u32"),
+            chunk,
+        )
+        .expect("authenticate public-key material chunk");
+    }
+    crate::bgv::setup::finish_bgv_canonical_stream(stream.handle)
+        .expect("finish authenticated public-key material stream");
 }
 
 pub(in super::super) fn public_key_share_coefficients_and_errors_for_fixture(
@@ -384,11 +485,8 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
         let logical_proof_record = serde_json::json!({
             "objectType": "PublicKeyShareSuccinctProof",
-            "ceremonyId": setup_context["ceremonyId"],
-            "manifestHash": setup_context["manifestHash"],
-            "rosterHash": setup_context["rosterHash"],
-            "setupParametersHash": setup_context["setupParametersHash"],
-            "setupEpoch": setup_context["setupEpoch"],
+            "setupContextHash": crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+                .expect("setup context hash"),
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
             "publicKeyShareRoot": share_record["publicKeyShareRoot"],

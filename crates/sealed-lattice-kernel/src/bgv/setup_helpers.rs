@@ -100,16 +100,6 @@ pub(super) fn read_optional_u64(value: &Value, field_name: &str) -> CanonicalRes
         .transpose()
 }
 
-pub(super) fn decimal_i128_value(value: &Value) -> Option<i128> {
-    if let Some(value) = value.as_i64() {
-        return Some(i128::from(value));
-    }
-    if let Some(value) = value.as_u64() {
-        return Some(i128::from(value));
-    }
-    value.as_str()?.parse::<i128>().ok()
-}
-
 pub(super) fn string_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalResult<&'a str> {
     let mut current = value;
     for field_name in path {

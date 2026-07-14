@@ -48,6 +48,7 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
     )?;
     Ok(SetupBinding {
         setup_package_hash,
+        setup_context_hash: setup_context_hashes.setup_context_hash,
         ceremony_id,
         setup_epoch,
         election_manifest_hash,

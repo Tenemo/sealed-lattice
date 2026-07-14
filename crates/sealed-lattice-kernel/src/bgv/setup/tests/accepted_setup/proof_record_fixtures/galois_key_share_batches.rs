@@ -13,6 +13,9 @@ pub(in super::super) fn galois_key_share_batches_object(
     accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> GaloisKeyShareBatchesFixture {
     let schedule = &package["evaluatorKeySchedule"];
+    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
     let participant_count = participant_count_from_package(package);
     let required_schedule = schedule["requiredGaloisKeySchedule"]
         .as_array()
@@ -33,8 +36,12 @@ pub(in super::super) fn galois_key_share_batches_object(
                 .map(|schedule_entry| {
                     let rotation = schedule_entry["rotation"].as_u64().expect("rotation");
                     let level = schedule_entry["level"].as_u64().expect("level");
-                    let key_switch_seed_hex =
-                        galois_key_switch_seed_for_test(schedule, rotation, level);
+                    let key_switch_seed_hex = galois_key_switch_seed_for_test(
+                        schedule,
+                        public_matrix_seed_hash,
+                        rotation,
+                        level,
+                    );
                     evaluation_key_share_fixture_material(
                         EvaluationKeyShareProofFamily::Galois,
                         trustee_roster_position,
@@ -52,8 +59,12 @@ pub(in super::super) fn galois_key_share_batches_object(
             {
                 let rotation = schedule_entry["rotation"].as_u64().expect("rotation");
                 let level = schedule_entry["level"].as_u64().expect("level");
-                let key_switch_seed_hex =
-                    galois_key_switch_seed_for_test(schedule, rotation, level);
+                let key_switch_seed_hex = galois_key_switch_seed_for_test(
+                    schedule,
+                    public_matrix_seed_hash,
+                    rotation,
+                    level,
+                );
                 let key_switch_domain = format!("galois-{rotation}");
                 let mut material_record = serde_json::json!({
                     "objectType": "GaloisKeyShareMaterial",

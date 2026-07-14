@@ -258,6 +258,29 @@ pub(crate) struct TrusteeEvaluationKeyStatement {
     pub(crate) proof: SetupProofStatement,
 }
 
+impl TrusteeEvaluationKeyStatement {
+    pub(crate) fn application_statement_schema_identifier(&self) -> u16 {
+        match &self.proof {
+            SetupProofStatement::PublicKeyShare { .. } => 0x1212,
+            SetupProofStatement::PrivateVssShare(_) => 0x2110,
+            SetupProofStatement::VssShareLinkage(statement) => {
+                if statement.is_threshold_aggregate {
+                    0x2111
+                } else {
+                    0x2110
+                }
+            }
+            SetupProofStatement::SameSecretBridge { .. } => 0x1211,
+            SetupProofStatement::TargetDecryptionShare(_) => 0x1621,
+            // The current key-bearing atom statement batches round-one,
+            // round-two, and Galois schedule entries. Its joint commitment is
+            // rooted under the hardest linked relation until those entries are
+            // emitted as individual common-profile proof applications.
+            SetupProofStatement::TrusteeEvaluationKey { .. } => 0x1216,
+        }
+    }
+}
+
 pub(crate) struct KeyBearingWitness {
     pub(crate) secret_coefficients: Vec<i64>,
     pub(crate) error_coefficients_by_key: Vec<Vec<Vec<i64>>>,
@@ -282,6 +305,7 @@ pub(crate) enum TrusteeEvaluationKeyWitness {
         negative_indicator_coefficients: Vec<i64>,
         committed_material: VssCommittedMaterialWitness,
     },
+    #[cfg(test)]
     PrivateVssShare {
         coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
         opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
@@ -450,9 +474,9 @@ impl TrusteeEvaluationKeyWitness {
                 secret_coefficients,
                 ..
             } => secret_coefficients,
-            Self::PrivateVssShare { .. }
-            | Self::VssShareLinkage { .. }
-            | Self::TargetDecryptionShare { .. } => &[],
+            #[cfg(test)]
+            Self::PrivateVssShare { .. } => &[],
+            Self::VssShareLinkage { .. } | Self::TargetDecryptionShare { .. } => &[],
         }
     }
 
@@ -527,6 +551,7 @@ impl TrusteeEvaluationKeyWitness {
 
     pub(crate) fn private_vss_coefficient_messages_by_shamir_index(&self) -> &[Vec<i64>] {
         match self {
+            #[cfg(test)]
             Self::PrivateVssShare {
                 coefficient_messages_by_shamir_index,
                 ..
@@ -537,6 +562,7 @@ impl TrusteeEvaluationKeyWitness {
 
     pub(crate) fn private_vss_opening_randomness_by_shamir_index(&self) -> &[Vec<Vec<i64>>] {
         match self {
+            #[cfg(test)]
             Self::PrivateVssShare {
                 opening_randomness_by_shamir_index,
                 ..
@@ -547,6 +573,7 @@ impl TrusteeEvaluationKeyWitness {
 
     pub(crate) fn private_vss_carry_witnesses(&self) -> &[i64] {
         match self {
+            #[cfg(test)]
             Self::PrivateVssShare {
                 carry_witnesses, ..
             } => carry_witnesses,
@@ -641,7 +668,9 @@ impl TrusteeEvaluationKeyWitness {
             | Self::TargetDecryptionShare {
                 committed_material, ..
             } => Some(committed_material),
-            Self::PrivateVssShare { .. } | Self::TrusteeEvaluationKey { .. } => None,
+            #[cfg(test)]
+            Self::PrivateVssShare { .. } => None,
+            Self::TrusteeEvaluationKey { .. } => None,
         }
     }
 

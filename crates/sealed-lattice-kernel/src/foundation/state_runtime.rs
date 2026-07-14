@@ -21,6 +21,7 @@ pub(crate) const STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH: usize = 32;
 const STATE_VERIFIER_IDENTITY_BYTE_LENGTH: usize = 64;
 const STATE_VERIFIER_HASH_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
 pub(crate) const STATE_DURABLE_BINDING_BYTE_LENGTH: usize = 674;
+pub(crate) const STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH: usize = 3_801;
 
 const STATE_VERIFIER_CONFIGURATION_VERSION: u16 = 1;
 const FIXED_CONFIGURATION_BYTE_LENGTH: usize = 2 + 3 * Hash512::BYTE_LENGTH + 2 + 4;
@@ -45,12 +46,18 @@ struct StateVerifierRuntimeSession {
     capability: Zeroizing<[u8; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH]>,
     handle: u32,
     verifier: StateVerifier,
+    prepared_witness_votes: HashMap<u32, super::ObjectEnvelope>,
     verified_objects: HashMap<u32, RuntimeVerifiedStateObject>,
 }
 
 impl StateVerifierRuntimeSession {
     fn require_object_capacity(&self) -> RuntimeResult<()> {
-        if self.verified_objects.len() >= MAXIMUM_RETAINED_VERIFIED_STATE_OBJECT_COUNT {
+        if self
+            .verified_objects
+            .len()
+            .saturating_add(self.prepared_witness_votes.len())
+            >= MAXIMUM_RETAINED_VERIFIED_STATE_OBJECT_COUNT
+        {
             return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
         }
         Ok(())
@@ -160,6 +167,7 @@ impl StateVerifierRuntimeRegistry {
             capability: Zeroizing::new(capability),
             handle,
             verifier,
+            prepared_witness_votes: HashMap::new(),
             verified_objects: HashMap::new(),
         });
         Ok(handle)
@@ -460,6 +468,127 @@ impl StateVerifierRuntimeRegistry {
         Ok(object_handle)
     }
 
+    fn certify_intent_from_unordered_vote_carriers(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        verified_intent_handle: u32,
+        canonical_vote_carriers: &[Vec<u8>],
+    ) -> RuntimeResult<u32> {
+        let certified_object = {
+            let session = self.require_active_session(session_handle, capability)?;
+            session.require_object_capacity()?;
+            match session.verified_objects.get(&verified_intent_handle) {
+                Some(RuntimeVerifiedStateObject::ReservationIntent(intent)) => session
+                    .verifier
+                    .certify_reservation_intent_from_unordered_vote_carriers(
+                        intent,
+                        canonical_vote_carriers,
+                    )
+                    .into_result()
+                    .map(CertifiedRuntimeStateObject::Reservation)
+                    .map_err(refusal_status)?,
+                Some(RuntimeVerifiedStateObject::OutputIntent(intent)) => session
+                    .verifier
+                    .certify_output_intent_from_unordered_vote_carriers(
+                        intent,
+                        canonical_vote_carriers,
+                    )
+                    .into_result()
+                    .map(CertifiedRuntimeStateObject::Output)
+                    .map_err(refusal_status)?,
+                Some(RuntimeVerifiedStateObject::RecoveryIntent(intent)) => session
+                    .verifier
+                    .certify_recovery_intent_from_unordered_vote_carriers(
+                        intent,
+                        canonical_vote_carriers,
+                    )
+                    .into_result()
+                    .map(CertifiedRuntimeStateObject::Recovery)
+                    .map_err(refusal_status)?,
+                Some(_) => return Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+                None => return Err(refusal_status(RefusalReason::ConsumedState)),
+            }
+        };
+        let object_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
+        let runtime_object = match certified_object {
+            CertifiedRuntimeStateObject::Reservation(value) => {
+                RuntimeVerifiedStateObject::Reservation(value)
+            }
+            CertifiedRuntimeStateObject::Output(value) => RuntimeVerifiedStateObject::Output(value),
+            CertifiedRuntimeStateObject::Recovery(value) => {
+                RuntimeVerifiedStateObject::Recovery(value)
+            }
+        };
+        self.require_active_session_mut(session_handle, capability)?
+            .verified_objects
+            .insert(object_handle, runtime_object);
+        Ok(object_handle)
+    }
+
+    fn prepare_witness_vote(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        verified_intent_handle: u32,
+        witness_participant_id: ParticipantIdentity,
+        signature_message_output: &mut [u8],
+    ) -> RuntimeResult<u32> {
+        if signature_message_output.len() != STATE_VERIFIER_HASH_BYTE_LENGTH {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
+        let (envelope, signature_message) = {
+            let session = self.require_active_session(session_handle, capability)?;
+            session.require_object_capacity()?;
+            let binding = match session.verified_objects.get(&verified_intent_handle) {
+                Some(RuntimeVerifiedStateObject::ReservationIntent(intent)) => {
+                    intent.durable_binding()
+                }
+                Some(RuntimeVerifiedStateObject::OutputIntent(intent)) => intent.durable_binding(),
+                Some(RuntimeVerifiedStateObject::RecoveryIntent(intent)) => {
+                    intent.durable_binding()
+                }
+                Some(_) => return Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+                None => return Err(refusal_status(RefusalReason::ConsumedState)),
+            };
+            session
+                .verifier
+                .prepare_state_witness_vote(binding, witness_participant_id)
+                .map_err(|error| refusal_status(error.refusal_reason))?
+        };
+        let prepared_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
+        signature_message_output.copy_from_slice(signature_message.as_bytes());
+        self.require_active_session_mut(session_handle, capability)?
+            .prepared_witness_votes
+            .insert(prepared_handle, envelope);
+        Ok(prepared_handle)
+    }
+
+    fn finish_witness_vote(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        prepared_handle: u32,
+        signature: &[u8],
+    ) -> RuntimeResult<Vec<u8>> {
+        let signature = signature
+            .try_into()
+            .map_err(|_| refusal_status(RefusalReason::WrongTypeOrLength))?;
+        let session = self.require_active_session_mut(session_handle, capability)?;
+        let envelope = session
+            .prepared_witness_votes
+            .remove(&prepared_handle)
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        let canonical_carrier = session
+            .verifier
+            .finish_prepared_state_witness_vote(envelope, signature)
+            .map_err(|error| refusal_status(error.refusal_reason))?;
+        if canonical_carrier.len() != STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
+        Ok(canonical_carrier)
+    }
+
     fn describe(
         &self,
         session_handle: u32,
@@ -480,10 +609,17 @@ impl StateVerifierRuntimeRegistry {
             return Err(refusal_status(RefusalReason::ConsumedState));
         }
         let session = self.require_active_session_mut(session_handle, capability)?;
-        session
+        if session
             .verified_objects
             .remove(&verified_object_handle)
-            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+            .is_none()
+            && session
+                .prepared_witness_votes
+                .remove(&verified_object_handle)
+                .is_none()
+        {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
         Ok(())
     }
 
@@ -780,6 +916,53 @@ pub(crate) fn certify_verified_state_intent(
     })
 }
 
+pub(crate) fn certify_verified_state_intent_from_unordered_vote_carriers(
+    session_handle: u32,
+    capability: &[u8],
+    verified_intent_handle: u32,
+    framed_canonical_vote_carriers: &[u8],
+) -> RuntimeResult<u32> {
+    let canonical_vote_carriers = decode_unordered_vote_carriers(framed_canonical_vote_carriers)?;
+    with_runtime_registry(|registry| {
+        registry.certify_intent_from_unordered_vote_carriers(
+            session_handle,
+            capability,
+            verified_intent_handle,
+            &canonical_vote_carriers,
+        )
+    })
+}
+
+pub(crate) fn prepare_state_witness_vote(
+    session_handle: u32,
+    capability: &[u8],
+    verified_intent_handle: u32,
+    witness_participant_id: &[u8],
+    signature_message_output: &mut [u8],
+) -> RuntimeResult<u32> {
+    let witness_participant_id = decode_participant_identity(witness_participant_id)?;
+    with_runtime_registry(|registry| {
+        registry.prepare_witness_vote(
+            session_handle,
+            capability,
+            verified_intent_handle,
+            witness_participant_id,
+            signature_message_output,
+        )
+    })
+}
+
+pub(crate) fn finish_state_witness_vote(
+    session_handle: u32,
+    capability: &[u8],
+    prepared_handle: u32,
+    signature: &[u8],
+) -> RuntimeResult<Vec<u8>> {
+    with_runtime_registry(|registry| {
+        registry.finish_witness_vote(session_handle, capability, prepared_handle, signature)
+    })
+}
+
 pub(crate) fn describe_verified_state_object(
     session_handle: u32,
     capability: &[u8],
@@ -920,6 +1103,28 @@ fn require_verification_input(bytes: &[u8], allow_empty: bool) -> RuntimeResult<
     Ok(())
 }
 
+fn decode_unordered_vote_carriers(bytes: &[u8]) -> RuntimeResult<Vec<Vec<u8>>> {
+    const MAXIMUM_UNTRUSTED_STATE_VOTE_CARRIER_COUNT: usize =
+        FOUNDATION_PROFILE.participant_count as usize * 2;
+    require_verification_input(bytes, false)?;
+    let mut reader = InputReader::new(bytes);
+    let count = usize::try_from(reader.read_u32()?)
+        .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+    if count == 0 || count > MAXIMUM_UNTRUSTED_STATE_VOTE_CARRIER_COUNT {
+        return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
+    }
+    let mut carriers = Vec::with_capacity(count);
+    for _ in 0..count {
+        let byte_length = usize::try_from(reader.read_u32()?)
+            .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+        let carrier = reader.read_bytes(byte_length)?;
+        require_verification_input(carrier, false)?;
+        carriers.push(carrier.to_vec());
+    }
+    reader.finish()?;
+    Ok(carriers)
+}
+
 fn require_session_binding(
     session: &StateVerifierRuntimeSession,
     handle: u32,
@@ -951,9 +1156,13 @@ const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use fips203::{
+        ml_kem_768,
+        traits::{KeyGen as KemKeyGen, SerDes as KemSerDes},
+    };
     use fips204::{
         ml_dsa_65,
-        traits::{KeyGen, SerDes},
+        traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes},
     };
 
     use super::*;
@@ -969,9 +1178,19 @@ mod tests {
                     u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
                         .expect("test reverse roster position fits u8");
                 let (verification_key, _) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
+                let mut mailbox_seed = [0x41_u8; 32];
+                mailbox_seed[0] =
+                    u8::try_from(roster_position + 1).expect("test roster position fits u8");
+                let mut mailbox_fallback_seed = [0x92_u8; 32];
+                mailbox_fallback_seed[31] =
+                    u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                        .expect("test reverse roster position fits u8");
+                let (mailbox_key, _) =
+                    ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
                 RosterEntry {
                     roster_position,
                     signing_verification_key: verification_key.into_bytes(),
+                    mailbox_encapsulation_key: mailbox_key.into_bytes(),
                 }
             })
             .collect();

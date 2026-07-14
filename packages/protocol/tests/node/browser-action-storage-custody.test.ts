@@ -6,7 +6,7 @@ import type {
     BrowserActionStorageCustody,
     BrowserActionStorageRootBinding,
     BrowserDeviceWrappingSnapshot,
-    ExternallyVerifiedStorageRootCommitment,
+    UntrustedExpectedStorageRootCommitment,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody';
 import {
     copyBrowserDeviceWrappingState,
@@ -33,24 +33,26 @@ const testBinding: BrowserActionStorageRootBinding = Object.freeze({
     suiteId: createTestBytes(64, 7),
 });
 
-const verifiedCommitment = (
+const untrustedExpectedCommitment = (
     storageRootCommitment: Uint8Array,
-): ExternallyVerifiedStorageRootCommitment =>
+): UntrustedExpectedStorageRootCommitment =>
     Object.freeze({ storageRootCommitment: storageRootCommitment.slice() });
 
 const initializeAndActivate = async (
     custody: BrowserActionStorageCustody,
 ): Promise<
     Readonly<{
-        commitment: ExternallyVerifiedStorageRootCommitment;
+        commitment: UntrustedExpectedStorageRootCommitment;
         snapshot: BrowserDeviceWrappingSnapshot;
     }>
 > => {
     const snapshot = await custody.initialize();
-    const commitment = verifiedCommitment(snapshot.storageRootCommitment);
+    const commitment = untrustedExpectedCommitment(
+        snapshot.storageRootCommitment,
+    );
     await custody.openIntoOwnedWorker({
         expectedSnapshot: snapshot,
-        externallyVerifiedCommitment: commitment,
+        untrustedExpectedCommitment: commitment,
     });
 
     return { commitment, snapshot };
@@ -256,7 +258,7 @@ describe('Browser action-storage custody', () => {
         expect(workerKernel.stagedRootPresent()).toBe(true);
         await custody.openIntoOwnedWorker({
             expectedSnapshot: snapshot,
-            externallyVerifiedCommitment: verifiedCommitment(
+            untrustedExpectedCommitment: untrustedExpectedCommitment(
                 snapshot.storageRootCommitment,
             ),
         });
@@ -285,7 +287,112 @@ describe('Browser action-storage custody', () => {
         expect(workerKernel.stagedRootPresent()).toBe(false);
     });
 
-    it('requires exact external acceptance before activation and preserves the staged root after a wrong commitment', async () => {
+    it('copies, versions, authenticates, and hashes closed local records through custody', async () => {
+        const { custody } = createCustody({
+            actionStorageRoot: createTestBytes(
+                testActionStorageRootByteLength,
+                19,
+            ),
+        });
+        await initializeAndActivate(custody);
+        const recipientInputRoot = createTestBytes(64, 31);
+        const preservedRecipientInputRoot = recipientInputRoot.slice();
+        const pendingIdentifier = custody.deriveLocalRecordIdentifier({
+            recordType: 'aggregateThresholdShare',
+            recipientInputRoot,
+        });
+        recipientInputRoot.fill(0);
+        const identifier = await pendingIdentifier;
+        expect(identifier).toHaveLength(64);
+        await expect(
+            custody.deriveLocalRecordIdentifier({
+                recordType: 'aggregateThresholdShare',
+                recipientInputRoot: preservedRecipientInputRoot,
+            }),
+        ).resolves.toEqual(identifier);
+
+        const expectedContext = {
+            actionRandomnessCommitment: createTestBytes(64, 53),
+            creationRecoveryEpoch: 2n,
+            identifierInput: {
+                recordType: 'aggregateThresholdShare',
+                recipientInputRoot: preservedRecipientInputRoot,
+            },
+            recordVersion: 0n,
+        } as const;
+        const plaintext = createTestBytes(8_193, 73);
+        const preservedPlaintext = plaintext.slice();
+        const pendingEnvelope = custody.sealLocalRecord({
+            ...expectedContext,
+            plaintext,
+        });
+        plaintext.fill(0);
+        const envelope = await pendingEnvelope;
+        await expect(
+            custody.openLocalRecord({ ...expectedContext, envelope }),
+        ).resolves.toEqual(preservedPlaintext);
+        const envelopeHash = await custody.hashLocalRecordEnvelope(envelope);
+        expect(envelopeHash).toHaveLength(64);
+
+        const successorContext = {
+            ...expectedContext,
+            predecessorRecordHash: envelopeHash,
+            recordVersion: 1n,
+        } as const;
+        const successorPlaintext = createTestBytes(257, 109);
+        const successorEnvelope = await custody.sealLocalRecord({
+            ...successorContext,
+            plaintext: successorPlaintext,
+        });
+        await expect(
+            custody.openLocalRecord({
+                ...successorContext,
+                envelope: successorEnvelope,
+            }),
+        ).resolves.toEqual(successorPlaintext);
+
+        const tamperedEnvelope = envelope.slice();
+        tamperedEnvelope[tamperedEnvelope.byteLength - 1] ^= 1;
+        await expect(
+            custody.openLocalRecord({
+                ...expectedContext,
+                envelope: tamperedEnvelope,
+            }),
+        ).rejects.toMatchObject({
+            code: 'OwnedWorkerFailure',
+            name: 'BrowserActionStorageCustodyError',
+        });
+        await expect(
+            custody.openLocalRecord({
+                ...expectedContext,
+                actionRandomnessCommitment: createTestBytes(64, 54),
+                envelope,
+            }),
+        ).rejects.toMatchObject({
+            code: 'OwnedWorkerFailure',
+            name: 'BrowserActionStorageCustodyError',
+        });
+        await expect(
+            custody.sealLocalRecord({
+                ...expectedContext,
+                predecessorRecordHash: envelopeHash,
+                plaintext: preservedPlaintext,
+            }),
+        ).rejects.toMatchObject({
+            code: 'InvalidInput',
+            name: 'BrowserActionStorageCustodyError',
+        });
+
+        await custody.close();
+        await expect(
+            custody.hashLocalRecordEnvelope(envelope),
+        ).rejects.toMatchObject({
+            code: 'Closed',
+            name: 'BrowserActionStorageCustodyError',
+        });
+    });
+
+    it('recomputes the untrusted expected commitment and preserves the staged root after a forged value', async () => {
         const { custody, workerKernel } = createCustody({
             actionStorageRoot: createTestBytes(
                 testActionStorageRootByteLength,
@@ -293,7 +400,7 @@ describe('Browser action-storage custody', () => {
             ),
         });
         const snapshot = await custody.initialize();
-        const wrongCommitment = verifiedCommitment(
+        const wrongCommitment = untrustedExpectedCommitment(
             snapshot.storageRootCommitment,
         );
         wrongCommitment.storageRootCommitment[0] ^= 0x80;
@@ -301,7 +408,7 @@ describe('Browser action-storage custody', () => {
         await expect(
             custody.openIntoOwnedWorker({
                 expectedSnapshot: snapshot,
-                externallyVerifiedCommitment: wrongCommitment,
+                untrustedExpectedCommitment: wrongCommitment,
             }),
         ).rejects.toMatchObject({ code: 'CommitmentMismatch' });
         expect(workerKernel.activeRootPresent()).toBe(false);
@@ -309,12 +416,33 @@ describe('Browser action-storage custody', () => {
 
         await custody.openIntoOwnedWorker({
             expectedSnapshot: snapshot,
-            externallyVerifiedCommitment: verifiedCommitment(
+            untrustedExpectedCommitment: untrustedExpectedCommitment(
                 snapshot.storageRootCommitment,
             ),
         });
         expect(workerKernel.activeRootPresent()).toBe(true);
         expect(workerKernel.stagedRootPresent()).toBe(false);
+    });
+
+    it('copies an untrusted expected commitment before queued worker use', async () => {
+        const { custody, workerKernel } = createCustody({
+            actionStorageRoot: createTestBytes(
+                testActionStorageRootByteLength,
+                22,
+            ),
+        });
+        const snapshot = await custody.initialize();
+        const expectation = untrustedExpectedCommitment(
+            snapshot.storageRootCommitment,
+        );
+        const opening = custody.openIntoOwnedWorker({
+            expectedSnapshot: snapshot,
+            untrustedExpectedCommitment: expectation,
+        });
+        expectation.storageRootCommitment.fill(0);
+
+        await expect(opening).resolves.toBeUndefined();
+        expect(workerKernel.retainedRootMatchesExpected()).toBe(true);
     });
 
     it('recovers the public first-use commitment from persisted state after a pre-publication worker restart', async () => {
@@ -342,7 +470,7 @@ describe('Browser action-storage custody', () => {
         }
         await restartedWorker.custody.openIntoOwnedWorker({
             expectedSnapshot: restoredSnapshot,
-            externallyVerifiedCommitment: verifiedCommitment(
+            untrustedExpectedCommitment: untrustedExpectedCommitment(
                 restoredSnapshot.storageRootCommitment,
             ),
         });
@@ -373,7 +501,8 @@ describe('Browser action-storage custody', () => {
 
         const recoveredSnapshot = await missingStorageCustody.custody.recover({
             caseInsensitiveRecoveryText: testRecoveryText.toLowerCase(),
-            externallyVerifiedCommitment: verifiedCommitment(knownCommitment),
+            untrustedExpectedCommitment:
+                untrustedExpectedCommitment(knownCommitment),
         });
         expect(recoveredSnapshot.recoveryValueExported).toBe(true);
         expect(
@@ -407,7 +536,7 @@ describe('Browser action-storage custody', () => {
         await expect(
             wrongBindingCustody.custody.openIntoOwnedWorker({
                 expectedSnapshot: initializationSnapshot,
-                externallyVerifiedCommitment: verifiedCommitment(
+                untrustedExpectedCommitment: untrustedExpectedCommitment(
                     initializationSnapshot.storageRootCommitment,
                 ),
             }),
@@ -427,7 +556,7 @@ describe('Browser action-storage custody', () => {
         const { commitment, snapshot } = await initializeAndActivate(custody);
         const preparation = await custody.beginRecoveryExport({
             expectedSnapshot: snapshot,
-            externallyVerifiedCommitment: commitment,
+            untrustedExpectedCommitment: commitment,
         });
 
         expect('canonicalRecoveryText' in preparation).toBe(false);
@@ -455,7 +584,7 @@ describe('Browser action-storage custody', () => {
         await expect(
             custody.beginRecoveryExport({
                 expectedSnapshot: confirmation.snapshot,
-                externallyVerifiedCommitment: commitment,
+                untrustedExpectedCommitment: commitment,
             }),
         ).rejects.toMatchObject({ code: 'RecoveryAlreadyExported' });
         await expect(custody.delete(snapshot)).rejects.toMatchObject({
@@ -477,7 +606,7 @@ describe('Browser action-storage custody', () => {
 
         const recoveredSnapshot = await custody.recover({
             caseInsensitiveRecoveryText: testRecoveryText.toLowerCase(),
-            externallyVerifiedCommitment: commitment,
+            untrustedExpectedCommitment: commitment,
             expectedSnapshot: originalSnapshot,
         });
         const recoveredState = await storage.readState();
@@ -525,7 +654,7 @@ describe('Browser action-storage custody', () => {
         await expect(
             custody.openIntoOwnedWorker({
                 expectedSnapshot: snapshot,
-                externallyVerifiedCommitment: commitment,
+                untrustedExpectedCommitment: commitment,
             }),
         ).rejects.toMatchObject({ code: 'OwnedWorkerFailure' });
         expect(workerKernel.retainedRootMatchesExpected()).toBe(true);
@@ -590,7 +719,7 @@ describe('Browser action-storage custody', () => {
         await expect(
             custody.openIntoOwnedWorker({
                 expectedSnapshot: snapshot,
-                externallyVerifiedCommitment: verifiedCommitment(
+                untrustedExpectedCommitment: untrustedExpectedCommitment(
                     snapshot.storageRootCommitment,
                 ),
             }),
@@ -612,7 +741,7 @@ describe('Browser action-storage custody', () => {
         await expect(
             custody.recover({
                 caseInsensitiveRecoveryText: testRecoveryText,
-                externallyVerifiedCommitment: commitment,
+                untrustedExpectedCommitment: commitment,
                 expectedSnapshot: snapshot,
             }),
         ).rejects.toMatchObject({ code: 'Conflict' });
@@ -643,6 +772,7 @@ describe('Browser action-storage custody', () => {
                     maximumActiveTransactionCount: 1,
                     maximumLeaseByteLength: 64,
                     maximumLeaseCountPerTransaction: 1,
+                    maximumOwnedRecordCount: 32,
                     maximumStoredValueByteLength: 4_096,
                     maximumTransactionByteLength: 128,
                     maximumTransactionLifetimeMilliseconds: 10_000,

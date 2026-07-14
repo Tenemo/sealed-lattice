@@ -10,7 +10,7 @@ const VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD: &str = "vssShareLinkageProofMa
 
 #[derive(Debug, Clone)]
 pub(super) enum VssPublicMaterialVerification {
-    Verified,
+    Verified { ring_degree: usize },
     Refused(Refusals),
 }
 
@@ -44,7 +44,7 @@ pub(super) fn verify_vss_public_material(
     }
 
     match verify_vss_public_material_binding(setup_package, proof_binding_session) {
-        Ok(()) => Ok(VssPublicMaterialVerification::Verified),
+        Ok(ring_degree) => Ok(VssPublicMaterialVerification::Verified { ring_degree }),
         Err(error) => Ok(VssPublicMaterialVerification::Refused(
             vss_public_material_refusal(
                 "vssPublicMaterialMalformed",
@@ -58,7 +58,7 @@ pub(super) fn verify_vss_public_material(
 fn verify_vss_public_material_binding(
     setup_package: &Value,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
-) -> CanonicalResult<()> {
+) -> CanonicalResult<usize> {
     let coefficient_set = setup_package
         .get(VSS_PUBLIC_COEFFICIENT_COMMITMENT_SET_FIELD)
         .ok_or_else(|| public_material_error("coefficient commitment set"))?;
@@ -110,11 +110,8 @@ fn verify_vss_public_material_binding(
         &statement_verification,
         "VSS share-linkage statement",
     )?;
-    if unsigned_at_path(&statement_verification, &["ringDegree"])? != POLYNOMIAL_DEGREE as u64 {
-        return Err(public_material_error(
-            "VSS share-linkage statement ring degree must match the accepted setup parameters",
-        ));
-    }
+    let ring_degree = usize::try_from(unsigned_at_path(&statement_verification, &["ringDegree"])?)
+        .map_err(|_| public_material_error("VSS share-linkage ring degree does not fit usize"))?;
 
     let common_randomness = setup_package
         .get("commonRandomness")
@@ -139,9 +136,7 @@ fn verify_vss_public_material_binding(
         &crate::bgv::setup::VssAggregateThresholdProofContext {
             public_matrix_seed_hash: accepted_public_matrix_seed_hash,
             setup_context_hash: setup_context_hash(setup_context)?,
-            ring_degree: unsigned_at_path(&statement_verification, &["ringDegree"])?
-                .try_into()
-                .map_err(|_| public_material_error("aggregate ring degree does not fit usize"))?,
+            ring_degree,
             participant_count: unsigned_at_path(&statement_verification, &["participantCount"])?
                 .try_into()
                 .map_err(|_| {
@@ -155,7 +150,7 @@ fn verify_vss_public_material_binding(
         },
     )?;
 
-    Ok(())
+    Ok(ring_degree)
 }
 
 fn public_material_error(message: &'static str) -> CanonicalError {

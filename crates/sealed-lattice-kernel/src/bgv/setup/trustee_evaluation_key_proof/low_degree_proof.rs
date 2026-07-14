@@ -6,8 +6,8 @@ use super::*;
 use crate::bgv::modular_arithmetic::{inverse_mod, pow_mod};
 use fiat_shamir_transcript::FiatShamirTranscript;
 use merkle_commitment::{
-    BatchedMerkleOpening, MerkleDigest, MerkleTree, consistent_sorted_leaves, leaf_hash,
-    sorted_unique_indices, verify_merkle_batch,
+    BatchedMerkleOpening, MerkleContext, MerkleDigest, MerkleTree, consistent_sorted_leaves,
+    leaf_hash, sorted_unique_indices, verify_merkle_batch,
 };
 
 // Batched FRI low-degree argument. The initial layer is a codeword over the
@@ -61,6 +61,7 @@ pub(super) struct LowDegreeProverState {
 }
 
 pub(super) struct LowDegreeVerificationState {
+    merkle_context: MerkleContext,
     modulus: u64,
     initial_domain_size: usize,
     initial_offset: u64,
@@ -161,11 +162,15 @@ fn fold_layer(
 // Fold-layer values are deterministic functions of the batched codeword, so
 // their leaves are unsalted. Phase-tree leaves commit witness rows and remain
 // salted.
-fn pair_leaf_hashes(layer: &[ChallengeExtensionElement]) -> Vec<MerkleDigest> {
+fn pair_leaf_hashes(
+    merkle_context: MerkleContext,
+    layer: &[ChallengeExtensionElement],
+) -> Vec<MerkleDigest> {
     let half = layer.len() / 2;
     (0..half)
         .map(|pair_index| {
             leaf_hash(
+                merkle_context,
                 pair_index,
                 &[],
                 &flatten_extension_pair(&[layer[pair_index], layer[pair_index + half]]),
@@ -215,6 +220,7 @@ fn evaluate_coefficients(
 // claims without letting the prover see those positions before all commitment
 // roots and final coefficients are bound.
 pub(super) fn commit_low_degree(
+    merkle_context: MerkleContext,
     transcript: &mut FiatShamirTranscript,
     parameters: &LowDegreeParameters,
     initial_layer: &[ChallengeExtensionElement],
@@ -247,7 +253,11 @@ pub(super) fn commit_low_degree(
         offset = mul_mod_fast(offset, offset, parameters.modulus);
         root = mul_mod_fast(root, root, parameters.modulus);
         if fold_index + 1 < total_folds {
-            let tree = MerkleTree::from_leaf_hashes(pair_leaf_hashes(&folded))?;
+            let fold_context = merkle_context.with_tree_ordinal_offset(fold_index)?;
+            let tree = MerkleTree::from_leaf_hashes(
+                fold_context,
+                pair_leaf_hashes(fold_context, &folded),
+            )?;
             transcript.absorb("fold-layer-root", &tree.root());
             folded_layer_roots.push(tree.root());
             trees.push(tree);
@@ -335,6 +345,7 @@ pub(super) fn open_low_degree_at_positions(
 }
 
 pub(super) fn bind_low_degree_commitment(
+    merkle_context: MerkleContext,
     transcript: &mut FiatShamirTranscript,
     parameters: &LowDegreeParameters,
     proof: &LowDegreeProof,
@@ -367,6 +378,7 @@ pub(super) fn bind_low_degree_commitment(
     }
 
     Ok(LowDegreeVerificationState {
+        merkle_context,
         modulus: parameters.modulus,
         initial_domain_size: parameters.initial_domain_size,
         initial_offset: parameters.initial_offset,
@@ -451,6 +463,9 @@ pub(super) fn verify_low_degree_openings(
                 reconstructed_pair[slot] = folded_value;
                 reconstructed_pair[slot ^ 1] = sibling_opening.sibling;
                 let leaf = leaf_hash(
+                    verification_state
+                        .merkle_context
+                        .with_tree_ordinal_offset(fold_index)?,
                     pair_index,
                     &[],
                     &flatten_extension_pair(&reconstructed_pair),
@@ -488,6 +503,9 @@ pub(super) fn verify_low_degree_openings(
             ));
         };
         if !verify_merkle_batch(
+            verification_state
+                .merkle_context
+                .with_tree_ordinal_offset(fold_index)?,
             &proof.folded_layer_roots[fold_index],
             layer_depth,
             &layer_leaves,

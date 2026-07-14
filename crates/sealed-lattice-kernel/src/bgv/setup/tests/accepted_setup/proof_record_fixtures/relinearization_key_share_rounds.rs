@@ -19,6 +19,9 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
     let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
         .expect("setup context hash");
     let schedule = &package["evaluatorKeySchedule"];
+    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
     let participant_count = participant_count_from_package(package);
     let trustee_roster_positions = (0..participant_count).collect::<Vec<_>>();
     let level_schedule = schedule["relinearizationLevelSchedule"]
@@ -34,8 +37,12 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
     let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     for level in &scheduled_levels {
         let level = *level;
-        let key_switch_seed_hex =
-            relinearization_key_switch_seed_for_test(schedule, "round-one", level);
+        let key_switch_seed_hex = relinearization_key_switch_seed_for_test(
+            schedule,
+            public_matrix_seed_hash,
+            "round-one",
+            level,
+        );
         // Generate every trustee's key-switch component material for this level
         // in parallel; the deterministic material is then consumed in roster
         // order by the sequential aggregate-accumulation and record-building
@@ -113,8 +120,12 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
     let mut round_two_records = Vec::new();
     for level in &scheduled_levels {
         let level = *level;
-        let key_switch_seed_hex =
-            relinearization_key_switch_seed_for_test(schedule, "round-two", level);
+        let key_switch_seed_hex = relinearization_key_switch_seed_for_test(
+            schedule,
+            public_matrix_seed_hash,
+            "round-two",
+            level,
+        );
         let round_one_aggregate_diagonals = round_one_aggregate_diagonals_by_level
             .get(&level)
             .expect("round-one aggregate diagonals");

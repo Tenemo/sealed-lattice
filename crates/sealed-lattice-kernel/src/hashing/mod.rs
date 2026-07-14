@@ -60,70 +60,40 @@ pub fn hash512_hex(domain: &str, parts: &[&[u8]]) -> String {
     to_hex(&hash_framed_parts_512(domain, parts))
 }
 
-/// Computes the protocol's domain-separated 32-byte SHAKE256 hash output with
-/// the same length-framed preimage shape as `hash512`, under its own fixed
-/// prefix. Used for internal Merkle commitment nodes where the 256-bit width
-/// is the disclosed binding length.
-pub(crate) fn hash256(domain: &str, parts: &[&[u8]]) -> [u8; 32] {
-    const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/hash256";
-    let mut preimage = Vec::new();
-    preimage.extend(HASH256_PREIMAGE_PREFIX);
-    append_bytes(&mut preimage, domain.as_bytes());
-    append_varuint(&mut preimage, parts.len() as u64);
-    for part in parts {
-        append_bytes(&mut preimage, part);
-    }
-
-    let mut hasher = Shake256::default();
-    hasher.update(&preimage);
-    let mut reader = hasher.finalize_xof();
-    let mut output = [0_u8; 32];
-    reader.read(&mut output);
-
-    output
-}
-
-/// A streaming variant of [`hash256`] producing byte-identical output for the
-/// same domain and parts, without buffering the whole preimage. The caller
-/// declares the part count up front, then either supplies whole framed parts or
-/// opens one part with its byte length and streams its bytes. Used by the atom
-/// family backend's streamed Merkle leaf hashing, where one leaf's row part is
-/// produced one committed column at a time.
-pub(crate) struct StreamingHash256 {
+/// Streaming form of [`hash_framed_parts_512`] for a caller that produces one
+/// framed part incrementally. The caller declares the part count and streamed
+/// byte length before supplying bytes, preserving the exact canonical framing
+/// without buffering a complete proof row.
+pub(crate) struct StreamingHash512 {
     hasher: Shake256,
 }
 
-impl StreamingHash256 {
+impl StreamingHash512 {
     pub(crate) fn new(domain: &str, part_count: u64) -> Self {
-        const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/hash256";
         let mut hasher = Shake256::default();
-        hasher.update(HASH256_PREIMAGE_PREFIX);
+        hasher.update(HASH512_PREIMAGE_PREFIX);
         update_varuint(&mut hasher, domain.len() as u64);
         hasher.update(domain.as_bytes());
         update_varuint(&mut hasher, part_count);
         Self { hasher }
     }
 
-    // Absorb one whole length-framed part.
     pub(crate) fn absorb_part(&mut self, part: &[u8]) {
         update_varuint(&mut self.hasher, part.len() as u64);
         self.hasher.update(part);
     }
 
-    // Open a length-framed part whose bytes will follow through `absorb_raw`.
-    // The caller must then absorb exactly `byte_length` bytes.
     pub(crate) fn begin_part(&mut self, byte_length: u64) {
         update_varuint(&mut self.hasher, byte_length);
     }
 
-    // Absorb raw bytes belonging to the currently open part.
     pub(crate) fn absorb_raw(&mut self, bytes: &[u8]) {
         self.hasher.update(bytes);
     }
 
-    pub(crate) fn finalize(self) -> [u8; 32] {
+    pub(crate) fn finalize(self) -> [u8; 64] {
         let mut reader = self.hasher.finalize_xof();
-        let mut output = [0_u8; 32];
+        let mut output = [0_u8; 64];
         reader.read(&mut output);
         output
     }

@@ -1,5 +1,5 @@
 {
-  "eventCount": 5746,
+  "eventCount": 5305,
   "fixture": {
     "proofRelation": "threshold-aggregate-share-linkage",
     "ringDegree": 128,
@@ -14,14 +14,14 @@
       "segments": [
         {"byteLength": 28, "eventCount": 1, "label": "trustee-evaluation-key-share", "operation": "initialize", "squeezeCounterStart": null},
         {"byteLength": 64, "eventCount": 1, "label": "statement", "operation": "absorb", "squeezeCounterStart": null},
-        {"byteLength": 32, "eventCount": 3, "label": "witness-tree-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 64, "eventCount": 3, "label": "witness-tree-root", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": null, "eventCount": 320, "label": "consistency-vector", "operation": "squeeze", "squeezeCounterStart": 0}
       ],
       "transcriptFamily": "trustee-evaluation-key",
       "transcriptPath": "trustee-evaluation-key-share"
     },
     {
-      "eventCount": 1807,
+      "eventCount": 1660,
       "segments": [
         {"byteLength": 4, "eventCount": 1, "label": "fork", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": 8, "eventCount": 1, "label": "fork-index", "operation": "absorb", "squeezeCounterStart": null},
@@ -29,7 +29,7 @@
         {"byteLength": null, "eventCount": 3, "label": "vss-share-linkage-alpha", "operation": "squeeze", "squeezeCounterStart": 2},
         {"byteLength": null, "eventCount": 310, "label": "consistency-alpha", "operation": "squeeze", "squeezeCounterStart": 5},
         {"byteLength": null, "eventCount": 319, "label": "beta", "operation": "squeeze", "squeezeCounterStart": 315},
-        {"byteLength": 32, "eventCount": 1, "label": "quotient-tree-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 64, "eventCount": 1, "label": "quotient-tree-root", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": 4960, "eventCount": 1, "label": "masked-consistency-claims", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": null, "eventCount": 2, "label": "deep-point", "operation": "squeeze", "squeezeCounterStart": 0},
         {"byteLength": 21120, "eventCount": 3, "label": "deep-evaluations", "operation": "absorb", "squeezeCounterStart": null},
@@ -40,13 +40,13 @@
         {"byteLength": 24, "eventCount": 1, "label": "low-degree-purpose", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": null, "eventCount": 1, "label": "fold-challenge", "operation": "squeeze", "squeezeCounterStart": 0},
         {"byteLength": 1024, "eventCount": 1, "label": "final-coefficients", "operation": "absorb", "squeezeCounterStart": null},
-        {"byteLength": null, "eventCount": 168, "label": "shared-query-position", "operation": "squeeze", "squeezeCounterStart": 0}
+        {"byteLength": null, "eventCount": 21, "label": "shared-query-position", "operation": "squeeze", "squeezeCounterStart": 0}
       ],
       "transcriptFamily": "trustee-evaluation-key",
       "transcriptPath": "trustee-evaluation-key-share/limb[0]"
     },
     {
-      "eventCount": 1807,
+      "eventCount": 1660,
       "segments": [
         {"byteLength": 4, "eventCount": 1, "label": "fork", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": 8, "eventCount": 1, "label": "fork-index", "operation": "absorb", "squeezeCounterStart": null},
@@ -54,7 +54,7 @@
         {"byteLength": null, "eventCount": 3, "label": "vss-share-linkage-alpha", "operation": "squeeze", "squeezeCounterStart": 2},
         {"byteLength": null, "eventCount": 310, "label": "consistency-alpha", "operation": "squeeze", "squeezeCounterStart": 5},
         {"byteLength": null, "eventCount": 319, "label": "beta", "operation": "squeeze", "squeezeCounterStart": 315},
-        {"byteLength": 32, "eventCount": 1, "label": "quotient-tree-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 64, "eventCount": 1, "label": "quotient-tree-root", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": 4960, "eventCount": 1, "label": "masked-consistency-claims", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": null, "eventCount": 2, "label": "deep-point", "operation": "squeeze", "squeezeCounterStart": 0},
         {"byteLength": 21120, "eventCount": 3, "label": "deep-evaluations", "operation": "absorb", "squeezeCounterStart": null},
@@ -65,13 +65,13 @@
         {"byteLength": 24, "eventCount": 1, "label": "low-degree-purpose", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": null, "eventCount": 1, "label": "fold-challenge", "operation": "squeeze", "squeezeCounterStart": 0},
         {"byteLength": 1024, "eventCount": 1, "label": "final-coefficients", "operation": "absorb", "squeezeCounterStart": null},
-        {"byteLength": null, "eventCount": 168, "label": "shared-query-position", "operation": "squeeze", "squeezeCounterStart": 0}
+        {"byteLength": null, "eventCount": 21, "label": "shared-query-position", "operation": "squeeze", "squeezeCounterStart": 0}
       ],
       "transcriptFamily": "trustee-evaluation-key",
       "transcriptPath": "trustee-evaluation-key-share/limb[1]"
     },
     {
-      "eventCount": 1807,
+      "eventCount": 1660,
       "segments": [
         {"byteLength": 4, "eventCount": 1, "label": "fork", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": 8, "eventCount": 1, "label": "fork-index", "operation": "absorb", "squeezeCounterStart": null},
@@ -79,7 +79,7 @@
         {"byteLength": null, "eventCount": 3, "label": "vss-share-linkage-alpha", "operation": "squeeze", "squeezeCounterStart": 2},
         {"byteLength": null, "eventCount": 310, "label": "consistency-alpha", "operation": "squeeze", "squeezeCounterStart": 5},
         {"byteLength": null, "eventCount": 319, "label": "beta", "operation": "squeeze", "squeezeCounterStart": 315},
-        {"byteLength": 32, "eventCount": 1, "label": "quotient-tree-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 64, "eventCount": 1, "label": "quotient-tree-root", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": 4960, "eventCount": 1, "label": "masked-consistency-claims", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": null, "eventCount": 2, "label": "deep-point", "operation": "squeeze", "squeezeCounterStart": 0},
         {"byteLength": 21120, "eventCount": 3, "label": "deep-evaluations", "operation": "absorb", "squeezeCounterStart": null},
@@ -90,7 +90,7 @@
         {"byteLength": 24, "eventCount": 1, "label": "low-degree-purpose", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": null, "eventCount": 1, "label": "fold-challenge", "operation": "squeeze", "squeezeCounterStart": 0},
         {"byteLength": 1024, "eventCount": 1, "label": "final-coefficients", "operation": "absorb", "squeezeCounterStart": null},
-        {"byteLength": null, "eventCount": 168, "label": "shared-query-position", "operation": "squeeze", "squeezeCounterStart": 0}
+        {"byteLength": null, "eventCount": 21, "label": "shared-query-position", "operation": "squeeze", "squeezeCounterStart": 0}
       ],
       "transcriptFamily": "trustee-evaluation-key",
       "transcriptPath": "trustee-evaluation-key-share/limb[2]"

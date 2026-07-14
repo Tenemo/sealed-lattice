@@ -96,8 +96,13 @@ fn full_ring_low_degree_proof_accepts_degree_below_main_bound() {
         super::super::MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE,
     );
 
-    let state = commit_low_degree(&mut transcript, &parameters, &initial_layer)
-        .expect("full-ring degree-below-bound polynomial must commit");
+    let state = commit_low_degree(
+        super::super::merkle_commitment::MerkleContext::new(0x1216, 0x4000),
+        &mut transcript,
+        &parameters,
+        &initial_layer,
+    )
+    .expect("full-ring degree-below-bound polynomial must commit");
     let query_positions = transcript
         .challenge_positions(
             "shared-query-position",

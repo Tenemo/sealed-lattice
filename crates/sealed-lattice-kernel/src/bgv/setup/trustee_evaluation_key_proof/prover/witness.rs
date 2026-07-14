@@ -1,4 +1,5 @@
 use super::super::evaluation_domain::EvaluationDomainPlan;
+use super::super::merkle_commitment::{WITNESS_TREE_ORDINAL_BASE, limb_tree_context};
 use super::super::relation::{
     LimbColumnLayout, SetupProofStatement, TrusteeEvaluationKeyStatement,
     TrusteeEvaluationKeyWitness, private_vss_share_lifted_carry_bound,
@@ -377,6 +378,11 @@ pub(super) fn build_limb_witness_commitment(
         ],
     );
     let salted = commit_salted_extension_row_pairs(
+        limb_tree_context(
+            statement.application_statement_schema_identifier(),
+            WITNESS_TREE_ORDINAL_BASE,
+            limb_index,
+        )?,
         &extension_columns,
         plan.extension_size,
         &mut salt_sampler,
@@ -403,6 +409,7 @@ pub(super) fn validate_witness_support(
             validate_key_bearing_witness(statement, witness)?;
             validate_linkage_witness(0, 0, witness, statement.ring_degree)
         }
+        #[cfg(test)]
         (
             SetupProofStatement::PrivateVssShare(private_vss_share),
             TrusteeEvaluationKeyWitness::PrivateVssShare { .. },
@@ -849,6 +856,7 @@ fn validate_vss_public_witness(
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_private_vss_witness(
     statement: &super::super::relation::PrivateVssShareStatement,
     witness: &TrusteeEvaluationKeyWitness,

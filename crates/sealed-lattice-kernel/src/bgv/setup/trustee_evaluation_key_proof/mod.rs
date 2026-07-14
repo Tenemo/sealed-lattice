@@ -17,6 +17,7 @@ mod low_degree_proof;
 mod merkle_commitment;
 mod proof_codec;
 mod prover;
+pub(crate) use prover::VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP;
 mod relation;
 mod verifier;
 
@@ -46,13 +47,15 @@ pub(in crate::bgv::setup) use commands::{
 };
 pub(in crate::bgv::setup) use fiat_shamir_transcript::HashChainTranscriptCore;
 pub(in crate::bgv::setup) use merkle_commitment::{
-    BatchedMerkleOpening as SetupBatchedMerkleOpening, MerkleDigest as SetupMerkleDigest,
-    MerkleTree as SetupMerkleTree, consistent_sorted_leaves as consistent_setup_merkle_leaves,
-    sorted_unique_indices as sorted_unique_setup_merkle_indices,
-    verify_merkle_batch_with_node_domain,
+    BatchedMerkleOpening as SetupBatchedMerkleOpening, MerkleContext as SetupMerkleContext,
+    MerkleDigest as SetupMerkleDigest, MerkleTree as SetupMerkleTree,
+    consistent_sorted_leaves as consistent_setup_merkle_leaves,
+    sorted_unique_indices as sorted_unique_setup_merkle_indices, verify_merkle_batch_with_context,
 };
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof_from_source;
+#[cfg(test)]
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
+#[cfg(test)]
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
 pub(in crate::bgv::setup) use prover::{
     VssCommittedMaterialTreeInput, vss_committed_material_roots_by_commitment_field,
@@ -80,8 +83,10 @@ use crate::{
     bgv::modular_arithmetic::{add_mod_fast, mul_mod_fast, sub_mod_fast},
     bgv::setup::setup_proof::{CanonicalProofMaterialBytes, SetupProofFamily},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::hash512_hex,
 };
+
+#[cfg(test)]
+use crate::hashing::hash512_hex;
 
 // Canonical hash of authenticated trustee evaluation-key proof bytes, bound into
 // the package proof records and the chunked proof stream reference.
@@ -137,17 +142,6 @@ pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_bytes_hash
         SetupProofFamily::PublicKeyShare
             .proof_bytes_hash_domain()
             .expect("public-key share proofs have a byte-hash domain"),
-    )
-}
-
-pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_bytes_hash(
-    proof_bytes: &[u8],
-) -> String {
-    hash512_hex(
-        SetupProofFamily::PrivateVssShare
-            .proof_bytes_hash_domain()
-            .expect("private VSS share proofs have a byte-hash domain"),
-        &[proof_bytes],
     )
 }
 

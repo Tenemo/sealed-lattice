@@ -1,13 +1,24 @@
 import type {
+    BrowserActionStorageCustody,
     BrowserActionStorageRootBinding,
-    ExternallyVerifiedStorageRootCommitment,
+    UntrustedExpectedStorageRootCommitment,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody';
-import type {
+import {
+    copyBrowserDeviceWrappingState,
+    createBrowserActionStorageCustodyForOwnedWorker,
+    type BrowserDeviceWrappingState,
+    type BrowserDeviceWrappingStateMutation,
+    type BrowserDeviceWrappingStateStorage,
     BrowserActionStorageWorkerKernel,
     LocalStorageRecoveryExportMaterial,
     WorkerPreparedDeviceWrappingState,
     WorkerPreparedRecoveryState,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody-internal';
+import type {
+    BrowserLocalRecordIdentifierInput,
+    BrowserLocalRecordOpenInput,
+    BrowserLocalRecordSealInput,
+} from '#packages/types/src/browser-action-storage';
 
 export const testActionStorageRootByteLength = 48;
 export const testDeviceWrappingTagByteLength = 16;
@@ -15,6 +26,7 @@ export const testRecoveryText = 'A'.repeat(708);
 
 const associatedDataByteLength = 64 * 5;
 const nonceByteLength = 12;
+const textEncoder = new TextEncoder();
 
 export const testBytesEqual = (left: Uint8Array, right: Uint8Array): boolean =>
     left.byteLength === right.byteLength &&
@@ -31,6 +43,47 @@ const arrayBufferFromBytes = (bytes: Uint8Array): ArrayBuffer => {
     copy.set(bytes);
 
     return copy.buffer;
+};
+
+const serializeTestRecordContext = (value: unknown): Uint8Array => {
+    const normalize = (currentValue: unknown): unknown => {
+        if (currentValue instanceof Uint8Array) {
+            return [...currentValue];
+        }
+        if (typeof currentValue === 'bigint') {
+            return currentValue.toString(10);
+        }
+        if (Array.isArray(currentValue)) {
+            return currentValue.map(normalize);
+        }
+        if (typeof currentValue === 'object' && currentValue !== null) {
+            return Object.fromEntries(
+                Object.entries(currentValue)
+                    .sort(([leftKey], [rightKey]) =>
+                        leftKey.localeCompare(rightKey),
+                    )
+                    .map(([key, entryValue]) => [key, normalize(entryValue)]),
+            );
+        }
+        return currentValue;
+    };
+
+    return textEncoder.encode(JSON.stringify(normalize(value)));
+};
+
+const concatenateTestBytes = (...values: readonly Uint8Array[]): Uint8Array => {
+    const combined = new Uint8Array(
+        values.reduce(
+            (totalByteLength, value) => totalByteLength + value.byteLength,
+            0,
+        ),
+    );
+    let offset = 0;
+    for (const value of values) {
+        combined.set(value, offset);
+        offset += value.byteLength;
+    }
+    return combined;
 };
 
 export class TestActionStorageWorkerKernel implements BrowserActionStorageWorkerKernel {
@@ -108,13 +161,13 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
 
     public async stageDeviceWrappingStateOpen(input: {
         binding: BrowserActionStorageRootBinding;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
         state: WorkerPreparedDeviceWrappingState;
     }): Promise<void> {
         const envelope = this.decodeEnvelope(input.state.wrappedStorageRoot);
         const expectedAssociatedData = this.#associatedData(
             input.binding,
-            input.externallyVerifiedCommitment.storageRootCommitment,
+            input.untrustedExpectedCommitment.storageRootCommitment,
         );
         if (
             !testBytesEqual(
@@ -123,7 +176,7 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
             ) ||
             !testBytesEqual(
                 input.state.storageRootCommitment,
-                input.externallyVerifiedCommitment.storageRootCommitment,
+                input.untrustedExpectedCommitment.storageRootCommitment,
             )
         ) {
             throw new Error('Wrong test device-wrapping associated data.');
@@ -160,7 +213,7 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
             !testBytesEqual(openedRoot, this.#actionStorageRoot) ||
             !testBytesEqual(
                 recomputedCommitment,
-                input.externallyVerifiedCommitment.storageRootCommitment,
+                input.untrustedExpectedCommitment.storageRootCommitment,
             )
         ) {
             openedRoot.fill(0);
@@ -175,7 +228,7 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
     public async stageRecoveryValueImportAndDeviceWrapping(input: {
         binding: BrowserActionStorageRootBinding;
         caseInsensitiveRecoveryText: string;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<WorkerPreparedRecoveryState> {
         this.importCallCount += 1;
         if (
@@ -189,11 +242,11 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         if (
             !testBytesEqual(
                 preparedState.storageRootCommitment,
-                input.externallyVerifiedCommitment.storageRootCommitment,
+                input.untrustedExpectedCommitment.storageRootCommitment,
             )
         ) {
             await this.discardStagedActionStorageRoot();
-            throw new Error('Wrong externally verified test commitment.');
+            throw new Error('Wrong untrusted expected test commitment.');
         }
 
         return {
@@ -274,6 +327,95 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         }
 
         return Promise.resolve();
+    }
+
+    public async deriveActiveLocalRecordIdentifier(
+        input: BrowserLocalRecordIdentifierInput,
+    ): Promise<Uint8Array> {
+        const activeRoot = this.#requireActiveRoot();
+        const identifierInput = concatenateTestBytes(
+            activeRoot,
+            this.#activeMutationIdentifier as Uint8Array,
+            serializeTestRecordContext(input),
+        );
+        try {
+            return new Uint8Array(
+                await this.#cryptoProvider.subtle.digest(
+                    'SHA-512',
+                    arrayBufferFromBytes(identifierInput),
+                ),
+            );
+        } finally {
+            identifierInput.fill(0);
+        }
+    }
+
+    public async sealActiveLocalRecord(
+        input: BrowserLocalRecordSealInput,
+    ): Promise<Uint8Array> {
+        const { plaintext, ...expectedContext } = input;
+        const contextBytes = serializeTestRecordContext(expectedContext);
+        const recordKey = await this.#deriveTestLocalRecordKey(contextBytes);
+        const nonce = new Uint8Array(nonceByteLength);
+        this.#cryptoProvider.getRandomValues(nonce);
+        try {
+            const ciphertext = new Uint8Array(
+                await this.#cryptoProvider.subtle.encrypt(
+                    {
+                        additionalData: arrayBufferFromBytes(contextBytes),
+                        iv: arrayBufferFromBytes(nonce),
+                        name: 'AES-GCM',
+                        tagLength: 128,
+                    },
+                    recordKey,
+                    arrayBufferFromBytes(plaintext),
+                ),
+            );
+            return concatenateTestBytes(nonce, ciphertext);
+        } finally {
+            contextBytes.fill(0);
+        }
+    }
+
+    public async openActiveLocalRecord(
+        input: BrowserLocalRecordOpenInput,
+    ): Promise<Uint8Array> {
+        const { envelope, ...expectedContext } = input;
+        if (envelope.byteLength <= nonceByteLength + 16) {
+            throw new Error('Malformed test local-record envelope.');
+        }
+        const contextBytes = serializeTestRecordContext(expectedContext);
+        const recordKey = await this.#deriveTestLocalRecordKey(contextBytes);
+        try {
+            return new Uint8Array(
+                await this.#cryptoProvider.subtle.decrypt(
+                    {
+                        additionalData: arrayBufferFromBytes(contextBytes),
+                        iv: arrayBufferFromBytes(
+                            envelope.subarray(0, nonceByteLength),
+                        ),
+                        name: 'AES-GCM',
+                        tagLength: 128,
+                    },
+                    recordKey,
+                    arrayBufferFromBytes(envelope.subarray(nonceByteLength)),
+                ),
+            );
+        } finally {
+            contextBytes.fill(0);
+        }
+    }
+
+    public async hashActiveLocalRecordEnvelope(
+        envelope: Uint8Array,
+    ): Promise<Uint8Array> {
+        this.#requireActiveRoot();
+        return new Uint8Array(
+            await this.#cryptoProvider.subtle.digest(
+                'SHA-512',
+                arrayBufferFromBytes(envelope),
+            ),
+        );
     }
 
     public checksum(): Uint8Array {
@@ -389,6 +531,47 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         this.#stagedRoot = root.slice();
     }
 
+    #requireActiveRoot(): Uint8Array {
+        if (
+            this.#activeRoot === undefined ||
+            this.#activeMutationIdentifier === undefined
+        ) {
+            throw new Error('No accepted test storage root is active.');
+        }
+        return this.#activeRoot;
+    }
+
+    async #deriveTestLocalRecordKey(
+        contextBytes: Uint8Array,
+    ): Promise<CryptoKey> {
+        const keyInput = concatenateTestBytes(
+            this.#requireActiveRoot(),
+            this.#activeMutationIdentifier as Uint8Array,
+            contextBytes,
+        );
+        try {
+            const keyBytes = new Uint8Array(
+                await this.#cryptoProvider.subtle.digest(
+                    'SHA-256',
+                    arrayBufferFromBytes(keyInput),
+                ),
+            );
+            try {
+                return await this.#cryptoProvider.subtle.importKey(
+                    'raw',
+                    arrayBufferFromBytes(keyBytes),
+                    'AES-GCM',
+                    false,
+                    ['encrypt', 'decrypt'],
+                );
+            } finally {
+                keyBytes.fill(0);
+            }
+        } finally {
+            keyInput.fill(0);
+        }
+    }
+
     #associatedData(
         binding: BrowserActionStorageRootBinding,
         storageRootCommitment: Uint8Array,
@@ -439,3 +622,63 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         return digest;
     }
 }
+
+class InMemoryDeviceWrappingStateStorage implements BrowserDeviceWrappingStateStorage {
+    #state: BrowserDeviceWrappingState | undefined;
+
+    public readState(): Promise<BrowserDeviceWrappingState | undefined> {
+        return Promise.resolve(
+            this.#state === undefined
+                ? undefined
+                : copyBrowserDeviceWrappingState(this.#state),
+        );
+    }
+
+    public compareAndSwapState(
+        mutation: BrowserDeviceWrappingStateMutation,
+    ): Promise<boolean> {
+        const matches =
+            mutation.expectedMutationIdentifier === undefined
+                ? this.#state === undefined
+                : this.#state !== undefined &&
+                  testBytesEqual(
+                      this.#state.mutationIdentifier,
+                      mutation.expectedMutationIdentifier,
+                  );
+        if (!matches) {
+            return Promise.resolve(false);
+        }
+        this.#state =
+            mutation.replacement === undefined
+                ? undefined
+                : copyBrowserDeviceWrappingState(mutation.replacement);
+
+        return Promise.resolve(true);
+    }
+}
+
+export const createActiveTestActionStorageCustody = async (input: {
+    readonly actionStorageRoot: Uint8Array;
+    readonly binding: BrowserActionStorageRootBinding;
+    readonly cryptoProvider: Crypto;
+}): Promise<BrowserActionStorageCustody> => {
+    const custody = createBrowserActionStorageCustodyForOwnedWorker({
+        assertExclusiveOwnership: () => undefined,
+        binding: input.binding,
+        cryptoProvider: input.cryptoProvider,
+        storage: new InMemoryDeviceWrappingStateStorage(),
+        workerKernel: new TestActionStorageWorkerKernel({
+            actionStorageRoot: input.actionStorageRoot,
+            cryptoProvider: input.cryptoProvider,
+        }),
+    });
+    const snapshot = await custody.initialize();
+    await custody.openIntoOwnedWorker({
+        expectedSnapshot: snapshot,
+        untrustedExpectedCommitment: {
+            storageRootCommitment: snapshot.storageRootCommitment,
+        },
+    });
+
+    return custody;
+};

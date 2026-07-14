@@ -34,29 +34,6 @@ fn terminal_evaluation_key_bearing_collective_setup_fixture() -> (
     (fixture, proof_binding_session)
 }
 
-// The evaluation-key phase-boundary refusal object path is the pending-object
-// path, so the eval-key phase leaving no refusal means the phase accepted the
-// same-secret-bridge-bound proofs. A refused-object list containing an eval-key
-// refusal reason would fail this check.
-fn evaluation_key_phase_refused(result: &serde_json::Value) -> Option<String> {
-    result["refusedObjects"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find_map(|refusal| {
-            let reason = refusal["reasonCode"].as_str()?;
-            let path = refusal["objectPath"].as_str().unwrap_or_default();
-            let is_evaluation_key = reason.contains("elinearization")
-                || reason.contains("alois")
-                || reason.contains("EvaluationKey")
-                || reason.contains("evaluationKey")
-                || path.contains("relinearizationKeyShareRounds")
-                || path.contains("galoisKeyShareBatches")
-                || path.contains("trusteeEvaluationKeyProofs");
-            is_evaluation_key.then(|| format!("{reason} ({path})"))
-        })
-}
-
 #[test]
 #[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluation_key_phase() {
@@ -71,26 +48,22 @@ fn heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluati
         .expect("verification response");
     let context = || serde_json::to_string_pretty(&result).expect("verification result JSON");
 
-    assert_eq!(
-        evaluation_key_phase_refused(&result),
-        None,
-        "the evaluation-key phase must accept the same-secret-bridge-bound proofs: {}",
-        context()
-    );
     // The reduced development ring means the only permitted refusal is the
     // profile/full-ring boundary, which runs after the evaluation-key phase; the
     // evaluation-key objects were accepted before it. A profile-ring boundary
     // refusal, or a clean accept on a full-ring package, are both consistent with
     // the evaluation-key phase having passed.
-    let refusal_reason = result["refusedObjects"][0]["reasonCode"]
-        .as_str()
-        .unwrap_or_default();
-    assert!(
-        result["isValid"] == true || refusal_reason == "setupMaterialOutsideAcceptedRing",
-        "reduced-ring terminal package must either accept or stop only at the \
-         profile-ring boundary after the evaluation-key phase: {}",
-        context()
-    );
+    if result["isValid"] == true {
+        assert_eq!(result["value"], serde_json::json!({}), "{}", context());
+    } else {
+        assert_eq!(
+            result["refusalReason"],
+            "outsideSupportedProfile",
+            "reduced-ring terminal package must either accept or stop only at the \
+             profile-ring boundary after the evaluation-key phase: {}",
+            context()
+        );
+    }
 }
 
 #[test]
@@ -113,22 +86,7 @@ fn heavy_accepted_setup_terminal_tampered_trustee_evaluation_key_proof_is_refuse
     let context = || serde_json::to_string_pretty(&result).expect("verification result JSON");
 
     assert_eq!(result["isValid"], false, "{}", context());
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "trusteeEvaluationKeyProofVerificationFailed",
-        "{}",
-        context()
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["objectPath"],
-        "setupPackage.trusteeEvaluationKeyProofs"
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["message"],
-        "key-bearing trustee evaluation-key proof bytes are not schedule-format",
-        "{}",
-        context()
-    );
+    assert_eq!(result["refusalReason"], "invalidProof", "{}", context());
 }
 
 // Replaces the first trustee's proof material with malformed authenticated

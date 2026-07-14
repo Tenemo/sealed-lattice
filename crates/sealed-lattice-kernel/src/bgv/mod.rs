@@ -8,6 +8,7 @@ pub(crate) mod commands;
 )]
 pub(crate) mod direct_ballots;
 pub(crate) mod parameters;
+pub(crate) mod proof_suite;
 pub(crate) mod target_decryption;
 
 #[cfg(test)]

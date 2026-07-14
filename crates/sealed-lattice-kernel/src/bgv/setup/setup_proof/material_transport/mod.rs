@@ -20,7 +20,6 @@ pub(crate) struct CanonicalProofMaterialBytes {
 pub(crate) trait ProofByteSource {
     fn byte_length(&self) -> usize;
     fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool;
-    fn byte_at(&self, offset: usize) -> Option<u8>;
 }
 
 impl ProofByteSource for [u8] {
@@ -38,10 +37,6 @@ impl ProofByteSource for [u8] {
         destination.copy_from_slice(source);
         true
     }
-
-    fn byte_at(&self, offset: usize) -> Option<u8> {
-        self.get(offset).copied()
-    }
 }
 
 impl ProofByteSource for Vec<u8> {
@@ -51,10 +46,6 @@ impl ProofByteSource for Vec<u8> {
 
     fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool {
         self.as_slice().copy_bytes(offset, destination)
-    }
-
-    fn byte_at(&self, offset: usize) -> Option<u8> {
-        self.as_slice().byte_at(offset)
     }
 }
 
@@ -156,16 +147,6 @@ impl CanonicalProofMaterialBytes {
         true
     }
 
-    pub(crate) fn byte_at(&self, offset: usize) -> Option<u8> {
-        if offset >= self.total_byte_length {
-            return None;
-        }
-        let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
-        self.chunk(offset / chunk_byte_length)
-            .and_then(|chunk| chunk.get(offset % chunk_byte_length))
-            .copied()
-    }
-
     pub(crate) fn chunks(&self) -> impl Iterator<Item = &[u8]> {
         (0..self.chunk_count()).map(|chunk_index| {
             self.chunk(chunk_index)
@@ -199,10 +180,6 @@ impl ProofByteSource for CanonicalProofMaterialBytes {
 
     fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool {
         self.copy_range(offset, destination)
-    }
-
-    fn byte_at(&self, offset: usize) -> Option<u8> {
-        self.byte_at(offset)
     }
 }
 

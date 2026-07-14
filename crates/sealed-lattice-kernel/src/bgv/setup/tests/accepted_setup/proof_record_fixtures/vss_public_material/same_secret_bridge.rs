@@ -49,6 +49,8 @@ pub(super) fn same_secret_bridge_statement_record(
     source_trustee_roster_position: usize,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
     let source_trustee_identity = source_coefficient_record["sourceTrusteeIdentity"]
         .as_str()
         .expect("source trustee identity");
@@ -69,11 +71,7 @@ pub(super) fn same_secret_bridge_statement_record(
         .collect::<Vec<_>>();
     let mut statement_record = serde_json::json!({
         "objectType": "VssSameSecretBridgeStatement",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
+        "setupContextHash": setup_context_hash,
         "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
         "ringDegree": vss_commitment_ring_degree_from_fixture_package(package),
         "trusteeIdentity": source_trustee_identity,
@@ -252,6 +250,8 @@ pub(super) fn same_secret_bridge_proof_generation_request(
     trustee_roster_position: usize,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
     let target_records = super::same_secret_bridge_target_constant_records_from_fixture_package(
         package,
         trustee_roster_position as u64,
@@ -321,12 +321,9 @@ pub(super) fn same_secret_bridge_proof_generation_request(
     .expect("same-secret bridge proof randomness nonce");
     serde_json::json!({
         "context": {
-            "ceremonyId": setup_context["ceremonyId"],
-            "manifestHash": setup_context["manifestHash"],
-            "rosterHash": setup_context["rosterHash"],
+            "setupContextHash": setup_context_hash,
             "trusteeIdentity": statement_record["trusteeIdentity"],
             "trusteeRosterPosition": statement_record["trusteeRosterPosition"],
-            "setupEpoch": setup_context["setupEpoch"],
         },
         "ringDegree": ring_degree,
         "sameSecretLinkage": {
@@ -335,7 +332,6 @@ pub(super) fn same_secret_bridge_proof_generation_request(
         },
         "sameSecretBridge": {
             "publicMatrixSeedHash": statement_record["publicMatrixSeedHash"],
-            "setupParametersHash": statement_record["setupParametersHash"],
             "sourceTrusteeIdentity": statement_record["trusteeIdentity"],
             "sourceTrusteeRosterPosition": statement_record["trusteeRosterPosition"],
             "bridgeRnsPrimes": bridge_rns_primes,

@@ -7,10 +7,19 @@ import {
     type BrowserActionStorageCustodyErrorCode,
     type BrowserActionStorageRootBinding,
     type BrowserDeviceWrappingSnapshot,
-    type ExternallyVerifiedStorageRootCommitment,
+    type BrowserLocalRecordIdentifierInput,
+    type BrowserLocalRecordOpenInput,
+    type BrowserLocalRecordSealInput,
+    type UntrustedExpectedStorageRootCommitment,
     type BrowserRecoveryExportChallenge,
     type BrowserRecoveryExportConfirmation,
 } from './browser-action-storage-custody.js';
+import {
+    copyLocalRecordBytes,
+    copyLocalRecordIdentifierInput,
+    copyLocalRecordOpenInput,
+    copyLocalRecordSealInput,
+} from './browser-local-record-validation.js';
 import type { UntrustedStorageTransactionLimits } from './untrusted-storage-transaction-store.js';
 import {
     openWebLockOwnedBrowserActionStorageCustody,
@@ -43,10 +52,14 @@ type CustodyWorkerCommand =
     | 'confirm-recovery-export'
     | 'current-snapshot'
     | 'delete'
+    | 'derive-record-identifier'
+    | 'hash-record-envelope'
     | 'initialize'
+    | 'open-record'
     | 'open-custody'
     | 'open-root'
-    | 'recover';
+    | 'recover'
+    | 'seal-record';
 
 type CustodyWorkerRequest = Readonly<{
     command: CustodyWorkerCommand;
@@ -179,16 +192,16 @@ const copyRootBinding = (value: unknown): BrowserActionStorageRootBinding => {
     });
 };
 
-const copyVerifiedCommitment = (
+const copyUntrustedExpectedCommitment = (
     value: unknown,
-): ExternallyVerifiedStorageRootCommitment => {
+): UntrustedExpectedStorageRootCommitment => {
     if (
         !isPlainRecord(value) ||
         !hasRequiredKeys(value, ['storageRootCommitment'])
     ) {
         throw new BrowserActionStorageCustodyError(
             'InvalidInput',
-            'The externally verified storage-root commitment is malformed.',
+            'The untrusted expected storage-root commitment is malformed.',
         );
     }
 
@@ -196,7 +209,7 @@ const copyVerifiedCommitment = (
         storageRootCommitment: copyBytes(
             value.storageRootCommitment,
             storageRootCommitmentByteLength,
-            'Externally verified storage-root commitment',
+            'Untrusted expected storage-root commitment',
         ),
     });
 };
@@ -236,13 +249,13 @@ const copyBoundSnapshotInput = (
     value: unknown,
 ): Readonly<{
     expectedSnapshot: BrowserDeviceWrappingSnapshot;
-    externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+    untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
 }> => {
     if (
         !isPlainRecord(value) ||
         !hasRequiredKeys(value, [
             'expectedSnapshot',
-            'externallyVerifiedCommitment',
+            'untrustedExpectedCommitment',
         ])
     ) {
         throw new BrowserActionStorageCustodyError(
@@ -253,8 +266,8 @@ const copyBoundSnapshotInput = (
 
     return Object.freeze({
         expectedSnapshot: copySnapshot(value.expectedSnapshot),
-        externallyVerifiedCommitment: copyVerifiedCommitment(
-            value.externallyVerifiedCommitment,
+        untrustedExpectedCommitment: copyUntrustedExpectedCommitment(
+            value.untrustedExpectedCommitment,
         ),
     });
 };
@@ -364,6 +377,7 @@ const copyLimits = (value: unknown): UntrustedStorageTransactionLimits => {
         'maximumActiveTransactionCount',
         'maximumLeaseByteLength',
         'maximumLeaseCountPerTransaction',
+        'maximumOwnedRecordCount',
         'maximumStoredValueByteLength',
         'maximumTransactionByteLength',
         'maximumTransactionLifetimeMilliseconds',
@@ -387,6 +401,7 @@ const copyLimits = (value: unknown): UntrustedStorageTransactionLimits => {
         maximumActiveTransactionCount: value.maximumActiveTransactionCount,
         maximumLeaseByteLength: value.maximumLeaseByteLength,
         maximumLeaseCountPerTransaction: value.maximumLeaseCountPerTransaction,
+        maximumOwnedRecordCount: value.maximumOwnedRecordCount,
         maximumStoredValueByteLength: value.maximumStoredValueByteLength,
         maximumTransactionByteLength: value.maximumTransactionByteLength,
         maximumTransactionLifetimeMilliseconds:
@@ -484,10 +499,14 @@ const custodyWorkerCommands: readonly CustodyWorkerCommand[] = [
     'confirm-recovery-export',
     'current-snapshot',
     'delete',
+    'derive-record-identifier',
+    'hash-record-envelope',
     'initialize',
+    'open-record',
     'open-custody',
     'open-root',
     'recover',
+    'seal-record',
 ];
 
 const isCustodyWorkerRequest = (
@@ -600,7 +619,7 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
 
     public openIntoOwnedWorker(input: {
         expectedSnapshot: BrowserDeviceWrappingSnapshot;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<void> {
         return this.#queueValidatedOperation(
             () => copyBoundSnapshotInput(input),
@@ -611,7 +630,7 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
 
     public beginRecoveryExport(input: {
         expectedSnapshot: BrowserDeviceWrappingSnapshot;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<BrowserRecoveryExportChallenge> {
         return this.#queueValidatedOperation(
             () => copyBoundSnapshotInput(input),
@@ -662,7 +681,7 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
 
     public recover(input: {
         caseInsensitiveRecoveryText: string;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
         expectedSnapshot?: BrowserDeviceWrappingSnapshot;
     }): Promise<BrowserDeviceWrappingSnapshot> {
         return this.#queueValidatedOperation(
@@ -671,13 +690,88 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
                     input.caseInsensitiveRecoveryText,
                     false,
                 ),
-                externallyVerifiedCommitment: copyVerifiedCommitment(
-                    input.externallyVerifiedCommitment,
+                untrustedExpectedCommitment: copyUntrustedExpectedCommitment(
+                    input.untrustedExpectedCommitment,
                 ),
                 expectedSnapshot: copyOptionalSnapshot(input.expectedSnapshot),
             }),
             (copiedInput) =>
                 this.#sendRequest('recover', copiedInput, copySnapshot),
+        );
+    }
+
+    public deriveLocalRecordIdentifier(
+        input: BrowserLocalRecordIdentifierInput,
+    ): Promise<Uint8Array> {
+        return this.#queueValidatedOperation(
+            () => copyLocalRecordIdentifierInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'derive-record-identifier',
+                    copiedInput,
+                    (value) =>
+                        copyLocalRecordBytes(value, {
+                            allowEmpty: false,
+                            errorCode: 'OwnedWorkerFailure',
+                            exactByteLength: storageRootCommitmentByteLength,
+                            label: 'Worker-derived local-record identifier',
+                        }),
+                ),
+        );
+    }
+
+    public sealLocalRecord(
+        input: BrowserLocalRecordSealInput,
+    ): Promise<Uint8Array> {
+        return this.#queueValidatedOperation(
+            () => copyLocalRecordSealInput(input),
+            (copiedInput) =>
+                this.#sendRequest('seal-record', copiedInput, (value) =>
+                    copyLocalRecordBytes(value, {
+                        allowEmpty: false,
+                        errorCode: 'OwnedWorkerFailure',
+                        label: 'Worker-produced local-record envelope',
+                    }),
+                ),
+        );
+    }
+
+    public openLocalRecord(
+        input: BrowserLocalRecordOpenInput,
+    ): Promise<Uint8Array> {
+        return this.#queueValidatedOperation(
+            () => copyLocalRecordOpenInput(input),
+            (copiedInput) =>
+                this.#sendRequest('open-record', copiedInput, (value) =>
+                    copyLocalRecordBytes(value, {
+                        allowEmpty: true,
+                        errorCode: 'OwnedWorkerFailure',
+                        label: 'Worker-opened local-record plaintext',
+                    }),
+                ),
+        );
+    }
+
+    public hashLocalRecordEnvelope(envelope: Uint8Array): Promise<Uint8Array> {
+        return this.#queueValidatedOperation(
+            () =>
+                copyLocalRecordBytes(envelope, {
+                    allowEmpty: false,
+                    errorCode: 'InvalidInput',
+                    label: 'Local-record envelope',
+                }),
+            (copiedEnvelope) =>
+                this.#sendRequest(
+                    'hash-record-envelope',
+                    copiedEnvelope,
+                    (value) =>
+                        copyLocalRecordBytes(value, {
+                            allowEmpty: false,
+                            errorCode: 'OwnedWorkerFailure',
+                            exactByteLength: storageRootCommitmentByteLength,
+                            label: 'Worker-derived local-record envelope hash',
+                        }),
+                ),
         );
     }
 
@@ -912,10 +1006,18 @@ export const openBrowserActionStorageCustodyWorker = async (input: {
                 client.confirmRecoveryExport(confirmationInput),
             currentSnapshot: () => client.currentSnapshot(),
             delete: (expectedSnapshot) => client.delete(expectedSnapshot),
+            deriveLocalRecordIdentifier: (identifierInput) =>
+                client.deriveLocalRecordIdentifier(identifierInput),
+            hashLocalRecordEnvelope: (envelope) =>
+                client.hashLocalRecordEnvelope(envelope),
             initialize: () => client.initialize(),
+            openLocalRecord: (recordInput) =>
+                client.openLocalRecord(recordInput),
             openIntoOwnedWorker: (openInput) =>
                 client.openIntoOwnedWorker(openInput),
             recover: (recoveryInput) => client.recover(recoveryInput),
+            sealLocalRecord: (recordInput) =>
+                client.sealLocalRecord(recordInput),
         } satisfies BrowserActionStorageCustody);
     } catch (error) {
         client.abortAfterOpenFailure();
@@ -937,6 +1039,18 @@ const copyHostCommandInput = (
         case 'open-root':
         case 'begin-recovery-export':
             return copyBoundSnapshotInput(input);
+        case 'derive-record-identifier':
+            return copyLocalRecordIdentifierInput(input);
+        case 'seal-record':
+            return copyLocalRecordSealInput(input);
+        case 'open-record':
+            return copyLocalRecordOpenInput(input);
+        case 'hash-record-envelope':
+            return copyLocalRecordBytes(input, {
+                allowEmpty: false,
+                errorCode: 'InvalidInput',
+                label: 'Local-record envelope',
+            });
         case 'delete':
             return copySnapshot(input);
         case 'cancel-recovery-export':
@@ -971,7 +1085,7 @@ const copyHostCommandInput = (
                 !isPlainRecord(input) ||
                 !hasRequiredKeys(input, [
                     'caseInsensitiveRecoveryText',
-                    'externallyVerifiedCommitment',
+                    'untrustedExpectedCommitment',
                     'expectedSnapshot',
                 ])
             ) {
@@ -986,8 +1100,8 @@ const copyHostCommandInput = (
                     input.caseInsensitiveRecoveryText,
                     false,
                 ),
-                externallyVerifiedCommitment: copyVerifiedCommitment(
-                    input.externallyVerifiedCommitment,
+                untrustedExpectedCommitment: copyUntrustedExpectedCommitment(
+                    input.untrustedExpectedCommitment,
                 ),
                 expectedSnapshot: copyOptionalSnapshot(input.expectedSnapshot),
             };
@@ -1006,6 +1120,26 @@ const copyHostCommandResult = (
         case 'delete':
         case 'close':
             return validateVoidResult(result);
+        case 'derive-record-identifier':
+        case 'hash-record-envelope':
+            return copyLocalRecordBytes(result, {
+                allowEmpty: false,
+                errorCode: 'OwnedWorkerFailure',
+                exactByteLength: storageRootCommitmentByteLength,
+                label: 'Worker-derived local-record hash',
+            });
+        case 'seal-record':
+            return copyLocalRecordBytes(result, {
+                allowEmpty: false,
+                errorCode: 'OwnedWorkerFailure',
+                label: 'Worker-produced local-record envelope',
+            });
+        case 'open-record':
+            return copyLocalRecordBytes(result, {
+                allowEmpty: true,
+                errorCode: 'OwnedWorkerFailure',
+                label: 'Worker-opened local-record plaintext',
+            });
         case 'initialize':
             return copySnapshot(result);
         case 'recover':
@@ -1251,14 +1385,14 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 return custody().openIntoOwnedWorker(
                     copiedInput as {
                         expectedSnapshot: BrowserDeviceWrappingSnapshot;
-                        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+                        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
                     },
                 );
             case 'begin-recovery-export':
                 return custody().beginRecoveryExport(
                     copiedInput as {
                         expectedSnapshot: BrowserDeviceWrappingSnapshot;
-                        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+                        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
                     },
                 );
             case 'confirm-recovery-export':
@@ -1274,9 +1408,25 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 return custody().recover(
                     copiedInput as {
                         caseInsensitiveRecoveryText: string;
-                        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+                        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
                         expectedSnapshot?: BrowserDeviceWrappingSnapshot;
                     },
+                );
+            case 'derive-record-identifier':
+                return custody().deriveLocalRecordIdentifier(
+                    copiedInput as BrowserLocalRecordIdentifierInput,
+                );
+            case 'seal-record':
+                return custody().sealLocalRecord(
+                    copiedInput as BrowserLocalRecordSealInput,
+                );
+            case 'open-record':
+                return custody().openLocalRecord(
+                    copiedInput as BrowserLocalRecordOpenInput,
+                );
+            case 'hash-record-envelope':
+                return custody().hashLocalRecordEnvelope(
+                    copiedInput as Uint8Array,
                 );
             case 'delete':
                 return custody().delete(

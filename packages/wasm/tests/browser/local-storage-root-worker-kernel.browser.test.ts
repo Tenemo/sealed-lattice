@@ -1,3 +1,4 @@
+import { BrowserActionStorageCustodyError } from '@sealed-lattice/types';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
@@ -5,11 +6,16 @@ import type {
     BrowserActionStorageRootBinding,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody';
 import { openBrowserActionStorageCustodyWorker } from '#packages/protocol/src/runtime/browser-action-storage-custody-worker-channel';
+import {
+    createWasmBrowserActionStorageWorkerKernel,
+    loadFreshTranscriptCoreKernel,
+} from '#packages/wasm/src/index';
 
 const transactionLimits = {
     maximumActiveTransactionCount: 2,
     maximumLeaseByteLength: 64,
     maximumLeaseCountPerTransaction: 2,
+    maximumOwnedRecordCount: 32,
     maximumStoredValueByteLength: 4_096,
     maximumTransactionByteLength: 128,
     maximumTransactionLifetimeMilliseconds: 10_000,
@@ -27,6 +33,16 @@ const binding: BrowserActionStorageRootBinding = Object.freeze({
     participantId: createBytes(64, 43),
     suiteId: createBytes(64, 7),
 });
+
+const expectCustodyErrorCode = async (
+    operation: Promise<unknown>,
+    code: BrowserActionStorageCustodyError['code'],
+): Promise<void> => {
+    await expect(operation).rejects.toMatchObject({
+        code,
+        name: 'BrowserActionStorageCustodyError',
+    });
+};
 
 type OpenedWorker = Readonly<{
     custody: BrowserActionStorageCustody;
@@ -131,6 +147,51 @@ afterEach(async () => {
 });
 
 describe('Local storage-root real-WASM browser worker', () => {
+    it('authenticates local-record envelopes in the browser WASM runtime', async () => {
+        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
+            kernel: loadFreshTranscriptCoreKernel(),
+        });
+        await workerKernel.createAndStageDeviceWrappingState({ binding });
+        await workerKernel.commitStagedActionStorageRoot({
+            mutationIdentifier: createBytes(32, 113),
+        });
+
+        const expectedContext = {
+            actionRandomnessCommitment: createBytes(64, 127),
+            creationRecoveryEpoch: 0n,
+            identifierInput: {
+                recordType: 'subjectState',
+                stateKey: createBytes(64, 131),
+            },
+            recordVersion: 0n,
+        } as const;
+        const plaintext = createBytes(8_193, 137);
+        const envelope = await workerKernel.sealActiveLocalRecord({
+            ...expectedContext,
+            plaintext,
+        });
+        expect(
+            await workerKernel.openActiveLocalRecord({
+                ...expectedContext,
+                envelope,
+            }),
+        ).toEqual(plaintext);
+        expect(
+            await workerKernel.hashActiveLocalRecordEnvelope(envelope),
+        ).toHaveLength(64);
+
+        const tamperedEnvelope = envelope.slice();
+        tamperedEnvelope[tamperedEnvelope.length - 17] ^= 1;
+        await expectCustodyErrorCode(
+            workerKernel.openActiveLocalRecord({
+                ...expectedContext,
+                envelope: tamperedEnvelope,
+            }),
+            'RecordAuthenticationFailed',
+        );
+        await workerKernel.destroyActiveActionStorageRoot();
+    });
+
     it('completes the ordered crash, recovery, and binding-refusal lifecycle', async () => {
         {
             const primaryDatabaseName = databaseName();
@@ -155,14 +216,14 @@ describe('Local storage-root real-WASM browser worker', () => {
             await expect(
                 reopened.custody.openIntoOwnedWorker({
                     expectedSnapshot: initialSnapshot,
-                    externallyVerifiedCommitment: {
+                    untrustedExpectedCommitment: {
                         storageRootCommitment: wrongCommitment,
                     },
                 }),
             ).rejects.toMatchObject({ code: 'CommitmentMismatch' });
             await reopened.custody.openIntoOwnedWorker({
                 expectedSnapshot: initialSnapshot,
-                externallyVerifiedCommitment: {
+                untrustedExpectedCommitment: {
                     storageRootCommitment:
                         initialSnapshot.storageRootCommitment,
                 },
@@ -176,12 +237,12 @@ describe('Local storage-root real-WASM browser worker', () => {
                 databaseName: recoveryDatabaseName,
             });
             const initialSnapshot = await opened.custody.initialize();
-            const externallyVerifiedCommitment = {
+            const untrustedExpectedCommitment = {
                 storageRootCommitment: initialSnapshot.storageRootCommitment,
             };
             const challenge = await opened.custody.beginRecoveryExport({
                 expectedSnapshot: initialSnapshot,
-                externallyVerifiedCommitment,
+                untrustedExpectedCommitment,
             });
             const confirmation = await opened.custody.confirmRecoveryExport({
                 confirmedChecksum: challenge.recoveryChecksum,
@@ -196,7 +257,7 @@ describe('Local storage-root real-WASM browser worker', () => {
             const recoveredSnapshot = await opened.custody.recover({
                 caseInsensitiveRecoveryText:
                     confirmation.canonicalRecoveryText.toLowerCase(),
-                externallyVerifiedCommitment,
+                untrustedExpectedCommitment,
             });
             expect(recoveredSnapshot.storageRootCommitment).toEqual(
                 initialSnapshot.storageRootCommitment,
@@ -212,7 +273,7 @@ describe('Local storage-root real-WASM browser worker', () => {
             const initialSnapshot = await source.custody.initialize();
             const challenge = await source.custody.beginRecoveryExport({
                 expectedSnapshot: initialSnapshot,
-                externallyVerifiedCommitment: {
+                untrustedExpectedCommitment: {
                     storageRootCommitment:
                         initialSnapshot.storageRootCommitment,
                 },
@@ -236,7 +297,7 @@ describe('Local storage-root real-WASM browser worker', () => {
                 wrongBindingWorker.custody.recover({
                     caseInsensitiveRecoveryText:
                         confirmation.canonicalRecoveryText,
-                    externallyVerifiedCommitment: {
+                    untrustedExpectedCommitment: {
                         storageRootCommitment:
                             initialSnapshot.storageRootCommitment,
                     },

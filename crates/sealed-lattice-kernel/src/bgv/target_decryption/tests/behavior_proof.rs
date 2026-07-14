@@ -34,10 +34,39 @@ fn target_share_proof_statement_binds_local_witness_and_share() {
         trustee_identity: "trustee-1",
     })
     .expect("target share proof statement");
+    let setup_binding = read_setup_binding(&setup_package).expect("setup binding");
+    let accepted_binding = read_target_accepted_binding(&accepted_record, &setup_binding)
+        .expect("target accepted binding");
+    let target_ciphertext_pair = read_target_ciphertext_pair(
+        &target_ciphertexts,
+        &target_ciphertext_binding,
+        &accepted_binding,
+    )
+    .expect("target ciphertext pair");
+    let participant = setup_binding
+        .participants
+        .iter()
+        .find(|participant| participant.trustee_identity == "trustee-1")
+        .expect("target decryption participant");
+    let proof_request =
+        target_decryption_share_all_active_limbs_proof_statement_from_public_inputs(
+            TargetDecryptionShareAllActiveLimbsProofStatementInput {
+                setup_binding: &setup_binding,
+                target_ciphertexts: &target_ciphertext_pair,
+                participant,
+                target_decryption_share: &local_share,
+                proof_statement: &statement,
+            },
+        )
+        .expect("target share succinct proof request");
 
     assert_eq!(
         statement["objectType"],
         json!("BgvTargetDecryptionShareProofStatement")
+    );
+    assert_eq!(
+        proof_request["context"]["setupContextHash"],
+        json!(setup_binding.setup_context_hash)
     );
     assert_eq!(
         statement["targetDecryptionShareHash"],

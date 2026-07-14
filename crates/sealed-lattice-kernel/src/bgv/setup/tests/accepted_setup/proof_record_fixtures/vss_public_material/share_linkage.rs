@@ -529,12 +529,9 @@ pub(super) fn vss_share_linkage_proof_generation_request(
 
     serde_json::json!({
         "context": {
-            "ceremonyId": statement["ceremonyId"],
-            "manifestHash": statement["manifestHash"],
-            "rosterHash": statement["rosterHash"],
+            "setupContextHash": statement["setupContextHash"],
             "trusteeIdentity": "vss-share-linkage",
             "trusteeRosterPosition": 0,
-            "setupEpoch": statement["setupEpoch"],
             "shareLinkageStatementRoot": statement["statementRoot"],
         },
         "ringDegree": ring_degree,

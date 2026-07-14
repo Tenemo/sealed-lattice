@@ -22,11 +22,24 @@ Transcript and mailbox services only relay bytes. Correctness and acceptance mus
 The repository contains development implementations of these building blocks:
 
 - canonical poll, roster, and protocol-object encoding and validation;
+- roster-bound browser-local signing and mailbox capabilities, streaming signed
+  authenticated mailboxes, and bounded browser-local transaction and checkpoint
+  storage;
 - collective BGV setup, verifiable secret sharing, public-key construction, and evaluation-key material;
 - internal bounded encrypted-ballot relations, homomorphic aggregation, and deterministic top-k evaluation; and
 - target-bound threshold result release.
 
-They are not yet composed into one complete participant workflow. The public package does not provide accepted canonical-board finality and state authorization, target release has no persistent non-forking one-shot authority, and the current setup and ballot proofs do not have the required end-to-end security arguments. The intended participant-facing verification path is a mobile browser, but the complete ceremony has not been demonstrated on supported physical phones. Native, Node.js, desktop-browser, fixture, and emulated-mobile results are development evidence only. The authoritative limitations are maintained in [SECURITY.md](SECURITY.md).
+They are not yet composed into one complete participant workflow. The generated
+common-proof profile deliberately remains non-accepting because its application
+relations, extraction and zero-knowledge arguments, typed-transcript reduction,
+and shared-oracle post-quantum composition are incomplete. The public package
+does not provide accepted canonical-board finality and state authorization,
+and target release has no persistent non-forking one-shot authority. The
+intended participant-facing verification path is a mobile browser, but the
+complete ceremony has not been demonstrated on supported physical phones.
+Native, Node.js, desktop-browser, fixture, and emulated-mobile results are
+development evidence only. The authoritative limitations are maintained in
+[SECURITY.md](SECURITY.md).
 
 Target partial decryption remains development-only pending the security work tracked in [`SEC-016`](SECURITY.md#sec-016-theorem-matched-threshold-smudging).
 

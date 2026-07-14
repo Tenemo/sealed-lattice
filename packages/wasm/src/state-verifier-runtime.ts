@@ -44,7 +44,24 @@ type StateVerifierKernelContext = Readonly<{
         canonicalStateCertificateLength: number,
         statusPointer: number,
     ): number;
+    certifyUnorderedVotes(
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedIntentHandle: number,
+        framedCanonicalVoteCarriersPointer: number,
+        framedCanonicalVoteCarriersLength: number,
+        statusPointer: number,
+    ): number;
     deallocate(pointer: number, length: number): void;
+    describe(
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ): number;
     memory: WebAssembly.Memory;
     release(
         sessionHandle: number,
@@ -66,6 +83,17 @@ type StateVerifierKernelContext = Readonly<{
         canonicalOutputIntentCarrierLength: number,
         canonicalStateCertificatePointer: number,
         canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ): number;
+    finishWitnessVote(
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        preparedHandle: number,
+        signaturePointer: number,
+        signatureLength: number,
+        carrierOutputPointer: number,
+        carrierOutputLength: number,
         statusPointer: number,
     ): number;
     prepareOutput(
@@ -103,6 +131,17 @@ type StateVerifierKernelContext = Readonly<{
         expectedAuthorizationHashLength: number,
         canonicalReservationIntentCarrierPointer: number,
         canonicalReservationIntentCarrierLength: number,
+        statusPointer: number,
+    ): number;
+    prepareWitnessVote(
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedIntentHandle: number,
+        witnessParticipantIdentityPointer: number,
+        witnessParticipantIdentityLength: number,
+        signatureMessageOutputPointer: number,
+        signatureMessageOutputLength: number,
         statusPointer: number,
     ): number;
     verifyRecovery(
@@ -152,8 +191,11 @@ export const registerStateVerifierKernelContext = (
 
 const stateVerifierConfigurationVersion = 1;
 const stateVerifierCapabilityByteLength = 32;
+const stateDurableBindingByteLength = 674;
 const stateIdentityByteLength = 64;
 const stateHashByteLength = 64;
+const stateWitnessVoteCarrierByteLength = 3_801;
+const mlDsa65SignatureByteLength = 3_309;
 const wasm32WordByteLength = 4;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
 const fixedConfigurationByteLength = 2 + 3 * stateHashByteLength + 2 + 4;
@@ -172,6 +214,39 @@ declare const verifiedStateRecoveryBrand: unique symbol;
 declare const verifiedStateReservationIntentBrand: unique symbol;
 declare const verifiedStateOutputIntentBrand: unique symbol;
 declare const verifiedStateRecoveryIntentBrand: unique symbol;
+declare const verifiedStateDurableBindingBrand: unique symbol;
+declare const preparedStateWitnessVoteBrand: unique symbol;
+
+export const stateWitnessVoteKinds = Object.freeze({
+    reservation: 1,
+    output: 2,
+    recovery: 3,
+} as const);
+
+export type StateWitnessVoteKind =
+    (typeof stateWitnessVoteKinds)[keyof typeof stateWitnessVoteKinds];
+
+export type VerifiedStateDurableBinding = Readonly<{
+    readonly [verifiedStateDurableBindingBrand]: true;
+}>;
+
+export type StateDurableBindingDescription = Readonly<{
+    actionContextHash: Uint8Array;
+    capabilityKind: StateCapabilityKind;
+    ceremonyContextHash: Uint8Array;
+    exactOutputByteLength?: bigint;
+    exactOutputHash?: Uint8Array;
+    intentObjectHash: Uint8Array;
+    outputIntentObjectHash?: Uint8Array;
+    predecessorTransitionHash?: Uint8Array;
+    reservationIntentObjectHash?: Uint8Array;
+    stateKey: Uint8Array;
+    subjectEpoch: bigint;
+    subjectParticipantIdentity: Uint8Array;
+    suiteIdentifier: Uint8Array;
+    voteKind: StateWitnessVoteKind;
+    witnessVoteSequence: bigint;
+}>;
 
 export type VerifiedStateReservationIntent = Readonly<{
     readonly [verifiedStateReservationIntentBrand]: true;
@@ -189,6 +264,17 @@ export type VerifiedStateIntent =
     | VerifiedStateOutputIntent
     | VerifiedStateRecoveryIntent
     | VerifiedStateReservationIntent;
+
+export type UntrustedStateWitnessVoteCarrier = Readonly<{
+    canonicalCarrier: Uint8Array;
+}>;
+
+export type PreparedStateWitnessVote = Readonly<{
+    readonly [preparedStateWitnessVoteBrand]: true;
+    cancel(): void;
+    copySignatureMessage(): VerificationResult<Uint8Array>;
+    finish(signature: Uint8Array): VerificationResult<Uint8Array>;
+}>;
 
 export type VerifiedStateReservation = Readonly<{
     readonly [verifiedStateReservationBrand]: true;
@@ -290,12 +376,27 @@ export type StateVerifierSession = Readonly<{
     }): VerificationResult<
         VerifiedStateOutput | VerifiedStateRecovery | VerifiedStateReservation
     >;
+    certifyIntentFromUntrustedVoteCarriers(input: {
+        untrustedVoteCarriers: readonly UntrustedStateWitnessVoteCarrier[];
+        verifiedIntent: VerifiedStateIntent;
+    }): VerificationResult<
+        VerifiedStateOutput | VerifiedStateRecovery | VerifiedStateReservation
+    >;
     openOutputIntentVerification(
         input: StateOutputIntentVerification,
     ): VerificationResult<StateOutputIntentVerificationLease>;
     openOutputVerification(
         input: StateOutputVerification,
     ): VerificationResult<StateOutputVerificationLease>;
+    durableBindingFor(
+        verifiedObject:
+            | VerifiedStateOutput
+            | VerifiedStateOutputIntent
+            | VerifiedStateRecovery
+            | VerifiedStateRecoveryIntent
+            | VerifiedStateReservation
+            | VerifiedStateReservationIntent,
+    ): VerificationResult<VerifiedStateDurableBinding>;
     releaseVerifiedObject(
         verifiedObject:
             | VerifiedStateOutput
@@ -305,6 +406,10 @@ export type StateVerifierSession = Readonly<{
             | VerifiedStateReservation
             | VerifiedStateReservationIntent,
     ): VerificationResult<undefined>;
+    prepareWitnessVote(input: {
+        verifiedIntent: VerifiedStateIntent;
+        witnessParticipantIdentity: Uint8Array;
+    }): VerificationResult<PreparedStateWitnessVote>;
     state(): StateVerifierSessionState;
     verifyRecovery(
         input: StateRecoveryVerification,
@@ -357,7 +462,79 @@ type VerifiedObjectRecord = {
     session: StateVerifierSessionImplementation;
 };
 
+type PreparedStateWitnessVoteRecord = {
+    active: boolean;
+    handle: number;
+    signatureMessage: Uint8Array;
+};
+
 const verifiedObjectRecords = new WeakMap<object, VerifiedObjectRecord>();
+const durableBindingDescriptions = new WeakMap<
+    object,
+    StateDurableBindingDescription
+>();
+
+const copyDurableBindingDescription = (
+    description: StateDurableBindingDescription,
+): StateDurableBindingDescription =>
+    Object.freeze({
+        actionContextHash: description.actionContextHash.slice(),
+        capabilityKind: description.capabilityKind,
+        ceremonyContextHash: description.ceremonyContextHash.slice(),
+        ...(description.exactOutputByteLength === undefined
+            ? {}
+            : { exactOutputByteLength: description.exactOutputByteLength }),
+        ...(description.exactOutputHash === undefined
+            ? {}
+            : { exactOutputHash: description.exactOutputHash.slice() }),
+        intentObjectHash: description.intentObjectHash.slice(),
+        ...(description.outputIntentObjectHash === undefined
+            ? {}
+            : {
+                  outputIntentObjectHash:
+                      description.outputIntentObjectHash.slice(),
+              }),
+        ...(description.predecessorTransitionHash === undefined
+            ? {}
+            : {
+                  predecessorTransitionHash:
+                      description.predecessorTransitionHash.slice(),
+              }),
+        ...(description.reservationIntentObjectHash === undefined
+            ? {}
+            : {
+                  reservationIntentObjectHash:
+                      description.reservationIntentObjectHash.slice(),
+              }),
+        stateKey: description.stateKey.slice(),
+        subjectEpoch: description.subjectEpoch,
+        subjectParticipantIdentity:
+            description.subjectParticipantIdentity.slice(),
+        suiteIdentifier: description.suiteIdentifier.slice(),
+        voteKind: description.voteKind,
+        witnessVoteSequence: description.witnessVoteSequence,
+    });
+
+export const copyVerifiedStateDurableBinding = (
+    binding: VerifiedStateDurableBinding,
+): StateDurableBindingDescription => {
+    if (
+        (typeof binding !== 'object' && typeof binding !== 'function') ||
+        binding === null
+    ) {
+        throw new TypeError(
+            'The durable state binding was not issued by the WASM state verifier.',
+        );
+    }
+    const description = durableBindingDescriptions.get(binding);
+    if (description === undefined) {
+        throw new TypeError(
+            'The durable state binding was not issued by the WASM state verifier.',
+        );
+    }
+
+    return copyDurableBindingDescription(description);
+};
 
 const refused = <Value>(
     refusalReason: RefusalReason,
@@ -387,6 +564,180 @@ const isStateOutputCapabilityKind = (
     value === stateCapabilityKinds.ballotCandidateList ||
     value === stateCapabilityKinds.finalitySignature ||
     value === stateCapabilityKinds.targetRelease;
+
+const isStateWitnessVoteKind = (value: number): value is StateWitnessVoteKind =>
+    value === stateWitnessVoteKinds.reservation ||
+    value === stateWitnessVoteKinds.output ||
+    value === stateWitnessVoteKinds.recovery;
+
+const bytesAreZero = (bytes: Uint8Array): boolean =>
+    bytes.every((byte) => byte === 0);
+
+const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
+    if (left.byteLength !== right.byteLength) {
+        return false;
+    }
+    for (let byteIndex = 0; byteIndex < left.byteLength; byteIndex += 1) {
+        if (left[byteIndex] !== right[byteIndex]) {
+            return false;
+        }
+    }
+    return true;
+};
+
+const expectedWitnessVoteSequence = (
+    voteKind: StateWitnessVoteKind,
+    subjectEpoch: bigint,
+): bigint => {
+    if (voteKind === stateWitnessVoteKinds.recovery && subjectEpoch === 0n) {
+        throw new StateVerifierInternalError(
+            'A verifier-derived recovery binding used subject epoch zero.',
+        );
+    }
+    const multipliedEpoch = subjectEpoch * 3n;
+    switch (voteKind) {
+        case stateWitnessVoteKinds.reservation:
+            return multipliedEpoch + 1n;
+        case stateWitnessVoteKinds.output:
+            return multipliedEpoch + 2n;
+        case stateWitnessVoteKinds.recovery:
+            return multipliedEpoch;
+    }
+};
+
+const decodeDurableBinding = (
+    bytes: Uint8Array,
+): StateDurableBindingDescription => {
+    if (bytes.byteLength !== stateDurableBindingByteLength) {
+        throw new StateVerifierInternalError(
+            'The WASM state verifier returned a durable binding with the wrong length.',
+        );
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let offset = 0;
+    const readUnsigned16 = (): number => {
+        const value = view.getUint16(offset, true);
+        offset += 2;
+        return value;
+    };
+    const readUnsigned64 = (): bigint => {
+        const value = view.getBigUint64(offset, true);
+        offset += 8;
+        return value;
+    };
+    const readFixedBytes = (byteLength: number): Uint8Array => {
+        const value = bytes.slice(offset, offset + byteLength);
+        offset += byteLength;
+        return value;
+    };
+    const readOptionalHash = (): Uint8Array | undefined => {
+        const present = bytes[offset];
+        offset += 1;
+        const hash = readFixedBytes(stateHashByteLength);
+        if (present === 0) {
+            if (!bytesAreZero(hash)) {
+                throw new StateVerifierInternalError(
+                    'The WASM state verifier returned a noncanonical absent durable hash.',
+                );
+            }
+            return undefined;
+        }
+        if (present !== 1) {
+            throw new StateVerifierInternalError(
+                'The WASM state verifier returned an invalid optional-hash flag.',
+            );
+        }
+        return hash;
+    };
+
+    if (readUnsigned16() !== 1) {
+        throw new StateVerifierInternalError(
+            'The WASM state verifier returned an unsupported durable-binding version.',
+        );
+    }
+    const voteKind = readUnsigned16();
+    const capabilityKind = readUnsigned16();
+    if (
+        !isStateWitnessVoteKind(voteKind) ||
+        !isStateCapabilityKind(capabilityKind)
+    ) {
+        throw new StateVerifierInternalError(
+            'The WASM state verifier returned an unassigned durable-binding code.',
+        );
+    }
+    const suiteIdentifier = readFixedBytes(stateHashByteLength);
+    const ceremonyContextHash = readFixedBytes(stateHashByteLength);
+    const actionContextHash = readFixedBytes(stateHashByteLength);
+    const subjectParticipantIdentity = readFixedBytes(stateIdentityByteLength);
+    const stateKey = readFixedBytes(stateHashByteLength);
+    const intentObjectHash = readFixedBytes(stateHashByteLength);
+    const subjectEpoch = readUnsigned64();
+    const witnessVoteSequence = readUnsigned64();
+    const predecessorTransitionHash = readOptionalHash();
+    const reservationIntentObjectHash = readOptionalHash();
+    const outputIntentObjectHash = readOptionalHash();
+    const exactOutputHash = readOptionalHash();
+    const encodedExactOutputByteLength = readUnsigned64();
+    if (
+        offset !== bytes.byteLength ||
+        witnessVoteSequence !==
+            expectedWitnessVoteSequence(voteKind, subjectEpoch)
+    ) {
+        throw new StateVerifierInternalError(
+            'The WASM state verifier returned an inconsistent durable binding.',
+        );
+    }
+    if (
+        (voteKind === stateWitnessVoteKinds.reservation &&
+            (reservationIntentObjectHash === undefined ||
+                !bytesEqual(reservationIntentObjectHash, intentObjectHash) ||
+                outputIntentObjectHash !== undefined ||
+                exactOutputHash !== undefined ||
+                encodedExactOutputByteLength !== 0n)) ||
+        (voteKind === stateWitnessVoteKinds.output &&
+            (reservationIntentObjectHash === undefined ||
+                outputIntentObjectHash === undefined ||
+                !bytesEqual(outputIntentObjectHash, intentObjectHash) ||
+                exactOutputHash === undefined)) ||
+        (voteKind === stateWitnessVoteKinds.recovery &&
+            (exactOutputHash !== undefined ||
+                encodedExactOutputByteLength !== 0n ||
+                (outputIntentObjectHash !== undefined &&
+                    reservationIntentObjectHash === undefined)))
+    ) {
+        throw new StateVerifierInternalError(
+            'The WASM state verifier returned a semantically inconsistent durable binding.',
+        );
+    }
+
+    return Object.freeze({
+        actionContextHash,
+        capabilityKind,
+        ceremonyContextHash,
+        ...(exactOutputHash === undefined
+            ? {}
+            : {
+                  exactOutputByteLength: encodedExactOutputByteLength,
+                  exactOutputHash,
+              }),
+        intentObjectHash,
+        ...(outputIntentObjectHash === undefined
+            ? {}
+            : { outputIntentObjectHash }),
+        ...(predecessorTransitionHash === undefined
+            ? {}
+            : { predecessorTransitionHash }),
+        ...(reservationIntentObjectHash === undefined
+            ? {}
+            : { reservationIntentObjectHash }),
+        stateKey,
+        subjectEpoch,
+        subjectParticipantIdentity,
+        suiteIdentifier,
+        voteKind,
+        witnessVoteSequence,
+    });
+};
 
 const decodeStatus = (status: number): RefusalReason | undefined => {
     if (status === 0) {
@@ -420,6 +771,61 @@ const requireCopiedBytes = (
         return 'outsideSupportedProfile';
     }
     return undefined;
+};
+
+const frameUntrustedStateWitnessVoteCarriers = (
+    untrustedVoteCarriers: readonly UntrustedStateWitnessVoteCarrier[],
+): Uint8Array => {
+    const maximumCarrierCount = foundationProfile.participantCount * 2;
+    if (
+        !Array.isArray(untrustedVoteCarriers) ||
+        untrustedVoteCarriers.length === 0 ||
+        untrustedVoteCarriers.length > maximumCarrierCount
+    ) {
+        throw new StateVerifierRefusalError('outsideSupportedProfile');
+    }
+    const canonicalCarriers = (untrustedVoteCarriers as readonly unknown[]).map(
+        (untrustedCarrier) => {
+            if (
+                typeof untrustedCarrier !== 'object' ||
+                untrustedCarrier === null ||
+                Array.isArray(untrustedCarrier)
+            ) {
+                throw new StateVerifierRefusalError('wrongTypeOrLength');
+            }
+            const canonicalCarrier = (
+                untrustedCarrier as { readonly canonicalCarrier?: unknown }
+            ).canonicalCarrier;
+            const refusalReason = requireCopiedBytes(canonicalCarrier);
+            if (refusalReason !== undefined) {
+                throw new StateVerifierRefusalError(refusalReason);
+            }
+            return Uint8Array.from(canonicalCarrier as Uint8Array);
+        },
+    );
+    const byteLength = canonicalCarriers.reduce(
+        (total, carrier) => total + wasm32WordByteLength + carrier.byteLength,
+        wasm32WordByteLength,
+    );
+    if (
+        byteLength > foundationProfile.maximumCopiedBufferByteLength ||
+        byteLength > maximumWasm32UnsignedInteger
+    ) {
+        throw new StateVerifierRefusalError('outsideSupportedProfile');
+    }
+    const framed = new Uint8Array(byteLength);
+    const view = new DataView(framed.buffer);
+    let offset = 0;
+    view.setUint32(offset, canonicalCarriers.length, true);
+    offset += wasm32WordByteLength;
+    for (const carrier of canonicalCarriers) {
+        view.setUint32(offset, carrier.byteLength, true);
+        offset += wasm32WordByteLength;
+        framed.set(carrier, offset);
+        offset += carrier.byteLength;
+        carrier.fill(0);
+    }
+    return framed;
 };
 
 const encodeConfiguration = (input: StateVerifierSessionInput): Uint8Array => {
@@ -719,6 +1125,7 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
     readonly #outputLeases = new Set<
         StateOutputVerificationLeaseImplementation<unknown>
     >();
+    readonly #preparedWitnessVotes = new Set<PreparedStateWitnessVoteRecord>();
     #capabilityPointer: number;
     #state: StateVerifierSessionState = 'active';
 
@@ -732,6 +1139,98 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         this.#context = context;
         this.#handle = handle;
         this.#capabilityPointer = capabilityPointer;
+    }
+
+    public durableBindingFor(
+        verifiedObject:
+            | VerifiedStateOutput
+            | VerifiedStateOutputIntent
+            | VerifiedStateRecovery
+            | VerifiedStateRecoveryIntent
+            | VerifiedStateReservation
+            | VerifiedStateReservationIntent,
+    ): VerificationResult<VerifiedStateDurableBinding> {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        const resolved = resolveVerifiedObject(verifiedObject, this, [
+            'output',
+            'output-intent',
+            'recovery',
+            'recovery-intent',
+            'reservation',
+            'reservation-intent',
+        ]);
+        if ('refusalReason' in resolved) {
+            return refused(resolved.refusalReason);
+        }
+
+        let outputPointer = 0;
+        try {
+            outputPointer = allocateZeroed(
+                this.#context,
+                stateDurableBindingByteLength,
+            );
+            const status = this.#context.runExclusive(
+                'state verifier describe durable binding',
+                () =>
+                    this.#context.describe(
+                        this.#handle,
+                        this.#capabilityPointer,
+                        stateVerifierCapabilityByteLength,
+                        resolved.record.handle,
+                        outputPointer,
+                        stateDurableBindingByteLength,
+                    ),
+            );
+            const refusalReason = decodeStatus(status);
+            if (refusalReason !== undefined) {
+                return refused(refusalReason);
+            }
+            const description = decodeDurableBinding(
+                new Uint8Array(
+                    this.#context.memory.buffer,
+                    outputPointer,
+                    stateDurableBindingByteLength,
+                ).slice(),
+            );
+            const expectedVoteKind =
+                resolved.record.kind === 'reservation' ||
+                resolved.record.kind === 'reservation-intent'
+                    ? stateWitnessVoteKinds.reservation
+                    : resolved.record.kind === 'output' ||
+                        resolved.record.kind === 'output-intent'
+                      ? stateWitnessVoteKinds.output
+                      : stateWitnessVoteKinds.recovery;
+            if (
+                description.capabilityKind !== resolved.record.capabilityKind ||
+                description.voteKind !== expectedVoteKind
+            ) {
+                throw new StateVerifierInternalError(
+                    'The WASM durable binding does not match its verified object handle.',
+                );
+            }
+            const binding = Object.freeze(Object.create(null) as object);
+            durableBindingDescriptions.set(binding, description);
+            return valid(binding as VerifiedStateDurableBinding);
+        } catch (error) {
+            if (error instanceof StateVerifierRefusalError) {
+                return refused(error.refusalReason);
+            }
+            throw error;
+        } finally {
+            if (outputPointer !== 0) {
+                zeroMemory(
+                    this.#context,
+                    outputPointer,
+                    stateDurableBindingByteLength,
+                );
+                this.#context.deallocate(
+                    outputPointer,
+                    stateDurableBindingByteLength,
+                );
+            }
+        }
     }
 
     public verifyReservation(
@@ -934,6 +1433,205 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
                     | VerifiedStateReservation
                 >(handle, certifiedKind, resolved.record.capabilityKind),
         );
+    }
+
+    public certifyIntentFromUntrustedVoteCarriers(input: {
+        untrustedVoteCarriers: readonly UntrustedStateWitnessVoteCarrier[];
+        verifiedIntent: VerifiedStateIntent;
+    }): VerificationResult<
+        VerifiedStateOutput | VerifiedStateRecovery | VerifiedStateReservation
+    > {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input)
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        const resolved = resolveVerifiedObject(input.verifiedIntent, this, [
+            'output-intent',
+            'recovery-intent',
+            'reservation-intent',
+        ]);
+        if ('refusalReason' in resolved) {
+            return refused(resolved.refusalReason);
+        }
+        let framedCarriers: Uint8Array;
+        try {
+            framedCarriers = frameUntrustedStateWitnessVoteCarriers(
+                input.untrustedVoteCarriers,
+            );
+        } catch (error) {
+            if (error instanceof StateVerifierRefusalError) {
+                return refused(error.refusalReason);
+            }
+            throw error;
+        }
+        const certifiedKind: Extract<
+            VerifiedObjectKind,
+            'output' | 'recovery' | 'reservation'
+        > =
+            resolved.record.kind === 'output-intent'
+                ? 'output'
+                : resolved.record.kind === 'recovery-intent'
+                  ? 'recovery'
+                  : 'reservation';
+        try {
+            return this.#runHandleVerification(
+                'unordered state vote certification',
+                [framedCarriers],
+                (pointers, statusPointer) =>
+                    this.#context.certifyUnorderedVotes(
+                        this.#handle,
+                        this.#capabilityPointer,
+                        stateVerifierCapabilityByteLength,
+                        resolved.record.handle,
+                        pointers[0],
+                        framedCarriers.byteLength,
+                        statusPointer,
+                    ),
+                (handle) =>
+                    this.#issueVerifiedObject<
+                        | VerifiedStateOutput
+                        | VerifiedStateRecovery
+                        | VerifiedStateReservation
+                    >(handle, certifiedKind, resolved.record.capabilityKind),
+            );
+        } finally {
+            framedCarriers.fill(0);
+        }
+    }
+
+    public prepareWitnessVote(input: {
+        verifiedIntent: VerifiedStateIntent;
+        witnessParticipantIdentity: Uint8Array;
+    }): VerificationResult<PreparedStateWitnessVote> {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input)
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        const witnessIdentityRefusal = requireCopiedBytes(
+            input.witnessParticipantIdentity,
+            stateIdentityByteLength,
+        );
+        if (witnessIdentityRefusal !== undefined) {
+            return refused(witnessIdentityRefusal);
+        }
+        const resolved = resolveVerifiedObject(input.verifiedIntent, this, [
+            'output-intent',
+            'recovery-intent',
+            'reservation-intent',
+        ]);
+        if ('refusalReason' in resolved) {
+            return refused(resolved.refusalReason);
+        }
+        const witnessParticipantIdentity = Uint8Array.from(
+            input.witnessParticipantIdentity,
+        );
+        let identityPointer = 0;
+        let messagePointer = 0;
+        let statusPointer = 0;
+        let preparedHandle = 0;
+        try {
+            identityPointer = allocateAndCopy(
+                this.#context,
+                witnessParticipantIdentity,
+            );
+            messagePointer = allocateZeroed(this.#context, stateHashByteLength);
+            statusPointer = allocateZeroed(this.#context, wasm32WordByteLength);
+            preparedHandle = this.#context.runExclusive(
+                'state witness vote preparation',
+                () =>
+                    this.#context.prepareWitnessVote(
+                        this.#handle,
+                        this.#capabilityPointer,
+                        stateVerifierCapabilityByteLength,
+                        resolved.record.handle,
+                        identityPointer,
+                        witnessParticipantIdentity.byteLength,
+                        messagePointer,
+                        stateHashByteLength,
+                        statusPointer,
+                    ),
+            );
+            const refusalReason = decodeStatus(
+                new DataView(
+                    this.#context.memory.buffer,
+                    statusPointer,
+                    wasm32WordByteLength,
+                ).getUint32(0, true),
+            );
+            if (refusalReason !== undefined) {
+                if (preparedHandle !== 0) {
+                    throw new StateVerifierInternalError(
+                        'A refused state-vote preparation returned a handle.',
+                    );
+                }
+                return refused(refusalReason);
+            }
+            if (preparedHandle === 0) {
+                throw new StateVerifierInternalError(
+                    'State-vote preparation returned no handle.',
+                );
+            }
+            const record: PreparedStateWitnessVoteRecord = {
+                active: true,
+                handle: preparedHandle,
+                signatureMessage: new Uint8Array(
+                    this.#context.memory.buffer,
+                    messagePointer,
+                    stateHashByteLength,
+                ).slice(),
+            };
+            this.#preparedWitnessVotes.add(record);
+            const prepared = Object.freeze({
+                cancel: (): void => this.#cancelPreparedWitnessVote(record),
+                copySignatureMessage: (): VerificationResult<Uint8Array> =>
+                    record.active && this.#state === 'active'
+                        ? valid(record.signatureMessage.slice())
+                        : refused('consumedState'),
+                finish: (
+                    signature: Uint8Array,
+                ): VerificationResult<Uint8Array> =>
+                    this.#finishPreparedWitnessVote(record, signature),
+            }) as PreparedStateWitnessVote;
+            return valid(prepared);
+        } catch (error) {
+            if (preparedHandle !== 0) {
+                const status = this.#context.release(
+                    this.#handle,
+                    this.#capabilityPointer,
+                    stateVerifierCapabilityByteLength,
+                    preparedHandle,
+                );
+                decodeStatus(status);
+            }
+            if (error instanceof StateVerifierRefusalError) {
+                return refused(error.refusalReason);
+            }
+            throw error;
+        } finally {
+            witnessParticipantIdentity.fill(0);
+            for (const [pointer, byteLength] of [
+                [identityPointer, stateIdentityByteLength],
+                [messagePointer, stateHashByteLength],
+                [statusPointer, wasm32WordByteLength],
+            ] as const) {
+                if (pointer !== 0) {
+                    zeroMemory(this.#context, pointer, byteLength);
+                    this.#context.deallocate(pointer, byteLength);
+                }
+            }
+        }
     }
 
     public openOutputIntentVerification(
@@ -1325,6 +2023,11 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         for (const outputLease of [...this.#outputLeases]) {
             outputLease.cancel();
         }
+        for (const preparedVote of this.#preparedWitnessVotes) {
+            preparedVote.active = false;
+            preparedVote.signatureMessage.fill(0);
+        }
+        this.#preparedWitnessVotes.clear();
         const status = this.#context.runExclusive(
             'state verifier cancellation',
             () =>
@@ -1353,6 +2056,128 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
             stateVerifierCapabilityByteLength,
         );
         this.#capabilityPointer = 0;
+    }
+
+    #cancelPreparedWitnessVote(record: PreparedStateWitnessVoteRecord): void {
+        if (!record.active) {
+            return;
+        }
+        record.active = false;
+        record.signatureMessage.fill(0);
+        this.#preparedWitnessVotes.delete(record);
+        if (this.#state !== 'active') {
+            return;
+        }
+        const refusalReason = decodeStatus(
+            this.#context.runExclusive(
+                'prepared state witness vote cancellation',
+                () =>
+                    this.#context.release(
+                        this.#handle,
+                        this.#capabilityPointer,
+                        stateVerifierCapabilityByteLength,
+                        record.handle,
+                    ),
+            ),
+        );
+        if (refusalReason !== undefined) {
+            throw new StateVerifierRefusalError(refusalReason);
+        }
+    }
+
+    #finishPreparedWitnessVote(
+        record: PreparedStateWitnessVoteRecord,
+        signature: Uint8Array,
+    ): VerificationResult<Uint8Array> {
+        if (!record.active || this.#state !== 'active') {
+            record.signatureMessage.fill(0);
+            return refused('consumedState');
+        }
+        const signatureRefusal = requireCopiedBytes(
+            signature,
+            mlDsa65SignatureByteLength,
+        );
+        if (signatureRefusal !== undefined) {
+            return refused(signatureRefusal);
+        }
+        const copiedSignature = Uint8Array.from(signature);
+        let signaturePointer = 0;
+        let carrierPointer = 0;
+        let statusPointer = 0;
+        let finishInvoked = false;
+        try {
+            signaturePointer = allocateAndCopy(this.#context, copiedSignature);
+            carrierPointer = allocateZeroed(
+                this.#context,
+                stateWitnessVoteCarrierByteLength,
+            );
+            statusPointer = allocateZeroed(this.#context, wasm32WordByteLength);
+            finishInvoked = true;
+            const returnedCarrier = this.#context.runExclusive(
+                'prepared state witness vote finish',
+                () =>
+                    this.#context.finishWitnessVote(
+                        this.#handle,
+                        this.#capabilityPointer,
+                        stateVerifierCapabilityByteLength,
+                        record.handle,
+                        signaturePointer,
+                        copiedSignature.byteLength,
+                        carrierPointer,
+                        stateWitnessVoteCarrierByteLength,
+                        statusPointer,
+                    ),
+            );
+            const refusalReason = decodeStatus(
+                new DataView(
+                    this.#context.memory.buffer,
+                    statusPointer,
+                    wasm32WordByteLength,
+                ).getUint32(0, true),
+            );
+            if (refusalReason !== undefined) {
+                if (returnedCarrier !== 0) {
+                    throw new StateVerifierInternalError(
+                        'A refused state-vote finish returned success.',
+                    );
+                }
+                return refused(refusalReason);
+            }
+            if (returnedCarrier !== 1) {
+                throw new StateVerifierInternalError(
+                    'A successful state-vote finish returned no carrier.',
+                );
+            }
+            return valid(
+                new Uint8Array(
+                    this.#context.memory.buffer,
+                    carrierPointer,
+                    stateWitnessVoteCarrierByteLength,
+                ).slice(),
+            );
+        } catch (error) {
+            if (error instanceof StateVerifierRefusalError) {
+                return refused(error.refusalReason);
+            }
+            throw error;
+        } finally {
+            copiedSignature.fill(0);
+            if (finishInvoked) {
+                record.active = false;
+                record.signatureMessage.fill(0);
+                this.#preparedWitnessVotes.delete(record);
+            }
+            for (const [pointer, byteLength] of [
+                [signaturePointer, mlDsa65SignatureByteLength],
+                [carrierPointer, stateWitnessVoteCarrierByteLength],
+                [statusPointer, wasm32WordByteLength],
+            ] as const) {
+                if (pointer !== 0) {
+                    zeroMemory(this.#context, pointer, byteLength);
+                    this.#context.deallocate(pointer, byteLength);
+                }
+            }
+        }
     }
 
     #finishOutputIntent(

@@ -1,6 +1,10 @@
+use fips203::{
+    ml_kem_768,
+    traits::{KeyGen as KemKeyGen, SerDes as KemSerDes},
+};
 use fips204::{
     ml_dsa_65,
-    traits::{KeyGen, SerDes, Signer},
+    traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes, Signer},
 };
 
 use super::*;
@@ -32,9 +36,19 @@ impl TestFixture {
             key_seed[31] = u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
                 .expect("test reverse roster position fits u8");
             let (public_key, private_key) = ml_dsa_65::KG::keygen_from_seed(&key_seed);
+            let mut mailbox_seed = [0x41_u8; 32];
+            mailbox_seed[0] =
+                u8::try_from(roster_position + 1).expect("test roster position fits u8");
+            let mut mailbox_fallback_seed = [0x92_u8; 32];
+            mailbox_fallback_seed[31] =
+                u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                    .expect("test reverse roster position fits u8");
+            let (mailbox_key, _) =
+                ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
             roster_entries.push(RosterEntry {
                 roster_position,
                 signing_verification_key: public_key.into_bytes(),
+                mailbox_encapsulation_key: mailbox_key.into_bytes(),
             });
             private_keys.push(private_key);
         }
@@ -974,6 +988,119 @@ fn state_verifier_accepts_exact_quorums_and_refuses_every_malformed_extra_or_con
             canonical_state_certificate: &reservation_certificate,
         }),
         RefusalReason::WrongContext,
+    );
+}
+
+#[test]
+fn unordered_state_votes_are_authenticated_before_duplicate_and_equivocation_resolution() {
+    let fixture = TestFixture::new();
+    let verifier = fixture.verifier();
+    let subject_participant_id = fixture.subject_participant_id();
+    let capability_kind = StateCapabilityKind::TargetRelease;
+    let authorization_hash = Hash512::from_bytes([0xa1; 64]);
+    let reservation_carrier = fixture.signed_subject_intent(
+        FoundationObjectType::StateReservation,
+        0,
+        None,
+        0,
+        StateReservationIntentPayload {
+            capability_kind,
+            authorization_hash,
+        }
+        .encode()
+        .expect("reservation payload encodes"),
+    );
+    let reservation_hash = object_hash(&reservation_carrier);
+    let verified_intent = verifier
+        .verify_reservation_intent(StateReservationIntentVerificationInput {
+            subject_participant_id,
+            capability_kind,
+            verified_predecessor_recovery: None,
+            expected_authorization_hash: authorization_hash,
+            canonical_reservation_intent_carrier: &reservation_carrier,
+        })
+        .into_result()
+        .expect("reservation intent verifies");
+    let producer_sequence =
+        derive_state_witness_vote_sequence(StateWitnessVoteKind::Reservation, 0)
+            .expect("vote sequence derives");
+    let mut unordered_votes = (1..=7)
+        .rev()
+        .map(|position| fixture.vote_carrier(position, reservation_hash, producer_sequence))
+        .collect::<Vec<_>>();
+    let duplicate_envelope = SignedCarrier::decode(
+        unordered_votes
+            .last()
+            .expect("unordered votes have a last carrier"),
+        &CanonicalDecodeLimits::default(),
+    )
+    .expect("duplicate source carrier decodes")
+    .envelope;
+    unordered_votes.push(fixture.sign_envelope(1, duplicate_envelope, 0xf1));
+    let certified = verifier
+        .certify_reservation_intent_from_unordered_vote_carriers(&verified_intent, &unordered_votes)
+        .into_result()
+        .expect("unordered votes and a semantic duplicate certify");
+    assert_eq!(certified.intent_object_hash(), reservation_hash);
+
+    let wrong_hash = Hash512::from_bytes([0xfe; 64]);
+    let conflicting_vote = fixture.vote_carrier(1, wrong_hash, producer_sequence);
+    let mut equivocation_votes = unordered_votes[..7].to_vec();
+    equivocation_votes.push(conflicting_vote.clone());
+    expect_refusal(
+        verifier.certify_reservation_intent_from_unordered_vote_carriers(
+            &verified_intent,
+            &equivocation_votes,
+        ),
+        RefusalReason::Equivocation,
+    );
+
+    let mut unauthenticated_conflict =
+        SignedCarrier::decode(&conflicting_vote, &CanonicalDecodeLimits::default())
+            .expect("conflicting carrier decodes");
+    unauthenticated_conflict.signature[0] ^= 1;
+    let mut unauthenticated_votes = unordered_votes[..7].to_vec();
+    unauthenticated_votes.push(
+        unauthenticated_conflict
+            .encode()
+            .expect("invalid-signature carrier encodes"),
+    );
+    expect_refusal(
+        verifier.certify_reservation_intent_from_unordered_vote_carriers(
+            &verified_intent,
+            &unauthenticated_votes,
+        ),
+        RefusalReason::InvalidSignature,
+    );
+
+    let mut malformed_votes = unordered_votes[..7].to_vec();
+    malformed_votes.push(vec![0x01, 0x02, 0x03]);
+    expect_refusal(
+        verifier.certify_reservation_intent_from_unordered_vote_carriers(
+            &verified_intent,
+            &malformed_votes,
+        ),
+        RefusalReason::MalformedEncoding,
+    );
+
+    let binding = verified_intent.durable_binding();
+    let (prepared_envelope, signature_message) = verifier
+        .prepare_state_witness_vote(binding, fixture.participant_identities[1])
+        .expect("state witness vote prepares");
+    let prepared_signature = fixture.private_keys[1]
+        .try_sign_with_seed(
+            &[0x81; 32],
+            signature_message.as_bytes(),
+            OBJECT_SIGNATURE_CONTEXT,
+        )
+        .expect("prepared state witness vote signs");
+    let prepared_carrier = verifier
+        .finish_prepared_state_witness_vote(prepared_envelope, prepared_signature)
+        .expect("prepared state witness vote finishes");
+    assert_eq!(
+        prepared_carrier,
+        fixture.vote_carrier(1, reservation_hash, producer_sequence),
+        "the closed preparation path produces the exact canonical carrier",
     );
 }
 

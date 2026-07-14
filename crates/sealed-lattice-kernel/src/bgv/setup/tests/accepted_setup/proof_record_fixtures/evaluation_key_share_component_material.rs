@@ -361,12 +361,14 @@ fn evaluation_key_component_vector_root(
 // and no profile-identifier fields enter the preimage.
 pub(in super::super) fn relinearization_key_switch_seed_for_test(
     schedule: &serde_json::Value,
+    public_matrix_seed_hash: &str,
     round: &str,
     level: u64,
 ) -> String {
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "RelinearizationKeySwitchPublicSampleSeed",
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
+        "publicMatrixSeedHash": public_matrix_seed_hash,
         "round": round,
         "level": level,
     }))
@@ -377,12 +379,14 @@ pub(in super::super) fn relinearization_key_switch_seed_for_test(
 // accepted-setup verifier's `expected_galois_key_switch_seed`.
 pub(in super::super) fn galois_key_switch_seed_for_test(
     schedule: &serde_json::Value,
+    public_matrix_seed_hash: &str,
     rotation: u64,
     level: u64,
 ) -> String {
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "GaloisKeySwitchPublicSampleSeed",
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
+        "publicMatrixSeedHash": public_matrix_seed_hash,
         "rotation": rotation,
         "level": level,
     }))

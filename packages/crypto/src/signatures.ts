@@ -3,9 +3,9 @@ import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import type {
     CanonicalSignedRootObject,
     ProtocolHash,
-    ProtocolRefusalCode,
     ProtocolSignatureEnvelope,
-    SignatureVerificationResult,
+    RefusalReason,
+    VerificationResult,
 } from '@sealed-lattice/types';
 
 import { canonicalJson } from './canonical-json.js';
@@ -16,28 +16,24 @@ const supportedMlDsaContextString = 'sealed-lattice:v1';
 const mlDsa65PublicKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 
-export type SignatureExpectation = Readonly<
+type SignatureExpectation = Readonly<
     CanonicalSignedRootObject & {
         readonly publicKeyHash: ProtocolHash;
     }
 >;
 
-const emptySignatureVerificationResult = (
-    code: ProtocolRefusalCode,
-    message: string,
-): SignatureVerificationResult => ({
+const refusedSignatureVerification = (
+    refusalReason: RefusalReason,
+): VerificationResult<ProtocolSignatureEnvelope> => ({
     isValid: false,
-    refusedObjects: [
-        {
-            code,
-            message,
-        },
-    ],
+    refusalReason,
 });
 
-const successfulSignatureVerification = (): SignatureVerificationResult => ({
+const successfulSignatureVerification = (
+    signature: ProtocolSignatureEnvelope,
+): VerificationResult<ProtocolSignatureEnvelope> => ({
     isValid: true,
-    refusedObjects: [],
+    value: signature,
 });
 
 const isCanonicalInteger = (value: number): boolean =>
@@ -52,29 +48,13 @@ const isLowercaseHex = (value: string): boolean =>
 const isProtocolHashString = (value: string): boolean =>
     /^[0-9a-f]{128}$/u.test(value);
 
-const isOptionalProtocolHash = (
-    value: unknown,
-): value is ProtocolHash | undefined =>
-    value === undefined ||
-    (typeof value === 'string' && isProtocolHashString(value));
-
 const canonicalSignedRootValue = (
     signedRoot: CanonicalSignedRootObject,
 ): CanonicalSignedRootObject => ({
     objectType: signedRoot.objectType,
     ceremonyId: signedRoot.ceremonyId,
-    ...(signedRoot.manifestHash === undefined
-        ? {}
-        : { manifestHash: signedRoot.manifestHash }),
-    ...(signedRoot.objectRoot === undefined
-        ? {}
-        : { objectRoot: signedRoot.objectRoot }),
-    ...(signedRoot.chunkMerkleRoot === undefined
-        ? {}
-        : { chunkMerkleRoot: signedRoot.chunkMerkleRoot }),
-    ...(signedRoot.boardHeadHash === undefined
-        ? {}
-        : { boardHeadHash: signedRoot.boardHeadHash }),
+    manifestHash: signedRoot.manifestHash,
+    objectRoot: signedRoot.objectRoot,
     signerRole: signedRoot.signerRole,
     signerIdentity: signedRoot.signerIdentity,
     recoveryEpoch: signedRoot.recoveryEpoch,
@@ -111,9 +91,7 @@ const decodeHexField = (
     return bytes;
 };
 
-export const deriveMlDsaPublicKeyHash = (
-    publicKeyBytesHex: string,
-): ProtocolHash => {
+const deriveMlDsaPublicKeyHash = (publicKeyBytesHex: string): ProtocolHash => {
     decodeHexField(
         publicKeyBytesHex,
         mlDsa65PublicKeyByteLength,
@@ -128,7 +106,7 @@ export const deriveMlDsaPublicKeyHash = (
 
 const validateSignatureMaterial = (
     signature: ProtocolSignatureEnvelope,
-): SignatureVerificationResult | undefined => {
+): VerificationResult<ProtocolSignatureEnvelope> | undefined => {
     try {
         decodeHexField(
             signature.publicKeyBytesHex,
@@ -141,20 +119,14 @@ const validateSignatureMaterial = (
             'signatureBytesHex',
         );
     } catch {
-        return emptySignatureVerificationResult(
-            'InvalidSignature',
-            'Signature envelope contains malformed ML-DSA key or signature bytes.',
-        );
+        return refusedSignatureVerification('invalidSignature');
     }
 
     const expectedPublicKeyHash = deriveMlDsaPublicKeyHash(
         signature.publicKeyBytesHex,
     );
     if (signature.publicKeyHash !== expectedPublicKeyHash) {
-        return emptySignatureVerificationResult(
-            'WrongPublicKey',
-            'Signature public key hash does not match the ML-DSA public key bytes.',
-        );
+        return refusedSignatureVerification('wrongContext');
     }
 
     return undefined;
@@ -162,11 +134,13 @@ const validateSignatureMaterial = (
 
 const validateSignedRootShape = (
     signedRoot: CanonicalSignedRootObject,
-): SignatureVerificationResult | undefined => {
+): VerificationResult<ProtocolSignatureEnvelope> | undefined => {
     const signedRootRecord = signedRoot as Record<string, unknown>;
     const requiredFields = [
         'objectType',
         'ceremonyId',
+        'manifestHash',
+        'objectRoot',
         'signerRole',
         'signerIdentity',
         'recoveryEpoch',
@@ -179,57 +153,27 @@ const validateSignedRootShape = (
     );
 
     if (missingField !== undefined) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            `Signed roots must bind ${missingField}.`,
-        );
-    }
-    const objectRootPresent = typeof signedRoot.objectRoot === 'string';
-    const chunkMerkleRootPresent =
-        typeof signedRoot.chunkMerkleRoot === 'string';
-
-    if (!objectRootPresent && !chunkMerkleRootPresent) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signed roots must bind an object root or chunk Merkle root.',
-        );
-    }
-    if (objectRootPresent && chunkMerkleRootPresent) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signed roots must bind exactly one object root or chunk Merkle root.',
-        );
+        return refusedSignatureVerification('wrongTypeOrLength');
     }
     if (
-        !isOptionalProtocolHash(signedRoot.objectRoot) ||
-        !isOptionalProtocolHash(signedRoot.chunkMerkleRoot) ||
-        !isOptionalProtocolHash(signedRoot.manifestHash) ||
-        !isOptionalProtocolHash(signedRoot.boardHeadHash) ||
+        !isProtocolHashString(signedRoot.manifestHash) ||
+        !isProtocolHashString(signedRoot.objectRoot) ||
         !isProtocolHashString(signedRoot.contextHash)
     ) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signed-root hash bindings must be canonical hash strings when present.',
-        );
+        return refusedSignatureVerification('wrongTypeOrLength');
     }
     if (
         !isNonNegativeInteger(signedRoot.recoveryEpoch) ||
         !isNonNegativeInteger(signedRoot.deviceEpoch)
     ) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signed root epochs must be non-negative integers.',
-        );
+        return refusedSignatureVerification('wrongTypeOrLength');
     }
     if (
         signedRoot.ceremonyId.length === 0 ||
         signedRoot.signerIdentity.length === 0 ||
         signedRoot.contextHash.length === 0
     ) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signed roots must bind ceremony, signer identity, and context hash.',
-        );
+        return refusedSignatureVerification('wrongTypeOrLength');
     }
 
     return undefined;
@@ -238,80 +182,38 @@ const validateSignedRootShape = (
 const validateExpectation = (
     signature: ProtocolSignatureEnvelope,
     expectation: SignatureExpectation,
-): SignatureVerificationResult | undefined => {
+): VerificationResult<ProtocolSignatureEnvelope> | undefined => {
     const { signedRoot } = signature;
 
     if (signedRoot.objectType !== expectation.objectType) {
-        return emptySignatureVerificationResult(
-            'WrongObjectType',
-            'Signature root object type does not match the expected object.',
-        );
+        return refusedSignatureVerification('wrongTypeOrLength');
     }
     if (signedRoot.signerRole !== expectation.signerRole) {
-        return emptySignatureVerificationResult(
-            'WrongSignerRole',
-            'Signature root signer role does not match the expected role.',
-        );
+        return refusedSignatureVerification('wrongTypeOrLength');
     }
     if (signedRoot.signerIdentity !== expectation.signerIdentity) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root signer identity does not match the expected identity.',
-        );
+        return refusedSignatureVerification('wrongContext');
     }
     if (signedRoot.ceremonyId !== expectation.ceremonyId) {
-        return emptySignatureVerificationResult(
-            'WrongCeremony',
-            'Signature root ceremony does not match the expected ceremony.',
-        );
+        return refusedSignatureVerification('wrongContext');
     }
     if (signature.publicKeyHash !== expectation.publicKeyHash) {
-        return emptySignatureVerificationResult(
-            'WrongPublicKey',
-            'Signature public key hash does not match the expected key.',
-        );
+        return refusedSignatureVerification('wrongContext');
     }
     if (signedRoot.manifestHash !== expectation.manifestHash) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root manifest hash does not match the expected manifest.',
-        );
+        return refusedSignatureVerification('wrongHashOrRoot');
     }
     if (signedRoot.objectRoot !== expectation.objectRoot) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root object hash does not match the signed object.',
-        );
-    }
-    if (signedRoot.chunkMerkleRoot !== expectation.chunkMerkleRoot) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root chunk Merkle root does not match the expected object.',
-        );
-    }
-    if (signedRoot.boardHeadHash !== expectation.boardHeadHash) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root board-head hash does not match the expected head.',
-        );
+        return refusedSignatureVerification('wrongHashOrRoot');
     }
     if (signedRoot.recoveryEpoch !== expectation.recoveryEpoch) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root recovery epoch does not match the expected object.',
-        );
+        return refusedSignatureVerification('wrongContext');
     }
     if (signedRoot.deviceEpoch !== expectation.deviceEpoch) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root device epoch does not match the expected object.',
-        );
+        return refusedSignatureVerification('wrongContext');
     }
     if (signedRoot.contextHash !== expectation.contextHash) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root context hash does not match the expected context.',
-        );
+        return refusedSignatureVerification('wrongContext');
     }
 
     return undefined;
@@ -320,7 +222,7 @@ const validateExpectation = (
 const verifySignedObjectSignatureInner = (
     signature: ProtocolSignatureEnvelope,
     expectation: SignatureExpectation,
-): SignatureVerificationResult => {
+): VerificationResult<ProtocolSignatureEnvelope> => {
     const materialFailure = validateSignatureMaterial(signature);
     if (materialFailure !== undefined) {
         return materialFailure;
@@ -359,25 +261,19 @@ const verifySignedObjectSignatureInner = (
     );
 
     if (!signatureValid) {
-        return emptySignatureVerificationResult(
-            'InvalidSignature',
-            'ML-DSA signature does not verify for the canonical signed root.',
-        );
+        return refusedSignatureVerification('invalidSignature');
     }
 
-    return successfulSignatureVerification();
+    return successfulSignatureVerification(signature);
 };
 
 export const verifySignedObjectSignature = (
     signature: ProtocolSignatureEnvelope,
     expectation: SignatureExpectation,
-): SignatureVerificationResult => {
+): VerificationResult<ProtocolSignatureEnvelope> => {
     try {
         return verifySignedObjectSignatureInner(signature, expectation);
     } catch {
-        return emptySignatureVerificationResult(
-            'InvalidSignature',
-            'Signature envelope is not a canonical ML-DSA signed-root envelope.',
-        );
+        return refusedSignatureVerification('invalidSignature');
     }
 };

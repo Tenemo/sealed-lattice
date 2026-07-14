@@ -183,4 +183,18 @@ mod tests {
 
         assert_eq!(display_text.as_str(), "label-\u{e000}");
     }
+
+    #[test]
+    fn unicode_seventeen_assignment_boundary_is_enforced() {
+        let newly_assigned = StabilizedDisplayText::from_ingress_utf8("\u{16ea0}".as_bytes())
+            .expect("Unicode 17 assigned code point is accepted");
+        assert_eq!(newly_assigned.as_str(), "\u{16ea0}");
+
+        assert_eq!(
+            StabilizedDisplayText::from_ingress_utf8("\u{16eb9}".as_bytes()),
+            Err(DisplayTextError::UnassignedCodePoint {
+                code_point: 0x16eb9
+            })
+        );
+    }
 }

@@ -1,13 +1,17 @@
 use core::str;
 use std::cell::RefCell;
+use std::collections::HashSet;
 
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
+use super::local_encrypted_storage::LocalRecordSealWithIdentifierInput;
 use super::{
     ActionStorageRoot, CanonicalDecodeLimits, CanonicalLocalStorageRecoveryIngress,
-    DeviceWrappedStorageRoot, Hash512, LocalStorageBinding, ParticipantIdentity, RefusalReason,
-    StorageRootCommitmentPayload,
+    DeviceWrappedStorageRoot, Hash512, LocalRecordEnvelope, LocalRecordIdentifierInput,
+    LocalRecordType, LocalStorageBinding, ParticipantIdentity, RefusalReason,
+    StorageRootCommitmentPayload, derive_local_record_envelope_hash,
+    derive_local_record_identifier,
 };
 
 pub(crate) const LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH: usize = 32;
@@ -24,6 +28,10 @@ pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DESTROY: u32 = 10;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_PREPARE_RECOVERY: u32 = 11;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_CONFIRM_RECOVERY: u32 = 12;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_RESET: u32 = 13;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER: u32 = 14;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD: u32 = 15;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD: u32 = 16;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_HASH_RECORD_ENVELOPE: u32 = 17;
 
 pub(crate) const LOCAL_STORAGE_ROOT_STATUS_RESOURCE_LIMIT: u32 = 0x0001_0000;
 pub(crate) const LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE: u32 = 0x0001_0001;
@@ -36,12 +44,18 @@ const HANDLE_BYTE_LENGTH: usize = 4;
 const MUTATION_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const RECOVERY_CHECKSUM_BYTE_LENGTH: usize = 16;
 const RECOVERY_TEXT_BYTE_LENGTH: usize = 708;
+const MAXIMUM_CHECKPOINT_SOURCE_DIGEST_COUNT: usize = 4_096;
+const MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT: u64 = 1 << 30;
+const MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT: u64 = 1 << 40;
 
 struct RootLease {
     capability: Zeroizing<[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH]>,
     handle: u32,
+    local_record_seal_invocation_count: u64,
+    local_record_sealed_plaintext_byte_length: u64,
     mutation_identifier: Option<[u8; MUTATION_IDENTIFIER_BYTE_LENGTH]>,
     root: ActionStorageRoot,
+    sealed_record_versions: HashSet<([u8; HASH_BYTE_LENGTH], u64)>,
 }
 
 #[derive(Default)]
@@ -75,8 +89,11 @@ impl RootRegistry {
         self.staged = Some(RootLease {
             capability: Zeroizing::new(capability),
             handle,
+            local_record_seal_invocation_count: 0,
+            local_record_sealed_plaintext_byte_length: 0,
             mutation_identifier: None,
             root,
+            sealed_record_versions: HashSet::new(),
         });
         Ok(handle)
     }
@@ -87,6 +104,10 @@ impl RootRegistry {
 
     fn active(&self, handle: u32, capability: &[u8]) -> RuntimeResult<&RootLease> {
         require_lease(self.active.as_ref(), handle, capability)
+    }
+
+    fn active_mut(&mut self, handle: u32, capability: &[u8]) -> RuntimeResult<&mut RootLease> {
+        require_lease_mut(self.active.as_mut(), handle, capability)
     }
 
     fn commit(
@@ -152,6 +173,35 @@ impl<'input> InputReader<'input> {
         bytes.try_into().map_err(|_| malformed_status())
     }
 
+    fn read_slice(&mut self, byte_length: usize) -> RuntimeResult<&'input [u8]> {
+        let end = self
+            .offset
+            .checked_add(byte_length)
+            .ok_or_else(malformed_status)?;
+        let bytes = self
+            .bytes
+            .get(self.offset..end)
+            .ok_or_else(malformed_status)?;
+        self.offset = end;
+        Ok(bytes)
+    }
+
+    fn read_u8(&mut self) -> RuntimeResult<u8> {
+        Ok(self.read_array::<1>()?[0])
+    }
+
+    fn read_u16(&mut self) -> RuntimeResult<u16> {
+        Ok(u16::from_le_bytes(self.read_array()?))
+    }
+
+    fn read_u32(&mut self) -> RuntimeResult<u32> {
+        Ok(u32::from_le_bytes(self.read_array()?))
+    }
+
+    fn read_u64(&mut self) -> RuntimeResult<u64> {
+        Ok(u64::from_le_bytes(self.read_array()?))
+    }
+
     fn read_remaining(&mut self) -> &'input [u8] {
         let remaining = &self.bytes[self.offset..];
         self.offset = self.bytes.len();
@@ -182,6 +232,10 @@ pub(crate) fn run_local_storage_root_command(command: u32, input: &[u8]) -> Runt
         LOCAL_STORAGE_ROOT_COMMAND_PREPARE_RECOVERY => prepare_recovery(input),
         LOCAL_STORAGE_ROOT_COMMAND_CONFIRM_RECOVERY => confirm_recovery(input),
         LOCAL_STORAGE_ROOT_COMMAND_RESET => reset(input),
+        LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER => derive_record_identifier(input),
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD => seal_record(input),
+        LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD => open_record(input),
+        LOCAL_STORAGE_ROOT_COMMAND_HASH_RECORD_ENVELOPE => hash_record_envelope(input),
         _ => Err(malformed_status()),
     }
 }
@@ -411,6 +465,298 @@ fn reset(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     Ok(Vec::new())
 }
 
+fn derive_record_identifier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let handle = reader.read_u32()?;
+    let capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH] = reader.read_array()?;
+    let record_type = read_record_type(&mut reader)?;
+    let identifier_context = reader.read_remaining();
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active(handle, &capability)?;
+        Ok(derive_record_identifier_from_context(
+            lease.root.binding(),
+            record_type,
+            identifier_context,
+        )?
+        .as_bytes()
+        .to_vec())
+    })
+}
+
+fn seal_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let request = read_record_request(&mut reader)?;
+    let nonce = reader.read_array()?;
+    let plaintext = reader.read_remaining();
+    ROOT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let lease = registry.active_mut(request.handle, &request.capability)?;
+        let record_identifier = derive_record_identifier_from_context(
+            lease.root.binding(),
+            request.record_type,
+            request.identifier_context,
+        )?;
+        let record_version_key = (record_identifier.into_bytes(), request.record_version);
+        if lease.sealed_record_versions.contains(&record_version_key) {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
+        let next_seal_invocation_count = lease
+            .local_record_seal_invocation_count
+            .checked_add(1)
+            .ok_or_else(outside_supported_profile_status)?;
+        let plaintext_byte_length =
+            u64::try_from(plaintext.len()).map_err(|_| outside_supported_profile_status())?;
+        let next_sealed_plaintext_byte_length = lease
+            .local_record_sealed_plaintext_byte_length
+            .checked_add(plaintext_byte_length)
+            .ok_or_else(outside_supported_profile_status)?;
+        if next_seal_invocation_count > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
+            || next_sealed_plaintext_byte_length
+                > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT
+        {
+            return Err(outside_supported_profile_status());
+        }
+        let envelope = lease
+            .root
+            .seal_local_record_with_identifier(LocalRecordSealWithIdentifierInput {
+                action_randomness_commitment: request.action_randomness_commitment,
+                record_type: request.record_type,
+                record_identifier,
+                record_version: request.record_version,
+                creation_recovery_epoch: request.creation_recovery_epoch,
+                predecessor_record_hash: request.predecessor_record_hash,
+                nonce,
+                plaintext,
+            })
+            .map_err(schema_status)?;
+        let encoded_envelope = envelope.encode().map_err(schema_status)?;
+        lease.sealed_record_versions.insert(record_version_key);
+        lease.local_record_seal_invocation_count = next_seal_invocation_count;
+        lease.local_record_sealed_plaintext_byte_length = next_sealed_plaintext_byte_length;
+        Ok(encoded_envelope)
+    })
+}
+
+fn open_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let request = read_record_request(&mut reader)?;
+    let envelope_bytes = reader.read_remaining();
+    if envelope_bytes.is_empty() {
+        return Err(malformed_status());
+    }
+    let envelope = LocalRecordEnvelope::decode(envelope_bytes, &CanonicalDecodeLimits::default())
+        .map_err(schema_status)?;
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active(request.handle, &request.capability)?;
+        let record_identifier = derive_record_identifier_from_context(
+            lease.root.binding(),
+            request.record_type,
+            request.identifier_context,
+        )?;
+        lease
+            .root
+            .open_local_record_with_identifier(
+                request.action_randomness_commitment,
+                request.record_type,
+                record_identifier,
+                request.record_version,
+                request.creation_recovery_epoch,
+                request.predecessor_record_hash,
+                &envelope,
+            )
+            .into_result()
+            .map(|plaintext| plaintext.to_vec())
+            .map_err(refusal_status)
+    })
+}
+
+fn hash_record_envelope(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let handle = reader.read_u32()?;
+    let capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH] = reader.read_array()?;
+    let envelope_bytes = reader.read_remaining();
+    if envelope_bytes.is_empty() {
+        return Err(malformed_status());
+    }
+    let envelope = LocalRecordEnvelope::decode(envelope_bytes, &CanonicalDecodeLimits::default())
+        .map_err(schema_status)?;
+    let canonical_envelope = envelope.encode().map_err(schema_status)?;
+    if canonical_envelope != envelope_bytes {
+        return Err(refusal_status(RefusalReason::MalformedEncoding));
+    }
+    ROOT_REGISTRY.with(|registry| {
+        registry.borrow().active(handle, &capability)?;
+        Ok(derive_local_record_envelope_hash(&canonical_envelope)
+            .map_err(schema_status)?
+            .as_bytes()
+            .to_vec())
+    })
+}
+
+struct RecordRequest<'input> {
+    handle: u32,
+    capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    action_randomness_commitment: Hash512,
+    record_type: LocalRecordType,
+    identifier_context: &'input [u8],
+    record_version: u64,
+    creation_recovery_epoch: u64,
+    predecessor_record_hash: Option<Hash512>,
+}
+
+fn read_record_request<'input>(
+    reader: &mut InputReader<'input>,
+) -> RuntimeResult<RecordRequest<'input>> {
+    let handle = reader.read_u32()?;
+    let capability = reader.read_array()?;
+    let action_randomness_commitment = Hash512::from_bytes(reader.read_array()?);
+    let record_type = read_record_type(reader)?;
+    let identifier_context_byte_length =
+        usize::try_from(reader.read_u32()?).map_err(|_| malformed_status())?;
+    let identifier_context = reader.read_slice(identifier_context_byte_length)?;
+    let record_version = reader.read_u64()?;
+    let creation_recovery_epoch = reader.read_u64()?;
+    let predecessor_record_hash = match reader.read_u8()? {
+        0 => None,
+        1 => Some(Hash512::from_bytes(reader.read_array()?)),
+        _ => return Err(malformed_status()),
+    };
+    Ok(RecordRequest {
+        handle,
+        capability,
+        action_randomness_commitment,
+        record_type,
+        identifier_context,
+        record_version,
+        creation_recovery_epoch,
+        predecessor_record_hash,
+    })
+}
+
+fn read_record_type(reader: &mut InputReader<'_>) -> RuntimeResult<LocalRecordType> {
+    LocalRecordType::from_canonical_code(reader.read_u16()?)
+        .ok_or_else(|| refusal_status(RefusalReason::WrongTypeOrLength))
+}
+
+fn derive_record_identifier_from_context(
+    binding: LocalStorageBinding,
+    record_type: LocalRecordType,
+    identifier_context: &[u8],
+) -> RuntimeResult<Hash512> {
+    let mut reader = InputReader::new(identifier_context);
+    let identifier = match record_type {
+        LocalRecordType::ActionRandomness => {
+            reader.finish()?;
+            LocalRecordIdentifierInput::ActionRandomness
+        }
+        LocalRecordType::PublicCoinPrivateMaterial => {
+            reader.finish()?;
+            LocalRecordIdentifierInput::PublicCoinPrivateMaterial
+        }
+        LocalRecordType::SourceVssMaterial => {
+            let material_context_hash = Hash512::from_bytes(reader.read_array()?);
+            reader.finish()?;
+            LocalRecordIdentifierInput::SourceVssMaterial {
+                material_context_hash,
+            }
+        }
+        LocalRecordType::AggregateThresholdShare => {
+            let recipient_input_root = Hash512::from_bytes(reader.read_array()?);
+            reader.finish()?;
+            LocalRecordIdentifierInput::AggregateThresholdShare {
+                recipient_input_root,
+            }
+        }
+        LocalRecordType::ProofAttempt => {
+            let application_slot_hash = Hash512::from_bytes(reader.read_array()?);
+            reader.finish()?;
+            LocalRecordIdentifierInput::ProofAttempt {
+                application_slot_hash,
+            }
+        }
+        LocalRecordType::BallotAttempt => {
+            let statement_byte_length =
+                usize::try_from(reader.read_u32()?).map_err(|_| malformed_status())?;
+            if statement_byte_length == 0 {
+                return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+            }
+            let canonical_ballot_statement_bytes = reader.read_slice(statement_byte_length)?;
+            let ballot_encryption_attempt_identifier = reader.read_array()?;
+            reader.finish()?;
+            return derive_local_record_identifier(
+                binding,
+                LocalRecordIdentifierInput::BallotAttempt {
+                    canonical_ballot_statement_bytes,
+                    ballot_encryption_attempt_identifier: &ballot_encryption_attempt_identifier,
+                },
+            )
+            .map_err(schema_status);
+        }
+        LocalRecordType::ExactOutputChunk => {
+            let capability_kind = reader.read_u16()?;
+            let exact_output_hash = Hash512::from_bytes(reader.read_array()?);
+            let output_chunk_index = reader.read_u64()?;
+            reader.finish()?;
+            LocalRecordIdentifierInput::ExactOutputChunk {
+                capability_kind,
+                exact_output_hash,
+                output_chunk_index,
+            }
+        }
+        LocalRecordType::SubjectState => {
+            let state_key = Hash512::from_bytes(reader.read_array()?);
+            reader.finish()?;
+            LocalRecordIdentifierInput::SubjectState { state_key }
+        }
+        LocalRecordType::WitnessState => {
+            let state_key = Hash512::from_bytes(reader.read_array()?);
+            reader.finish()?;
+            LocalRecordIdentifierInput::WitnessState { state_key }
+        }
+        LocalRecordType::CheckpointManifest => {
+            let runtime_build_manifest_hash = Hash512::from_bytes(reader.read_array()?);
+            let checkpoint_lineage_identifier = reader.read_array()?;
+            let operation_kind = reader.read_u16()?;
+            let safe_boundary_ordinal = reader.read_u32()?;
+            let source_digest_count =
+                usize::try_from(reader.read_u32()?).map_err(|_| malformed_status())?;
+            if source_digest_count > MAXIMUM_CHECKPOINT_SOURCE_DIGEST_COUNT {
+                return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
+            }
+            let mut ordered_source_digests = Vec::with_capacity(source_digest_count);
+            for _ in 0..source_digest_count {
+                ordered_source_digests.push(Hash512::from_bytes(reader.read_array()?));
+            }
+            reader.finish()?;
+            return derive_local_record_identifier(
+                binding,
+                LocalRecordIdentifierInput::CheckpointManifest {
+                    runtime_build_manifest_hash,
+                    checkpoint_lineage_identifier: &checkpoint_lineage_identifier,
+                    operation_kind,
+                    safe_boundary_ordinal,
+                    ordered_source_digests: &ordered_source_digests,
+                },
+            )
+            .map_err(schema_status);
+        }
+        LocalRecordType::CheckpointChunk => {
+            let checkpoint_identifier = Hash512::from_bytes(reader.read_array()?);
+            let chunk_index = reader.read_u32()?;
+            let chunk_digest = Hash512::from_bytes(reader.read_array()?);
+            reader.finish()?;
+            LocalRecordIdentifierInput::CheckpointChunk {
+                checkpoint_identifier,
+                chunk_index,
+                chunk_digest,
+            }
+        }
+    };
+    derive_local_record_identifier(binding, identifier).map_err(schema_status)
+}
+
 fn read_binding(reader: &mut InputReader<'_>) -> RuntimeResult<LocalStorageBinding> {
     let suite_id = Hash512::from_bytes(reader.read_array()?);
     let ceremony_context_hash = Hash512::from_bytes(reader.read_array()?);
@@ -460,8 +806,29 @@ fn require_lease<'lease>(
     Ok(lease)
 }
 
+fn require_lease_mut<'lease>(
+    lease: Option<&'lease mut RootLease>,
+    handle: u32,
+    capability: &[u8],
+) -> RuntimeResult<&'lease mut RootLease> {
+    let lease = lease.ok_or(LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE)?;
+    if lease.handle != handle {
+        return Err(LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE);
+    }
+    if capability.len() != LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH
+        || !bool::from(lease.capability.as_ref().ct_eq(capability))
+    {
+        return Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH);
+    }
+    Ok(lease)
+}
+
 const fn malformed_status() -> u32 {
     refusal_status(RefusalReason::MalformedEncoding)
+}
+
+const fn outside_supported_profile_status() -> u32 {
+    refusal_status(RefusalReason::OutsideSupportedProfile)
 }
 
 const fn refusal_status(refusal_reason: RefusalReason) -> u32 {

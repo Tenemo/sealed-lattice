@@ -1,9 +1,3 @@
-export { verifyBoardConsistency } from './board/index.js';
-export {
-    verifyCastReceiptShell,
-    verifyCloseRecordShell,
-} from './closing/index.js';
-export { deriveValidatedFirstValidOrder } from './ordering/index.js';
 export { restoreAndPrepareLocalTargetDecryptionShareWitness } from './target-decryption/local-target-share-witness.js';
 export type {
     PreparedLocalTargetDecryptionShareWitness,
@@ -18,15 +12,13 @@ export type {
 } from './target-decryption/proof-material-transport.js';
 export { derivePollSpecHash, validatePollSpec } from './lifecycle/poll-spec.js';
 export {
-    isActionCurrentForRecoveryEpoch,
-    verifyRecoveryEpochUpdate,
-} from './recovery/index.js';
-export {
     openUntrustedStorageTransactionStore,
+    UntrustedStorageTransactionError,
     UntrustedStorageTransactionStore,
 } from './runtime/untrusted-storage-transaction-store.js';
 export type {
     UntrustedStorageAdapter,
+    UntrustedStorageAuthenticatedRecoveryProtection,
     UntrustedStorageAtomicMutation,
     UntrustedStorageAuthenticationInput,
     UntrustedStorageAuthenticator,
@@ -34,13 +26,66 @@ export type {
     UntrustedStorageRecoveryReport,
     UntrustedStorageTransactionErrorCode,
     UntrustedStorageTransactionLimits,
+    UntrustedStorageTransaction,
+    UntrustedStorageTransactionStoreConfiguration,
+    UntrustedStorageTransactionStoreOpenResult,
     UntrustedStorageWrite,
+    UntrustedStorageWriteLease,
 } from './runtime/untrusted-storage-transaction-store.js';
 export {
-    deriveCollectiveBgvSetupRosterHash,
-    verifyRosterExternalAcceptance,
-    verifyRosterManifestTranscript,
-} from './roster/index.js';
+    AuthenticatedMailboxStorageError,
+    createBrowserLocalAuthenticatedMailboxStorage,
+} from './runtime/authenticated-mailbox-storage.js';
+export type {
+    AuthenticatedMailboxStorageErrorCode,
+    AuthenticatedMailboxStorageLimits,
+    BrowserLocalAuthenticatedMailboxStorage,
+    BrowserLocalAuthenticatedMailboxStorageConfiguration,
+} from './runtime/authenticated-mailbox-storage.js';
+export {
+    createBrowserLocalStateWitnessVoteIssuer,
+    DurableStateWitnessServiceError,
+    openDurableStateWitnessService,
+} from './runtime/durable-state-witness-service.js';
+export type {
+    BrowserLocalStateWitnessVoteIssuer,
+    DurableStateWitnessService,
+    DurableStateWitnessServiceErrorCode,
+    DurableStateWitnessServiceLimits,
+    RuntimeStorageAuthorityContext,
+} from './runtime/durable-state-witness-service.js';
+export {
+    DurableProofApplicationServiceError,
+    openDurableProofApplicationService,
+} from './runtime/durable-proof-application-service.js';
+export type {
+    DurableProofApplicationChargeResult,
+    DurableProofApplicationOperationCharge,
+    DurableProofApplicationReservation,
+    DurableProofApplicationReservationInput,
+    DurableProofApplicationResourceCeilings,
+    DurableProofApplicationResourceCounters,
+    DurableProofApplicationService,
+    DurableProofApplicationServiceErrorCode,
+    DurableProofApplicationServiceLimits,
+} from './runtime/durable-proof-application-service.js';
+export {
+    AuthenticatedCheckpointStoreError,
+    openAuthenticatedCheckpointStore,
+} from './runtime/authenticated-checkpoint-store.js';
+export type {
+    AuthenticatedCheckpointStore,
+    AuthenticatedCheckpointStoreErrorCode,
+    AuthenticatedCheckpointStoreLimits,
+    CheckpointBoundary,
+    CheckpointBoundaryPolicy,
+    CheckpointOperationIdentity,
+    CheckpointRandomCursor,
+    CheckpointRandomCursorKernel,
+    ExpectedCheckpointBoundary,
+    ResumedCheckpoint,
+} from './runtime/authenticated-checkpoint-store.js';
+export { deriveCollectiveBgvSetupRosterHash } from './roster/index.js';
 export type { CollectiveBgvSetupRosterEntryInput } from './roster/index.js';
 export { createPrivateVssMailboxDeliverySet } from './setup/private-vss-mailbox-delivery.js';
 export type {
@@ -103,7 +148,10 @@ export type {
     VssSourceTrusteeCoefficientOpeningState,
     VssOpeningRandomByteSource,
 } from './setup/vss-coefficient-commitments.js';
-export type { LocalTrusteeSetupStateCommitment } from './setup/local-trustee-setup-state.js';
+export type {
+    EncryptedLocalTrusteeSetupState,
+    LocalTrusteeSetupStateCommitment,
+} from './setup/local-trustee-setup-state.js';
 export type {
     SetupPackage,
     SetupPackageVerificationInput,

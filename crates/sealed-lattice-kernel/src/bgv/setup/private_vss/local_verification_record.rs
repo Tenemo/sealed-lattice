@@ -46,14 +46,29 @@ pub(super) fn verification_response(
     limb_verifications: Vec<Value>,
     refused_objects: Vec<PrivateVssRefusal>,
 ) -> Value {
+    if is_valid {
+        return match (private_envelope_hash, local_verification_root) {
+            (Some(private_envelope_hash), Some(local_verification_root)) => json!({
+                "isValid": true,
+                "value": {
+                    "privateEnvelopeHash": private_envelope_hash,
+                    "localVerificationRoot": local_verification_root,
+                    "limbVerifications": limb_verifications,
+                },
+            }),
+            _ => json!({
+                "isValid": false,
+                "refusalReason": crate::foundation::RefusalReason::MalformedEncoding.name(),
+            }),
+        };
+    }
+
     json!({
-        "isValid": is_valid,
-        "privateEnvelopeHash": private_envelope_hash,
-        "localVerificationRoot": local_verification_root,
-        "limbVerifications": limb_verifications,
-        "refusedObjects": refused_objects
-            .into_iter()
-            .map(|refusal| refusal.to_value())
-            .collect::<Vec<_>>(),
+        "isValid": false,
+        "refusalReason": refused_objects
+            .first()
+            .map(PrivateVssRefusal::refusal_reason)
+            .unwrap_or(crate::foundation::RefusalReason::MalformedEncoding)
+            .name(),
     })
 }

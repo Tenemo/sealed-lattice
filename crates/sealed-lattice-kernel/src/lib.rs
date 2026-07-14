@@ -26,12 +26,17 @@ use bgv::{
 };
 use foundation::{
     CanonicalStreamRuntimeBegin, STATE_DURABLE_BINDING_BYTE_LENGTH,
-    STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, absorb_canonical_stream_chunk,
-    begin_canonical_stream_verifier, begin_canonical_stream_writer, begin_state_verifier_session,
-    cancel_canonical_stream, cancel_state_verifier_session, certify_verified_state_intent,
-    describe_verified_state_object, finish_canonical_stream_verifier,
-    finish_canonical_stream_writer, finish_state_output_intent_verification,
-    finish_state_output_verification, release_verified_state_object,
+    STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH,
+    absorb_canonical_stream_chunk, authenticate_mailbox_gcm_chunk, begin_canonical_stream_verifier,
+    begin_canonical_stream_writer, begin_mailbox_gcm_encryptor, begin_mailbox_gcm_verifier,
+    begin_state_verifier_session, cancel_canonical_stream, cancel_mailbox_gcm,
+    cancel_state_verifier_session, certify_verified_state_intent,
+    certify_verified_state_intent_from_unordered_vote_carriers, decrypt_mailbox_gcm_chunk,
+    describe_verified_state_object, encrypt_mailbox_gcm_chunk, finish_canonical_stream_verifier,
+    finish_canonical_stream_writer, finish_mailbox_gcm_authentication,
+    finish_mailbox_gcm_decryptor, finish_mailbox_gcm_encryptor,
+    finish_state_output_intent_verification, finish_state_output_verification,
+    finish_state_witness_vote, prepare_state_witness_vote, release_verified_state_object,
     run_local_storage_root_command, verify_state_recovery, verify_state_recovery_intent,
     verify_state_reservation, verify_state_reservation_intent,
 };
@@ -128,6 +133,14 @@ unsafe fn canonical_stream_input<'input>(pointer: *const u8, length: usize) -> &
         &[]
     } else {
         unsafe { slice::from_raw_parts(pointer, length) }
+    }
+}
+
+unsafe fn canonical_stream_input_mut<'input>(pointer: *mut u8, length: usize) -> &'input mut [u8] {
+    if length == 0 || pointer.is_null() {
+        &mut []
+    } else {
+        unsafe { slice::from_raw_parts_mut(pointer, length) }
     }
 }
 
@@ -279,6 +292,217 @@ pub extern "C" fn sealed_lattice_canonical_stream_finish_verifier(handle: u32) -
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_canonical_stream_cancel(handle: u32) -> u32 {
     cancel_canonical_stream(handle).map_or_else(|status| status, |()| 0)
+}
+
+/// Begins incremental AES-256-GCM encryption for one authenticated mailbox.
+///
+/// # Safety
+///
+/// Input pointers must name their declared readable ranges. `status_pointer`
+/// must be null or point to one writable `u32`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn sealed_lattice_mailbox_gcm_begin_encryptor(
+    key_pointer: *const u8,
+    key_length: usize,
+    nonce_pointer: *const u8,
+    nonce_length: usize,
+    associated_data_pointer: *const u8,
+    associated_data_length: usize,
+    total_byte_length: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    if key_length != foundation::MAILBOX_GCM_KEY_BYTE_LENGTH
+        || nonce_length != foundation::MAILBOX_GCM_NONCE_BYTE_LENGTH
+        || key_pointer.is_null()
+        || nonce_pointer.is_null()
+    {
+        unsafe {
+            write_u32_if_present(
+                status_pointer,
+                u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code()),
+            )
+        };
+        return 0;
+    }
+    let key = unsafe { fixed_bytes(key_pointer, key_length) };
+    let nonce = unsafe { fixed_bytes(nonce_pointer, nonce_length) };
+    let associated_data =
+        unsafe { canonical_stream_input(associated_data_pointer, associated_data_length) };
+    match begin_mailbox_gcm_encryptor(key, nonce, associated_data, total_byte_length) {
+        Ok(handle) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            handle
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Begins incremental authentication for one mailbox ciphertext. Successful
+/// completion changes this same opaque handle into a decryptor.
+///
+/// # Safety
+///
+/// Input pointers must name their declared readable ranges. `status_pointer`
+/// must be null or point to one writable `u32`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn sealed_lattice_mailbox_gcm_begin_verifier(
+    key_pointer: *const u8,
+    key_length: usize,
+    nonce_pointer: *const u8,
+    nonce_length: usize,
+    associated_data_pointer: *const u8,
+    associated_data_length: usize,
+    total_byte_length: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    if key_length != foundation::MAILBOX_GCM_KEY_BYTE_LENGTH
+        || nonce_length != foundation::MAILBOX_GCM_NONCE_BYTE_LENGTH
+        || key_pointer.is_null()
+        || nonce_pointer.is_null()
+    {
+        unsafe {
+            write_u32_if_present(
+                status_pointer,
+                u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code()),
+            )
+        };
+        return 0;
+    }
+    let key = unsafe { fixed_bytes(key_pointer, key_length) };
+    let nonce = unsafe { fixed_bytes(nonce_pointer, nonce_length) };
+    let associated_data =
+        unsafe { canonical_stream_input(associated_data_pointer, associated_data_length) };
+    match begin_mailbox_gcm_verifier(key, nonce, associated_data, total_byte_length) {
+        Ok(handle) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            handle
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Encrypts one mailbox plaintext fragment in place.
+///
+/// # Safety
+///
+/// `chunk_pointer` must name its declared writable byte range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_mailbox_gcm_encrypt_chunk(
+    handle: u32,
+    chunk_pointer: *mut u8,
+    chunk_length: usize,
+) -> u32 {
+    if chunk_pointer.is_null() || chunk_length == 0 {
+        let _ = cancel_mailbox_gcm(handle);
+        return u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code());
+    }
+    let chunk = unsafe { canonical_stream_input_mut(chunk_pointer, chunk_length) };
+    encrypt_mailbox_gcm_chunk(handle, chunk).map_or_else(|status| status, |()| 0)
+}
+
+/// Authenticates one staged mailbox ciphertext fragment without decrypting it.
+///
+/// # Safety
+///
+/// `chunk_pointer` must name its declared readable byte range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_mailbox_gcm_authenticate_chunk(
+    handle: u32,
+    chunk_pointer: *const u8,
+    chunk_length: usize,
+) -> u32 {
+    if chunk_pointer.is_null() || chunk_length == 0 {
+        let _ = cancel_mailbox_gcm(handle);
+        return u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code());
+    }
+    let chunk = unsafe { canonical_stream_input(chunk_pointer, chunk_length) };
+    authenticate_mailbox_gcm_chunk(handle, chunk).map_or_else(|status| status, |()| 0)
+}
+
+/// Finishes mailbox encryption and copies the exact 16-byte GCM tag.
+///
+/// # Safety
+///
+/// `tag_pointer` must name a writable range of exactly `tag_length` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_mailbox_gcm_finish_encryptor(
+    handle: u32,
+    tag_pointer: *mut u8,
+    tag_length: usize,
+) -> u32 {
+    if tag_pointer.is_null() || tag_length != foundation::MAILBOX_GCM_TAG_BYTE_LENGTH {
+        let _ = cancel_mailbox_gcm(handle);
+        return u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code());
+    }
+    match finish_mailbox_gcm_encryptor(handle) {
+        Ok(mut tag) => {
+            unsafe {
+                slice::from_raw_parts_mut(tag_pointer, tag_length).copy_from_slice(&tag);
+            }
+            tag.fill(0);
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+/// Verifies the complete ciphertext tag before changing the handle into a
+/// decryptor. No plaintext operation is available before this succeeds.
+///
+/// # Safety
+///
+/// `tag_pointer` must name a readable range of exactly `tag_length` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_mailbox_gcm_finish_authentication(
+    handle: u32,
+    tag_pointer: *const u8,
+    tag_length: usize,
+) -> u32 {
+    if tag_pointer.is_null() || tag_length != foundation::MAILBOX_GCM_TAG_BYTE_LENGTH {
+        let _ = cancel_mailbox_gcm(handle);
+        return u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code());
+    }
+    let tag = unsafe { fixed_bytes(tag_pointer, tag_length) };
+    finish_mailbox_gcm_authentication(handle, &tag).map_or_else(|status| status, |()| 0)
+}
+
+/// Decrypts one already-authenticated staged ciphertext fragment in place.
+///
+/// # Safety
+///
+/// `chunk_pointer` must name its declared writable byte range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_mailbox_gcm_decrypt_chunk(
+    handle: u32,
+    chunk_pointer: *mut u8,
+    chunk_length: usize,
+) -> u32 {
+    if chunk_pointer.is_null() || chunk_length == 0 {
+        let _ = cancel_mailbox_gcm(handle);
+        return u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code());
+    }
+    let chunk = unsafe { canonical_stream_input_mut(chunk_pointer, chunk_length) };
+    decrypt_mailbox_gcm_chunk(handle, chunk).map_or_else(|status| status, |()| 0)
+}
+
+/// Finishes and removes an authenticated mailbox decryptor.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_mailbox_gcm_finish_decryptor(handle: u32) -> u32 {
+    finish_mailbox_gcm_decryptor(handle).map_or_else(|status| status, |()| 0)
+}
+
+/// Removes the active mailbox GCM session and zeroizes its secret state.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_mailbox_gcm_cancel(handle: u32) -> u32 {
+    cancel_mailbox_gcm(handle).map_or_else(|status| status, |()| 0)
 }
 
 /// Begins a BGV large-object sink whose framing and integrity are owned by the
@@ -956,6 +1180,182 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_certify_intent(
         }
         Err(status) => {
             unsafe {
+                write_u32_if_present(status_pointer, status);
+            }
+            0
+        }
+    }
+}
+
+/// Verifies adversarially ordered canonical witness-vote carriers for one
+/// prepared intent. Transport metadata is not part of this byte boundary.
+///
+/// # Safety
+///
+/// Every pointer must name its declared readable range. A non-null status
+/// pointer must point to one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn sealed_lattice_state_verifier_certify_unordered_votes(
+    session_handle: u32,
+    capability_pointer: *const u8,
+    capability_length: usize,
+    verified_intent_handle: u32,
+    framed_canonical_vote_carriers_pointer: *const u8,
+    framed_canonical_vote_carriers_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let capability = unsafe { canonical_stream_input(capability_pointer, capability_length) };
+    let framed_canonical_vote_carriers = unsafe {
+        canonical_stream_input(
+            framed_canonical_vote_carriers_pointer,
+            framed_canonical_vote_carriers_length,
+        )
+    };
+    match certify_verified_state_intent_from_unordered_vote_carriers(
+        session_handle,
+        capability,
+        verified_intent_handle,
+        framed_canonical_vote_carriers,
+    ) {
+        Ok(handle) => {
+            unsafe {
+                write_u32_if_present(status_pointer, 0);
+            }
+            handle
+        }
+        Err(status) => {
+            unsafe {
+                write_u32_if_present(status_pointer, status);
+            }
+            0
+        }
+    }
+}
+
+/// Prepares the exact state-witness envelope and copies its 64-byte signature
+/// message. The returned handle can be finished once with an ML-DSA-65
+/// signature from the named roster witness.
+///
+/// # Safety
+///
+/// Every input pointer must name its declared readable range. The message
+/// output must name exactly 64 writable bytes. A non-null status pointer must
+/// point to one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn sealed_lattice_state_verifier_prepare_witness_vote(
+    session_handle: u32,
+    capability_pointer: *const u8,
+    capability_length: usize,
+    verified_intent_handle: u32,
+    witness_participant_id_pointer: *const u8,
+    witness_participant_id_length: usize,
+    signature_message_output_pointer: *mut u8,
+    signature_message_output_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    if signature_message_output_pointer.is_null()
+        || signature_message_output_length != foundation::Hash512::BYTE_LENGTH
+    {
+        unsafe {
+            write_u32_if_present(
+                status_pointer,
+                u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code()),
+            );
+        }
+        return 0;
+    }
+    let capability = unsafe { canonical_stream_input(capability_pointer, capability_length) };
+    let witness_participant_id = unsafe {
+        canonical_stream_input(
+            witness_participant_id_pointer,
+            witness_participant_id_length,
+        )
+    };
+    let signature_message_output = unsafe {
+        slice::from_raw_parts_mut(
+            signature_message_output_pointer,
+            signature_message_output_length,
+        )
+    };
+    match prepare_state_witness_vote(
+        session_handle,
+        capability,
+        verified_intent_handle,
+        witness_participant_id,
+        signature_message_output,
+    ) {
+        Ok(handle) => {
+            unsafe {
+                write_u32_if_present(status_pointer, 0);
+            }
+            handle
+        }
+        Err(status) => {
+            signature_message_output.fill(0);
+            unsafe {
+                write_u32_if_present(status_pointer, status);
+            }
+            0
+        }
+    }
+}
+
+/// Finishes one prepared state-witness vote, verifies its signature, and
+/// copies the exact canonical signed carrier.
+///
+/// # Safety
+///
+/// Every input pointer must name its declared readable range. The carrier
+/// output must name exactly `STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH` writable
+/// bytes. A non-null status pointer must point to one writable `u32` in WASM
+/// memory.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn sealed_lattice_state_verifier_finish_witness_vote(
+    session_handle: u32,
+    capability_pointer: *const u8,
+    capability_length: usize,
+    prepared_handle: u32,
+    signature_pointer: *const u8,
+    signature_length: usize,
+    carrier_output_pointer: *mut u8,
+    carrier_output_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    if carrier_output_pointer.is_null()
+        || carrier_output_length != STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH
+    {
+        unsafe {
+            write_u32_if_present(
+                status_pointer,
+                u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code()),
+            );
+        }
+        return 0;
+    }
+    let capability = unsafe { canonical_stream_input(capability_pointer, capability_length) };
+    let signature = unsafe { canonical_stream_input(signature_pointer, signature_length) };
+    match finish_state_witness_vote(session_handle, capability, prepared_handle, signature) {
+        Ok(canonical_carrier) => {
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    canonical_carrier.as_ptr(),
+                    carrier_output_pointer,
+                    canonical_carrier.len(),
+                );
+                write_u32_if_present(status_pointer, 0);
+            }
+            1
+        }
+        Err(status) => {
+            unsafe {
+                ptr::write_bytes(
+                    carrier_output_pointer,
+                    0,
+                    STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH,
+                );
                 write_u32_if_present(status_pointer, status);
             }
             0

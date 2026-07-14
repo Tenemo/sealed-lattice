@@ -12,6 +12,7 @@ const transactionLimits = {
     maximumActiveTransactionCount: 2,
     maximumLeaseByteLength: 64,
     maximumLeaseCountPerTransaction: 2,
+    maximumOwnedRecordCount: 32,
     maximumStoredValueByteLength: 4_096,
     maximumTransactionByteLength: 128,
     maximumTransactionLifetimeMilliseconds: 10_000,

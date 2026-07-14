@@ -259,12 +259,9 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
 
     Ok(json!({
         "context": {
-            "ceremonyId": input.setup_binding.ceremony_id,
-            "manifestHash": input.setup_binding.election_manifest_hash,
-            "rosterHash": input.setup_binding.roster_hash,
+            "setupContextHash": input.setup_binding.setup_context_hash,
             "trusteeIdentity": input.participant.trustee_identity,
             "trusteeRosterPosition": input.participant.roster_position,
-            "setupEpoch": input.setup_binding.setup_epoch,
             "targetShareProofStatementRoot": proof_statement_root,
             "activeCredentialBindingRoot": active_credential_binding_root,
             "smudgingCommitmentSetRoot": smudging_commitment_set_root,

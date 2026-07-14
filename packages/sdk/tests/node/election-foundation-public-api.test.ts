@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
@@ -20,17 +22,8 @@ const expectedPublicRuntimeExportNames = [
     'derivePollSpecHash',
     'deriveThresholdParameters',
     'deriveThresholdParametersHash',
-    'deriveValidatedFirstValidOrder',
-    'generateTargetDecryptionShareProofMaterial',
-    'isActionCurrentForRecoveryEpoch',
     'validatePollSpec',
-    'verifyBoardConsistency',
-    'verifyCastReceiptShell',
-    'verifyCloseRecordShell',
     'verifyPrivateVssShare',
-    'verifyRecoveryEpochUpdate',
-    'verifyRosterExternalAcceptance',
-    'verifyRosterManifestTranscript',
     'verifySetupPackage',
     'verifyTargetDecryptionResult',
 ] as const;
@@ -81,5 +74,16 @@ describe('election foundation public package API in Node', () => {
                 },
             ]),
         ).toBe(expectedSetupRosterHash);
+    });
+
+    it('publishes an opaque setup capability without a serializable kernel handle', () => {
+        const declarations = readFileSync(
+            new URL('../../dist/index.d.ts', import.meta.url),
+            'utf8',
+        );
+
+        expect(declarations).toContain('VerifiedSetup');
+        expect(declarations).toContain('readonly verifiedSetup: VerifiedSetup');
+        expect(declarations).not.toContain('acceptedSetupHandle');
     });
 });

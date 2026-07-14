@@ -129,6 +129,7 @@ pub(in super::super) fn verify_public_key_share_material_set(
     material_set: &Value,
     setup_context: &Value,
     common_binding: &PublicKeyCommonBinding,
+    ring_degree: usize,
     public_key_share_set_root: &str,
     share_records: &BTreeMap<u64, Value>,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
@@ -147,7 +148,6 @@ pub(in super::super) fn verify_public_key_share_material_set(
             "publicKeyShareMaterial.objectType must be PublicKeyShareMaterialSet",
         ));
     }
-    let ring_degree = POLYNOMIAL_DEGREE;
     let (bindings, material_root_references) = verify_stored_public_key_share_material_set(
         material_set,
         setup_context,

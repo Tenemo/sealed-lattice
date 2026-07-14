@@ -1,15 +1,25 @@
+import { webcrypto } from 'node:crypto';
+
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
     restoreAndPrepareLocalTargetDecryptionShareWitness,
 } from '#packages/protocol/src/index';
 import {
+    type BrowserActionStorageCustody,
+    type BrowserActionStorageRootBinding,
+} from '#packages/protocol/src/runtime/browser-action-storage-custody';
+import {
     type LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
     type VssPublicAggregateThresholdCommitmentSet,
 } from '#packages/protocol/src/setup/vss-commitments';
-import { withDeterministicWebCryptoRandomness } from '#tests/support/deterministic-web-crypto-randomness';
+import {
+    createActiveTestActionStorageCustody,
+    createTestBytes,
+    testActionStorageRootByteLength,
+} from '#packages/protocol/tests/support/action-storage-custody-test-support';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -31,10 +41,14 @@ type AggregateThresholdCommitmentSet = VssPublicAggregateThresholdCommitmentSet;
 type LocalTrusteeSetupStateInput = Parameters<
     typeof createEncryptedLocalTrusteeSetupStateFromVerifiedShares
 >[0];
+type LocalTrusteeSetupStateInputWithoutCustody = Omit<
+    LocalTrusteeSetupStateInput,
+    'storageCustody'
+>;
 type SetupArtifacts = Readonly<{
     aggregateOpeningCredentialHandoff: LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
     aggregateThresholdCommitmentSet: AggregateThresholdCommitmentSet;
-    localStateInput: LocalTrusteeSetupStateInput;
+    localStateInput: LocalTrusteeSetupStateInputWithoutCustody;
 }>;
 type TargetSetupInput = Readonly<{
     setupPackage: Readonly<{
@@ -49,13 +63,48 @@ type TargetSetupInput = Readonly<{
     }>;
 }>;
 
-const createEncryptedLocalTrusteeSetupStateFixture = (
-    input: LocalTrusteeSetupStateInput,
-): ReturnType<typeof createEncryptedLocalTrusteeSetupStateFromVerifiedShares> =>
-    withDeterministicWebCryptoRandomness(
-        ['61'.repeat(12), '51'.repeat(12)],
-        () => createEncryptedLocalTrusteeSetupStateFromVerifiedShares(input),
-    );
+const cryptoProvider = webcrypto as unknown as Crypto;
+const storageBinding: BrowserActionStorageRootBinding = Object.freeze({
+    actionContextHash: createTestBytes(64, 13),
+    ceremonyContextHash: createTestBytes(64, 29),
+    participantId: createTestBytes(64, 47),
+    suiteId: createTestBytes(64, 71),
+});
+const openedCustodies = new Set<BrowserActionStorageCustody>();
+
+afterEach(async () => {
+    const custodies = [...openedCustodies];
+    openedCustodies.clear();
+    await Promise.all(custodies.map((custody) => custody.close()));
+});
+
+const createEncryptedLocalTrusteeSetupStateFixture = async (
+    input: LocalTrusteeSetupStateInputWithoutCustody,
+): Promise<
+    Awaited<
+        ReturnType<
+            typeof createEncryptedLocalTrusteeSetupStateFromVerifiedShares
+        >
+    > &
+        Readonly<{ storageCustody: BrowserActionStorageCustody }>
+> => {
+    const storageCustody = await createActiveTestActionStorageCustody({
+        actionStorageRoot: createTestBytes(
+            testActionStorageRootByteLength,
+            openedCustodies.size + 101,
+        ),
+        binding: storageBinding,
+        cryptoProvider,
+    });
+    openedCustodies.add(storageCustody);
+    const encryptedState =
+        await createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
+            ...input,
+            storageCustody,
+        });
+
+    return { ...encryptedState, storageCustody };
+};
 
 const setupArtifacts = (): SetupArtifacts => {
     const aggregateOpeningRoot = fixtureHash('aggregate-opening');
@@ -176,7 +225,8 @@ const setupArtifacts = (): SetupArtifacts => {
             verifiedPrivateVssShareEnvelopes: [privateEnvelope],
             localTrusteeAggregateOpeningCredentialHandoff:
                 aggregateOpeningCredentialHandoff,
-            storageKeyBytesHex: '41'.repeat(32),
+            actionRandomnessCommitment: createTestBytes(64, 211),
+            creationRecoveryEpoch: 0n,
         },
     } as const;
 };
@@ -213,17 +263,19 @@ describe('local setup-to-target-share witness lifecycle', () => {
         );
         const preparedWitness =
             await restoreAndPrepareLocalTargetDecryptionShareWitness({
+                actionRandomnessCommitment:
+                    artifacts.localStateInput.actionRandomnessCommitment,
+                creationRecoveryEpoch:
+                    artifacts.localStateInput.creationRecoveryEpoch,
                 encryptedLocalState: encryptedState.encryptedLocalState,
-                expectedLocalStateRoot:
-                    encryptedState.localStateCommitment.localStateRoot,
+                localStateCommitment: encryptedState.localStateCommitment,
                 setupContext,
-                storageKeyBytesHex:
-                    artifacts.localStateInput.storageKeyBytesHex,
+                storageCustody: encryptedState.storageCustody,
                 ...targetSetup,
             });
 
         expect(
-            JSON.stringify(encryptedState.encryptedLocalState),
+            Buffer.from(encryptedState.encryptedLocalState).toString('hex'),
         ).not.toContain(aggregateMaterialSeedHex);
         const [originalCredential] =
             artifacts.aggregateOpeningCredentialHandoff
@@ -271,6 +323,34 @@ describe('local setup-to-target-share witness lifecycle', () => {
                 expectedByteLength: ringDegree * 8 - 1,
             }),
         ).rejects.toThrow(/non-canonical chunk length/u);
+
+        const tamperedEnvelope = encryptedState.encryptedLocalState.slice();
+        tamperedEnvelope[tamperedEnvelope.byteLength - 1] ^= 1;
+        await expect(
+            restoreAndPrepareLocalTargetDecryptionShareWitness({
+                actionRandomnessCommitment:
+                    artifacts.localStateInput.actionRandomnessCommitment,
+                creationRecoveryEpoch:
+                    artifacts.localStateInput.creationRecoveryEpoch,
+                encryptedLocalState: tamperedEnvelope,
+                localStateCommitment: encryptedState.localStateCommitment,
+                setupContext,
+                storageCustody: encryptedState.storageCustody,
+                ...targetSetup,
+            }),
+        ).rejects.toThrow();
+        await expect(
+            restoreAndPrepareLocalTargetDecryptionShareWitness({
+                actionRandomnessCommitment: createTestBytes(64, 212),
+                creationRecoveryEpoch:
+                    artifacts.localStateInput.creationRecoveryEpoch,
+                encryptedLocalState: encryptedState.encryptedLocalState,
+                localStateCommitment: encryptedState.localStateCommitment,
+                setupContext,
+                storageCustody: encryptedState.storageCustody,
+                ...targetSetup,
+            }),
+        ).rejects.toThrow();
     });
 
     it('rejects changed trustee, aggregate message, accepted root, and setup context', async () => {
@@ -329,14 +409,16 @@ describe('local setup-to-target-share witness lifecycle', () => {
         );
         await expect(
             restoreAndPrepareLocalTargetDecryptionShareWitness({
+                actionRandomnessCommitment:
+                    artifacts.localStateInput.actionRandomnessCommitment,
+                creationRecoveryEpoch:
+                    artifacts.localStateInput.creationRecoveryEpoch,
                 encryptedLocalState:
                     encryptedChangedRootState.encryptedLocalState,
-                expectedLocalStateRoot:
-                    encryptedChangedRootState.localStateCommitment
-                        .localStateRoot,
+                localStateCommitment:
+                    encryptedChangedRootState.localStateCommitment,
                 setupContext,
-                storageKeyBytesHex:
-                    artifacts.localStateInput.storageKeyBytesHex,
+                storageCustody: encryptedChangedRootState.storageCustody,
                 ...targetSetup,
             }),
         ).rejects.toThrow(/must match the accepted aggregate commitment/u);
@@ -347,12 +429,14 @@ describe('local setup-to-target-share witness lifecycle', () => {
             );
         await expect(
             restoreAndPrepareLocalTargetDecryptionShareWitness({
+                actionRandomnessCommitment:
+                    artifacts.localStateInput.actionRandomnessCommitment,
+                creationRecoveryEpoch:
+                    artifacts.localStateInput.creationRecoveryEpoch,
                 encryptedLocalState: encryptedState.encryptedLocalState,
-                expectedLocalStateRoot:
-                    encryptedState.localStateCommitment.localStateRoot,
+                localStateCommitment: encryptedState.localStateCommitment,
                 setupContext,
-                storageKeyBytesHex:
-                    artifacts.localStateInput.storageKeyBytesHex,
+                storageCustody: encryptedState.storageCustody,
                 ...targetSetup,
                 setupPackage: {
                     ...targetSetup.setupPackage,

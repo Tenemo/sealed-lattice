@@ -6,6 +6,8 @@ import type {
     CanonicalSignedRootObject,
     ProtocolHash,
     ProtocolSignatureEnvelope,
+    RefusalReason,
+    VerificationResult,
 } from '@sealed-lattice/types';
 
 import {
@@ -51,22 +53,16 @@ type VssShareComplaintRecordInput = {
     readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
     readonly envelopeReference: PrivateVssEnvelopeVerificationReference;
     readonly complaintEvidenceRoot: ProtocolHash;
-    readonly complaintReasonCode: string;
+    readonly complaintReasonCode: RefusalReason;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
     readonly signRoot: ProtocolRootSigner;
 };
 
-export type PrivateVssLocalVerificationFailure = Readonly<{
-    readonly isValid: false;
-    readonly privateEnvelopeHash: ProtocolHash | null;
-    readonly localVerificationRoot: ProtocolHash | null;
-    readonly refusedObjects: readonly Readonly<{
-        readonly reasonCode: string;
-        readonly message: string;
-        readonly objectPath: string;
-    }>[];
-}>;
+export type PrivateVssLocalVerificationFailure = Extract<
+    VerificationResult<never>,
+    { readonly isValid: false }
+>;
 
 type VssShareComplaintFromLocalVerificationInput = Omit<
     VssShareComplaintRecordInput,
@@ -90,7 +86,7 @@ export type VssShareComplaintRecord = Readonly<
         readonly sourceTrusteeRosterPosition: number;
         readonly recipientRosterPosition: number;
         readonly complaintEvidenceRoot: ProtocolHash;
-        readonly complaintReasonCode: string;
+        readonly complaintReasonCode: RefusalReason;
         readonly signatureEnvelope: ProtocolSignatureEnvelope;
     }
 >;
@@ -120,12 +116,6 @@ type VssShareVerificationPayloadFields = Readonly<{
     readonly privateEnvelopeHash: ProtocolHash;
 }>;
 
-const signatureFailureMessage = (
-    recordLabel: string,
-    refusedObject: { readonly code: string; readonly message: string },
-): string =>
-    `${recordLabel} signature envelope failed verification: ${refusedObject.code}: ${refusedObject.message}`;
-
 const verifyGeneratedSignatureEnvelope = (
     recordLabel: string,
     signatureEnvelope: ProtocolSignatureEnvelope,
@@ -136,11 +126,8 @@ const verifyGeneratedSignatureEnvelope = (
         publicKeyHash: signatureEnvelope.publicKeyHash,
     });
     if (!result.isValid) {
-        const refusedObject = result.refusedObjects[0];
         throw new Error(
-            refusedObject === undefined
-                ? `${recordLabel} signature envelope failed verification.`
-                : signatureFailureMessage(recordLabel, refusedObject),
+            `${recordLabel} signature envelope failed verification: ${result.refusalReason}.`,
         );
     }
 };
@@ -320,27 +307,6 @@ export const createVssShareComplaintRecord = async (
 export const createVssShareComplaintRecordFromLocalVerification = async (
     input: VssShareComplaintFromLocalVerificationInput,
 ): Promise<VssShareComplaintRecord> => {
-    const firstRefusal = input.localVerification.refusedObjects[0];
-    if (firstRefusal === undefined) {
-        throw new Error(
-            'localVerification refusedObjects must include the local verification failure.',
-        );
-    }
-    assertNonEmptyString(
-        firstRefusal.reasonCode,
-        'localVerification.reasonCode',
-    );
-    assertNonEmptyString(firstRefusal.message, 'localVerification.message');
-    if (
-        input.localVerification.privateEnvelopeHash !== null &&
-        input.localVerification.privateEnvelopeHash !==
-            input.envelopeReference.privateEnvelopeHash
-    ) {
-        throw new Error(
-            'localVerification.privateEnvelopeHash must match the private envelope reference when present.',
-        );
-    }
-
     const evidencePayload = {
         objectType: 'VssShareComplaintEvidence',
         ...shareVerificationPayloadFields(
@@ -348,21 +314,12 @@ export const createVssShareComplaintRecordFromLocalVerification = async (
             input.privateVssEnvelopeCommitmentRoot,
             input.envelopeReference,
         ),
-        privateEnvelopeHashFromLocalVerification:
-            input.localVerification.privateEnvelopeHash,
-        localVerificationRoot: input.localVerification.localVerificationRoot,
-        refusedObjects: input.localVerification.refusedObjects.map(
-            (refusedObject) => ({
-                reasonCode: refusedObject.reasonCode,
-                message: refusedObject.message,
-                objectPath: refusedObject.objectPath,
-            }),
-        ),
+        refusalReason: input.localVerification.refusalReason,
     } as const satisfies JsonRecord;
 
     return createVssShareComplaintRecord({
         ...input,
         complaintEvidenceRoot: deriveCanonicalObjectHash(evidencePayload),
-        complaintReasonCode: firstRefusal.reasonCode,
+        complaintReasonCode: input.localVerification.refusalReason,
     });
 };

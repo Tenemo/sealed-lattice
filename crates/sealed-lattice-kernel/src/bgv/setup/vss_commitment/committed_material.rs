@@ -297,8 +297,8 @@ mod tests {
             "one material root per commitment field"
         );
         assert!(
-            roots.iter().all(|root| root.len() == 64),
-            "material roots are 32-byte digests in hex"
+            roots.iter().all(|root| root.len() == 128),
+            "material roots are 64-byte H_512 digests in hex"
         );
         // The record hash is the canonical hash of the commitment object.
         assert_eq!(

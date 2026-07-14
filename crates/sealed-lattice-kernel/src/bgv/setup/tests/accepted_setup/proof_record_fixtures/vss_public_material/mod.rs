@@ -142,12 +142,12 @@ pub(in super::super) fn compact_aggregate_threshold_proof_fixture()
     let mut aggregate_threshold_commitment_set =
         commitment_sets::vss_public_aggregate_threshold_commitment_set_without_proofs_for_coordinates(
             &package,
-            &[(0, 0), (1, 0)],
+            &[(0, 0), (0, 1)],
         );
     let aggregate_threshold_proofs = aggregate_threshold::vss_aggregate_threshold_proofs(
         &package,
         &aggregate_threshold_commitment_set,
-        &[(0, 0), (1, 0)],
+        &[(0, 0), (0, 1)],
     );
     aggregate_threshold_commitment_set["aggregateThresholdProofs"] =
         serde_json::json!(aggregate_threshold_proofs.records);
@@ -159,6 +159,7 @@ pub(in super::super) fn compact_aggregate_threshold_proof_fixture()
     }
 }
 
+pub(in super::super) use commitment_sets::vss_public_coefficient_commitment_set_object;
 pub(in super::super) use finalized_package::{
     FinalizedCollectiveSetupPackageFixture, finalize_collective_setup_package,
 };

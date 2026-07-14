@@ -3,26 +3,30 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Value, json};
 
 use crate::{
-    bgv::{parameters::DATA_PRIMES, setup_helpers::decimal_i128_value},
-    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_canonical_object_hash,
+    bgv::parameters::DATA_PRIMES, encoding::CanonicalResult, hashing::derive_canonical_object_hash,
 };
 
 use super::{
     commitment::{SetupCommitmentValue, parse_setup_commitment_full_value, setup_commitment_root},
     private_vss_share_proof::{
-        PrivateVssShareSuccinctProofGenerationInput, PrivateVssShareSuccinctProofVerificationInput,
-        PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_record,
+        PrivateVssShareSuccinctProofVerificationInput,
         verify_private_vss_share_succinct_relation_proof,
     },
-    sharing::canonical_trustee_point,
 };
 
 use super::accepted_setup;
+#[cfg(test)]
+use super::private_vss_share_proof::{
+    PrivateVssShareSuccinctProofGenerationInput, PrivateVssShareSuccinctProofWitness,
+    private_vss_share_succinct_proof_record,
+};
+#[cfg(test)]
+use super::sharing::canonical_trustee_point;
 
 mod bindings;
 mod envelope;
 mod local_verification_record;
+#[cfg(test)]
 mod proof_generation;
 mod refusal;
 mod request_fields;
@@ -33,6 +37,7 @@ use local_verification_record::*;
 use refusal::*;
 use request_fields::*;
 
+#[cfg(test)]
 pub(crate) use proof_generation::generate_private_vss_share_proof_from_request;
 
 pub(crate) fn verify_private_vss_share_envelope_from_request(

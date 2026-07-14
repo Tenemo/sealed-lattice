@@ -10,9 +10,8 @@
 
 use super::super::proof_field::ProofFieldParameters;
 use super::merkle::MerkleDigest;
+use crate::bgv::proof_suite::CanonicalTranscriptEngine;
 use crate::bgv::setup::trustee_evaluation_key_proof::HashChainTranscriptCore;
-
-const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/transcript";
 
 // Words drawn per field challenge. The proof fields are at most 13 limbs
 // (~770 bits); 15 words is ~960 bits, so Horner reduction leaves a bias below
@@ -28,7 +27,8 @@ impl Transcript {
     pub(super) fn new(protocol_label: &str) -> Self {
         Self {
             core: HashChainTranscriptCore::new(
-                TRANSCRIPT_DOMAIN,
+                CanonicalTranscriptEngine::KeySwitchAtom,
+                0x1216,
                 "limb-group-key-switch-atom",
                 protocol_label,
             ),

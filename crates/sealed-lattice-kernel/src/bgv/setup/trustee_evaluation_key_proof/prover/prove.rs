@@ -6,7 +6,11 @@ use super::super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::super::low_degree_proof::{
     LowDegreeParameters, commit_low_degree, open_low_degree_at_positions,
 };
-use super::super::merkle_commitment::sorted_unique_indices;
+use super::super::merkle_commitment::{
+    MAIN_LOW_DEGREE_TREE_ORDINAL_BASE, QUOTIENT_TREE_ORDINAL_BASE,
+    RESIDUAL_LOW_DEGREE_TREE_ORDINAL_BASE, limb_tree_context, low_degree_tree_context,
+    sorted_unique_indices,
+};
 use super::super::relation::{
     BaseColumnDomain, PHASE_TWO_COLUMN_COUNT, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL,
     SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
@@ -331,6 +335,11 @@ fn prove_limb(
         ],
     );
     let phase_two_salted = commit_salted_extension_row_pairs(
+        limb_tree_context(
+            statement.application_statement_schema_identifier(),
+            QUOTIENT_TREE_ORDINAL_BASE,
+            limb_index,
+        )?,
         &phase_two_columns,
         extension_size,
         &mut phase_two_salt_sampler,
@@ -510,6 +519,11 @@ fn prove_limb(
     };
     transcript.absorb("low-degree-purpose", MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE);
     let low_degree_state = match commit_low_degree(
+        low_degree_tree_context(
+            statement.application_statement_schema_identifier(),
+            MAIN_LOW_DEGREE_TREE_ORDINAL_BASE,
+            limb_index,
+        )?,
         &mut transcript,
         &low_degree_parameters,
         &batch_codeword,
@@ -545,6 +559,11 @@ fn prove_limb(
         SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE,
     );
     let sumcheck_residual_low_degree_state = commit_low_degree(
+        low_degree_tree_context(
+            statement.application_statement_schema_identifier(),
+            RESIDUAL_LOW_DEGREE_TREE_ORDINAL_BASE,
+            limb_index,
+        )?,
         &mut transcript,
         &sumcheck_residual_low_degree_parameters,
         &sumcheck_residual_codeword,
@@ -709,8 +728,9 @@ fn prove_evaluation_key_share_with_limb_batch_size(
     let proof_limb_indices = statement.proof_limb_indices();
     let limb_batch_size =
         normalize_limb_batch_size(requested_limb_batch_size, proof_limb_indices.len());
-    let mut transcript = FiatShamirTranscript::new(
+    let mut transcript = FiatShamirTranscript::new_for_schema(
         "trustee-evaluation-key-share",
+        statement.application_statement_schema_identifier(),
         MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
     )?;
     transcript.absorb("statement", &statement.statement_hash());

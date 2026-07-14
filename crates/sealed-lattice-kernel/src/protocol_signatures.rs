@@ -25,10 +25,8 @@ pub(crate) struct ProtocolSignatureExpectation<'a> {
     pub signer_identity: &'a str,
     pub ceremony_id: &'a str,
     pub public_key_hash: &'a str,
-    pub manifest_hash: Option<&'a str>,
-    pub object_root: Option<&'a str>,
-    pub chunk_merkle_root: Option<&'a str>,
-    pub board_head_hash: Option<&'a str>,
+    pub manifest_hash: &'a str,
+    pub object_root: &'a str,
     pub context_hash: &'a str,
     pub recovery_epoch: u64,
     pub device_epoch: u64,
@@ -61,10 +59,8 @@ struct ParsedProtocolSignature<'a> {
 struct ParsedSignedRoot<'a> {
     object_type: &'a str,
     ceremony_id: &'a str,
-    manifest_hash: Option<&'a str>,
-    object_root: Option<&'a str>,
-    chunk_merkle_root: Option<&'a str>,
-    board_head_hash: Option<&'a str>,
+    manifest_hash: &'a str,
+    object_root: &'a str,
     signer_role: &'a str,
     signer_identity: &'a str,
     recovery_epoch: u64,
@@ -77,10 +73,8 @@ impl ParsedSignedRoot<'_> {
         let mut signed_root = Map::new();
         signed_root.insert("objectType".into(), self.object_type.into());
         signed_root.insert("ceremonyId".into(), self.ceremony_id.into());
-        insert_optional_hash(&mut signed_root, "manifestHash", self.manifest_hash);
-        insert_optional_hash(&mut signed_root, "objectRoot", self.object_root);
-        insert_optional_hash(&mut signed_root, "chunkMerkleRoot", self.chunk_merkle_root);
-        insert_optional_hash(&mut signed_root, "boardHeadHash", self.board_head_hash);
+        signed_root.insert("manifestHash".into(), self.manifest_hash.into());
+        signed_root.insert("objectRoot".into(), self.object_root.into());
         signed_root.insert("signerRole".into(), self.signer_role.into());
         signed_root.insert("signerIdentity".into(), self.signer_identity.into());
         signed_root.insert("recoveryEpoch".into(), self.recovery_epoch.into());
@@ -192,31 +186,14 @@ fn parse_signed_root(
     let context_hash = required_hash(signed_root, "contextHash")?;
     let recovery_epoch = required_epoch(signed_root, "recoveryEpoch")?;
     let device_epoch = required_epoch(signed_root, "deviceEpoch")?;
-    let manifest_hash = optional_hash(signed_root, "manifestHash")?;
-    let object_root = optional_hash(signed_root, "objectRoot")?;
-    let chunk_merkle_root = optional_hash(signed_root, "chunkMerkleRoot")?;
-    let board_head_hash = optional_hash(signed_root, "boardHeadHash")?;
-
-    if object_root.is_none() && chunk_merkle_root.is_none() {
-        return Err(ProtocolSignatureFailure::new(
-            "InvalidSignedRoot",
-            "Signed roots must bind an object root or chunk Merkle root.",
-        ));
-    }
-    if object_root.is_some() && chunk_merkle_root.is_some() {
-        return Err(ProtocolSignatureFailure::new(
-            "InvalidSignedRoot",
-            "Signed roots must bind exactly one object root or chunk Merkle root.",
-        ));
-    }
+    let manifest_hash = required_hash(signed_root, "manifestHash")?;
+    let object_root = required_hash(signed_root, "objectRoot")?;
 
     Ok(ParsedSignedRoot {
         object_type,
         ceremony_id,
         manifest_hash,
         object_root,
-        chunk_merkle_root,
-        board_head_hash,
         signer_role,
         signer_identity,
         recovery_epoch,
@@ -272,16 +249,6 @@ fn validate_expectation(
             "objectRoot",
             signed_root.object_root,
             expectation.object_root,
-        ),
-        (
-            "chunkMerkleRoot",
-            signed_root.chunk_merkle_root,
-            expectation.chunk_merkle_root,
-        ),
-        (
-            "boardHeadHash",
-            signed_root.board_head_hash,
-            expectation.board_head_hash,
         ),
     ] {
         if actual_hash != expected_hash {
@@ -396,20 +363,6 @@ fn required_hash<'a>(
         })
 }
 
-fn optional_hash<'a>(
-    signed_root: &'a Map<String, Value>,
-    field_name: &str,
-) -> Result<Option<&'a str>, ProtocolSignatureFailure> {
-    match signed_root.get(field_name) {
-        None => Ok(None),
-        Some(Value::String(value)) if is_protocol_hash_string(value) => Ok(Some(value)),
-        Some(_) => Err(ProtocolSignatureFailure::new(
-            "InvalidSignedRoot",
-            format!("Signed-root {field_name} must be omitted or contain a canonical hash string."),
-        )),
-    }
-}
-
 fn required_epoch(
     signed_root: &Map<String, Value>,
     field_name: &str,
@@ -424,16 +377,6 @@ fn required_epoch(
                 format!("Signed-root {field_name} must be a safe non-negative integer."),
             )
         })
-}
-
-fn insert_optional_hash(
-    signed_root: &mut Map<String, Value>,
-    field_name: &'static str,
-    value: Option<&str>,
-) {
-    if let Some(value) = value {
-        signed_root.insert(field_name.into(), value.into());
-    }
 }
 
 #[cfg(test)]
@@ -565,10 +508,8 @@ mod tests {
             signer_identity: "trustee-0",
             ceremony_id: "ceremony-main",
             public_key_hash: &fixture.public_key_hash,
-            manifest_hash: Some(&object_root),
-            object_root: Some(&object_root),
-            chunk_merkle_root: None,
-            board_head_hash: None,
+            manifest_hash: &object_root,
+            object_root: &object_root,
             context_hash: &context_hash,
             recovery_epoch: 0,
             device_epoch: 0,
@@ -577,6 +518,62 @@ mod tests {
         verify_protocol_signature_envelope(&fixture.envelope, &expectation)
             .expect("verification should run")
             .expect("signature should verify");
+    }
+
+    #[test]
+    fn rejects_signature_root_missing_manifest_or_object_binding() {
+        let object_root = derive_canonical_object_hash(&json!({
+            "objectType": "ProtocolSignatureTestObject",
+            "fixture": "signed-object",
+        }))
+        .expect("object root");
+        let context_hash = derive_canonical_object_hash(&json!({
+            "objectType": "ProtocolSignatureTestObject",
+            "fixture": "signature-context",
+        }))
+        .expect("context hash");
+        let fixture = create_protocol_signature_fixture(
+            "trustee-0",
+            json!({
+                "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
+                "ceremonyId": "ceremony-main",
+                "manifestHash": object_root,
+                "objectRoot": object_root,
+                "signerRole": "Trustee",
+                "signerIdentity": "trustee-0",
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
+                "contextHash": context_hash,
+            }),
+        )
+        .expect("signature fixture");
+        let expectation = ProtocolSignatureExpectation {
+            object_type: "CollectiveBgvSetupIntentTrusteeRegistration",
+            signer_role: "Trustee",
+            signer_identity: "trustee-0",
+            ceremony_id: "ceremony-main",
+            public_key_hash: &fixture.public_key_hash,
+            manifest_hash: &object_root,
+            object_root: &object_root,
+            context_hash: &context_hash,
+            recovery_epoch: 0,
+            device_epoch: 0,
+        };
+
+        for missing_field in ["manifestHash", "objectRoot"] {
+            let mut incomplete_envelope = fixture.envelope.clone();
+            incomplete_envelope["signedRoot"]
+                .as_object_mut()
+                .expect("signed root object")
+                .remove(missing_field)
+                .expect("required binding exists in fixture");
+
+            let failure = verify_protocol_signature_envelope(&incomplete_envelope, &expectation)
+                .expect("verification should run")
+                .expect_err("missing required binding must be rejected");
+
+            assert_eq!(failure.reason_code, "InvalidSignedRoot");
+        }
     }
 
     #[test]
@@ -612,10 +609,8 @@ mod tests {
             signer_identity: "trustee-0",
             ceremony_id: "ceremony-main",
             public_key_hash: &fixture.public_key_hash,
-            manifest_hash: Some(&object_root),
-            object_root: Some(&object_root),
-            chunk_merkle_root: None,
-            board_head_hash: None,
+            manifest_hash: &object_root,
+            object_root: &object_root,
             context_hash: &context_hash,
             recovery_epoch: 1,
             device_epoch: 0,

@@ -16,7 +16,9 @@
 //! `COMMITMENT_BOUND_FACTOR * trace`.
 
 use super::super::evaluation_domain::EvaluationDomainPlan;
-use super::super::merkle_commitment::MerkleDigest;
+use super::super::merkle_commitment::{
+    MerkleContext, MerkleDigest, VSS_COMMITTED_MATERIAL_TREE_ORDINAL_BASE,
+};
 use super::super::relation::{TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness};
 use super::super::{TRACE_SPLIT, invalid_succinct_setup_proof};
 use super::claim_masking::masked_half_coefficients_with_mask_degree;
@@ -134,6 +136,8 @@ pub(super) fn vss_committed_material_trees_by_commitment_field(
             ],
         );
         let salted = commit_salted_extension_row_pairs(
+            MerkleContext::new(0x2110, VSS_COMMITTED_MATERIAL_TREE_ORDINAL_BASE)
+                .with_tree_ordinal_offset(commitment_field_position)?,
             &extension_columns,
             plan.extension_size,
             &mut salt_sampler,
@@ -362,6 +366,12 @@ mod tests {
 
     const TEST_RING_DEGREE: usize = 128;
 
+    fn material_merkle_context(field_position: usize) -> MerkleContext {
+        MerkleContext::new(0x2110, VSS_COMMITTED_MATERIAL_TREE_ORDINAL_BASE)
+            .with_tree_ordinal_offset(field_position)
+            .expect("the test field position fits the Merkle ordinal range")
+    }
+
     fn test_digit_columns() -> Vec<Vec<u64>> {
         let message: Vec<u64> = (0..TEST_RING_DEGREE)
             .map(|coefficient_index| {
@@ -465,6 +475,7 @@ mod tests {
                     (
                         pair_index,
                         phase_pair_leaf_hash(
+                            material_merkle_context(field_position),
                             pair_index,
                             field_trees.salted.pair_salt(pair_index),
                             &first_row,
@@ -476,7 +487,13 @@ mod tests {
             let sorted_leaves =
                 consistent_sorted_leaves(opened_leaves.clone()).expect("consistent leaves");
             assert!(
-                verify_merkle_batch(&root, depth, &sorted_leaves, &batched_opening),
+                verify_merkle_batch(
+                    material_merkle_context(field_position),
+                    &root,
+                    depth,
+                    &sorted_leaves,
+                    &batched_opening,
+                ),
                 "an honest batched opening must verify against the committed root"
             );
 
@@ -497,6 +514,7 @@ mod tests {
             tampered_leaves[2] = (
                 tampered_pair,
                 phase_pair_leaf_hash(
+                    material_merkle_context(field_position),
                     tampered_pair,
                     field_trees.salted.pair_salt(tampered_pair),
                     &tampered_first_row,
@@ -506,7 +524,13 @@ mod tests {
             let tampered_sorted =
                 consistent_sorted_leaves(tampered_leaves).expect("consistent leaves");
             assert!(
-                !verify_merkle_batch(&root, depth, &tampered_sorted, &batched_opening),
+                !verify_merkle_batch(
+                    material_merkle_context(field_position),
+                    &root,
+                    depth,
+                    &tampered_sorted,
+                    &batched_opening,
+                ),
                 "a tampered opened row must be rejected"
             );
         }
@@ -534,6 +558,7 @@ mod tests {
                 (
                     pair_index,
                     phase_pair_leaf_hash(
+                        material_merkle_context(0),
                         pair_index,
                         first_field.salted.pair_salt(pair_index),
                         &first_row,
@@ -544,7 +569,13 @@ mod tests {
             .collect::<Vec<_>>();
         let sorted_leaves = consistent_sorted_leaves(opened_leaves).expect("consistent leaves");
         assert!(
-            !verify_merkle_batch(&other_root, depth, &sorted_leaves, &batched_opening),
+            !verify_merkle_batch(
+                material_merkle_context(1),
+                &other_root,
+                depth,
+                &sorted_leaves,
+                &batched_opening,
+            ),
             "another field's root must not authenticate these openings"
         );
     }

@@ -22,12 +22,6 @@ const transcriptCoreKernelLoaderOptions = {
     expectedKernelSha256Hex: packagedTranscriptCoreKernelNormalizedSha256Hex,
 } as const;
 
-export const loadTranscriptCoreKernel: () => Promise<PublishedSdkKernel> =
-    createPublishedSdkKernelLoader(
-        transcriptCoreKernelUrl,
-        transcriptCoreKernelLoaderOptions,
-    );
-
 // Portable one-shot operations can own a disposable WASM instance. If source
 // staging or generated-material export fails, discarding that instance also
 // discards authenticated or generated one-shot roots and its linear-memory

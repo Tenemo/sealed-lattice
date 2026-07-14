@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
-import type {
-    BgvCollectiveSetupParametersDescription,
-    TranscriptCoreKernel,
-} from '#packages/wasm/src/index';
+import type { TranscriptCoreKernel } from '#packages/wasm/src/index';
 // Shared hash vector set used by the Rust kernel test
 // (trustee_evaluation_key_proof::tests): byte-identical succinct-setup statement
 // hashes pinned across the TS/WASM and Rust provers. Edit the values in the JSON
@@ -12,9 +9,6 @@ import type {
 import expectedStatementHashes from '#test-vectors/succinct-setup-statement-hashes.json';
 
 type JsonRecord = Record<string, unknown>;
-type PrivateVssProofInput = Parameters<
-    TranscriptCoreKernel['generatePrivateVssShareProof']
->[0];
 
 const ringDegree = 128;
 const proofRandomnessSeedHex =
@@ -107,120 +101,8 @@ const zeroSetupCommitment = (
     };
 };
 
-const setupContext = (
-    parameters: BgvCollectiveSetupParametersDescription,
-): JsonRecord => ({
-    ceremonyId: 'statement-vector-ceremony',
-    manifestHash: repeatedHash('10'),
-    rosterHash: repeatedHash('20'),
-    setupParametersHash: parameters.setupParametersHash,
-    setupEpoch: 'statement-vector-epoch',
-    participantCount: 10,
-});
-
-const setupContextHash = (
-    kernel: TranscriptCoreKernel,
-    parameters: BgvCollectiveSetupParametersDescription,
-): string =>
-    kernel.deriveCanonicalObjectHash({
-        value: {
-            objectType: 'CollectiveBgvSetupContext',
-            ...setupContext(parameters),
-        },
-    });
-
-const privateVssRequest = (
-    kernel: TranscriptCoreKernel,
-    parameters: BgvCollectiveSetupParametersDescription,
-): PrivateVssProofInput => {
-    const currentSetupContext = setupContext(parameters);
-    const currentSetupContextHash = setupContextHash(kernel, parameters);
-    const publicMatrixSeedHash = repeatedHash('40');
-    const coefficientCommitments: JsonRecord[] = [];
-    const materialRecords: JsonRecord[] = [];
-    const coefficientCommitmentRoots: string[] = [];
-    const firstQSharePrime = parameters.qShare.primes[0];
-    if (firstQSharePrime === undefined) {
-        throw new Error(
-            'Collective setup parameters must include Q_share primes.',
-        );
-    }
-
-    parameters.qShare.primes.forEach((rnsPrime, rnsLimbIndex) => {
-        Array.from({ length: 4 }, (_unused, shamirCoefficientIndex) => {
-            const { commitment, commitmentRoot } = zeroSetupCommitment(kernel, {
-                publicMatrixSeedHash,
-                sourceRnsLimbIndex: rnsLimbIndex,
-                sourceMessageModulus: rnsPrime,
-                shamirCoefficientIndex,
-            });
-            if (rnsLimbIndex === 0) {
-                coefficientCommitmentRoots.push(commitmentRoot);
-            }
-            coefficientCommitments.push({
-                objectType: 'VssCoefficientCommitment',
-                setupContextHash: currentSetupContextHash,
-                sourceTrusteeIdentity: 'statement-vector-trustee',
-                sourceTrusteeRosterPosition: 0,
-                publicMatrixSeedHash,
-                rnsLimbIndex,
-                rnsPrime,
-                shamirCoefficientIndex,
-                commitmentRoot,
-            });
-            materialRecords.push({
-                objectType: 'VssCoefficientCommitmentMaterial',
-                setupContextHash: currentSetupContextHash,
-                sourceTrusteeIdentity: 'statement-vector-trustee',
-                sourceTrusteeRosterPosition: 0,
-                publicMatrixSeedHash,
-                rnsLimbIndex,
-                rnsPrime,
-                shamirCoefficientIndex,
-                commitmentRoot,
-                commitment,
-            });
-        });
-    });
-
-    const sourceTrusteeRecord: JsonRecord = {
-        objectType: 'VssSourceTrusteeCoefficientCommitments',
-        setupContextHash: currentSetupContextHash,
-        sourceTrusteeIdentity: 'statement-vector-trustee',
-        sourceTrusteeRosterPosition: 0,
-        publicMatrixSeedHash,
-        coefficientCommitments,
-    };
-    sourceTrusteeRecord.sourceTrusteeCommitmentRoot =
-        kernel.deriveCanonicalObjectHash({
-            value: sourceTrusteeRecord,
-        });
-
-    return {
-        setupContext: currentSetupContext,
-        publicMatrixSeedHash,
-        privateEnvelopeAadHash: repeatedHash('44'),
-        sourceTrusteeCoefficientCommitmentRecord: sourceTrusteeRecord,
-        sourceTrusteeCoefficientCommitmentMaterialRecords: materialRecords,
-        recipientIdentity: 'statement-vector-recipient',
-        recipientRosterPosition: 2,
-        rnsLimbIndex: 0,
-        rnsPrime: firstQSharePrime,
-        ringDegree,
-        shareValues: zeroU64Vector(),
-        coefficientCommitmentRoots,
-        coefficientMessagesByShamirIndex: Array.from({ length: 4 }, () =>
-            zeroU64Vector(),
-        ),
-        openingRandomnessByShamirIndex: Array.from({ length: 4 }, () =>
-            Array.from({ length: 5 }, () => zeroI64Vector()),
-        ),
-        ...proofRandomnessFields,
-    };
-};
-
 describe('succinct setup statement hash vectors', () => {
-    it('matches Rust native vectors for every current setup proof family', async () => {
+    it('matches Rust native vectors for every publicly generated setup proof family', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const parameters = kernel.describeCollectiveBgvSetupParameters();
         const publicMatrixSeedHash = repeatedHash('40');
@@ -353,13 +235,6 @@ describe('succinct setup statement hash vectors', () => {
         });
         expect(publicKeyShare.statementHash).toBe(
             expectedStatementHashes.publicKeyShare,
-        );
-
-        const privateVssShare = kernel.generatePrivateVssShareProof(
-            privateVssRequest(kernel, parameters),
-        );
-        expect(privateVssShare.privateVssShareProof.statementHash).toBe(
-            expectedStatementHashes.privateVssShare,
         );
 
         // The key-bearing statement links its atom secret directly to the

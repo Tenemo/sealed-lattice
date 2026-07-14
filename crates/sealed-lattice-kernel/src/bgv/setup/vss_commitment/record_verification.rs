@@ -115,20 +115,16 @@ pub(crate) fn validate_standalone_vss_committed_material_commitment(
             DATA_PRIMES[expected_commitment_modulus_index],
             &format!("{field_name} commitmentFields.{field_position}.modulus"),
         )?;
-        // The material root is a fixed-width Merkle digest (32 bytes) in
+        // The material root is the fixed-width H_512 Merkle digest in
         // lowercase hex. Binding is checked by the canonical-root comparison in
         // the caller and by the succinct proof's material openings; here it is
         // only a well-formedness check.
         let material_root_hex = string_at_path(commitment_field, &["materialRootHex"])?;
-        if material_root_hex.len() != 64
-            || !material_root_hex
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
+        if !is_lowercase_protocol_hash(material_root_hex) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 format!(
-                    "{field_name} commitmentFields.{field_position}.materialRootHex must be a 32-byte lowercase hex digest"
+                    "{field_name} commitmentFields.{field_position}.materialRootHex must be a 64-byte lowercase hex digest"
                 ),
             ));
         }

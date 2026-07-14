@@ -32,7 +32,7 @@ export const unsigned32LittleEndian = (value: number): Uint8Array => {
     return bytes;
 };
 
-const unsigned64LittleEndian = (value: bigint): Uint8Array => {
+export const unsigned64LittleEndian = (value: bigint): Uint8Array => {
     const bytes = new Uint8Array(8);
     new DataView(bytes.buffer).setBigUint64(0, value, true);
     return bytes;
@@ -68,6 +68,9 @@ export const asciiItem = (value: string): Uint8Array =>
 export const unsigned16Item = (value: number): Uint8Array =>
     canonicalItem(0x03, unsigned16LittleEndian(value));
 
+export const unsigned32Item = (value: number): Uint8Array =>
+    canonicalItem(0x04, unsigned32LittleEndian(value));
+
 export const unsigned64Item = (value: bigint): Uint8Array =>
     canonicalItem(0x05, unsigned64LittleEndian(value));
 
@@ -76,6 +79,28 @@ export const hashItem = (value: Uint8Array): Uint8Array =>
 
 export const variableBytesItem = (value: Uint8Array): Uint8Array =>
     canonicalItem(0x01, variableValue(value));
+
+export const fixedBytesItem = (value: Uint8Array): Uint8Array =>
+    canonicalItem(0x01, value);
+
+export const participantIdentityItem = (value: Uint8Array): Uint8Array =>
+    canonicalItem(0x07, value);
+
+export const displayTextItem = (value: string): Uint8Array =>
+    canonicalItem(0x0c, variableValue(textEncoder.encode(value)));
+
+export const homogeneousListItem = (
+    elementItemType: number,
+    canonicalValues: readonly Uint8Array[],
+): Uint8Array =>
+    canonicalItem(
+        0x0e,
+        concatenateBytes(
+            unsigned16LittleEndian(elementItemType),
+            unsigned32LittleEndian(canonicalValues.length),
+            ...canonicalValues,
+        ),
+    );
 
 export const emptyOptionalItem = (containedItemType: number): Uint8Array =>
     canonicalItem(
@@ -117,15 +142,18 @@ export const foundationHash512 = (
     );
 
 export const createCanonicalTestRosterBytes = (
-    signingVerificationKeys: readonly Uint8Array[],
+    entries: readonly Readonly<{
+        signingVerificationKey: Uint8Array;
+        mailboxEncapsulationKey: Uint8Array;
+    }>[],
 ): Uint8Array => {
-    const rosterEntries = signingVerificationKeys.map(
-        (signingVerificationKey, rosterPosition) =>
-            canonicalTuple(
-                0x0114,
-                unsigned16Item(rosterPosition),
-                canonicalItem(0x01, signingVerificationKey),
-            ),
+    const rosterEntries = entries.map((entry, rosterPosition) =>
+        canonicalTuple(
+            0x0114,
+            unsigned16Item(rosterPosition),
+            canonicalItem(0x01, entry.signingVerificationKey),
+            canonicalItem(0x01, entry.mailboxEncapsulationKey),
+        ),
     );
 
     return canonicalTuple(

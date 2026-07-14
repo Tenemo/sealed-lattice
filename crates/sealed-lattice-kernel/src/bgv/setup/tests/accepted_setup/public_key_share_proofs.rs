@@ -12,14 +12,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
     let result = fixture.verify().expect("verification response");
 
     assert_eq!(result["isValid"], false);
-    let refused_objects = result["refusedObjects"]
-        .as_array()
-        .expect("missing public-key objects must be typed refusals");
-    assert_eq!(refused_objects.len(), 1);
-    assert!(refused_objects.iter().all(|refusal| {
-        refusal["reasonCode"] == "setupObjectMissing"
-            && refusal["objectPath"] == "setupPackage.collectivePublicKey"
-    }));
+    assert_eq!(result["refusalReason"], "missingPrerequisite");
 }
 
 #[test]
@@ -45,8 +38,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_succinct_publi
 
     assert_eq!(missing_succinct_proofs_result["isValid"], false);
     assert_eq!(
-        missing_succinct_proofs_result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofsMissing"
+        missing_succinct_proofs_result["refusalReason"],
+        "invalidProof"
     );
 }
 
@@ -57,16 +50,11 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
         "heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_proof_containers",
     );
 
-    for (proof_set_name, field_name, reason_code) in [
-        (
-            "publicKeyShareSuccinctProofs",
-            "proofRecords",
-            "publicKeyShareSuccinctProofRecordsMissing",
-        ),
+    for (proof_set_name, field_name) in [
+        ("publicKeyShareSuccinctProofs", "proofRecords"),
         (
             "publicKeyShareSuccinctProofs",
             "publicKeyShareSuccinctProofSetRoot",
-            "publicKeyShareSuccinctProofSetRootMissing",
         ),
     ] {
         let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
@@ -83,11 +71,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
             .expect("verification response");
 
         assert_eq!(result["isValid"], false);
-        assert_eq!(result["refusedObjects"][0]["reasonCode"], reason_code);
-        assert_eq!(
-            result["refusedObjects"][0]["objectPath"],
-            format!("setupPackage.{proof_set_name}.{field_name}")
-        );
+        assert_eq!(result["refusalReason"], "invalidProof");
     }
 }
 
@@ -119,10 +103,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         .expect("verification response");
 
     assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareMaterialVerificationFailed"
-    );
+    assert_eq!(result["refusalReason"], "malformedEncoding");
 }
 
 #[test]
@@ -169,10 +150,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         .expect("verification response");
 
     assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofVerificationFailed"
-    );
+    assert_eq!(result["refusalReason"], "invalidProof");
 }
 
 #[test]
@@ -187,10 +165,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_f
     let result = fixture.verify().expect("verification response");
 
     assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "setupMaterialOutsideAcceptedRing"
-    );
+    assert_eq!(result["refusalReason"], "missingPrerequisite");
 }
 
 #[test]
@@ -223,10 +198,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
         .expect("verification response");
 
     assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "collectivePublicKeyVerificationFailed"
-    );
+    assert_eq!(result["refusalReason"], "malformedEncoding");
 }
 
 #[test]
@@ -252,12 +224,8 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
 
     assert_eq!(missing_object_result["isValid"], false);
     assert_eq!(
-        missing_object_result["refusedObjects"][0]["reasonCode"],
-        "setupObjectMissing"
-    );
-    assert_eq!(
-        missing_object_result["refusedObjects"][0]["objectPath"],
-        "setupPackage.collectivePublicKey"
+        missing_object_result["refusalReason"],
+        "missingPrerequisite"
     );
 
     let missing_root_fixture = collective_public_key_bearing_collective_setup_fixture();
@@ -276,12 +244,5 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
         .expect("verification response");
 
     assert_eq!(missing_root_result["isValid"], false);
-    assert_eq!(
-        missing_root_result["refusedObjects"][0]["reasonCode"],
-        "setupObjectMissing"
-    );
-    assert_eq!(
-        missing_root_result["refusedObjects"][0]["objectPath"],
-        "setupPackage.collectivePublicKey.collectivePublicKeyRoot"
-    );
+    assert_eq!(missing_root_result["refusalReason"], "missingPrerequisite");
 }

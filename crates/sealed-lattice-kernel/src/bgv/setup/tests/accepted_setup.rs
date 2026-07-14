@@ -13,6 +13,7 @@ use self::package_fixtures::{
     collective_public_key_bearing_collective_setup_fixture, collective_setup_intent_package,
     descriptor_backed_vss_collective_setup_fixture, minimal_collective_setup_package_fixture,
     minimal_collective_setup_package_for_participant_count,
+    private_vss_envelope_commitments_object,
     public_key_share_succinct_proof_bearing_collective_setup_fixture,
     ten_participant_descriptor_backed_vss_collective_setup_fixture,
 };
@@ -22,6 +23,7 @@ use self::proof_record_fixtures::{
     public_key_share_material_object, public_key_share_succinct_proofs_fixture,
     relinearization_key_share_rounds_fixture, replace_public_key_share_hashes_with_material_hashes,
     trustee_evaluation_key_proofs_object, vss_commitment_ring_degree_from_fixture_package,
+    vss_public_coefficient_commitment_set_object,
 };
 use self::record_rebinding::{
     private_vss_envelope_commitment_set_root_input, rebind_collective_evaluator_key_schedule_root,
@@ -87,17 +89,13 @@ fn accepted_setup_test_timing(test_name: &'static str) -> AcceptedSetupTestTimin
 
 // Runs the collective BGV setup verifier over a setup package and its
 // authenticated material references. Wraps the infallible-response expectation
-// that every accepted-setup rejection test repeats verbatim.
-// Builds the minimal descriptor-backed collective setup fixture, applies a
-// single labeled mutation (which performs any record-level rebinds it needs),
-// rebinds the outer package hash, and asserts the verifier refuses with the
-// expected reason code. This keeps authenticated proof material alive for the
-// complete verification path, so a later-phase mutation cannot be preempted by
-// an unrelated missing-material refusal.
+// that every accepted-setup rejection test repeats verbatim. The minimal helper
+// is for mutations reached during VSS verification; the collective-public-key
+// helper carries every prerequisite needed to reach evaluator-key checks.
 fn assert_minimal_collective_setup_package_refused(
     case_label: &str,
     mutate: impl FnOnce(&mut serde_json::Value),
-    expected_reason_code: &str,
+    expected_refusal_reason: &str,
 ) {
     let mut fixture = descriptor_backed_vss_collective_setup_fixture();
     mutate(&mut fixture.package);
@@ -108,8 +106,27 @@ fn assert_minimal_collective_setup_package_refused(
         "{case_label}: unexpected verifier result: {result}"
     );
     assert_eq!(
-        result["refusedObjects"][0]["reasonCode"], expected_reason_code,
-        "{case_label}: unexpected refusal reason code: {result}"
+        result["refusalReason"], expected_refusal_reason,
+        "{case_label}: unexpected refusal reason: {result}"
+    );
+}
+
+fn assert_collective_public_key_bearing_setup_package_refused(
+    case_label: &str,
+    mutate: impl FnOnce(&mut serde_json::Value),
+    expected_refusal_reason: &str,
+) {
+    let mut fixture = collective_public_key_bearing_collective_setup_fixture();
+    mutate(&mut fixture.package);
+    rebind_collective_setup_package_hash(&mut fixture.package);
+    let result = fixture.verify().expect("verification response");
+    assert_eq!(
+        result["isValid"], false,
+        "{case_label}: unexpected verifier result: {result}"
+    );
+    assert_eq!(
+        result["refusalReason"], expected_refusal_reason,
+        "{case_label}: unexpected refusal reason: {result}"
     );
 }
 

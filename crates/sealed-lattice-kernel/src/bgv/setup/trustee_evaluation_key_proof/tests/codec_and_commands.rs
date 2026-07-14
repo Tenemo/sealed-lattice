@@ -233,8 +233,9 @@ fn proof_command_binds_randomness_seed_to_nonce_and_statement() {
 
 #[test]
 fn proof_codec_round_trips_and_rejects_malformed_bytes() {
+    let codec_test_ring_degree = LOW_DEGREE_QUERY_COUNT.next_power_of_two();
     let (statement, witness) =
-        generate_development_public_key_share_instance("c0dec0de", SMALL_RING_DEGREE)
+        generate_development_public_key_share_instance("c0dec0de", codec_test_ring_degree)
             .expect("public-key share instance");
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
@@ -242,6 +243,11 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
     let decoded = decode_trustee_evaluation_key_proof(&statement, &bytes)
         .expect("decode canonical proof bytes");
     verify_evaluation_key_share(&statement, &decoded).expect("verify decoded proof");
+    assert_eq!(
+        encode_trustee_evaluation_key_proof(&decoded),
+        bytes,
+        "decoding and re-encoding must preserve every canonical proof byte"
+    );
 
     let mut trailing = bytes.clone();
     trailing.push(0);
@@ -268,8 +274,9 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
 
 #[test]
 fn proof_codec_decodes_chunked_material_across_adversarial_boundaries() {
+    let codec_test_ring_degree = LOW_DEGREE_QUERY_COUNT.next_power_of_two();
     let (statement, witness) =
-        generate_development_public_key_share_instance("c0dec0df", SMALL_RING_DEGREE)
+        generate_development_public_key_share_instance("c0dec0df", codec_test_ring_degree)
             .expect("public-key share instance");
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
@@ -289,6 +296,11 @@ fn proof_codec_decodes_chunked_material_across_adversarial_boundaries() {
     let decoded = decode_trustee_evaluation_key_proof_from_source(&statement, &chunked_material)
         .expect("decode proof across chunk boundaries");
     verify_evaluation_key_share(&statement, &decoded).expect("verify chunk-decoded proof");
+    assert_eq!(
+        encode_trustee_evaluation_key_proof(&decoded),
+        bytes,
+        "chunked decoding and re-encoding must preserve every canonical proof byte"
+    );
 
     let mut truncated_chunks = chunked_material.chunks.to_vec();
     truncated_chunks.last_mut().expect("final chunk").pop();
@@ -362,7 +374,7 @@ fn heavy_rust_kernel_proof_codec_rejects_low_degree_shape_mismatches_before_veri
         LOW_DEGREE_QUERY_COUNT * folded_layer_path_length(extension_size, 0);
     proof.limb_proofs[0].low_degree.layer_batch_openings[0]
         .authentication_nodes
-        .resize(maximum_layer_zero_nodes + 1, [0_u8; 32]);
+        .resize(maximum_layer_zero_nodes + 1, [0_u8; 64]);
     let encoded = encode_trustee_evaluation_key_proof(&proof);
     let error = match decode_trustee_evaluation_key_proof(&statement, &encoded) {
         Ok(_) => panic!("an oversized batched opening must reject at decode"),

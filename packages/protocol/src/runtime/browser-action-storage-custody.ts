@@ -1,10 +1,18 @@
-import type { ExternallyVerifiedStorageRootCommitment } from '@sealed-lattice/types';
+import type {
+    BrowserLocalRecordIdentifierInput,
+    BrowserLocalRecordOpenInput,
+    BrowserLocalRecordSealInput,
+    UntrustedExpectedStorageRootCommitment,
+} from '@sealed-lattice/types';
 
 export { BrowserActionStorageCustodyError } from '@sealed-lattice/types';
 export type {
     BrowserActionStorageCustodyErrorCode,
     BrowserActionStorageRootBinding,
-    ExternallyVerifiedStorageRootCommitment,
+    BrowserLocalRecordIdentifierInput,
+    BrowserLocalRecordOpenInput,
+    BrowserLocalRecordSealInput,
+    UntrustedExpectedStorageRootCommitment,
 } from '@sealed-lattice/types';
 
 /**
@@ -29,8 +37,9 @@ export type BrowserRecoveryExportConfirmation = Readonly<{
 
 /**
  * Structured-clone-safe custody commands exposed by the owned worker. The
- * main thread receives only mutation metadata and an explicitly confirmed
- * recovery value. Device keys, wrapped envelopes, plaintext roots, and root
+ * main thread receives mutation metadata, explicitly confirmed recovery
+ * material, and the local-record plaintext or envelope bytes it explicitly
+ * requests. Device keys, wrapped root envelopes, plaintext roots, and root
  * handles never occur in this contract.
  */
 export type BrowserActionStorageCustody = Readonly<{
@@ -42,11 +51,11 @@ export type BrowserActionStorageCustody = Readonly<{
     currentSnapshot(): Promise<BrowserDeviceWrappingSnapshot | undefined>;
     openIntoOwnedWorker(input: {
         expectedSnapshot: BrowserDeviceWrappingSnapshot;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<void>;
     beginRecoveryExport(input: {
         expectedSnapshot: BrowserDeviceWrappingSnapshot;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<BrowserRecoveryExportChallenge>;
     confirmRecoveryExport(input: {
         preparationIdentifier: string;
@@ -55,9 +64,15 @@ export type BrowserActionStorageCustody = Readonly<{
     cancelRecoveryExport(preparationIdentifier: string): Promise<void>;
     recover(input: {
         caseInsensitiveRecoveryText: string;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
+        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
         expectedSnapshot?: BrowserDeviceWrappingSnapshot;
     }): Promise<BrowserDeviceWrappingSnapshot>;
+    deriveLocalRecordIdentifier(
+        input: BrowserLocalRecordIdentifierInput,
+    ): Promise<Uint8Array>;
+    sealLocalRecord(input: BrowserLocalRecordSealInput): Promise<Uint8Array>;
+    openLocalRecord(input: BrowserLocalRecordOpenInput): Promise<Uint8Array>;
+    hashLocalRecordEnvelope(envelope: Uint8Array): Promise<Uint8Array>;
     delete(expectedSnapshot: BrowserDeviceWrappingSnapshot): Promise<void>;
     close(): Promise<void>;
 }>;

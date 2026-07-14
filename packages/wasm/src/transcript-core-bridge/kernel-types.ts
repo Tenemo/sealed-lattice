@@ -11,7 +11,6 @@ import type {
     BgvTrusteeEvaluationKeyStatementKey,
     BgvLocalTrusteeSetupStateVerification,
     BgvPrivateVssShareEnvelopeVerification,
-    BgvPrivateVssShareProofGeneration,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofContext,
     BgvSameSecretBridgeProofGeneration,
@@ -34,7 +33,6 @@ export type {
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvLocalTrusteeSetupStateVerification,
     BgvPrivateVssShareEnvelopeVerification,
-    BgvPrivateVssShareProofGeneration,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofContext,
     BgvSameSecretBridgeProofGeneration,
@@ -61,6 +59,183 @@ export type BgvCollectiveSetupVerificationInput = Readonly<{
     readonly expectedSetupPackageHash?: ProtocolHash;
     readonly expectedManifestHash?: ProtocolHash;
     readonly expectedRosterHash?: ProtocolHash;
+}>;
+
+export type MailboxPayloadType = 1 | 2;
+
+export type CanonicalFoundationValueValidation = Readonly<{
+    readonly schemaIdentifier: number;
+    readonly canonicalBytesHex: string;
+    readonly bindingHash?: ProtocolHash;
+}>;
+
+export type CanonicalFoundationValueValidationInput =
+    | Readonly<{
+          readonly schemaIdentifier: number;
+          readonly canonicalBytesHex: string;
+      }>
+    | Readonly<{
+          readonly schemaIdentifier: number;
+          readonly canonicalByteLength: number;
+          readonly canonicalByteChunksHex: readonly string[];
+      }>;
+
+export type CeremonyContextInput = Readonly<{
+    readonly suiteId: ProtocolHash;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly ceremonyIdentifier: string;
+}>;
+
+export type ActionContextInput = Readonly<{
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly actionIdentifier: string;
+    readonly actionDefinitionHash: ProtocolHash;
+    readonly boardPolicyHash: ProtocolHash;
+}>;
+
+export type MailboxKeyScheduleInput = Readonly<{
+    readonly suiteId: ProtocolHash;
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly actionContextHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly sourceParticipantId: string;
+    readonly recipientParticipantId: string;
+    readonly producerSequence: string;
+    readonly envelopeAttemptIdentifierHex: string;
+    readonly payloadType: MailboxPayloadType;
+    readonly statementHash: ProtocolHash;
+    readonly orderedMaterialRoots: readonly ProtocolHash[];
+    readonly kemCiphertextHash: ProtocolHash;
+}>;
+
+export type MailboxAssociatedData = Readonly<
+    MailboxKeyScheduleInput & {
+        readonly plaintextByteLength: string;
+    }
+>;
+
+export type SetupMailboxSlot = Omit<
+    MailboxKeyScheduleInput,
+    'envelopeAttemptIdentifierHex' | 'kemCiphertextHash'
+>;
+
+export type MailboxCiphertextDescriptor = Readonly<{
+    readonly totalByteLength: string;
+    readonly orderedChunkDigests: readonly ProtocolHash[];
+    readonly fullObjectDigest: ProtocolHash;
+}>;
+
+export type UnsignedMailboxEnvelope = Readonly<{
+    readonly associatedData: MailboxAssociatedData;
+    readonly kemCiphertextHex: string;
+    readonly ciphertextDescriptor: MailboxCiphertextDescriptor;
+    readonly gcmTagHex: string;
+}>;
+
+export type SignedMailboxEnvelope = Readonly<
+    UnsignedMailboxEnvelope & {
+        readonly sourceSignatureHex: string;
+    }
+>;
+
+export type EncodedMailboxKeyScheduleInput = Readonly<{
+    readonly canonicalBytesHex: string;
+    readonly hkdfExtractSaltHex: string;
+}>;
+
+export type DecodedMailboxKeyScheduleInput = Readonly<{
+    readonly value: MailboxKeyScheduleInput;
+    readonly hkdfExtractSaltHex: string;
+}>;
+
+export type EncodedMailboxAssociatedData = Readonly<{
+    readonly canonicalBytesHex: string;
+    readonly hkdfExtractSaltHex: string;
+}>;
+
+export type DecodedMailboxAssociatedData = Readonly<{
+    readonly value: MailboxAssociatedData;
+    readonly hkdfExtractSaltHex: string;
+}>;
+
+export type EncodedStreamDescriptor = Readonly<{
+    readonly canonicalBytesHex: string;
+}>;
+
+export type DecodedStreamDescriptor = Readonly<{
+    readonly value: MailboxCiphertextDescriptor;
+}>;
+
+export type PrivateRandomCursor = Readonly<{
+    readonly family: number;
+    readonly purpose: number;
+    readonly derivationContextHash: ProtocolHash;
+    readonly streamAttemptIdentifierHex: string;
+    readonly nextCounter: string;
+    readonly nextUnreadBitOffsetInBufferedBlock?: number;
+}>;
+
+export type ActionRandomnessDerivationInput = Readonly<{
+    readonly suiteId: ProtocolHash;
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly actionContextHash: ProtocolHash;
+    readonly participantId: string;
+}>;
+
+export type PrivateRandomBlockInput = Readonly<
+    ActionRandomnessDerivationInput & {
+        readonly family: number;
+        readonly purpose: number;
+        readonly derivationContextHash: ProtocolHash;
+        readonly attemptIdentifierHex: string;
+        readonly counter: string;
+    }
+>;
+
+export type EncodedActionRandomnessDerivationInput = Readonly<{
+    readonly canonicalBytesHex: string;
+}>;
+
+export type DecodedActionRandomnessDerivationInput = Readonly<{
+    readonly value: ActionRandomnessDerivationInput;
+}>;
+
+export type EncodedPrivateRandomBlockInput = Readonly<{
+    readonly canonicalBytesHex: string;
+}>;
+
+export type DecodedPrivateRandomBlockInput = Readonly<{
+    readonly value: PrivateRandomBlockInput;
+}>;
+
+export type EncodedPrivateRandomCursor = Readonly<{
+    readonly canonicalBytesHex: string;
+}>;
+
+export type DecodedPrivateRandomCursor = Readonly<{
+    readonly value: PrivateRandomCursor;
+}>;
+
+export type GeneratedProofSuiteCandidate = Readonly<{
+    readonly suiteId: ProtocolHash;
+    readonly canonicalSuiteRecordHex: string;
+    readonly artifacts: readonly Readonly<{
+        readonly artifactKind: number;
+        readonly canonicalArtifactHex: string;
+        readonly byteLength: number;
+        readonly artifactHash: ProtocolHash;
+    }>[];
+}>;
+
+export type EncodedSignedMailboxEnvelope = Readonly<{
+    readonly canonicalBytesHex: string;
+    readonly envelopeHash: ProtocolHash;
+}>;
+
+export type DecodedSignedMailboxEnvelope = Readonly<{
+    readonly value: SignedMailboxEnvelope;
+    readonly envelopeHash: ProtocolHash;
 }>;
 
 export type AcceptedSetupSession = Readonly<{
@@ -153,6 +328,63 @@ export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
     beginAcceptedSetupSession(): AcceptedSetupSession;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
+    validateCanonicalFoundationValue(
+        input: CanonicalFoundationValueValidationInput,
+    ): CanonicalFoundationValueValidation;
+    deriveCeremonyContextHash(value: CeremonyContextInput): ProtocolHash;
+    deriveActionContextHash(value: ActionContextInput): ProtocolHash;
+    encodeMailboxKeyScheduleInput(
+        value: MailboxKeyScheduleInput,
+    ): EncodedMailboxKeyScheduleInput;
+    decodeMailboxKeyScheduleInput(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedMailboxKeyScheduleInput;
+    encodeMailboxAssociatedData(
+        value: MailboxAssociatedData,
+    ): EncodedMailboxAssociatedData;
+    decodeMailboxAssociatedData(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedMailboxAssociatedData;
+    encodeStreamDescriptor(
+        value: MailboxCiphertextDescriptor,
+    ): EncodedStreamDescriptor;
+    decodeStreamDescriptor(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedStreamDescriptor;
+    deriveSetupMailboxSlotHash(value: SetupMailboxSlot): ProtocolHash;
+    encodeActionRandomnessDerivationInput(
+        value: ActionRandomnessDerivationInput,
+    ): EncodedActionRandomnessDerivationInput;
+    decodeActionRandomnessDerivationInput(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedActionRandomnessDerivationInput;
+    deriveActionRandomnessCommitment(input: {
+        readonly actionRandomnessRootHex: string;
+        readonly value: ActionRandomnessDerivationInput;
+    }): ProtocolHash;
+    encodePrivateRandomBlockInput(
+        value: PrivateRandomBlockInput,
+    ): EncodedPrivateRandomBlockInput;
+    decodePrivateRandomBlockInput(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedPrivateRandomBlockInput;
+    encodePrivateRandomCursor(
+        value: PrivateRandomCursor,
+    ): EncodedPrivateRandomCursor;
+    decodePrivateRandomCursor(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedPrivateRandomCursor;
+    generateProofSuiteCandidate(): GeneratedProofSuiteCandidate;
+    encodeSignedMailboxEnvelope(
+        value: SignedMailboxEnvelope,
+    ): EncodedSignedMailboxEnvelope;
+    decodeSignedMailboxEnvelope(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedSignedMailboxEnvelope;
+    deriveMailboxKemCiphertextHash(input: {
+        readonly kemCiphertextHex: string;
+    }): ProtocolHash;
+    deriveMailboxEnvelopeHash(value: UnsignedMailboxEnvelope): ProtocolHash;
     generateBgvTargetDecryptionShareFromLocalShare(
         input: BgvTargetDecryptionLocalCommandContext & {
             readonly trusteeIdentity: string;
@@ -182,24 +414,6 @@ export type TranscriptCoreKernel = {
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
         readonly expectedLocalVerificationRoot?: ProtocolHash;
     }): BgvPrivateVssShareEnvelopeVerification;
-    generatePrivateVssShareProof(input: {
-        readonly setupContext: unknown;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly privateEnvelopeAadHash: ProtocolHash;
-        readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
-        readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
-        readonly recipientIdentity: string;
-        readonly recipientRosterPosition: number;
-        readonly rnsLimbIndex: number;
-        readonly rnsPrime: number;
-        readonly ringDegree: number;
-        readonly shareValues: readonly number[];
-        readonly coefficientCommitmentRoots: readonly ProtocolHash[];
-        readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-        readonly openingRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-        readonly proofRandomnessSeedHex: string;
-        readonly proofRandomnessNonceHex: string;
-    }): BgvPrivateVssShareProofGeneration;
     generateTrusteeEvaluationKeyProof(
         input: BgvTrusteeEvaluationKeyProofInput,
     ): BgvTrusteeEvaluationKeyProofGeneration;
@@ -280,7 +494,6 @@ export type PublishedSdkKernel = Pick<
     TranscriptCoreKernel,
     | 'beginAcceptedSetupSession'
     | 'exportedFunctionNames'
-    | 'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness'
     | 'verifyPrivateVssShareEnvelope'
     | 'beginBgvTargetDecryptionResultRelease'
     | 'absorbBgvTargetDecryptionResultReleaseShare'
@@ -311,6 +524,93 @@ type TranscriptCoreKernelCommand =
           'deriveCanonicalObjectHash'
       >
     | KernelCommandFromMethod<
+          'ValidateCanonicalFoundationValue',
+          'validateCanonicalFoundationValue'
+      >
+    | Readonly<{
+          readonly command: 'DeriveCeremonyContextHash';
+          readonly value: CeremonyContextInput;
+      }>
+    | Readonly<{
+          readonly command: 'DeriveActionContextHash';
+          readonly value: ActionContextInput;
+      }>
+    | Readonly<{
+          readonly command: 'EncodeMailboxKeyScheduleInput';
+          readonly value: MailboxKeyScheduleInput;
+      }>
+    | KernelCommandFromMethod<
+          'DecodeMailboxKeyScheduleInput',
+          'decodeMailboxKeyScheduleInput'
+      >
+    | Readonly<{
+          readonly command: 'EncodeMailboxAssociatedData';
+          readonly value: MailboxAssociatedData;
+      }>
+    | KernelCommandFromMethod<
+          'DecodeMailboxAssociatedData',
+          'decodeMailboxAssociatedData'
+      >
+    | Readonly<{
+          readonly command: 'EncodeStreamDescriptor';
+          readonly value: MailboxCiphertextDescriptor;
+      }>
+    | KernelCommandFromMethod<
+          'DecodeStreamDescriptor',
+          'decodeStreamDescriptor'
+      >
+    | Readonly<{
+          readonly command: 'DeriveSetupMailboxSlotHash';
+          readonly value: SetupMailboxSlot;
+      }>
+    | Readonly<{
+          readonly command: 'EncodeActionRandomnessDerivationInput';
+          readonly value: ActionRandomnessDerivationInput;
+      }>
+    | KernelCommandFromMethod<
+          'DecodeActionRandomnessDerivationInput',
+          'decodeActionRandomnessDerivationInput'
+      >
+    | KernelCommandFromMethod<
+          'DeriveActionRandomnessCommitment',
+          'deriveActionRandomnessCommitment'
+      >
+    | Readonly<{
+          readonly command: 'EncodePrivateRandomBlockInput';
+          readonly value: PrivateRandomBlockInput;
+      }>
+    | KernelCommandFromMethod<
+          'DecodePrivateRandomBlockInput',
+          'decodePrivateRandomBlockInput'
+      >
+    | Readonly<{
+          readonly command: 'EncodePrivateRandomCursor';
+          readonly value: PrivateRandomCursor;
+      }>
+    | KernelCommandFromMethod<
+          'DecodePrivateRandomCursor',
+          'decodePrivateRandomCursor'
+      >
+    | Readonly<{
+          readonly command: 'GenerateProofSuiteCandidate';
+      }>
+    | Readonly<{
+          readonly command: 'EncodeSignedMailboxEnvelope';
+          readonly value: SignedMailboxEnvelope;
+      }>
+    | KernelCommandFromMethod<
+          'DecodeSignedMailboxEnvelope',
+          'decodeSignedMailboxEnvelope'
+      >
+    | KernelCommandFromMethod<
+          'DeriveMailboxKemCiphertextHash',
+          'deriveMailboxKemCiphertextHash'
+      >
+    | Readonly<{
+          readonly command: 'DeriveMailboxEnvelopeHash';
+          readonly value: UnsignedMailboxEnvelope;
+      }>
+    | KernelCommandFromMethod<
           'GenerateBgvTargetDecryptionShareFromLocalShare',
           'generateBgvTargetDecryptionShareFromLocalShare'
       >
@@ -333,10 +633,6 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'VerifyPrivateVssShareEnvelope',
           'verifyPrivateVssShareEnvelope'
-      >
-    | KernelCommandFromMethod<
-          'GeneratePrivateVssShareProof',
-          'generatePrivateVssShareProof'
       >
     | KernelCommandFromMethod<
           'GenerateTrusteeEvaluationKeyProof',
@@ -472,6 +768,53 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         statusPointer: number,
         outputLengthPointer: number,
     ) => number;
+    sealed_lattice_mailbox_gcm_authenticate_chunk?: (
+        handle: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_begin_encryptor?: (
+        keyPointer: number,
+        keyLength: number,
+        noncePointer: number,
+        nonceLength: number,
+        associatedDataPointer: number,
+        associatedDataLength: number,
+        totalByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_begin_verifier?: (
+        keyPointer: number,
+        keyLength: number,
+        noncePointer: number,
+        nonceLength: number,
+        associatedDataPointer: number,
+        associatedDataLength: number,
+        totalByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_cancel?: (handle: number) => number;
+    sealed_lattice_mailbox_gcm_decrypt_chunk?: (
+        handle: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_encrypt_chunk?: (
+        handle: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_finish_authentication?: (
+        handle: number,
+        tagPointer: number,
+        tagLength: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_finish_decryptor?: (handle: number) => number;
+    sealed_lattice_mailbox_gcm_finish_encryptor?: (
+        handle: number,
+        tagPointer: number,
+        tagLength: number,
+    ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
     sealed_lattice_local_storage_root_command?: (
         command: number,
@@ -499,6 +842,15 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         verifiedIntentHandle: number,
         canonicalStateCertificatePointer: number,
         canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_certify_unordered_votes?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedIntentHandle: number,
+        framedCanonicalVoteCarriersPointer: number,
+        framedCanonicalVoteCarriersLength: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_state_verifier_describe?: (
@@ -550,6 +902,17 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         canonicalRecoveryTransitionCarrierLength: number,
         statusPointer: number,
     ) => number;
+    sealed_lattice_state_verifier_prepare_witness_vote?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedIntentHandle: number,
+        witnessParticipantIdentityPointer: number,
+        witnessParticipantIdentityLength: number,
+        signatureMessageOutputPointer: number,
+        signatureMessageOutputLength: number,
+        statusPointer: number,
+    ) => number;
     sealed_lattice_state_verifier_prepare_reservation?: (
         sessionHandle: number,
         capabilityPointer: number,
@@ -593,6 +956,17 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         canonicalReservationIntentCarrierLength: number,
         canonicalStateCertificatePointer: number,
         canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_finish_witness_vote?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        preparedHandle: number,
+        signaturePointer: number,
+        signatureLength: number,
+        carrierOutputPointer: number,
+        carrierOutputLength: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_transcript_core_command_with_length?: (

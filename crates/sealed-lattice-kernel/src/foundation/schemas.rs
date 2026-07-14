@@ -1,9 +1,10 @@
 use core::{fmt, str};
 use std::collections::BTreeSet;
 
+use fips203::{ml_kem_768, traits::SerDes as KemSerDes};
 use fips204::{
     ml_dsa_65,
-    traits::{SerDes, Verifier},
+    traits::{SerDes as SignatureSerDes, Verifier},
 };
 
 use super::canonical_tuple::CanonicalDecodeBudget;
@@ -18,9 +19,10 @@ pub const SIGNED_CARRIER_SCHEMA_IDENTIFIER: u16 = 0x0101;
 pub const ROSTER_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x0114;
 pub const ROSTER_SCHEMA_IDENTIFIER: u16 = 0x0115;
 pub const STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER: u16 = 0x1800;
+pub const ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH: usize = ml_kem_768::EK_LEN;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
-const ML_DSA_65_SIGNATURE_BYTE_LENGTH: usize = 3_309;
+pub const ML_DSA_65_SIGNATURE_BYTE_LENGTH: usize = 3_309;
 const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +30,14 @@ pub struct FoundationProfile {
     pub protocol_name: &'static str,
     pub protocol_version: u16,
     pub participant_count: u16,
+    pub active_fault_bound: u16,
+    pub reconstruction_threshold: u16,
+    pub finality_quorum: u16,
     pub state_witness_quorum: u16,
+    pub option_count: u16,
+    pub minimum_score: u16,
+    pub maximum_score: u16,
+    pub maximum_identifier_byte_length: usize,
     pub stream_chunk_byte_length: usize,
     pub maximum_copied_buffer_byte_length: usize,
 }
@@ -37,7 +46,14 @@ pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
     protocol_name: "sealed-lattice",
     protocol_version: 1,
     participant_count: 10,
+    active_fault_bound: 3,
+    reconstruction_threshold: 4,
+    finality_quorum: 7,
     state_witness_quorum: 7,
+    option_count: 20,
+    minimum_score: 1,
+    maximum_score: 10,
+    maximum_identifier_byte_length: 128,
     stream_chunk_byte_length: 1_048_576,
     maximum_copied_buffer_byte_length: 1_572_864,
 };
@@ -45,23 +61,69 @@ pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum FoundationObjectType {
+    PublicRandomnessCommitment = 0x0001,
+    PublicRandomnessReveal = 0x0002,
+    SetupIntent = 0x0010,
+    PrivateShareAcceptance = 0x0011,
+    Complaint = 0x0012,
+    PublicSetupRecord = 0x0013,
+    BallotPackage = 0x0020,
+    BallotCandidateList = 0x0021,
+    Aggregate = 0x0030,
+    EvaluatorReplay = 0x0040,
+    FinalitySignature = 0x0050,
     StateReservation = 0x0051,
     StateOutputIntent = 0x0052,
     StateWitnessVote = 0x0053,
     RecoveryTransition = 0x0054,
+    TargetDecryptionShare = 0x0060,
+    StorageRootCommitment = 0x0070,
 }
 
 impl FoundationObjectType {
+    pub const ALL: [Self; 17] = [
+        Self::PublicRandomnessCommitment,
+        Self::PublicRandomnessReveal,
+        Self::SetupIntent,
+        Self::PrivateShareAcceptance,
+        Self::Complaint,
+        Self::PublicSetupRecord,
+        Self::BallotPackage,
+        Self::BallotCandidateList,
+        Self::Aggregate,
+        Self::EvaluatorReplay,
+        Self::FinalitySignature,
+        Self::StateReservation,
+        Self::StateOutputIntent,
+        Self::StateWitnessVote,
+        Self::RecoveryTransition,
+        Self::TargetDecryptionShare,
+        Self::StorageRootCommitment,
+    ];
+
     pub const fn canonical_code(self) -> u16 {
         self as u16
     }
 
     pub const fn from_canonical_code(code: u16) -> Option<Self> {
         match code {
+            0x0001 => Some(Self::PublicRandomnessCommitment),
+            0x0002 => Some(Self::PublicRandomnessReveal),
+            0x0010 => Some(Self::SetupIntent),
+            0x0011 => Some(Self::PrivateShareAcceptance),
+            0x0012 => Some(Self::Complaint),
+            0x0013 => Some(Self::PublicSetupRecord),
+            0x0020 => Some(Self::BallotPackage),
+            0x0021 => Some(Self::BallotCandidateList),
+            0x0030 => Some(Self::Aggregate),
+            0x0040 => Some(Self::EvaluatorReplay),
+            0x0050 => Some(Self::FinalitySignature),
             0x0051 => Some(Self::StateReservation),
             0x0052 => Some(Self::StateOutputIntent),
             0x0053 => Some(Self::StateWitnessVote),
             0x0054 => Some(Self::RecoveryTransition),
+            0x0060 => Some(Self::TargetDecryptionShare),
+            0x0070 => Some(Self::StorageRootCommitment),
             _ => None,
         }
     }
@@ -107,15 +169,15 @@ pub(super) type SchemaResult<Value> = Result<Value, FoundationSchemaError>;
 pub struct RosterEntry {
     pub roster_position: u16,
     pub signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+    pub mailbox_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
 }
 
 impl RosterEntry {
     fn validate(&self) -> SchemaResult<()> {
-        validate_ml_dsa_65_verification_key(&self.signing_verification_key)
+        validate_ml_kem_768_encapsulation_key(&self.mailbox_encapsulation_key)
     }
 
     pub fn participant_identity(&self) -> SchemaResult<ParticipantIdentity> {
-        validate_ml_dsa_65_verification_key(&self.signing_verification_key)?;
         Ok(derive_participant_identity(&self.signing_verification_key)?)
     }
 
@@ -127,15 +189,17 @@ impl RosterEntry {
             vec![
                 CanonicalItem::unsigned16(self.roster_position),
                 CanonicalItem::fixed_bytes(self.signing_verification_key)?,
+                CanonicalItem::fixed_bytes(self.mailbox_encapsulation_key)?,
             ],
         ))
     }
 
     fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 2)?;
+        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 3)?;
         let entry = Self {
             roster_position: read_u16(&tuple.items[0])?,
             signing_verification_key: read_fixed_bytes(&tuple.items[1])?,
+            mailbox_encapsulation_key: read_fixed_bytes(&tuple.items[2])?,
         };
         entry.validate()?;
         Ok(entry)
@@ -164,6 +228,7 @@ impl Roster {
             ));
         }
         let mut signing_keys = BTreeSet::new();
+        let mut mailbox_keys = BTreeSet::new();
         let mut participant_identities = BTreeSet::new();
         for (expected_position, entry) in entries.iter().enumerate() {
             entry.validate()?;
@@ -176,11 +241,12 @@ impl Roster {
                 ));
             }
             if !signing_keys.insert(entry.signing_verification_key.as_slice())
+                || !mailbox_keys.insert(entry.mailbox_encapsulation_key.as_slice())
                 || !participant_identities.insert(participant_identity)
             {
                 return Err(FoundationSchemaError::new(
                     RefusalReason::DuplicateIdentity,
-                    "roster contains a duplicate identity or signing key",
+                    "roster contains a duplicate identity, signing key, or mailbox key",
                 ));
             }
         }
@@ -516,10 +582,27 @@ impl SignedCarrier {
 /// aggregate and evaluator objects are unsigned.
 pub fn signature_message(envelope: &ObjectEnvelope, roster_hash: Hash512) -> SchemaResult<Hash512> {
     let signature_purpose = match envelope.object_type {
+        FoundationObjectType::PublicRandomnessCommitment => "public-randomness-commitment",
+        FoundationObjectType::PublicRandomnessReveal => "public-randomness-reveal",
+        FoundationObjectType::SetupIntent => "setup-intent",
+        FoundationObjectType::PrivateShareAcceptance => "private-share-acceptance",
+        FoundationObjectType::Complaint => "setup-complaint",
+        FoundationObjectType::PublicSetupRecord => "dealer-public-setup",
+        FoundationObjectType::BallotPackage => "direct-ballot",
+        FoundationObjectType::BallotCandidateList => "ballot-candidate-list",
+        FoundationObjectType::Aggregate | FoundationObjectType::EvaluatorReplay => {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::WrongTypeOrLength,
+                "deterministic aggregate and evaluator objects are unsigned",
+            ));
+        }
+        FoundationObjectType::FinalitySignature => "target-finality",
         FoundationObjectType::StateReservation => "state-reservation-intent",
         FoundationObjectType::StateOutputIntent => "state-output-intent",
         FoundationObjectType::StateWitnessVote => "state-witness-vote",
         FoundationObjectType::RecoveryTransition => "state-recovery-transition",
+        FoundationObjectType::TargetDecryptionShare => "target-release-output",
+        FoundationObjectType::StorageRootCommitment => "storage-root-commitment",
     };
     Ok(hash512(
         "sealed-lattice/foundation/signature-message/v1",
@@ -531,20 +614,20 @@ pub fn signature_message(envelope: &ObjectEnvelope, roster_hash: Hash512) -> Sch
     )?)
 }
 
-fn validate_ml_dsa_65_verification_key(
-    key: &[u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+fn validate_ml_kem_768_encapsulation_key(
+    key: &[u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
 ) -> SchemaResult<()> {
-    let verification_key = ml_dsa_65::PublicKey::try_from_bytes(*key).map_err(|_| {
+    let encapsulation_key = ml_kem_768::EncapsKey::try_from_bytes(*key).map_err(|_| {
         FoundationSchemaError::new(
             RefusalReason::MalformedEncoding,
-            "signing verification key is not a canonical ML-DSA-65 public key",
+            "mailbox encapsulation key is not a canonical ML-KEM-768 public key",
         )
     })?;
 
-    if verification_key.into_bytes() != *key {
+    if encapsulation_key.into_bytes() != *key {
         return Err(FoundationSchemaError::new(
             RefusalReason::MalformedEncoding,
-            "signing verification key is not a canonical ML-DSA-65 public key",
+            "mailbox encapsulation key is not a canonical ML-KEM-768 public key",
         ));
     }
 
@@ -769,6 +852,13 @@ pub(super) fn read_u16(item: &CanonicalItem) -> SchemaResult<u16> {
     Ok(u16::from_le_bytes(bytes))
 }
 
+pub(super) fn read_u32(item: &CanonicalItem) -> SchemaResult<u32> {
+    let bytes: [u8; 4] = read_item(item, CanonicalItemType::Unsigned32)?
+        .try_into()
+        .map_err(|_| FoundationSchemaError::new(RefusalReason::MalformedEncoding, "u32 length"))?;
+    Ok(u32::from_le_bytes(bytes))
+}
+
 pub(super) fn read_u64(item: &CanonicalItem) -> SchemaResult<u64> {
     let bytes: [u8; 8] = read_item(item, CanonicalItemType::Unsigned64)?
         .try_into()
@@ -929,4 +1019,253 @@ pub(super) fn read_nested_tuple_list_with_budget(
         ));
     }
     Ok(tuples)
+}
+
+#[cfg(test)]
+mod tests {
+    use fips203::{
+        ml_kem_768,
+        traits::{KeyGen as KemKeyGen, SerDes as KemSerDes},
+    };
+    use fips204::{
+        ml_dsa_65,
+        traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes},
+    };
+
+    use super::*;
+
+    fn roster_entries() -> Vec<RosterEntry> {
+        (0..FOUNDATION_PROFILE.participant_count)
+            .map(|roster_position| {
+                let mut signing_seed = [0x13_u8; 32];
+                signing_seed[0] = u8::try_from(roster_position + 1).expect("test position fits u8");
+                signing_seed[31] =
+                    u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                        .expect("reverse test position fits u8");
+                let (signing_key, _) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
+
+                let mut mailbox_seed = [0x47_u8; 32];
+                mailbox_seed[0] = u8::try_from(roster_position + 1).expect("test position fits u8");
+                let mut mailbox_fallback_seed = [0xb2_u8; 32];
+                mailbox_fallback_seed[31] =
+                    u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                        .expect("reverse test position fits u8");
+                let (mailbox_key, _) =
+                    ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
+
+                RosterEntry {
+                    roster_position,
+                    signing_verification_key: signing_key.into_bytes(),
+                    mailbox_encapsulation_key: mailbox_key.into_bytes(),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn roster_round_trip_preserves_both_post_quantum_key_families() {
+        let roster = Roster::new(roster_entries()).expect("test roster is valid");
+        let encoded = roster.encode().expect("roster encodes");
+        let decoded =
+            Roster::decode(&encoded, &CanonicalDecodeLimits::default()).expect("roster decodes");
+        assert_eq!(decoded, roster);
+        assert_eq!(
+            decoded.roster_hash().expect("decoded roster hash derives"),
+            roster.roster_hash().expect("roster hash derives")
+        );
+
+        let tuple = CanonicalTuple::decode(
+            &roster.entries[0].encode().expect("entry encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect("entry tuple decodes");
+        assert_eq!(tuple.items.len(), 3);
+        assert_eq!(
+            read_item(&tuple.items[2], CanonicalItemType::RawBytes)
+                .expect("mailbox key bytes decode")
+                .len(),
+            ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH
+        );
+    }
+
+    #[test]
+    fn roster_rejects_duplicate_signing_and_mailbox_keys_independently() {
+        let entries = roster_entries();
+
+        let mut duplicate_signing_key = entries.clone();
+        duplicate_signing_key[6].signing_verification_key =
+            duplicate_signing_key[2].signing_verification_key;
+        assert_eq!(
+            Roster::new(duplicate_signing_key)
+                .expect_err("duplicate signing key refuses")
+                .refusal_reason,
+            RefusalReason::DuplicateIdentity
+        );
+
+        let mut duplicate_mailbox_key = entries;
+        duplicate_mailbox_key[8].mailbox_encapsulation_key =
+            duplicate_mailbox_key[1].mailbox_encapsulation_key;
+        assert_eq!(
+            Roster::new(duplicate_mailbox_key)
+                .expect_err("duplicate mailbox key refuses")
+                .refusal_reason,
+            RefusalReason::DuplicateIdentity
+        );
+    }
+
+    #[test]
+    fn post_quantum_public_key_validation_matches_their_fips_encodings() {
+        let mut malformed_mailbox_key = roster_entries();
+        malformed_mailbox_key[0].mailbox_encapsulation_key =
+            [0xff; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH];
+        assert_eq!(
+            Roster::new(malformed_mailbox_key)
+                .expect_err("malformed mailbox key refuses")
+                .refusal_reason,
+            RefusalReason::MalformedEncoding
+        );
+
+        // FIPS 204 Algorithm 23 assigns exactly ten bits to every t1 coefficient,
+        // so every fixed-width ML-DSA-65 public-key byte string is canonical.
+        let arbitrary_signing_key = [0xff; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH];
+        let decoded_signing_key = ml_dsa_65::PublicKey::try_from_bytes(arbitrary_signing_key)
+            .expect("every fixed-width ML-DSA-65 public key decodes");
+        assert_eq!(decoded_signing_key.into_bytes(), arbitrary_signing_key);
+
+        let mut arbitrary_signing_key_roster = roster_entries();
+        arbitrary_signing_key_roster[0].signing_verification_key = arbitrary_signing_key;
+        Roster::new(arbitrary_signing_key_roster)
+            .expect("arbitrary fixed-width ML-DSA-65 public key is canonical");
+
+        let mut wrong_length_entry = CanonicalTuple::decode(
+            &roster_entries()[0].encode().expect("entry encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect("entry tuple decodes");
+        wrong_length_entry.items[1] =
+            CanonicalItem::fixed_bytes([0xff; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH - 1])
+                .expect("wrong-width test item encodes");
+        assert_eq!(
+            RosterEntry::decode(
+                &wrong_length_entry.encode().expect("entry tuple encodes"),
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err("wrong-width signing key refuses")
+            .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+    }
+
+    #[test]
+    fn every_assigned_object_type_round_trips_and_unsigned_types_refuse_signing() {
+        for object_type in FoundationObjectType::ALL {
+            assert_eq!(
+                FoundationObjectType::from_canonical_code(object_type.canonical_code()),
+                Some(object_type)
+            );
+        }
+        for unassigned_code in [0, 3, 0x000f, 0x0022, 0x0041, 0xffff] {
+            assert_eq!(
+                FoundationObjectType::from_canonical_code(unassigned_code),
+                None
+            );
+        }
+
+        let signature_purposes = [
+            (
+                FoundationObjectType::PublicRandomnessCommitment,
+                "public-randomness-commitment",
+            ),
+            (
+                FoundationObjectType::PublicRandomnessReveal,
+                "public-randomness-reveal",
+            ),
+            (FoundationObjectType::SetupIntent, "setup-intent"),
+            (
+                FoundationObjectType::PrivateShareAcceptance,
+                "private-share-acceptance",
+            ),
+            (FoundationObjectType::Complaint, "setup-complaint"),
+            (
+                FoundationObjectType::PublicSetupRecord,
+                "dealer-public-setup",
+            ),
+            (FoundationObjectType::BallotPackage, "direct-ballot"),
+            (
+                FoundationObjectType::BallotCandidateList,
+                "ballot-candidate-list",
+            ),
+            (FoundationObjectType::FinalitySignature, "target-finality"),
+            (
+                FoundationObjectType::StateReservation,
+                "state-reservation-intent",
+            ),
+            (
+                FoundationObjectType::StateOutputIntent,
+                "state-output-intent",
+            ),
+            (FoundationObjectType::StateWitnessVote, "state-witness-vote"),
+            (
+                FoundationObjectType::RecoveryTransition,
+                "state-recovery-transition",
+            ),
+            (
+                FoundationObjectType::TargetDecryptionShare,
+                "target-release-output",
+            ),
+            (
+                FoundationObjectType::StorageRootCommitment,
+                "storage-root-commitment",
+            ),
+        ];
+        let roster_hash = Hash512::from_bytes([0x77; 64]);
+        for (object_type, expected_purpose) in signature_purposes {
+            let envelope = test_envelope(object_type);
+            let expected = hash512(
+                "sealed-lattice/foundation/signature-message/v1",
+                &[
+                    CanonicalItem::hash512(
+                        envelope
+                            .object_hash()
+                            .expect("object hash derives")
+                            .into_bytes(),
+                    ),
+                    CanonicalItem::hash512(roster_hash.into_bytes()),
+                    CanonicalItem::ascii(expected_purpose).expect("purpose is printable ASCII"),
+                ],
+            )
+            .expect("expected signature message derives");
+            assert_eq!(
+                signature_message(&envelope, roster_hash).expect("signature message derives"),
+                expected
+            );
+        }
+
+        for unsigned_type in [
+            FoundationObjectType::Aggregate,
+            FoundationObjectType::EvaluatorReplay,
+        ] {
+            assert_eq!(
+                signature_message(&test_envelope(unsigned_type), roster_hash)
+                    .expect_err("unsigned type refuses a signature purpose")
+                    .refusal_reason,
+                RefusalReason::WrongTypeOrLength
+            );
+        }
+    }
+
+    fn test_envelope(object_type: FoundationObjectType) -> ObjectEnvelope {
+        ObjectEnvelope {
+            suite_id: Hash512::from_bytes([0x11; 64]),
+            object_type,
+            ceremony_context_hash: Hash512::from_bytes([0x22; 64]),
+            action_context_hash: Hash512::from_bytes([0x33; 64]),
+            recovery_epoch: 0,
+            recovery_transition_hash: None,
+            producer_participant_id: None,
+            producer_sequence: 0,
+            ordered_prerequisite_hashes: Vec::new(),
+            payload_bytes: vec![0x44],
+        }
+    }
 }

@@ -34,3 +34,11 @@ const TEST_SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND: i128 = 1;
 fn valid_hash(fill: char) -> String {
     fill.to_string().repeat(128)
 }
+
+#[test]
+fn setup_refusal_reason_maps_lower_camel_outside_codes_to_the_profile_boundary() {
+    assert_eq!(
+        super::setup_refusal_reason("outsideCollectiveBgvSetupParameters"),
+        crate::foundation::RefusalReason::OutsideSupportedProfile,
+    );
+}

@@ -7,8 +7,10 @@ use super::low_degree_proof::{
     LowDegreeParameters, bind_low_degree_commitment, verify_low_degree_openings,
 };
 use super::merkle_commitment::{
-    LEAF_SALT_BYTES, MerkleDigest, consistent_sorted_leaves, phase_pair_leaf_hash,
-    verify_merkle_batch,
+    LEAF_SALT_BYTES, MAIN_LOW_DEGREE_TREE_ORDINAL_BASE, MerkleContext, MerkleDigest,
+    QUOTIENT_TREE_ORDINAL_BASE, RESIDUAL_LOW_DEGREE_TREE_ORDINAL_BASE,
+    VSS_COMMITTED_MATERIAL_TREE_ORDINAL_BASE, WITNESS_TREE_ORDINAL_BASE, consistent_sorted_leaves,
+    limb_tree_context, low_degree_tree_context, phase_pair_leaf_hash, verify_merkle_batch,
 };
 use super::prover::{
     LimbProof, SuccinctEvaluationKeyProof, barycentric_weights, build_limb_public_vectors,
@@ -167,6 +169,31 @@ fn verify_limb(
             .collect::<CanonicalResult<Vec<_>>>()?
     } else {
         Vec::new()
+    };
+    let application_statement_schema_identifier =
+        statement.application_statement_schema_identifier();
+    let witness_merkle_context = limb_tree_context(
+        application_statement_schema_identifier,
+        WITNESS_TREE_ORDINAL_BASE,
+        limb_index,
+    )?;
+    let quotient_merkle_context = limb_tree_context(
+        application_statement_schema_identifier,
+        QUOTIENT_TREE_ORDINAL_BASE,
+        limb_index,
+    )?;
+    let material_merkle_context = if material_tree_count > 0 {
+        let commitment_field_position =
+            crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+                .iter()
+                .position(|commitment_modulus_index| *commitment_modulus_index == limb_index)
+                .expect("material roots already established this is a commitment-field limb");
+        Some(
+            MerkleContext::new(0x2110, VSS_COMMITTED_MATERIAL_TREE_ORDINAL_BASE)
+                .with_tree_ordinal_offset(commitment_field_position)?,
+        )
+    } else {
+        None
     };
 
     let mut transcript = global_transcript.fork("limb", limb_index as u64);
@@ -364,6 +391,11 @@ fn verify_limb(
         vec![Vec::new(); material_tree_count];
     transcript.absorb("low-degree-purpose", MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE);
     let low_degree_verification_state = bind_low_degree_commitment(
+        low_degree_tree_context(
+            application_statement_schema_identifier,
+            MAIN_LOW_DEGREE_TREE_ORDINAL_BASE,
+            limb_index,
+        )?,
         &mut transcript,
         &low_degree_parameters,
         &limb_proof.low_degree,
@@ -380,6 +412,11 @@ fn verify_limb(
         SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE,
     );
     let sumcheck_residual_low_degree_verification_state = bind_low_degree_commitment(
+        low_degree_tree_context(
+            application_statement_schema_identifier,
+            RESIDUAL_LOW_DEGREE_TREE_ORDINAL_BASE,
+            limb_index,
+        )?,
         &mut transcript,
         &sumcheck_residual_low_degree_parameters,
         &limb_proof.sumcheck_residual_low_degree,
@@ -412,6 +449,7 @@ fn verify_limb(
             witness_leaves.push((
                 pair_index,
                 phase_pair_leaf_hash(
+                    witness_merkle_context,
                     pair_index,
                     &opening.phase_one_pair_salt,
                     &opening.phase_one_rows[0],
@@ -421,6 +459,7 @@ fn verify_limb(
             quotient_leaves.push((
                 pair_index,
                 phase_pair_leaf_hash(
+                    quotient_merkle_context,
                     pair_index,
                     &opening.phase_two_pair_salt,
                     &opening.phase_two_rows[0],
@@ -446,6 +485,7 @@ fn verify_limb(
                 material_leaves[tree_index].push((
                     pair_index,
                     phase_pair_leaf_hash(
+                        material_merkle_context.expect("material trees have a Merkle context"),
                         pair_index,
                         &material_opening.pair_salt,
                         &material_opening.rows[0],
@@ -505,6 +545,7 @@ fn verify_limb(
         ));
     };
     if !verify_merkle_batch(
+        witness_merkle_context,
         &limb_proof.witness_tree_root,
         phase_tree_depth,
         &witness_sorted_leaves,
@@ -520,6 +561,7 @@ fn verify_limb(
         ));
     };
     if !verify_merkle_batch(
+        quotient_merkle_context,
         &limb_proof.quotient_tree_root,
         phase_tree_depth,
         &quotient_sorted_leaves,
@@ -541,6 +583,7 @@ fn verify_limb(
             ));
         };
         if !verify_merkle_batch(
+            material_merkle_context.expect("material trees have a Merkle context"),
             &material_expected_roots[tree_index],
             phase_tree_depth,
             &material_sorted_leaves,
@@ -682,8 +725,9 @@ pub(crate) fn verify_evaluation_key_share(
             "proof limb count does not match the statement",
         ));
     }
-    let mut transcript = FiatShamirTranscript::new(
+    let mut transcript = FiatShamirTranscript::new_for_schema(
         "trustee-evaluation-key-share",
+        statement.application_statement_schema_identifier(),
         MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
     )?;
     transcript.absorb("statement", &statement.statement_hash());

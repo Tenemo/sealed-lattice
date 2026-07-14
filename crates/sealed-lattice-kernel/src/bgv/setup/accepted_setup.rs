@@ -313,15 +313,6 @@ pub(in crate::bgv::setup) fn verify_collective_bgv_setup_intent_for_test(
 }
 
 #[cfg(test)]
-pub(in crate::bgv::setup) fn verify_collective_bgv_setup_package_with_proof_binding_leases(
-    setup_package: &Value,
-    request: &Value,
-    proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
-) -> CanonicalResult<Value> {
-    verify_collective_bgv_setup_package_inner(setup_package, request, proof_binding_leases)
-}
-
-#[cfg(test)]
 pub(in crate::bgv::setup) fn verify_collective_bgv_setup_package_in_proof_binding_session(
     setup_package: &Value,
     request: &Value,
@@ -458,12 +449,13 @@ fn verify_collective_setup_package(
     {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
-    match verify_vss_public_material(setup_package, Some(proof_binding_session))? {
-        VssPublicMaterialVerification::Verified => {}
-        VssPublicMaterialVerification::Refused(refusals) => {
-            return Ok(SetupPackageVerification::Refused(refusals));
-        }
-    }
+    let verified_ring_degree =
+        match verify_vss_public_material(setup_package, Some(proof_binding_session))? {
+            VssPublicMaterialVerification::Verified { ring_degree } => ring_degree,
+            VssPublicMaterialVerification::Refused(refusals) => {
+                return Ok(SetupPackageVerification::Refused(refusals));
+            }
+        };
     let verified_same_secret_bridge = match verify_same_secret_bridge_statement_set(
         setup_package,
         Some(proof_binding_session),
@@ -479,13 +471,16 @@ fn verify_collective_setup_package(
     if let Some(refusals) = verify_public_key_share_succinct_proofs(
         setup_package,
         Some(&verified_same_secret_bridge),
+        verified_ring_degree,
         proof_binding_session,
     )? {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(refusals) =
-        verify_collective_public_key_material(setup_package, proof_binding_session)?
-    {
+    if let Some(refusals) = verify_collective_public_key_material(
+        setup_package,
+        verified_ring_degree,
+        proof_binding_session,
+    )? {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
     if let Some(refusals) = verify_evaluator_key_schedule(setup_package)? {
@@ -498,6 +493,12 @@ fn verify_collective_setup_package(
         &setup_intent_registrations,
     )? {
         return Ok(SetupPackageVerification::Refused(refusals));
+    }
+    if verified_ring_degree != POLYNOMIAL_DEGREE {
+        return Ok(outside_accepted_parameters(
+            "the verified setup ring degree is outside the supported production profile",
+            "setupPackage.vssShareLinkageStatement.ringDegree",
+        ));
     }
     Ok(SetupPackageVerification::Verified)
 }
@@ -598,19 +599,16 @@ pub(super) fn setup_refusals(
 }
 
 fn verification_response(refused_objects: Refusals) -> Value {
-    let accepted = refused_objects.is_empty();
-
-    json!({
-        "isValid": accepted,
-        "refusedObjects": refused_objects
-            .into_iter()
-            .map(|refusal| json!({
-                "reasonCode": refusal.reason_code,
-                "message": refusal.message,
-                "objectPath": refusal.object_path,
-            }))
-            .collect::<Vec<_>>(),
-    })
+    match refused_objects.first() {
+        None => json!({
+            "isValid": true,
+            "value": {},
+        }),
+        Some(refusal) => json!({
+            "isValid": false,
+            "refusalReason": super::setup_refusal_reason(refusal.reason_code).name(),
+        }),
+    }
 }
 
 mod binding_checks;

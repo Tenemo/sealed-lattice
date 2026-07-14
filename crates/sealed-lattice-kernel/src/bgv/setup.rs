@@ -1,5 +1,7 @@
 use serde_json::{Value, json};
 
+use crate::foundation::RefusalReason;
+
 mod accepted_setup;
 mod canonical_stream_transport;
 mod commitment;
@@ -59,11 +61,12 @@ pub(crate) use canonical_stream_transport::{
     finish_bgv_canonical_stream, read_bgv_canonical_material_chunk,
     retain_generated_canonical_proof_material, take_verified_canonical_proof_material_bytes,
 };
-pub(crate) use commitment::compute_setup_commitment_from_opening_request;
-pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
-pub(crate) use private_vss::{
-    generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
+pub(crate) use commitment::{
+    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+    compute_setup_commitment_from_opening_request,
 };
+pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
+pub(crate) use private_vss::verify_private_vss_share_envelope_from_request;
 #[cfg(test)]
 pub(in crate::bgv::setup) use same_secret_bridge::{
     same_secret_bridge_proof_verification_request_from_public_records,
@@ -79,6 +82,7 @@ pub(crate) use trustee_evaluation_key_proof::generate_target_decryption_share_pr
 pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_source_from_request;
 pub(crate) use trustee_evaluation_key_proof::{
     TARGET_DECRYPTION_SHARE_PROOF_FAMILY, TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND,
+    VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP,
 };
 
 pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
@@ -93,9 +97,66 @@ pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
             crate::bgv::target_decryption::register_verified_target_release_setup(
                 &request["setupPackage"],
             )?;
-        response["acceptedSetupHandle"] = Value::from(accepted_setup_handle);
+        response["value"]["acceptedSetupHandle"] = Value::from(accepted_setup_handle);
     }
     Ok(response)
+}
+
+pub(super) fn setup_refusal_reason(reason_code: &str) -> RefusalReason {
+    if reason_code.contains("Signature") {
+        RefusalReason::InvalidSignature
+    } else if reason_code.contains("Proof") {
+        RefusalReason::InvalidProof
+    } else if reason_code.contains("Unsupported") {
+        RefusalReason::UnsupportedVersionOrSuite
+    } else if reason_code.contains("Consumed") || reason_code.contains("Replay") {
+        RefusalReason::ConsumedState
+    } else if reason_code.contains("Duplicate")
+        || reason_code.contains("Equivocation")
+        || reason_code.contains("Conflict")
+    {
+        RefusalReason::Equivocation
+    } else if reason_code.contains("Missing") {
+        RefusalReason::MissingPrerequisite
+    } else if reason_code.contains("HashMismatch")
+        || reason_code.contains("RootMismatch")
+        || reason_code.contains("BindingMismatch")
+        || reason_code.contains("DigestMismatch")
+        || reason_code.contains("CoverageMismatch")
+        || reason_code.contains("SeedMismatch")
+        || reason_code.contains("AadMismatch")
+    {
+        RefusalReason::WrongHashOrRoot
+    } else if reason_code.contains("Context")
+        || reason_code.contains("RosterHashMismatch")
+        || reason_code.contains("SourceTrusteeMismatch")
+        || reason_code.contains("RecipientMismatch")
+        || reason_code.contains("IdentityMismatch")
+    {
+        RefusalReason::WrongContext
+    } else if reason_code.contains("Outside")
+        || reason_code.contains("outside")
+        || reason_code.contains("SupportedRange")
+    {
+        RefusalReason::OutsideSupportedProfile
+    } else if reason_code.contains("Abort") || reason_code.contains("Relation") {
+        RefusalReason::InvalidArithmeticRelation
+    } else if reason_code.contains("Malformed") || reason_code.contains("NotObject") {
+        RefusalReason::MalformedEncoding
+    } else if reason_code.contains("Type")
+        || reason_code.contains("Length")
+        || reason_code.contains("Count")
+        || reason_code.contains("Position")
+        || reason_code.contains("Prime")
+        || reason_code.contains("RingDegree")
+        || reason_code.contains("Domain")
+        || reason_code.contains("Empty")
+        || reason_code.contains("Invalid")
+    {
+        RefusalReason::WrongTypeOrLength
+    } else {
+        RefusalReason::MalformedEncoding
+    }
 }
 #[cfg(test)]
 pub(crate) use trustee_evaluation_key_proof::verify_vss_share_linkage_proof_material_set_from_request;
@@ -157,6 +218,7 @@ use crate::bgv::{
 // decryption verified against a package pins the same setup identity the setup
 // acceptance established.
 pub(crate) struct CollectiveBgvSetupContextHashes {
+    pub(crate) setup_context_hash: String,
     pub(crate) roster_hash: String,
     pub(crate) setup_parameters_hash: String,
 }
@@ -168,6 +230,10 @@ pub(crate) fn collective_bgv_setup_context_hashes_from_package(
     let roster = accepted_setup::accepted_roster_from_package(setup_package)?;
 
     Ok(CollectiveBgvSetupContextHashes {
+        setup_context_hash: accepted_setup::setup_context_hash(value_at_path(
+            setup_package,
+            &["setupContext"],
+        )?)?,
         roster_hash,
         setup_parameters_hash: accepted_setup::setup_parameters_hash_for_roster(&roster)?,
     })

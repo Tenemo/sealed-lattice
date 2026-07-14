@@ -1,11 +1,11 @@
 use super::*;
 
-fn assert_setup_intent_refused(package: &serde_json::Value, expected_reason_code: &str) {
+fn assert_setup_intent_refused(package: &serde_json::Value, expected_refusal_reason: &str) {
     let result = verify_collective_bgv_setup_intent_for_test(package)
         .expect("setup-intent verification response");
     assert_eq!(result["isValid"], false, "unexpected result: {result}");
     assert_eq!(
-        result["refusedObjects"][0]["reasonCode"], expected_reason_code,
+        result["refusalReason"], expected_refusal_reason,
         "unexpected refusal: {result}"
     );
 }
@@ -75,6 +75,7 @@ fn collective_setup_intent_accepts_signed_canonical_registrations() {
         .expect("setup-intent verification response");
 
     assert_eq!(result["isValid"], true, "unexpected result: {result}");
+    assert_eq!(result["value"], serde_json::json!({}));
 }
 
 #[test]
@@ -84,19 +85,16 @@ fn collective_setup_intent_refuses_missing_and_wrong_object_types() {
         .as_object_mut()
         .expect("setup package")
         .remove("setupIntent");
-    assert_setup_intent_refused(&missing, "setupObjectMissing");
+    assert_setup_intent_refused(&missing, "missingPrerequisite");
 
     let mut wrong_wrapper_type = collective_setup_intent_package();
     wrong_wrapper_type["setupIntent"]["objectType"] = serde_json::json!("SetupIntent");
-    assert_setup_intent_refused(&wrong_wrapper_type, "setupIntentTypeMismatch");
+    assert_setup_intent_refused(&wrong_wrapper_type, "wrongTypeOrLength");
 
     let mut wrong_registration_type = collective_setup_intent_package();
     wrong_registration_type["setupIntent"]["trusteeRegistrations"][0]["objectType"] =
         serde_json::json!("TrusteeRegistration");
-    assert_setup_intent_refused(
-        &wrong_registration_type,
-        "setupIntentTrusteeRegistrationTypeMismatch",
-    );
+    assert_setup_intent_refused(&wrong_registration_type, "wrongTypeOrLength");
 }
 
 #[test]
@@ -109,7 +107,7 @@ fn collective_setup_intent_refuses_duplicate_trustee_identities() {
         1,
         "trustee-1-setup-signing",
     );
-    assert_setup_intent_refused(&duplicate, "setupIntentTrusteeIdentityDuplicate");
+    assert_setup_intent_refused(&duplicate, "equivocation");
 }
 
 #[test]
@@ -120,7 +118,7 @@ fn collective_setup_intent_refuses_reused_signing_and_mailbox_keys() {
         1,
         "trustee-0-setup-signing",
     );
-    assert_setup_intent_refused(&duplicate_signing_key, "setupIntentSigningKeyDuplicate");
+    assert_setup_intent_refused(&duplicate_signing_key, "equivocation");
 
     let mut duplicate_mailbox_key = collective_setup_intent_package();
     let first_mailbox_public_key_hash = duplicate_mailbox_key["setupIntent"]
@@ -129,7 +127,7 @@ fn collective_setup_intent_refuses_reused_signing_and_mailbox_keys() {
     duplicate_mailbox_key["setupIntent"]["trusteeRegistrations"][1]["privateVssMailboxPublicKeyHash"] =
         first_mailbox_public_key_hash;
     rebind_collective_setup_intent_registration(&mut duplicate_mailbox_key, 1);
-    assert_setup_intent_refused(&duplicate_mailbox_key, "setupIntentMailboxKeyDuplicate");
+    assert_setup_intent_refused(&duplicate_mailbox_key, "equivocation");
 }
 
 #[test]
@@ -139,7 +137,7 @@ fn collective_setup_intent_refuses_a_rebound_wrong_roster() {
     package["setupContext"]["rosterHash"] = serde_json::json!(wrong_roster_hash);
     rebind_collective_setup_intent_signatures(&mut package);
 
-    assert_setup_intent_refused(&package, "setupRosterHashMismatch");
+    assert_setup_intent_refused(&package, "wrongHashOrRoot");
 }
 
 #[test]
@@ -160,12 +158,45 @@ fn collective_setup_intent_refuses_tampered_signature_bytes() {
     package["setupIntent"]["trusteeRegistrations"][0]["signatureEnvelope"]["signatureBytesHex"] =
         serde_json::json!(tampered_signature_bytes);
 
-    assert_setup_intent_refused(&package, "InvalidSignature");
+    assert_setup_intent_refused(&package, "invalidSignature");
 }
 
 #[test]
 fn collective_setup_verifier_binds_private_vss_envelopes_to_registered_mailbox_keys() {
     let mut package = collective_setup_intent_package();
+    let coefficient_set = vss_public_coefficient_commitment_set_object(&package, 128);
+    let coefficient_view = serde_json::json!({
+        "vssCoefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"],
+        "sourceTrusteeRecords": coefficient_set["sourceTrusteeRecords"]
+            .as_array()
+            .expect("source trustee records")
+            .iter()
+            .enumerate()
+            .map(|(source_trustee_roster_position, source_record)| serde_json::json!({
+                "sourceTrusteeRosterPosition": source_trustee_roster_position,
+                "sourceTrusteeCommitmentRoot": source_record["sourceCoefficientCommitmentRoot"],
+            }))
+            .collect::<Vec<_>>(),
+    });
+    let setup_context = &package["setupContext"];
+    let private_vss_envelope_commitments = private_vss_envelope_commitments_object(
+        setup_context["ceremonyId"].as_str().expect("ceremony id"),
+        setup_context["manifestHash"]
+            .as_str()
+            .expect("manifest hash"),
+        setup_context["rosterHash"].as_str().expect("roster hash"),
+        setup_context["setupParametersHash"]
+            .as_str()
+            .expect("setup parameters hash"),
+        setup_context["setupEpoch"].as_str().expect("setup epoch"),
+        &package["commonRandomness"],
+        &coefficient_view,
+        setup_context["participantCount"]
+            .as_u64()
+            .expect("participant count"),
+    );
+    package["privateVssEnvelopeCommitments"] = private_vss_envelope_commitments;
+    package["vssPublicCoefficientCommitmentSet"] = coefficient_set;
     package["setupIntent"]["trusteeRegistrations"][0]["privateVssMailboxPublicKeyHash"] =
         serde_json::json!(valid_hash('8'));
     rebind_collective_setup_intent_registration(&mut package, 0);
@@ -175,7 +206,7 @@ fn collective_setup_verifier_binds_private_vss_envelopes_to_registered_mailbox_k
         .expect("verification response");
     assert_eq!(result["isValid"], false, "unexpected result: {result}");
     assert_eq!(
-        result["refusedObjects"][0]["reasonCode"], "privateVssEncryptedEnvelopeBindingMismatch",
+        result["refusalReason"], "wrongHashOrRoot",
         "unexpected refusal: {result}"
     );
 }
@@ -195,14 +226,8 @@ fn collective_setup_verifier_refuses_malformed_setup_context_tokens_first() {
 
         let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
             .expect("verification response");
-        assert_eq!(
-            result["refusedObjects"][0]["reasonCode"],
-            "setupContextTokenMalformed"
-        );
-        assert_eq!(
-            result["refusedObjects"][0]["objectPath"],
-            format!("setupPackage.setupContext.{field_name}")
-        );
+        assert_eq!(result["isValid"], false, "unexpected result: {result}");
+        assert_eq!(result["refusalReason"], "wrongContext");
     }
 }
 
@@ -217,10 +242,7 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
     let missing_reveal_result =
         verify_collective_bgv_setup_package(&missing_reveal, &serde_json::json!({}))
             .expect("verification response");
-    assert_eq!(
-        missing_reveal_result["refusedObjects"][0]["reasonCode"],
-        "commonRandomnessRevealCountMismatch"
-    );
+    assert_eq!(missing_reveal_result["refusalReason"], "wrongTypeOrLength");
 
     let mut wrong_seed = collective_setup_intent_package();
     wrong_seed["commonRandomness"]["publicMatrixSeedHash"] = serde_json::json!(valid_hash('9'));
@@ -228,8 +250,5 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
     let wrong_seed_result =
         verify_collective_bgv_setup_package(&wrong_seed, &serde_json::json!({}))
             .expect("verification response");
-    assert_eq!(
-        wrong_seed_result["refusedObjects"][0]["reasonCode"],
-        "commonRandomnessPublicMatrixSeedMismatch"
-    );
+    assert_eq!(wrong_seed_result["refusalReason"], "wrongHashOrRoot");
 }

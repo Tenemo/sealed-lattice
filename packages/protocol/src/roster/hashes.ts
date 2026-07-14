@@ -1,82 +1,13 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import type {
-    ElectionManifest,
-    ProtocolHash,
-    RegistrationEntry,
-    RosterExternalAcceptance,
-    TrusteeSetupEntry,
-} from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
-import {
-    compareCanonicalStrings,
-    isProtocolHashString,
-} from '../common/verification-helpers.js';
+import { isProtocolHashString } from '../common/verification-helpers.js';
 
 export type CollectiveBgvSetupRosterEntryInput = Readonly<{
     readonly rosterPosition: number;
     readonly trusteeIdentity: string;
     readonly signingPublicKeyHash: ProtocolHash;
 }>;
-
-export const deriveRegistrationEntryHash = (
-    entry: Omit<RegistrationEntry, 'registrationEntryHash' | 'signature'>,
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        boardPosition: entry.boardPosition,
-        boardSequence: entry.boardSequence,
-        ceremonyId: entry.ceremonyId,
-        deviceEpoch: entry.deviceEpoch,
-        objectType: entry.objectType,
-        participantIdentity: entry.participantIdentity,
-        recoveryEpoch: entry.recoveryEpoch,
-        signingPublicKeyHash: entry.signingPublicKeyHash,
-    });
-
-export const deriveTrusteeSetupEntryHash = (
-    entry: Omit<TrusteeSetupEntry, 'trusteeSetupEntryHash' | 'signature'>,
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        boardPosition: entry.boardPosition,
-        boardSequence: entry.boardSequence,
-        bgvParametersHash: entry.bgvParametersHash,
-        collectivePublicKeyRoot: entry.collectivePublicKeyRoot,
-        ceremonyId: entry.ceremonyId,
-        deviceEpoch: entry.deviceEpoch,
-        evaluationKeyRoot: entry.evaluationKeyRoot,
-        objectType: entry.objectType,
-        participantSetupRecordHash: entry.participantSetupRecordHash,
-        publicKeyShareRoot: entry.publicKeyShareRoot,
-        recoveryEpoch: entry.recoveryEpoch,
-        rotSetHash: entry.rotSetHash,
-        thresholdShareVerificationKeyRoot:
-            entry.thresholdShareVerificationKeyRoot,
-        trusteeThresholdVerificationKeyHash:
-            entry.trusteeThresholdVerificationKeyHash,
-        trusteeIdentity: entry.trusteeIdentity,
-        trusteeSetupRoot: entry.trusteeSetupRoot,
-    });
-
-// Order-independent by design: canonical ASCII identities are sorted before
-// hashing, so any party computes the same roster hash regardless of the
-// original registration order.
-export const deriveRosterHash = (
-    entries: readonly RegistrationEntry[],
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        objectType: 'Roster',
-        entries: entries
-            .map((entry) => ({
-                participantIdentity: entry.participantIdentity,
-                registrationEntryHash: entry.registrationEntryHash,
-                signingPublicKeyHash: entry.signingPublicKeyHash,
-            }))
-            .sort((left, right) =>
-                compareCanonicalStrings(
-                    left.participantIdentity,
-                    right.participantIdentity,
-                ),
-            ),
-    });
 
 export const deriveCollectiveBgvSetupRosterHash = (
     entries: readonly CollectiveBgvSetupRosterEntryInput[],
@@ -143,33 +74,3 @@ export const deriveCollectiveBgvSetupRosterHash = (
         rosterEntries,
     });
 };
-
-export const deriveRosterExternalAcceptanceHash = (
-    acceptance: Omit<
-        RosterExternalAcceptance,
-        'rosterExternalAcceptanceHash' | 'signature'
-    >,
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        acceptedBoardHeadHash: acceptance.acceptedBoardHeadHash,
-        ceremonyId: acceptance.ceremonyId,
-        electionManifestHash: acceptance.electionManifestHash,
-        objectType: acceptance.objectType,
-        participantIdentity: acceptance.participantIdentity,
-        rosterHash: acceptance.rosterHash,
-    });
-
-export const deriveElectionManifestHash = (
-    manifest: Omit<ElectionManifest, 'electionManifestHash' | 'signature'>,
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        boardPosition: manifest.boardPosition,
-        boardSequence: manifest.boardSequence,
-        ceremonyId: manifest.ceremonyId,
-        manifestOpaqueBindings: manifest.manifestOpaqueBindings,
-        manifestPolicyHashes: manifest.manifestPolicyHashes,
-        objectType: manifest.objectType,
-        pollSpecHash: manifest.pollSpecHash,
-        rosterHash: manifest.rosterHash,
-        thresholdParametersHash: manifest.thresholdParametersHash,
-    });

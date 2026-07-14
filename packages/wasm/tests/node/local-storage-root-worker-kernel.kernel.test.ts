@@ -32,6 +32,112 @@ const expectCustodyErrorCode = async (
 };
 
 describe('Local storage-root real-WASM worker kernel', () => {
+    it('derives, seals, authenticates, versions, and hashes local records inside the owned kernel', async () => {
+        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
+            kernel: loadFreshTranscriptCoreKernel(),
+        });
+        await workerKernel.createAndStageDeviceWrappingState({ binding });
+        await workerKernel.commitStagedActionStorageRoot({
+            mutationIdentifier,
+        });
+
+        const identifierInput = {
+            applicationSlotHash: createBytes(64, 151),
+            recordType: 'proofAttempt',
+        } as const;
+        const recordIdentifier =
+            await workerKernel.deriveActiveLocalRecordIdentifier(
+                identifierInput,
+            );
+        expect(recordIdentifier).toHaveLength(64);
+        const changedRecordIdentifier =
+            await workerKernel.deriveActiveLocalRecordIdentifier({
+                ...identifierInput,
+                applicationSlotHash: createBytes(64, 152),
+            });
+        expect(changedRecordIdentifier).not.toEqual(recordIdentifier);
+
+        const versionZeroContext = {
+            actionRandomnessCommitment: createBytes(64, 167),
+            creationRecoveryEpoch: 7n,
+            identifierInput,
+            recordVersion: 0n,
+        } as const;
+        const plaintext = createBytes(1_013, 181);
+        const envelope = await workerKernel.sealActiveLocalRecord({
+            ...versionZeroContext,
+            plaintext,
+        });
+        expect(envelope.length).toBeGreaterThan(plaintext.length);
+        expect(
+            await workerKernel.openActiveLocalRecord({
+                ...versionZeroContext,
+                envelope,
+            }),
+        ).toEqual(plaintext);
+        const envelopeHash =
+            await workerKernel.hashActiveLocalRecordEnvelope(envelope);
+        expect(envelopeHash).toHaveLength(64);
+
+        await expectCustodyErrorCode(
+            workerKernel.sealActiveLocalRecord({
+                ...versionZeroContext,
+                plaintext: createBytes(3, 193),
+            }),
+            'InvalidState',
+        );
+        const tamperedEnvelope = envelope.slice();
+        tamperedEnvelope[tamperedEnvelope.length - 1] ^= 1;
+        await expectCustodyErrorCode(
+            workerKernel.openActiveLocalRecord({
+                ...versionZeroContext,
+                envelope: tamperedEnvelope,
+            }),
+            'RecordAuthenticationFailed',
+        );
+        await expectCustodyErrorCode(
+            workerKernel.openActiveLocalRecord({
+                ...versionZeroContext,
+                actionRandomnessCommitment: createBytes(64, 168),
+                envelope,
+            }),
+            'RecordAuthenticationFailed',
+        );
+
+        const versionOneContext = {
+            ...versionZeroContext,
+            predecessorRecordHash: envelopeHash,
+            recordVersion: 1n,
+        } as const;
+        const successorPlaintext = createBytes(257, 211);
+        const successorEnvelope = await workerKernel.sealActiveLocalRecord({
+            ...versionOneContext,
+            plaintext: successorPlaintext,
+        });
+        expect(
+            await workerKernel.openActiveLocalRecord({
+                ...versionOneContext,
+                envelope: successorEnvelope,
+            }),
+        ).toEqual(successorPlaintext);
+        await expectCustodyErrorCode(
+            workerKernel.openActiveLocalRecord({
+                ...versionOneContext,
+                predecessorRecordHash: createBytes(64, 212),
+                envelope: successorEnvelope,
+            }),
+            'RecordAuthenticationFailed',
+        );
+        await expectCustodyErrorCode(
+            workerKernel.sealActiveLocalRecord({
+                ...versionZeroContext,
+                plaintext: new Uint8Array(1_048_577),
+            }),
+            'InvalidInput',
+        );
+        await workerKernel.destroyActiveActionStorageRoot();
+    });
+
     it('wraps, activates, exports, confirms, destroys, and reopens after a worker crash', async () => {
         const initialWorkerKernel = createWasmBrowserActionStorageWorkerKernel({
             kernel: loadFreshTranscriptCoreKernel(),
@@ -58,7 +164,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
         await expectCustodyErrorCode(
             initialWorkerKernel.stageDeviceWrappingStateOpen({
                 binding,
-                externallyVerifiedCommitment: {
+                untrustedExpectedCommitment: {
                     storageRootCommitment: conflictingCommitment,
                 },
                 state: {
@@ -70,7 +176,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
         );
         await initialWorkerKernel.stageDeviceWrappingStateOpen({
             binding,
-            externallyVerifiedCommitment: {
+            untrustedExpectedCommitment: {
                 storageRootCommitment: prepared.storageRootCommitment,
             },
             state: prepared,
@@ -118,7 +224,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
             });
         await replacementWorkerKernel.stageDeviceWrappingStateOpen({
             binding,
-            externallyVerifiedCommitment: {
+            untrustedExpectedCommitment: {
                 storageRootCommitment: prepared.storageRootCommitment,
             },
             state: prepared,
@@ -162,7 +268,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
         await expectCustodyErrorCode(
             openingWorkerKernel.stageDeviceWrappingStateOpen({
                 binding: wrongBinding,
-                externallyVerifiedCommitment: {
+                untrustedExpectedCommitment: {
                     storageRootCommitment: prepared.storageRootCommitment,
                 },
                 state: prepared,
@@ -175,7 +281,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
         await expectCustodyErrorCode(
             openingWorkerKernel.stageDeviceWrappingStateOpen({
                 binding,
-                externallyVerifiedCommitment: {
+                untrustedExpectedCommitment: {
                     storageRootCommitment: wrongCommitment,
                 },
                 state: prepared,
@@ -193,7 +299,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
         await expectCustodyErrorCode(
             openingWorkerKernel.stageDeviceWrappingStateOpen({
                 binding,
-                externallyVerifiedCommitment: {
+                untrustedExpectedCommitment: {
                     storageRootCommitment: prepared.storageRootCommitment,
                 },
                 state: tamperedState,
@@ -203,7 +309,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
 
         await openingWorkerKernel.stageDeviceWrappingStateOpen({
             binding,
-            externallyVerifiedCommitment: {
+            untrustedExpectedCommitment: {
                 storageRootCommitment: prepared.storageRootCommitment,
             },
             state: prepared,
@@ -246,7 +352,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
                 binding: wrongBinding,
                 caseInsensitiveRecoveryText:
                     recovery.canonicalRecoveryText.toLowerCase(),
-                externallyVerifiedCommitment: {
+                untrustedExpectedCommitment: {
                     storageRootCommitment: prepared.storageRootCommitment,
                 },
             }),
@@ -258,7 +364,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
             recoveryWorkerKernel.stageRecoveryValueImportAndDeviceWrapping({
                 binding,
                 caseInsensitiveRecoveryText: recovery.canonicalRecoveryText,
-                externallyVerifiedCommitment: {
+                untrustedExpectedCommitment: {
                     storageRootCommitment: wrongCommitment,
                 },
             }),
@@ -271,7 +377,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
                     binding,
                     caseInsensitiveRecoveryText:
                         recovery.canonicalRecoveryText.toLowerCase(),
-                    externallyVerifiedCommitment: {
+                    untrustedExpectedCommitment: {
                         storageRootCommitment: prepared.storageRootCommitment,
                     },
                 },

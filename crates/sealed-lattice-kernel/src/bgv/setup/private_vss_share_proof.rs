@@ -1,4 +1,10 @@
-use serde_json::{Value, json};
+use serde_json::Value;
+
+#[cfg(test)]
+use serde_json::json;
+
+#[cfg(test)]
+use crate::hashing::hash512_hex;
 
 use crate::{
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
@@ -8,16 +14,24 @@ use crate::{
 
 use super::{
     accepted_setup::setup_context_hash,
-    commitment::{SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue, setup_commitment_root},
+    commitment::{SetupCommitmentValue, setup_commitment_root},
     setup_proof::{SetupProofMaterialBytes, take_verified_setup_proof_material_bytes},
-    sharing::canonical_trustee_point,
     trustee_evaluation_key_proof::{
         PRIVATE_VSS_SHARE_PROOF_FAMILY, PrivateVssShareStatement, SetupProofStatement,
-        SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
-        decode_trustee_evaluation_key_proof_from_source, encode_trustee_evaluation_key_proof,
-        private_vss_share_succinct_proof_bytes_hash,
-        private_vss_share_succinct_proof_material_bytes_hash, prove_evaluation_key_share,
-        verify_evaluation_key_share,
+        SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+        decode_trustee_evaluation_key_proof_from_source,
+        private_vss_share_succinct_proof_material_bytes_hash, verify_evaluation_key_share,
+    },
+};
+
+#[cfg(test)]
+use super::{
+    commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+    setup_proof::SetupProofFamily,
+    sharing::canonical_trustee_point,
+    trustee_evaluation_key_proof::{
+        TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof,
+        prove_evaluation_key_share,
     },
 };
 
@@ -46,12 +60,14 @@ pub(super) struct PrivateVssShareSuccinctProofVerification {
     pub(super) statement_hash_hex: String,
 }
 
+#[cfg(test)]
 pub(super) struct PrivateVssShareSuccinctProofWitness {
     pub(super) coefficient_messages_by_shamir_index: Vec<Vec<u64>>,
     pub(super) opening_randomness_by_shamir_index: Vec<Vec<Vec<i128>>>,
     pub(super) carry_witnesses: Vec<i128>,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy)]
 pub(super) struct PrivateVssShareSuccinctProofGenerationInput<'a> {
     pub(super) setup_context: &'a Value,
@@ -256,6 +272,7 @@ fn private_vss_share_succinct_proof_material_root(
     )
 }
 
+#[cfg(test)]
 fn trustee_point_powers_i128(
     trustee_point: u64,
     coefficient_count: usize,
@@ -274,6 +291,7 @@ fn trustee_point_powers_i128(
     Ok(powers)
 }
 
+#[cfg(test)]
 fn checked_i128_sum_with_extra(values: &[i128], extra: i128) -> CanonicalResult<i128> {
     values.iter().try_fold(extra, |accumulator, value| {
         accumulator.checked_add(*value).ok_or_else(|| {
@@ -320,6 +338,17 @@ fn invalid_private_vss_share_proof(message: impl Into<String>) -> CanonicalError
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
+#[cfg(test)]
+fn private_vss_share_succinct_proof_bytes_hash(proof_bytes: &[u8]) -> String {
+    hash512_hex(
+        SetupProofFamily::PrivateVssShare
+            .proof_bytes_hash_domain()
+            .expect("private VSS share proofs have a byte-hash domain"),
+        &[proof_bytes],
+    )
+}
+
+#[cfg(test)]
 pub(super) fn private_vss_share_succinct_proof_record(
     input: PrivateVssShareSuccinctProofGenerationInput<'_>,
 ) -> CanonicalResult<Value> {
@@ -415,6 +444,7 @@ pub(super) fn private_vss_share_succinct_proof_record(
     }))
 }
 
+#[cfg(test)]
 fn validate_private_vss_share_witness(
     input: &PrivateVssShareSuccinctProofGenerationInput<'_>,
 ) -> CanonicalResult<()> {
@@ -458,6 +488,7 @@ fn validate_private_vss_share_witness(
     )
 }
 
+#[cfg(test)]
 fn validate_private_vss_share_proof_randomness_seed(seed_hex: &str) -> CanonicalResult<()> {
     if seed_hex.len() != 128
         || !seed_hex
@@ -472,6 +503,7 @@ fn validate_private_vss_share_proof_randomness_seed(seed_hex: &str) -> Canonical
     Ok(())
 }
 
+#[cfg(test)]
 fn verify_private_vss_share_witness_relation(
     rns_prime: u64,
     recipient_roster_position: u64,

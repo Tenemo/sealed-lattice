@@ -13,15 +13,14 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
         .expect("private VSS envelope verification");
 
     assert_eq!(result["isValid"], true);
-    assert_eq!(result["refusedObjects"], serde_json::json!([]));
     assert_eq!(
-        result["limbVerifications"]
+        result["value"]["limbVerifications"]
             .as_array()
             .expect("limb verifications")
             .len(),
         DATA_PRIMES.len()
     );
-    for limb_verification in result["limbVerifications"]
+    for limb_verification in result["value"]["limbVerifications"]
         .as_array()
         .expect("limb verifications")
     {
@@ -49,9 +48,8 @@ fn private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_privat
         .expect("foundation-roster private VSS envelope verification");
 
     assert_eq!(result["isValid"], true);
-    assert_eq!(result["refusedObjects"], serde_json::json!([]));
     assert_eq!(
-        result["limbVerifications"]
+        result["value"]["limbVerifications"]
             .as_array()
             .expect("limb verifications")
             .len(),
@@ -60,14 +58,14 @@ fn private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_privat
     // A signed VSS share acceptance commits to the recipient-local verification
     // root and envelope hash, so both handles must be populated at full size.
     assert_eq!(
-        result["localVerificationRoot"]
+        result["value"]["localVerificationRoot"]
             .as_str()
             .expect("local verification root")
             .len(),
         128
     );
     assert_eq!(
-        result["privateEnvelopeHash"]
+        result["value"]["privateEnvelopeHash"]
             .as_str()
             .expect("private envelope hash")
             .len(),
@@ -87,10 +85,7 @@ fn private_vss_share_envelope_verifier_refuses_noncanonical_succinct_context() {
         .expect("private VSS envelope verification");
 
     assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssContextMismatch"
-    );
+    assert_eq!(result["refusalReason"], "wrongContext");
 }
 
 #[test]
@@ -512,10 +507,7 @@ fn private_vss_share_envelope_verifier_refuses_authenticated_private_share_proof
         "private-vss-authenticated-proof-material-root-drift",
     );
 
-    assert_private_vss_share_proof_refusal_contains(
-        &request,
-        "proofMaterialRoot must match the canonical proof material reference",
-    );
+    assert_private_vss_share_proof_refusal(&request);
 }
 
 #[test]
@@ -530,10 +522,7 @@ fn private_vss_share_envelope_verifier_refuses_private_share_statement_hash_drif
         "private-vss-statement-hash-drift",
     );
 
-    assert_private_vss_share_proof_refusal_contains(
-        &request,
-        "statementHash must match the canonical proof statement",
-    );
+    assert_private_vss_share_proof_refusal(&request);
 }
 
 #[test]
@@ -553,10 +542,7 @@ fn private_vss_share_envelope_verifier_refuses_unauthenticated_proof_material_re
     .expect("private VSS proof material store lookup")
     .expect("private VSS proof material was retained");
 
-    assert_private_vss_share_proof_refusal_contains(
-        &request,
-        "has no canonical stream-authenticated proof material",
-    );
+    assert_private_vss_share_proof_refusal(&request);
 }
 
 #[test]
@@ -578,10 +564,7 @@ fn private_vss_share_envelope_verifier_refuses_share_value_drift_after_proof_gen
         .expect("private VSS envelope verification");
 
     assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssShareProofVerificationFailed"
-    );
+    assert_eq!(result["refusalReason"], "invalidProof");
 }
 
 fn replace_first_private_vss_proof_hash(
@@ -604,25 +587,12 @@ fn replace_first_private_vss_proof_hash(
     proof_record[field_name] = serde_json::json!(replacement_hash);
 }
 
-fn assert_private_vss_share_proof_refusal_contains(
-    request: &serde_json::Value,
-    expected_message_fragment: &str,
-) {
+fn assert_private_vss_share_proof_refusal(request: &serde_json::Value) {
     let result = verify_private_vss_share_envelope_from_request(request)
         .expect("private VSS envelope verification");
 
     assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssShareProofVerificationFailed"
-    );
-    let refusal_message = result["refusedObjects"][0]["message"]
-        .as_str()
-        .expect("refusal message");
-    assert!(
-        refusal_message.contains(expected_message_fragment),
-        "expected refusal message to contain {expected_message_fragment:?}, got {refusal_message:?}"
-    );
+    assert_eq!(result["refusalReason"], "invalidProof");
 }
 
 fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {

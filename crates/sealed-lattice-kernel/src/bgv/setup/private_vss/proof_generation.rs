@@ -1,10 +1,40 @@
 use super::*;
 
 use crate::bgv::parameters::POLYNOMIAL_DEGREE;
+use crate::encoding::{CanonicalError, CanonicalErrorCode};
 use crate::hashing::derive_canonical_object_hash;
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
+
+fn validate_exact_randomness_hex(
+    value: &str,
+    expected_byte_length: usize,
+    field_name: &str,
+) -> CanonicalResult<()> {
+    if value.len() == expected_byte_length * 2
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(());
+    }
+
+    Err(CanonicalError::new(
+        CanonicalErrorCode::InvalidFixture,
+        format!("{field_name} must be {expected_byte_length} bytes of lowercase hex"),
+    ))
+}
+
+fn decimal_i128_value(value: &Value) -> Option<i128> {
+    if let Some(value) = value.as_i64() {
+        return Some(i128::from(value));
+    }
+    if let Some(value) = value.as_u64() {
+        return Some(i128::from(value));
+    }
+    value.as_str()?.parse::<i128>().ok()
+}
 
 pub(crate) fn generate_private_vss_share_proof_from_request(
     request: &Value,

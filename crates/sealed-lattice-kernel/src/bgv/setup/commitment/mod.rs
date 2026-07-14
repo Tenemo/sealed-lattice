@@ -29,7 +29,20 @@ mod validation;
 
 #[cfg(test)]
 pub(super) use algebra::*;
-pub(super) use commitment_parameters::*;
+#[cfg(test)]
+pub(super) use commitment_parameters::setup_coefficient_fits_commitment_modulus_product;
+use commitment_parameters::setup_coefficients_fit_commitment_modulus_product;
+pub(crate) use commitment_parameters::{
+    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+};
+pub(super) use commitment_parameters::{
+    SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+};
+#[cfg(test)]
+use commitment_parameters::{
+    setup_big_signed_coefficient_fits_centered_commitment_modulus_product,
+    setup_signed_coefficient_fits_centered_commitment_modulus_product,
+};
 pub(super) use matrix::*;
 #[cfg(test)]
 pub(super) use opening::*;

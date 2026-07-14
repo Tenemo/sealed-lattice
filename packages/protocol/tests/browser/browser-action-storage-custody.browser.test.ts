@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type {
     BrowserActionStorageCustody,
     BrowserActionStorageRootBinding,
-    ExternallyVerifiedStorageRootCommitment,
+    UntrustedExpectedStorageRootCommitment,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody';
 import { openBrowserActionStorageCustodyWorker } from '#packages/protocol/src/runtime/browser-action-storage-custody-worker-channel';
 import { deriveWebLockStorageNamespaceName } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store';
@@ -13,6 +13,7 @@ const transactionLimits = {
     maximumActiveTransactionCount: 2,
     maximumLeaseByteLength: 64,
     maximumLeaseCountPerTransaction: 2,
+    maximumOwnedRecordCount: 32,
     maximumStoredValueByteLength: 4_096,
     maximumTransactionByteLength: 128,
     maximumTransactionLifetimeMilliseconds: 10_000,
@@ -24,9 +25,9 @@ const testBinding: BrowserActionStorageRootBinding = Object.freeze({
     suiteId: createTestBytes(64, 7),
 });
 
-const verifiedCommitment = (
+const untrustedExpectedCommitment = (
     storageRootCommitment: Uint8Array,
-): ExternallyVerifiedStorageRootCommitment =>
+): UntrustedExpectedStorageRootCommitment =>
     Object.freeze({ storageRootCommitment: storageRootCommitment.slice() });
 
 type OpeningWorker = Readonly<{
@@ -180,7 +181,7 @@ describe('Browser action-storage custody worker channel', () => {
             databaseName,
         });
         const initialSnapshot = await firstCustody.initialize();
-        const commitment = verifiedCommitment(
+        const commitment = untrustedExpectedCommitment(
             initialSnapshot.storageRootCommitment,
         );
 
@@ -191,23 +192,23 @@ describe('Browser action-storage custody worker channel', () => {
             knownStorageRootCommitment: commitment.storageRootCommitment,
         });
         expect(await secondCustody.currentSnapshot()).toEqual(initialSnapshot);
-        const wrongCommitment = verifiedCommitment(
+        const wrongCommitment = untrustedExpectedCommitment(
             commitment.storageRootCommitment,
         );
         wrongCommitment.storageRootCommitment[63] ^= 0x01;
         await expect(
             secondCustody.openIntoOwnedWorker({
                 expectedSnapshot: initialSnapshot,
-                externallyVerifiedCommitment: wrongCommitment,
+                untrustedExpectedCommitment: wrongCommitment,
             }),
         ).rejects.toMatchObject({ code: 'CommitmentMismatch' });
         await secondCustody.openIntoOwnedWorker({
             expectedSnapshot: initialSnapshot,
-            externallyVerifiedCommitment: commitment,
+            untrustedExpectedCommitment: commitment,
         });
         const challenge = await secondCustody.beginRecoveryExport({
             expectedSnapshot: initialSnapshot,
-            externallyVerifiedCommitment: commitment,
+            untrustedExpectedCommitment: commitment,
         });
         const confirmation = await secondCustody.confirmRecoveryExport({
             confirmedChecksum: challenge.recoveryChecksum,
@@ -219,7 +220,7 @@ describe('Browser action-storage custody worker channel', () => {
         const recoveredSnapshot = await secondCustody.recover({
             caseInsensitiveRecoveryText:
                 confirmation.canonicalRecoveryText.toLowerCase(),
-            externallyVerifiedCommitment: commitment,
+            untrustedExpectedCommitment: commitment,
             expectedSnapshot: confirmation.snapshot,
         });
         expect(recoveredSnapshot.mutationIdentifier).not.toEqual(
@@ -236,9 +237,57 @@ describe('Browser action-storage custody worker channel', () => {
         await expect(
             secondCustody.openIntoOwnedWorker({
                 expectedSnapshot: recoveredSnapshot,
-                externallyVerifiedCommitment: commitment,
+                untrustedExpectedCommitment: commitment,
             }),
         ).rejects.toMatchObject({ code: 'Unavailable' });
+    });
+
+    it('transports authenticated local-record operations across the worker channel', async () => {
+        const custody = await openWorker({
+            databaseName: createDatabaseName(),
+        });
+        const snapshot = await custody.initialize();
+        await custody.openIntoOwnedWorker({
+            expectedSnapshot: snapshot,
+            untrustedExpectedCommitment: untrustedExpectedCommitment(
+                snapshot.storageRootCommitment,
+            ),
+        });
+        const expectedContext = {
+            actionRandomnessCommitment: createTestBytes(64, 101),
+            creationRecoveryEpoch: 0n,
+            identifierInput: {
+                recordType: 'aggregateThresholdShare',
+                recipientInputRoot: createTestBytes(64, 117),
+            },
+            recordVersion: 0n,
+        } as const;
+        const plaintext = createTestBytes(4_097, 133);
+        const envelope = await custody.sealLocalRecord({
+            ...expectedContext,
+            plaintext,
+        });
+
+        await expect(
+            custody.openLocalRecord({ ...expectedContext, envelope }),
+        ).resolves.toEqual(plaintext);
+        await expect(
+            custody.hashLocalRecordEnvelope(envelope),
+        ).resolves.toHaveLength(64);
+        await expect(
+            custody.openLocalRecord({
+                ...expectedContext,
+                creationRecoveryEpoch: 1n,
+                envelope,
+            }),
+        ).rejects.toMatchObject({ code: 'OwnedWorkerFailure' });
+        await expect(
+            custody.sealLocalRecord({
+                ...expectedContext,
+                predecessorRecordHash: createTestBytes(64, 149),
+                plaintext,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
     });
 
     it('isolates persisted wrapping state by the complete action binding', async () => {
@@ -262,7 +311,7 @@ describe('Browser action-storage custody worker channel', () => {
         await expect(
             wrongBindingCustody.openIntoOwnedWorker({
                 expectedSnapshot: originalSnapshot,
-                externallyVerifiedCommitment: verifiedCommitment(
+                untrustedExpectedCommitment: untrustedExpectedCommitment(
                     originalSnapshot.storageRootCommitment,
                 ),
             }),
@@ -284,7 +333,9 @@ describe('Browser action-storage custody worker channel', () => {
             databaseName,
         });
         const snapshot = await firstCustody.initialize();
-        const commitment = verifiedCommitment(snapshot.storageRootCommitment);
+        const commitment = untrustedExpectedCommitment(
+            snapshot.storageRootCommitment,
+        );
         const secondOpening = startOpeningWorker({
             databaseName,
             knownStorageRootCommitment: commitment.storageRootCommitment,
@@ -309,11 +360,11 @@ describe('Browser action-storage custody worker channel', () => {
         expect(await secondCustody.currentSnapshot()).toEqual(snapshot);
         await secondCustody.openIntoOwnedWorker({
             expectedSnapshot: snapshot,
-            externallyVerifiedCommitment: commitment,
+            untrustedExpectedCommitment: commitment,
         });
         const challenge = await secondCustody.beginRecoveryExport({
             expectedSnapshot: snapshot,
-            externallyVerifiedCommitment: commitment,
+            untrustedExpectedCommitment: commitment,
         });
         expect(challenge.recoveryChecksum).toHaveLength(16);
         await secondCustody.cancelRecoveryExport(

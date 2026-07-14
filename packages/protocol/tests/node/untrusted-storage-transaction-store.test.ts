@@ -152,6 +152,7 @@ const defaultLimits: UntrustedStorageTransactionLimits = {
     maximumActiveTransactionCount: 4,
     maximumLeaseByteLength: 1_024,
     maximumLeaseCountPerTransaction: 4,
+    maximumOwnedRecordCount: 64,
     maximumStoredValueByteLength: 16_384,
     maximumTransactionByteLength: 2_048,
     maximumTransactionLifetimeMilliseconds: 1_000,
@@ -540,6 +541,73 @@ describe('untrusted storage transaction store', () => {
                 logicalRecordKey: 'post-publication',
             }),
         ).toEqual(expectedBytes);
+    });
+
+    it('releases failed wrapper ownership after post-commit authentication and abort cleanup failures', async () => {
+        const postCommitStore = await openTestStore({
+            namespace: 'close-post-commit',
+        });
+        const postCommitTransaction =
+            await postCommitStore.store.beginTransaction({
+                lifetimeMilliseconds: 100,
+            });
+        const expectedBytes = new Uint8Array([21, 22, 23]);
+        const postCommitLease = await postCommitTransaction.issueWriteLease({
+            declaredByteLength: expectedBytes.byteLength,
+            logicalRecordKey: 'post-commit-failure',
+        });
+        await postCommitLease.write(expectedBytes);
+        await postCommitLease.seal(
+            exactAuthenticator('post-commit-failure', expectedBytes),
+        );
+        const stagedObjectKey = postCommitStore.adapter
+            .keys()
+            .find((key) => key.includes('/objects/'));
+        postCommitStore.adapter.afterNextAtomicMutation = () => {
+            postCommitStore.adapter.rawWrite(
+                stagedObjectKey ?? '',
+                new Uint8Array([23, 22, 21]),
+            );
+        };
+
+        await expectStorageError(
+            postCommitTransaction.commit(),
+            'AuthenticationFailed',
+        );
+        await postCommitTransaction.closeAfterFailure();
+        await expectStorageError(
+            postCommitTransaction.commit(),
+            'InvalidState',
+        );
+        await expect(postCommitStore.store.recover()).resolves.toMatchObject({
+            retainedObjectCount: 1,
+        });
+
+        const abortStore = await openTestStore({
+            namespace: 'close-abort-cleanup',
+        });
+        const abortTransaction = await abortStore.store.beginTransaction({
+            lifetimeMilliseconds: 100,
+        });
+        const abortLease = await abortTransaction.issueWriteLease({
+            declaredByteLength: 1,
+            logicalRecordKey: 'abort-cleanup-failure',
+        });
+        await abortLease.write(new Uint8Array([7]));
+        await abortLease.seal(
+            exactAuthenticator('abort-cleanup-failure', new Uint8Array([7])),
+        );
+        abortStore.adapter.failNextDeleteCount = 1;
+
+        await expectStorageError(
+            abortTransaction.closeAfterFailure(),
+            'CleanupFailed',
+        );
+        await expect(abortStore.store.recover()).resolves.toMatchObject({
+            removedUnreferencedObjectCount: 1,
+            retainedObjectCount: 0,
+        });
+        await expectStorageError(abortTransaction.commit(), 'InvalidState');
     });
 
     it('binds atomic publication to the owned bytes authenticated before commit', async () => {
@@ -1028,7 +1096,47 @@ describe('untrusted storage transaction store', () => {
         );
     });
 
-    it('recovers abandoned writes and corrupt, dangling, aliased storage indices', async () => {
+    it('bounds hostile owned-key enumeration before recovery builds record maps', async () => {
+        const adapter = new DeterministicInMemoryStorageAdapter();
+        const namespace = 'owned-record-cap';
+        const objectKey =
+            `sealed-lattice-runtime-store/${namespace}/objects/` +
+            `${identifierFilledWithByte(7)}/${identifierFilledWithByte(8)}`;
+        adapter.rawWrite(objectKey, new Uint8Array([1]));
+        adapter.rawWrite(
+            indexKey(namespace, 'record'),
+            textEncoder.encode(objectKey),
+        );
+
+        await expectStorageError(
+            openUntrustedStorageTransactionStore({
+                adapter,
+                createIdentifier: createDeterministicIdentifierFactory(),
+                limits: { ...defaultLimits, maximumOwnedRecordCount: 1 },
+                monotonicClockMilliseconds: () => 0,
+                namespace,
+            }),
+            'QuotaExceeded',
+        );
+
+        const longKeyAdapter = new DeterministicInMemoryStorageAdapter();
+        longKeyAdapter.rawWrite(
+            `sealed-lattice-runtime-store/${namespace}/indices/${'a'.repeat(2_049)}`,
+            new Uint8Array([1]),
+        );
+        await expectStorageError(
+            openUntrustedStorageTransactionStore({
+                adapter: longKeyAdapter,
+                createIdentifier: createDeterministicIdentifierFactory(),
+                limits: defaultLimits,
+                monotonicClockMilliseconds: () => 0,
+                namespace,
+            }),
+            'AdapterFailure',
+        );
+    });
+
+    it('recovers abandoned writes but fails closed on corrupt, dangling, or aliased committed indices', async () => {
         const adapter = new DeterministicInMemoryStorageAdapter();
         const crashedStore = await openTestStore({ adapter });
         const abandonedTransaction = await crashedStore.store.beginTransaction({
@@ -1084,31 +1192,23 @@ describe('untrusted storage transaction store', () => {
         );
         adapter.rawWrite(orphanObjectKey, new Uint8Array([7, 7]));
 
-        const recovered = await openTestStore({ adapter });
-        expect(recovered.recoveryReport).toMatchObject({
-            removedCorruptIndexCount: 4,
-            removedUnreferencedObjectCount: 2,
-            retainedObjectCount: 1,
-        });
+        await expectStorageError(openTestStore({ adapter }), 'CorruptIndex');
         expect(
-            await recovered.store.readAuthenticated({
-                authenticate: exactAuthenticator(
-                    'aliased-record',
-                    new Uint8Array([1]),
-                ),
-                logicalRecordKey: 'aliased-record',
-            }),
-        ).toBeUndefined();
+            adapter.rawRead(indexKey('test-runtime', 'aliased-record')),
+        ).toBeDefined();
         expect(
-            await recovered.store.readAuthenticated({
-                authenticate: exactAuthenticator(
-                    'retained-record',
-                    new Uint8Array([2]),
-                ),
-                logicalRecordKey: 'retained-record',
-            }),
-        ).toEqual(new Uint8Array([2]));
-        expect(adapter.rawRead(orphanObjectKey)).toBeUndefined();
+            adapter.rawRead(indexKey('test-runtime', 'alias-copy')),
+        ).toBeDefined();
+        expect(adapter.rawRead(indexKey('test-runtime', 'malformed'))).toEqual(
+            new Uint8Array([0xff]),
+        );
+        expect(
+            adapter.rawRead(indexKey('test-runtime', 'dangling')),
+        ).toBeDefined();
+        expect(adapter.rawRead(aliasedObjectKey)).toEqual(new Uint8Array([1]));
+        expect(adapter.rawRead(orphanObjectKey)).toEqual(
+            new Uint8Array([7, 7]),
+        );
     });
 
     it('detects index changes that race an authenticated read', async () => {

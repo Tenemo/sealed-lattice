@@ -1,13 +1,7 @@
-import {
-    deriveCanonicalObjectHash,
-    deriveLocalTrusteeSetupStateCommitmentRoot,
-    encryptLocalTrusteeSetupSealedMaterial,
-    encryptLocalTrusteeState,
-    type EncryptedLocalTrusteeSetupState,
-    type LocalTrusteeSetupStateCommitment as StoredLocalTrusteeSetupStateCommitment,
-    type LocalTrusteeSetupStateSealedPayload,
-} from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
+
+import type { BrowserActionStorageCustody } from '../runtime/browser-action-storage-custody.js';
 
 import {
     assertJsonRecord,
@@ -21,6 +15,7 @@ import {
     deriveCollectiveBgvSetupContextHash,
     type JsonRecord,
 } from './common-fields.js';
+import { encodeAggregateThresholdShareRecord } from './local-trustee-aggregate-threshold-share-record.js';
 import type { PrivateVssEnvelopeCommitment } from './private-vss-mailbox-delivery.js';
 import type { LocalTrusteeVssPublicAggregateOpeningCredentialHandoff } from './vss-commitments/commitment-sets.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
@@ -32,12 +27,6 @@ type LocalTrusteeSetupStateCommitmentInput = {
     readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
     readonly aggregateThresholdShareRoot: ProtocolHash;
 };
-
-type LocalTrusteeSetupStateEncryptionInput =
-    LocalTrusteeSetupStateCommitmentInput & {
-        readonly localStatePlaintext: LocalTrusteeSetupStateSealedPayload;
-        readonly storageKeyBytesHex: string;
-    };
 
 type LocalTrusteeSetupStateEncryptionResult = Readonly<{
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
@@ -53,14 +42,25 @@ type GeneratedLocalTrusteeSetupStateInput = Readonly<{
     readonly privateVssEnvelopeCommitments: unknown;
     readonly verifiedPrivateVssShareEnvelopes: readonly unknown[];
     readonly localTrusteeAggregateOpeningCredentialHandoff: LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
-    readonly storageKeyBytesHex: string;
+    readonly actionRandomnessCommitment: Uint8Array;
+    readonly creationRecoveryEpoch: bigint;
+    readonly storageCustody: BrowserActionStorageCustody;
 }>;
 
 type GeneratedLocalTrusteeSetupStateResult =
     LocalTrusteeSetupStateEncryptionResult;
 
-export type LocalTrusteeSetupStateCommitment =
-    StoredLocalTrusteeSetupStateCommitment;
+export type EncryptedLocalTrusteeSetupState = Uint8Array;
+
+export type LocalTrusteeSetupStateCommitment = Readonly<{
+    readonly objectType: 'LocalTrusteeSetupStateCommitment';
+    readonly setupContextHash: ProtocolHash;
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
+    readonly aggregateThresholdShareRoot: ProtocolHash;
+    readonly localStateRoot: ProtocolHash;
+}>;
 
 const stringField = (
     value: JsonRecord,
@@ -169,9 +169,7 @@ export const createLocalTrusteeSetupStateCommitment = (
 
     return {
         ...localStateWithoutRoot,
-        localStateRoot: deriveLocalTrusteeSetupStateCommitmentRoot(
-            localStateWithoutRoot,
-        ),
+        localStateRoot: deriveCanonicalObjectHash(localStateWithoutRoot),
     } satisfies LocalTrusteeSetupStateCommitment;
 };
 
@@ -509,25 +507,6 @@ const aggregateVerifiedPrivateVssMaterial = (
     };
 };
 
-async function encryptLocalTrusteeSetupState(
-    input: LocalTrusteeSetupStateEncryptionInput,
-): Promise<LocalTrusteeSetupStateEncryptionResult> {
-    const localStateCommitment = createLocalTrusteeSetupStateCommitment(input);
-    const encryptedLocalState = await encryptLocalTrusteeState({
-        localStatePlaintext: input.localStatePlaintext,
-        localStateCommitment,
-        setupContextHash: deriveCollectiveBgvSetupContextHash(
-            input.setupContext,
-        ),
-        storageKeyBytesHex: input.storageKeyBytesHex,
-    });
-
-    return {
-        localStateCommitment,
-        encryptedLocalState,
-    };
-}
-
 export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
     input: GeneratedLocalTrusteeSetupStateInput,
 ): Promise<GeneratedLocalTrusteeSetupStateResult> => {
@@ -547,33 +526,41 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
         input,
         envelopeReferences,
     );
-    const sealedAggregateThresholdShare =
-        await encryptLocalTrusteeSetupSealedMaterial({
-            materialPlaintext:
-                materialPlaintexts.aggregateThresholdShareMaterial,
-            setupContextHash: deriveCollectiveBgvSetupContextHash(
-                input.setupContext,
-            ),
-            trusteeIdentity: input.trusteeIdentity,
-            trusteeRosterPosition: input.trusteeRosterPosition,
-            thresholdShareCommitmentRecipientRoot:
-                thresholdShareCommitmentRecipientRootValue,
-            storageKeyBytesHex: input.storageKeyBytesHex,
-        });
-    const localStatePlaintext = {
-        objectType: 'LocalTrusteeSetupStateSealedPayload',
-        sealedAggregateThresholdShare,
-    } satisfies LocalTrusteeSetupStateSealedPayload;
-    const encryptedLocalState = await encryptLocalTrusteeSetupState({
+    const localStatePlaintext = encodeAggregateThresholdShareRecord(
+        input.localTrusteeAggregateOpeningCredentialHandoff,
+    );
+    const aggregateThresholdShareRoot = deriveCanonicalObjectHash(
+        materialPlaintexts.aggregateThresholdShareMaterial,
+    );
+    const localStateCommitment = createLocalTrusteeSetupStateCommitment({
         setupContext: input.setupContext,
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
         thresholdShareCommitmentRecipientRoot:
             thresholdShareCommitmentRecipientRootValue,
-        aggregateThresholdShareRoot: sealedAggregateThresholdShare.materialRoot,
-        localStatePlaintext,
-        storageKeyBytesHex: input.storageKeyBytesHex,
+        aggregateThresholdShareRoot,
     });
+    let encryptedLocalState: Uint8Array;
+    try {
+        encryptedLocalState = await input.storageCustody.sealLocalRecord({
+            actionRandomnessCommitment: input.actionRandomnessCommitment,
+            creationRecoveryEpoch: input.creationRecoveryEpoch,
+            identifierInput: {
+                recordType: 'aggregateThresholdShare',
+                recipientInputRoot: bytesFromHex(
+                    thresholdShareCommitmentRecipientRootValue,
+                    'thresholdShareCommitmentRecipientRoot',
+                ),
+            },
+            plaintext: localStatePlaintext,
+            recordVersion: 0n,
+        });
+    } finally {
+        localStatePlaintext.fill(0);
+    }
 
-    return encryptedLocalState;
+    return {
+        localStateCommitment,
+        encryptedLocalState,
+    };
 };

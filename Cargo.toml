@@ -3,6 +3,7 @@ members = [
     "crates/sealed-lattice-kernel",
     "tools/process-memory-guard",
 ]
+exclude = ["fuzz"]
 resolver = "3"
 
 [profile.test]

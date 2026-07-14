@@ -1,6 +1,7 @@
 import type {
     BgvTargetDecryptionShareProofMaterial,
     ProtocolHash,
+    VerificationResult,
 } from '@sealed-lattice/types';
 
 type BgvJsonRecord = Readonly<Record<string, unknown>>;
@@ -45,28 +46,13 @@ export type BgvCollectiveSetupParametersDescription = {
     };
 };
 
-export type BgvCollectiveSetupVerification = Readonly<
-    {
-        readonly refusedObjects: readonly {
-            readonly reasonCode: string;
-            readonly message: string;
-            readonly objectPath: string;
-        }[];
-    } & (
-        | {
-              readonly isValid: true;
-              readonly acceptedSetupHandle: number;
-          }
-        | {
-              readonly isValid: false;
-          }
-    )
->;
+export type BgvCollectiveSetupVerification = VerificationResult<{
+    readonly acceptedSetupHandle: number;
+}>;
 
-export type BgvPrivateVssShareEnvelopeVerification = {
-    readonly isValid: boolean;
-    readonly privateEnvelopeHash: ProtocolHash | null;
-    readonly localVerificationRoot: ProtocolHash | null;
+export type BgvPrivateVssShareEnvelopeVerification = VerificationResult<{
+    readonly privateEnvelopeHash: ProtocolHash;
+    readonly localVerificationRoot: ProtocolHash;
     readonly limbVerifications: readonly {
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
@@ -76,24 +62,7 @@ export type BgvPrivateVssShareEnvelopeVerification = {
         readonly privateVssShareProofHash: ProtocolHash;
         readonly limbVerificationRoot: ProtocolHash;
     }[];
-    readonly refusedObjects: readonly {
-        readonly reasonCode: string;
-        readonly message: string;
-        readonly objectPath: string;
-    }[];
-};
-
-export type BgvPrivateVssShareProofGeneration = {
-    readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
-    readonly recipientIdentity: string;
-    readonly recipientRosterPosition: number;
-    readonly rnsLimbIndex: number;
-    readonly rnsPrime: number;
-    readonly ringDegree: number;
-    readonly shareValuesHash: ProtocolHash;
-    readonly privateVssShareProof: Record<string, unknown>;
-};
+}>;
 
 type BgvTrusteeEvaluationKeyStatementKeyCommon = {
     readonly level: number;

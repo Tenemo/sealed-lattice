@@ -59,7 +59,6 @@ let mockKernel: MockKernel;
 vi.mock('../../src/kernel.js', () => ({
     loadFreshTranscriptCoreKernel: () =>
         Promise.resolve(createFreshMockKernel()),
-    loadTranscriptCoreKernel: () => Promise.resolve(mockKernel),
 }));
 
 const publicPackage = (await import('../../src/index.js')) as Readonly<{
@@ -188,6 +187,7 @@ const setupVerificationBindings = {
 
 const setupPackageWithoutEvaluationKeyComponentReferences = {
     objectType: 'SetupPackage',
+    setupPackageHash: proofMaterialRoot,
     relinearizationKeyShareRounds: {
         objectType: 'RelinearizationKeyShareRounds',
         roundOneRecords: [],
@@ -220,9 +220,12 @@ describe('canonical setup material streaming in the public package', () => {
         const newMockKernel = (): MockKernel => {
             const acceptedSetupSession: MockAcceptedSetupSession = {
                 cancel: vi.fn(() => lifecycleEvents.push('cancel')),
-                verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => {
+                verifyCollectiveBgvSetup: vi.fn((_input: JsonRecord) => {
                     lifecycleEvents.push('terminal');
-                    return { isValid: false, observedInput: input };
+                    return {
+                        isValid: false,
+                        refusalReason: 'invalidProof',
+                    };
                 }),
             };
 
@@ -233,9 +236,9 @@ describe('canonical setup material streaming in the public package', () => {
                     return acceptedSetupSession;
                 }),
                 verifyCollectiveBgvSetup: vi.fn(),
-                verifyPrivateVssShareEnvelope: vi.fn((input: JsonRecord) => ({
+                verifyPrivateVssShareEnvelope: vi.fn((_input: JsonRecord) => ({
                     isValid: false,
-                    observedInput: input,
+                    refusalReason: 'invalidProof',
                 })),
             };
         };
@@ -254,13 +257,18 @@ describe('canonical setup material streaming in the public package', () => {
         async (transportCase) => {
             const source = proofMaterialSource(proofMaterialRoot, 17);
 
-            await publicPackage.verifySetupPackage({
+            const verification = await publicPackage.verifySetupPackage({
                 setupPackage:
                     setupPackageWithoutEvaluationKeyComponentReferences,
                 ...setupVerificationBindings,
                 [transportCase.fieldName]:
                     transportedProofMaterialSet(transportCase),
                 setupProofMaterialChunkSources: [source],
+            });
+
+            expect(verification).toEqual({
+                isValid: false,
+                refusalReason: 'invalidProof',
             });
 
             expect(readMaterial).toHaveBeenNthCalledWith(2, {
@@ -282,6 +290,35 @@ describe('canonical setup material streaming in the public package', () => {
             expect(mockKernel.verifyCollectiveBgvSetup).not.toHaveBeenCalled();
         },
     );
+
+    it('returns a process-local verified setup capability without exposing the kernel handle', async () => {
+        const kernel = createFreshMockKernel();
+        kernel.acceptedSetupSession.verifyCollectiveBgvSetup.mockReturnValueOnce(
+            {
+                isValid: true,
+                value: { acceptedSetupHandle: 37 },
+            },
+        );
+        createFreshMockKernel = () => kernel;
+
+        const verification = await publicPackage.verifySetupPackage({
+            setupPackage: setupPackageWithoutEvaluationKeyComponentReferences,
+            ...setupVerificationBindings,
+        });
+
+        expect(verification).not.toHaveProperty('acceptedSetupHandle');
+        expect(verification.isValid).toBe(true);
+        if (!verification.isValid) {
+            throw new Error('Expected setup verification to succeed.');
+        }
+        expect(verification.value.verifiedSetup).toMatchObject({
+            setupPackageHash: proofMaterialRoot,
+        });
+        expect(Object.keys(verification.value.verifiedSetup)).toEqual([
+            'setupPackageHash',
+        ]);
+        expect(Object.isFrozen(verification.value.verifiedSetup)).toBe(true);
+    });
 
     it('authenticates public-key share material before terminal verification', async () => {
         const source = proofMaterialSource(publicKeyShareMaterialRoot, 19);
@@ -319,7 +356,7 @@ describe('canonical setup material streaming in the public package', () => {
         } as const;
         const source = proofMaterialSource(alternateProofMaterialRoot, 29);
 
-        await publicPackage.verifyPrivateVssShare({
+        const verification = await publicPackage.verifyPrivateVssShare({
             setupContext: {
                 ceremonyId: 'ceremony',
                 manifestHash: expectedManifestHash,
@@ -338,6 +375,11 @@ describe('canonical setup material streaming in the public package', () => {
                     alternateProofMaterialRoot,
                 ),
             privateVssShareProofMaterialChunkSources: [source],
+        });
+
+        expect(verification).toEqual({
+            isValid: false,
+            refusalReason: 'invalidProof',
         });
 
         expect(readMaterial).toHaveBeenCalledExactlyOnceWith({

@@ -1,19 +1,21 @@
-import {
-    decryptLocalTrusteeSetupSealedMaterial,
-    decryptLocalTrusteeState,
-    type EncryptedLocalTrusteeSetupState,
-    type LocalTrusteeSetupSealedMaterialDecryptionInput,
-} from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     isProtocolHashString,
     isRecord,
 } from '../common/verification-helpers.js';
+import type { BrowserActionStorageCustody } from '../runtime/browser-action-storage-custody.js';
 import {
     bytesFromHex,
     deriveCollectiveBgvSetupContextHash,
 } from '../setup/common-fields.js';
+import { decodeAggregateThresholdShareRecord } from '../setup/local-trustee-aggregate-threshold-share-record.js';
+import {
+    createLocalTrusteeSetupStateCommitment,
+    type EncryptedLocalTrusteeSetupState,
+    type LocalTrusteeSetupStateCommitment,
+} from '../setup/local-trustee-setup-state.js';
 import type { CollectiveBgvSetupContext } from '../setup/vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -43,10 +45,12 @@ export type PreparedLocalTargetDecryptionShareWitness = Readonly<{
 }>;
 
 export type RestoredLocalTargetDecryptionShareWitnessInput = Readonly<{
+    readonly actionRandomnessCommitment: Uint8Array;
+    readonly creationRecoveryEpoch: bigint;
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
-    readonly expectedLocalStateRoot: ProtocolHash;
+    readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly setupContext: CollectiveBgvSetupContext;
-    readonly storageKeyBytesHex: string;
+    readonly storageCustody: BrowserActionStorageCustody;
     readonly setupPackage: unknown;
 }>;
 
@@ -669,45 +673,27 @@ export const restoreAndPrepareLocalTargetDecryptionShareWitness = async (
     const setupContextHash = deriveCollectiveBgvSetupContextHash(
         input.setupContext,
     );
-    const restoredLocalState = await decryptLocalTrusteeState({
-        encryptedLocalState: input.encryptedLocalState,
-        expectedLocalStateRoot: input.expectedLocalStateRoot,
-        setupContextHash,
-        storageKeyBytesHex: input.storageKeyBytesHex,
-    });
-    const storageAad = jsonRecord(
-        input.encryptedLocalState.storageAad,
-        'encryptedLocalState.storageAad',
-    );
     const localStateCommitment = jsonRecord(
-        storageAad.localStateCommitment,
-        'encryptedLocalState.storageAad.localStateCommitment',
-    ) as LocalTrusteeSetupSealedMaterialDecryptionInput['localStateCommitment'];
-    const aggregateThresholdShareRoot = protocolHashField(
-        localStateCommitment,
-        'aggregateThresholdShareRoot',
-        'encryptedLocalState.storageAad.localStateCommitment',
-    );
-    const restoredAggregateThresholdShare =
-        await decryptLocalTrusteeSetupSealedMaterial({
-            sealedMaterial: restoredLocalState.sealedAggregateThresholdShare,
-            expectedMaterialRoot: aggregateThresholdShareRoot,
-            localStateCommitment,
-            setupContextHash,
-            storageKeyBytesHex: input.storageKeyBytesHex,
-        });
-    const aggregateThresholdShareMaterial = jsonRecord(
-        restoredAggregateThresholdShare,
-        'aggregateThresholdShareMaterial',
+        input.localStateCommitment,
+        'localStateCommitment',
     );
     exactStringField(
-        aggregateThresholdShareMaterial,
+        localStateCommitment,
         'objectType',
-        'LocalTrusteeAggregateThresholdShareMaterial',
-        'aggregateThresholdShareMaterial',
+        'LocalTrusteeSetupStateCommitment',
+        'localStateCommitment',
     );
-    const setupPackage = jsonRecord(input.setupPackage, 'setupPackage');
-    assertRestoredSetupContext(input.setupContext, setupPackage);
+    if (
+        protocolHashField(
+            localStateCommitment,
+            'setupContextHash',
+            'localStateCommitment',
+        ) !== setupContextHash
+    ) {
+        throw new Error(
+            'localStateCommitment.setupContextHash must match setupContext.',
+        );
+    }
     const trusteeIdentity = nonEmptyStringField(
         localStateCommitment,
         'trusteeIdentity',
@@ -718,16 +704,82 @@ export const restoreAndPrepareLocalTargetDecryptionShareWitness = async (
         'trusteeRosterPosition',
         'localStateCommitment',
     );
+    const thresholdShareCommitmentRecipientRoot = protocolHashField(
+        localStateCommitment,
+        'thresholdShareCommitmentRecipientRoot',
+        'localStateCommitment',
+    );
+    const aggregateThresholdShareRoot = protocolHashField(
+        localStateCommitment,
+        'aggregateThresholdShareRoot',
+        'localStateCommitment',
+    );
+    const canonicalLocalStateCommitment =
+        createLocalTrusteeSetupStateCommitment({
+            aggregateThresholdShareRoot,
+            setupContext: input.setupContext,
+            thresholdShareCommitmentRecipientRoot,
+            trusteeIdentity,
+            trusteeRosterPosition,
+        });
+    if (
+        protocolHashField(
+            localStateCommitment,
+            'localStateRoot',
+            'localStateCommitment',
+        ) !== canonicalLocalStateCommitment.localStateRoot
+    ) {
+        throw new Error(
+            'localStateCommitment.localStateRoot does not match the canonical local state commitment.',
+        );
+    }
+    const localStatePlaintext = await input.storageCustody.openLocalRecord({
+        actionRandomnessCommitment: input.actionRandomnessCommitment,
+        creationRecoveryEpoch: input.creationRecoveryEpoch,
+        envelope: input.encryptedLocalState,
+        identifierInput: {
+            recordType: 'aggregateThresholdShare',
+            recipientInputRoot: bytesFromHex(
+                thresholdShareCommitmentRecipientRoot,
+                'localStateCommitment.thresholdShareCommitmentRecipientRoot',
+            ),
+        },
+        recordVersion: 0n,
+    });
+    let aggregateOpeningCredentialHandoffValue: ReturnType<
+        typeof decodeAggregateThresholdShareRecord
+    >;
+    try {
+        aggregateOpeningCredentialHandoffValue =
+            decodeAggregateThresholdShareRecord(localStatePlaintext);
+    } finally {
+        localStatePlaintext.fill(0);
+    }
+    const aggregateThresholdShareMaterial = {
+        objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
+        aggregateOpeningCredentialHandoff:
+            aggregateOpeningCredentialHandoffValue,
+    } as const;
+    if (
+        deriveCanonicalObjectHash(aggregateThresholdShareMaterial) !==
+        aggregateThresholdShareRoot
+    ) {
+        throw new Error(
+            'restored aggregate threshold share does not match localStateCommitment.aggregateThresholdShareRoot.',
+        );
+    }
+    const aggregateOpeningCredentialHandoff = jsonRecord(
+        aggregateOpeningCredentialHandoffValue,
+        'aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff',
+    );
+    const setupPackage = jsonRecord(input.setupPackage, 'setupPackage');
+    assertRestoredSetupContext(input.setupContext, setupPackage);
     const participant = setupParticipant(setupPackage, trusteeIdentity);
     if (participant.rosterPosition !== trusteeRosterPosition) {
         throw new Error(
             'restored aggregate threshold share roster position must match the supplied setup package.',
         );
     }
-    const aggregateOpeningCredentialHandoff = jsonRecord(
-        aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff,
-        'aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff',
-    );
     exactStringField(
         aggregateOpeningCredentialHandoff,
         'objectType',

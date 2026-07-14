@@ -219,7 +219,7 @@ export default defineConfig(
             'no-restricted-imports': [
                 'error',
                 {
-                    paths: ['@sealed-lattice/wasm', 'sealed-lattice'],
+                    paths: ['sealed-lattice'],
                     patterns: packageSourceImportPatterns,
                 },
             ],

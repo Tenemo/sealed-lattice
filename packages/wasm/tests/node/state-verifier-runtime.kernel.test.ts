@@ -11,12 +11,15 @@ import {
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 import {
+    copyVerifiedStateDurableBinding,
     openStateVerifierSession,
     stateCapabilityKinds,
+    stateWitnessVoteKinds,
     type StateVerifierSession,
     type StateVerifierSessionInput,
     type VerifiedStateRecovery,
     type VerifiedStateReservation,
+    type VerifiedStateDurableBinding,
 } from '#packages/wasm/src/state-verifier-runtime';
 import {
     createStateVerifierTestVector,
@@ -118,10 +121,69 @@ describe('State verifier real-WASM runtime in Node', () => {
         });
     });
 
+    it('projects verifier-derived durable bindings without exposing forgeable fields', () => {
+        const session = openSession(kernel, vector);
+        try {
+            const reservationIntent = session.verifyReservationIntent({
+                canonicalReservationIntentCarrier:
+                    vector.reservation.canonicalIntentCarrier,
+                capabilityKind: stateCapabilityKinds.targetRelease,
+                expectedAuthorizationHash: vector.authorizationHash,
+                subjectParticipantIdentity: vector.subjectParticipantIdentity,
+            });
+            expect(reservationIntent.isValid).toBe(true);
+            if (!reservationIntent.isValid) {
+                throw new Error(reservationIntent.refusalReason);
+            }
+            const durableBinding = session.durableBindingFor(
+                reservationIntent.value,
+            );
+            expect(durableBinding.isValid).toBe(true);
+            if (!durableBinding.isValid) {
+                throw new Error(durableBinding.refusalReason);
+            }
+            expect(Reflect.ownKeys(durableBinding.value)).toEqual([]);
+            const description = copyVerifiedStateDurableBinding(
+                durableBinding.value,
+            );
+            expect(description).toMatchObject({
+                capabilityKind: stateCapabilityKinds.targetRelease,
+                intentObjectHash: vector.reservation.objectHash,
+                reservationIntentObjectHash: vector.reservation.objectHash,
+                subjectEpoch: 0n,
+                subjectParticipantIdentity: vector.subjectParticipantIdentity,
+                voteKind: stateWitnessVoteKinds.reservation,
+                witnessVoteSequence: 1n,
+            });
+            expect(description.suiteIdentifier).toEqual(vector.suiteIdentifier);
+            description.stateKey.fill(0);
+            expect(
+                copyVerifiedStateDurableBinding(durableBinding.value).stateKey,
+            ).not.toEqual(description.stateKey);
+            expect(() =>
+                copyVerifiedStateDurableBinding(
+                    Object.freeze(
+                        Object.create(null),
+                    ) as VerifiedStateDurableBinding,
+                ),
+            ).toThrow('was not issued by the WASM state verifier');
+            expect(
+                session.releaseVerifiedObject(reservationIntent.value),
+            ).toEqual({ isValid: true, value: undefined });
+            expect(session.durableBindingFor(reservationIntent.value)).toEqual({
+                isValid: false,
+                refusalReason: 'consumedState',
+            });
+        } finally {
+            session.cancel();
+        }
+    });
+
     it('verifies an exact quorum and consumes streamed output without exposing its bytes', () => {
         expect(kernel.exportedFunctionNames).toEqual(
             expect.arrayContaining([
                 'sealed_lattice_state_verifier_begin',
+                'sealed_lattice_state_verifier_describe',
                 'sealed_lattice_state_verifier_finish_output',
                 'sealed_lattice_state_verifier_verify_recovery',
                 'sealed_lattice_state_verifier_verify_reservation',

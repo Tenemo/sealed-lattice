@@ -148,25 +148,9 @@ fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
     let result = fixture
         .verify()
         .expect("finalized collective setup package verification result");
-    let context = || serde_json::to_string_pretty(&result).unwrap();
     // The embedded commitment sets satisfy the coefficient-commitment requirement;
     // only the terminal runtime objects a pre-terminal setup package lacks may
     // remain.
-    let refused_objects = result["refusedObjects"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    assert!(
-        !refused_objects.is_empty()
-            && refused_objects.iter().all(|refusal| {
-                refusal["reasonCode"] == "setupObjectMissing"
-                    && matches!(
-                        refusal["objectPath"].as_str(),
-                        Some("setupPackage.publicKeyShareMaterial")
-                            | Some("setupPackage.publicKeyShareSuccinctProofs")
-                    )
-            }),
-        "only terminal runtime objects may remain missing for the pre-terminal finalized package: {}",
-        context()
-    );
+    assert_eq!(result["isValid"], false, "unexpected result: {result}");
+    assert_eq!(result["refusalReason"], "missingPrerequisite");
 }

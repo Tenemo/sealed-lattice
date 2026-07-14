@@ -30,28 +30,6 @@ export const createPublishedSdkKernelBindings = (
     return {
         beginAcceptedSetupSession: () => openAcceptedSetupSession(getKernel()),
         exportedFunctionNames: runtime.exportedFunctionNames,
-        generateBgvTargetDecryptionShareProofMaterialFromLocalWitness: (
-            input,
-        ) =>
-            runtime.executeCommand<
-                ReturnType<
-                    PublishedSdkKernel['generateBgvTargetDecryptionShareProofMaterialFromLocalWitness']
-                >
-            >({
-                command:
-                    'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
-                setupPackage: input.setupPackage,
-                targetAcceptedRecord: input.targetAcceptedRecord,
-                targetCiphertexts: input.targetCiphertexts,
-                targetCiphertextBinding: input.targetCiphertextBinding,
-                targetShareProfile: input.targetShareProfile,
-                trusteeIdentity: input.trusteeIdentity,
-                localTargetShareWitness: input.localTargetShareWitness,
-                targetDecryptionShare: input.targetDecryptionShare,
-                proofStatement: input.proofStatement,
-                proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                proofRandomnessNonceHex: input.proofRandomnessNonceHex,
-            }),
         verifyPrivateVssShareEnvelope: (input) =>
             runtime.executeCommand<
                 ReturnType<PublishedSdkKernel['verifyPrivateVssShareEnvelope']>

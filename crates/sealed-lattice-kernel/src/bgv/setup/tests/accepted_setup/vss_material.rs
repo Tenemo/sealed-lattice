@@ -18,22 +18,8 @@ fn ten_participant_vss_proof_bearing_collective_setup_package_passes_preterminal
     let result = fixture
         .verify()
         .expect("ten-participant accepted-setup verification response");
-    let refused_objects = result["refusedObjects"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    assert!(
-        !refused_objects.is_empty()
-            && refused_objects.iter().all(|refusal| {
-                refusal["reasonCode"] == "setupObjectMissing"
-                    && matches!(
-                        refusal["objectPath"].as_str(),
-                        Some("setupPackage.publicKeyShareMaterial")
-                            | Some("setupPackage.publicKeyShareSuccinctProofs")
-                    )
-            }),
-        "the ten-participant proof-bearing package must pass every preterminal accepted-setup check: {result}",
-    );
+    assert_eq!(result["isValid"], false, "unexpected result: {result}");
+    assert_eq!(result["refusalReason"], "missingPrerequisite");
 }
 
 fn install_signed_vss_complaint(package: &mut serde_json::Value) {
@@ -140,7 +126,7 @@ fn valid_vss_complaint_aborts_accepted_setup() {
     assert_minimal_collective_setup_package_refused(
         "valid signed VSS complaint",
         install_signed_vss_complaint,
-        "vssComplaintAcceptedAbort",
+        "invalidArithmeticRelation",
     );
 }
 
@@ -164,11 +150,7 @@ fn collective_setup_verifier_refuses_tampered_vss_complaint_payloads() {
     ];
 
     for (case_label, mutate) in mutation_cases {
-        assert_minimal_collective_setup_package_refused(
-            case_label,
-            *mutate,
-            "vssComplaintRootMismatch",
-        );
+        assert_minimal_collective_setup_package_refused(case_label, *mutate, "wrongHashOrRoot");
     }
 }
 
@@ -182,7 +164,7 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
         |package| {
             package["privateVssEnvelopeCommitments"] = serde_json::json!([]);
         },
-        "privateVssEnvelopeCommitmentsNotObject",
+        "malformedEncoding",
     );
 
     assert_minimal_collective_setup_package_refused(
@@ -193,7 +175,7 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
             rebind_first_private_vss_encrypted_envelope_hash(package);
             rebind_collective_private_vss_envelope_commitment_root(package);
         },
-        "privateVssEncryptedEnvelopeAadMismatch",
+        "wrongHashOrRoot",
     );
 
     assert_minimal_collective_setup_package_refused(
@@ -203,7 +185,7 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
                 serde_json::json!(valid_hash('6'));
             rebind_collective_private_vss_envelope_commitment_root(package);
         },
-        "privateVssEncryptedEnvelopeHashMismatch",
+        "wrongHashOrRoot",
     );
 
     assert_minimal_collective_setup_package_refused(
@@ -214,7 +196,7 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
             rebind_first_private_vss_encrypted_envelope_hash(package);
             rebind_collective_private_vss_envelope_commitment_root(package);
         },
-        "privateVssEncryptedEnvelopeBindingMismatch",
+        "wrongHashOrRoot",
     );
 
     assert_minimal_collective_setup_package_refused(
@@ -223,7 +205,7 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
             package["privateVssEnvelopeCommitments"]["privateVssEnvelopeCommitmentRoot"] =
                 serde_json::json!(valid_hash('5'));
         },
-        "privateVssEnvelopeCommitmentRootMismatch",
+        "wrongHashOrRoot",
     );
 }
 
@@ -237,7 +219,7 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         (
             "VSS share acceptances replaced with an array",
             |package| package["vssShareAcceptances"] = serde_json::json!([]),
-            "vssShareAcceptancesNotObject",
+            "malformedEncoding",
         ),
         (
             "wrong VSS share acceptance object type",
@@ -245,7 +227,7 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
                 package["vssShareAcceptances"]["acceptanceRecords"][0]["objectType"] =
                     serde_json::json!("VssShareComplaint");
             },
-            "vssShareAcceptanceTypeMismatch",
+            "wrongTypeOrLength",
         ),
         (
             "non-integer VSS share acceptance source position",
@@ -253,7 +235,7 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
                 package["vssShareAcceptances"]["acceptanceRecords"][0]["sourceTrusteeRosterPosition"] =
                     serde_json::json!("0");
             },
-            "vssShareAcceptanceSourceTrusteePositionMissing",
+            "missingPrerequisite",
         ),
         (
             "duplicate VSS share acceptance pair",
@@ -261,7 +243,7 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
                 package["vssShareAcceptances"]["acceptanceRecords"][1] =
                     package["vssShareAcceptances"]["acceptanceRecords"][0].clone();
             },
-            "vssShareAcceptanceDuplicate",
+            "equivocation",
         ),
         (
             "VSS share acceptance rebound to another recipient",
@@ -269,7 +251,7 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
                 package["vssShareAcceptances"]["acceptanceRecords"][0]["recipientRosterPosition"] =
                     serde_json::json!(1);
             },
-            "vssShareAcceptanceRootMismatch",
+            "wrongHashOrRoot",
         ),
         (
             "drifted private VSS envelope local verification root",
@@ -278,7 +260,7 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
                     serde_json::json!(valid_hash('9'));
                 rebind_collective_private_vss_envelope_commitment_root(package);
             },
-            "vssShareAcceptanceRootMismatch",
+            "wrongHashOrRoot",
         ),
         (
             "wrong signed VSS share acceptance object root",
@@ -286,7 +268,7 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
                 package["vssShareAcceptances"]["acceptanceRecords"][0]["signatureEnvelope"]["signedRoot"]
                     ["objectRoot"] = serde_json::json!(valid_hash('4'));
             },
-            "vssShareAcceptanceRootMismatch",
+            "wrongHashOrRoot",
         ),
         (
             "tampered VSS share acceptance signature",
@@ -311,12 +293,16 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
                     serde_json::json!(tampered_signature_bytes_hex),
                 );
             },
-            "InvalidSignature",
+            "invalidSignature",
         ),
     ];
 
-    for (case_label, mutate, expected_reason_code) in mutation_cases {
-        assert_minimal_collective_setup_package_refused(case_label, *mutate, expected_reason_code);
+    for (case_label, mutate, expected_refusal_reason) in mutation_cases {
+        assert_minimal_collective_setup_package_refused(
+            case_label,
+            *mutate,
+            expected_refusal_reason,
+        );
     }
 }
 
@@ -332,24 +318,11 @@ fn compact_aggregate_threshold_proof_context(
         public_matrix_seed_hash: aggregate_threshold_commitment_set["publicMatrixSeedHash"]
             .as_str()
             .expect("public matrix seed hash"),
-        ring_degree: usize::try_from(
-            aggregate_threshold_commitment_set["ringDegree"]
-                .as_u64()
-                .expect("ring degree"),
-        )
-        .expect("ring degree fits usize"),
-        participant_count: usize::try_from(
-            aggregate_threshold_commitment_set["participantCount"]
-                .as_u64()
-                .expect("participant count"),
-        )
-        .expect("participant count fits usize"),
-        rns_limb_count: usize::try_from(
-            aggregate_threshold_commitment_set["rnsLimbCount"]
-                .as_u64()
-                .expect("RNS limb count"),
-        )
-        .expect("RNS limb count fits usize"),
+        ring_degree: vss_commitment_ring_degree_from_fixture_package(fixture),
+        participant_count: proof_record_fixtures::participant_count_from_package(fixture)
+            .try_into()
+            .expect("participant count fits usize"),
+        rns_limb_count: DATA_PRIMES.len(),
     }
 }
 

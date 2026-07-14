@@ -1,12 +1,12 @@
 use super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement};
+use crate::bgv::proof_suite::{
+    CanonicalProofTranscript, CanonicalTranscriptEngine, common_proof_suite_id,
+};
 #[cfg(test)]
 use crate::bgv::setup::transcript_order_audit::{
     TranscriptOrderAuditRecorder, active_transcript_order_audit_recorder,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
-use crate::hashing::hash_framed_parts_512 as hash512;
-
-const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/transcript";
 
 fn transcript_error(message: &'static str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
@@ -14,8 +14,8 @@ fn transcript_error(message: &'static str) -> CanonicalError {
 
 #[derive(Clone)]
 pub(in crate::bgv::setup) struct HashChainTranscriptCore {
-    domain: &'static str,
-    state: [u8; 64],
+    transcript: CanonicalProofTranscript,
+    engine: CanonicalTranscriptEngine,
     squeeze_counter: u64,
     #[cfg(test)]
     audit: Option<TranscriptOrderAuditRecorder>,
@@ -23,13 +23,19 @@ pub(in crate::bgv::setup) struct HashChainTranscriptCore {
 
 impl HashChainTranscriptCore {
     pub(in crate::bgv::setup) fn new(
-        domain: &'static str,
+        engine: CanonicalTranscriptEngine,
+        application_statement_schema_identifier: u16,
         audit_label: &'static str,
         protocol_label: &str,
     ) -> Self {
         let core = Self {
-            domain,
-            state: hash512(domain, &[b"init", protocol_label.as_bytes()]),
+            transcript: CanonicalProofTranscript::new(
+                1,
+                common_proof_suite_id(),
+                application_statement_schema_identifier,
+                protocol_label.as_bytes(),
+            ),
+            engine,
             squeeze_counter: 0,
             #[cfg(test)]
             audit: active_transcript_order_audit_recorder(audit_label, protocol_label),
@@ -54,10 +60,9 @@ impl HashChainTranscriptCore {
         if let Some(audit) = self.audit.as_mut() {
             audit.record_absorb(label, bytes.len());
         }
-        self.state = hash512(
-            self.domain,
-            &[b"absorb", &self.state, label.as_bytes(), bytes],
-        );
+        self.transcript
+            .absorb_engine_round(self.engine, label, bytes)
+            .unwrap_or_else(|_| panic!("proof engine round tag `{label}` is not canonical"));
         self.squeeze_counter = 0;
     }
 
@@ -83,15 +88,13 @@ impl HashChainTranscriptCore {
         if let Some(audit) = self.audit.as_mut() {
             audit.record_squeeze(label, squeeze_counter);
         }
-        Some(hash512(
-            self.domain,
-            &[
-                b"squeeze",
-                &self.state,
-                label.as_bytes(),
-                &squeeze_counter.to_le_bytes(),
-            ],
-        ))
+        Some(
+            self.transcript
+                .squeeze_engine_challenge(self.engine, label, squeeze_counter)
+                .unwrap_or_else(|_| {
+                    panic!("proof engine challenge tag `{label}` is not canonical")
+                }),
+        )
     }
 
     #[cfg(test)]
@@ -110,8 +113,17 @@ pub(super) struct FiatShamirTranscript {
 }
 
 impl FiatShamirTranscript {
+    #[cfg(test)]
     pub(super) fn new(
         protocol_label: &str,
+        maximum_candidate_draws_per_output: u32,
+    ) -> CanonicalResult<Self> {
+        Self::new_for_schema(protocol_label, 0x1216, maximum_candidate_draws_per_output)
+    }
+
+    pub(super) fn new_for_schema(
+        protocol_label: &str,
+        application_statement_schema_identifier: u16,
         maximum_candidate_draws_per_output: u32,
     ) -> CanonicalResult<Self> {
         if maximum_candidate_draws_per_output == 0 {
@@ -121,7 +133,8 @@ impl FiatShamirTranscript {
         }
         Ok(Self {
             core: HashChainTranscriptCore::new(
-                TRANSCRIPT_DOMAIN,
+                CanonicalTranscriptEngine::TrusteeEvaluationKey,
+                application_statement_schema_identifier,
                 "trustee-evaluation-key",
                 protocol_label,
             ),
@@ -167,13 +180,6 @@ impl FiatShamirTranscript {
         self.core.try_squeeze_block(label).ok_or_else(|| {
             transcript_error("the trustee proof transcript squeeze counter was exhausted")
         })
-    }
-
-    fn squeeze_u64(&mut self, label: &str) -> CanonicalResult<u64> {
-        let block = self.squeeze_block(label)?;
-        Ok(u64::from_le_bytes(
-            block[..8].try_into().expect("block prefix is eight bytes"),
-        ))
     }
 
     // Unbiased uniform residues below the modulus via rejection sampling.
@@ -292,28 +298,38 @@ impl FiatShamirTranscript {
         Ok(integers)
     }
 
-    // Query positions in [0, range).
+    // Query positions in [0, range), sampled independently with replacement.
+    // Repeated positions remain separate query ordinals; transport may still
+    // deduplicate the corresponding Merkle openings.
     pub(super) fn challenge_positions(
         &mut self,
         label: &str,
         range: usize,
         count: usize,
     ) -> CanonicalResult<Vec<usize>> {
-        // Masking is unbiased only because FRI domain sizes are powers of two
-        // (debug-asserted); base-field challenges differ and must
-        // rejection-sample against the non-power-of-two modulus.
         if !range.is_power_of_two() {
             return Err(transcript_error(
                 "the trustee proof challenge-position range must be a nonzero power of two",
             ));
         }
-        let mask = (range - 1) as u64;
+        let position_mask = u64::try_from(range - 1).map_err(|_| {
+            transcript_error("the trustee proof challenge-position range exceeds u64")
+        })?;
         let mut positions = Vec::with_capacity(count);
         while positions.len() < count {
-            let value = self.squeeze_u64(label)?;
-            positions.push((value & mask) as usize);
+            let block = self.squeeze_block(label)?;
+            for chunk in block.chunks_exact(8) {
+                if positions.len() == count {
+                    break;
+                }
+                let candidate = u64::from_le_bytes(chunk.try_into().expect("eight-byte chunk"));
+                positions.push(usize::try_from(candidate & position_mask).map_err(|_| {
+                    transcript_error(
+                        "the trustee proof challenge position exceeds the platform range",
+                    )
+                })?);
+            }
         }
-
         Ok(positions)
     }
 }
@@ -389,16 +405,45 @@ mod tests {
                 .is_err()
         );
         assert!(transcript.challenge_positions("position", 3, 1).is_err());
+        assert_eq!(
+            transcript
+                .challenge_positions("position", 1, 3)
+                .expect("the singleton domain is valid"),
+            vec![0, 0, 0]
+        );
     }
 
     #[test]
-    fn squeeze_counter_exhaustion_is_typed() {
+    fn query_positions_are_bounded_repeatable_and_deterministic() {
+        let mut first = FiatShamirTranscript::new("query-positions", 64)
+            .expect("positive candidate-draw limit is valid");
+        let mut second = first.clone();
+        let first_positions = first
+            .challenge_positions("position", 8, 24)
+            .expect("query ordinals may repeat positions");
+        let second_positions = second
+            .challenge_positions("position", 8, 24)
+            .expect("deterministic replay derives the same positions");
+        assert_eq!(first_positions, second_positions);
+        assert_eq!(first_positions.len(), 24);
+        assert!(first_positions.iter().all(|position| *position < 8));
+        assert!(
+            first_positions
+                .iter()
+                .enumerate()
+                .any(|(index, position)| first_positions[..index].contains(position)),
+            "more query ordinals than domain positions must produce a repeat"
+        );
+    }
+
+    #[test]
+    fn sequential_squeeze_counter_exhaustion_is_typed() {
         let mut transcript = FiatShamirTranscript::new("counter-limit", 1)
             .expect("positive candidate-draw limit is valid");
         transcript.core.exhaust_squeeze_counter();
 
         let error = transcript
-            .challenge_positions("position", 2, 1)
+            .challenge_field_elements("field", 17, 1)
             .expect_err("an exhausted squeeze counter must fail closed");
         assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
         assert!(error.message.contains("squeeze counter was exhausted"));

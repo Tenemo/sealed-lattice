@@ -110,11 +110,8 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
         let mut record = serde_json::json!({
             "objectType": "TrusteeEvaluationKeyProof",
-            "ceremonyId": setup_context["ceremonyId"],
-            "manifestHash": setup_context["manifestHash"],
-            "rosterHash": setup_context["rosterHash"],
-            "setupParametersHash": setup_context["setupParametersHash"],
-            "setupEpoch": setup_context["setupEpoch"],
+            "setupContextHash": crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+                .expect("setup context hash"),
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
             "statementHash": statement_hash_hex,
