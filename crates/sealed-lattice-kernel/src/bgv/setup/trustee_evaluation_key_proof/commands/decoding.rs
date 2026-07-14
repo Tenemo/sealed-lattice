@@ -7,6 +7,7 @@ const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
 pub(super) fn decode_component_material_bytes(
     material_bytes: &[u8],
     expected_level: usize,
+    expected_digit_count: usize,
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     let read_word = |cursor: &mut usize| -> CanonicalResult<u64> {
         let end = cursor
@@ -34,17 +35,11 @@ pub(super) fn decode_component_material_bytes(
     let ring_degree = usize::try_from(read_word(&mut cursor)?).map_err(|_| {
         invalid_succinct_setup_proof("component material ring degree does not fit usize")
     })?;
-    let digit_count = usize::try_from(read_word(&mut cursor)?).map_err(|_| {
-        invalid_succinct_setup_proof("component material digit count does not fit usize")
-    })?;
-    let limb_count = usize::try_from(read_word(&mut cursor)?).map_err(|_| {
-        invalid_succinct_setup_proof("component material limb count does not fit usize")
-    })?;
-    if level != expected_level
-        || digit_count != level + 1
-        || limb_count != level + 1
-        || limb_count > DATA_PRIMES.len()
-    {
+    let limb_count = level
+        .checked_add(1)
+        .ok_or_else(|| invalid_succinct_setup_proof("component material limb count overflowed"))?;
+    let digit_count = expected_digit_count;
+    if level != expected_level || limb_count > DATA_PRIMES.len() {
         return Err(invalid_succinct_setup_proof(
             "component material shape does not match the key descriptor level",
         ));

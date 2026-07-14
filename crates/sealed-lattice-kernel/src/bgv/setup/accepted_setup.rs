@@ -19,9 +19,7 @@ use self::same_secret_bridge_verification::{
 // Re-exported for terminal proof fixtures, which build public-key-share and
 // trustee evaluation-key statements against the verified same-secret bridge
 // material that the accepted-setup verifier reconstructs.
-use self::evaluation_key_material_transport::{
-    evaluation_key_material_refusal, verify_evaluation_key_share_component_material_transport,
-};
+use self::evaluation_key_material_transport::evaluation_key_material_refusal;
 use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
@@ -93,14 +91,10 @@ use unicode_normalization::UnicodeNormalization;
 use super::*;
 use super::{
     evaluation_key_share_material::{
-        DecodedEvaluationKeyShareComponentMaterial,
-        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
-        EvaluationKeyShareDerivedMaterialBinding, EvaluationKeyShareProofFamily,
-        component_b_vectors_from_record,
+        DecodedEvaluationKeyShareComponentMaterial, EvaluationKeyShareDerivedMaterialBinding,
+        EvaluationKeyShareProofFamily, component_b_vectors_from_record,
     },
-    setup_proof::{
-        SetupProofMaterialBytes, SetupProofMaterialMap, SetupProofMaterialTransportFamily,
-    },
+    setup_proof::SetupProofMaterialBytes,
 };
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
 use crate::bgv::evaluator::top_k::{
@@ -115,20 +109,10 @@ use crate::protocol_signatures::{
     ProtocolSignatureExpectation, verify_protocol_signature_envelope,
 };
 const SETUP_PACKAGE_OBJECT_TYPE: &str = "SetupPackage";
-const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
-    "SetupTransportedPublicKeyShareProofMaterialSet";
-const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE: &str =
-    "SetupTransportedPublicKeyShareProofMaterial";
-const EVALUATION_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
-    "SetupTransportedEvaluationKeyShareProofMaterialSet";
-const EVALUATION_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE: &str =
-    "SetupTransportedEvaluationKeyShareProofMaterial";
 const PUBLIC_KEY_SHARE_SET_OBJECT_TYPE: &str = "PublicKeyShareSet";
 const PUBLIC_KEY_SHARE_OBJECT_TYPE: &str = "PublicKeyShare";
 const PUBLIC_KEY_SHARE_MATERIAL_SET_OBJECT_TYPE: &str = "PublicKeyShareMaterialSet";
 const PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE: &str = "PublicKeyShareMaterial";
-pub(super) const PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =
-    "SetupTransportedPublicKeyShareMaterial";
 const PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC: &[u8; 8] = b"SLPKSMV1";
 const PUBLIC_KEY_SHARE_MATERIAL_BINARY_VERSION: u64 = 1;
 const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareSuccinctProofSet";
@@ -474,7 +458,7 @@ fn verify_collective_setup_package(
     {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
-    match verify_vss_public_material(setup_package, request, Some(proof_binding_session))? {
+    match verify_vss_public_material(setup_package, Some(proof_binding_session))? {
         VssPublicMaterialVerification::Verified => {}
         VssPublicMaterialVerification::Refused(refusals) => {
             return Ok(SetupPackageVerification::Refused(refusals));
@@ -482,7 +466,6 @@ fn verify_collective_setup_package(
     }
     let verified_same_secret_bridge = match verify_same_secret_bridge_statement_set(
         setup_package,
-        request,
         Some(proof_binding_session),
     )? {
         SameSecretBridgeVerification::Verified(verified_material) => verified_material,
@@ -495,14 +478,13 @@ fn verify_collective_setup_package(
     }
     if let Some(refusals) = verify_public_key_share_succinct_proofs(
         setup_package,
-        request,
         Some(&verified_same_secret_bridge),
         proof_binding_session,
     )? {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
     if let Some(refusals) =
-        verify_collective_public_key_material(setup_package, request, proof_binding_session)?
+        verify_collective_public_key_material(setup_package, proof_binding_session)?
     {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
@@ -511,17 +493,9 @@ fn verify_collective_setup_package(
     }
     if let Some(refusals) = verify_pending_evaluation_key_material_boundary(
         setup_package,
-        request,
         Some(&verified_same_secret_bridge),
         proof_binding_session,
         &setup_intent_registrations,
-    )? {
-        return Ok(SetupPackageVerification::Refused(refusals));
-    }
-    if let Some(refusals) = verify_evaluation_key_share_component_material_transport(
-        setup_package,
-        request,
-        proof_binding_session,
     )? {
         return Ok(SetupPackageVerification::Refused(refusals));
     }

@@ -5,39 +5,6 @@ import type {
 
 type BgvJsonRecord = Readonly<Record<string, unknown>>;
 
-type BgvTransportedMaterialObject<ObjectType extends string> = Readonly<
-    BgvJsonRecord & {
-        readonly objectType: ObjectType;
-    }
->;
-
-type BgvTransportedSetupProofMaterialSet<ObjectType extends string = string> =
-    BgvTransportedMaterialObject<ObjectType> &
-        Readonly<{
-            readonly proofMaterials: readonly BgvJsonRecord[];
-        }>;
-
-type BgvTransportedPublicKeyShareMaterial =
-    BgvTransportedMaterialObject<'SetupTransportedPublicKeyShareMaterial'> &
-        Readonly<{
-            readonly publicKeyShareMaterialSetRoot: ProtocolHash;
-        }>;
-
-type BgvTransportedEvaluationKeyShareComponentMaterialSet =
-    BgvTransportedMaterialObject<'SetupTransportedEvaluationKeyShareComponentMaterialSet'> &
-        Readonly<{
-            readonly componentMaterials: readonly BgvJsonRecord[];
-        }>;
-
-export type BgvCollectiveSetupTransportCompanions = Readonly<{
-    readonly transportedPublicKeyShareMaterial: BgvTransportedPublicKeyShareMaterial;
-    readonly transportedPublicKeyShareProofMaterial: BgvTransportedSetupProofMaterialSet<'SetupTransportedPublicKeyShareProofMaterialSet'>;
-    readonly transportedEvaluationKeyShareProofMaterial: BgvTransportedSetupProofMaterialSet<'SetupTransportedEvaluationKeyShareProofMaterialSet'>;
-    readonly transportedVssShareLinkageProofMaterial: BgvTransportedSetupProofMaterialSet<'SetupTransportedVssShareLinkageProofMaterialSet'>;
-    readonly transportedSameSecretBridgeProofMaterial: BgvTransportedSetupProofMaterialSet<'SetupTransportedSameSecretBridgeProofMaterialSet'>;
-    readonly transportedEvaluationKeyShareComponentMaterial: BgvTransportedEvaluationKeyShareComponentMaterialSet;
-}>;
-
 export type BgvRnsParametersDescription = {
     readonly parameters: {
         readonly polynomialDegree: number;
@@ -128,22 +95,31 @@ export type BgvPrivateVssShareProofGeneration = {
     readonly privateVssShareProof: Record<string, unknown>;
 };
 
-// One key share inside a trustee evaluation-key proof statement. Component
-// material is supplied only as canonical binary transport bytes; round-two
-// keys also carry the recomputed public round-one aggregate diagonals.
-export type BgvTrusteeEvaluationKeyStatementKey = {
-    readonly proofFamily:
-        | 'relinearization-round-one'
-        | 'relinearization-round-two'
-        | 'galois-rotation'
-        | 'public-key-share';
-    readonly rotation?: number;
+type BgvTrusteeEvaluationKeyStatementKeyCommon = {
     readonly level: number;
     readonly keySwitchDomain: string;
     readonly keySwitchSeedHex: string;
     readonly componentMaterialBytesHex: string;
-    readonly roundOneAggregateDiagonal?: readonly (readonly number[])[];
 };
+
+// One key share inside a key-bearing setup proof statement. Component material
+// is supplied only as canonical binary transport bytes; round-two keys also
+// carry the recomputed public round-one aggregate diagonals.
+export type BgvTrusteeEvaluationKeyStatementKey =
+    | (BgvTrusteeEvaluationKeyStatementKeyCommon & {
+          readonly proofFamily: 'relinearization-round-one';
+      })
+    | (BgvTrusteeEvaluationKeyStatementKeyCommon & {
+          readonly proofFamily: 'relinearization-round-two';
+          readonly roundOneAggregateDiagonal: readonly (readonly number[])[];
+      })
+    | (BgvTrusteeEvaluationKeyStatementKeyCommon & {
+          readonly proofFamily: 'galois-rotation';
+          readonly rotation: number;
+      })
+    | (BgvTrusteeEvaluationKeyStatementKeyCommon & {
+          readonly proofFamily: 'public-key-share';
+      });
 
 // The kernel derives the key-bearing proof family from the key list. Trustee
 // evaluation-key statements bind their schedule and exact source constant;
@@ -171,7 +147,6 @@ export type BgvTrusteeEvaluationKeySameSecretLinkage = {
 
 export type BgvTrusteeEvaluationKeySameSecretBridge = {
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly setupContextHash: ProtocolHash;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly bridgeRnsPrimes: readonly number[];

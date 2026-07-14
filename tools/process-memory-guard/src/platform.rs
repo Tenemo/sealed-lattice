@@ -964,11 +964,9 @@ mod implementation {
     fn read_process_information(process_id: u32) -> Result<ProcessInformation, ProcessReadError> {
         let path = format!("/proc/{process_id}/stat");
         let text = read_process_text(&path)?;
-        let closing_name_parenthesis = text
-            .rfind(')')
-            .ok_or_else(|| {
-                ProcessReadError::Failed(format!("{path} omitted the process-name terminator"))
-            })?;
+        let closing_name_parenthesis = text.rfind(')').ok_or_else(|| {
+            ProcessReadError::Failed(format!("{path} omitted the process-name terminator"))
+        })?;
         let fields = text[(closing_name_parenthesis + 1)..]
             .split_whitespace()
             .collect::<Vec<_>>();
@@ -979,9 +977,7 @@ mod implementation {
         }
         let parse_field = |field_index: usize, field_name: &str| {
             fields[field_index].parse::<u64>().map_err(|error| {
-                ProcessReadError::Failed(format!(
-                    "failed to parse {field_name} in {path}: {error}"
-                ))
+                ProcessReadError::Failed(format!("failed to parse {field_name} in {path}: {error}"))
             })
         };
 
@@ -1045,9 +1041,10 @@ mod implementation {
             if !selected_names.contains(&name) {
                 continue;
             }
-            let value = raw_value.split_whitespace().next().ok_or_else(|| {
-                format!("{name} in {} omitted its value", path.display())
-            })?;
+            let value = raw_value
+                .split_whitespace()
+                .next()
+                .ok_or_else(|| format!("{name} in {} omitted its value", path.display()))?;
             let value = value.parse::<u64>().map_err(|error| {
                 format!("failed to parse {name} in {}: {error}", path.display())
             })?;

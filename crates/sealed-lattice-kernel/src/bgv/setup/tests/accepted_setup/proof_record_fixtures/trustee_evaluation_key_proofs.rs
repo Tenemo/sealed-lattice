@@ -16,7 +16,6 @@ use crate::hashing::{derive_canonical_object_hash, to_hex};
 
 pub(in super::super) struct TrusteeEvaluationKeyProofFixture {
     pub(in super::super) proof_set: serde_json::Value,
-    pub(in super::super) transported_proof_material: serde_json::Value,
 }
 
 pub(in super::super) fn trustee_evaluation_key_proof_material_root_from_fixture_record(
@@ -42,7 +41,6 @@ pub(in super::super) fn trustee_evaluation_key_proof_material_root_from_fixture_
 
 pub(in super::super) fn trustee_evaluation_key_proofs_object(
     package: &serde_json::Value,
-    proof_material_request: &serde_json::Value,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
     round_one_aggregate_diagonals_by_level: &BTreeMap<u64, Vec<Vec<u64>>>,
 ) -> TrusteeEvaluationKeyProofFixture {
@@ -50,14 +48,10 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
     let participant_count = participant_count_from_package(package);
     let trustee_roster_positions = (0..participant_count).collect::<Vec<_>>();
     // The bridge material the verifier reconstructs from the package records
-    // and their authenticated proof-material request.
+    // and authenticated session material.
     let verified_same_secret_bridge = package.get("sameSecretBridgeStatementSet").map(|_| {
-        verified_same_secret_bridge_material_from_package(
-            package,
-            proof_material_request,
-            Some(proof_binding_session),
-        )
-        .expect("same-secret bridge material")
+        verified_same_secret_bridge_material_from_package(package, Some(proof_binding_session))
+            .expect("same-secret bridge material")
     });
     assert!(
         verified_same_secret_bridge.is_some(),
@@ -68,15 +62,11 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         .expect("same-secret bridge ring degree") as usize;
 
     let mut proof_records = Vec::with_capacity(trustee_roster_positions.len());
-    let mut transported_proof_materials = Vec::with_capacity(trustee_roster_positions.len());
     for trustee_roster_position in trustee_roster_positions {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let statement =
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package: package,
-                transported_key_switch_component_material: proof_material_request
-                    .get("transportedEvaluationKeyShareComponentMaterial")
-                    .expect("transported evaluation-key share component material"),
                 verified_same_secret_bridge: verified_same_secret_bridge.as_ref(),
                 round_one_aggregate_diagonals_by_level,
                 trustee_roster_position,
@@ -139,10 +129,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         )
         .expect("authenticate trustee evaluation-key proof material stream");
         record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
-        let transported_proof_material = serde_json::json!({
-            "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
-            "proofMaterialRoot": proof_material_root,
-        });
         final_package_phase(&format!(
             "generated trustee evaluation-key proof trustee {trustee_roster_position}"
         ));
@@ -162,7 +148,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         )
         .expect("retain trustee evaluation-key proof binding");
         proof_records.push(record);
-        transported_proof_materials.push(transported_proof_material);
     }
 
     let proof_set = serde_json::json!({
@@ -170,13 +155,7 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         "proofRecords": proof_records,
     });
 
-    TrusteeEvaluationKeyProofFixture {
-        proof_set,
-        transported_proof_material: serde_json::json!({
-            "objectType": "SetupTransportedEvaluationKeyShareProofMaterialSet",
-            "proofMaterials": transported_proof_materials,
-        }),
-    }
+    TrusteeEvaluationKeyProofFixture { proof_set }
 }
 
 // The deterministic fixture witness for one trustee's batched statement: the
@@ -230,31 +209,26 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
     // The atom opens one original BDLOP source constant commitment. Its five
     // ternary randomness columns are the exact opening used to construct the
     // accepted VSS coefficient commitment at source limb zero.
-    let opening_randomness_by_limb = statement
-        .same_secret_linkage()
-        .map(|_| {
-            vec![
-                accepted_vss_randomness_fixture(trustee_roster_position, 0, 0, ring_degree)
+    let opening_randomness_by_limb = vec![
+        accepted_vss_randomness_fixture(trustee_roster_position, 0, 0, ring_degree)
+            .into_iter()
+            .map(|column| {
+                column
                     .into_iter()
-                    .map(|column| {
-                        column
-                            .into_iter()
-                            .map(|value| i64::try_from(value).expect("ternary randomness fits i64"))
-                            .collect()
-                    })
-                    .collect(),
-            ]
-        })
-        .unwrap_or_default();
+                    .map(|value| i64::try_from(value).expect("ternary randomness fits i64"))
+                    .collect()
+            })
+            .collect(),
+    ];
 
     TrusteeEvaluationKeyWitness::TrusteeEvaluationKey {
         key: KeyBearingWitness {
             secret_coefficients,
             error_coefficients_by_key,
         },
-        linkage: Some(SameSecretLinkageWitness {
+        linkage: SameSecretLinkageWitness {
             negative_indicator_coefficients,
             opening_randomness_by_limb,
-        }),
+        },
     }
 }

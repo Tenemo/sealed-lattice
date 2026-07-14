@@ -193,9 +193,4 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
-export {
-    textEncoder,
-    textDecoder,
-    wasmHeader,
-    createMockKernelExports,
-};
+export { textEncoder, textDecoder, wasmHeader, createMockKernelExports };

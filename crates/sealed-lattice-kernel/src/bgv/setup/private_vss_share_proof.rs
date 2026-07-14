@@ -193,22 +193,21 @@ fn private_vss_share_succinct_proof_bytes_from_record(
         proof_material_root,
         "privateVssShareProof.proofMaterialRoot",
     )?;
-    let proof_bytes = take_verified_setup_proof_material_bytes(
-        PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        proof_material_root,
-        "privateVssShareProof.proofMaterialRoot",
-        None,
-    )?;
-    let expected_material_root = private_vss_share_succinct_proof_material_root(
-        value_string(proof_record, "proofBytesHash")?,
-    )?;
+    let expected_material_root = private_vss_share_succinct_proof_material_root(value_string(
+        proof_record,
+        "proofBytesHash",
+    )?)?;
     if proof_material_root != expected_material_root {
         return Err(invalid_private_vss_share_proof(
             "private VSS share proofMaterialRoot must match the canonical proof material reference",
         ));
     }
-
-    Ok(proof_bytes)
+    take_verified_setup_proof_material_bytes(
+        PRIVATE_VSS_SHARE_PROOF_FAMILY,
+        proof_material_root,
+        "privateVssShareProof.proofMaterialRoot",
+        None,
+    )
 }
 
 fn private_vss_share_succinct_statement(
@@ -402,8 +401,7 @@ pub(super) fn private_vss_share_succinct_proof_record(
     let proof = prove_evaluation_key_share(&statement, &witness, input.proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
     let proof_bytes_hash = private_vss_share_succinct_proof_bytes_hash(&proof_bytes);
-    let proof_material_root =
-        private_vss_share_succinct_proof_material_root(&proof_bytes_hash)?;
+    let proof_material_root = private_vss_share_succinct_proof_material_root(&proof_bytes_hash)?;
     crate::bgv::setup::retain_generated_canonical_proof_material(
         PRIVATE_VSS_SHARE_PROOF_FAMILY,
         proof_material_root.clone(),

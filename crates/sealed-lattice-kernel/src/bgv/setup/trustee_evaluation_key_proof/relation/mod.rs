@@ -2,22 +2,11 @@ use super::evaluation_domain::negacyclic_transpose_product;
 use super::extension_field::{
     CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
 };
-use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-    SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT, SetupCommitmentValue,
-    StructuralMatrixPolynomial, setup_commitment_matrix_coefficients_cached,
-    structural_matrix_polynomial_kind,
+use crate::bgv::evaluator::{
+    key_switch::{KEY_SWITCH_SAMPLE_DOMAIN, PLAINTEXT_MODULUS_I64},
+    prg::DeterministicSampler,
 };
-use crate::bgv::setup::sampling::dense_public_residues_with_degree;
 use crate::bgv::setup::sharing::canonical_trustee_point;
-use crate::bgv::{
-    evaluator::{
-        key_switch::{KEY_SWITCH_SAMPLE_DOMAIN, PLAINTEXT_MODULUS_I64},
-        prg::DeterministicSampler,
-    },
-    parameters::DATA_PRIMES,
-};
-use crate::hashing::hash_framed_parts_512 as hash512;
 
 mod column_layout;
 mod constraint_kernels;

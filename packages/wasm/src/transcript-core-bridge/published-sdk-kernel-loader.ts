@@ -64,8 +64,6 @@ export const createPublishedSdkKernelBindings = (
                 sourceTrusteeCoefficientCommitmentMaterialRecords:
                     input.sourceTrusteeCoefficientCommitmentMaterialRecords,
                 privateEnvelope: input.privateEnvelope,
-                transportedPrivateVssShareProofMaterial:
-                    input.transportedPrivateVssShareProofMaterial,
                 expectedPrivateEnvelopeHash: input.expectedPrivateEnvelopeHash,
                 expectedLocalVerificationRoot:
                     input.expectedLocalVerificationRoot,
@@ -115,8 +113,7 @@ export const createPublishedSdkKernelLoader = (
             transcriptCoreKernelUrl,
             options,
         );
-        let kernel: PublishedSdkKernel;
-        kernel = createPublishedSdkKernelBindings(runtime, () => kernel);
+        const kernel = createPublishedSdkKernelBindings(runtime, () => kernel);
         registerKernelContexts(kernel, runtime);
 
         return kernel;

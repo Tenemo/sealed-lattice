@@ -184,7 +184,7 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
         const original = makeChunk(89, 37);
         const descriptor = descriptorFor(
             kernel,
-            canonicalStreamDomains.evaluatorKeyStore,
+            canonicalStreamDomains.sameSecretProof,
             [original],
         );
         const mutated = original.slice(0);
@@ -192,7 +192,7 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
 
         const substituted = runtime.openVerifier({
             descriptorBytes: descriptor,
-            family: bgvCanonicalStreamFamilies.relinearizationComponent,
+            family: bgvCanonicalStreamFamilies.sameSecretBridge,
             materialRoot: '31'.repeat(64),
         });
         expect(() => substituted.absorbChunk(0, mutated)).toThrowError(
@@ -201,7 +201,7 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
 
         const cancelled = runtime.openVerifier({
             descriptorBytes: descriptor,
-            family: bgvCanonicalStreamFamilies.relinearizationComponent,
+            family: bgvCanonicalStreamFamilies.sameSecretBridge,
             materialRoot: '32'.repeat(64),
         });
         cancelled.cancel();
@@ -211,9 +211,9 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
         await expect(
             authenticateMaterial(kernel, runtime, {
                 chunks: [original],
-                family: bgvCanonicalStreamFamilies.relinearizationComponent,
+                family: bgvCanonicalStreamFamilies.sameSecretBridge,
                 materialRoot: '33'.repeat(64),
-                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
+                streamDomain: canonicalStreamDomains.sameSecretProof,
             }),
         ).resolves.toBeUndefined();
     });

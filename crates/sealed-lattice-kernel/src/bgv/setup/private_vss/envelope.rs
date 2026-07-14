@@ -1,6 +1,5 @@
 use super::*;
 
-use crate::bgv::setup::setup_proof::SetupProofMaterialMap;
 use crate::hashing::derive_canonical_object_hash;
 
 const PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "PrivateVssShareEnvelope";

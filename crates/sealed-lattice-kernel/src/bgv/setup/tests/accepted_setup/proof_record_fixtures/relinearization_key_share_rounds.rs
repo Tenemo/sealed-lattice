@@ -31,7 +31,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
 
     let mut round_one_records = Vec::new();
     let mut round_one_aggregate_diagonals_by_level = BTreeMap::<u64, Vec<Vec<u64>>>::new();
-    let mut transported_component_materials = Vec::new();
     let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     for level in &scheduled_levels {
         let level = *level;
@@ -91,7 +90,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 "level": level,
                 "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
             });
-            let authenticated_material =
+            let authenticated_material_root =
                 authenticate_evaluation_key_share_component_material_fixture(
                     EvaluationKeyShareProofFamily::Relinearization,
                     &record,
@@ -106,8 +105,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                     accepted_setup_session,
                 );
             record["keySwitchComponentMaterialRoot"] =
-                serde_json::json!(authenticated_material.material_root);
-            transported_component_materials.push(authenticated_material.transported_material);
+                serde_json::json!(authenticated_material_root);
             round_one_records.push(record);
         }
     }
@@ -153,7 +151,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 "level": level,
                 "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
             });
-            let authenticated_material =
+            let authenticated_material_root =
                 authenticate_evaluation_key_share_component_material_fixture(
                     EvaluationKeyShareProofFamily::Relinearization,
                     &record,
@@ -168,8 +166,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                     accepted_setup_session,
                 );
             record["keySwitchComponentMaterialRoot"] =
-                serde_json::json!(authenticated_material.material_root);
-            transported_component_materials.push(authenticated_material.transported_material);
+                serde_json::json!(authenticated_material_root);
             round_two_records.push(record);
         }
     }
@@ -187,6 +184,5 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
     RelinearizationKeyShareRoundsFixture {
         rounds,
         round_one_aggregate_diagonals_by_level,
-        transported_component_materials,
     }
 }

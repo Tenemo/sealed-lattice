@@ -120,18 +120,6 @@ class AcceptedSetupSessionImplementation implements AcceptedSetupSession {
                     expectedSetupPackageHash: input.expectedSetupPackageHash,
                     expectedManifestHash: input.expectedManifestHash,
                     expectedRosterHash: input.expectedRosterHash,
-                    transportedPublicKeyShareMaterial:
-                        input.transportedPublicKeyShareMaterial,
-                    transportedPublicKeyShareProofMaterial:
-                        input.transportedPublicKeyShareProofMaterial,
-                    transportedEvaluationKeyShareProofMaterial:
-                        input.transportedEvaluationKeyShareProofMaterial,
-                    transportedVssShareLinkageProofMaterial:
-                        input.transportedVssShareLinkageProofMaterial,
-                    transportedSameSecretBridgeProofMaterial:
-                        input.transportedSameSecretBridgeProofMaterial,
-                    transportedEvaluationKeyShareComponentMaterial:
-                        input.transportedEvaluationKeyShareComponentMaterial,
                 },
                 this.#sessionHandle,
                 () => {

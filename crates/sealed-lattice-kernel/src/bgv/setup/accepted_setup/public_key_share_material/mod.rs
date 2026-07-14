@@ -29,7 +29,6 @@ pub(super) struct PublicKeyShareMaterialBinding {
 
 pub(super) fn verify_collective_public_key_material(
     setup_package: &Value,
-    request: &Value,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<Option<Refusals>> {
     let Some(aggregate_object) = setup_package.get("collectivePublicKey") else {
@@ -74,12 +73,6 @@ pub(super) fn verify_collective_public_key_material(
                 "publicKeyShareSuccinctProofs was required before collective public-key verification",
             )
         })?;
-    if request.get("transportedPublicKeyShareMaterial").is_none() {
-        return Ok(Some(setup_refusals(
-            vec!["transportedPublicKeyShareMaterial".to_string()],
-            Vec::new(),
-        )));
-    }
     let common_binding = public_key_common_binding(setup_package)?;
     let share_records = public_key_share_records_by_roster_position(setup_package)?;
     let public_key_share_set_root = value_string(
@@ -97,7 +90,6 @@ pub(super) fn verify_collective_public_key_material(
         &common_binding,
         public_key_share_set_root,
         &share_records,
-        request,
         proof_binding_session,
     ) {
         Ok(bindings) => bindings,
@@ -164,14 +156,6 @@ pub(super) fn verify_collective_public_key_material(
             "setupPackage.collectivePublicKey.collectivePublicKeyRoot",
         )?));
     }
-    if let Err(error) = accepted_setup_collective_public_key_from_package(setup_package) {
-        return Ok(Some(public_key_refusal(
-            "collectivePublicKeyRuntimeMaterialInvalid",
-            error.message,
-            "setupPackage.collectivePublicKey",
-        )?));
-    }
-
     Ok(None)
 }
 
@@ -182,7 +166,6 @@ mod transport;
 
 use collective_public_key::*;
 
-pub(in crate::bgv::setup) use collective_public_key::accepted_setup_collective_public_key_from_package;
 pub(super) use material_records::verify_public_key_share_material_set;
 pub(in crate::bgv::setup) use transport::{
     CanonicalPublicKeyShareMaterialStream, VerifiedCanonicalPublicKeyShareMaterialHandle,

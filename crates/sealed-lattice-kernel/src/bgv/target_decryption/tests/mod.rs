@@ -237,10 +237,8 @@ fn canonical_target_ciphertext(key: &DevelopmentBgvKey, slots: &[u64], seed: &st
 fn sparse_target_slots(ids: &[u64], orders: &[u64]) -> (Vec<u64>, Vec<u64>) {
     let mut target_ids = vec![0_u64; POLYNOMIAL_DEGREE];
     let mut target_orders = vec![0_u64; POLYNOMIAL_DEGREE];
-    for option in 0..MAXIMUM_OPTION_COUNT {
-        target_ids[option] = ids[option];
-        target_orders[option] = orders[option];
-    }
+    target_ids[..MAXIMUM_OPTION_COUNT].copy_from_slice(&ids[..MAXIMUM_OPTION_COUNT]);
+    target_orders[..MAXIMUM_OPTION_COUNT].copy_from_slice(&orders[..MAXIMUM_OPTION_COUNT]);
     (target_ids, target_orders)
 }
 

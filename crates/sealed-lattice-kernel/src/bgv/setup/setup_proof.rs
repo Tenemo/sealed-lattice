@@ -12,7 +12,7 @@ pub(in crate::bgv::setup) use self::material_transport::{
     authenticate_setup_proof_material_stream_in_session_for_test,
 };
 
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::{
     bgv::setup_helpers::validate_hash_string,
@@ -58,6 +58,7 @@ impl SetupProofFamily {
         }
     }
 
+    #[cfg(test)]
     pub(in crate::bgv::setup) const fn stream_code(self) -> u32 {
         match self {
             Self::PrivateVssShare => 1,

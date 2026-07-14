@@ -12,10 +12,6 @@ import type {
 import expectedStatementHashes from '#test-vectors/succinct-setup-statement-hashes.json';
 
 type JsonRecord = Record<string, unknown>;
-type TrusteeProofInput = Parameters<
-    TranscriptCoreKernel['generateTrusteeEvaluationKeyProof']
->[0];
-type TrusteeStatementContext = TrusteeProofInput['context'];
 type PrivateVssProofInput = Parameters<
     TranscriptCoreKernel['generatePrivateVssShareProof']
 >[0];
@@ -37,15 +33,18 @@ const zeroI64Vector = (): number[] =>
 const zeroOpeningRandomness = (): readonly number[][] =>
     Array.from({ length: 5 }, () => zeroI64Vector());
 
-const zeroComponentMaterialBytesHex = (level: number): string => {
+const zeroComponentMaterialBytesHex = (
+    level: number,
+    digitCount: number,
+): string => {
     const componentMaterialMagic = new Uint8Array([
         0x53, 0x4c, 0x45, 0x4b, 0x43, 0x4d, 0x56, 0x31,
     ]);
-    const digitCount = level + 1;
+    const limbCount = level + 1;
     const componentMaterialBytes = new Uint8Array(
         componentMaterialMagic.byteLength +
             2 * 8 +
-            digitCount ** 2 * ringDegree * 8,
+            digitCount * limbCount * ringDegree * 8,
     );
     componentMaterialBytes.set(componentMaterialMagic);
     const componentMaterialView = new DataView(componentMaterialBytes.buffer);
@@ -65,16 +64,15 @@ const zeroComponentMaterialBytesHex = (level: number): string => {
     ).join('');
 };
 
-const statementContext = (
+const statementContext = <BindingRoots extends JsonRecord>(
     setupContextHash: string,
-    bindingRoots: JsonRecord,
-): TrusteeStatementContext =>
-    ({
-        setupContextHash,
-        trusteeIdentity: 'statement-vector-trustee',
-        trusteeRosterPosition: 0,
-        ...bindingRoots,
-    }) as TrusteeStatementContext;
+    bindingRoots: BindingRoots,
+) => ({
+    setupContextHash,
+    trusteeIdentity: 'statement-vector-trustee',
+    trusteeRosterPosition: 0,
+    ...bindingRoots,
+});
 
 const proofRandomnessFields = {
     proofRandomnessSeedHex,
@@ -226,7 +224,7 @@ describe('succinct setup statement hash vectors', () => {
         const kernel = await loadTranscriptCoreKernel();
         const parameters = kernel.describeCollectiveBgvSetupParameters();
         const publicMatrixSeedHash = repeatedHash('40');
-        const currentSetupContextHash = setupContextHash(kernel, parameters);
+        const statementVectorSetupContextHash = repeatedHash('10');
         const qSharePrimes = parameters.qShare.primes;
         const firstQSharePrime = qSharePrimes[0];
         if (firstQSharePrime === undefined) {
@@ -261,7 +259,7 @@ describe('succinct setup statement hash vectors', () => {
             });
         const sameSecret = kernel.generateSameSecretBridgeProof({
             context: {
-                setupContextHash: currentSetupContextHash,
+                setupContextHash: statementVectorSetupContextHash,
                 trusteeIdentity: 'statement-vector-trustee',
                 trusteeRosterPosition: 0,
             },
@@ -272,7 +270,6 @@ describe('succinct setup statement hash vectors', () => {
             },
             sameSecretBridge: {
                 publicMatrixSeedHash,
-                setupContextHash: currentSetupContextHash,
                 sourceTrusteeIdentity: 'statement-vector-trustee',
                 sourceTrusteeRosterPosition: 0,
                 bridgeRnsPrimes: [firstQSharePrime],
@@ -316,7 +313,7 @@ describe('succinct setup statement hash vectors', () => {
             });
         const publicKeyShare = kernel.generateTrusteeEvaluationKeyProof({
             statementFamily: 'public-key-share',
-            context: statementContext(currentSetupContextHash, {
+            context: statementContext(statementVectorSetupContextHash, {
                 sameSecretBridgeStatementRoot: repeatedHash('31'),
                 sameSecretBridgeProofRecordRoot: repeatedHash('32'),
             }),
@@ -329,12 +326,12 @@ describe('succinct setup statement hash vectors', () => {
                     keySwitchSeedHex: repeatedHash('41'),
                     componentMaterialBytesHex: zeroComponentMaterialBytesHex(
                         qSharePrimes.length - 1,
+                        1,
                     ),
                 },
             ],
             sameSecretBridge: {
                 publicMatrixSeedHash: repeatedHash('41'),
-                setupContextHash: currentSetupContextHash,
                 sourceTrusteeIdentity: 'statement-vector-trustee',
                 sourceTrusteeRosterPosition: 0,
                 bridgeRnsPrimes: [firstQSharePrime],
@@ -382,7 +379,7 @@ describe('succinct setup statement hash vectors', () => {
         const trusteeEvaluationKey =
             kernel.describeTrusteeEvaluationKeyStatement({
                 statementFamily: 'trustee-evaluation-key',
-                context: statementContext(currentSetupContextHash, {
+                context: statementContext(statementVectorSetupContextHash, {
                     evaluatorKeyScheduleRoot: repeatedHash('34'),
                     sourceConstantCoefficientCommitmentRoot: repeatedHash('36'),
                 }),
@@ -394,7 +391,7 @@ describe('succinct setup statement hash vectors', () => {
                         keySwitchDomain: 'relinearization-round-one',
                         keySwitchSeedHex: repeatedHash('42'),
                         componentMaterialBytesHex:
-                            zeroComponentMaterialBytesHex(2),
+                            zeroComponentMaterialBytesHex(2, 3),
                     },
                 ],
                 sameSecretLinkage: {

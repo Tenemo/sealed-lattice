@@ -26,12 +26,10 @@ use super::relation::{
 use super::{
     COMMITMENT_BOUND_FACTOR, DEEP_EVALUATION_POINT_COUNT, LOW_DEGREE_QUERY_COUNT,
     MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE, MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-    SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE, TRACE_SPLIT,
-    invalid_succinct_setup_proof,
+    SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE, TRACE_SPLIT, invalid_succinct_setup_proof,
 };
-use crate::bgv::modular_arithmetic::inverse_mod;
+use crate::bgv::modular_arithmetic::{inverse_mod, mul_mod_fast};
 use crate::bgv::parameters::DATA_PRIMES;
-use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
 use crate::encoding::CanonicalResult;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;

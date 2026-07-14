@@ -228,7 +228,6 @@ type CanonicalStreamKernelContext = Readonly<{
     ): Result;
 }>;
 
-
 type CanonicalStreamAtomicVerifierFinish = (input: {
     readonly streamHandle: number;
 }) => void;

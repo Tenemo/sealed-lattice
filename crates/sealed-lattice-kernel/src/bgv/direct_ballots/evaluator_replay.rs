@@ -30,7 +30,6 @@ pub(crate) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {
     pub(crate) aggregate_ciphertext: &'a Ciphertext,
     pub(crate) ballot_count: usize,
     pub(crate) top_counts: &'a [usize],
-    pub(crate) target_finality_policy_hash: Option<&'a str>,
 }
 
 pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
@@ -42,7 +41,6 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         aggregate_ciphertext,
         ballot_count,
         top_counts,
-        target_finality_policy_hash,
     } = input;
 
     if top_counts.is_empty() {
@@ -110,19 +108,13 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
                 target_ciphertext_hash: &target_ciphertext_hash,
             },
         )?;
-        let target_proposal = direct_ballot_target_proposal(
-            &evaluator_replay_record_hash,
-            target_finality_policy_hash,
-        )?;
-
         let evaluation = json!({
             "topCount": top_count,
             "targetLayoutHash": target_layout_root,
             "targetIdRoot": target_id_root,
             "targetOrderRoot": target_order_root,
             "targetCiphertextHash": target_ciphertext_hash,
-            "evaluatorReplayRecordHash": evaluator_replay_record_hash,
-            "targetProposal": target_proposal
+            "evaluatorReplayRecordHash": evaluator_replay_record_hash
         });
         evaluations.push(evaluation);
     }

@@ -810,7 +810,6 @@ impl StateDurableBinding {
     pub fn witness_vote_sequence(self) -> StateResult<u64> {
         derive_state_witness_vote_sequence(self.vote_kind, self.subject_epoch)
     }
-
 }
 
 pub struct VerifiedStateReservationIntent {

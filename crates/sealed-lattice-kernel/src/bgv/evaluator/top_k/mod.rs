@@ -17,23 +17,23 @@ pub(crate) use sparse_target::*;
 #[cfg(test)]
 use std::collections::BTreeSet;
 
-use crate::{
-    bgv::{
-        evaluator::{
-            circuit::{
-                EvaluatorContext, broadcast_constant_coefficients,
-                evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch,
-                modulus_switch_to, normalize_scaling,
-            },
-            engine::{
-                Ciphertext, add_plaintext_coefficients, ciphertext_add, ciphertext_negate,
-                ciphertext_sub, encode_slots_to_coefficients, plaintext_mul, scalar_mul,
-                signed_residue,
-            },
+use crate::bgv::{
+    evaluator::{
+        circuit::{
+            EvaluatorContext, broadcast_constant_coefficients,
+            evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch,
+            modulus_switch_to, normalize_scaling,
         },
-        modular_arithmetic::{add_mod, integer_square_root_ceil, inverse_mod, mul_mod, sub_mod},
-        parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+        engine::{
+            Ciphertext, add_plaintext_coefficients, ciphertext_add, ciphertext_negate,
+            ciphertext_sub, encode_slots_to_coefficients, plaintext_mul, scalar_mul,
+            signed_residue,
+        },
     },
+    modular_arithmetic::{add_mod, integer_square_root_ceil, inverse_mod, mul_mod, sub_mod},
+};
+use crate::{
+    bgv::parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 

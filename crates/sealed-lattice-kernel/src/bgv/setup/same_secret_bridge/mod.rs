@@ -159,13 +159,13 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
             None => false,
         };
         if !proof_binding_was_consumed {
-            let resolved_proof_bytes = resolve_same_secret_bridge_proof_bytes(
+            let proof_bytes = resolve_same_secret_bridge_proof_bytes(
                 validated_proof_reference,
                 proof_binding_session,
             )?;
             verify_reconstructed_same_secret_bridge_proof(
                 &proof_verification_request,
-                &resolved_proof_bytes.proof_bytes,
+                &proof_bytes,
             )?;
         }
     }

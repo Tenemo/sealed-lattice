@@ -1,11 +1,8 @@
 use super::decoding::*;
 use super::share_linkage_verification::*;
 use super::*;
+use crate::bgv::setup::trustee_evaluation_key_proof::VSS_SHARE_LINKAGE_PROOF_FAMILY;
 use crate::bgv::setup_helpers::compare_required_string;
-
-pub(super) struct ResolvedVssShareLinkageProofBytes {
-    pub(super) proof_bytes: SetupProofMaterialBytes,
-}
 
 pub(super) struct ValidatedVssShareLinkageProofReference {
     pub(super) proof_bytes_hash: String,
@@ -34,31 +31,12 @@ pub(super) fn validate_vss_share_linkage_proof_reference(
 pub(super) fn resolve_vss_share_linkage_proof_bytes(
     reference: ValidatedVssShareLinkageProofReference,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
-) -> CanonicalResult<ResolvedVssShareLinkageProofBytes> {
-    let proof_bytes = take_verified_setup_proof_material_bytes(
-        VSS_SHARE_LINKAGE_PROOF_FAMILY,
+) -> CanonicalResult<SetupProofMaterialBytes> {
+    verified_vss_share_linkage_proof_material_bytes(
         &reference.proof_material_root,
-        "vssShareLinkageProofRecord.proofMaterialRoot",
-        proof_binding_session,
-    )?;
-    let proof_bytes_hash = proof_bytes.hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)?;
-    compare_string_value(
         &reference.proof_bytes_hash,
-        &proof_bytes_hash,
-        "share-linkage proof record proofBytesHash",
-    )?;
-    compare_required_string(
-        &reference.proof_material_root,
-        &crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
-            VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            &proof_bytes_hash,
-        )?,
-        "share-linkage proof material root",
-    )?;
-
-    Ok(ResolvedVssShareLinkageProofBytes {
-        proof_bytes,
-    })
+        proof_binding_session,
+    )
 }
 
 pub(in crate::bgv::setup) fn verified_vss_share_linkage_proof_material_bytes(

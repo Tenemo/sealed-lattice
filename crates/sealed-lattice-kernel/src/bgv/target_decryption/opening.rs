@@ -98,16 +98,18 @@ pub(super) fn verify_aggregate_opening_credential(
 pub(super) fn compute_aggregate_opening(
     input: AggregateOpeningRootsInput<'_>,
 ) -> CanonicalResult<AggregateOpeningComputation> {
-    let commitment_context = aggregate_commitment_context(
-        input.ceremony_id,
-        input.election_manifest_hash,
-        input.roster_hash,
-        input.setup_parameters_hash,
-        input.participant,
-        input.setup_epoch,
-        input.rns_limb_index,
-        input.rns_prime,
-    )?;
+    let commitment_context = json!({
+        "objectType": "VssPublicAggregateThresholdCommitmentContext",
+        "ceremonyId": input.ceremony_id,
+        "manifestHash": input.election_manifest_hash,
+        "rosterHash": input.roster_hash,
+        "setupParametersHash": input.setup_parameters_hash,
+        "setupEpoch": input.setup_epoch,
+        "recipientIdentity": input.participant.trustee_identity.as_str(),
+        "recipientRosterPosition": input.participant.roster_position,
+        "rnsLimbIndex": input.rns_limb_index,
+        "rnsPrime": input.rns_prime,
+    });
     let computation =
         compute_vss_committed_material_commitment(VssCommittedMaterialCommitmentInput {
             commitment_role: VSS_PUBLIC_AGGREGATE_COMMITMENT_ROLE,
@@ -197,28 +199,4 @@ fn derive_aggregate_share_values(
     }
 
     Ok(aggregate_share_values)
-}
-
-fn aggregate_commitment_context(
-    ceremony_id: &str,
-    election_manifest_hash: &str,
-    roster_hash: &str,
-    setup_parameters_hash: &str,
-    participant: &ParticipantBinding,
-    setup_epoch: &str,
-    rns_limb_index: usize,
-    rns_prime: u64,
-) -> CanonicalResult<Value> {
-    Ok(json!({
-        "objectType": "VssPublicAggregateThresholdCommitmentContext",
-        "ceremonyId": ceremony_id,
-        "manifestHash": election_manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
-        "recipientIdentity": participant.trustee_identity.as_str(),
-        "recipientRosterPosition": participant.roster_position,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-    }))
 }

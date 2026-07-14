@@ -33,20 +33,15 @@ use serde_json::{Value, json};
 use crate::{
     bgv::coefficient_codec::coefficient_vector_le_hex,
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
-    bgv::setup_helpers::{array_field, string_field},
+    bgv::setup_helpers::string_field,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::VerifiedCanonicalStreamSummary,
 };
 
-pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str =
-    "SetupTransportedEvaluationKeyShareComponentMaterialSet";
-pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =
-    "SetupTransportedEvaluationKeyShareComponentMaterial";
 const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
 
 // Key-share families whose component material this module encodes; the family
-// string scopes the component hash domains and the transported material
-// references.
+// string scopes the component hash domains and material references.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EvaluationKeyShareProofFamily {
     Relinearization,

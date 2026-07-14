@@ -6,7 +6,6 @@ import type {
     EvaluationKeyShareComponentMaterialChunkSource,
     PublicKeyShareMaterialChunkSource,
     SetupProofMaterialChunkSource,
-    SetupPackageVerificationInput,
     SetupPackageVerificationInputSource,
     TransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet,
@@ -42,6 +41,10 @@ type JsonRecord = Record<string, unknown>;
 
 type KernelSetupPackageVerificationInput = Parameters<
     AcceptedSetupSession['verifyCollectiveBgvSetup']
+>[0];
+
+type KernelPrivateVssShareVerificationInput = Parameters<
+    PublishedSdkKernel['verifyPrivateVssShareEnvelope']
 >[0];
 
 type SetupProofMaterialTransportFieldName =
@@ -860,19 +863,12 @@ const setupPackageVerificationInput = (
         input as unknown as SetupPackageVerificationInputSource,
     );
 
-    const verificationInputWithExpectedPackageHash:
-        | SetupPackageVerificationInput
-        | (SetupPackageVerificationInput & {
-              readonly expectedSetupPackageHash: string;
-          }) =
-        input.expectedSetupPackageHash === undefined
-            ? verificationInput
-            : {
-                  ...verificationInput,
-                  expectedSetupPackageHash: input.expectedSetupPackageHash,
-              };
-
-    return verificationInputWithExpectedPackageHash as KernelSetupPackageVerificationInput;
+    return {
+        ...verificationInput,
+        ...(input.expectedSetupPackageHash === undefined
+            ? {}
+            : { expectedSetupPackageHash: input.expectedSetupPackageHash }),
+    };
 };
 
 export const prepareSnapshottedSetupPackageVerificationInputForKernel = async (
@@ -1030,7 +1026,7 @@ export const prepareSnapshottedPrivateVssShareVerificationInputForKernel =
     async (
         kernel: PublishedSdkKernel,
         input: VerifyPrivateVssShareInput,
-    ): Promise<VerifyPrivateVssShareInput> => {
+    ): Promise<KernelPrivateVssShareVerificationInput> => {
         const transportedMaterial =
             input.transportedPrivateVssShareProofMaterial as
                 | JsonRecord
@@ -1044,69 +1040,68 @@ export const prepareSnapshottedPrivateVssShareVerificationInputForKernel =
                     'privateVssShareProofMaterialChunkSources requires transported private VSS proof material references.',
                 );
             }
-            return input;
-        }
-        const materialSet = transportedMaterial as JsonRecord & {
-            readonly proofMaterials: readonly unknown[];
-        };
-        const runtime = openBgvCanonicalStreamRuntime({ kernel });
-        const chunkSourcesByRoot = proofMaterialChunkSourcesByRoot(
-            input.privateVssShareProofMaterialChunkSources,
-            'privateVssShareProofMaterialChunkSources',
-        );
-        const proofMaterials: JsonRecord[] = [];
-        for (
-            let proofMaterialIndex = 0;
-            proofMaterialIndex < materialSet.proofMaterials.length;
-            proofMaterialIndex += 1
-        ) {
-            const proofMaterialValue =
-                materialSet.proofMaterials[proofMaterialIndex];
-            if (
-                proofMaterialValue === null ||
-                typeof proofMaterialValue !== 'object'
+        } else {
+            const materialSet = transportedMaterial as JsonRecord & {
+                readonly proofMaterials: readonly unknown[];
+            };
+            const runtime = openBgvCanonicalStreamRuntime({ kernel });
+            const chunkSourcesByRoot = proofMaterialChunkSourcesByRoot(
+                input.privateVssShareProofMaterialChunkSources,
+                'privateVssShareProofMaterialChunkSources',
+            );
+            for (
+                let proofMaterialIndex = 0;
+                proofMaterialIndex < materialSet.proofMaterials.length;
+                proofMaterialIndex += 1
             ) {
+                const proofMaterialValue =
+                    materialSet.proofMaterials[proofMaterialIndex];
+                if (
+                    proofMaterialValue === null ||
+                    typeof proofMaterialValue !== 'object'
+                ) {
+                    throw new TypeError(
+                        'A transported private VSS proof material must be an object.',
+                    );
+                }
+                const proofMaterial = proofMaterialValue as JsonRecord;
+                const materialRoot = protocolHash(
+                    proofMaterial.proofMaterialRoot,
+                    `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)}.proofMaterialRoot`,
+                );
+                const pullChunk = chunkSourcesByRoot.get(materialRoot);
+                if (pullChunk === undefined) {
+                    throw new TypeError(
+                        `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)} has no canonical chunk source.`,
+                    );
+                }
+                await authenticateCanonicalProofMaterial(runtime, {
+                    descriptorBytes: ownedCanonicalDescriptorBytes(
+                        proofMaterial.descriptorBytes,
+                        `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)}.descriptorBytes`,
+                    ),
+                    family: bgvCanonicalStreamFamilies.vssOpeningCarry,
+                    materialRoot,
+                    pullChunk,
+                });
+                chunkSourcesByRoot.delete(materialRoot);
+            }
+            if (chunkSourcesByRoot.size !== 0) {
                 throw new TypeError(
-                    'A transported private VSS proof material must be an object.',
+                    'privateVssShareProofMaterialChunkSources must match transported proof material references exactly.',
                 );
             }
-            const proofMaterial = proofMaterialValue as JsonRecord;
-            const materialRoot = protocolHash(
-                proofMaterial.proofMaterialRoot,
-                `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)}.proofMaterialRoot`,
-            );
-            const pullChunk = chunkSourcesByRoot.get(materialRoot);
-            if (pullChunk === undefined) {
-                throw new TypeError(
-                    `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)} has no canonical chunk source.`,
-                );
-            }
-            await authenticateCanonicalProofMaterial(runtime, {
-                descriptorBytes: ownedCanonicalDescriptorBytes(
-                    proofMaterial.descriptorBytes,
-                    `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)}.descriptorBytes`,
-                ),
-                family: bgvCanonicalStreamFamilies.vssOpeningCarry,
-                materialRoot,
-                pullChunk,
-            });
-            chunkSourcesByRoot.delete(materialRoot);
-            const { descriptorBytes: omittedDescriptorBytes, ...reference } =
-                proofMaterial;
-            void omittedDescriptorBytes;
-            proofMaterials.push(reference);
-        }
-        if (chunkSourcesByRoot.size !== 0) {
-            throw new TypeError(
-                'privateVssShareProofMaterialChunkSources must match transported proof material references exactly.',
-            );
         }
 
         return {
-            ...input,
-            transportedPrivateVssShareProofMaterial: {
-                ...materialSet,
-                proofMaterials,
-            },
+            setupContext: input.setupContext,
+            publicMatrixSeedHash: input.publicMatrixSeedHash,
+            sourceTrusteeCoefficientCommitmentRecord:
+                input.sourceTrusteeCoefficientCommitmentRecord,
+            sourceTrusteeCoefficientCommitmentMaterialRecords:
+                input.sourceTrusteeCoefficientCommitmentMaterialRecords,
+            privateEnvelope: input.privateEnvelope,
+            expectedPrivateEnvelopeHash: input.expectedPrivateEnvelopeHash,
+            expectedLocalVerificationRoot: input.expectedLocalVerificationRoot,
         };
     };

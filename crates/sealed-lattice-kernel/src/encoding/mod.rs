@@ -311,10 +311,7 @@ pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
     }
 }
 
-pub(crate) fn run_accepted_setup_command(
-    input: &[u8],
-    session_handle: u32,
-) -> Vec<u8> {
+pub(crate) fn run_accepted_setup_command(input: &[u8], session_handle: u32) -> Vec<u8> {
     match command::run_accepted_setup_command_inner(input, session_handle) {
         Ok(value) => encode_success(value),
         Err(error) => encode_error(error),
@@ -440,5 +437,4 @@ mod tests {
             "accepted setup verification requires an opaque material-ownership session"
         );
     }
-
 }

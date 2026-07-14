@@ -11,6 +11,7 @@ const verification = await verifyPrivateVssShare({
         rosterHash: '1'.repeat(128),
         setupParametersHash: '2'.repeat(128),
         setupEpoch: 'packed-package-smoke',
+        participantCount: 3,
     },
     publicMatrixSeedHash: '3'.repeat(128),
     sourceTrusteeCoefficientCommitmentRecord: {

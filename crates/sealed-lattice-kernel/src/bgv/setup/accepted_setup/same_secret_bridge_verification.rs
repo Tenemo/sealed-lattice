@@ -44,7 +44,6 @@ pub(in crate::bgv::setup) struct SameSecretBridgeStatementBinding {
 
 pub(super) fn verify_same_secret_bridge_statement_set(
     setup_package: &Value,
-    request: &Value,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<SameSecretBridgeVerification> {
     let required_bridge_material_fields = [
@@ -71,11 +70,7 @@ pub(super) fn verify_same_secret_bridge_statement_set(
         ));
     }
 
-    match verified_same_secret_bridge_material_from_package(
-        setup_package,
-        request,
-        proof_binding_session,
-    ) {
+    match verified_same_secret_bridge_material_from_package(setup_package, proof_binding_session) {
         Ok(verified_material) => Ok(SameSecretBridgeVerification::Verified(verified_material)),
         Err(error) => Ok(SameSecretBridgeVerification::Refused(
             same_secret_bridge_refusal(
@@ -154,14 +149,13 @@ fn verify_same_secret_bridge_setup_binding(
 
 pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     setup_package: &Value,
-    request: &Value,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<VerifiedSameSecretBridgeMaterial> {
     let statement_set = setup_package
         .get(SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD)
         .ok_or_else(|| same_secret_bridge_error("same-secret bridge statement set"))?;
     crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(
-        &same_secret_bridge_verification_request(statement_set, None, setup_package, request),
+        &same_secret_bridge_verification_request(statement_set, None, setup_package),
     )?;
     verify_same_secret_bridge_setup_binding(setup_package, statement_set)?;
     let proof_material_set = setup_package
@@ -172,7 +166,6 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
             statement_set,
             Some(proof_material_set),
             setup_package,
-            request,
         ),
         proof_binding_session,
     )?;
@@ -307,7 +300,6 @@ fn same_secret_bridge_verification_request(
     statement_set: &Value,
     proof_material_set: Option<&Value>,
     setup_package: &Value,
-    request: &Value,
 ) -> Value {
     let mut verification_request =
         serde_json::Map::from_iter([("statementSet".to_string(), statement_set.clone())]);
@@ -322,15 +314,6 @@ fn same_secret_bridge_verification_request(
     if let Some(proof_material_set) = proof_material_set {
         verification_request.insert("proofMaterialSet".to_string(), proof_material_set.clone());
     }
-    for field_name in [
-        "transportedSameSecretBridgeProofMaterial",
-        "verifiedSetupProofMaterials",
-    ] {
-        if let Some(value) = request.get(field_name) {
-            verification_request.insert(field_name.to_string(), value.clone());
-        }
-    }
-
     Value::Object(verification_request)
 }
 
@@ -362,7 +345,6 @@ mod tests {
                 "vssPublicCoefficientCommitmentSet": {},
                 "vssCoefficientCommitments": {},
             }),
-            &json!({}),
             None,
         )
         .expect("complete bridge refusal")

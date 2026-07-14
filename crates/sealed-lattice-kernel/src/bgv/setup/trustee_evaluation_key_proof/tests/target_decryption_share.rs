@@ -250,13 +250,14 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
         "target-decryption relation challenges must include decoder rows"
     );
 
-    let mut sparse_request = instance.command_request;
-    let sparse_limb_statement =
-        sparse_request["targetDecryptionShare"]["targetRnsLimbStatements"][4].clone();
-    sparse_request["targetDecryptionShare"]["targetRnsLimbStatements"] =
-        json!([sparse_limb_statement]);
-    let error = super::generate_target_decryption_share_proof_bytes_from_request(&sparse_request)
-        .expect_err("sparse target-decryption proof must reject before proving");
+    let mut noncanonical_request = instance.command_request;
+    noncanonical_request["targetDecryptionShare"]["targetRnsLimbStatements"]
+        .as_array_mut()
+        .expect("target RNS limb statements")
+        .swap(3, 4);
+    let error =
+        super::generate_target_decryption_share_proof_bytes_from_request(&noncanonical_request)
+            .expect_err("noncanonical target-decryption limb order must reject before proving");
     assert!(
         error.message.contains(
             "target-decryption proof must cover every active target limb in canonical order"

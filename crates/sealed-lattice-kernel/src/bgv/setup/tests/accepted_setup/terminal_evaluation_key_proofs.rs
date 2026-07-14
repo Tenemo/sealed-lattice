@@ -17,21 +17,12 @@ fn terminal_evaluation_key_bearing_collective_setup_fixture() -> (
         package["relinearizationKeyShareRounds"] = relinearization.rounds;
         let galois = galois_key_share_batches_object(package, proof_binding_session);
         package["galoisKeyShareBatches"] = galois.batches;
-        let mut transported_component_materials = relinearization.transported_component_materials;
-        transported_component_materials.extend(galois.transported_component_materials);
-        fixture.verification_request["transportedEvaluationKeyShareComponentMaterial"] = serde_json::json!({
-            "objectType": "SetupTransportedEvaluationKeyShareComponentMaterialSet",
-            "componentMaterials": transported_component_materials,
-        });
         let trustee_proof_fixture = trustee_evaluation_key_proofs_object(
             package,
-            &fixture.verification_request,
             &proof_binding_session,
             &relinearization.round_one_aggregate_diagonals_by_level,
         );
         package["trusteeEvaluationKeyProofs"] = trustee_proof_fixture.proof_set;
-        fixture.verification_request["transportedEvaluationKeyShareProofMaterial"] =
-            trustee_proof_fixture.transported_proof_material;
         rebind_collective_setup_package_hash(package);
     }
 
@@ -166,10 +157,6 @@ fn replace_first_trustee_evaluation_key_proof_with_tampered_material(
         proof_binding_session,
     )
     .expect("authenticate tampered trustee proof material stream");
-
-    let transported_proof_material = &mut fixture.verification_request["transportedEvaluationKeyShareProofMaterial"]
-        ["proofMaterials"][0];
-    transported_proof_material["proofMaterialRoot"] = serde_json::json!(proof_material_root);
 
     rebind_collective_setup_package_hash(&mut fixture.package);
 }

@@ -1,8 +1,6 @@
 use super::*;
 
-pub(super) struct ResolvedSameSecretBridgeProofBytes {
-    pub(super) proof_bytes: SetupProofMaterialBytes,
-}
+use crate::bgv::setup::setup_proof::take_verified_setup_proof_material_bytes;
 
 #[derive(Debug)]
 pub(super) struct ValidatedSameSecretBridgeProofReference {
@@ -36,7 +34,7 @@ pub(super) fn validate_same_secret_bridge_proof_reference(
     if expected_proof_record_root != proof_record_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "same-secret bridge proof record root does not match its transported proof material",
+            "same-secret bridge proof record root does not match its canonical fields",
         ));
     }
 
@@ -49,7 +47,7 @@ pub(super) fn validate_same_secret_bridge_proof_reference(
 pub(super) fn resolve_same_secret_bridge_proof_bytes(
     reference: ValidatedSameSecretBridgeProofReference,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
-) -> CanonicalResult<ResolvedSameSecretBridgeProofBytes> {
+) -> CanonicalResult<SetupProofMaterialBytes> {
     let proof_bytes = take_verified_setup_proof_material_bytes(
         SAME_SECRET_BRIDGE_PROOF_FAMILY,
         &reference.proof_material_root,
@@ -71,7 +69,7 @@ pub(super) fn resolve_same_secret_bridge_proof_bytes(
         "same-secret bridge proof material root",
     )?;
 
-    Ok(ResolvedSameSecretBridgeProofBytes { proof_bytes })
+    Ok(proof_bytes)
 }
 
 #[cfg(test)]

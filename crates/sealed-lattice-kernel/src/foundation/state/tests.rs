@@ -543,7 +543,6 @@ fn state_derivations_check_domains_boundaries_and_replay_equivocation() {
             .refusal_reason,
         RefusalReason::OutsideSupportedProfile
     );
-
 }
 
 #[test]
@@ -976,7 +975,6 @@ fn state_verifier_accepts_exact_quorums_and_refuses_every_malformed_extra_or_con
         }),
         RefusalReason::WrongContext,
     );
-
 }
 
 fn assert_reservation_only_setup_capability_verifies_recovers_and_refuses_outputs(

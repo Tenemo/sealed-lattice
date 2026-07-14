@@ -739,18 +739,14 @@ fn aggregate_threshold_commitment_record(
     }))
 }
 
-pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
+fn share_linkage_statement_from_evidence(
     coefficient_set: &serde_json::Value,
     recipient_set: &serde_json::Value,
     aggregate_set: &serde_json::Value,
 ) -> serde_json::Value {
     let statement_without_root = json!({
         "objectType": "VssShareLinkageStatement",
-        "ceremonyId": "vss-test",
-        "manifestHash": "1".repeat(128),
-        "rosterHash": "2".repeat(128),
-        "setupParametersHash": "3".repeat(128),
-        "setupEpoch": "setup-epoch",
+        "setupContextHash": "1".repeat(128),
         "publicMatrixSeedHash": "7".repeat(128),
         "ringDegree": test_ring_degree(),
         "participantCount": 2,

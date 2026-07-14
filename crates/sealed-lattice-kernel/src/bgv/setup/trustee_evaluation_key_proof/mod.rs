@@ -6,7 +6,7 @@
 // cross-limb claims as masked centered integers, and checks low degree through
 // DEEP evaluations and FRI. Same-secret relations open the accepted BDLOP
 // constant commitments, tying the relation witness to the committed secret.
-// Verifiers rebuild statements from transported public material before checking
+// Verifiers rebuild statements from authenticated public material before checking
 // any proof.
 
 mod commands;
@@ -60,13 +60,16 @@ pub(in crate::bgv::setup) use prover::{
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
 pub(in crate::bgv::setup) use relation::public_key_switch_sample;
 pub(in crate::bgv::setup) use relation::{
-    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, KeyBearingWitness,
-    PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL, PrivateVssShareStatement,
-    SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE, SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS,
-    SameSecretBridgeStatement, SameSecretLinkageAtomFieldForms, SameSecretLinkageStatement,
-    SameSecretLinkageWitness, SetupProofStatement, SuccinctSetupProofContext,
-    TrusteeEvaluationKeyStatement, VssCommittedMaterialWitness,
+    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
+    PrivateVssShareStatement, SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE,
+    SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS, SameSecretBridgeStatement,
+    SameSecretLinkageAtomFieldForms, SameSecretLinkageStatement, SetupProofStatement,
+    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
     build_same_secret_linkage_atom_field_forms,
+};
+#[cfg(test)]
+pub(in crate::bgv::setup) use relation::{
+    KeyBearingWitness, SameSecretLinkageWitness, VssCommittedMaterialWitness,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 
@@ -80,8 +83,8 @@ use crate::{
     hashing::hash512_hex,
 };
 
-// Canonical hash of transported trustee evaluation-key proof bytes, bound into
-// the package proof records and the chunked proof transport reference.
+// Canonical hash of authenticated trustee evaluation-key proof bytes, bound into
+// the package proof records and the chunked proof stream reference.
 #[cfg(test)]
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes: &[u8]) -> String {
     hash512_hex(

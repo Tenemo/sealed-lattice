@@ -25,7 +25,6 @@ pub(in super::super) fn galois_key_share_batches_object(
     // trustee-by-rotation matrix. The per-trustee outer order and per-rotation
     // inner order are preserved, so the emitted batches stay byte-identical
     // to sequential generation.
-    let mut transported_component_materials = Vec::new();
     let batches = (0..participant_count)
         .map(|trustee_roster_position| {
             let trustee_identity = format!("trustee-{trustee_roster_position}");
@@ -62,7 +61,7 @@ pub(in super::super) fn galois_key_share_batches_object(
                     "level": level,
                     "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
                 });
-                let authenticated_material =
+                let authenticated_material_root =
                     authenticate_evaluation_key_share_component_material_fixture(
                         EvaluationKeyShareProofFamily::Galois,
                         &material_record,
@@ -77,8 +76,7 @@ pub(in super::super) fn galois_key_share_batches_object(
                         accepted_setup_session,
                     );
                 material_record["keySwitchComponentMaterialRoot"] =
-                    serde_json::json!(authenticated_material.material_root);
-                transported_component_materials.push(authenticated_material.transported_material);
+                    serde_json::json!(authenticated_material_root);
                 galois_key_share_material_records.push(material_record);
             }
             serde_json::json!({
@@ -92,6 +90,5 @@ pub(in super::super) fn galois_key_share_batches_object(
 
     GaloisKeyShareBatchesFixture {
         batches: serde_json::Value::Array(batches),
-        transported_component_materials,
     }
 }

@@ -1,3 +1,11 @@
+use super::super::relation::{
+    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SetupProofStatement,
+    SuccinctSetupProofFamilyShape, TargetDecryptionShareLimbStatement,
+    TargetDecryptionShareRoleStatement, TargetDecryptionShareStatement,
+    TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, VssCommittedMaterialWitness,
+    VssShareLinkageCommitment,
+};
+use super::super::{TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND, invalid_succinct_setup_proof};
 use super::decoding::{
     decode_component_material_bytes, read_hex_bytes, read_i64_matrix2, read_string,
     read_string_array, read_u64, read_u64_array, read_u64_matrix, read_u64_matrix3,
@@ -6,16 +14,6 @@ use super::request_parsing::proof_context_from_value;
 use super::{
     TARGET_DECRYPTION_PROOF_TARGET_ROLES, TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
     VssPublicCommandCommitmentExpectation,
-};
-use super::super::{
-    TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND, invalid_succinct_setup_proof,
-};
-use super::super::relation::{
-    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SetupProofStatement,
-    SuccinctSetupProofFamilyShape, TargetDecryptionShareLimbStatement,
-    TargetDecryptionShareRoleStatement, TargetDecryptionShareStatement,
-    TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, VssCommittedMaterialWitness,
-    VssShareLinkageCommitment,
 };
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
@@ -357,7 +355,7 @@ pub(super) fn target_decryption_smudging_commitments_from_set(
         .position(|role| *role == target_role)
         .ok_or_else(|| invalid_succinct_setup_proof("targetRole is not canonical"))?;
     let records_per_role = records.len() / TARGET_DECRYPTION_PROOF_TARGET_ROLES.len();
-    if records_per_role % smudging_polynomial_degree != 0 {
+    if !records_per_role.is_multiple_of(smudging_polynomial_degree) {
         return Err(invalid_succinct_setup_proof(
             "smudging commitment set does not contain a complete degree sequence per role and limb",
         ));
@@ -533,6 +531,13 @@ pub(super) fn key_descriptor_from_value(
     };
     let level = usize::try_from(read_u64(key_value, "level")?)
         .map_err(|_| invalid_succinct_setup_proof("level does not fit usize"))?;
+    let expected_digit_count = if kind == EvaluationKeyShareKind::PublicKeyShare {
+        1
+    } else {
+        level
+            .checked_add(1)
+            .ok_or_else(|| invalid_succinct_setup_proof("key digit count overflowed"))?
+    };
     let component_b_by_digit = match (
         key_value.get("componentBByDigit"),
         key_value.get("componentMaterialBytesHex"),
@@ -541,6 +546,7 @@ pub(super) fn key_descriptor_from_value(
         (None, Some(_)) => decode_component_material_bytes(
             &read_hex_bytes(key_value, "componentMaterialBytesHex")?,
             level,
+            expected_digit_count,
         )?,
         _ => {
             return Err(invalid_succinct_setup_proof(

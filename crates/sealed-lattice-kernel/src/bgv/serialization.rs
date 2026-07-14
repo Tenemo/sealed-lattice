@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::transcript_core::encode_hex;
 use crate::{
     bgv::{
         parameters::POLYNOMIAL_DEGREE,
@@ -8,7 +10,6 @@ use crate::{
         append_varuint,
     },
     hashing::namespace_root,
-    transcript_core::encode_hex,
 };
 
 const CANONICAL_MAGIC: &str = "sealed-lattice-bgv-rns-canonical-object";
@@ -118,10 +119,12 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
     Ok(object)
 }
 
+#[cfg(test)]
 pub(crate) fn canonical_bytes_hex(bytes: &[u8]) -> String {
     encode_hex(bytes)
 }
 
+#[cfg(test)]
 pub(crate) fn plaintext_root(canonical_bytes: &[u8]) -> String {
     namespace_root("sealed-lattice-root/plaintext-root", canonical_bytes)
 }

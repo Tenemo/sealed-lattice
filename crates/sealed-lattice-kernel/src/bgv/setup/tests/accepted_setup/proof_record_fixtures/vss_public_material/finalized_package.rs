@@ -21,9 +21,6 @@ pub(in super::super::super) fn finalize_collective_setup_package(
     let aggregate_threshold_commitment_set =
         vss_public_aggregate_threshold_commitment_set_object(&package);
     package["vssPublicAggregateThresholdCommitmentSet"] = aggregate_threshold_commitment_set.value;
-    super::aggregate_threshold::append_vss_aggregate_threshold_proof_material_transport(
-        &mut package,
-    );
     package["vssShareLinkageStatement"] = vss_share_linkage_statement_object(&package);
     let share_linkage_proof_material_set = vss_share_linkage_proof_material_set_object(&package);
     package["vssShareLinkageProofMaterialSet"] = share_linkage_proof_material_set.value;

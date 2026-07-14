@@ -474,10 +474,10 @@ fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_openi
 }
 
 #[test]
-fn private_vss_share_envelope_verifier_accepts_transported_succinct_private_share_proofs() {
+fn private_vss_share_envelope_verifier_accepts_authenticated_succinct_private_share_proofs() {
     let request = proof_shaped_private_vss_share_envelope_request(
         PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
-        "accepts-transported-succinct-private-share-proofs",
+        "accepts-authenticated-succinct-private-share-proofs",
     );
 
     let result = verify_private_vss_share_envelope_from_request(&request)
@@ -500,21 +500,21 @@ fn private_vss_share_envelope_verifier_accepts_transported_succinct_private_shar
 }
 
 #[test]
-fn private_vss_share_envelope_verifier_refuses_transported_private_share_proof_material_root_drift()
-{
+fn private_vss_share_envelope_verifier_refuses_authenticated_private_share_proof_material_root_drift()
+ {
     let mut request = proof_shaped_private_vss_share_envelope_request(
         PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
-        "refuses-transported-private-share-proof-material-root-drift",
+        "refuses-authenticated-private-share-proof-material-root-drift",
     );
     replace_first_private_vss_proof_hash(
         &mut request,
         "proofMaterialRoot",
-        "private-vss-transported-proof-material-root-drift",
+        "private-vss-authenticated-proof-material-root-drift",
     );
 
     assert_private_vss_share_proof_refusal_contains(
         &request,
-        "has no canonical stream-authenticated proof material",
+        "proofMaterialRoot must match the canonical proof material reference",
     );
 }
 
@@ -530,7 +530,10 @@ fn private_vss_share_envelope_verifier_refuses_private_share_statement_hash_drif
         "private-vss-statement-hash-drift",
     );
 
-    assert_private_vss_share_proof_refusal_contains(&request, "proofMaterialRoot");
+    assert_private_vss_share_proof_refusal_contains(
+        &request,
+        "statementHash must match the canonical proof statement",
+    );
 }
 
 #[test]

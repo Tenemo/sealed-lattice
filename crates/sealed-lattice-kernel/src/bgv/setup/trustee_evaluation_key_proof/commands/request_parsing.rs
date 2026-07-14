@@ -1,11 +1,3 @@
-use super::decoding::{
-    read_i64_array, read_i64_matrix, read_i64_matrix2, read_string, read_string_array, read_u64,
-    read_u64_array,
-};
-use super::target_decryption_parsing::{
-    key_descriptor_from_value, vss_share_linkage_commitment_from_value,
-};
-use super::VssPublicCommandCommitmentExpectation;
 use super::super::invalid_succinct_setup_proof;
 use super::super::relation::{
     EvaluationKeyShareDescriptor, SameSecretBridgeStatement, SameSecretLinkageStatement,
@@ -13,6 +5,15 @@ use super::super::relation::{
     SuccinctSetupProofFamilyShape, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
     VssCommittedMaterialWitness, VssShareLinkageItem, VssShareLinkageStatement,
 };
+use super::VssPublicCommandCommitmentExpectation;
+use super::decoding::{
+    read_i64_array, read_i64_matrix, read_i64_matrix2, read_string, read_string_array, read_u64,
+    read_u64_array,
+};
+use super::target_decryption_parsing::{
+    key_descriptor_from_value, vss_share_linkage_commitment_from_value,
+};
+use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
 use crate::encoding::CanonicalResult;
 use serde_json::Value;
 

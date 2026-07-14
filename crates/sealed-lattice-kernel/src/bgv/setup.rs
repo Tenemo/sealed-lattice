@@ -38,15 +38,16 @@ pub(crate) use canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_TARGET_DE
 pub(in crate::bgv::setup) use canonical_stream_transport::{
     AcceptedSetupProofBindingSession, accepted_setup_component_material,
     accepted_setup_public_key_share_material, consume_accepted_setup_proof_binding,
-    evict_verified_canonical_setup_proof_materials, finish_accepted_setup_proof_binding_session,
-    take_accepted_setup_proof_material_bytes, verified_canonical_setup_proof_material_bytes,
+    finish_accepted_setup_proof_binding_session, take_accepted_setup_proof_material_bytes,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use canonical_stream_transport::{
     CanonicalSetupProofBindingLease, accepted_setup_proof_binding_lease,
     begin_accepted_setup_fixture_proof_binding_session,
+    evict_verified_canonical_setup_proof_materials,
     finish_accepted_setup_fixture_proof_binding_session,
     restore_accepted_setup_proof_binding_lease, retain_accepted_setup_proof_binding,
+    verified_canonical_setup_proof_material_bytes,
 };
 pub(crate) use canonical_stream_transport::{
     TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY, absorb_bgv_canonical_stream_chunk,
@@ -129,14 +130,9 @@ pub(in crate::bgv::setup) fn accepted_setup_final_package_material_store_checkpo
         .join("accepted-setup-final-package-material-store")
 }
 
-use sampling::dense_public_residues;
-
-use crate::bgv::evaluator::key_switch::key_switch_key_from_public_component_b;
 use crate::{
     bgv::{
-        evaluator::{
-            engine::BgvPublicKey, key_switch::KeySwitchKey, records::MAXIMUM_OPTION_COUNT,
-        },
+        evaluator::records::MAXIMUM_OPTION_COUNT,
         modular_arithmetic::add_mod,
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         setup_helpers::{
@@ -148,6 +144,7 @@ use crate::{
     hashing::{derive_canonical_object_hash, hash_framed_parts_512 as hash512, hash512_hex},
 };
 
+#[cfg(test)]
 use crate::bgv::{
     modular_arithmetic::mul_mod,
     ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},

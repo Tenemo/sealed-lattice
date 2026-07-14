@@ -2,6 +2,7 @@ use super::decoding::*;
 use super::request_parsing::*;
 use super::target_decryption_parsing::*;
 use super::*;
+use crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_BRIDGE_PROOF_FAMILY;
 
 pub(crate) fn generate_same_secret_bridge_proof_from_request(
     request: &Value,

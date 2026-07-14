@@ -6,6 +6,7 @@ pub(crate) fn ciphertext_object_root(ciphertext: &Ciphertext) -> CanonicalResult
     Ok(ciphertext_root(&canonical_bytes))
 }
 
+#[cfg(test)]
 pub(crate) fn ciphertext_canonical_bytes_hex(ciphertext: &Ciphertext) -> CanonicalResult<String> {
     Ok(canonical_bytes_hex(&ciphertext_canonical_bytes(
         ciphertext,

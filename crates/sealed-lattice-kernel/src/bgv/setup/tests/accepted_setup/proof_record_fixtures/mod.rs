@@ -13,16 +13,10 @@ pub(super) struct EvaluationKeyShareFixtureMaterial {
 pub(super) struct RelinearizationKeyShareRoundsFixture {
     pub(super) rounds: serde_json::Value,
     pub(super) round_one_aggregate_diagonals_by_level: BTreeMap<u64, Vec<Vec<u64>>>,
-    pub(super) transported_component_materials: Vec<serde_json::Value>,
 }
 
-// The Galois key-share batches and their authenticated component-material
-// descriptors. Keeping the two together prevents a package record from being
-// assembled without the request-side material that production verification
-// resolves by root.
 pub(super) struct GaloisKeyShareBatchesFixture {
     pub(super) batches: serde_json::Value,
-    pub(super) transported_component_materials: Vec<serde_json::Value>,
 }
 
 pub(in super::super) fn source_constant_commitments_from_fixture_package(

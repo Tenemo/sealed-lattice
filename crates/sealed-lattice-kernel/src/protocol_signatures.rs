@@ -6,8 +6,10 @@ use fips204::{
 };
 use serde_json::{Map, Value, json};
 
+#[cfg(test)]
+use crate::encoding::{CanonicalError, CanonicalErrorCode};
 use crate::{
-    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
+    encoding::CanonicalResult,
     hashing::{canonical_json, derive_canonical_object_hash},
     transcript_core::decode_hex,
 };

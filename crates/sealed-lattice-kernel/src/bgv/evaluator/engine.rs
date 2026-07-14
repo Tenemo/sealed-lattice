@@ -9,15 +9,15 @@ use crate::{
         ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
         parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         rns::RnsPolynomial,
-        serialization::{
-            BgvObjectKind, canonical_bytes_hex, ciphertext_root, serialize_bgv_object,
-        },
+        serialization::{BgvObjectKind, ciphertext_root, serialize_bgv_object},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
 #[cfg(test)]
 use crate::bgv::encoding::decode_plaintext_coefficients_to_logical_slots;
+#[cfg(test)]
+use crate::bgv::serialization::canonical_bytes_hex;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -26,7 +26,9 @@ mod ciphertext_records;
 mod decryption;
 mod operations;
 
-pub(crate) use ciphertext_records::{ciphertext_canonical_bytes_hex, ciphertext_object_root};
+#[cfg(test)]
+pub(crate) use ciphertext_records::ciphertext_canonical_bytes_hex;
+pub(crate) use ciphertext_records::ciphertext_object_root;
 pub(crate) use decryption::decryption_accumulator_to_coefficients;
 pub(crate) use operations::{
     add_plaintext_coefficients, ciphertext_add, ciphertext_negate, ciphertext_sub,
@@ -111,11 +113,13 @@ impl Ciphertext {
 }
 
 #[derive(Clone)]
+#[cfg(test)]
 pub(crate) struct BgvPublicKey {
     public_b: Vec<Vec<u64>>,
     public_a: Vec<Vec<u64>>,
 }
 
+#[cfg(test)]
 impl BgvPublicKey {
     pub(crate) fn from_components(
         public_b: Vec<Vec<u64>>,

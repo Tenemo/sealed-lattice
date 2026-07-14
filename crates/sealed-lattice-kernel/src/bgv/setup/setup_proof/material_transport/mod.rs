@@ -1,7 +1,7 @@
 use super::*;
 
-use std::sync::Arc;
 use crate::foundation::FOUNDATION_PROFILE;
+use std::sync::Arc;
 
 enum CanonicalProofMaterialBacking {
     Contiguous(Vec<u8>),
@@ -236,9 +236,7 @@ pub(in crate::bgv::setup) fn take_verified_setup_proof_material_bytes(
     .ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
-            format!(
-                "{proof_material_path} has no canonical stream-authenticated proof material"
-            ),
+            format!("{proof_material_path} has no canonical stream-authenticated proof material"),
         )
     })
 }

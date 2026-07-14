@@ -1,3 +1,6 @@
+use super::super::extension_field::{
+    CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
+};
 use super::super::{
     CLAIM_MASK_RADIX, LINCHECK_REPETITIONS,
     TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
@@ -5,19 +8,15 @@ use super::super::{
     VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT,
     VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT, invalid_succinct_setup_proof,
 };
-use super::super::extension_field::{
-    CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
-};
-use super::constraint_kernels::SumcheckPublicEvaluations;
 use super::key_relation_algebra::negacyclic_transpose_product_extension;
 use super::statement_types::{
     PrivateVssShareStatement, SameSecretLinkageStatement, TargetDecryptionMessageClaimKind,
     TrusteeEvaluationKeyStatement, vss_share_linkage_lincheck_roster_position,
 };
 use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-    SETUP_COMMITMENT_ROW_COUNT, StructuralMatrixPolynomial,
-    setup_commitment_matrix_coefficients_cached, structural_matrix_polynomial_kind,
+    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+    StructuralMatrixPolynomial, setup_commitment_matrix_coefficients_cached,
+    structural_matrix_polynomial_kind,
 };
 use crate::bgv::setup::sharing::canonical_trustee_point;
 use crate::encoding::CanonicalResult;

@@ -1,8 +1,7 @@
 use super::super::evaluation_domain::EvaluationDomainPlan;
 use super::super::relation::{
-    LimbColumnLayout, PrivateVssShareStatement, SetupProofStatement,
-    TargetDecryptionShareStatement, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
-    VssShareLinkageStatement, private_vss_share_lifted_carry_bound,
+    LimbColumnLayout, SetupProofStatement, TrusteeEvaluationKeyStatement,
+    TrusteeEvaluationKeyWitness, private_vss_share_lifted_carry_bound,
     vss_share_linkage_lincheck_roster_position,
 };
 use super::super::{TRACE_SPLIT, invalid_succinct_setup_proof, signed_value_residue};
@@ -446,7 +445,7 @@ pub(super) fn validate_witness_support(
                 witness,
                 statement.ring_degree,
             )
-        },
+        }
         _ => Err(invalid_succinct_setup_proof(
             "witness family does not match the proof statement family",
         )),

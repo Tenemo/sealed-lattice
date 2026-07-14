@@ -1,11 +1,15 @@
 use std::sync::OnceLock;
 
+#[cfg(test)]
+use crate::bgv::{
+    base_conversion::lift_plaintext_coefficients_to_basis,
+    parameters::{BgvBasisKind, bgv_parameters_hash},
+    rns::RnsPolynomial,
+};
 use crate::{
     bgv::{
-        base_conversion::lift_plaintext_coefficients_to_basis,
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt_in_place},
-        parameters::{BgvBasisKind, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash},
-        rns::RnsPolynomial,
+        parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -14,6 +18,7 @@ pub(crate) const LOGICAL_SLOT_GENERATOR: usize = 3;
 
 static LOGICAL_TO_NATURAL_TRANSFORM_INDEX: OnceLock<Vec<usize>> = OnceLock::new();
 
+#[cfg(test)]
 pub(crate) struct EncodedBatchPlaintext {
     pub(crate) coefficients_mod_plaintext: Vec<u64>,
     pub(crate) polynomial: RnsPolynomial,
@@ -22,6 +27,7 @@ pub(crate) struct EncodedBatchPlaintext {
 // Logical slots follow the suite generator order, while the NTT implementation
 // exposes evaluations in ascending odd-exponent order. The suite arithmetic
 // derivation owns the permutation between those two orders.
+#[cfg(test)]
 pub(crate) fn encode_batch_plaintext_slots(
     supplied_slots: &[u64],
     target_level: usize,

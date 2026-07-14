@@ -157,7 +157,6 @@ fn evaluator_key_schedule_refusal(
 
 pub(super) fn verify_pending_evaluation_key_material_boundary(
     setup_package: &Value,
-    request: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
     trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
@@ -172,7 +171,6 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
     }
     if let Some(response) = verify_trustee_evaluation_key_proofs(
         setup_package,
-        request,
         verified_same_secret_bridge,
         proof_binding_session,
     )? {

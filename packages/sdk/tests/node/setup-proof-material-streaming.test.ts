@@ -306,11 +306,6 @@ describe('canonical setup material streaming in the public package', () => {
             materialRoot: publicKeyShareMaterialRoot,
             pullChunk: source.pullChunk,
         });
-        const kernelInput = mockKernel.acceptedSetupSession
-            .verifyCollectiveBgvSetup.mock.calls[0]?.[0] as JsonRecord;
-        expect(kernelInput.transportedPublicKeyShareMaterial).toMatchObject({
-            publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
-        });
     });
 
     it('authenticates private VSS proof bytes before verification', async () => {

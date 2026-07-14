@@ -1,3 +1,4 @@
+use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
 use super::super::{
     LINCHECK_REPETITIONS, TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
     TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT, TRACE_SPLIT,
@@ -5,10 +6,7 @@ use super::super::{
     VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT, invalid_succinct_setup_proof,
 };
 use super::family_shape_and_validation::SuccinctSetupProofFamilyShape;
-use super::statement_types::{
-    TargetDecryptionMessageClaimKind, TrusteeEvaluationKeyStatement,
-};
-use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
+use super::statement_types::{TargetDecryptionMessageClaimKind, TrusteeEvaluationKeyStatement};
 use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
     SETUP_COMMITMENT_ROW_COUNT,

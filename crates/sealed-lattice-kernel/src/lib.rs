@@ -25,17 +25,15 @@ use bgv::{
     read_bgv_canonical_material_chunk,
 };
 use foundation::{
-    CanonicalStreamRuntimeBegin,
-    STATE_DURABLE_BINDING_BYTE_LENGTH, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
-    absorb_canonical_stream_chunk, begin_canonical_stream_verifier, begin_canonical_stream_writer,
-    begin_state_verifier_session, cancel_canonical_stream, cancel_state_verifier_session,
-    certify_verified_state_intent,
+    CanonicalStreamRuntimeBegin, STATE_DURABLE_BINDING_BYTE_LENGTH,
+    STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, absorb_canonical_stream_chunk,
+    begin_canonical_stream_verifier, begin_canonical_stream_writer, begin_state_verifier_session,
+    cancel_canonical_stream, cancel_state_verifier_session, certify_verified_state_intent,
     describe_verified_state_object, finish_canonical_stream_verifier,
     finish_canonical_stream_writer, finish_state_output_intent_verification,
-    finish_state_output_verification,
-    release_verified_state_object, run_local_storage_root_command,
-    verify_state_recovery, verify_state_recovery_intent, verify_state_reservation,
-    verify_state_reservation_intent,
+    finish_state_output_verification, release_verified_state_object,
+    run_local_storage_root_command, verify_state_recovery, verify_state_recovery_intent,
+    verify_state_reservation, verify_state_reservation_intent,
 };
 
 use encoding::run_accepted_setup_command;
@@ -187,10 +185,7 @@ pub unsafe extern "C" fn sealed_lattice_canonical_stream_begin_writer(
     status_pointer: *mut u32,
     chunk_count_pointer: *mut u32,
 ) -> u32 {
-    let result = begin_canonical_stream_writer(
-        stream_domain_code,
-        total_byte_length,
-    );
+    let result = begin_canonical_stream_writer(stream_domain_code, total_byte_length);
     unsafe {
         write_canonical_stream_begin(result, status_pointer, ptr::null_mut(), chunk_count_pointer)
     }
@@ -212,10 +207,7 @@ pub unsafe extern "C" fn sealed_lattice_canonical_stream_begin_verifier(
     chunk_count_pointer: *mut u32,
 ) -> u32 {
     let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
-    let result = begin_canonical_stream_verifier(
-        stream_domain_code,
-        descriptor,
-    );
+    let result = begin_canonical_stream_verifier(stream_domain_code, descriptor);
     unsafe {
         write_canonical_stream_begin(
             result,
@@ -239,12 +231,7 @@ pub unsafe extern "C" fn sealed_lattice_canonical_stream_absorb_chunk(
     chunk_length: usize,
 ) -> u32 {
     let chunk = unsafe { canonical_stream_input(chunk_pointer, chunk_length) };
-    absorb_canonical_stream_chunk(
-        handle,
-        chunk_index,
-        chunk,
-    )
-        .map_or_else(|status| status, |()| 0)
+    absorb_canonical_stream_chunk(handle, chunk_index, chunk).map_or_else(|status| status, |()| 0)
 }
 
 /// Finishes a writer and returns its bounded canonical descriptor bytes.
@@ -283,8 +270,7 @@ pub unsafe extern "C" fn sealed_lattice_canonical_stream_finish_writer(
 ///
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_canonical_stream_finish_verifier(handle: u32) -> u32 {
-    finish_canonical_stream_verifier(handle)
-        .map_or_else(|status| status, |()| 0)
+    finish_canonical_stream_verifier(handle).map_or_else(|status| status, |()| 0)
 }
 
 /// Removes the active canonical-stream session. Repeated cancellation after a
@@ -292,8 +278,7 @@ pub extern "C" fn sealed_lattice_canonical_stream_finish_verifier(handle: u32) -
 ///
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_canonical_stream_cancel(handle: u32) -> u32 {
-    cancel_canonical_stream(handle)
-        .map_or_else(|status| status, |()| 0)
+    cancel_canonical_stream(handle).map_or_else(|status| status, |()| 0)
 }
 
 /// Begins a BGV large-object sink whose framing and integrity are owned by the
@@ -374,22 +359,21 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_canonical_stream_begin(
     total_byte_length_pointer: *mut u32,
     chunk_count_pointer: *mut u32,
 ) -> u32 {
-    let accepted_setup_session = match active_accepted_setup_proof_binding_session(
-        setup_session_handle,
-    ) {
-        Ok(session) => session,
-        Err(_) => {
-            unsafe {
-                write_canonical_stream_begin(
-                    Err(foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
-                    status_pointer,
-                    total_byte_length_pointer,
-                    chunk_count_pointer,
-                )
-            };
-            return 0;
-        }
-    };
+    let accepted_setup_session =
+        match active_accepted_setup_proof_binding_session(setup_session_handle) {
+            Ok(session) => session,
+            Err(_) => {
+                unsafe {
+                    write_canonical_stream_begin(
+                        Err(foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
+                        status_pointer,
+                        total_byte_length_pointer,
+                        chunk_count_pointer,
+                    )
+                };
+                return 0;
+            }
+        };
     let material_root =
         unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
     let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
@@ -519,14 +503,12 @@ pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_read_chunk
 
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_bgv_canonical_material_reader_finish(handle: u32) -> u32 {
-    finish_bgv_canonical_material_reader(handle)
-        .map_or_else(|status| status, |()| 0)
+    finish_bgv_canonical_material_reader(handle).map_or_else(|status| status, |()| 0)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_bgv_canonical_material_reader_cancel(handle: u32) -> u32 {
-    cancel_bgv_canonical_material_reader(handle)
-        .map_or_else(|status| status, |()| 0)
+    cancel_bgv_canonical_material_reader(handle).map_or_else(|status| status, |()| 0)
 }
 
 /// # Safety

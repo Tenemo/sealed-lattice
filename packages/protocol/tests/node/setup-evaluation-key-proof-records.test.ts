@@ -24,11 +24,6 @@ import type {
     EvaluatorKeySchedule,
     RequiredGaloisKeyScheduleEntry,
 } from '#packages/protocol/src/setup/evaluator-key-schedule';
-import {
-    createSetupPackageVerificationInput,
-    type SetupPackage,
-    type SetupPackageVerificationInputSource,
-} from '#packages/protocol/src/setup/setup-package-assembly';
 import type { VssSameSecretBridgeStatementSet } from '#packages/protocol/src/setup/vss-commitments';
 import {
     makeSetupContext,
@@ -36,14 +31,6 @@ import {
 } from '#tests/support/setup-fixtures';
 
 type JsonRecord = Record<string, unknown>;
-type DescriptorBackedProofMaterialSet = Readonly<{
-    objectType: string;
-    proofMaterials: readonly Readonly<{
-        objectType: string;
-        proofMaterialRoot: string;
-        descriptorBytes: Uint8Array;
-    }>[];
-}>;
 type TrusteeEvaluationKeyProofGeneratorInput =
     Parameters<TrusteeEvaluationKeyProofGenerator>[0];
 type RelinearizationKeyShareRoundsInput = Parameters<
@@ -1329,159 +1316,6 @@ describe('trustee evaluation-key canonical proof material', () => {
         ).rejects.toThrow(
             'proofMaterialRoot must bind the proof family and proof hash',
         );
-    });
-});
-
-describe('setup package transport references', () => {
-    const descriptorBytes = canonicalStreamDescriptor(1n, [0x41], 0x42);
-    const publicKeyMaterialRoot = fixtureHash(
-        'normalized-public-key-share-material-set',
-    );
-    const publicKeyProofRoot = fixtureHash(
-        'normalized-public-key-proof-material',
-    );
-    const vssShareLinkageProofRoot = fixtureHash(
-        'normalized-vss-share-linkage-proof-material',
-    );
-    const sameSecretBridgeProofRoot = fixtureHash(
-        'normalized-same-secret-bridge-proof-material',
-    );
-    const evaluationKeyProofRoot = fixtureHash(
-        'normalized-evaluation-key-proof-material',
-    );
-    const componentRoot = fixtureHash('normalized-component-material');
-
-    const descriptorBackedProofMaterialSet = (
-        proofMaterialSetObjectType: string,
-        proofMaterialObjectType: string,
-        proofMaterialRoot: string,
-    ): DescriptorBackedProofMaterialSet => ({
-        objectType: proofMaterialSetObjectType,
-        proofMaterials: [
-            {
-                objectType: proofMaterialObjectType,
-                proofMaterialRoot,
-                descriptorBytes: descriptorBytes.slice(),
-            },
-        ],
-    });
-
-    const descriptorBackedCompanionTemplate = {
-        transportedPublicKeyShareMaterial: {
-            objectType: 'SetupTransportedPublicKeyShareMaterial',
-            publicKeyShareMaterialSetRoot: publicKeyMaterialRoot,
-            descriptorBytes: descriptorBytes.slice(),
-        },
-        transportedPublicKeyShareProofMaterial:
-            descriptorBackedProofMaterialSet(
-                'SetupTransportedPublicKeyShareProofMaterialSet',
-                'SetupTransportedPublicKeyShareProofMaterial',
-                publicKeyProofRoot,
-            ),
-        transportedEvaluationKeyShareProofMaterial:
-            descriptorBackedProofMaterialSet(
-                'SetupTransportedEvaluationKeyShareProofMaterialSet',
-                'SetupTransportedEvaluationKeyShareProofMaterial',
-                evaluationKeyProofRoot,
-            ),
-        transportedVssShareLinkageProofMaterial:
-            descriptorBackedProofMaterialSet(
-                'SetupTransportedVssShareLinkageProofMaterialSet',
-                'SetupTransportedVssShareLinkageProofMaterial',
-                vssShareLinkageProofRoot,
-            ),
-        transportedSameSecretBridgeProofMaterial:
-            descriptorBackedProofMaterialSet(
-                'SetupTransportedSameSecretBridgeProofMaterialSet',
-                'SetupTransportedSameSecretBridgeProofMaterial',
-                sameSecretBridgeProofRoot,
-            ),
-        transportedEvaluationKeyShareComponentMaterial: {
-            objectType:
-                'SetupTransportedEvaluationKeyShareComponentMaterialSet',
-            componentMaterials: [
-                {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterial',
-                    keySwitchComponentMaterialRoot: componentRoot,
-                    descriptorBytes: descriptorBytes.slice(),
-                },
-            ],
-        },
-    };
-
-    const descriptorBackedCompanions =
-        (): typeof descriptorBackedCompanionTemplate =>
-            structuredClone(descriptorBackedCompanionTemplate);
-
-    const descriptorBackedSetupPackageVerificationInput = (
-        companions: typeof descriptorBackedCompanionTemplate,
-    ): SetupPackageVerificationInputSource =>
-        ({
-            setupPackage: {
-                objectType: 'SetupPackage',
-            } as SetupPackage,
-            expectedManifestHash: fixtureHash('expected-manifest'),
-            expectedRosterHash: fixtureHash('expected-roster'),
-            ...companions,
-        }) as unknown as SetupPackageVerificationInputSource;
-
-    it('preserves the semantic material references used by the kernel', () => {
-        const companions = descriptorBackedCompanions();
-        const verificationInput = createSetupPackageVerificationInput(
-            descriptorBackedSetupPackageVerificationInput(companions),
-        );
-        const publicKeyMaterial =
-            verificationInput.transportedPublicKeyShareMaterial;
-        expect(publicKeyMaterial).toMatchObject({
-            objectType: 'SetupTransportedPublicKeyShareMaterial',
-            publicKeyShareMaterialSetRoot: publicKeyMaterialRoot,
-        });
-
-        expect(
-            verificationInput.transportedEvaluationKeyShareComponentMaterial
-                .componentMaterials,
-        ).toEqual([
-            expect.objectContaining({
-                objectType:
-                    'SetupTransportedEvaluationKeyShareComponentMaterial',
-                keySwitchComponentMaterialRoot: componentRoot,
-            }),
-        ]);
-
-        for (const [
-            proofSet,
-            expectedObjectType,
-            expectedProofMaterialRoot,
-        ] of [
-            [
-                verificationInput.transportedPublicKeyShareProofMaterial,
-                'SetupTransportedPublicKeyShareProofMaterial',
-                publicKeyProofRoot,
-            ],
-            [
-                verificationInput.transportedEvaluationKeyShareProofMaterial,
-                'SetupTransportedEvaluationKeyShareProofMaterial',
-                evaluationKeyProofRoot,
-            ],
-            [
-                verificationInput.transportedVssShareLinkageProofMaterial,
-                'SetupTransportedVssShareLinkageProofMaterial',
-                vssShareLinkageProofRoot,
-            ],
-            [
-                verificationInput.transportedSameSecretBridgeProofMaterial,
-                'SetupTransportedSameSecretBridgeProofMaterial',
-                sameSecretBridgeProofRoot,
-            ],
-        ] as const) {
-            const proofMaterials =
-                proofSet.proofMaterials as readonly JsonRecord[];
-            expect(proofMaterials[0]).toMatchObject({
-                objectType: expectedObjectType,
-                proofMaterialRoot: expectedProofMaterialRoot,
-            });
-        }
     });
 });
 

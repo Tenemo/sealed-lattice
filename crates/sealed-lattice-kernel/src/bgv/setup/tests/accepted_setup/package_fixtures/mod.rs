@@ -418,14 +418,11 @@ fn build_public_key_share_succinct_proof_bearing_collective_setup_package()
     let proof_binding_session = descriptor_backed_vss_fixture.begin_proof_binding_session();
     let mut proof_binding_leases = descriptor_backed_vss_fixture.proof_binding_leases;
     let mut package = descriptor_backed_vss_fixture.package;
-    let mut verification_request = descriptor_backed_vss_fixture.verification_request;
+    let verification_request = descriptor_backed_vss_fixture.verification_request;
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    let succinct_proof_fixture = public_key_share_succinct_proofs_fixture(
-        &package,
-        &verification_request,
-        &proof_binding_session,
-    );
+    let succinct_proof_fixture =
+        public_key_share_succinct_proofs_fixture(&package, &proof_binding_session);
     proof_binding_leases.extend(succinct_proof_fixture.proof_binding_leases.iter().cloned());
     crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
         proof_binding_session.session_handle,
@@ -433,9 +430,6 @@ fn build_public_key_share_succinct_proof_bearing_collective_setup_package()
     .expect("cancel public-key share fixture proof binding session");
     package["publicKeyShareSuccinctProofs"] = succinct_proof_fixture.proof_set.clone();
     rebind_collective_setup_package_hash(&mut package);
-    verification_request["transportedPublicKeyShareProofMaterial"] =
-        succinct_proof_fixture.transported_proof_material.clone();
-
     CachedPublicKeyShareCollectiveSetupFixture {
         verification_fixture: CollectiveSetupVerificationFixture {
             package,
@@ -472,7 +466,7 @@ fn build_descriptor_backed_vss_collective_setup_fixture_from_package(
     CachedDescriptorBackedVssCollectiveSetupFixture {
         verification_fixture: CollectiveSetupVerificationFixture {
             package,
-            verification_request: proof_material_fixture.verification_request.clone(),
+            verification_request: serde_json::json!({}),
             proof_binding_leases: proof_material_fixture.proof_binding_leases(),
         },
     }

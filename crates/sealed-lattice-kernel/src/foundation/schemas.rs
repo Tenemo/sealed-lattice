@@ -10,8 +10,7 @@ use super::canonical_tuple::CanonicalDecodeBudget;
 use super::{
     CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
     Hash512, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, ParticipantIdentity, RefusalReason,
-    VerificationResult, derive_participant_identity,
-    hash_foundation_tuple_512 as hash512,
+    VerificationResult, derive_participant_identity, hash_foundation_tuple_512 as hash512,
 };
 
 pub const OBJECT_ENVELOPE_SCHEMA_IDENTIFIER: u16 = 0x0100;

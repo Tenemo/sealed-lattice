@@ -3,17 +3,16 @@ use super::super::{invalid_succinct_setup_proof, signed_value_residue};
 use super::key_relation_algebra::public_key_switch_sample;
 use super::statement_types::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, KeyBearingWitness,
-    PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL, SameSecretBridgeStatement,
-    SameSecretLinkageStatement, SameSecretLinkageWitness, SetupProofStatement,
-    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
-    VssCommittedMaterialWitness,
+    PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL, SameSecretBridgeStatement, SameSecretLinkageStatement,
+    SameSecretLinkageWitness, SetupProofStatement, SuccinctSetupProofContext,
+    TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, VssCommittedMaterialWitness,
 };
-use crate::bgv::evaluator::key_switch::KEY_SWITCH_ERROR_DOMAIN;
+use crate::bgv::evaluator::key_switch::{KEY_SWITCH_ERROR_DOMAIN, PLAINTEXT_MODULUS_I64};
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::modular_arithmetic::{add_mod_fast, sub_mod_fast};
 use crate::bgv::parameters::DATA_PRIMES;
-use crate::bgv::setup::commitment::compute_setup_big_signed_lifted_commitment;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH;
+use crate::bgv::setup::commitment::compute_setup_big_signed_lifted_commitment;
 use crate::bgv::setup::sampling::dense_public_residues_with_degree;
 use crate::bgv::setup::setup_proof::SetupProofFamily;
 use crate::encoding::CanonicalResult;

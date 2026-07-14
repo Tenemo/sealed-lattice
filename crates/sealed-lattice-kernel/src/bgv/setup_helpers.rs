@@ -32,16 +32,6 @@ pub(super) fn object_field<'a>(value: &'a Value, field_name: &str) -> CanonicalR
         .ok_or_else(|| invalid_setup_fixture(format!("{field_name} must be an object")))
 }
 
-pub(super) fn array_field<'a>(
-    value: &'a Value,
-    field_name: &str,
-) -> CanonicalResult<&'a Vec<Value>> {
-    value
-        .get(field_name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid_setup_fixture(format!("{field_name} must be an array")))
-}
-
 pub(super) fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
     value
         .get(field_name)

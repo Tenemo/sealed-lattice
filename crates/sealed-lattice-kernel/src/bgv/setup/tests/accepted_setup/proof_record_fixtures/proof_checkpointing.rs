@@ -1,7 +1,7 @@
 use super::super::*;
 
 // Checkpoint subdirectories for the expensive proof families. The trustee
-// evaluation-key family already persists its transported proof material under a
+// evaluation-key family already persists its authenticated proof material under a
 // sibling directory; these two cover the other expensive prover outputs so a
 // resumed run skips re-proving every family, not just the trustee one.
 pub(in super::super) const SAME_SECRET_BRIDGE_PROOF_CHECKPOINT_DIRECTORY: &str =

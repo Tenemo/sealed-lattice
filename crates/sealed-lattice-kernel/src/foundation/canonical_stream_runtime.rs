@@ -346,10 +346,16 @@ mod tests {
     fn failed_operations_are_terminal_but_overlap_is_not() {
         let mut registry = CanonicalStreamRuntimeRegistry::default();
         let first = registry
-            .begin_writer(CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(), 17)
+            .begin_writer(
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
+                17,
+            )
             .expect("first writer begins");
         assert_eq!(
-            registry.begin_writer(CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(), 17),
+            registry.begin_writer(
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
+                17
+            ),
             Err(refusal_status(RefusalReason::OutsideSupportedProfile))
         );
         registry
@@ -360,7 +366,10 @@ mod tests {
             .expect("the original writer finishes");
 
         let second = registry
-            .begin_writer(CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(), 17)
+            .begin_writer(
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
+                17,
+            )
             .expect("second writer begins");
         assert_eq!(
             registry.absorb_chunk(second.handle, 1, &[0; 17]),

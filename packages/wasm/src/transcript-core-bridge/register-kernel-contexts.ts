@@ -137,11 +137,7 @@ export const registerKernelContexts = (
         beginCanonicalStream: acceptedSetupCanonicalStreamBegin,
         cancel: acceptedSetupSessionCancel,
         deallocate: runtime.deallocate,
-        executeCommand: (
-            request,
-            sessionHandle,
-            beforeKernelInvocation,
-        ) =>
+        executeCommand: (request, sessionHandle, beforeKernelInvocation) =>
             translateAcceptedSetupCommandFailure(() =>
                 runtime.runExclusive('accepted-setup command', () =>
                     runKernelCommand<BgvCollectiveSetupVerification>(

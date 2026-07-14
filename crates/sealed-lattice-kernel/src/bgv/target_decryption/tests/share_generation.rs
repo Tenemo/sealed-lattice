@@ -268,7 +268,7 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     assert!(
         merkle_root_error
             .message
-            .contains("does not match the accepted aggregate commitment record"),
+            .contains("does not match its target decryption binding"),
         "{}",
         merkle_root_error.message
     );

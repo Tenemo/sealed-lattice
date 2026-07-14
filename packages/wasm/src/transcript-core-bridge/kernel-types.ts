@@ -1,7 +1,6 @@
 import type { CanonicalError, ProtocolHash } from '@sealed-lattice/types';
 
 import type {
-    BgvCollectiveSetupTransportCompanions,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
@@ -33,8 +32,6 @@ export type {
     BgvTrusteeEvaluationKeyStatementDescription,
     BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
-    BgvTrusteeEvaluationKeyStatementContext,
-    BgvTrusteeEvaluationKeyStatementKey,
     BgvLocalTrusteeSetupStateVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
@@ -59,14 +56,12 @@ type BgvTargetDecryptionLocalCommandContext = Readonly<{
     readonly targetShareProfile: unknown;
 }>;
 
-export type BgvCollectiveSetupVerificationInput = Readonly<
-    {
-        readonly setupPackage: unknown;
-        readonly expectedSetupPackageHash?: ProtocolHash;
-        readonly expectedManifestHash?: ProtocolHash;
-        readonly expectedRosterHash?: ProtocolHash;
-    } & BgvCollectiveSetupTransportCompanions
->;
+export type BgvCollectiveSetupVerificationInput = Readonly<{
+    readonly setupPackage: unknown;
+    readonly expectedSetupPackageHash?: ProtocolHash;
+    readonly expectedManifestHash?: ProtocolHash;
+    readonly expectedRosterHash?: ProtocolHash;
+}>;
 
 export type AcceptedSetupSession = Readonly<{
     cancel(): void;
@@ -75,23 +70,52 @@ export type AcceptedSetupSession = Readonly<{
     ): BgvCollectiveSetupVerification;
 }>;
 
-type BgvTrusteeEvaluationKeyStatementCommonInput = Readonly<{
-    readonly context: BgvTrusteeEvaluationKeyStatementContext;
+type BgvTrusteeEvaluationKeyContext = Extract<
+    BgvTrusteeEvaluationKeyStatementContext,
+    { readonly evaluatorKeyScheduleRoot: ProtocolHash }
+>;
+
+type BgvPublicKeyShareContext = Extract<
+    BgvTrusteeEvaluationKeyStatementContext,
+    { readonly sameSecretBridgeStatementRoot: ProtocolHash }
+>;
+
+type BgvEvaluationKeyStatementKey = Exclude<
+    BgvTrusteeEvaluationKeyStatementKey,
+    { readonly proofFamily: 'public-key-share' }
+>;
+
+type BgvPublicKeyShareStatementKey = Extract<
+    BgvTrusteeEvaluationKeyStatementKey,
+    { readonly proofFamily: 'public-key-share' }
+>;
+
+type BgvTrusteeEvaluationKeyStatementCommonInput<Context, Key> = Readonly<{
+    readonly context: Context;
     readonly ringDegree: number;
-    readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
+    readonly keys: readonly Key[];
 }>;
 
 export type BgvTrusteeEvaluationKeyStatementInput =
     | Readonly<
-          BgvTrusteeEvaluationKeyStatementCommonInput & {
+          BgvTrusteeEvaluationKeyStatementCommonInput<
+              BgvTrusteeEvaluationKeyContext,
+              BgvEvaluationKeyStatementKey
+          > & {
               readonly statementFamily: 'trustee-evaluation-key';
               readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
           }
       >
     | Readonly<
-          Omit<BgvTrusteeEvaluationKeyStatementCommonInput, 'keys'> & {
+          Omit<
+              BgvTrusteeEvaluationKeyStatementCommonInput<
+                  BgvPublicKeyShareContext,
+                  BgvPublicKeyShareStatementKey
+              >,
+              'keys'
+          > & {
               readonly statementFamily: 'public-key-share';
-              readonly keys: readonly [BgvTrusteeEvaluationKeyStatementKey];
+              readonly keys: readonly [BgvPublicKeyShareStatementKey];
               readonly sameSecretBridge: BgvTrusteeEvaluationKeySameSecretBridge;
           }
       >;
@@ -155,7 +179,6 @@ export type TranscriptCoreKernel = {
         readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
         readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
         readonly privateEnvelope: unknown;
-        readonly transportedPrivateVssShareProofMaterial?: unknown;
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
         readonly expectedLocalVerificationRoot?: ProtocolHash;
     }): BgvPrivateVssShareEnvelopeVerification;
@@ -218,7 +241,7 @@ export type TranscriptCoreKernel = {
         readonly context: BgvSameSecretBridgeProofContext;
         readonly ringDegree: number;
         readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
-        readonly sameSecretBridge: Record<string, unknown>;
+        readonly sameSecretBridge: BgvTrusteeEvaluationKeySameSecretBridge;
         readonly secretCoefficients: readonly number[];
         readonly negativeIndicatorCoefficients: readonly number[];
         readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
@@ -376,8 +399,12 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         sessionHandle: number,
         outputLengthPointer: number,
     ) => number;
-    sealed_lattice_accepted_setup_session_begin?: (statusPointer: number) => number;
-    sealed_lattice_accepted_setup_session_cancel?: (sessionHandle: number) => number;
+    sealed_lattice_accepted_setup_session_begin?: (
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_session_cancel?: (
+        sessionHandle: number,
+    ) => number;
     sealed_lattice_bgv_canonical_stream_absorb_chunk?: (
         handle: number,
         chunkIndex: number,
@@ -404,8 +431,12 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         totalByteLengthPointer: number,
         chunkCountPointer: number,
     ) => number;
-    sealed_lattice_bgv_canonical_material_reader_cancel?: (handle: number) => number;
-    sealed_lattice_bgv_canonical_material_reader_finish?: (handle: number) => number;
+    sealed_lattice_bgv_canonical_material_reader_cancel?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_material_reader_finish?: (
+        handle: number,
+    ) => number;
     sealed_lattice_bgv_canonical_material_reader_read_chunk?: (
         handle: number,
         chunkIndex: number,

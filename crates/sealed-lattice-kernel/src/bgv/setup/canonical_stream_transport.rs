@@ -37,11 +37,13 @@ use super::{
     },
 };
 
+#[cfg(test)]
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE: u32 =
     SetupProofFamily::PublicKeyShare.stream_code();
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT: u32 = 6;
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_GALOIS_COMPONENT: u32 = 7;
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE_MATERIAL: u32 = 9;
+#[cfg(test)]
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_AGGREGATE_OPENING: u32 =
     SetupProofFamily::TargetDecryptionAggregateOpening.stream_code();
 pub(crate) const TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY: &str =
@@ -154,6 +156,20 @@ enum AcceptedSetupMaterial {
     PublicKeyShare(VerifiedCanonicalPublicKeyShareMaterialStoreEntry),
 }
 
+fn retain_material_if_vacant<Material>(
+    materials: &mut BTreeMap<String, Material>,
+    material_root: String,
+    material: Material,
+) -> bool {
+    match materials.entry(material_root) {
+        Entry::Vacant(entry) => {
+            entry.insert(material);
+            true
+        }
+        Entry::Occupied(_) => false,
+    }
+}
+
 impl AcceptedSetupMaterial {
     fn store(&self) -> AcceptedSetupMaterialStore {
         match self {
@@ -181,6 +197,27 @@ impl AcceptedSetupProofBindingSessionState {
         }
     }
 
+    fn retains_material_root(
+        &self,
+        store: AcceptedSetupMaterialStore,
+        material_root: &str,
+    ) -> bool {
+        match store {
+            AcceptedSetupMaterialStore::Component => {
+                self.component_materials.contains_key(material_root)
+            }
+            AcceptedSetupMaterialStore::Proof => self.proof_materials.contains_key(material_root),
+            AcceptedSetupMaterialStore::PublicKeyShare => {
+                self.public_key_share_materials.contains_key(material_root)
+            }
+        }
+    }
+
+    fn owns_material_root(&self, store: AcceptedSetupMaterialStore, material_root: &str) -> bool {
+        self.material_roots(store).contains(material_root)
+            || self.retains_material_root(store, material_root)
+    }
+
     fn retain_material(
         &mut self,
         material_root: String,
@@ -194,18 +231,17 @@ impl AcceptedSetupProofBindingSessionState {
             ));
         }
         let was_vacant = match material {
-            AcceptedSetupMaterial::Component(material) => self
-                .component_materials
-                .insert(material_root, material)
-                .is_none(),
-            AcceptedSetupMaterial::Proof(material) => self
-                .proof_materials
-                .insert(material_root, material)
-                .is_none(),
-            AcceptedSetupMaterial::PublicKeyShare(material) => self
-                .public_key_share_materials
-                .insert(material_root, material)
-                .is_none(),
+            AcceptedSetupMaterial::Component(material) => {
+                retain_material_if_vacant(&mut self.component_materials, material_root, material)
+            }
+            AcceptedSetupMaterial::Proof(material) => {
+                retain_material_if_vacant(&mut self.proof_materials, material_root, material)
+            }
+            AcceptedSetupMaterial::PublicKeyShare(material) => retain_material_if_vacant(
+                &mut self.public_key_share_materials,
+                material_root,
+                material,
+            ),
         };
         if !was_vacant {
             return Err(CanonicalError::new(
@@ -308,7 +344,7 @@ pub(in crate::bgv::setup) fn reserve_accepted_setup_material_root(
         .map_err(|_| canonical_proof_store_error())?;
     registry.session(session_handle)?;
     if registry.sessions.iter().any(|(other_handle, session)| {
-        *other_handle != session_handle && session.material_roots(store).contains(material_root)
+        *other_handle != session_handle && session.owns_material_root(store, material_root)
     }) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -316,6 +352,12 @@ pub(in crate::bgv::setup) fn reserve_accepted_setup_material_root(
         ));
     }
     let session = registry.session_mut(session_handle)?;
+    if session.retains_material_root(store, material_root) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "accepted-setup material root is already retained by this session",
+        ));
+    }
     if !session
         .material_roots_mut(store)
         .insert(material_root.to_string())
@@ -358,6 +400,7 @@ fn retain_accepted_setup_material(
         .retain_material(material_root, material)
 }
 
+#[cfg(test)]
 pub(in crate::bgv::setup) fn accepted_setup_session_owns_material_root(
     session_handle: u32,
     store: AcceptedSetupMaterialStore,
@@ -367,18 +410,7 @@ pub(in crate::bgv::setup) fn accepted_setup_session_owns_material_root(
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
     let session = registry.session(session_handle)?;
-    Ok(session.material_roots(store).contains(material_root)
-        || match store {
-            AcceptedSetupMaterialStore::Component => {
-                session.component_materials.contains_key(material_root)
-            }
-            AcceptedSetupMaterialStore::Proof => {
-                session.proof_materials.contains_key(material_root)
-            }
-            AcceptedSetupMaterialStore::PublicKeyShare => session
-                .public_key_share_materials
-                .contains_key(material_root),
-        })
+    Ok(session.owns_material_root(store, material_root))
 }
 
 pub(in crate::bgv::setup) fn accepted_setup_public_key_share_material(
@@ -624,6 +656,7 @@ fn verified_canonical_proof_materials()
     VERIFIED_CANONICAL_PROOF_MATERIALS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+#[cfg(test)]
 pub(in crate::bgv::setup) fn verified_canonical_setup_proof_material_bytes(
     proof_family: &str,
     proof_material_root: &str,
@@ -671,6 +704,7 @@ pub(crate) fn take_verified_canonical_proof_material_bytes(
         .map(|material| material.proof_bytes))
 }
 
+#[cfg(test)]
 pub(in crate::bgv::setup) fn evict_verified_canonical_setup_proof_materials(
     proof_material_roots: &[String],
 ) {
@@ -1409,7 +1443,8 @@ mod tests {
     fn accepted_setup_material_roots_are_session_owned_drained_and_retryable() {
         let material_root_bytes = [0xd1; MATERIAL_ROOT_BYTE_LENGTH];
         let material_root = to_hex(&material_root_bytes);
-        let proof_bytes = vec![0xd2; FOUNDATION_PROFILE.stream_chunk_byte_length + 17];
+        let retained_proof_bytes = vec![0xd2; FOUNDATION_PROFILE.stream_chunk_byte_length + 17];
+        let replacement_proof_bytes = vec![0xd3; FOUNDATION_PROFILE.stream_chunk_byte_length + 17];
         evict_verified_canonical_proof_materials(std::slice::from_ref(&material_root));
 
         let first_handle = begin_accepted_setup_proof_binding_session()
@@ -1424,7 +1459,7 @@ mod tests {
         finish_owned_public_key_share_proof_stream(
             first_session,
             &material_root_bytes,
-            &proof_bytes,
+            &retained_proof_bytes,
         )
         .expect("first session finishes its owned proof stream");
         assert!(
@@ -1437,12 +1472,36 @@ mod tests {
         );
         assert_eq!(
             finish_owned_public_key_share_proof_stream(
+                first_session,
+                &material_root_bytes,
+                &replacement_proof_bytes,
+            ),
+            Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
+            "the owning session cannot reserve its retained root again",
+        );
+        assert_eq!(
+            finish_owned_public_key_share_proof_stream(
                 second_session,
                 &material_root_bytes,
-                &proof_bytes,
+                &replacement_proof_bytes,
             ),
             Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
             "another session cannot reserve the owned root",
+        );
+        let retained_material = take_accepted_setup_proof_material_bytes(
+            first_handle,
+            "public-key-share",
+            &material_root,
+        )
+        .expect("retained proof material lookup")
+        .expect("first session retains the original proof material");
+        let retained_material_bytes = retained_material
+            .chunks()
+            .flat_map(|chunk| chunk.iter().copied())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            retained_material_bytes, retained_proof_bytes,
+            "rejected same-session and cross-session reservations cannot replace retained bytes",
         );
 
         cancel_accepted_setup_proof_binding_session(first_handle)
@@ -1456,7 +1515,7 @@ mod tests {
         finish_owned_public_key_share_proof_stream(
             second_session,
             &material_root_bytes,
-            &proof_bytes,
+            &replacement_proof_bytes,
         )
         .expect("same root is reusable after owner cancellation");
         finish_accepted_setup_proof_binding_session(second_handle)

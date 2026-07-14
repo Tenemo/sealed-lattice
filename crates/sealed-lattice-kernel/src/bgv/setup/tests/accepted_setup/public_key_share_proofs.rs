@@ -28,16 +28,12 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_succinct_publi
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_missing_succinct_public_key_proofs",
     );
-    let mut missing_succinct_proofs_fixture =
-        collective_public_key_bearing_collective_setup_fixture();
+    let missing_succinct_proofs_fixture = collective_public_key_bearing_collective_setup_fixture();
     let mut missing_succinct_proofs_package = missing_succinct_proofs_fixture.package.clone();
     missing_succinct_proofs_package
         .as_object_mut()
         .expect("setup package")
         .remove("publicKeyShareSuccinctProofs");
-    remove_public_key_share_proof_transport(
-        &mut missing_succinct_proofs_fixture.verification_request,
-    );
     rebind_collective_setup_package_hash(&mut missing_succinct_proofs_package);
 
     let missing_succinct_proofs_result = missing_succinct_proofs_fixture
@@ -79,10 +75,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
             .as_object_mut()
             .expect("public-key proof set")
             .remove(field_name);
-        let mut verification_request = fixture.verification_request.clone();
-        if proof_set_name == "publicKeyShareSuccinctProofs" && field_name == "proofRecords" {
-            remove_public_key_share_proof_transport(&mut verification_request);
-        }
+        let verification_request = fixture.verification_request.clone();
         rebind_collective_setup_package_hash(&mut package);
 
         let result = fixture
@@ -96,13 +89,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
             format!("setupPackage.{proof_set_name}.{field_name}")
         );
     }
-}
-
-fn remove_public_key_share_proof_transport(verification_request: &mut serde_json::Value) {
-    verification_request
-        .as_object_mut()
-        .expect("setup verification request")
-        .remove("transportedPublicKeyShareProofMaterial");
 }
 
 #[test]
@@ -149,7 +135,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
     let proof_binding_session = fixture.begin_proof_binding_session();
     let mut package = fixture.package.clone();
-    let mut verification_request = fixture.verification_request.clone();
+    let verification_request = fixture.verification_request.clone();
     // The descriptor, hashes, and package roots below are rebound,
     // so these deliberately malformed proof bytes reach the semantic decoder.
     // The fixture itself retains only opaque verifier bindings, never a second
@@ -169,9 +155,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
     rebind_collective_public_key_succinct_proof_roots(&mut package);
 
-    let transported_proof_material =
-        &mut verification_request["transportedPublicKeyShareProofMaterial"]["proofMaterials"][0];
-    transported_proof_material["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
     authenticate_setup_proof_material_stream_in_session_for_test(
         crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
         &proof_material_root,

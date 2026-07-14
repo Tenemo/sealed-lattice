@@ -1,9 +1,10 @@
 use super::super::{LINCHECK_REPETITIONS, invalid_succinct_setup_proof};
 use super::family_shape_and_validation::validate_context_token;
+use super::key_relation_algebra::public_key_switch_sample;
+use super::vss_vectors::VssShareLinkageCommitment;
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-    SetupCommitmentValue,
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue,
 };
 use crate::bgv::setup::sampling::dense_public_residues_with_degree;
 use crate::encoding::CanonicalResult;
@@ -480,16 +481,6 @@ impl TrusteeEvaluationKeyWitness {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn error_coefficients_by_key_mut(&mut self) -> &mut [Vec<Vec<i64>>] {
-        match self {
-            Self::PublicKeyShare { key, .. } | Self::TrusteeEvaluationKey { key, .. } => {
-                &mut key.error_coefficients_by_key
-            }
-            _ => &mut [],
-        }
-    }
-
     pub(crate) fn negative_indicator_coefficients(&self) -> &[i64] {
         match self {
             Self::PublicKeyShare {
@@ -497,9 +488,7 @@ impl TrusteeEvaluationKeyWitness {
                 ..
             } => negative_indicator_coefficients,
             Self::SameSecretBridge { linkage, .. } => &linkage.negative_indicator_coefficients,
-            Self::TrusteeEvaluationKey { linkage, .. } => {
-                &linkage.negative_indicator_coefficients
-            }
+            Self::TrusteeEvaluationKey { linkage, .. } => &linkage.negative_indicator_coefficients,
             _ => &[],
         }
     }
@@ -531,9 +520,7 @@ impl TrusteeEvaluationKeyWitness {
     pub(crate) fn opening_randomness_by_limb_mut(&mut self) -> &mut [Vec<Vec<i64>>] {
         match self {
             Self::SameSecretBridge { linkage, .. } => &mut linkage.opening_randomness_by_limb,
-            Self::TrusteeEvaluationKey { linkage, .. } => {
-                &mut linkage.opening_randomness_by_limb
-            }
+            Self::TrusteeEvaluationKey { linkage, .. } => &mut linkage.opening_randomness_by_limb,
             _ => &mut [],
         }
     }

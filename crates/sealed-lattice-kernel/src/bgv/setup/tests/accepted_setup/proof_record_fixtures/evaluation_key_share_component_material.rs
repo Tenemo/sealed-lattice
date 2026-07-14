@@ -99,11 +99,6 @@ pub(in super::super) fn evaluation_key_share_fixture_material(
     }
 }
 
-pub(in super::super) struct AuthenticatedEvaluationKeyShareComponentMaterialFixture {
-    pub(in super::super) material_root: String,
-    pub(in super::super) transported_material: serde_json::Value,
-}
-
 // Moves one deterministic share's component vectors through the same canonical
 // stream verifier used by the browser bridge. The package retains only the
 // canonical material reference; statement construction and terminal
@@ -115,7 +110,7 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
     ring_degree: usize,
     fixture_material: &EvaluationKeyShareFixtureMaterial,
     accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
-) -> AuthenticatedEvaluationKeyShareComponentMaterialFixture {
+) -> String {
     let material_root = evaluation_key_share_component_material_reference_root(
         proof_family,
         record,
@@ -155,13 +150,7 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
         accepted_setup_session,
     );
 
-    AuthenticatedEvaluationKeyShareComponentMaterialFixture {
-        material_root: material_root.clone(),
-        transported_material: serde_json::json!({
-            "objectType": "SetupTransportedEvaluationKeyShareComponentMaterial",
-            "keySwitchComponentMaterialRoot": material_root,
-        }),
-    }
+    material_root
 }
 
 fn encode_evaluation_key_share_component_material(
@@ -601,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn transported_component_material_rejects_derived_binding_substitution() {
+    fn authenticated_component_material_rejects_derived_binding_substitution() {
         let proof_family = EvaluationKeyShareProofFamily::Relinearization;
         let trustee_identity = "trustee-2";
         let trustee_roster_position = 2_u64;
@@ -637,26 +626,21 @@ mod tests {
         let accepted_setup_session =
             crate::bgv::setup::AcceptedSetupProofBindingSession::begin_fresh()
                 .expect("accepted-setup session");
-        let authenticated_material = authenticate_evaluation_key_share_component_material_fixture(
-            proof_family,
-            &record,
-            correct_binding,
-            ring_degree,
-            &fixture_material,
-            accepted_setup_session,
-        );
+        let authenticated_material_root =
+            authenticate_evaluation_key_share_component_material_fixture(
+                proof_family,
+                &record,
+                correct_binding,
+                ring_degree,
+                &fixture_material,
+                accepted_setup_session,
+            );
         record["keySwitchComponentMaterialRoot"] =
-            serde_json::Value::String(authenticated_material.material_root.clone());
-        let transported_material_set = serde_json::json!({
-            "objectType": "SetupTransportedEvaluationKeyShareComponentMaterialSet",
-            "componentMaterials": [authenticated_material.transported_material],
-        });
-
+            serde_json::Value::String(authenticated_material_root);
         let decoded_material = component_b_vectors_from_record(
             proof_family,
             &record,
             correct_binding,
-            &transported_material_set,
             &accepted_setup_session,
         )
         .expect("correctly derived binding must decode authenticated material");
@@ -702,7 +686,6 @@ mod tests {
                 proof_family,
                 &record,
                 substituted_binding,
-                &transported_material_set,
                 &accepted_setup_session,
             )
             .err()

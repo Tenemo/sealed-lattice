@@ -1,11 +1,26 @@
 pub(crate) mod commands;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the internal ballot and evaluator path remains browser-compiled while end-to-end command composition is still open"
+    )
+)]
 pub(crate) mod direct_ballots;
 pub(crate) mod parameters;
 pub(crate) mod target_decryption;
 
+#[cfg(test)]
 mod base_conversion;
 mod coefficient_codec;
 mod encoding;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the internal ballot and evaluator path remains browser-compiled while end-to-end command composition is still open"
+    )
+)]
 pub(crate) mod evaluator;
 mod modular_arithmetic;
 mod ntt;

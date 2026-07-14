@@ -40,23 +40,6 @@ fn first_accepted_candidate_from_block(
 }
 
 #[cfg(test)]
-pub(super) fn sample_centered_binomial_eta2(
-    seed_hash: &str,
-    identity: &str,
-    label: &str,
-) -> Vec<Value> {
-    sample_positions()
-        .into_iter()
-        .map(|position| {
-            let value = centered_binomial_eta2_coefficient(seed_hash, identity, label, position);
-            json!({
-                "position": position,
-                "value": value,
-            })
-        })
-        .collect()
-}
-
 pub(super) fn dense_public_residues(
     seed_hash: &str,
     label: &str,
@@ -89,39 +72,9 @@ pub(super) fn dense_public_residues_with_degree(
     }
 }
 
-fn centered_binomial_eta2_coefficient(
-    seed_hash: &str,
-    identity: &str,
-    label: &str,
-    position: usize,
-) -> i64 {
-    let position_text = position.to_string();
-    let output = hash512(
-        "sealed-lattice-bgv-rns/sample-centered-binomial-eta2",
-        &[
-            seed_hash.as_bytes(),
-            identity.as_bytes(),
-            label.as_bytes(),
-            position_text.as_bytes(),
-        ],
-    );
-
-    centered_binomial_eta2_from_bits(output[0])
-}
-
-// Centered binomial distribution with eta=2, support [-2, 2]: takes 4 random
-// bits per sample and returns (b0 + b1) - (b2 + b3).
-// eta = 2 is the accepted error parameter: per-coefficient noise stays in
-// [-2, 2], which feeds the BGV noise budget and the commitment no-wrap bound.
-fn centered_binomial_eta2_from_bits(bits: u8) -> i64 {
-    let low_weight = i64::from(bits & 1) + i64::from((bits >> 1) & 1);
-    let high_weight = i64::from((bits >> 2) & 1) + i64::from((bits >> 3) & 1);
-
-    low_weight - high_weight
-}
-
 // Polynomial multiplication in Z_q[X]/(X^N + 1): forward NTT both operands,
 // multiply pointwise, then inverse NTT.
+#[cfg(test)]
 pub(super) fn negacyclic_product_mod(
     left: &[u64],
     right: &[u64],
@@ -197,21 +150,6 @@ pub(super) fn reduce_unbiased_u64(candidate: u64, modulus: u64) -> Option<u64> {
     } else {
         None
     }
-}
-
-pub(super) fn sample_positions() -> Vec<usize> {
-    let mut positions = vec![
-        0_usize,
-        1,
-        2,
-        17,
-        POLYNOMIAL_DEGREE / 2,
-        POLYNOMIAL_DEGREE - 1,
-    ];
-    positions.sort_unstable();
-    positions.dedup();
-
-    positions
 }
 
 #[cfg(test)]

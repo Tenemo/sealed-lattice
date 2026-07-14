@@ -59,61 +59,6 @@ pub(in super::super) fn vss_aggregate_threshold_proofs(
     }
 }
 
-pub(super) fn append_vss_aggregate_threshold_proof_material_transport(
-    package: &mut serde_json::Value,
-) {
-    let aggregate_proofs =
-        package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"]
-            .as_array()
-            .expect("VSS aggregate threshold proof records");
-    let aggregate_materials = aggregate_proofs
-        .iter()
-        .map(|proof_record| {
-            serde_json::json!({
-                "objectType": "SetupTransportedVssShareLinkageProofMaterial",
-                "proofMaterialRoot": proof_record["proofMaterialRoot"],
-            })
-        })
-        .collect::<Vec<_>>();
-
-    let package_object = package
-        .as_object_mut()
-        .expect("collective setup package object");
-    let transported_material_set = package_object
-        .entry("transportedVssShareLinkageProofMaterial")
-        .or_insert_with(|| {
-            serde_json::json!({
-                "objectType": "SetupTransportedVssShareLinkageProofMaterialSet",
-                "proofMaterials": [],
-            })
-        });
-    assert_eq!(
-        transported_material_set["objectType"], "SetupTransportedVssShareLinkageProofMaterialSet",
-        "VSS share-linkage transport set object type",
-    );
-    let transported_materials = transported_material_set["proofMaterials"]
-        .as_array_mut()
-        .expect("VSS share-linkage transported proof materials");
-    let mut retained_material_roots = transported_materials
-        .iter()
-        .map(|material| {
-            material["proofMaterialRoot"]
-                .as_str()
-                .expect("VSS share-linkage transported proof material root")
-                .to_string()
-        })
-        .collect::<std::collections::BTreeSet<_>>();
-    for aggregate_material in aggregate_materials {
-        let proof_material_root = aggregate_material["proofMaterialRoot"]
-            .as_str()
-            .expect("VSS aggregate threshold proof material root")
-            .to_string();
-        if retained_material_roots.insert(proof_material_root) {
-            transported_materials.push(aggregate_material);
-        }
-    }
-}
-
 fn vss_aggregate_threshold_proof_record(
     package: &serde_json::Value,
     aggregate_record: &serde_json::Value,
@@ -345,6 +290,8 @@ fn vss_aggregate_threshold_proof_generation_request(
     rns_limb_index: usize,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
     let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     // Bound-commitment order: the summand slots (coefficient commitments) then
     // the single aggregate recipient share. Context hashes read off the
@@ -387,12 +334,9 @@ fn vss_aggregate_threshold_proof_generation_request(
 
     serde_json::json!({
         "context": {
-            "ceremonyId": setup_context["ceremonyId"],
-            "manifestHash": setup_context["manifestHash"],
-            "rosterHash": setup_context["rosterHash"],
+            "setupContextHash": setup_context_hash,
             "trusteeIdentity": "vss-aggregate-threshold",
             "trusteeRosterPosition": 0,
-            "setupEpoch": setup_context["setupEpoch"],
             "shareLinkageStatementRoot": vss_aggregate["shareLinkageStatementRoot"],
         },
         "ringDegree": ring_degree,

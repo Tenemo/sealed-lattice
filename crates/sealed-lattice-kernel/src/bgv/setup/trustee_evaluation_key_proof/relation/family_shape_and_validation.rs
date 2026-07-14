@@ -4,12 +4,15 @@ use super::super::{
     VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS,
     VSS_PUBLIC_CONSISTENCY_REPETITIONS, invalid_succinct_setup_proof,
 };
-use super::linkage_and_vss_vectors::masked_claim_lift_residue_count_for_moduli;
+use super::linkage_and_vss_vectors::{
+    masked_claim_bounds_for_global_claim, masked_claim_lift_residue_count_for_moduli,
+};
 use super::statement_types::{
     EvaluationKeyShareKind, PrivateVssShareStatement, SameSecretBridgeStatement,
     SetupProofStatement, SuccinctSetupProofContext, TargetDecryptionShareStatement,
-    TrusteeEvaluationKeyStatement, VssShareLinkageCommitment, VssShareLinkageStatement,
+    TrusteeEvaluationKeyStatement, VssShareLinkageStatement,
 };
+use super::vss_vectors::VssShareLinkageCommitment;
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_ROW_COUNT,

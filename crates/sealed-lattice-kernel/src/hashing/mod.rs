@@ -9,10 +9,6 @@ use crate::encoding::{
     CanonicalError, CanonicalErrorCode, CanonicalResult, append_bytes, append_varuint,
 };
 
-mod chunk_tree;
-
-pub use chunk_tree::chunk_root;
-
 pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/hash512";
 // Canonical objects are separated by their mandatory `objectType`
 // discriminator inside canonical JSON rather than per-type domain strings.
@@ -605,7 +601,7 @@ pub(crate) fn derive_canonical_object_hash_omitting_field_paths(
 #[cfg(test)]
 mod tests {
     use super::{
-        CanonicalJsonPathSegment, canonical_json, chunk_root,
+        CanonicalJsonPathSegment, canonical_json,
         derive_canonical_object_hash_omitting_field_paths, hash512_hex, hash512_hex_streamed_part,
     };
     use crate::encoding::CanonicalErrorCode;
@@ -717,28 +713,6 @@ mod tests {
             assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
             assert!(error.message.contains("only ASCII characters"));
         }
-    }
-
-    #[test]
-    fn chunk_root_changes_with_chunk_size() {
-        let input = b"0123456789abcdef";
-
-        assert_ne!(
-            chunk_root(input, 4).expect("chunk root should compute"),
-            chunk_root(input, 8).expect("chunk root should compute"),
-        );
-    }
-
-    #[test]
-    fn chunk_root_separates_empty_input_from_zero_leaf_input() {
-        assert_ne!(
-            chunk_root(&[], 1).expect("empty chunk root should compute"),
-            chunk_root(&[0], 1).expect("single zero chunk root should compute"),
-        );
-        assert_ne!(
-            chunk_root(&[], 64).expect("empty chunk root should compute"),
-            chunk_root(&[0; 64], 64).expect("full zero chunk root should compute"),
-        );
     }
 
     #[test]

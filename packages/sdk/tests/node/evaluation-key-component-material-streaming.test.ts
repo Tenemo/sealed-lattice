@@ -165,12 +165,13 @@ const {
 const { bgvCanonicalStreamFamilies } =
     await import('@sealed-lattice/wasm/published-sdk');
 
-const prepare = (input: JsonRecord): Promise<JsonRecord> =>
-    prepareSnapshottedSetupPackageVerificationInputForKernel(
+const prepare = async (input: JsonRecord): Promise<void> => {
+    await prepareSnapshottedSetupPackageVerificationInputForKernel(
         {} as TranscriptCoreKernel,
         snapshotSetupPackageVerificationInput(input as never),
         {} as AcceptedSetupSession,
     );
+};
 
 describe('evaluation-key component material streaming before terminal verification', () => {
     beforeEach(() => {
@@ -193,7 +194,7 @@ describe('evaluation-key component material streaming before terminal verificati
             secondComponentMaterialRoot,
             [0xcc, 0xdd],
         );
-        const verificationInput = await prepare({
+        await prepare({
             setupPackage: setupPackageWithComponentReferences({
                 roundOneRoots: [componentMaterialRoot],
                 galoisRoots: [secondComponentMaterialRoot],
@@ -236,13 +237,6 @@ describe('evaluation-key component material streaming before terminal verificati
             { chunkIndex: 0, expectedByteLength: 4 },
             { chunkIndex: 1, expectedByteLength: 0 },
         ]);
-        const normalizedComponentMaterials = (
-            verificationInput.transportedEvaluationKeyShareComponentMaterial as JsonRecord
-        ).componentMaterials as readonly JsonRecord[];
-        expect(normalizedComponentMaterials).toHaveLength(2);
-        expect(normalizedComponentMaterials[0]).toMatchObject({
-            keySwitchComponentMaterialRoot: componentMaterialRoot,
-        });
     });
 
     it('uses one descriptor snapshot when a chunk callback mutates the caller buffer', async () => {
@@ -260,7 +254,7 @@ describe('evaluation-key component material streaming before terminal verificati
                 return source.pullChunk(request);
             },
         );
-        const verificationInput = await prepare({
+        await prepare({
             setupPackage: setupPackageWithComponentReferences({
                 roundOneRoots: [componentMaterialRoot],
             }),
@@ -297,12 +291,6 @@ describe('evaluation-key component material streaming before terminal verificati
         expect(streamedInput?.descriptorBytes).not.toBe(
             callerMaterial.descriptorBytes,
         );
-        const normalizedComponentMaterials = (
-            verificationInput.transportedEvaluationKeyShareComponentMaterial as JsonRecord
-        ).componentMaterials as readonly JsonRecord[];
-        expect(normalizedComponentMaterials[0]).toMatchObject({
-            keySwitchComponentMaterialRoot: componentMaterialRoot,
-        });
     });
 
     it('surfaces a canonical stream rejection instead of swallowing it', async () => {

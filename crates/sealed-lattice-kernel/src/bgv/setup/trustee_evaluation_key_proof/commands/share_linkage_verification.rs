@@ -1,6 +1,8 @@
 use super::decoding::*;
 use super::share_linkage_transport::*;
 use super::*;
+use crate::bgv::setup::trustee_evaluation_key_proof::VSS_SHARE_LINKAGE_PROOF_FAMILY;
+use crate::encoding::CanonicalError;
 
 pub(super) struct VssShareLinkageMaterialRecordStatementInput<'a> {
     pub(super) proof_statement: &'a Value,
@@ -213,7 +215,12 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
         ));
     }
     let coefficient_records = array_field(coefficient_source_record, "coefficientCommitments")?;
-    for coefficient_index in 0..threshold_degree {
+    for (coefficient_index, (coefficient_commitment_root, coefficient_commitment)) in
+        coefficient_commitment_roots
+            .iter()
+            .zip(coefficient_commitments)
+            .enumerate()
+    {
         let coefficient_record_index = source_rns_limb_index
             .checked_mul(threshold_degree)
             .and_then(|offset| offset.checked_add(coefficient_index))
@@ -243,11 +250,11 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
             "share-linkage proof coefficient shamirCoefficientIndex",
         )?;
         compare_string_value(
-            &coefficient_commitment_roots[coefficient_index],
+            coefficient_commitment_root,
             read_string(coefficient_record, "coefficientCommitmentRoot")?,
             "share-linkage proof coefficientCommitmentRoot",
         )?;
-        if coefficient_commitments.get(coefficient_index) != coefficient_record.get("commitment") {
+        if Some(coefficient_commitment) != coefficient_record.get("commitment") {
             return Err(invalid_succinct_setup_proof(
                 "share-linkage proof coefficient commitment body must match the public coefficient record",
             ));
@@ -470,13 +477,13 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
             None => false,
         };
         if !proof_binding_was_consumed {
-            let resolved_proof_bytes = resolve_vss_share_linkage_proof_bytes(
+            let proof_bytes = resolve_vss_share_linkage_proof_bytes(
                 validated_proof_reference,
                 proof_binding_session,
             )?;
             verify_vss_share_linkage_proof_source_from_request(
                 &proof_request,
-                resolved_proof_bytes.proof_bytes.as_ref(),
+                proof_bytes.as_ref(),
             )
             .map_err(|error| {
                 CanonicalError::new(

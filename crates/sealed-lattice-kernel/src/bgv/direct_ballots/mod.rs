@@ -5,25 +5,29 @@ mod encryption;
 mod evaluator_replay;
 #[cfg(test)]
 mod request;
-mod target_proposal;
 #[cfg(test)]
 use aggregation::*;
 #[cfg(test)]
 use encryption::*;
+#[cfg(test)]
 pub(crate) use evaluator_replay::{
-    DirectBallotPackedBatchedPairEvaluatorInput,
+    DirectBallotPackedBatchedPairEvaluatorInput, direct_ballot_comparison_domain_max,
+    direct_ballot_evaluator_working_level, direct_ballot_plaintext_target_slots,
     run_direct_ballot_packed_batched_pair_evaluator_for_top_counts,
 };
 #[cfg(test)]
-pub(crate) use evaluator_replay::{
-    direct_ballot_comparison_domain_max, direct_ballot_evaluator_working_level,
-    direct_ballot_plaintext_target_slots,
-};
-#[cfg(test)]
 use request::*;
-use target_proposal::*;
-
 use serde_json::{Value, json};
+
+#[cfg(test)]
+use crate::bgv::{
+    evaluator::engine::{
+        EncryptionWitness, ciphertext_add, encode_slots_to_coefficients, negacyclic_mul,
+        signed_residue,
+    },
+    modular_arithmetic::add_mod,
+    parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+};
 
 #[cfg(test)]
 mod relation_proof;
@@ -34,23 +38,15 @@ use relation_proof::DirectBallotRelationProofGeneration;
 use relation_proof::{generate_direct_ballot_relation_proof, verify_direct_ballot_relation_proof};
 
 use crate::{
-    bgv::{
-        evaluator::{
-            circuit::{EvaluatorContext, modulus_switch_to},
-            engine::{
-                Ciphertext, DevelopmentBgvKey, EncryptionWitness, ciphertext_add,
-                ciphertext_object_root, encode_slots_to_coefficients, negacyclic_mul,
-                signed_residue,
-            },
-            records::target_layout_hash,
-            top_k::{
-                SELECTED_EVALUATOR_WORKING_LEVEL,
-                evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
-                pack_direct_score_slots, project_packed_sparse_target_from_rank_evaluation,
-            },
+    bgv::evaluator::{
+        circuit::{EvaluatorContext, modulus_switch_to},
+        engine::{Ciphertext, DevelopmentBgvKey, ciphertext_object_root},
+        records::target_layout_hash,
+        top_k::{
+            SELECTED_EVALUATOR_WORKING_LEVEL,
+            evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
+            pack_direct_score_slots, project_packed_sparse_target_from_rank_evaluation,
         },
-        modular_arithmetic::add_mod,
-        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::hash512_hex,

@@ -64,7 +64,6 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
             aggregate_ciphertext: &aggregate_ciphertext,
             ballot_count,
             top_counts: &[top_count],
-            target_finality_policy_hash: None,
         },
     )
     .expect("production evaluator replay");

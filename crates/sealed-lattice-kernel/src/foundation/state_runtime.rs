@@ -7,9 +7,9 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use super::{
-    CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512,
-    ParticipantIdentity, PreservedStateIntent, RefusalReason, Roster, StateCapabilityKind,
-    StateDurableBinding, StateRecoveryIntentVerificationInput, StateRecoveryVerificationInput,
+    CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, ParticipantIdentity, PreservedStateIntent,
+    RefusalReason, Roster, StateCapabilityKind, StateDurableBinding,
+    StateRecoveryIntentVerificationInput, StateRecoveryVerificationInput,
     StateReservationIntentVerificationInput, StateReservationVerificationInput, StateVerifier,
     VerifiedStateOutput, VerifiedStateOutputIntent, VerifiedStateRecovery,
     VerifiedStateRecoveryIntent, VerifiedStateReservation, VerifiedStateReservationIntent,

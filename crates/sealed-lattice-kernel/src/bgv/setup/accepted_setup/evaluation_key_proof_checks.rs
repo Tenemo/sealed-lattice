@@ -2,6 +2,7 @@ use super::*;
 
 use super::same_secret_bridge_verification::VerifiedSameSecretBridgeMaterial;
 use crate::bgv::setup::commitment::setup_commitment_root;
+use crate::bgv::setup::setup_proof::take_verified_setup_proof_material_bytes;
 use crate::hashing::derive_canonical_object_hash;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::{
@@ -14,7 +15,7 @@ use crate::hashing::to_hex;
 
 // Verification of the per-trustee succinct evaluation-key arguments: every
 // trustee's single proof covers its whole frozen key schedule, and the
-// verifier rebuilds each statement from the transported share records, the
+// verifier rebuilds each statement from the authenticated share records, the
 // recomputed round-one public aggregates, the accepted same-secret constant
 // commitments, and the ceremony context. No proof material inside the share
 // records is trusted; everything verification-relevant is recomputed here.
@@ -126,10 +127,8 @@ fn verify_trustee_evaluation_key_proof_set(
         }
     }
     trustee_evaluation_key_verify_progress(|| "shared-inputs-start".to_string());
-    let round_one_aggregate_diagonals_by_level = round_one_public_aggregate_diagonals_from_package(
-        setup_package,
-        proof_binding_session,
-    )?;
+    let round_one_aggregate_diagonals_by_level =
+        round_one_public_aggregate_diagonals_from_package(setup_package, proof_binding_session)?;
     trustee_evaluation_key_verify_progress(|| "shared-inputs-finish".to_string());
 
     let verify_record = |record_position: usize, proof_record: &Value| -> CanonicalResult<()> {
@@ -212,10 +211,8 @@ fn verify_trustee_evaluation_key_proof_record(
         proof_material_root,
         &verification_binding_hash,
     )? {
-        let proof_bytes = trustee_evaluation_key_proof_bytes_from_record(
-            proof_record,
-            proof_binding_session,
-        )?;
+        let proof_bytes =
+            trustee_evaluation_key_proof_bytes_from_record(proof_record, proof_binding_session)?;
         if value_string(proof_record, "proofBytesHash")?
             != trustee_evaluation_key_proof_material_bytes_hash(proof_bytes.as_ref())?
         {
@@ -624,12 +621,6 @@ fn trustee_evaluation_key_proof_bytes_from_record(
         proof_material_root,
         "trusteeEvaluationKeyProof.proofMaterialRoot",
     )?;
-    let proof_bytes = take_verified_setup_proof_material_bytes(
-        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        proof_material_root,
-        "trusteeEvaluationKeyProof.proofMaterialRoot",
-        Some(proof_binding_session),
-    )?;
     let expected_material_root = trustee_evaluation_key_proof_material_root(proof_record)?;
     if proof_material_root != expected_material_root {
         return Err(CanonicalError::new(
@@ -637,8 +628,12 @@ fn trustee_evaluation_key_proof_bytes_from_record(
             "trustee evaluation-key proofMaterialRoot must match the canonical proof material reference",
         ));
     }
-
-    Ok(proof_bytes)
+    take_verified_setup_proof_material_bytes(
+        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        proof_material_root,
+        "trusteeEvaluationKeyProof.proofMaterialRoot",
+        Some(proof_binding_session),
+    )
 }
 
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(

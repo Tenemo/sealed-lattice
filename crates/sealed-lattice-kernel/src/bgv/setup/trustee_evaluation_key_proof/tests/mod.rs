@@ -662,7 +662,7 @@ fn component_material_bytes_for_request_key(
 ) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"SLEKCMV1");
-    for value in [key.level, ring_degree, key.level + 1, key.level + 1] {
+    for value in [key.level, ring_degree] {
         bytes.extend_from_slice(&(value as u64).to_le_bytes());
     }
     for component_b_by_limb in &key.component_b_by_digit {

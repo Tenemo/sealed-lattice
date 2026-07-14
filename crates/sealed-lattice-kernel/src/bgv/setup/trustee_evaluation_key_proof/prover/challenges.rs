@@ -318,12 +318,11 @@ pub(in super::super) fn build_limb_public_vectors(
         });
     }
     if layout.target_decryption_active() {
-        let target_decryption_share =
-            statement.target_decryption_share().ok_or_else(|| {
-                invalid_succinct_setup_proof(
-                    "target-decryption layout requires a target share statement",
-                )
-            })?;
+        let target_decryption_share = statement.target_decryption_share().ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "target-decryption layout requires a target share statement",
+            )
+        })?;
         let mut combined_claim = ChallengeExtensionTower::zero();
         let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
         for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {

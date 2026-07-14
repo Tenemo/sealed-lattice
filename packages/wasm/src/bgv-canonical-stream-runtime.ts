@@ -446,15 +446,11 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 readerLease.state = 'failed';
                 this.#release(readerLease);
                 readerLease = undefined;
-            } else if (
-                handle !== 0 &&
-                this.#activeLease === undefined
-            ) {
+            } else if (handle !== 0 && this.#activeLease === undefined) {
                 try {
                     const cancelStatus = this.#context.runExclusive(
                         'BGV canonical material reader begin cleanup',
-                        () =>
-                            this.#context.bgvMaterialReaderCancel!(handle),
+                        () => this.#context.bgvMaterialReaderCancel!(handle),
                     );
                     if (cancelStatus >>> 0 !== runtimeInvalidSessionStatus) {
                         this.#throwStatus(cancelStatus);
@@ -759,10 +755,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
         throw operationFailure;
     }
 
-    #cancelUnactivated(
-        handle: number,
-        operationFailure: unknown,
-    ): never {
+    #cancelUnactivated(handle: number, operationFailure: unknown): never {
         try {
             const status = this.#context.runExclusive(
                 'BGV canonical stream begin failure cleanup',

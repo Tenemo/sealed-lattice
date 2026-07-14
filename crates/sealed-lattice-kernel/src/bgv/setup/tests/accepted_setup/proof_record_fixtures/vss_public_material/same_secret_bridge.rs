@@ -396,8 +396,6 @@ fn vss_public_material_fixture_verifies_generated_fields() {
             "recipientShareCommitmentSet": package["vssPublicRecipientShareCommitmentSet"],
             "aggregateThresholdCommitmentSet": package["vssPublicAggregateThresholdCommitmentSet"],
             "proofMaterialSet": package["vssShareLinkageProofMaterialSet"],
-            "transportedVssShareLinkageProofMaterial":
-                proof_material_fixture.verification_request["transportedVssShareLinkageProofMaterial"],
         }),
         Some(&proof_binding_session),
     )
@@ -412,8 +410,6 @@ fn vss_public_material_fixture_verifies_generated_fields() {
         "coefficientCommitmentSet": package["vssPublicCoefficientCommitmentSet"],
         "vssCoefficientCommitments": package["vssCoefficientCommitments"],
         "proofMaterialSet": package["sameSecretBridgeProofMaterialSet"],
-        "transportedSameSecretBridgeProofMaterial":
-            proof_material_fixture.verification_request["transportedSameSecretBridgeProofMaterial"],
     });
     crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(&bridge_request)
         .expect("generated same-secret bridge statement set verifies");

@@ -3,6 +3,7 @@ use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufWriter, Write};
 
+use crate::bgv::setup_helpers::validate_hash_string;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::foundation::FOUNDATION_PROFILE;
 use crate::hashing::derive_canonical_object_hash;
@@ -40,7 +41,7 @@ fn stored_verified_evaluation_key_share_component_material_chunks(
     )?
     .ok_or_else(|| {
         invalid_evaluation_key_share_material(
-            "transported evaluation-key component material is not owned by the accepted-setup session",
+            "evaluation-key component material is not owned by the accepted-setup session",
         )
     })?;
     read_verified_evaluation_key_share_component_material_chunks(store_entry)
@@ -205,12 +206,7 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_record(
         accepted_setup_session,
         expected_material_root,
         proof_family.proof_family(),
-    )
-    .map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material was not authenticated by the canonical binary stream",
-        )
-    })?;
+    )?;
     let decoded_material = decode_evaluation_key_share_component_vectors(
         proof_family,
         record,
@@ -340,12 +336,16 @@ fn decode_evaluation_key_share_component_vectors(
     validate_hex_string(derived_binding.key_switch_seed_hex, "keySwitchSeedHex")?;
     let mut component_b_by_digit = vec![vec![Vec::<u64>::new(); limb_count]; digit_count];
     let mut entries = Vec::with_capacity(digit_count * limb_count);
-    for digit_index in 0..digit_count {
-        for rns_limb_index in 0..limb_count {
+    for (digit_index, component_b_limbs) in component_b_by_digit.iter_mut().enumerate() {
+        for (rns_limb_index, (component_b_limb, &rns_prime)) in component_b_limbs
+            .iter_mut()
+            .zip(DATA_PRIMES.iter())
+            .enumerate()
+        {
             let mut coefficients = Vec::with_capacity(ring_degree);
             for _ in 0..ring_degree {
                 let coefficient = reader.read_u64()?;
-                if coefficient >= DATA_PRIMES[rns_limb_index] {
+                if coefficient >= rns_prime {
                     return Err(invalid_evaluation_key_share_material(
                         "evaluation-key component material contains non-canonical Q_share residues",
                     ));
@@ -355,10 +355,10 @@ fn decode_evaluation_key_share_component_vectors(
             entries.push(json!({
                 "digitIndex": digit_index,
                 "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": DATA_PRIMES[rns_limb_index],
+                "rnsPrime": rns_prime,
                 "coefficientsLeHex": coefficient_vector_le_hex(&coefficients),
             }));
-            component_b_by_digit[digit_index][rns_limb_index] = coefficients;
+            *component_b_limb = coefficients;
         }
     }
     if !reader.is_exhausted() {
@@ -376,7 +376,7 @@ fn decode_evaluation_key_share_component_vectors(
     )?;
     if string_field(record, "keySwitchComponentVectorRoot")? != expected_root {
         return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component vector root does not match transported public material",
+            "evaluation-key component vector root does not match authenticated public material",
         ));
     }
 

@@ -82,21 +82,7 @@ export type SetupPackageVerificationInputSource = Readonly<{
     readonly transportedEvaluationKeyShareComponentMaterial: TransportedEvaluationKeyShareComponentMaterialSet;
 }>;
 
-export type SetupPackageVerificationInput = Readonly<
-    Omit<
-        SetupPackageVerificationInputSource,
-        | 'transportedPublicKeyShareMaterial'
-        | 'transportedPublicKeyShareProofMaterial'
-        | 'transportedEvaluationKeyShareProofMaterial'
-        | 'transportedVssShareLinkageProofMaterial'
-        | 'transportedSameSecretBridgeProofMaterial'
-        | 'transportedEvaluationKeyShareComponentMaterial'
-    > & {
-        readonly transportedPublicKeyShareMaterial: JsonRecord;
-        readonly transportedPublicKeyShareProofMaterial: JsonRecord;
-        readonly transportedEvaluationKeyShareProofMaterial: JsonRecord;
-        readonly transportedVssShareLinkageProofMaterial: JsonRecord;
-        readonly transportedSameSecretBridgeProofMaterial: JsonRecord;
-        readonly transportedEvaluationKeyShareComponentMaterial: JsonRecord;
-    }
+export type SetupPackageVerificationInput = Pick<
+    SetupPackageVerificationInputSource,
+    'setupPackage' | 'expectedManifestHash' | 'expectedRosterHash'
 >;

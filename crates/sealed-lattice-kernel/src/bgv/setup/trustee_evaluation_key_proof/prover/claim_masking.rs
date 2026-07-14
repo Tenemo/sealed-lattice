@@ -3,10 +3,10 @@ use super::super::relation::{
     LimbColumnLayout, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
     claim_mask_digit_count_for_global_claim,
 };
-use super::super::CLAIM_MASK_RADIX;
+use super::super::{CLAIM_MASK_RADIX, column_mask_degree};
 use super::CLAIM_MASK_DOMAIN;
-use super::vss_committed_material::same_secret_bridge_target_message_coefficients;
 use crate::bgv::evaluator::prg::DeterministicSampler;
+use crate::bgv::modular_arithmetic::{add_mod_fast, sub_mod_fast};
 use crate::encoding::CanonicalResult;
 use num_bigint::BigInt;
 
@@ -264,6 +264,7 @@ fn append_vss_public_trit_vectors(
 pub(super) fn global_claim_integers(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
+    bound_message_coefficients: &[Vec<u64>],
     consistency_vectors: &[Vec<u64>],
     proof_randomness_seed_hex: &str,
 ) -> Vec<BigInt> {
@@ -396,18 +397,12 @@ pub(super) fn global_claim_integers(
         }
         if statement.same_secret_linkage().is_some() || statement.same_secret_bridge().is_some() {
             signed_vectors.push(witness.negative_indicator_coefficients());
-            if let Some(bridge) = statement.same_secret_bridge() {
-                for target_messages in same_secret_bridge_target_message_coefficients(
-                    &bridge.bridge_rns_primes,
-                    witness.secret_coefficients(),
-                    witness.negative_indicator_coefficients(),
-                )
-                .expect("same-secret bridge witness is validated before claim masking")
-                {
+            if statement.same_secret_bridge().is_some() {
+                for target_messages in bound_message_coefficients {
                     let target_messages = target_messages
-                        .into_iter()
+                        .iter()
                         .map(|target_message| {
-                            i64::try_from(target_message)
+                            i64::try_from(*target_message)
                                 .expect("same-secret bridge message fits i64")
                         })
                         .collect::<Vec<_>>();

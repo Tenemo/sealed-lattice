@@ -16,7 +16,6 @@ pub(super) enum VssPublicMaterialVerification {
 
 pub(super) fn verify_vss_public_material(
     setup_package: &Value,
-    request: &Value,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<VssPublicMaterialVerification> {
     let public_material_fields = [
@@ -44,7 +43,7 @@ pub(super) fn verify_vss_public_material(
         ));
     }
 
-    match verify_vss_public_material_binding(setup_package, request, proof_binding_session) {
+    match verify_vss_public_material_binding(setup_package, proof_binding_session) {
         Ok(()) => Ok(VssPublicMaterialVerification::Verified),
         Err(error) => Ok(VssPublicMaterialVerification::Refused(
             vss_public_material_refusal(
@@ -58,7 +57,6 @@ pub(super) fn verify_vss_public_material(
 
 fn verify_vss_public_material_binding(
     setup_package: &Value,
-    request: &Value,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<()> {
     let coefficient_set = setup_package
@@ -77,7 +75,7 @@ fn verify_vss_public_material_binding(
         .get(VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD)
         .ok_or_else(|| public_material_error("share-linkage proof material set"))?;
 
-    let mut proof_material_request = serde_json::Map::from_iter([
+    let proof_material_request = serde_json::Map::from_iter([
         ("statement".to_string(), statement.clone()),
         (
             "coefficientCommitmentSet".to_string(),
@@ -93,14 +91,6 @@ fn verify_vss_public_material_binding(
         ),
         ("proofMaterialSet".to_string(), proof_material_set.clone()),
     ]);
-    for field_name in [
-        "transportedVssShareLinkageProofMaterial",
-        "verifiedSetupProofMaterials",
-    ] {
-        if let Some(value) = request.get(field_name) {
-            proof_material_request.insert(field_name.to_string(), value.clone());
-        }
-    }
     let statement_verification =
         crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_statement_and_proof_material_set_from_request(
             &Value::Object(proof_material_request),
@@ -197,7 +187,6 @@ mod tests {
                 "vssShareLinkageStatement": {},
                 "vssShareLinkageProofMaterialSet": {},
             }),
-            &json!({}),
             None,
         )
         .expect("complete VSS public material refusal") else {

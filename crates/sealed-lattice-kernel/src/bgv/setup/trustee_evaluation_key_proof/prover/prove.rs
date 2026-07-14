@@ -35,7 +35,7 @@ use super::{
     SuccinctEvaluationKeyProof,
 };
 use crate::bgv::evaluator::prg::DeterministicSampler;
-use crate::bgv::modular_arithmetic::inverse_mod;
+use crate::bgv::modular_arithmetic::{inverse_mod, mul_mod_fast, sub_mod_fast};
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
 use crate::encoding::CanonicalResult;
@@ -778,6 +778,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
     let claim_integers = global_claim_integers(
         statement,
         witness,
+        &bound_material.message_coefficients,
         &consistency_vectors,
         proof_randomness_seed_hex,
     );

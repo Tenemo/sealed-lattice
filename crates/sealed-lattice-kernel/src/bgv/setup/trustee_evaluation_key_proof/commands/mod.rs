@@ -6,23 +6,13 @@ use super::proof_codec::{
 };
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
-    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, KeyBearingWitness,
-    SameSecretBridgeStatement, SameSecretLinkageStatement, SameSecretLinkageWitness,
-    SetupProofStatement, SuccinctSetupProofContext, SuccinctSetupProofFamilyShape,
+    KeyBearingWitness, SameSecretLinkageWitness, SetupProofStatement,
     TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, VssCommittedMaterialWitness,
-    VssShareLinkageCommitment, VssShareLinkageItem, VssShareLinkageStatement,
 };
-use super::relation::{
-    TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
-    TargetDecryptionShareStatement,
-};
-use super::invalid_succinct_setup_proof;
 use super::verifier::verify_evaluation_key_share;
+use super::{VSS_SHARE_LINKAGE_PROOF_FAMILY, invalid_succinct_setup_proof};
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::ProofByteSource;
-use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, parse_setup_commitment_full_value,
-};
 use crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule as atom_schedule;
 use crate::bgv::setup::same_secret_bridge::SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN;
 use crate::bgv::setup::setup_proof::{
@@ -139,7 +129,7 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
                     )?,
                 },
             }
-        },
+        }
         _ => {
             return Err(invalid_succinct_setup_proof(
                 "trustee proof generator requires a key-bearing proof statement",
@@ -348,7 +338,9 @@ use decoding::{
 #[cfg(test)]
 pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::same_secret_bridge_statement_from_request;
 pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::statement_from_request;
-use request_parsing::{vss_share_linkage_statement_from_request, vss_share_linkage_witness_from_request};
+use request_parsing::{
+    vss_share_linkage_statement_from_request, vss_share_linkage_witness_from_request,
+};
 #[cfg(test)]
 use share_linkage_verification::compare_string_value;
 
