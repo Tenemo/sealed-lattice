@@ -12,9 +12,10 @@ import {
 
 import {
     decapsulateClosedMailboxCiphertext,
-    encapsulateFreshMailbox,
-    signFreshMailboxEnvelope,
+    encapsulateResetSafeSetupMailbox,
+    signResetSafeSetupMailboxEnvelope,
     type BrowserLocalMailboxCapability,
+    type BrowserLocalSetupMailboxSlot,
     type BrowserLocalSigningCapability,
 } from './browser-local-key-provider.js';
 
@@ -116,6 +117,9 @@ export type AuthenticatedMailboxKernel = Readonly<{
         readonly kemCiphertextHex: string;
     }): ProtocolHash;
     deriveMailboxEnvelopeHash(value: UnsignedMailboxEnvelope): ProtocolHash;
+    deriveSetupMailboxSlotHash(
+        value: BrowserLocalSetupMailboxSlot,
+    ): ProtocolHash;
 }>;
 
 type MailboxLeaseState =
@@ -479,6 +483,24 @@ const producerSlot = (
     producerSequence: associatedData.producerSequence,
     payloadType: associatedData.payloadType,
 });
+
+const resetSafeSetupMailboxSlot = (
+    associatedData: AuthenticatedMailboxSealCommonInput['associatedData'],
+): BrowserLocalSetupMailboxSlot =>
+    Object.freeze({
+        suiteId: associatedData.suiteId,
+        ceremonyContextHash: associatedData.ceremonyContextHash,
+        actionContextHash: associatedData.actionContextHash,
+        rosterHash: associatedData.rosterHash,
+        sourceParticipantId: associatedData.sourceParticipantId,
+        recipientParticipantId: associatedData.recipientParticipantId,
+        producerSequence: associatedData.producerSequence,
+        payloadType: associatedData.payloadType,
+        statementHash: associatedData.statementHash,
+        orderedMaterialRoots: Object.freeze([
+            ...associatedData.orderedMaterialRoots,
+        ]),
+    });
 
 const expectedChunkCount = (totalByteLength: number): number =>
     Math.ceil(totalByteLength / foundationProfile.streamChunkByteLength);
@@ -851,6 +873,11 @@ const cachedSeal = async (
 const sealMailbox = async (
     input: AuthenticatedMailboxSealCommonInput,
 ): Promise<AuthenticatedMailboxCarrier> => {
+    const setupMailboxSlot = resetSafeSetupMailboxSlot(input.associatedData);
+    const stableInput: AuthenticatedMailboxSealCommonInput = {
+        ...input,
+        associatedData: setupMailboxSlot,
+    };
     const plaintextByteLength = requireMailboxByteLength(
         input.plaintextByteLength,
         'plaintextByteLength',
@@ -868,11 +895,15 @@ const sealMailbox = async (
     const chunkCount = expectedChunkCount(plaintextByteLength);
     const cacheLease = await input.outboundCache.reserve({
         plaintextByteLength,
-        producerSlot: producerSlot(input.associatedData),
+        producerSlot: producerSlot(setupMailboxSlot),
     });
     if (cacheLease.disposition === 'cached') {
         try {
-            return await cachedSeal(input, cacheLease, sourceVerificationKey);
+            return await cachedSeal(
+                stableInput,
+                cacheLease,
+                sourceVerificationKey,
+            );
         } finally {
             recipientEncapsulationKey.fill(0);
             sourceVerificationKey.fill(0);
@@ -889,15 +920,20 @@ const sealMailbox = async (
     let result: AuthenticatedMailboxCarrier | undefined;
     try {
         throwIfAborted(input.abortSignal);
-        const encapsulation = encapsulateFreshMailbox({
+        const setupMailboxSlotHash =
+            input.kernel.deriveSetupMailboxSlotHash(setupMailboxSlot);
+        const encapsulation = encapsulateResetSafeSetupMailbox({
+            setupMailboxSlot,
+            setupMailboxSlotHash,
             signingCapability: input.sourceSigningCapability,
             recipientEncapsulationKey,
+            sourceVerificationKey,
         });
         envelopeAttemptIdentifier = encapsulation.envelopeAttemptIdentifier;
         sharedSecret = encapsulation.sharedSecret;
         const kemCiphertextHex = bytesToHex(encapsulation.ciphertext);
         const keyScheduleInput: MailboxKeyScheduleInput = {
-            ...input.associatedData,
+            ...setupMailboxSlot,
             envelopeAttemptIdentifierHex: bytesToHex(envelopeAttemptIdentifier),
             kemCiphertextHash: input.kernel.deriveMailboxKemCiphertextHash({
                 kemCiphertextHex,
@@ -974,7 +1010,7 @@ const sealMailbox = async (
             };
             const envelopeHash =
                 input.kernel.deriveMailboxEnvelopeHash(unsignedEnvelope);
-            const sourceSignature = signFreshMailboxEnvelope({
+            const sourceSignature = signResetSafeSetupMailboxEnvelope({
                 signingCapability: input.sourceSigningCapability,
                 signingPermit: encapsulation.signingPermit,
                 envelopeHash,

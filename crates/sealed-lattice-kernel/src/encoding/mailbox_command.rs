@@ -262,6 +262,7 @@ fn stream_descriptor_from_json(value: &Value) -> CanonicalResult<StreamDescripto
     StreamDescriptor::new(
         required_u64_decimal(object, "totalByteLength")?,
         ordered_chunk_digests,
+        hash_from_value(required_value(object, "fullObjectDigest")?, "fullObjectDigest")?,
     )
     .map_err(schema_error)
 }
@@ -274,6 +275,7 @@ fn stream_descriptor_to_json(descriptor: &StreamDescriptor) -> Value {
             .iter()
             .map(|digest| digest.to_lowercase_hex())
             .collect::<Vec<_>>(),
+        "fullObjectDigest": descriptor.full_object_digest.to_lowercase_hex(),
     })
 }
 
@@ -456,6 +458,7 @@ mod tests {
             "ciphertextDescriptor": {
                 "totalByteLength": "64",
                 "orderedChunkDigests": ["a1".repeat(64)],
+                "fullObjectDigest": "a2".repeat(64),
             },
             "gcmTagHex": "b1".repeat(MAILBOX_GCM_TAG_BYTE_LENGTH),
         })

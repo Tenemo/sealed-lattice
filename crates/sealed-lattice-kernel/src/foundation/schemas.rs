@@ -307,13 +307,19 @@ impl Roster {
 pub struct StreamDescriptor {
     pub total_byte_length: u64,
     pub ordered_chunk_digests: Vec<Hash512>,
+    pub full_object_digest: Hash512,
 }
 
 impl StreamDescriptor {
-    pub fn new(total_byte_length: u64, ordered_chunk_digests: Vec<Hash512>) -> SchemaResult<Self> {
+    pub fn new(
+        total_byte_length: u64,
+        ordered_chunk_digests: Vec<Hash512>,
+        full_object_digest: Hash512,
+    ) -> SchemaResult<Self> {
         let descriptor = Self {
             total_byte_length,
             ordered_chunk_digests,
+            full_object_digest,
         };
         descriptor.validate()?;
         Ok(descriptor)
@@ -366,6 +372,7 @@ impl StreamDescriptor {
             vec![
                 CanonicalItem::unsigned64(self.total_byte_length),
                 CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &chunk_digests)?,
+                CanonicalItem::hash512(self.full_object_digest.into_bytes()),
             ],
         ))
     }
@@ -377,8 +384,12 @@ impl StreamDescriptor {
     }
 
     pub(super) fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, 2)?;
-        Self::new(read_u64(&tuple.items[0])?, read_hash_list(&tuple.items[1])?)
+        require_header(tuple, STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, 3)?;
+        Self::new(
+            read_u64(&tuple.items[0])?,
+            read_hash_list(&tuple.items[1])?,
+            read_hash(&tuple.items[2])?,
+        )
     }
 }
 

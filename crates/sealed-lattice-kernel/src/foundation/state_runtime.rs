@@ -26,6 +26,12 @@ const STATE_VERIFIER_CONFIGURATION_VERSION: u16 = 1;
 const FIXED_CONFIGURATION_BYTE_LENGTH: usize = 2 + 3 * Hash512::BYTE_LENGTH + 2 + 4;
 const MAXIMUM_RETAINED_VERIFIED_STATE_OBJECT_COUNT: usize = 512;
 
+#[derive(Clone, Copy)]
+pub(crate) struct VerifiedStateReservationRuntimeBinding {
+    pub(crate) authorization_hash: Hash512,
+    pub(crate) durable_binding: StateDurableBinding,
+}
+
 enum RuntimeVerifiedStateObject {
     ReservationIntent(VerifiedStateReservationIntent),
     OutputIntent(VerifiedStateOutputIntent),
@@ -528,6 +534,25 @@ impl StateVerifierRuntimeRegistry {
         encode_durable_binding(session.durable_binding(verified_object_handle)?)
     }
 
+    fn reservation_binding(
+        &self,
+        session_handle: u32,
+        capability: &[u8],
+        verified_reservation_handle: u32,
+    ) -> RuntimeResult<VerifiedStateReservationRuntimeBinding> {
+        let session = self.require_active_session(session_handle, capability)?;
+        match session.verified_objects.get(&verified_reservation_handle) {
+            Some(RuntimeVerifiedStateObject::Reservation(reservation)) => {
+                Ok(VerifiedStateReservationRuntimeBinding {
+                    authorization_hash: reservation.authorization_hash(),
+                    durable_binding: reservation.durable_binding(),
+                })
+            }
+            Some(_) => Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+            None => Err(refusal_status(RefusalReason::ConsumedState)),
+        }
+    }
+
     fn release_verified_object(
         &mut self,
         session_handle: u32,
@@ -865,6 +890,20 @@ pub(crate) fn describe_verified_state_object(
 ) -> RuntimeResult<Vec<u8>> {
     with_runtime_registry(|registry| {
         registry.describe(session_handle, capability, verified_object_handle)
+    })
+}
+
+pub(crate) fn verified_state_reservation_binding(
+    session_handle: u32,
+    capability: &[u8],
+    verified_reservation_handle: u32,
+) -> RuntimeResult<VerifiedStateReservationRuntimeBinding> {
+    with_runtime_registry(|registry| {
+        registry.reservation_binding(
+            session_handle,
+            capability,
+            verified_reservation_handle,
+        )
     })
 }
 

@@ -3,6 +3,16 @@ import { browserActionStorageCustodyErrorCodes } from '@sealed-lattice/types';
 import type { BrowserActionStorageWorkerKernel } from './browser-action-storage-custody-internal.js';
 import {
     BrowserActionStorageCustodyError,
+    type BrowserActionProofAttemptBinding,
+    type BrowserActionRandomnessRecordContext,
+    type BrowserActionRandomnessReservationVerificationInput,
+    type BrowserActionStateRecoveryVerificationInput,
+    type BrowserActionStateReservationVerificationInput,
+    type BrowserActionStateVerifierSessionInput,
+    type BrowserOpenedActionRandomnessSession,
+    type BrowserPersistentProofAttemptInput,
+    type BrowserSealedActionRandomnessSession,
+    type BrowserTargetReleaseAttemptInput,
     type BrowserActionStorageCustody,
     type BrowserActionStorageCustodyErrorCode,
     type BrowserActionStorageRootBinding,
@@ -13,7 +23,23 @@ import {
     type UntrustedExpectedStorageRootCommitment,
     type BrowserRecoveryExportChallenge,
     type BrowserRecoveryExportConfirmation,
+    type VerificationResult,
 } from './browser-action-storage-custody.js';
+import {
+    copyActionProofAttemptBinding,
+    copyActionRandomnessReservationVerificationInput,
+    copyActionStateRecoveryVerificationInput,
+    copyActionStateReservationVerificationInput,
+    copyActionStateVerifierSessionInput,
+    copyCreateAndSealActionRandomnessInput,
+    copyOpenedActionRandomnessSession,
+    copyOpaqueWorkerIdentifier,
+    copyOpenSealedActionRandomnessInput,
+    copyPersistentProofAttemptInput,
+    copySealedActionRandomnessSession,
+    copyTargetReleaseAttemptInput,
+    copyWorkerIdentifierVerificationResult,
+} from './browser-action-cryptography-validation.js';
 import {
     copyLocalRecordBytes,
     copyLocalRecordIdentifierInput,
@@ -48,18 +74,29 @@ type BrowserActionStorageCustodyWorkerConfiguration = Readonly<{
 type CustodyWorkerCommand =
     | 'begin-recovery-export'
     | 'cancel-recovery-export'
+    | 'close-action-randomness'
+    | 'close-state-verifier-session'
     | 'close'
     | 'confirm-recovery-export'
     | 'current-snapshot'
     | 'delete'
     | 'derive-record-identifier'
+    | 'derive-persistent-proof-attempt'
+    | 'derive-target-release-attempt'
     | 'hash-record-envelope'
     | 'initialize'
+    | 'create-and-seal-action-randomness'
+    | 'open-sealed-action-randomness'
+    | 'open-state-verifier-session'
     | 'open-record'
     | 'open-custody'
     | 'open-root'
     | 'recover'
-    | 'seal-record';
+    | 'release-state-object'
+    | 'seal-record'
+    | 'verify-state-recovery'
+    | 'verify-state-reservation'
+    | 'verify-action-randomness-reservation';
 
 type CustodyWorkerRequest = Readonly<{
     command: CustodyWorkerCommand;
@@ -495,18 +532,28 @@ const isCustodyWorkerResponse = (
 const custodyWorkerCommands: readonly CustodyWorkerCommand[] = [
     'begin-recovery-export',
     'cancel-recovery-export',
+    'close-action-randomness',
+    'close-state-verifier-session',
     'close',
     'confirm-recovery-export',
     'current-snapshot',
     'delete',
     'derive-record-identifier',
+    'derive-persistent-proof-attempt',
+    'derive-target-release-attempt',
     'hash-record-envelope',
     'initialize',
+    'create-and-seal-action-randomness',
+    'open-sealed-action-randomness',
+    'open-state-verifier-session',
     'open-record',
     'open-custody',
     'open-root',
     'recover',
+    'release-state-object',
     'seal-record',
+    'verify-state-recovery',
+    'verify-state-reservation',
 ];
 
 const isCustodyWorkerRequest = (
@@ -775,6 +822,170 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
         );
     }
 
+    public openActionStateVerifierSession(
+        input: BrowserActionStateVerifierSessionInput,
+    ): Promise<VerificationResult<string>> {
+        return this.#queueValidatedOperation(
+            () => copyActionStateVerifierSessionInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'open-state-verifier-session',
+                    copiedInput,
+                    copyWorkerIdentifierVerificationResult,
+                ),
+        );
+    }
+
+    public verifyActionStateReservation(
+        input: BrowserActionStateReservationVerificationInput,
+    ): Promise<VerificationResult<string>> {
+        return this.#queueValidatedOperation(
+            () => copyActionStateReservationVerificationInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'verify-state-reservation',
+                    copiedInput,
+                    copyWorkerIdentifierVerificationResult,
+                ),
+        );
+    }
+
+    public verifyActionRandomnessReservation(
+        input: BrowserActionRandomnessReservationVerificationInput,
+    ): Promise<VerificationResult<string>> {
+        return this.#queueValidatedOperation(
+            () => copyActionRandomnessReservationVerificationInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'verify-action-randomness-reservation',
+                    copiedInput,
+                    copyWorkerIdentifierVerificationResult,
+                ),
+        );
+    }
+
+    public verifyActionStateRecovery(
+        input: BrowserActionStateRecoveryVerificationInput,
+    ): Promise<VerificationResult<string>> {
+        return this.#queueValidatedOperation(
+            () => copyActionStateRecoveryVerificationInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'verify-state-recovery',
+                    copiedInput,
+                    copyWorkerIdentifierVerificationResult,
+                ),
+        );
+    }
+
+    public releaseActionStateObject(identifier: string): Promise<void> {
+        return this.#queueValidatedOperation(
+            () =>
+                copyOpaqueWorkerIdentifier(
+                    identifier,
+                    'State object identifier',
+                ),
+            (copiedIdentifier) =>
+                this.#sendRequest(
+                    'release-state-object',
+                    copiedIdentifier,
+                    validateVoidResult,
+                ),
+        );
+    }
+
+    public closeActionStateVerifierSession(identifier: string): Promise<void> {
+        return this.#queueValidatedOperation(
+            () =>
+                copyOpaqueWorkerIdentifier(
+                    identifier,
+                    'State-verifier session identifier',
+                ),
+            (copiedIdentifier) =>
+                this.#sendRequest(
+                    'close-state-verifier-session',
+                    copiedIdentifier,
+                    validateVoidResult,
+                ),
+        );
+    }
+
+    public createAndSealActionRandomness(
+        input: BrowserActionRandomnessRecordContext,
+    ): Promise<BrowserSealedActionRandomnessSession> {
+        return this.#queueValidatedOperation(
+            () => copyCreateAndSealActionRandomnessInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'create-and-seal-action-randomness',
+                    copiedInput,
+                    copySealedActionRandomnessSession,
+                ),
+        );
+    }
+
+    public openSealedActionRandomness(
+        input: BrowserActionRandomnessRecordContext &
+            Readonly<{
+                actionRandomnessCommitment: Uint8Array;
+                canonicalEnvelope: Uint8Array;
+            }>,
+    ): Promise<BrowserOpenedActionRandomnessSession> {
+        return this.#queueValidatedOperation(
+            () => copyOpenSealedActionRandomnessInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'open-sealed-action-randomness',
+                    copiedInput,
+                    copyOpenedActionRandomnessSession,
+                ),
+        );
+    }
+
+    public closeActionRandomness(identifier: string): Promise<void> {
+        return this.#queueValidatedOperation(
+            () =>
+                copyOpaqueWorkerIdentifier(
+                    identifier,
+                    'Action-randomness session identifier',
+                ),
+            (copiedIdentifier) =>
+                this.#sendRequest(
+                    'close-action-randomness',
+                    copiedIdentifier,
+                    validateVoidResult,
+                ),
+        );
+    }
+
+    public derivePersistentProofAttempt(
+        input: BrowserPersistentProofAttemptInput,
+    ): Promise<BrowserActionProofAttemptBinding> {
+        return this.#queueValidatedOperation(
+            () => copyPersistentProofAttemptInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'derive-persistent-proof-attempt',
+                    copiedInput,
+                    copyActionProofAttemptBinding,
+                ),
+        );
+    }
+
+    public deriveTargetReleaseAttempt(
+        input: BrowserTargetReleaseAttemptInput,
+    ): Promise<BrowserActionProofAttemptBinding> {
+        return this.#queueValidatedOperation(
+            () => copyTargetReleaseAttemptInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'derive-target-release-attempt',
+                    copiedInput,
+                    copyActionProofAttemptBinding,
+                ),
+        );
+    }
+
     public delete(
         expectedSnapshot: BrowserDeviceWrappingSnapshot,
     ): Promise<void> {
@@ -1001,23 +1212,45 @@ export const openBrowserActionStorageCustodyWorker = async (input: {
                 client.beginRecoveryExport(recoveryExportInput),
             cancelRecoveryExport: (preparationIdentifier) =>
                 client.cancelRecoveryExport(preparationIdentifier),
+            closeActionRandomness: (identifier) =>
+                client.closeActionRandomness(identifier),
+            closeActionStateVerifierSession: (identifier) =>
+                client.closeActionStateVerifierSession(identifier),
             close: () => client.close(),
             confirmRecoveryExport: (confirmationInput) =>
                 client.confirmRecoveryExport(confirmationInput),
             currentSnapshot: () => client.currentSnapshot(),
+            createAndSealActionRandomness: (operationInput) =>
+                client.createAndSealActionRandomness(operationInput),
             delete: (expectedSnapshot) => client.delete(expectedSnapshot),
             deriveLocalRecordIdentifier: (identifierInput) =>
                 client.deriveLocalRecordIdentifier(identifierInput),
+            derivePersistentProofAttempt: (attemptInput) =>
+                client.derivePersistentProofAttempt(attemptInput),
+            deriveTargetReleaseAttempt: (attemptInput) =>
+                client.deriveTargetReleaseAttempt(attemptInput),
             hashLocalRecordEnvelope: (envelope) =>
                 client.hashLocalRecordEnvelope(envelope),
             initialize: () => client.initialize(),
             openLocalRecord: (recordInput) =>
                 client.openLocalRecord(recordInput),
+            openActionStateVerifierSession: (sessionInput) =>
+                client.openActionStateVerifierSession(sessionInput),
             openIntoOwnedWorker: (openInput) =>
                 client.openIntoOwnedWorker(openInput),
+            openSealedActionRandomness: (operationInput) =>
+                client.openSealedActionRandomness(operationInput),
             recover: (recoveryInput) => client.recover(recoveryInput),
+            releaseActionStateObject: (identifier) =>
+                client.releaseActionStateObject(identifier),
             sealLocalRecord: (recordInput) =>
                 client.sealLocalRecord(recordInput),
+            verifyActionStateRecovery: (verificationInput) =>
+                client.verifyActionStateRecovery(verificationInput),
+            verifyActionStateReservation: (verificationInput) =>
+                client.verifyActionStateReservation(verificationInput),
+            verifyActionRandomnessReservation: (verificationInput) =>
+                client.verifyActionRandomnessReservation(verificationInput),
         } satisfies BrowserActionStorageCustody);
     } catch (error) {
         client.abortAfterOpenFailure();
@@ -1041,6 +1274,37 @@ const copyHostCommandInput = (
             return copyBoundSnapshotInput(input);
         case 'derive-record-identifier':
             return copyLocalRecordIdentifierInput(input);
+        case 'open-state-verifier-session':
+            return copyActionStateVerifierSessionInput(input);
+        case 'verify-state-reservation':
+            return copyActionStateReservationVerificationInput(input);
+        case 'verify-action-randomness-reservation':
+            return copyActionRandomnessReservationVerificationInput(input);
+        case 'verify-state-recovery':
+            return copyActionStateRecoveryVerificationInput(input);
+        case 'release-state-object':
+            return copyOpaqueWorkerIdentifier(
+                input,
+                'State object identifier',
+            );
+        case 'close-state-verifier-session':
+            return copyOpaqueWorkerIdentifier(
+                input,
+                'State-verifier session identifier',
+            );
+        case 'create-and-seal-action-randomness':
+            return copyCreateAndSealActionRandomnessInput(input);
+        case 'open-sealed-action-randomness':
+            return copyOpenSealedActionRandomnessInput(input);
+        case 'close-action-randomness':
+            return copyOpaqueWorkerIdentifier(
+                input,
+                'Action-randomness session identifier',
+            );
+        case 'derive-persistent-proof-attempt':
+            return copyPersistentProofAttemptInput(input);
+        case 'derive-target-release-attempt':
+            return copyTargetReleaseAttemptInput(input);
         case 'seal-record':
             return copyLocalRecordSealInput(input);
         case 'open-record':
@@ -1117,6 +1381,9 @@ const copyHostCommandResult = (
         case 'open-custody':
         case 'open-root':
         case 'cancel-recovery-export':
+        case 'close-action-randomness':
+        case 'close-state-verifier-session':
+        case 'release-state-object':
         case 'delete':
         case 'close':
             return validateVoidResult(result);
@@ -1128,6 +1395,17 @@ const copyHostCommandResult = (
                 exactByteLength: storageRootCommitmentByteLength,
                 label: 'Worker-derived local-record hash',
             });
+        case 'open-state-verifier-session':
+        case 'verify-state-recovery':
+        case 'verify-state-reservation':
+            return copyWorkerIdentifierVerificationResult(result);
+        case 'create-and-seal-action-randomness':
+            return copySealedActionRandomnessSession(result);
+        case 'open-sealed-action-randomness':
+            return copyOpenedActionRandomnessSession(result);
+        case 'derive-persistent-proof-attempt':
+        case 'derive-target-release-attempt':
+            return copyActionProofAttemptBinding(result);
         case 'seal-record':
             return copyLocalRecordBytes(result, {
                 allowEmpty: false,
@@ -1427,6 +1705,52 @@ export const installBrowserActionStorageCustodyWorkerHost = (
             case 'hash-record-envelope':
                 return custody().hashLocalRecordEnvelope(
                     copiedInput as Uint8Array,
+                );
+            case 'open-state-verifier-session':
+                return custody().openActionStateVerifierSession(
+                    copiedInput as BrowserActionStateVerifierSessionInput,
+                );
+            case 'verify-state-reservation':
+                return custody().verifyActionStateReservation(
+                    copiedInput as BrowserActionStateReservationVerificationInput,
+                );
+            case 'verify-action-randomness-reservation':
+                return custody().verifyActionRandomnessReservation(
+                    copiedInput as BrowserActionRandomnessReservationVerificationInput,
+                );
+            case 'verify-state-recovery':
+                return custody().verifyActionStateRecovery(
+                    copiedInput as BrowserActionStateRecoveryVerificationInput,
+                );
+            case 'release-state-object':
+                return custody().releaseActionStateObject(
+                    copiedInput as string,
+                );
+            case 'close-state-verifier-session':
+                return custody().closeActionStateVerifierSession(
+                    copiedInput as string,
+                );
+            case 'create-and-seal-action-randomness':
+                return custody().createAndSealActionRandomness(
+                    copiedInput as BrowserActionRandomnessRecordContext,
+                );
+            case 'open-sealed-action-randomness':
+                return custody().openSealedActionRandomness(
+                    copiedInput as BrowserActionRandomnessRecordContext &
+                        Readonly<{
+                            actionRandomnessCommitment: Uint8Array;
+                            canonicalEnvelope: Uint8Array;
+                        }>,
+                );
+            case 'close-action-randomness':
+                return custody().closeActionRandomness(copiedInput as string);
+            case 'derive-persistent-proof-attempt':
+                return custody().derivePersistentProofAttempt(
+                    copiedInput as BrowserPersistentProofAttemptInput,
+                );
+            case 'derive-target-release-attempt':
+                return custody().deriveTargetReleaseAttempt(
+                    copiedInput as BrowserTargetReleaseAttemptInput,
                 );
             case 'delete':
                 return custody().delete(

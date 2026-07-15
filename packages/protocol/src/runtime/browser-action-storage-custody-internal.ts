@@ -1,6 +1,16 @@
 import {
     BrowserActionStorageCustodyError,
     browserActionStorageCustodyErrorCodes,
+    type BrowserActionProofAttemptBinding,
+    type BrowserActionRandomnessRecordContext,
+    type BrowserActionRandomnessReservationVerificationInput,
+    type BrowserActionStateRecoveryVerificationInput,
+    type BrowserActionStateReservationVerificationInput,
+    type BrowserActionStateVerifierSessionInput,
+    type BrowserOpenedActionRandomnessSession,
+    type BrowserPersistentProofAttemptInput,
+    type BrowserSealedActionRandomnessSession,
+    type BrowserTargetReleaseAttemptInput,
     type BrowserActionStorageCustodyErrorCode,
     type BrowserActionStorageRootBinding,
     type BrowserActionStorageWorkerKernel,
@@ -9,6 +19,7 @@ import {
     type BrowserLocalRecordSealInput,
     type UntrustedExpectedStorageRootCommitment,
     type WorkerPreparedDeviceWrappingState,
+    type VerificationResult,
 } from '@sealed-lattice/types';
 
 import type {
@@ -23,6 +34,21 @@ import {
     copyLocalRecordOpenInput,
     copyLocalRecordSealInput,
 } from './browser-local-record-validation.js';
+import {
+    copyActionProofAttemptBinding,
+    copyActionRandomnessReservationVerificationInput,
+    copyActionStateRecoveryVerificationInput,
+    copyActionStateReservationVerificationInput,
+    copyActionStateVerifierSessionInput,
+    copyCreateAndSealActionRandomnessInput,
+    copyOpenedActionRandomnessSession,
+    copyOpaqueWorkerIdentifier,
+    copyOpenSealedActionRandomnessInput,
+    copyPersistentProofAttemptInput,
+    copySealedActionRandomnessSession,
+    copyTargetReleaseAttemptInput,
+    copyWorkerIdentifierVerificationResult,
+} from './browser-action-cryptography-validation.js';
 
 export type {
     BrowserActionStorageWorkerKernel,
@@ -918,6 +944,266 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
                 label: 'Worker-derived local-record envelope hash',
             });
         });
+    }
+
+    public openActionStateVerifierSession(
+        input: BrowserActionStateVerifierSessionInput,
+    ): Promise<VerificationResult<string>> {
+        let copiedInput: BrowserActionStateVerifierSessionInput;
+        try {
+            copiedInput = copyActionStateVerifierSessionInput(input);
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () =>
+            copyWorkerIdentifierVerificationResult(
+                await this.#workerCall(
+                    () =>
+                        this.#workerKernel.openActionStateVerifierSession(
+                            copiedInput,
+                        ),
+                    'Opening an action state-verifier session failed inside the owned worker.',
+                ),
+            ),
+        );
+    }
+
+    public verifyActionStateReservation(
+        input: BrowserActionStateReservationVerificationInput,
+    ): Promise<VerificationResult<string>> {
+        let copiedInput: BrowserActionStateReservationVerificationInput;
+        try {
+            copiedInput = copyActionStateReservationVerificationInput(input);
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () =>
+            copyWorkerIdentifierVerificationResult(
+                await this.#workerCall(
+                    () =>
+                        this.#workerKernel.verifyActionStateReservation(
+                            copiedInput,
+                        ),
+                    'Verifying an action state reservation failed inside the owned worker.',
+                ),
+            ),
+        );
+    }
+
+    public verifyActionRandomnessReservation(
+        input: BrowserActionRandomnessReservationVerificationInput,
+    ): Promise<VerificationResult<string>> {
+        let copiedInput: BrowserActionRandomnessReservationVerificationInput;
+        try {
+            copiedInput = copyActionRandomnessReservationVerificationInput(
+                input,
+            );
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () =>
+            copyWorkerIdentifierVerificationResult(
+                await this.#workerCall(
+                    () =>
+                        this.#workerKernel.verifyActionRandomnessReservation(
+                            copiedInput,
+                        ),
+                    'Verifying the action-randomness reservation failed inside the owned worker.',
+                ),
+            ),
+        );
+    }
+
+    public verifyActionStateRecovery(
+        input: BrowserActionStateRecoveryVerificationInput,
+    ): Promise<VerificationResult<string>> {
+        let copiedInput: BrowserActionStateRecoveryVerificationInput;
+        try {
+            copiedInput = copyActionStateRecoveryVerificationInput(input);
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () =>
+            copyWorkerIdentifierVerificationResult(
+                await this.#workerCall(
+                    () =>
+                        this.#workerKernel.verifyActionStateRecovery(
+                            copiedInput,
+                        ),
+                    'Verifying an action state recovery failed inside the owned worker.',
+                ),
+            ),
+        );
+    }
+
+    public releaseActionStateObject(identifier: string): Promise<void> {
+        let copiedIdentifier: string;
+        try {
+            copiedIdentifier = copyOpaqueWorkerIdentifier(
+                identifier,
+                'State object identifier',
+            );
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(() =>
+            this.#workerCall(
+                () =>
+                    this.#workerKernel.releaseActionStateObject(
+                        copiedIdentifier,
+                    ),
+                'Releasing an action state object failed inside the owned worker.',
+            ),
+        );
+    }
+
+    public closeActionStateVerifierSession(identifier: string): Promise<void> {
+        let copiedIdentifier: string;
+        try {
+            copiedIdentifier = copyOpaqueWorkerIdentifier(
+                identifier,
+                'State-verifier session identifier',
+            );
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(() =>
+            this.#workerCall(
+                () =>
+                    this.#workerKernel.closeActionStateVerifierSession(
+                        copiedIdentifier,
+                    ),
+                'Closing an action state-verifier session failed inside the owned worker.',
+            ),
+        );
+    }
+
+    public createAndSealActionRandomness(
+        input: BrowserActionRandomnessRecordContext,
+    ): Promise<BrowserSealedActionRandomnessSession> {
+        let copiedInput: BrowserActionRandomnessRecordContext;
+        try {
+            copiedInput = copyCreateAndSealActionRandomnessInput(input);
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () =>
+            copySealedActionRandomnessSession(
+                await this.#workerCall(
+                    () =>
+                        this.#workerKernel.createAndSealActionRandomness(
+                            copiedInput,
+                        ),
+                    'Creating and sealing action randomness failed inside the owned worker.',
+                ),
+            ),
+        );
+    }
+
+    public openSealedActionRandomness(
+        input: BrowserActionRandomnessRecordContext &
+            Readonly<{
+                actionRandomnessCommitment: Uint8Array;
+                canonicalEnvelope: Uint8Array;
+            }>,
+    ): Promise<BrowserOpenedActionRandomnessSession> {
+        let copiedInput: BrowserActionRandomnessRecordContext &
+            Readonly<{
+                actionRandomnessCommitment: Uint8Array;
+                canonicalEnvelope: Uint8Array;
+            }>;
+        try {
+            copiedInput = copyOpenSealedActionRandomnessInput(input);
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () =>
+            copyOpenedActionRandomnessSession(
+                await this.#workerCall(
+                    () =>
+                        this.#workerKernel.openSealedActionRandomness(
+                            copiedInput,
+                        ),
+                    'Opening sealed action randomness failed inside the owned worker.',
+                ),
+            ),
+        );
+    }
+
+    public closeActionRandomness(identifier: string): Promise<void> {
+        let copiedIdentifier: string;
+        try {
+            copiedIdentifier = copyOpaqueWorkerIdentifier(
+                identifier,
+                'Action-randomness session identifier',
+            );
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(() =>
+            this.#workerCall(
+                () =>
+                    this.#workerKernel.closeActionRandomness(
+                        copiedIdentifier,
+                    ),
+                'Closing action randomness failed inside the owned worker.',
+            ),
+        );
+    }
+
+    public derivePersistentProofAttempt(
+        input: BrowserPersistentProofAttemptInput,
+    ): Promise<BrowserActionProofAttemptBinding> {
+        let copiedInput: BrowserPersistentProofAttemptInput;
+        try {
+            copiedInput = copyPersistentProofAttemptInput(input);
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () =>
+            copyActionProofAttemptBinding(
+                await this.#workerCall(
+                    () =>
+                        this.#workerKernel.derivePersistentProofAttempt(
+                            copiedInput,
+                        ),
+                    'Deriving persistent proof randomness failed inside the owned worker.',
+                ),
+            ),
+        );
+    }
+
+    public deriveTargetReleaseAttempt(
+        input: BrowserTargetReleaseAttemptInput,
+    ): Promise<BrowserActionProofAttemptBinding> {
+        let copiedInput: BrowserTargetReleaseAttemptInput;
+        try {
+            copiedInput = copyTargetReleaseAttemptInput(input);
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () =>
+            copyActionProofAttemptBinding(
+                await this.#workerCall(
+                    () =>
+                        this.#workerKernel.deriveTargetReleaseAttempt(
+                            copiedInput,
+                        ),
+                    'Deriving target-release randomness failed inside the owned worker.',
+                ),
+            ),
+        );
     }
 
     public close(): Promise<void> {

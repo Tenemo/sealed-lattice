@@ -3,6 +3,7 @@ import {
     type BrowserActionStorageCustodyErrorCode,
     type BrowserLocalRecordExpectedContext,
     type BrowserLocalRecordIdentifierInput,
+    type BrowserLocalRecordOpenableIdentifierInput,
     type BrowserLocalRecordOpenInput,
     type BrowserLocalRecordSealInput,
 } from '@sealed-lattice/types';
@@ -282,6 +283,20 @@ export const copyLocalRecordIdentifierInput = (
     }
 };
 
+const copyOpenableLocalRecordIdentifierInput = (
+    value: unknown,
+    errorCode: BrowserActionStorageCustodyErrorCode,
+): BrowserLocalRecordOpenableIdentifierInput => {
+    const identifierInput = copyLocalRecordIdentifierInput(value, errorCode);
+    if (identifierInput.recordType === 'actionRandomness') {
+        throw malformed(
+            errorCode,
+            'Action randomness can only be sealed and opened by the closed worker operation.',
+        );
+    }
+    return identifierInput;
+};
+
 const copyLocalRecordExpectedContext = (
     value: unknown,
     errorCode: BrowserActionStorageCustodyErrorCode = 'InvalidInput',
@@ -328,7 +343,7 @@ const copyLocalRecordExpectedContext = (
             'Local-record creation recovery epoch',
             errorCode,
         ),
-        identifierInput: copyLocalRecordIdentifierInput(
+        identifierInput: copyOpenableLocalRecordIdentifierInput(
             value.identifierInput,
             errorCode,
         ),

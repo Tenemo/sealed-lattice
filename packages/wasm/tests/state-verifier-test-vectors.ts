@@ -19,6 +19,7 @@ import {
     emptyOptionalItem,
     foundationHash512,
     hashItem,
+    participantIdentityItem,
     presentOptionalItem,
     unsigned16Item,
     unsigned16LittleEndian,
@@ -66,10 +67,43 @@ export type StateVerifierTestVector = Readonly<{
     reservation: CertifiedStateIntentTestVector;
     reservationVoteCarriers: readonly Uint8Array[];
     reservationOnly: readonly ReservationOnlyStateIntentTestVector[];
+    rosterHash: Uint8Array;
     subjectParticipantIdentity: Uint8Array;
     suiteIdentifier: Uint8Array;
     witnessParticipantIdentity: Uint8Array;
 }>;
+
+export const deriveSetupActionRandomnessAuthorization = (
+    input: Pick<
+        StateVerifierTestVector,
+        | 'actionContextHash'
+        | 'canonicalRosterBytes'
+        | 'ceremonyContextHash'
+        | 'subjectParticipantIdentity'
+        | 'suiteIdentifier'
+    >,
+    actionRandomnessCommitment: Uint8Array,
+): Uint8Array => {
+    if (actionRandomnessCommitment.byteLength !== 64) {
+        throw new TypeError(
+            'The action-randomness commitment must contain exactly 64 bytes.',
+        );
+    }
+    const rosterHash = foundationHash512(
+        'sealed-lattice/foundation/roster/v1',
+        variableBytesItem(input.canonicalRosterBytes),
+    );
+
+    return foundationHash512(
+        'sealed-lattice/setup/state/action-randomness/v1',
+        hashItem(input.suiteIdentifier),
+        hashItem(input.ceremonyContextHash),
+        hashItem(input.actionContextHash),
+        hashItem(rosterHash),
+        participantIdentityItem(input.subjectParticipantIdentity),
+        hashItem(actionRandomnessCommitment),
+    );
+};
 
 const stateCertificate = (
     canonicalVoteCarriers: readonly Uint8Array[],
@@ -97,7 +131,17 @@ const stateExactOutputHash = (
         variableBytesItem(exactOutputBytes),
     );
 
-export const createStateVerifierTestVector = (): StateVerifierTestVector => {
+export const createStateVerifierTestVector = (input: {
+    setupActionRandomnessAuthorizationHash?: Uint8Array;
+} = {}): StateVerifierTestVector => {
+    if (
+        input.setupActionRandomnessAuthorizationHash !== undefined &&
+        input.setupActionRandomnessAuthorizationHash.byteLength !== 64
+    ) {
+        throw new TypeError(
+            'The setup action-randomness authorization hash must contain exactly 64 bytes.',
+        );
+    }
     const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
         foundationProfile.participantCount,
     );
@@ -278,12 +322,18 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             stateCapabilityKinds.setupRkgRoundOneBranch,
             stateCapabilityKinds.setupTerminalPackage,
         ].map((capabilityKind): ReservationOnlyStateIntentTestVector => {
+            const reservationAuthorizationHash =
+                capabilityKind ===
+                    stateCapabilityKinds.setupActionRandomnessRoot &&
+                input.setupActionRandomnessAuthorizationHash !== undefined
+                    ? input.setupActionRandomnessAuthorizationHash
+                    : authorizationHash;
             const carrier = signedCarrier({
                 objectType: stateReservationObjectType,
                 payloadBytes: canonicalTuple(
                     0x1610,
                     unsigned16Item(capabilityKind),
-                    hashItem(authorizationHash),
+                    hashItem(reservationAuthorizationHash),
                 ),
                 producerRosterPosition: 0,
                 producerSequence: 0n,
@@ -430,6 +480,7 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             reservation,
             reservationVoteCarriers,
             reservationOnly,
+            rosterHash,
             subjectParticipantIdentity: participantIdentities[0],
             suiteIdentifier,
             witnessParticipantIdentity: participantIdentities[1],

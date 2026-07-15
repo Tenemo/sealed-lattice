@@ -149,6 +149,9 @@ importers:
       '@noble/hashes':
         specifier: 2.2.0
         version: 2.2.0
+      '@sealed-lattice/crypto':
+        specifier: workspace:*
+        version: link:../crypto
       '@sealed-lattice/types':
         specifier: workspace:*
         version: link:../types

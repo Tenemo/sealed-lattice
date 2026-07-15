@@ -1,21 +1,31 @@
 use serde_json::{Value, json};
 
-use crate::{encoding::CanonicalResult, hashing::derive_canonical_object_hash};
+use crate::{
+    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
+    hashing::derive_canonical_object_hash,
+};
 
 // Ring degree N. Powers of two are NTT-friendly; 2N divides each modulus-1.
 pub(crate) const POLYNOMIAL_DEGREE: usize = 32_768;
 // Plaintext modulus t. 65537 is the Fermat prime 2^16+1; t-1 = 2^16 is
 // divisible by 2N, so a length-2N NTT exists for batch (slot) encoding.
 pub(crate) const PLAINTEXT_MODULUS: u64 = 65_537;
+pub(crate) const LOGICAL_SLOT_GENERATOR: usize = 3;
 pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis";
 pub(crate) const EXTENDED_BASIS_ID: &str = "sealed-lattice-bgv-rns-extended-basis";
 pub(crate) const SPECIAL_BASIS_ID: &str = "sealed-lattice-bgv-rns-special-basis";
 
 mod root_parameters;
+mod parameter_generation;
 
 pub(crate) use root_parameters::{
     BgvBasisKind, DATA_PRIMES, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIME,
     root_parameters_for_modulus,
+};
+pub(crate) use parameter_generation::{
+    ParameterGenerationError, regenerate_supported_data_root_parameters,
+    validate_supported_algebraic_parameters, verify_data_root_parameters,
+    verify_ntt_root_parameters,
 };
 // The single canonical identity for the fixed BGV parameter set. It binds the
 // ring arithmetic and the fixed score and batch layout used by the protocol.
@@ -45,6 +55,12 @@ pub(crate) fn bgv_parameters_value() -> Value {
 }
 
 pub(crate) fn bgv_parameters_hash() -> CanonicalResult<String> {
+    validate_supported_algebraic_parameters().map_err(|error| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("BGV algebraic parameter certificate failed: {error}"),
+        )
+    })?;
     derive_canonical_object_hash(&bgv_parameters_value())
 }
 
@@ -103,6 +119,12 @@ mod tests {
             assert!(is_prime_for_tests(modulus));
             assert!(root_parameters_for_modulus(modulus).is_some());
         }
+        assert!(
+            DATA_PRIMES
+                .iter()
+                .all(|modulus| modulus % PLAINTEXT_MODULUS == 1),
+            "every data-prime prefix must preserve exact target conversion modulo the plaintext modulus"
+        );
         assert!(root_parameters_for_modulus(PLAINTEXT_MODULUS).is_some());
     }
 

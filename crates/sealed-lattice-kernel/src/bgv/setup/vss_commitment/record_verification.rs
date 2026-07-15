@@ -216,47 +216,13 @@ pub(crate) fn validate_standalone_vss_committed_material_commitment(
         &["ringDegree"],
         &format!("{field_name} ringDegree"),
     )?;
-    let commitment_fields = array_at_path(commitment, &["commitmentFields"])?;
-    if commitment_fields.len() != VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() {
+    let material_root_hex = string_at_path(commitment, &["materialRootHex"])?;
+    if !is_lowercase_protocol_hash(material_root_hex) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            format!("{field_name} commitmentFields must cover the commitment modulus limbs"),
+            CanonicalErrorCode::InvalidFixture,
+            format!("{field_name} materialRootHex must be a 64-byte lowercase hex digest"),
         ));
     }
-    let mut verified_commitment_fields = Vec::with_capacity(commitment_fields.len());
-    for (field_position, commitment_field) in commitment_fields.iter().enumerate() {
-        let expected_commitment_modulus_index =
-            VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES[field_position];
-        compare_required_u64(
-            unsigned_at_path(commitment_field, &["commitmentModulusIndex"])?,
-            expected_commitment_modulus_index as u64,
-            &format!("{field_name} commitmentFields.{field_position}.commitmentModulusIndex"),
-        )?;
-        compare_required_u64(
-            unsigned_at_path(commitment_field, &["modulus"])?,
-            DATA_PRIMES[expected_commitment_modulus_index],
-            &format!("{field_name} commitmentFields.{field_position}.modulus"),
-        )?;
-        // The material root is the fixed-width H_512 Merkle digest in
-        // lowercase hex. Binding is checked by the canonical-root comparison in
-        // the caller and by the succinct proof's material openings; here it is
-        // only a well-formedness check.
-        let material_root_hex = string_at_path(commitment_field, &["materialRootHex"])?;
-        if !is_lowercase_protocol_hash(material_root_hex) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "{field_name} commitmentFields.{field_position}.materialRootHex must be a 64-byte lowercase hex digest"
-                ),
-            ));
-        }
-        verified_commitment_fields.push(json!({
-            "commitmentModulusIndex": expected_commitment_modulus_index,
-            "modulus": DATA_PRIMES[expected_commitment_modulus_index],
-            "materialRootHex": material_root_hex,
-        }));
-    }
-
     Ok(json!({
         "objectType": "VssCommittedMaterialCommitment",
         "commitmentRole": commitment_role,
@@ -264,7 +230,7 @@ pub(crate) fn validate_standalone_vss_committed_material_commitment(
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "ringDegree": ring_degree,
-        "commitmentFields": verified_commitment_fields,
+        "materialRootHex": material_root_hex,
     }))
 }
 

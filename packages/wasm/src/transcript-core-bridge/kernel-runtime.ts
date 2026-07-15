@@ -548,6 +548,7 @@ const requireKernelMemoryRange = (
 
 type NumberExportName =
     | 'sealed_lattice_allocate'
+    | 'sealed_lattice_action_randomness_command'
     | 'sealed_lattice_accepted_setup_canonical_stream_begin'
     | 'sealed_lattice_accepted_setup_command_with_length'
     | 'sealed_lattice_accepted_setup_session_begin'
@@ -560,6 +561,13 @@ type NumberExportName =
     | 'sealed_lattice_bgv_canonical_material_reader_cancel'
     | 'sealed_lattice_bgv_canonical_material_reader_finish'
     | 'sealed_lattice_bgv_canonical_material_reader_read_chunk'
+    | 'sealed_lattice_board_verifier_begin'
+    | 'sealed_lattice_board_verifier_cached_carrier_length'
+    | 'sealed_lattice_board_verifier_cancel'
+    | 'sealed_lattice_board_verifier_copy_cached_carrier'
+    | 'sealed_lattice_board_verifier_describe'
+    | 'sealed_lattice_board_verifier_release'
+    | 'sealed_lattice_board_verifier_verify_unordered'
     | 'sealed_lattice_canonical_stream_absorb_chunk'
     | 'sealed_lattice_canonical_stream_begin_verifier'
     | 'sealed_lattice_canonical_stream_begin_writer'

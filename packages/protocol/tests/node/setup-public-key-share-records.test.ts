@@ -18,7 +18,7 @@ import {
 } from '#tests/support/setup-fixtures';
 
 const qSharePrimes = [
-    140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
+    140_700_980_543_489, 140_546_359_361_537, 140_507_704_066_049,
 ] as const;
 const ringDegree = 8;
 const participantCount = 2;

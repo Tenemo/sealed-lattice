@@ -1,4 +1,38 @@
-use crate::bgv::setup::ProofByteSource;
+/// Random-access byte reads over a retained canonical proof stream.
+///
+/// Implementations expose only length-checked copies. The common decoder owns
+/// all cursor movement and never requires the source to join its chunks.
+pub(crate) trait ProofByteSource {
+    fn byte_length(&self) -> usize;
+    fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool;
+}
+
+impl ProofByteSource for [u8] {
+    fn byte_length(&self) -> usize {
+        self.len()
+    }
+
+    fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool {
+        let Some(end) = offset.checked_add(destination.len()) else {
+            return false;
+        };
+        let Some(source) = self.get(offset..end) else {
+            return false;
+        };
+        destination.copy_from_slice(source);
+        true
+    }
+}
+
+impl ProofByteSource for Vec<u8> {
+    fn byte_length(&self) -> usize {
+        self.len()
+    }
+
+    fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool {
+        self.as_slice().copy_bytes(offset, destination)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ProofDecodeError {
@@ -10,6 +44,7 @@ pub(crate) enum ProofDecodeError {
     IntegerOverflow,
     BoundedLengthExceeded,
     InvalidBitWidth,
+    NonCanonicalFieldElement,
     NonCanonicalPackedPadding,
     TrailingBytes,
 }
@@ -47,7 +82,6 @@ impl<'source, Source: ProofByteSource + ?Sized> BoundedProofDecoder<'source, Sou
         })
     }
 
-    #[cfg(test)]
     pub(crate) const fn offset(&self) -> usize {
         self.offset
     }
@@ -86,6 +120,36 @@ impl<'source, Source: ProofByteSource + ?Sized> BoundedProofDecoder<'source, Sou
         let mut bytes = [0_u8; 8];
         self.read_exact(&mut bytes)?;
         Ok(u64::from_le_bytes(bytes))
+    }
+
+    pub(crate) fn read_u16(&mut self) -> Result<u16, ProofDecodeError> {
+        Ok(u16::from_le_bytes(self.read_array()?))
+    }
+
+    pub(crate) fn read_u32(&mut self) -> Result<u32, ProofDecodeError> {
+        Ok(u32::from_le_bytes(self.read_array()?))
+    }
+
+    pub(crate) fn read_hash512(&mut self) -> Result<[u8; 64], ProofDecodeError> {
+        self.read_array()
+    }
+
+    pub(crate) fn read_base_field_element(
+        &mut self,
+    ) -> Result<super::ProofBaseFieldElement, ProofDecodeError> {
+        super::ProofBaseFieldElement::from_canonical(self.read_u64()?)
+            .map_err(|_| ProofDecodeError::NonCanonicalFieldElement)
+    }
+
+    pub(crate) fn read_challenge_extension_element(
+        &mut self,
+    ) -> Result<super::ProofChallengeExtensionElement, ProofDecodeError> {
+        let mut coordinates = [0_u64; super::PROOF_CHALLENGE_EXTENSION_DEGREE];
+        for coordinate in &mut coordinates {
+            *coordinate = self.read_u64()?;
+        }
+        super::ProofChallengeExtensionElement::from_canonical_coordinates(coordinates)
+            .map_err(|_| ProofDecodeError::NonCanonicalFieldElement)
     }
 
     /// Reads little-endian fixed-width values packed consecutively into bytes.

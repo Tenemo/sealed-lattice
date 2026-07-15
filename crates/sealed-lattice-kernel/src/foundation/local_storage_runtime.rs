@@ -7,11 +7,11 @@ use zeroize::Zeroizing;
 
 use super::local_encrypted_storage::LocalRecordSealWithIdentifierInput;
 use super::{
-    ActionStorageRoot, CanonicalDecodeLimits, CanonicalLocalStorageRecoveryIngress,
-    DeviceWrappedStorageRoot, Hash512, LocalRecordEnvelope, LocalRecordIdentifierInput,
+    ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionStorageRoot, CanonicalDecodeLimits,
+    CanonicalLocalStorageRecoveryIngress, DeviceWrappedStorageRoot, Hash512,
+    LOCAL_RECORD_NONCE_BYTE_LENGTH, LocalRecordEnvelope, LocalRecordIdentifierInput,
     LocalRecordType, LocalStorageBinding, ParticipantIdentity, RefusalReason,
-    StorageRootCommitmentPayload, derive_local_record_envelope_hash,
-    derive_local_record_identifier,
+    StorageRootCommitmentPayload, derive_local_record_envelope_hash, derive_local_record_identifier,
 };
 
 pub(crate) const LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH: usize = 32;
@@ -487,60 +487,34 @@ fn derive_record_identifier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
 fn seal_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let mut reader = InputReader::new(input);
     let request = read_record_request(&mut reader)?;
+    if request.record_type == LocalRecordType::ActionRandomness {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
     let nonce = reader.read_array()?;
     let plaintext = reader.read_remaining();
     ROOT_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
         let lease = registry.active_mut(request.handle, &request.capability)?;
-        let record_identifier = derive_record_identifier_from_context(
-            lease.root.binding(),
+        seal_record_with_active_lease(
+            lease,
+            request.action_randomness_commitment,
             request.record_type,
             request.identifier_context,
-        )?;
-        let record_version_key = (record_identifier.into_bytes(), request.record_version);
-        if lease.sealed_record_versions.contains(&record_version_key) {
-            return Err(refusal_status(RefusalReason::ConsumedState));
-        }
-        let next_seal_invocation_count = lease
-            .local_record_seal_invocation_count
-            .checked_add(1)
-            .ok_or_else(outside_supported_profile_status)?;
-        let plaintext_byte_length =
-            u64::try_from(plaintext.len()).map_err(|_| outside_supported_profile_status())?;
-        let next_sealed_plaintext_byte_length = lease
-            .local_record_sealed_plaintext_byte_length
-            .checked_add(plaintext_byte_length)
-            .ok_or_else(outside_supported_profile_status)?;
-        if next_seal_invocation_count > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
-            || next_sealed_plaintext_byte_length
-                > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT
-        {
-            return Err(outside_supported_profile_status());
-        }
-        let envelope = lease
-            .root
-            .seal_local_record_with_identifier(LocalRecordSealWithIdentifierInput {
-                action_randomness_commitment: request.action_randomness_commitment,
-                record_type: request.record_type,
-                record_identifier,
-                record_version: request.record_version,
-                creation_recovery_epoch: request.creation_recovery_epoch,
-                predecessor_record_hash: request.predecessor_record_hash,
-                nonce,
-                plaintext,
-            })
-            .map_err(schema_status)?;
-        let encoded_envelope = envelope.encode().map_err(schema_status)?;
-        lease.sealed_record_versions.insert(record_version_key);
-        lease.local_record_seal_invocation_count = next_seal_invocation_count;
-        lease.local_record_sealed_plaintext_byte_length = next_sealed_plaintext_byte_length;
-        Ok(encoded_envelope)
+            request.record_version,
+            request.creation_recovery_epoch,
+            request.predecessor_record_hash,
+            nonce,
+            plaintext,
+        )
     })
 }
 
 fn open_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let mut reader = InputReader::new(input);
     let request = read_record_request(&mut reader)?;
+    if request.record_type == LocalRecordType::ActionRandomness {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
     let envelope_bytes = reader.read_remaining();
     if envelope_bytes.is_empty() {
         return Err(malformed_status());
@@ -550,25 +524,182 @@ fn open_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     ROOT_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let lease = registry.active(request.handle, &request.capability)?;
-        let record_identifier = derive_record_identifier_from_context(
-            lease.root.binding(),
+        open_record_with_active_lease(
+            lease,
+            request.action_randomness_commitment,
             request.record_type,
             request.identifier_context,
+            request.record_version,
+            request.creation_recovery_epoch,
+            request.predecessor_record_hash,
+            &envelope,
+        )
+        .map(|mut plaintext| core::mem::take(&mut *plaintext))
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn seal_record_with_active_lease(
+    lease: &mut RootLease,
+    action_randomness_commitment: Hash512,
+    record_type: LocalRecordType,
+    identifier_context: &[u8],
+    record_version: u64,
+    creation_recovery_epoch: u64,
+    predecessor_record_hash: Option<Hash512>,
+    nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+    plaintext: &[u8],
+) -> RuntimeResult<Vec<u8>> {
+    let record_identifier = derive_record_identifier_from_context(
+        lease.root.binding(),
+        record_type,
+        identifier_context,
+    )?;
+    let record_version_key = (record_identifier.into_bytes(), record_version);
+    if lease.sealed_record_versions.contains(&record_version_key) {
+        return Err(refusal_status(RefusalReason::ConsumedState));
+    }
+    let next_seal_invocation_count = lease
+        .local_record_seal_invocation_count
+        .checked_add(1)
+        .ok_or_else(outside_supported_profile_status)?;
+    let plaintext_byte_length =
+        u64::try_from(plaintext.len()).map_err(|_| outside_supported_profile_status())?;
+    let next_sealed_plaintext_byte_length = lease
+        .local_record_sealed_plaintext_byte_length
+        .checked_add(plaintext_byte_length)
+        .ok_or_else(outside_supported_profile_status)?;
+    if next_seal_invocation_count > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
+        || next_sealed_plaintext_byte_length
+            > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT
+    {
+        return Err(outside_supported_profile_status());
+    }
+    let envelope = lease
+        .root
+        .seal_local_record_with_identifier(LocalRecordSealWithIdentifierInput {
+            action_randomness_commitment,
+            record_type,
+            record_identifier,
+            record_version,
+            creation_recovery_epoch,
+            predecessor_record_hash,
+            nonce,
+            plaintext,
+        })
+        .map_err(schema_status)?;
+    let encoded_envelope = envelope.encode().map_err(schema_status)?;
+    lease.sealed_record_versions.insert(record_version_key);
+    lease.local_record_seal_invocation_count = next_seal_invocation_count;
+    lease.local_record_sealed_plaintext_byte_length = next_sealed_plaintext_byte_length;
+    Ok(encoded_envelope)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn open_record_with_active_lease(
+    lease: &RootLease,
+    action_randomness_commitment: Hash512,
+    record_type: LocalRecordType,
+    identifier_context: &[u8],
+    record_version: u64,
+    creation_recovery_epoch: u64,
+    predecessor_record_hash: Option<Hash512>,
+    envelope: &LocalRecordEnvelope,
+) -> RuntimeResult<Zeroizing<Vec<u8>>> {
+    let record_identifier = derive_record_identifier_from_context(
+        lease.root.binding(),
+        record_type,
+        identifier_context,
+    )?;
+    lease
+        .root
+        .open_local_record_with_identifier(
+            action_randomness_commitment,
+            record_type,
+            record_identifier,
+            record_version,
+            creation_recovery_epoch,
+            predecessor_record_hash,
+            envelope,
+        )
+        .into_result()
+        .map_err(refusal_status)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn seal_action_randomness_root(
+    storage_handle: u32,
+    storage_capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    expected_binding: LocalStorageBinding,
+    action_randomness_commitment: Hash512,
+    record_version: u64,
+    creation_recovery_epoch: u64,
+    predecessor_record_hash: Option<Hash512>,
+    nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+    action_randomness_root: &[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+) -> RuntimeResult<Vec<u8>> {
+    ROOT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let lease = registry.active_mut(storage_handle, storage_capability)?;
+        if lease.root.binding() != expected_binding {
+            return Err(refusal_status(RefusalReason::WrongContext));
+        }
+        seal_record_with_active_lease(
+            lease,
+            action_randomness_commitment,
+            LocalRecordType::ActionRandomness,
+            &[],
+            record_version,
+            creation_recovery_epoch,
+            predecessor_record_hash,
+            nonce,
+            action_randomness_root,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn open_action_randomness_root(
+    storage_handle: u32,
+    storage_capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    expected_binding: LocalStorageBinding,
+    action_randomness_commitment: Hash512,
+    record_version: u64,
+    creation_recovery_epoch: u64,
+    predecessor_record_hash: Option<Hash512>,
+    canonical_envelope: &[u8],
+) -> RuntimeResult<Zeroizing<[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]>> {
+    if canonical_envelope.is_empty() {
+        return Err(malformed_status());
+    }
+    let envelope =
+        LocalRecordEnvelope::decode(canonical_envelope, &CanonicalDecodeLimits::default())
+            .map_err(schema_status)?;
+    if envelope.encode().map_err(schema_status)? != canonical_envelope {
+        return Err(refusal_status(RefusalReason::MalformedEncoding));
+    }
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active(storage_handle, storage_capability)?;
+        if lease.root.binding() != expected_binding {
+            return Err(refusal_status(RefusalReason::WrongContext));
+        }
+        let plaintext = open_record_with_active_lease(
+            lease,
+            action_randomness_commitment,
+            LocalRecordType::ActionRandomness,
+            &[],
+            record_version,
+            creation_recovery_epoch,
+            predecessor_record_hash,
+            &envelope,
         )?;
-        lease
-            .root
-            .open_local_record_with_identifier(
-                request.action_randomness_commitment,
-                request.record_type,
-                record_identifier,
-                request.record_version,
-                request.creation_recovery_epoch,
-                request.predecessor_record_hash,
-                &envelope,
-            )
-            .into_result()
-            .map(|plaintext| plaintext.to_vec())
-            .map_err(refusal_status)
+        if plaintext.len() != ACTION_RANDOMNESS_ROOT_BYTE_LENGTH {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
+        let mut root = Zeroizing::new([0u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]);
+        root.copy_from_slice(plaintext.as_slice());
+        Ok(root)
     })
 }
 

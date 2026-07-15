@@ -1,6 +1,9 @@
 //! Canonical foundation data shared by protocol verification paths.
 
 mod authenticated_mailbox;
+mod board_ingestion;
+mod board_ingestion_ffi;
+mod board_ingestion_runtime;
 mod canonical_stream;
 mod canonical_stream_runtime;
 mod canonical_tuple;
@@ -12,6 +15,8 @@ mod mailbox_gcm;
 mod mailbox_gcm_runtime;
 mod participant_identity;
 mod private_randomness;
+mod private_randomness_runtime;
+mod proof_application;
 mod refusal;
 mod runtime_build;
 mod schemas;
@@ -26,6 +31,10 @@ pub use authenticated_mailbox::{
     MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH, MailboxAssociatedData, MailboxKeyScheduleInput,
     MailboxPayloadType, SIGNED_MAILBOX_ENVELOPE_SCHEMA_IDENTIFIER, SignedMailboxEnvelope,
     derive_mailbox_kem_ciphertext_hash, derive_setup_mailbox_slot_hash,
+};
+pub use board_ingestion::{
+    CanonicalBoardError, CanonicalBoardLimits, CanonicalBoardVerifier,
+    VerifiedTranscriptBatch, VerifiedTranscriptObject,
 };
 pub(crate) use canonical_stream::VerifiedCanonicalStreamSummary;
 pub use canonical_stream::{
@@ -52,6 +61,10 @@ pub use external_inputs::{
     derive_artifact_hash,
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
+pub(crate) use hash::{
+    StreamingFoundationHashError, StreamingFoundationTupleHash512,
+    fill_foundation_tuple_xof,
+};
 pub(crate) use local_encrypted_storage::round_trip_local_record_authenticator_input;
 pub use local_encrypted_storage::{
     ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_STORAGE_ROOT_BYTE_LENGTH,
@@ -80,10 +93,24 @@ pub use participant_identity::{
     ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, ParticipantIdentity, ParticipantIdentityParseError,
     derive_participant_identity,
 };
-pub(crate) use private_randomness::PrivateRandomnessDomain;
 pub use private_randomness::{
-    PRIVATE_PROOF_SALT_PURPOSE, PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH,
-    PrivateRandomCursor, RANDOM_CURSOR_SCHEMA_IDENTIFIER,
+    ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_RANDOMNESS_ROOT_BYTE_LENGTH,
+    ActionPrivateRandomness, ActionRandomnessDerivationInput, ActionRandomnessRoot,
+    ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, OrdinaryProofCoinInput,
+    PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, PRIVATE_PROOF_SALT_PURPOSE,
+    PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER,
+    PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH, PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH,
+    PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER, PersistentProofCoinInput, PrivateRandomBlockInput,
+    PrivateRandomCursor, PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
+    PrivateRandomnessStream, ProofApplicationSlot, RANDOM_CURSOR_SCHEMA_IDENTIFIER,
+    derive_application_statement_hash, derive_proof_coin_context_hash,
+    derive_relation_plan_variant_hash,
+};
+pub(crate) use private_randomness_runtime::run_action_randomness_command;
+pub use proof_application::{
+    PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
+    ProofApplicationBinding, ProofApplicationSlotCeilings, ProofFamilyApplicationCeiling,
+    ProofObjectHeader,
 };
 pub use refusal::{RefusalReason, VerificationResult};
 pub use runtime_build::{

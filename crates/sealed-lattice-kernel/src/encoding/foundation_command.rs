@@ -3,12 +3,13 @@ use serde_json::{Map, Value, json};
 use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::foundation::LocalStorageRecoveryValue;
 use crate::foundation::{
-    ACTION_DEFINITION_SCHEMA_IDENTIFIER, ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
-    ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER, ActionContext, ActionDefinition,
-    ActionStorageDerivationInput, BOARD_POLICY_SCHEMA_IDENTIFIER, BoardPolicy,
-    CHECKPOINT_BOUNDARY_PROFILE_SCHEMA_IDENTIFIER, CHECKPOINT_RANDOM_USE_PROFILE_SCHEMA_IDENTIFIER,
-    CanonicalCodecError, CanonicalDecodeLimits, CeremonyContext, CheckpointBoundaryProfile,
-    CheckpointRandomUseProfile, DEVICE_WRAPPED_STORAGE_ROOT_SCHEMA_IDENTIFIER,
+    ACTION_DEFINITION_SCHEMA_IDENTIFIER, ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
+    ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER,
+    ActionContext, ActionDefinition, ActionRandomnessDerivationInput, ActionStorageDerivationInput,
+    BOARD_POLICY_SCHEMA_IDENTIFIER, BoardPolicy, CHECKPOINT_BOUNDARY_PROFILE_SCHEMA_IDENTIFIER,
+    CHECKPOINT_RANDOM_USE_PROFILE_SCHEMA_IDENTIFIER, CanonicalCodecError, CanonicalDecodeLimits,
+    CeremonyContext, CheckpointBoundaryProfile, CheckpointRandomUseProfile,
+    DEVICE_WRAPPED_STORAGE_ROOT_SCHEMA_IDENTIFIER,
     DEVICE_WRAPPING_ASSOCIATED_DATA_SCHEMA_IDENTIFIER, DISTRIBUTION_RECORD_SCHEMA_IDENTIFIER,
     DeviceWrappedStorageRoot, DeviceWrappingAssociatedData, DistributionRecord, Hash512,
     IncrementalCanonicalTupleDecoder, LOCAL_RECORD_ASSOCIATED_DATA_SCHEMA_IDENTIFIER,
@@ -17,8 +18,14 @@ use crate::foundation::{
     LocalRecordKeyInput, MAILBOX_ASSOCIATED_DATA_SCHEMA_IDENTIFIER,
     MAILBOX_KEY_SCHEDULE_INPUT_SCHEMA_IDENTIFIER, MANIFEST_SCHEMA_IDENTIFIER,
     MailboxAssociatedData, MailboxKeyScheduleInput, Manifest, OBJECT_ENVELOPE_SCHEMA_IDENTIFIER,
-    OPTION_DEFINITION_SCHEMA_IDENTIFIER, ObjectEnvelope, OptionDefinition, PrivateRandomCursor,
-    RANDOM_CURSOR_SCHEMA_IDENTIFIER, ROSTER_ENTRY_SCHEMA_IDENTIFIER, ROSTER_SCHEMA_IDENTIFIER,
+    OPTION_DEFINITION_SCHEMA_IDENTIFIER, ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER,
+    ObjectEnvelope, OptionDefinition, OrdinaryProofCoinInput,
+    PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER,
+    PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER,
+    PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER, PersistentProofCoinInput, PrivateRandomBlockInput,
+    PrivateRandomCursor, ProofApplicationBinding, ProofApplicationSlot, ProofObjectHeader,
+    RANDOM_CURSOR_SCHEMA_IDENTIFIER,
+    ROSTER_ENTRY_SCHEMA_IDENTIFIER, ROSTER_SCHEMA_IDENTIFIER,
     RUNTIME_ASSET_REFERENCE_SCHEMA_IDENTIFIER, RUNTIME_BUILD_MANIFEST_SCHEMA_IDENTIFIER,
     RUNTIME_OPERATION_PROFILE_SCHEMA_IDENTIFIER, Roster, RosterEntry, RuntimeAssetReference,
     RuntimeBuildManifest, RuntimeOperationProfile, SIGNED_CARRIER_SCHEMA_IDENTIFIER,
@@ -160,6 +167,37 @@ pub(super) fn validate_canonical_foundation_value(request: &Value) -> CanonicalR
         ),
         ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER => {
             round_trip_schema!(ActionStorageDerivationInput, canonical_bytes, limits)
+        }
+        ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER => {
+            round_trip_schema!(ActionRandomnessDerivationInput, canonical_bytes, limits)
+        }
+        PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER => {
+            let value =
+                ProofApplicationSlot::decode(&canonical_bytes, &limits).map_err(schema_error)?;
+            (
+                value.encode().map_err(schema_error)?,
+                Some(value.hash().map_err(schema_error)?),
+            )
+        }
+        PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER => {
+            let value = ProofObjectHeader::decode(&canonical_bytes, &limits)
+                .map_err(schema_error)?;
+            (
+                value.encode().map_err(schema_error)?,
+                Some(value.proof_header_hash().map_err(schema_error)?),
+            )
+        }
+        PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER => {
+            round_trip_schema!(ProofApplicationBinding, canonical_bytes, limits)
+        }
+        PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER => {
+            round_trip_schema!(PersistentProofCoinInput, canonical_bytes, limits)
+        }
+        ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER => {
+            round_trip_schema!(OrdinaryProofCoinInput, canonical_bytes, limits)
+        }
+        PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER => {
+            round_trip_schema!(PrivateRandomBlockInput, canonical_bytes, limits)
         }
         RANDOM_CURSOR_SCHEMA_IDENTIFIER => {
             round_trip_schema!(PrivateRandomCursor, canonical_bytes, limits)
@@ -307,6 +345,40 @@ pub(super) fn derive_action_context_hash(request: &Value) -> CanonicalResult<Val
     }))
 }
 
+pub(super) fn decode_proof_application_binding(request: &Value) -> CanonicalResult<Value> {
+    let request = required_object(request, "command request")?;
+    let canonical_bytes = decode_hex(required_string(request, "canonicalBytesHex")?)?;
+    let binding = ProofApplicationBinding::decode(
+        &canonical_bytes,
+        &CanonicalDecodeLimits::default(),
+    )
+    .map_err(schema_error)?;
+    if binding.encode().map_err(schema_error)? != canonical_bytes {
+        return Err(invalid_value(
+            "proof application binding did not round-trip to identical canonical bytes",
+        ));
+    }
+    let slot = binding.application_slot();
+    let descriptor = binding.proof_stream_descriptor();
+    Ok(json!({
+        "canonicalBytesHex": encode_hex(&canonical_bytes),
+        "applicationSlotCanonicalBytesHex": encode_hex(&slot.encode().map_err(schema_error)?),
+        "applicationSlotHash": slot.hash().map_err(schema_error)?.to_lowercase_hex(),
+        "suiteIdentifier": slot.suite_identifier().to_lowercase_hex(),
+        "ceremonyContextHash": slot.ceremony_context_hash().to_lowercase_hex(),
+        "actionContextHash": slot.action_context_hash().to_lowercase_hex(),
+        "applicationStatementSchemaIdentifier": slot.application_statement_schema_identifier(),
+        "rosterPosition": slot.roster_position(),
+        "schedulePosition": slot.schedule_position(),
+        "producerSequence": slot.producer_sequence().map(|value| value.to_string()),
+        "proofHeaderHash": binding.proof_header_hash().to_lowercase_hex(),
+        "proofStreamDescriptorCanonicalBytesHex": encode_hex(
+            &descriptor.encode().map_err(schema_error)?
+        ),
+        "proofByteLength": descriptor.total_byte_length.to_string(),
+    }))
+}
+
 fn required_object<'a>(value: &'a Value, label: &str) -> CanonicalResult<&'a Map<String, Value>> {
     value
         .as_object()
@@ -375,8 +447,9 @@ fn invalid_value(message: impl Into<String>) -> CanonicalError {
 mod tests {
     use super::*;
     use crate::foundation::{
-        ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, CanonicalItem, CanonicalTuple,
-        DEVICE_WRAPPED_STORAGE_ROOT_NONCE_BYTE_LENGTH,
+        ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
+        ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ActionRandomnessDerivationInput,
+        CanonicalItem, CanonicalTuple, DEVICE_WRAPPED_STORAGE_ROOT_NONCE_BYTE_LENGTH,
         DEVICE_WRAPPED_STORAGE_ROOT_SCHEMA_IDENTIFIER, DEVICE_WRAPPED_STORAGE_ROOT_TAG_BYTE_LENGTH,
         DEVICE_WRAPPING_ASSOCIATED_DATA_SCHEMA_IDENTIFIER, DeviceWrappedStorageRoot,
         DeviceWrappingAssociatedData, FOUNDATION_PROFILE,
@@ -385,8 +458,12 @@ mod tests {
         LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER, LOCAL_RECORD_KEY_INPUT_SCHEMA_IDENTIFIER,
         LOCAL_RECORD_NONCE_BYTE_LENGTH, LOCAL_RECORD_TAG_BYTE_LENGTH, LocalRecordAssociatedData,
         LocalRecordEnvelope, LocalRecordKeyInput, LocalRecordType, LocalStorageBinding,
-        LocalStorageRecoveryValue, ParticipantIdentity,
-        STORAGE_ROOT_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER,
+        LocalStorageRecoveryValue, ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER,
+        OrdinaryProofCoinInput, PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER,
+        PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER,
+        PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER, ParticipantIdentity, PersistentProofCoinInput,
+        ProofApplicationBinding, ProofApplicationSlot, ProofObjectHeader,
+        STORAGE_ROOT_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER, StreamDescriptor,
         STORAGE_ROOT_RECOVERY_VALUE_SCHEMA_IDENTIFIER, StabilizedDisplayText,
         StorageRootCommitmentPayload,
     };
@@ -638,6 +715,157 @@ mod tests {
                 Value::String(encode_hex(&canonical_bytes))
             );
         }
+    }
+
+    #[test]
+    fn foundation_validator_round_trips_private_randomness_public_schemas() {
+        let suite_identifier = Hash512::from_bytes([0x11; 64]);
+        let ceremony_context_hash = Hash512::from_bytes([0x22; 64]);
+        let action_context_hash = Hash512::from_bytes([0x33; 64]);
+        let participant_identity = ParticipantIdentity::from_bytes([0x44; 64]);
+        let derivation_input = ActionRandomnessDerivationInput::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            participant_identity,
+        );
+        let persistent_slot = ProofApplicationSlot::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            0x1211,
+            Some(2),
+            None,
+            None,
+        )
+        .expect("persistent proof slot");
+        let ordinary_slot = ProofApplicationSlot::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            0x1302,
+            Some(2),
+            None,
+            Some(7),
+        )
+        .expect("ordinary proof slot");
+        let persistent_input =
+            PersistentProofCoinInput::new(persistent_slot, Hash512::from_bytes([0x55; 64]))
+                .expect("persistent proof input");
+        let ordinary_input =
+            OrdinaryProofCoinInput::new(ordinary_slot, Hash512::from_bytes([0x66; 64]), [0x77; 32])
+                .expect("ordinary proof input");
+
+        for (schema_identifier, canonical_bytes) in [
+            (
+                ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
+                derivation_input.encode().expect("derivation input encodes"),
+            ),
+            (
+                PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER,
+                persistent_slot.encode().expect("proof slot encodes"),
+            ),
+            (
+                PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER,
+                persistent_input.encode().expect("persistent input encodes"),
+            ),
+            (
+                ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER,
+                ordinary_input.encode().expect("ordinary input encodes"),
+            ),
+        ] {
+            let response = validate_canonical_foundation_value(&json!({
+                "schemaIdentifier": schema_identifier,
+                "canonicalBytesHex": encode_hex(&canonical_bytes),
+            }))
+            .expect("private-randomness schema validates");
+            assert_eq!(
+                response["canonicalBytesHex"],
+                Value::String(encode_hex(&canonical_bytes))
+            );
+        }
+
+        let slot_bytes = persistent_slot.encode().expect("proof slot encodes");
+        let slot_response = validate_canonical_foundation_value(&json!({
+            "schemaIdentifier": PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER,
+            "canonicalBytesHex": encode_hex(&slot_bytes),
+        }))
+        .expect("proof slot validates");
+        assert_eq!(
+            slot_response["bindingHash"],
+            Value::String(
+                persistent_slot
+                    .hash()
+                    .expect("proof slot hash")
+                    .to_lowercase_hex()
+            )
+        );
+    }
+
+    #[test]
+    fn foundation_validator_round_trips_the_proof_header_and_application_binding() {
+        let limits = CanonicalDecodeLimits::default();
+        let statement_bytes = CanonicalTuple::new(
+            0x2110,
+            1,
+            vec![CanonicalItem::unsigned16(9)],
+        )
+        .encode()
+        .expect("application statement encodes");
+        let header = ProofObjectHeader::from_canonical_application_statement(
+            statement_bytes,
+            &limits,
+        )
+        .expect("proof header is valid");
+        let slot = ProofApplicationSlot::new(
+            Hash512::from_bytes([0x11; 64]),
+            Hash512::from_bytes([0x22; 64]),
+            Hash512::from_bytes([0x33; 64]),
+            0x2110,
+            Some(2),
+            None,
+            None,
+        )
+        .expect("proof slot is valid");
+        let binding = ProofApplicationBinding::new(
+            slot,
+            header.proof_header_hash().expect("proof header hashes"),
+            StreamDescriptor::new(
+                1,
+                vec![Hash512::from_bytes([0x44; 64])],
+                Hash512::from_bytes([0x45; 64]),
+            )
+                .expect("proof stream descriptor is valid"),
+        )
+        .expect("proof application binding is valid");
+
+        let header_bytes = header.encode().expect("proof header encodes");
+        let header_response = validate_canonical_foundation_value(&json!({
+            "schemaIdentifier": PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
+            "canonicalBytesHex": encode_hex(&header_bytes),
+        }))
+        .expect("proof header validates");
+        assert_eq!(
+            header_response["bindingHash"],
+            Value::String(
+                header
+                    .proof_header_hash()
+                    .expect("proof header hashes")
+                    .to_lowercase_hex()
+            )
+        );
+
+        let binding_bytes = binding.encode().expect("proof binding encodes");
+        let binding_response = validate_canonical_foundation_value(&json!({
+            "schemaIdentifier": PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER,
+            "canonicalBytesHex": encode_hex(&binding_bytes),
+        }))
+        .expect("proof binding validates");
+        assert_eq!(
+            binding_response["canonicalBytesHex"],
+            Value::String(encode_hex(&binding_bytes))
+        );
+        assert!(binding_response.get("bindingHash").is_none());
     }
 
     #[test]

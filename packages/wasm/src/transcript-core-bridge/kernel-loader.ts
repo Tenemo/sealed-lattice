@@ -1,5 +1,6 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { registerCanonicalBoardKernelContext } from '../canonical-board-runtime.js';
 import { registerStateVerifierKernelContext } from '../state-verifier-runtime.js';
 
 import type {
@@ -12,6 +13,7 @@ import type {
     BgvSetupCommitmentOpeningComputation,
     DecodedMailboxAssociatedData,
     DecodedMailboxKeyScheduleInput,
+    DecodedProofApplicationBinding,
     DecodedPrivateRandomCursor,
     DecodedSignedMailboxEnvelope,
     DecodedStreamDescriptor,
@@ -55,6 +57,34 @@ export const createTranscriptCoreKernelLoader = (
         const localStorageRootCommand = resolveOptionalNumberExport(
             exports,
             'sealed_lattice_local_storage_root_command',
+        );
+        const boardVerifierBegin = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_board_verifier_begin',
+        );
+        const boardVerifierCachedCarrierLength = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_board_verifier_cached_carrier_length',
+        );
+        const boardVerifierCancel = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_board_verifier_cancel',
+        );
+        const boardVerifierCopyCachedCarrier = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_board_verifier_copy_cached_carrier',
+        );
+        const boardVerifierDescribe = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_board_verifier_describe',
+        );
+        const boardVerifierRelease = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_board_verifier_release',
+        );
+        const boardVerifierVerifyUnordered = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_board_verifier_verify_unordered',
         );
         const stateVerifierBegin = resolveOptionalNumberExport(
             exports,
@@ -117,6 +147,11 @@ export const createTranscriptCoreKernelLoader = (
                 executeCommand<CanonicalFoundationValueValidation>({
                     command: 'ValidateCanonicalFoundationValue',
                     ...input,
+                }),
+            decodeProofApplicationBinding: (input) =>
+                executeCommand<DecodedProofApplicationBinding>({
+                    command: 'DecodeProofApplicationBinding',
+                    canonicalBytesHex: input.canonicalBytesHex,
                 }),
             deriveCeremonyContextHash: (value): ProtocolHash =>
                 executeCommand<{
@@ -314,6 +349,29 @@ export const createTranscriptCoreKernelLoader = (
                 deallocate,
                 memory,
                 runExclusive: runExclusiveKernelOperation,
+            });
+        }
+        if (
+            boardVerifierBegin !== undefined &&
+            boardVerifierCachedCarrierLength !== undefined &&
+            boardVerifierCancel !== undefined &&
+            boardVerifierCopyCachedCarrier !== undefined &&
+            boardVerifierDescribe !== undefined &&
+            boardVerifierRelease !== undefined &&
+            boardVerifierVerifyUnordered !== undefined
+        ) {
+            registerCanonicalBoardKernelContext(kernel, {
+                allocate,
+                begin: boardVerifierBegin,
+                cachedCarrierLength: boardVerifierCachedCarrierLength,
+                cancel: boardVerifierCancel,
+                copyCachedCarrier: boardVerifierCopyCachedCarrier,
+                deallocate,
+                describe: boardVerifierDescribe,
+                memory,
+                release: boardVerifierRelease,
+                runExclusive: runExclusiveKernelOperation,
+                verifyUnordered: boardVerifierVerifyUnordered,
             });
         }
         if (

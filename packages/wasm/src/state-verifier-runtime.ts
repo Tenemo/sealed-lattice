@@ -426,6 +426,13 @@ type VerifiedObjectRecord = {
     session: StateVerifierSessionImplementation;
 };
 
+export type VerifiedStateReservationKernelAuthorization = Readonly<{
+    capabilityMemory: WebAssembly.Memory;
+    capabilityPointer: number;
+    reservationHandle: number;
+    sessionHandle: number;
+}>;
+
 const verifiedObjectRecords = new WeakMap<object, VerifiedObjectRecord>();
 const durableBindingDescriptions = new WeakMap<
     object,
@@ -491,6 +498,32 @@ export const copyVerifiedStateDurableBinding = (
     }
 
     return copyDurableBindingDescription(description);
+};
+
+export const resolveVerifiedStateReservationKernelAuthorization = (
+    reservation: VerifiedStateReservation,
+    kernel: TranscriptCoreKernel,
+): VerifiedStateReservationKernelAuthorization => {
+    if (
+        (typeof reservation !== 'object' && typeof reservation !== 'function') ||
+        reservation === null
+    ) {
+        throw new TypeError(
+            'The state reservation was not issued by the WASM state verifier.',
+        );
+    }
+    const record = verifiedObjectRecords.get(reservation);
+    if (
+        record === undefined ||
+        !record.active ||
+        record.kind !== 'reservation'
+    ) {
+        throw new TypeError(
+            'The state reservation is unavailable or was not issued by the WASM state verifier.',
+        );
+    }
+
+    return record.session.reservationKernelAuthorization(record, kernel);
 };
 
 const refused = <Value>(
@@ -1095,6 +1128,31 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         this.#context = context;
         this.#handle = handle;
         this.#capabilityPointer = capabilityPointer;
+    }
+
+    public reservationKernelAuthorization(
+        record: VerifiedObjectRecord,
+        kernel: TranscriptCoreKernel,
+    ): VerifiedStateReservationKernelAuthorization {
+        if (
+            this.#state !== 'active' ||
+            !record.active ||
+            record.kind !== 'reservation' ||
+            record.session !== this
+        ) {
+            throw new TypeError('The verified state reservation is unavailable.');
+        }
+        if (kernel !== this.#kernel) {
+            throw new TypeError(
+                'The verified state reservation belongs to another WASM kernel.',
+            );
+        }
+        return Object.freeze({
+            capabilityMemory: this.#context.memory,
+            capabilityPointer: this.#capabilityPointer,
+            reservationHandle: record.handle,
+            sessionHandle: this.#handle,
+        });
     }
 
     public durableBindingFor(

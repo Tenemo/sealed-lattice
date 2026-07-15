@@ -1,13 +1,7 @@
-// Setup-proof commands and the shared per-limb polynomial-IOP engine.
-// Statements containing diagonal-source evaluation keys route to the limb-group
-// atom schedule; the other supported proof families use the shared engine here.
-// That engine commits masked witness columns per proof limb, batches support and
-// relation constraints through quotients and a univariate sumcheck, binds
-// cross-limb claims as masked centered integers, and checks low degree through
-// DEEP evaluations and FRI. Same-secret relations open the accepted BDLOP
-// constant commitments, tying the relation witness to the committed secret.
-// Verifiers rebuild statements from authenticated public material before checking
-// any proof.
+// Setup-proof commands for the trustee evaluation-key atom proof and the
+// recipient-private VSS proof. Public VSS linkage, threshold aggregation,
+// same-secret anchoring, public-key shares, and target decryption use the common
+// proof suite instead of this per-modulus engine.
 
 mod commands;
 mod evaluation_domain;
@@ -22,32 +16,12 @@ mod verifier;
 
 pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
 #[cfg(test)]
-pub(crate) use commands::verify_vss_share_linkage_proof_material_set_from_request;
-pub(crate) use commands::{
-    generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
-    verify_same_secret_bridge_proof_source_from_request,
-};
-#[cfg(test)]
-pub(crate) use commands::{
-    generate_target_decryption_share_proof_bytes_from_request,
-    verify_target_decryption_share_proof_bytes_from_request,
-    verify_target_decryption_share_proof_source_from_request,
-};
-#[cfg(test)]
 pub(in crate::bgv::setup) use commands::{
-    prove_trustee_evaluation_key_proof_bytes, verify_and_retain_vss_share_linkage_proof_binding,
-    verify_trustee_evaluation_key_proof_bytes,
+    prove_trustee_evaluation_key_proof_bytes, verify_trustee_evaluation_key_proof_bytes,
 };
 
 pub(in crate::bgv::setup) use commands::{
-    VssPublicCommandCommitmentExpectation, verified_vss_share_linkage_proof_material_bytes,
-    verify_vss_share_linkage_proof_source_from_request,
-    verify_vss_share_linkage_statement_and_proof_material_set_from_request,
-    vss_share_linkage_commitment_from_value, vss_share_linkage_proof_verification_binding_hash,
-};
-#[cfg(test)]
-pub(in crate::bgv::setup) use commands::{
-    VssShareLinkageMaterialRecordStatementInput, verify_vss_share_linkage_material_record_statement,
+    VssPublicCommandCommitmentExpectation, vss_share_linkage_commitment_from_value,
 };
 pub(in crate::bgv::setup) use fiat_shamir_transcript::HashChainTranscriptCore;
 pub(in crate::bgv::setup) use merkle_commitment::{
@@ -61,22 +35,18 @@ pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof_f
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 #[cfg(test)]
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
-pub(in crate::bgv::setup) use prover::{
-    VssCommittedMaterialTreeInput, vss_committed_material_roots_by_commitment_field,
-};
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
 pub(in crate::bgv::setup) use relation::public_key_switch_sample;
 pub(in crate::bgv::setup) use relation::{
-    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-    PrivateVssShareStatement, SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE,
-    SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS, SameSecretBridgeStatement,
+    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PrivateVssShareStatement,
+    SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE, SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS,
     SameSecretLinkageAtomFieldForms, SameSecretLinkageStatement, SetupProofStatement,
     SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
     build_same_secret_linkage_atom_field_forms,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use relation::{
-    KeyBearingWitness, SameSecretLinkageWitness, VssCommittedMaterialWitness,
+    KeyBearingWitness, SameSecretLinkageWitness,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 

@@ -9,12 +9,10 @@ use crate::bgv::{
 use crate::{
     bgv::{
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt_in_place},
-        parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+        parameters::{LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
-
-pub(crate) const LOGICAL_SLOT_GENERATOR: usize = 3;
 
 static LOGICAL_TO_NATURAL_TRANSFORM_INDEX: OnceLock<Vec<usize>> = OnceLock::new();
 

@@ -49,7 +49,7 @@ type EvaluationKeyShareComponentVectors =
     SourceRelinearizationContribution['keySwitchComponentVectorsLittleEndianHexByDigitAndLimb'];
 
 const qSharePrimes = [
-    140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
+    140_700_980_543_489, 140_546_359_361_537, 140_507_704_066_049,
 ] as const;
 const participantCount = 2;
 const scheduledLevel = 1;

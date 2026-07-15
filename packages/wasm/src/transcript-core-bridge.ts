@@ -9,6 +9,7 @@ export type {
     CanonicalFoundationValueValidation,
     CanonicalFoundationValueValidationInput,
     CeremonyContextInput,
+    DecodedProofApplicationBinding,
     DecodedPrivateRandomCursor,
     EncodedPrivateRandomCursor,
     PrivateRandomCursor,

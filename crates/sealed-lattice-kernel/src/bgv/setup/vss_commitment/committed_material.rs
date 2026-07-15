@@ -2,15 +2,9 @@
 //!
 //! The public commitment for a VSS message (a Shamir coefficient, a recipient
 //! share, an aggregate threshold share, or a target-decryption smudging
-//! coefficient) is the set of per-commitment-field committed-material roots
-//! over the message's canonical digit columns, built by the succinct-proof-side
-//! tree builder
-//! (`trustee_evaluation_key_proof::vss_committed_material_roots_by_commitment_field`)
-//! so the share-linkage, bridge, aggregate-opening, and target-decryption
-//! proofs can open the same trees at their query positions. Binding is
-//! SHAKE256 collision resistance of the salted Merkle roots; hiding is the
-//! deterministic-seeded column masks and pair salts. There are no public
-//! coordinates and no opening-randomness columns.
+//! coefficient) is one common-proof-field root over the message's canonical
+//! four-column layout. Every consuming proof opens that byte-identical tree on
+//! the profile-bound Goldilocks evaluation domain.
 
 use super::*;
 
@@ -79,35 +73,31 @@ pub(crate) fn compute_vss_committed_material_commitment(
         "commitmentContext": input.commitment_context,
     }))?;
 
-    let material_roots =
-        super::super::trustee_evaluation_key_proof::vss_committed_material_roots_by_commitment_field(
-            &super::super::trustee_evaluation_key_proof::VssCommittedMaterialTreeInput {
-                message_digit_columns: &message_digit_columns,
-                ring_degree: input.ring_degree,
-                material_seed_hex: input.material_seed_hex,
-                commitment_context_hash: &commitment_context_hash,
-            },
-        )?;
-    let commitment_fields = VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES
-        .iter()
-        .zip(material_roots.iter())
-        .map(|(commitment_modulus_index, material_root)| {
-            json!({
-                "commitmentModulusIndex": commitment_modulus_index,
-                "modulus": DATA_PRIMES[*commitment_modulus_index],
-                "materialRootHex": crate::transcript_core::encode_hex(material_root),
-            })
-        })
-        .collect::<Vec<_>>();
+    let material_context_hash =
+        decode_protocol_hash(&commitment_context_hash, "commitmentContextHash")?;
+    let material_seed = decode_protocol_hash(input.material_seed_hex, "materialSeedHex")?;
+    let material_profile =
+        crate::bgv::proof_suite::CommittedMaterialProfile::selected(input.ring_degree)
+            .map_err(committed_material_error)?;
+    let material_tree = crate::bgv::proof_suite::CommittedMaterialTree::construct(
+        crate::bgv::proof_suite::CommittedMaterialTreeInput {
+            profile: material_profile,
+            material_context_hash,
+            material_seed,
+            message_digit_columns: &message_digit_columns,
+        },
+    )
+    .map_err(committed_material_error)?;
+    let material_root_hex = crate::transcript_core::encode_hex(&material_tree.root());
 
     let commitment = json!({
         "objectType": "VssCommittedMaterialCommitment",
         "commitmentRole": input.commitment_role,
-        "commitmentContextHash": commitment_context_hash,
+        "commitmentContextHash": crate::transcript_core::encode_hex(&material_context_hash),
         "rnsLimbIndex": input.rns_limb_index,
         "rnsPrime": input.rns_prime,
         "ringDegree": input.ring_degree,
-        "commitmentFields": commitment_fields,
+        "materialRootHex": material_root_hex,
     });
     #[cfg(test)]
     let commitment_root = derive_canonical_object_hash(&commitment)?;
@@ -131,6 +121,25 @@ pub(crate) fn compute_vss_committed_material_commitment(
         commitment_root,
         opening_root,
     })
+}
+
+fn decode_protocol_hash(value: &str, field_name: &str) -> CanonicalResult<[u8; 64]> {
+    let bytes = crate::transcript_core::decode_hex(value)?;
+    bytes.try_into().map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("{field_name} must be a 64-byte lowercase hex digest"),
+        )
+    })
+}
+
+fn committed_material_error(
+    error: crate::bgv::proof_suite::CommittedMaterialError,
+) -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::InvalidFixture,
+        format!("committed-material tree construction failed: {error:?}"),
+    )
 }
 
 // The private opening reference: a length-framed hash of the message, its

@@ -1,3 +1,8 @@
+import type {
+    StateCapabilityKind,
+    VerificationResult,
+} from './foundation-contract.js';
+
 export const browserActionStorageCustodyErrorCodes = Object.freeze([
     'Closed',
     'CommitmentMismatch',
@@ -62,6 +67,75 @@ export type LocalStorageRecoveryExportMaterial = Readonly<{
     recoveryChecksum: Uint8Array;
 }>;
 
+export type BrowserActionStateVerifierSessionInput = Readonly<{
+    canonicalRosterBytes: Uint8Array;
+    maximumRecoveryTransitionsPerStateKey: number;
+}>;
+
+export type BrowserActionStateReservationVerificationInput = Readonly<{
+    canonicalReservationIntentCarrier: Uint8Array;
+    canonicalStateCertificate: Uint8Array;
+    capabilityKind: StateCapabilityKind;
+    expectedAuthorizationHash: Uint8Array;
+    stateVerifierSessionIdentifier: string;
+    subjectParticipantIdentity: Uint8Array;
+    verifiedPredecessorRecoveryIdentifier?: string;
+}>;
+
+export type BrowserActionRandomnessReservationVerificationInput = Readonly<{
+    actionRandomnessSessionIdentifier: string;
+    canonicalReservationIntentCarrier: Uint8Array;
+    canonicalStateCertificate: Uint8Array;
+    stateVerifierSessionIdentifier: string;
+    verifiedPredecessorRecoveryIdentifier?: string;
+}>;
+
+export type BrowserActionStateRecoveryVerificationInput = Readonly<{
+    canonicalRecoveryTransitionCarrier: Uint8Array;
+    canonicalStateCertificate: Uint8Array;
+    capabilityKind: StateCapabilityKind;
+    stateVerifierSessionIdentifier: string;
+    subjectParticipantIdentity: Uint8Array;
+    verifiedPredecessorRecoveryIdentifier?: string;
+}>;
+
+export type BrowserActionRandomnessRecordContext = Readonly<{
+    creationRecoveryEpoch: bigint;
+    predecessorRecordHash?: Uint8Array;
+    recordVersion: bigint;
+}>;
+
+export type BrowserSealedActionRandomnessSession = Readonly<{
+    actionRandomnessCommitment: Uint8Array;
+    actionRandomnessSessionIdentifier: string;
+    canonicalEnvelope: Uint8Array;
+}>;
+
+export type BrowserOpenedActionRandomnessSession = Omit<
+    BrowserSealedActionRandomnessSession,
+    'canonicalEnvelope'
+>;
+
+export type BrowserActionProofAttemptBinding = Readonly<{
+    applicationSlotHash: Uint8Array;
+    attemptIdentifier: Uint8Array;
+}>;
+
+export type BrowserPersistentProofAttemptInput = Readonly<{
+    actionRandomnessSessionIdentifier: string;
+    applicationStatementHash: Uint8Array;
+    rosterPosition: number;
+    schedulePosition?: number;
+    stateReservationIdentifier: string;
+    statementSchemaIdentifier: number;
+}>;
+
+export type BrowserTargetReleaseAttemptInput = Readonly<{
+    actionRandomnessSessionIdentifier: string;
+    rosterPosition: number;
+    stateReservationIdentifier: string;
+}>;
+
 export type BrowserLocalRecordIdentifierInput =
     | Readonly<{ recordType: 'actionRandomness' }>
     | Readonly<{ recordType: 'publicCoinPrivateMaterial' }>
@@ -111,10 +185,15 @@ export type BrowserLocalRecordIdentifierInput =
           recordType: 'checkpointChunk';
       }>;
 
+export type BrowserLocalRecordOpenableIdentifierInput = Exclude<
+    BrowserLocalRecordIdentifierInput,
+    Readonly<{ recordType: 'actionRandomness' }>
+>;
+
 export type BrowserLocalRecordExpectedContext = Readonly<{
     actionRandomnessCommitment: Uint8Array;
     creationRecoveryEpoch: bigint;
-    identifierInput: BrowserLocalRecordIdentifierInput;
+    identifierInput: BrowserLocalRecordOpenableIdentifierInput;
     predecessorRecordHash?: Uint8Array;
     recordVersion: bigint;
 }>;
@@ -166,4 +245,35 @@ export type BrowserActionStorageWorkerKernel = Readonly<{
         input: BrowserLocalRecordOpenInput,
     ): Promise<Uint8Array>;
     hashActiveLocalRecordEnvelope(envelope: Uint8Array): Promise<Uint8Array>;
+    openActionStateVerifierSession(
+        input: BrowserActionStateVerifierSessionInput,
+    ): Promise<VerificationResult<string>>;
+    verifyActionStateReservation(
+        input: BrowserActionStateReservationVerificationInput,
+    ): Promise<VerificationResult<string>>;
+    verifyActionRandomnessReservation(
+        input: BrowserActionRandomnessReservationVerificationInput,
+    ): Promise<VerificationResult<string>>;
+    verifyActionStateRecovery(
+        input: BrowserActionStateRecoveryVerificationInput,
+    ): Promise<VerificationResult<string>>;
+    releaseActionStateObject(identifier: string): Promise<void>;
+    closeActionStateVerifierSession(identifier: string): Promise<void>;
+    createAndSealActionRandomness(
+        input: BrowserActionRandomnessRecordContext,
+    ): Promise<BrowserSealedActionRandomnessSession>;
+    openSealedActionRandomness(
+        input: BrowserActionRandomnessRecordContext &
+            Readonly<{
+                actionRandomnessCommitment: Uint8Array;
+                canonicalEnvelope: Uint8Array;
+            }>,
+    ): Promise<BrowserOpenedActionRandomnessSession>;
+    closeActionRandomness(identifier: string): Promise<void>;
+    derivePersistentProofAttempt(
+        input: BrowserPersistentProofAttemptInput,
+    ): Promise<BrowserActionProofAttemptBinding>;
+    deriveTargetReleaseAttempt(
+        input: BrowserTargetReleaseAttemptInput,
+    ): Promise<BrowserActionProofAttemptBinding>;
 }>;

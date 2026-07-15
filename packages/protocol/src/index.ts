@@ -5,6 +5,7 @@ export {
     UntrustedStorageTransactionStore,
 } from './runtime/untrusted-storage-transaction-store.js';
 export { createRuntimeRecordAuthenticatedRecoveryProtection } from './runtime/authenticated-runtime-record.js';
+export { openCanonicalBoardRuntime } from './runtime/canonical-board-runtime.js';
 export type {
     UntrustedStorageAdapter,
     UntrustedStorageAuthenticatedRecoveryProtection,
@@ -21,6 +22,12 @@ export type {
     UntrustedStorageWrite,
     UntrustedStorageWriteLease,
 } from './runtime/untrusted-storage-transaction-store.js';
+export type {
+    CanonicalBoardRuntime,
+    CanonicalBoardRuntimeInput,
+    CanonicalBoardRuntimeState,
+    VerifiedCanonicalBoardSnapshot,
+} from './runtime/canonical-board-runtime.js';
 export {
     AuthenticatedMailboxStorageError,
     createBrowserLocalAuthenticatedMailboxStorage,
@@ -42,9 +49,26 @@ export type {
     RuntimeStorageAuthorityContext,
 } from './runtime/durable-state-witness-service.js';
 export {
+    openProofApplicationLedger,
+    ProofApplicationLedgerError,
+} from './runtime/proof-application-ledger.js';
+export type {
+    ProofApplicationLedger,
+    ProofApplicationLedgerErrorCode,
+    ProofApplicationLedgerLimits,
+    ProofApplicationLedgerSnapshot,
+    ProofApplicationReservation,
+    ProofFamilyApplicationCeiling,
+} from './runtime/proof-application-ledger.js';
+export {
     AuthenticatedCheckpointStoreError,
     openAuthenticatedCheckpointStore,
 } from './runtime/authenticated-checkpoint-store.js';
+export { openBrowserLocalActionCryptographicProvider } from './runtime/browser-local-action-cryptographic-provider.js';
+export type {
+    BrowserLocalActionCryptographicProvider,
+    BrowserLocalActionCryptographicProviderInput,
+} from './runtime/browser-local-action-cryptographic-provider.js';
 export type {
     AuthenticatedCheckpointStore,
     AuthenticatedCheckpointStoreErrorCode,

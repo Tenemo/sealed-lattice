@@ -1,8 +1,7 @@
 pub(in crate::bgv::setup) mod material_transport;
 
-pub(crate) use self::material_transport::{
-    BgvProofMaterialBytes, CanonicalProofMaterialBytes, ProofByteSource,
-};
+pub(crate) use crate::bgv::proof_suite::ProofByteSource;
+pub(crate) use self::material_transport::{BgvProofMaterialBytes, CanonicalProofMaterialBytes};
 pub(in crate::bgv::setup) use self::material_transport::{
     SetupProofMaterialBytes, take_verified_setup_proof_material_bytes,
 };

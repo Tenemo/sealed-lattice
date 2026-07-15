@@ -35,7 +35,7 @@ use foundation::{
     finish_canonical_stream_verifier, finish_canonical_stream_writer,
     finish_mailbox_gcm_authentication, finish_mailbox_gcm_decryptor, finish_mailbox_gcm_encryptor,
     finish_state_output_intent_verification, finish_state_output_verification,
-    release_verified_state_object, run_local_storage_root_command, verify_state_recovery,
+    release_verified_state_object, run_action_randomness_command, run_local_storage_root_command, verify_state_recovery,
     verify_state_recovery_intent, verify_state_reservation, verify_state_reservation_intent,
 };
 
@@ -1322,6 +1322,49 @@ pub unsafe extern "C" fn sealed_lattice_local_storage_root_command(
 ) -> *mut u8 {
     let input = unsafe { canonical_stream_input(input_pointer, input_length) };
     match run_local_storage_root_command(command, input) {
+        Ok(output) => {
+            let output_length = output.len();
+            unsafe {
+                write_u32_if_present(status_pointer, 0);
+                write_usize_if_present(output_length_pointer, output_length);
+            }
+            if output.is_empty() {
+                ptr::null_mut()
+            } else {
+                leak_bytes(output)
+            }
+        }
+        Err(status) => {
+            unsafe {
+                write_u32_if_present(status_pointer, status);
+                write_usize_if_present(output_length_pointer, 0);
+            }
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Runs one closed operation against the opaque action-randomness registry.
+///
+/// Action roots and derived keys remain owned by the WASM instance. Command
+/// output contains only the public commitment or the exact purpose-bound bytes
+/// consumed by a closed browser-local cryptographic operation.
+///
+/// # Safety
+///
+/// `input_pointer` must name its declared readable byte range. Every non-null
+/// output pointer must point to the corresponding writable value in WASM
+/// memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_action_randomness_command(
+    command: u32,
+    input_pointer: *const u8,
+    input_length: usize,
+    status_pointer: *mut u32,
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let input = unsafe { canonical_stream_input(input_pointer, input_length) };
+    match run_action_randomness_command(command, input) {
         Ok(output) => {
             let output_length = output.len();
             unsafe {

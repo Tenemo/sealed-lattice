@@ -1,33 +1,17 @@
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
 
-use super::proof_codec::{
-    decode_trustee_evaluation_key_proof_from_source, encode_trustee_evaluation_key_proof,
-};
-use super::prover::prove_evaluation_key_share;
 use super::relation::{
-    KeyBearingWitness, SameSecretLinkageWitness, SetupProofStatement,
-    TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, VssCommittedMaterialWitness,
+    KeyBearingWitness, SameSecretLinkageWitness, TrusteeEvaluationKeyStatement,
+    TrusteeEvaluationKeyWitness,
 };
-use super::verifier::verify_evaluation_key_share;
-use super::{VSS_SHARE_LINKAGE_PROOF_FAMILY, invalid_succinct_setup_proof};
-use crate::bgv::parameters::DATA_PRIMES;
+use super::invalid_succinct_setup_proof;
 use crate::bgv::setup::ProofByteSource;
 use crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule as atom_schedule;
-use crate::bgv::setup::same_secret_bridge::SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN;
-use crate::bgv::setup::setup_proof::{
-    SetupProofFamily, SetupProofMaterialBytes, take_verified_setup_proof_material_bytes,
-};
-use crate::bgv::setup::vss_commitment::VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN;
+use crate::bgv::setup::setup_proof::SetupProofFamily;
 use crate::encoding::CanonicalResult;
 use crate::hashing::{derive_canonical_object_hash, hash512_hex, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
-#[cfg(test)]
-const TARGET_DECRYPTION_FLOODING_NOISE_COMMITMENT_ROLE: &str = "target-decryption-flooding-noise";
-#[cfg(test)]
-const TARGET_DECRYPTION_PROOF_TARGET_ROLES: [&str; 2] = ["targetId", "targetOrder"];
-
 pub(in crate::bgv::setup) struct VssPublicCommandCommitmentExpectation<'a> {
     pub(in crate::bgv::setup) field_name: String,
     pub(in crate::bgv::setup) root: &'a str,
@@ -37,34 +21,23 @@ pub(in crate::bgv::setup) struct VssPublicCommandCommitmentExpectation<'a> {
     pub(in crate::bgv::setup) ring_degree: usize,
 }
 
-// Key-bearing statements use the key-switch atom backend; every other family
-// stays on the shared succinct engine.
+// Trustee evaluation-key statements use the key-switch atom backend. The
+// common proof suite owns public-key, same-secret, VSS-linkage, and target
+// decryption relations.
 pub(in crate::bgv::setup) fn prove_trustee_evaluation_key_proof_bytes(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
     proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<Vec<u8>> {
-    if atom_schedule::statement_is_key_bearing(statement) {
-        atom_schedule::prove_key_bearing_trustee_evaluation_keys(
-            statement,
-            witness,
-            proof_randomness_seed_hex,
-        )
-    } else {
-        let proof = prove_evaluation_key_share(statement, witness, proof_randomness_seed_hex)?;
-        Ok(encode_trustee_evaluation_key_proof(&proof))
-    }
+    atom_schedule::prove_key_bearing_trustee_evaluation_keys(
+        statement,
+        witness,
+        proof_randomness_seed_hex,
+    )
 }
 
-fn statement_proof_family(statement: &TrusteeEvaluationKeyStatement) -> SetupProofFamily {
-    match &statement.proof {
-        SetupProofStatement::PublicKeyShare { .. } => SetupProofFamily::PublicKeyShare,
-        SetupProofStatement::PrivateVssShare(_) => SetupProofFamily::PrivateVssShare,
-        SetupProofStatement::VssShareLinkage(_) => SetupProofFamily::VssShareLinkage,
-        SetupProofStatement::SameSecretBridge { .. } => SetupProofFamily::SameSecretBridge,
-        SetupProofStatement::TargetDecryptionShare(_) => SetupProofFamily::TargetDecryptionShare,
-        SetupProofStatement::TrusteeEvaluationKey { .. } => SetupProofFamily::TrusteeEvaluationKey,
-    }
+fn statement_proof_family(_: &TrusteeEvaluationKeyStatement) -> SetupProofFamily {
+    SetupProofFamily::TrusteeEvaluationKey
 }
 
 #[cfg(test)]
@@ -72,12 +45,7 @@ pub(in crate::bgv::setup) fn verify_trustee_evaluation_key_proof_bytes(
     statement: &TrusteeEvaluationKeyStatement,
     proof_bytes: &(impl ProofByteSource + Sync + ?Sized),
 ) -> CanonicalResult<()> {
-    if atom_schedule::statement_is_key_bearing(statement) {
-        atom_schedule::verify_key_bearing_trustee_evaluation_keys(statement, proof_bytes)
-    } else {
-        let proof = decode_trustee_evaluation_key_proof_from_source(statement, proof_bytes)?;
-        verify_evaluation_key_share(statement, &proof)
-    }
+    atom_schedule::verify_key_bearing_trustee_evaluation_keys(statement, proof_bytes)
 }
 
 fn negative_indicator_coefficients_from_ternary_secret(
@@ -109,40 +77,18 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
     let negative_indicator_coefficients =
         negative_indicator_coefficients_from_ternary_secret(&secret_coefficients)?;
     let error_coefficients_by_key = read_i64_matrix(request, "errorCoefficientsByKey")?;
-    let witness = match &statement.proof {
-        SetupProofStatement::PublicKeyShare { .. } => TrusteeEvaluationKeyWitness::PublicKeyShare {
-            key: KeyBearingWitness {
-                secret_coefficients,
-                error_coefficients_by_key,
-            },
-            negative_indicator_coefficients,
-            committed_material: VssCommittedMaterialWitness {
-                vss_committed_material_seeds_by_bound_message: read_string_array(
-                    request,
-                    "vssCommittedMaterialSeedsByBoundMessage",
-                )?,
-            },
+    let witness = TrusteeEvaluationKeyWitness::TrusteeEvaluationKey {
+        key: KeyBearingWitness {
+            secret_coefficients,
+            error_coefficients_by_key,
         },
-        SetupProofStatement::TrusteeEvaluationKey { .. } => {
-            TrusteeEvaluationKeyWitness::TrusteeEvaluationKey {
-                key: KeyBearingWitness {
-                    secret_coefficients,
-                    error_coefficients_by_key,
-                },
-                linkage: SameSecretLinkageWitness {
-                    negative_indicator_coefficients,
-                    opening_randomness_by_limb: read_i64_matrix(
-                        request,
-                        "openingRandomnessByLimb",
-                    )?,
-                },
-            }
-        }
-        _ => {
-            return Err(invalid_succinct_setup_proof(
-                "trustee proof generator requires a key-bearing proof statement",
-            ));
-        }
+        linkage: SameSecretLinkageWitness {
+            negative_indicator_coefficients,
+            opening_randomness_by_limb: read_i64_matrix(
+                request,
+                "openingRandomnessByLimb",
+            )?,
+        },
     };
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
     let bound_proof_randomness_seed_hex =
@@ -190,176 +136,10 @@ fn statement_bound_proof_randomness_seed_hex(
         "proofRandomnessSeedHex": to_hex(&seed_bytes),
     }))
 }
-
-pub(crate) fn generate_vss_share_linkage_proof_from_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let statement = vss_share_linkage_statement_from_request(request)?;
-    let witness = vss_share_linkage_witness_from_request(request)?;
-    let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
-    let bound_proof_randomness_seed_hex =
-        statement_bound_proof_randomness_seed_hex(&statement, proof_randomness_seed_hex)?;
-    let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
-    let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
-    let proof_bytes_hash = hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
-    crate::bgv::setup::retain_generated_canonical_proof_material(
-        VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        proof_bytes_hash.clone(),
-        proof_bytes,
-    )?;
-    Ok(json!({ "proofBytesHash": proof_bytes_hash }))
-}
-
-pub(crate) fn verify_vss_share_linkage_proof_source_from_request(
-    request: &Value,
-    proof_bytes: &(impl ProofByteSource + ?Sized),
-) -> CanonicalResult<()> {
-    let statement = vss_share_linkage_statement_from_request(request)?;
-    let proof = decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes)?;
-    verify_evaluation_key_share(&statement, &proof)
-}
-
-pub(in crate::bgv::setup) fn vss_share_linkage_proof_verification_binding_hash(
-    proof_bytes_hash: &str,
-    verification_request: &Value,
-) -> CanonicalResult<String> {
-    let context = verification_request
-        .get("context")
-        .ok_or_else(|| invalid_succinct_setup_proof("context must be present"))?;
-    let ring_degree = read_u64(verification_request, "ringDegree")?;
-    let vss_share_linkage = verification_request
-        .get("vssShareLinkage")
-        .ok_or_else(|| invalid_succinct_setup_proof("vssShareLinkage must be present"))?;
-    derive_canonical_object_hash(&json!({
-        "objectType": "VssShareLinkageProofVerificationBinding",
-        "proofBytesHash": proof_bytes_hash,
-        // Bind only the public relation consumed by the verifier. Prover-only
-        // witnesses and randomness may be present in a generation request, but
-        // they cannot change the semantic verification lease.
-        "verificationRequest": {
-            "context": context,
-            "ringDegree": ring_degree,
-            "vssShareLinkage": vss_share_linkage,
-        },
-    }))
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn verify_and_retain_vss_share_linkage_proof_binding(
-    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
-    proof_bytes_hash: &str,
-    verification_request: &Value,
-) -> CanonicalResult<()> {
-    let proof_bytes = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
-        VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        proof_bytes_hash,
-    )?
-    .ok_or_else(|| {
-        invalid_succinct_setup_proof(
-            "VSS share-linkage proof binding requires authenticated proof bytes",
-        )
-    })?;
-    let recomputed_proof_bytes_hash =
-        proof_bytes.hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)?;
-    compare_string_value(
-        proof_bytes_hash,
-        &recomputed_proof_bytes_hash,
-        "VSS share-linkage proof bytes hash",
-    )?;
-    verify_vss_share_linkage_proof_source_from_request(verification_request, proof_bytes.as_ref())?;
-    drop(proof_bytes);
-    crate::bgv::setup::retain_accepted_setup_proof_binding(
-        proof_binding_session.session_handle,
-        VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        proof_bytes_hash,
-        vss_share_linkage_proof_verification_binding_hash(proof_bytes_hash, verification_request)?,
-    )?;
-    Ok(())
-}
-
-mod bridge_target_commands;
 mod decoding;
 mod request_parsing;
-mod share_linkage_transport;
-mod share_linkage_verification;
 mod target_decryption_parsing;
 
-use decoding::{
-    decode_exact_hex_bytes, read_i64_array, read_i64_matrix, read_string, read_string_array,
-    read_u64,
-};
-#[cfg(test)]
-pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::same_secret_bridge_statement_from_request;
+use decoding::{decode_exact_hex_bytes, read_i64_array, read_i64_matrix, read_string};
 pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::statement_from_request;
-use request_parsing::{
-    vss_share_linkage_statement_from_request, vss_share_linkage_witness_from_request,
-};
-#[cfg(test)]
-use share_linkage_verification::compare_string_value;
-
-pub(in crate::bgv::setup) use share_linkage_transport::verified_vss_share_linkage_proof_material_bytes;
-
-pub(crate) use bridge_target_commands::{
-    generate_same_secret_bridge_proof_from_request,
-    verify_same_secret_bridge_proof_source_from_request,
-};
-#[cfg(test)]
-pub(crate) use bridge_target_commands::{
-    generate_target_decryption_share_proof_bytes_from_request,
-    verify_target_decryption_share_proof_bytes_from_request,
-    verify_target_decryption_share_proof_source_from_request,
-};
-#[cfg(test)]
-pub(crate) use share_linkage_verification::verify_vss_share_linkage_proof_material_set_from_request;
-pub(in crate::bgv::setup) use share_linkage_verification::verify_vss_share_linkage_statement_and_proof_material_set_from_request;
-#[cfg(test)]
-pub(in crate::bgv::setup) use share_linkage_verification::{
-    VssShareLinkageMaterialRecordStatementInput, verify_vss_share_linkage_material_record_statement,
-};
 pub(in crate::bgv::setup) use target_decryption_parsing::vss_share_linkage_commitment_from_value;
-
-#[cfg(test)]
-mod verification_binding_tests {
-    use super::*;
-
-    #[test]
-    fn share_linkage_binding_ignores_prover_inputs_but_binds_public_relation_fields() {
-        let proof_bytes_hash = "a".repeat(128);
-        let public_request = json!({
-            "context": {
-                "setupContextHash": "b".repeat(128),
-                "trusteeIdentity": "vss-share-linkage",
-                "trusteeRosterPosition": 0,
-            },
-            "ringDegree": 32_768,
-            "vssShareLinkage": {
-                "sourceTrusteeRosterPosition": 0,
-            },
-        });
-        let expected_binding =
-            vss_share_linkage_proof_verification_binding_hash(&proof_bytes_hash, &public_request)
-                .expect("public share-linkage verification binding");
-
-        let mut prover_request = public_request.clone();
-        prover_request["coefficientMessagesByShamirIndex"] = json!([[1, -1, 0]]);
-        prover_request["proofRandomnessSeedHex"] = json!("e".repeat(128));
-        assert_eq!(
-            vss_share_linkage_proof_verification_binding_hash(&proof_bytes_hash, &prover_request,)
-                .expect("prover request share-linkage verification binding"),
-            expected_binding,
-            "prover-only inputs must not alter a verifier-owned semantic binding",
-        );
-
-        let mut changed_public_request = public_request;
-        changed_public_request["ringDegree"] = json!(16_384);
-        assert_ne!(
-            vss_share_linkage_proof_verification_binding_hash(
-                &proof_bytes_hash,
-                &changed_public_request,
-            )
-            .expect("changed public share-linkage verification binding"),
-            expected_binding,
-            "an operative public relation field must alter the semantic binding",
-        );
-    }
-}

@@ -6,8 +6,8 @@ use sha3::{
 };
 
 use super::{
-    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError, CanonicalItem,
-    CanonicalTuple,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
+    CanonicalItem, CanonicalItemType, CanonicalTuple,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,6 +59,32 @@ pub fn hash_foundation_tuple_512(
     domain: &str,
     items: &[CanonicalItem],
 ) -> Result<Hash512, CanonicalCodecError> {
+    let hasher = foundation_tuple_hasher(domain, items)?;
+    let mut reader = hasher.finalize_xof();
+    let mut output = [0u8; Hash512::BYTE_LENGTH];
+    reader.read(&mut output);
+    Ok(Hash512(output))
+}
+
+/// Fills one arbitrary-length SHAKE256 output for a typed foundation tuple.
+/// This is one XOF evaluation at one framed input, not a chain of separately
+/// addressable hashes. It is kept crate-private for verifier messages whose
+/// logical challenge space is wider than 512 bits.
+pub(crate) fn fill_foundation_tuple_xof(
+    domain: &str,
+    items: &[CanonicalItem],
+    output: &mut [u8],
+) -> Result<(), CanonicalCodecError> {
+    let hasher = foundation_tuple_hasher(domain, items)?;
+    let mut reader = hasher.finalize_xof();
+    reader.read(output);
+    Ok(())
+}
+
+fn foundation_tuple_hasher(
+    domain: &str,
+    items: &[CanonicalItem],
+) -> Result<Shake256, CanonicalCodecError> {
     let mut framed_items = Vec::with_capacity(items.len().saturating_add(1));
     framed_items.push(CanonicalItem::nonempty_ascii(domain)?);
     framed_items.extend_from_slice(items);
@@ -71,10 +97,117 @@ pub fn hash_foundation_tuple_512(
 
     let mut hasher = Shake256::default();
     hasher.update(&framed_bytes);
-    let mut reader = hasher.finalize_xof();
-    let mut output = [0u8; Hash512::BYTE_LENGTH];
-    reader.read(&mut output);
-    Ok(Hash512(output))
+    Ok(hasher)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StreamingFoundationHashError {
+    InvalidDomain,
+    ItemCountOverflow,
+    ItemLengthOverflow,
+    TupleLengthOverflow,
+    PayloadOverrun,
+    PayloadIncomplete,
+}
+
+/// Incremental form of `H_512(domain, prefixItems..., bytes(payload))`.
+///
+/// The tuple and raw-byte item lengths are committed before any payload byte
+/// is accepted.  This produces byte-for-byte the same SHAKE256 preimage as
+/// [`hash_foundation_tuple_512`] without allocating or cloning the streamed
+/// payload, which is required for proof query-opening absorption in WASM.
+pub(crate) struct StreamingFoundationTupleHash512 {
+    hasher: Shake256,
+    remaining_payload_byte_length: usize,
+}
+
+impl StreamingFoundationTupleHash512 {
+    pub(crate) fn new_variable_bytes(
+        domain: &str,
+        prefix_items: &[CanonicalItem],
+        payload_byte_length: usize,
+    ) -> Result<Self, StreamingFoundationHashError> {
+        let domain_item = CanonicalItem::nonempty_ascii(domain)
+            .map_err(|_| StreamingFoundationHashError::InvalidDomain)?;
+        let item_count = prefix_items
+            .len()
+            .checked_add(2)
+            .ok_or(StreamingFoundationHashError::ItemCountOverflow)?;
+        let item_count = u32::try_from(item_count)
+            .map_err(|_| StreamingFoundationHashError::ItemCountOverflow)?;
+        let payload_byte_length_u32 = u32::try_from(payload_byte_length)
+            .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
+        let streamed_item_byte_length = payload_byte_length
+            .checked_add(4)
+            .ok_or(StreamingFoundationHashError::ItemLengthOverflow)?;
+        let streamed_item_byte_length_u32 = u32::try_from(streamed_item_byte_length)
+            .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
+
+        let tuple_byte_length = prefix_items
+            .iter()
+            .try_fold(8_usize, |length, item| {
+                length
+                    .checked_add(6)
+                    .and_then(|value| value.checked_add(item.canonical_bytes().len()))
+                    .ok_or(StreamingFoundationHashError::TupleLengthOverflow)
+            })?
+            .checked_add(6 + domain_item.canonical_bytes().len())
+            .and_then(|length| length.checked_add(6 + streamed_item_byte_length))
+            .ok_or(StreamingFoundationHashError::TupleLengthOverflow)?;
+        let _ = tuple_byte_length;
+
+        let mut hasher = Shake256::default();
+        hasher.update(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
+        hasher.update(&CANONICAL_TUPLE_VERSION.to_le_bytes());
+        hasher.update(&item_count.to_le_bytes());
+        update_canonical_hash_item(&mut hasher, &domain_item)?;
+        for item in prefix_items {
+            update_canonical_hash_item(&mut hasher, item)?;
+        }
+        hasher.update(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
+        hasher.update(
+            &streamed_item_byte_length_u32.to_le_bytes(),
+        );
+        hasher.update(&payload_byte_length_u32.to_le_bytes());
+        Ok(Self {
+            hasher,
+            remaining_payload_byte_length: payload_byte_length,
+        })
+    }
+
+    pub(crate) fn absorb(
+        &mut self,
+        payload_fragment: &[u8],
+    ) -> Result<(), StreamingFoundationHashError> {
+        if payload_fragment.len() > self.remaining_payload_byte_length {
+            return Err(StreamingFoundationHashError::PayloadOverrun);
+        }
+        self.hasher.update(payload_fragment);
+        self.remaining_payload_byte_length -= payload_fragment.len();
+        Ok(())
+    }
+
+    pub(crate) fn finalize(self) -> Result<Hash512, StreamingFoundationHashError> {
+        if self.remaining_payload_byte_length != 0 {
+            return Err(StreamingFoundationHashError::PayloadIncomplete);
+        }
+        let mut reader = self.hasher.finalize_xof();
+        let mut output = [0_u8; Hash512::BYTE_LENGTH];
+        reader.read(&mut output);
+        Ok(Hash512(output))
+    }
+}
+
+fn update_canonical_hash_item(
+    hasher: &mut Shake256,
+    item: &CanonicalItem,
+) -> Result<(), StreamingFoundationHashError> {
+    let byte_length = u32::try_from(item.canonical_bytes().len())
+        .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
+    hasher.update(&item.item_type().canonical_code().to_le_bytes());
+    hasher.update(&byte_length.to_le_bytes());
+    hasher.update(item.canonical_bytes());
+    Ok(())
 }
 
 #[cfg(test)]
@@ -119,6 +252,97 @@ mod tests {
         reader.read(&mut expected);
         assert_eq!(actual, Hash512::from_bytes(expected));
         assert_eq!(actual.to_lowercase_hex().len(), 128);
+    }
+
+    #[test]
+    fn extended_output_keeps_the_hash512_prefix_at_one_framed_input() {
+        let items = [
+            CanonicalItem::hash512([0x41; 64]),
+            CanonicalItem::nonempty_ascii("proof/1216/query-vector")
+                .expect("test tag is canonical"),
+            CanonicalItem::unsigned64(0),
+        ];
+        let expected_prefix = hash_foundation_tuple_512(
+            "sealed-lattice/proof/transcript/squeeze/v1",
+            &items,
+        )
+        .expect("the hash input is canonical");
+        let mut extended_output = [0_u8; 1024];
+
+        fill_foundation_tuple_xof(
+            "sealed-lattice/proof/transcript/squeeze/v1",
+            &items,
+            &mut extended_output,
+        )
+        .expect("the extended output input is canonical");
+
+        assert_eq!(
+            &extended_output[..Hash512::BYTE_LENGTH],
+            expected_prefix.as_bytes(),
+        );
+        assert!(extended_output[Hash512::BYTE_LENGTH..]
+            .iter()
+            .any(|byte| *byte != 0));
+    }
+
+    #[test]
+    fn streaming_variable_bytes_hash_matches_one_shot_for_every_fragmentation() {
+        let prefix_items = [
+            CanonicalItem::hash512([0x31; 64]),
+            CanonicalItem::nonempty_ascii("proof/1216/query-openings")
+                .expect("test tag"),
+        ];
+        let payload = (0_u16..=1024)
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let mut one_shot_items = prefix_items.to_vec();
+        one_shot_items.push(
+            CanonicalItem::variable_bytes(&payload).expect("bounded test payload"),
+        );
+        let expected = hash_foundation_tuple_512(
+            "sealed-lattice/proof/transcript/absorb/v1",
+            &one_shot_items,
+        )
+        .expect("one-shot hash");
+
+        for fragment_byte_length in [1, 3, 63, 64, 65, 511, payload.len()] {
+            let mut streaming = StreamingFoundationTupleHash512::new_variable_bytes(
+                "sealed-lattice/proof/transcript/absorb/v1",
+                &prefix_items,
+                payload.len(),
+            )
+            .expect("streaming hash initializes");
+            for fragment in payload.chunks(fragment_byte_length) {
+                streaming.absorb(fragment).expect("fragment fits");
+            }
+            assert_eq!(streaming.finalize().expect("payload is complete"), expected);
+        }
+    }
+
+    #[test]
+    fn streaming_variable_bytes_hash_rejects_overrun_and_incomplete_payloads() {
+        let mut overrun = StreamingFoundationTupleHash512::new_variable_bytes(
+            "sealed-lattice/test/streaming-hash/v1",
+            &[],
+            2,
+        )
+        .expect("stream initializes");
+        assert_eq!(
+            overrun.absorb(&[1, 2, 3]),
+            Err(StreamingFoundationHashError::PayloadOverrun),
+        );
+
+        let mut incomplete = StreamingFoundationTupleHash512::new_variable_bytes(
+            "sealed-lattice/test/streaming-hash/v1",
+            &[],
+            2,
+        )
+        .expect("stream initializes");
+        incomplete.absorb(&[1]).expect("prefix fits");
+        assert_eq!(
+            incomplete.finalize(),
+            Err(StreamingFoundationHashError::PayloadIncomplete),
+        );
     }
 
     #[test]

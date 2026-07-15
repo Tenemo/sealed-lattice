@@ -16,6 +16,7 @@ import {
     type CanonicalFoundationValueValidation,
     type CanonicalFoundationValueValidationInput,
     type CeremonyContextInput,
+    type DecodedProofApplicationBinding,
     type DecodedPrivateRandomCursor,
     type EncodedPrivateRandomCursor,
     type PrivateRandomCursor,
@@ -23,6 +24,10 @@ import {
     type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernel,
 } from './transcript-core-bridge.js';
+import {
+    foundationObjectTypes,
+    openCanonicalBoardVerifierSession,
+} from './canonical-board-runtime.js';
 
 const transcriptCoreKernelUrl = new URL(
     '../dist/sealed-lattice-kernel.wasm',
@@ -33,7 +38,9 @@ export {
     bgvCanonicalStreamFamilies,
     createWasmBrowserActionStorageWorkerKernel,
     createTranscriptCoreKernelLoader,
+    foundationObjectTypes,
     openBgvCanonicalStreamRuntime,
+    openCanonicalBoardVerifierSession,
     openMailboxGcmRuntime,
     TranscriptCoreKernelCommandError,
 };
@@ -48,6 +55,7 @@ export type {
     CanonicalFoundationValueValidation,
     CanonicalFoundationValueValidationInput,
     CeremonyContextInput,
+    DecodedProofApplicationBinding,
     DecodedPrivateRandomCursor,
     EncodedPrivateRandomCursor,
     PrivateRandomCursor,
@@ -78,6 +86,15 @@ export type {
     CanonicalStreamWorkerRuntime,
     CanonicalStreamWriterLease,
 } from './canonical-stream-runtime.js';
+export type {
+    CanonicalBoardVerifierConfiguration,
+    CanonicalBoardVerifierSession,
+    CanonicalBoardVerifierSessionState,
+    FoundationObjectType,
+    UntrustedCanonicalBoardCarrier,
+    VerifiedTranscriptObject,
+    VerifiedTranscriptObjectDescription,
+} from './canonical-board-runtime.js';
 export {
     copyVerifiedStateDurableBinding,
     openStateVerifierSession,
@@ -85,6 +102,15 @@ export {
     stateIntentKinds,
     stateWitnessVoteKinds,
 } from './state-verifier-runtime.js';
+export {
+    copyVerifiedProofApplicationBinding,
+    verifyProofApplicationBinding,
+} from './proof-application-runtime.js';
+export type {
+    ProofApplicationAuthorityContext,
+    ProofApplicationBindingDescription,
+    VerifiedProofApplicationBinding,
+} from './proof-application-runtime.js';
 export type {
     StateDurableBindingDescription,
     StateIntentKind,

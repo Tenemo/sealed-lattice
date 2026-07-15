@@ -1,4 +1,7 @@
-import { BrowserActionStorageCustodyError } from '@sealed-lattice/types';
+import {
+    BrowserActionStorageCustodyError,
+    stateCapabilityKinds,
+} from '@sealed-lattice/types';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
@@ -10,6 +13,10 @@ import {
     createWasmBrowserActionStorageWorkerKernel,
     loadFreshTranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import {
+    createStateVerifierTestVector,
+    deriveSetupActionRandomnessAuthorization,
+} from '#packages/wasm/tests/state-verifier-test-vectors';
 
 const transactionLimits = {
     maximumActiveTransactionCount: 2,
@@ -147,6 +154,167 @@ afterEach(async () => {
 });
 
 describe('Local storage-root real-WASM browser worker', () => {
+    it('retains state reservations and sealed action randomness inside the worker', async () => {
+        const baseStateVector = createStateVerifierTestVector();
+        const opened = await openWorker({
+            binding: {
+                actionContextHash: baseStateVector.actionContextHash,
+                ceremonyContextHash: baseStateVector.ceremonyContextHash,
+                participantId: baseStateVector.subjectParticipantIdentity,
+                suiteId: baseStateVector.suiteIdentifier,
+            },
+            databaseName: databaseName(),
+        });
+        await opened.custody.initialize();
+        const created = await opened.custody.createAndSealActionRandomness({
+            creationRecoveryEpoch: 0n,
+            recordVersion: 0n,
+        });
+        const stateVector = createStateVerifierTestVector({
+            setupActionRandomnessAuthorizationHash:
+                deriveSetupActionRandomnessAuthorization(
+                    baseStateVector,
+                    created.actionRandomnessCommitment,
+                ),
+        });
+        const stateSession =
+            await opened.custody.openActionStateVerifierSession({
+                canonicalRosterBytes: stateVector.canonicalRosterBytes,
+                maximumRecoveryTransitionsPerStateKey: 4,
+            });
+        if (!stateSession.isValid) {
+            throw new Error('Worker state-verifier session did not open.');
+        }
+        const rootReservationVector = stateVector.reservationOnly.find(
+            ({ capabilityKind }) =>
+                capabilityKind ===
+                stateCapabilityKinds.setupActionRandomnessRoot,
+        );
+        if (rootReservationVector === undefined) {
+            throw new Error('Missing action-randomness reservation vector.');
+        }
+        const rootReservation =
+            await opened.custody.verifyActionRandomnessReservation({
+                actionRandomnessSessionIdentifier:
+                    created.actionRandomnessSessionIdentifier,
+                canonicalReservationIntentCarrier:
+                    rootReservationVector.certifiedIntent
+                        .canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    rootReservationVector.certifiedIntent
+                        .canonicalStateCertificate,
+                stateVerifierSessionIdentifier: stateSession.value,
+            });
+        if (!rootReservation.isValid) {
+            throw new Error('Worker action-randomness reservation did not verify.');
+        }
+        expect(created.actionRandomnessCommitment).toHaveLength(64);
+        expect(created.canonicalEnvelope.length).toBeGreaterThan(64);
+        expect(created.actionRandomnessSessionIdentifier).toMatch(
+            /^[0-9a-f]{64}$/u,
+        );
+        await opened.custody.closeActionRandomness(
+            created.actionRandomnessSessionIdentifier,
+        );
+        const reopened =
+            await opened.custody.openSealedActionRandomness({
+                actionRandomnessCommitment:
+                    created.actionRandomnessCommitment,
+                canonicalEnvelope: created.canonicalEnvelope,
+                creationRecoveryEpoch: 0n,
+                recordVersion: 0n,
+            });
+        expect(reopened.actionRandomnessCommitment).toEqual(
+            created.actionRandomnessCommitment,
+        );
+        const dealerReservationVector = stateVector.reservationOnly.find(
+            ({ capabilityKind }) =>
+                capabilityKind ===
+                stateCapabilityKinds.setupDealerSetBranch,
+        );
+        if (dealerReservationVector === undefined) {
+            throw new Error('Missing dealer-set reservation vector.');
+        }
+        const dealerReservation =
+            await opened.custody.verifyActionStateReservation({
+                canonicalReservationIntentCarrier:
+                    dealerReservationVector.certifiedIntent
+                        .canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    dealerReservationVector.certifiedIntent
+                        .canonicalStateCertificate,
+                capabilityKind:
+                    stateCapabilityKinds.setupDealerSetBranch,
+                expectedAuthorizationHash: stateVector.authorizationHash,
+                stateVerifierSessionIdentifier: stateSession.value,
+                subjectParticipantIdentity:
+                    stateVector.subjectParticipantIdentity,
+            });
+        const targetReservation =
+            await opened.custody.verifyActionStateReservation({
+                canonicalReservationIntentCarrier:
+                    stateVector.reservation.canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    stateVector.reservation.canonicalStateCertificate,
+                capabilityKind: stateCapabilityKinds.targetRelease,
+                expectedAuthorizationHash: stateVector.authorizationHash,
+                stateVerifierSessionIdentifier: stateSession.value,
+                subjectParticipantIdentity:
+                    stateVector.subjectParticipantIdentity,
+            });
+        if (!dealerReservation.isValid || !targetReservation.isValid) {
+            throw new Error(
+                'Browser worker proof-attempt reservations did not verify.',
+            );
+        }
+        const persistentAttemptInput = {
+            actionRandomnessSessionIdentifier:
+                reopened.actionRandomnessSessionIdentifier,
+            applicationStatementHash: createBytes(64, 177),
+            rosterPosition: 0,
+            stateReservationIdentifier: dealerReservation.value,
+            statementSchemaIdentifier: 0x1211,
+        } as const;
+        expect(
+            await opened.custody.derivePersistentProofAttempt(
+                persistentAttemptInput,
+            ),
+        ).toEqual(
+            await opened.custody.derivePersistentProofAttempt(
+                persistentAttemptInput,
+            ),
+        );
+        const targetAttemptInput = {
+            actionRandomnessSessionIdentifier:
+                reopened.actionRandomnessSessionIdentifier,
+            rosterPosition: 0,
+            stateReservationIdentifier: targetReservation.value,
+        } as const;
+        expect(
+            await opened.custody.deriveTargetReleaseAttempt(
+                targetAttemptInput,
+            ),
+        ).toEqual(
+            await opened.custody.deriveTargetReleaseAttempt(
+                targetAttemptInput,
+            ),
+        );
+        await expectCustodyErrorCode(
+            opened.custody.deriveTargetReleaseAttempt({
+                ...targetAttemptInput,
+                stateReservationIdentifier: rootReservation.value,
+            }),
+            'InvalidState',
+        );
+        await opened.custody.closeActionRandomness(
+            reopened.actionRandomnessSessionIdentifier,
+        );
+        await opened.custody.closeActionStateVerifierSession(
+            stateSession.value,
+        );
+        await closeWorker(opened);
+    });
+
     it('authenticates local-record envelopes in the browser WASM runtime', async () => {
         const workerKernel = createWasmBrowserActionStorageWorkerKernel({
             kernel: loadFreshTranscriptCoreKernel(),

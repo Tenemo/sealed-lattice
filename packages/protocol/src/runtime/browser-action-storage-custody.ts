@@ -1,18 +1,40 @@
 import type {
+    BrowserActionProofAttemptBinding,
+    BrowserActionRandomnessRecordContext,
+    BrowserActionRandomnessReservationVerificationInput,
+    BrowserActionStateRecoveryVerificationInput,
+    BrowserActionStateReservationVerificationInput,
+    BrowserActionStateVerifierSessionInput,
+    BrowserOpenedActionRandomnessSession,
+    BrowserPersistentProofAttemptInput,
+    BrowserSealedActionRandomnessSession,
+    BrowserTargetReleaseAttemptInput,
     BrowserLocalRecordIdentifierInput,
     BrowserLocalRecordOpenInput,
     BrowserLocalRecordSealInput,
     UntrustedExpectedStorageRootCommitment,
+    VerificationResult,
 } from '@sealed-lattice/types';
 
 export { BrowserActionStorageCustodyError } from '@sealed-lattice/types';
 export type {
     BrowserActionStorageCustodyErrorCode,
     BrowserActionStorageRootBinding,
+    BrowserActionProofAttemptBinding,
+    BrowserActionRandomnessRecordContext,
+    BrowserActionRandomnessReservationVerificationInput,
+    BrowserActionStateRecoveryVerificationInput,
+    BrowserActionStateReservationVerificationInput,
+    BrowserActionStateVerifierSessionInput,
+    BrowserOpenedActionRandomnessSession,
+    BrowserPersistentProofAttemptInput,
+    BrowserSealedActionRandomnessSession,
+    BrowserTargetReleaseAttemptInput,
     BrowserLocalRecordIdentifierInput,
     BrowserLocalRecordOpenInput,
     BrowserLocalRecordSealInput,
     UntrustedExpectedStorageRootCommitment,
+    VerificationResult,
 } from '@sealed-lattice/types';
 
 /**
@@ -73,6 +95,37 @@ export type BrowserActionStorageCustody = Readonly<{
     sealLocalRecord(input: BrowserLocalRecordSealInput): Promise<Uint8Array>;
     openLocalRecord(input: BrowserLocalRecordOpenInput): Promise<Uint8Array>;
     hashLocalRecordEnvelope(envelope: Uint8Array): Promise<Uint8Array>;
+    openActionStateVerifierSession(
+        input: BrowserActionStateVerifierSessionInput,
+    ): Promise<VerificationResult<string>>;
+    verifyActionStateReservation(
+        input: BrowserActionStateReservationVerificationInput,
+    ): Promise<VerificationResult<string>>;
+    verifyActionRandomnessReservation(
+        input: BrowserActionRandomnessReservationVerificationInput,
+    ): Promise<VerificationResult<string>>;
+    verifyActionStateRecovery(
+        input: BrowserActionStateRecoveryVerificationInput,
+    ): Promise<VerificationResult<string>>;
+    releaseActionStateObject(identifier: string): Promise<void>;
+    closeActionStateVerifierSession(identifier: string): Promise<void>;
+    createAndSealActionRandomness(
+        input: BrowserActionRandomnessRecordContext,
+    ): Promise<BrowserSealedActionRandomnessSession>;
+    openSealedActionRandomness(
+        input: BrowserActionRandomnessRecordContext &
+            Readonly<{
+                actionRandomnessCommitment: Uint8Array;
+                canonicalEnvelope: Uint8Array;
+            }>,
+    ): Promise<BrowserOpenedActionRandomnessSession>;
+    closeActionRandomness(identifier: string): Promise<void>;
+    derivePersistentProofAttempt(
+        input: BrowserPersistentProofAttemptInput,
+    ): Promise<BrowserActionProofAttemptBinding>;
+    deriveTargetReleaseAttempt(
+        input: BrowserTargetReleaseAttemptInput,
+    ): Promise<BrowserActionProofAttemptBinding>;
     delete(expectedSnapshot: BrowserDeviceWrappingSnapshot): Promise<void>;
     close(): Promise<void>;
 }>;

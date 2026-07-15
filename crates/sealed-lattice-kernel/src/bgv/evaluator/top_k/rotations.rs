@@ -1,5 +1,5 @@
 use super::*;
-use crate::bgv::encoding::LOGICAL_SLOT_GENERATOR;
+use crate::bgv::parameters::LOGICAL_SLOT_GENERATOR;
 use std::sync::OnceLock;
 
 static GALOIS_ELEMENT_POSITIONS: OnceLock<Vec<Option<(bool, usize)>>> = OnceLock::new();

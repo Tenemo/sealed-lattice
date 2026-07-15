@@ -1,5 +1,6 @@
 import { registerAcceptedSetupSessionKernelContext } from '../accepted-setup-session-runtime.js';
 import { registerCanonicalStreamKernelContext } from '../canonical-stream-runtime.js';
+import { registerActionRandomnessKernelContext } from './action-randomness-kernel-context.js';
 
 import type {
     BgvCollectiveSetupVerification,
@@ -37,6 +38,10 @@ export const registerKernelContexts = (
     runtime: TranscriptCoreKernelCommandRuntime,
 ): void => {
     const { wasmExports } = runtime;
+    const actionRandomnessCommand = resolveOptionalNumberExport(
+        wasmExports,
+        'sealed_lattice_action_randomness_command',
+    );
     const acceptedSetupSessionBegin = resolveNumberExport(
         wasmExports,
         'sealed_lattice_accepted_setup_session_begin',
@@ -77,6 +82,15 @@ export const registerKernelContexts = (
         wasmExports,
         'sealed_lattice_canonical_stream_finish_writer',
     );
+    if (actionRandomnessCommand !== undefined) {
+        registerActionRandomnessKernelContext(kernel, {
+            allocate: runtime.allocate,
+            command: actionRandomnessCommand,
+            deallocate: runtime.deallocate,
+            memory: runtime.memory,
+            runExclusive: runtime.runExclusive,
+        });
+    }
     if (
         canonicalStreamAbsorbChunk !== undefined &&
         canonicalStreamBeginVerifier !== undefined &&

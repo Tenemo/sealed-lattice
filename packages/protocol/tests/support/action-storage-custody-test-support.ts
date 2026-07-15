@@ -418,6 +418,141 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         );
     }
 
+    public openActionStateVerifierSession(
+        input: Parameters<
+            BrowserActionStorageWorkerKernel['openActionStateVerifierSession']
+        >[0],
+    ): ReturnType<
+        BrowserActionStorageWorkerKernel['openActionStateVerifierSession']
+    > {
+        void input;
+        return Promise.reject(
+            new Error('The test worker does not implement state verification.'),
+        );
+    }
+
+    public verifyActionStateReservation(
+        input: Parameters<
+            BrowserActionStorageWorkerKernel['verifyActionStateReservation']
+        >[0],
+    ): ReturnType<
+        BrowserActionStorageWorkerKernel['verifyActionStateReservation']
+    > {
+        void input;
+        return Promise.reject(
+            new Error('The test worker does not implement state verification.'),
+        );
+    }
+
+    public verifyActionRandomnessReservation(
+        input: Parameters<
+            BrowserActionStorageWorkerKernel['verifyActionRandomnessReservation']
+        >[0],
+    ): ReturnType<
+        BrowserActionStorageWorkerKernel['verifyActionRandomnessReservation']
+    > {
+        void input;
+        return Promise.reject(
+            new Error('The test worker does not implement state verification.'),
+        );
+    }
+
+    public verifyActionStateRecovery(
+        input: Parameters<
+            BrowserActionStorageWorkerKernel['verifyActionStateRecovery']
+        >[0],
+    ): ReturnType<
+        BrowserActionStorageWorkerKernel['verifyActionStateRecovery']
+    > {
+        void input;
+        return Promise.reject(
+            new Error('The test worker does not implement state verification.'),
+        );
+    }
+
+    public releaseActionStateObject(
+        identifier: string,
+    ): ReturnType<
+        BrowserActionStorageWorkerKernel['releaseActionStateObject']
+    > {
+        void identifier;
+        return Promise.reject(
+            new Error('The test worker does not implement state verification.'),
+        );
+    }
+
+    public closeActionStateVerifierSession(
+        identifier: string,
+    ): ReturnType<
+        BrowserActionStorageWorkerKernel['closeActionStateVerifierSession']
+    > {
+        void identifier;
+        return Promise.reject(
+            new Error('The test worker does not implement state verification.'),
+        );
+    }
+
+    public createAndSealActionRandomness(
+        input: Parameters<
+            BrowserActionStorageWorkerKernel['createAndSealActionRandomness']
+        >[0],
+    ): ReturnType<
+        BrowserActionStorageWorkerKernel['createAndSealActionRandomness']
+    > {
+        void input;
+        return Promise.reject(
+            new Error('The test worker does not implement action randomness.'),
+        );
+    }
+
+    public openSealedActionRandomness(
+        input: Parameters<
+            BrowserActionStorageWorkerKernel['openSealedActionRandomness']
+        >[0],
+    ): ReturnType<
+        BrowserActionStorageWorkerKernel['openSealedActionRandomness']
+    > {
+        void input;
+        return Promise.reject(
+            new Error('The test worker does not implement action randomness.'),
+        );
+    }
+
+    public closeActionRandomness(
+        identifier: string,
+    ): ReturnType<BrowserActionStorageWorkerKernel['closeActionRandomness']> {
+        void identifier;
+        return Promise.reject(
+            new Error('The test worker does not implement action randomness.'),
+        );
+    }
+
+    public derivePersistentProofAttempt(
+        input: Parameters<
+            BrowserActionStorageWorkerKernel['derivePersistentProofAttempt']
+        >[0],
+    ): ReturnType<
+        BrowserActionStorageWorkerKernel['derivePersistentProofAttempt']
+    > {
+        void input;
+        return Promise.reject(
+            new Error('The test worker does not implement action randomness.'),
+        );
+    }
+
+    public deriveTargetReleaseAttempt(
+        input: Parameters<
+            BrowserActionStorageWorkerKernel['deriveTargetReleaseAttempt']
+        >[0],
+    ): ReturnType<
+        BrowserActionStorageWorkerKernel['deriveTargetReleaseAttempt']
+    > {
+        void input;
+        return Promise.reject(
+            new Error('The test worker does not implement action randomness.'),
+        );
+    }
+
     public checksum(): Uint8Array {
         return this.#checksum.slice();
     }

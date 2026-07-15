@@ -437,9 +437,12 @@ mod tests {
         let associated_data =
             MailboxAssociatedData::new(key_schedule_input(), plaintext_byte_length)
                 .expect("associated data is valid");
-        let descriptor =
-            StreamDescriptor::new(plaintext_byte_length, vec![Hash512::from_bytes([0xa1; 64])])
-                .expect("ciphertext descriptor is valid");
+        let descriptor = StreamDescriptor::new(
+            plaintext_byte_length,
+            vec![Hash512::from_bytes([0xa1; 64])],
+            Hash512::from_bytes([0xa2; 64]),
+        )
+        .expect("ciphertext descriptor is valid");
         SignedMailboxEnvelope::new(
             associated_data,
             [0x5a; MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH],

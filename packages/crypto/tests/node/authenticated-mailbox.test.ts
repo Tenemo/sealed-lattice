@@ -109,6 +109,8 @@ const kernel: AuthenticatedMailboxKernel = {
         ]),
     deriveMailboxEnvelopeHash: (value) =>
         objectHash('test/mailbox-envelope', value),
+    deriveSetupMailboxSlotHash: (value) =>
+        objectHash('test/setup-mailbox-slot', value),
 };
 
 const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
@@ -868,22 +870,36 @@ describe('authenticated mailbox', () => {
         const conflictingPlaintext = plaintext.slice();
         conflictingPlaintext[0] ^= 1;
         const conflictingCiphertext: Uint8Array[] = [];
-        const conflictingCarrier = await sealAuthenticatedMailbox({
-            associatedData,
-            emitCiphertextChunk: ({ bytes }) => {
-                conflictingCiphertext.push(new Uint8Array(bytes).slice());
-                return Promise.resolve();
-            },
-            gcmRuntime: makeGcmRuntime({ authenticationFinished: false }),
-            kernel,
-            outboundCache: makeOutboundCache().cache,
-            plaintextByteLength: conflictingPlaintext.byteLength,
-            pullPlaintextChunk: sourceFromBytes(conflictingPlaintext),
-            recipientEncapsulationKey: recipientKeys.mailbox.publicKey,
-            sourceSigningCapability: sourceProvider.signingCapability,
-            sourceVerificationKey: sourceKeys.signing.publicKey,
-            streamBoundary,
+        await expect(
+            sealAuthenticatedMailbox({
+                associatedData,
+                emitCiphertextChunk: ({ bytes }) => {
+                    conflictingCiphertext.push(new Uint8Array(bytes).slice());
+                    return Promise.resolve();
+                },
+                gcmRuntime: makeGcmRuntime({ authenticationFinished: false }),
+                kernel,
+                outboundCache: makeOutboundCache().cache,
+                plaintextByteLength: conflictingPlaintext.byteLength,
+                pullPlaintextChunk: sourceFromBytes(conflictingPlaintext),
+                recipientEncapsulationKey: recipientKeys.mailbox.publicKey,
+                sourceSigningCapability: sourceProvider.signingCapability,
+                sourceVerificationKey: sourceKeys.signing.publicKey,
+                streamBoundary,
+            }),
+        ).rejects.toMatchObject({ refusalReason: 'equivocation' });
+        expect(conflictingCiphertext).toHaveLength(0);
+
+        const decodedCarrier = kernel.decodeSignedMailboxEnvelope({
+            canonicalBytesHex: bytesToHex(carrier.canonicalEnvelopeBytes),
         });
+        const conflictingCarrier = resignEnvelope(
+            {
+                ...decodedCarrier.value,
+                gcmTagHex: flipLastHexByte(decodedCarrier.value.gcmTagHex),
+            },
+            sourceKeys.signing.secretKey,
+        );
         let conflictingFetchCount = 0;
         const conflictingOpen = await openAuthenticatedMailbox({
             carrier: conflictingCarrier,
@@ -919,11 +935,7 @@ describe('authenticated mailbox', () => {
         recipientProvider.close();
         plaintext.fill(0);
         conflictingPlaintext.fill(0);
-        for (const chunk of [
-            ...ciphertextChunks,
-            ...openedChunks,
-            ...conflictingCiphertext,
-        ]) {
+        for (const chunk of [...ciphertextChunks, ...openedChunks]) {
             chunk.fill(0);
         }
     });

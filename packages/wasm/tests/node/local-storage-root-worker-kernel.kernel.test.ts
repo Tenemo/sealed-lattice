@@ -1,10 +1,22 @@
-import { BrowserActionStorageCustodyError } from '@sealed-lattice/types';
+import {
+    BrowserActionStorageCustodyError,
+    stateCapabilityKinds,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
     createWasmBrowserActionStorageWorkerKernel,
     loadFreshTranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import {
+    closeWorkerActionRandomness,
+    createAndSealWorkerActionRandomness,
+    openSealedWorkerActionRandomness,
+} from '#packages/wasm/src/local-storage-root-worker-kernel';
+import {
+    createStateVerifierTestVector,
+    deriveSetupActionRandomnessAuthorization,
+} from '#packages/wasm/tests/state-verifier-test-vectors';
 
 const createBytes = (byteLength: number, seed: number): Uint8Array =>
     Uint8Array.from(
@@ -32,6 +44,207 @@ const expectCustodyErrorCode = async (
 };
 
 describe('Local storage-root real-WASM worker kernel', () => {
+    it('seals and reopens action randomness without exposing its root plaintext', async () => {
+        const baseStateVector = createStateVerifierTestVector();
+        const actionBinding = Object.freeze({
+            actionContextHash: baseStateVector.actionContextHash,
+            ceremonyContextHash: baseStateVector.ceremonyContextHash,
+            participantId: baseStateVector.subjectParticipantIdentity,
+            suiteId: baseStateVector.suiteIdentifier,
+        });
+        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
+            kernel: loadFreshTranscriptCoreKernel(),
+        });
+        await workerKernel.createAndStageDeviceWrappingState({
+            binding: actionBinding,
+        });
+        await workerKernel.commitStagedActionStorageRoot({
+            mutationIdentifier,
+        });
+        const recordContext = {
+            creationRecoveryEpoch: 0n,
+            recordVersion: 0n,
+        } as const;
+        const created = await createAndSealWorkerActionRandomness(
+            workerKernel,
+            recordContext,
+        );
+        const stateVector = createStateVerifierTestVector({
+            setupActionRandomnessAuthorizationHash:
+                deriveSetupActionRandomnessAuthorization(
+                    baseStateVector,
+                    created.actionRandomnessCommitment,
+                ),
+        });
+        const openedStateSession =
+            await workerKernel.openActionStateVerifierSession({
+                canonicalRosterBytes: stateVector.canonicalRosterBytes,
+                maximumRecoveryTransitionsPerStateKey: 4,
+            });
+        expect(openedStateSession.isValid).toBe(true);
+        if (!openedStateSession.isValid) {
+            throw new Error('State-verifier session did not open.');
+        }
+        const mismatchedRootReservationVector =
+            baseStateVector.reservationOnly.find(
+                ({ capabilityKind }) =>
+                    capabilityKind ===
+                    stateCapabilityKinds.setupActionRandomnessRoot,
+            );
+        if (mismatchedRootReservationVector === undefined) {
+            throw new Error('Missing mismatched action-randomness vector.');
+        }
+        expect(
+            await workerKernel.verifyActionRandomnessReservation({
+                actionRandomnessSessionIdentifier:
+                    created.actionRandomnessSessionIdentifier,
+                canonicalReservationIntentCarrier:
+                    mismatchedRootReservationVector.certifiedIntent
+                        .canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    mismatchedRootReservationVector.certifiedIntent
+                        .canonicalStateCertificate,
+                stateVerifierSessionIdentifier: openedStateSession.value,
+            }),
+        ).toEqual({ isValid: false, refusalReason: 'wrongHashOrRoot' });
+        const rootReservationVector = stateVector.reservationOnly.find(
+            ({ capabilityKind }) =>
+                capabilityKind ===
+                stateCapabilityKinds.setupActionRandomnessRoot,
+        );
+        if (rootReservationVector === undefined) {
+            throw new Error('Missing action-randomness reservation vector.');
+        }
+        const rootReservation =
+            await workerKernel.verifyActionRandomnessReservation({
+                actionRandomnessSessionIdentifier:
+                    created.actionRandomnessSessionIdentifier,
+                canonicalReservationIntentCarrier:
+                    rootReservationVector.certifiedIntent
+                        .canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    rootReservationVector.certifiedIntent
+                        .canonicalStateCertificate,
+                stateVerifierSessionIdentifier: openedStateSession.value,
+            });
+        expect(rootReservation.isValid).toBe(true);
+        if (!rootReservation.isValid) {
+            throw new Error('Action-randomness reservation did not verify.');
+        }
+        expect(created.actionRandomnessCommitment).toHaveLength(64);
+        expect(created.canonicalEnvelope.length).toBeGreaterThan(64);
+        await closeWorkerActionRandomness(
+            workerKernel,
+            created.actionRandomnessSessionIdentifier,
+        );
+        const reopened = await openSealedWorkerActionRandomness(workerKernel, {
+            ...recordContext,
+            actionRandomnessCommitment:
+                created.actionRandomnessCommitment,
+            canonicalEnvelope: created.canonicalEnvelope,
+        });
+        expect(reopened.actionRandomnessCommitment).toEqual(
+            created.actionRandomnessCommitment,
+        );
+        const dealerReservationVector = stateVector.reservationOnly.find(
+            ({ capabilityKind }) =>
+                capabilityKind === stateCapabilityKinds.setupDealerSetBranch,
+        );
+        if (dealerReservationVector === undefined) {
+            throw new Error('Missing dealer-set reservation vector.');
+        }
+        const dealerReservation =
+            await workerKernel.verifyActionStateReservation({
+                canonicalReservationIntentCarrier:
+                    dealerReservationVector.certifiedIntent
+                        .canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    dealerReservationVector.certifiedIntent
+                        .canonicalStateCertificate,
+                capabilityKind: stateCapabilityKinds.setupDealerSetBranch,
+                expectedAuthorizationHash: stateVector.authorizationHash,
+                stateVerifierSessionIdentifier: openedStateSession.value,
+                subjectParticipantIdentity:
+                    stateVector.subjectParticipantIdentity,
+            });
+        const targetReservation =
+            await workerKernel.verifyActionStateReservation({
+                canonicalReservationIntentCarrier:
+                    stateVector.reservation.canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    stateVector.reservation.canonicalStateCertificate,
+                capabilityKind: stateCapabilityKinds.targetRelease,
+                expectedAuthorizationHash: stateVector.authorizationHash,
+                stateVerifierSessionIdentifier: openedStateSession.value,
+                subjectParticipantIdentity:
+                    stateVector.subjectParticipantIdentity,
+            });
+        if (!dealerReservation.isValid || !targetReservation.isValid) {
+            throw new Error('Proof-attempt reservations did not verify.');
+        }
+        const persistentAttemptInput = {
+            actionRandomnessSessionIdentifier:
+                reopened.actionRandomnessSessionIdentifier,
+            applicationStatementHash: createBytes(64, 177),
+            rosterPosition: 0,
+            stateReservationIdentifier: dealerReservation.value,
+            statementSchemaIdentifier: 0x1211,
+        } as const;
+        expect(
+            await workerKernel.derivePersistentProofAttempt(
+                persistentAttemptInput,
+            ),
+        ).toEqual(
+            await workerKernel.derivePersistentProofAttempt(
+                persistentAttemptInput,
+            ),
+        );
+        const targetAttemptInput = {
+            actionRandomnessSessionIdentifier:
+                reopened.actionRandomnessSessionIdentifier,
+            rosterPosition: 0,
+            stateReservationIdentifier: targetReservation.value,
+        } as const;
+        expect(
+            await workerKernel.deriveTargetReleaseAttempt(targetAttemptInput),
+        ).toEqual(
+            await workerKernel.deriveTargetReleaseAttempt(targetAttemptInput),
+        );
+        await expectCustodyErrorCode(
+            workerKernel.deriveTargetReleaseAttempt({
+                ...targetAttemptInput,
+                stateReservationIdentifier: rootReservation.value,
+            }),
+            'InvalidState',
+        );
+        await closeWorkerActionRandomness(
+            workerKernel,
+            reopened.actionRandomnessSessionIdentifier,
+        );
+
+        const tamperedEnvelope = created.canonicalEnvelope.slice();
+        tamperedEnvelope[tamperedEnvelope.byteLength - 1] ^= 1;
+        await expectCustodyErrorCode(
+            openSealedWorkerActionRandomness(workerKernel, {
+                ...recordContext,
+                actionRandomnessCommitment:
+                    created.actionRandomnessCommitment,
+                canonicalEnvelope: tamperedEnvelope,
+            }),
+            'RecordAuthenticationFailed',
+        );
+        await expectCustodyErrorCode(
+            createAndSealWorkerActionRandomness(workerKernel, {
+                ...recordContext,
+            }),
+            'InvalidState',
+        );
+        await workerKernel.closeActionStateVerifierSession(
+            openedStateSession.value,
+        );
+        await workerKernel.destroyActiveActionStorageRoot();
+    });
+
     it('derives, seals, authenticates, versions, and hashes local records inside the owned kernel', async () => {
         const workerKernel = createWasmBrowserActionStorageWorkerKernel({
             kernel: loadFreshTranscriptCoreKernel(),

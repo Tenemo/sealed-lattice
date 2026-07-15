@@ -9,6 +9,7 @@ use crate::hashing::derive_canonical_object_hash;
 enum TranscriptCoreCommand {
     DeriveCanonicalObjectHash,
     ValidateCanonicalFoundationValue,
+    DecodeProofApplicationBinding,
     DeriveCeremonyContextHash,
     DeriveActionContextHash,
     EncodeMailboxKeyScheduleInput,
@@ -72,6 +73,9 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         }
         TranscriptCoreCommand::ValidateCanonicalFoundationValue => {
             super::foundation_command::validate_canonical_foundation_value(&request)
+        }
+        TranscriptCoreCommand::DecodeProofApplicationBinding => {
+            super::foundation_command::decode_proof_application_binding(&request)
         }
         TranscriptCoreCommand::DeriveCeremonyContextHash => {
             super::foundation_command::derive_ceremony_context_hash(&request)

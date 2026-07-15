@@ -62,6 +62,22 @@ export type CanonicalFoundationValueValidationInput =
           readonly canonicalByteChunksHex: readonly string[];
       }>;
 
+export type DecodedProofApplicationBinding = Readonly<{
+    readonly canonicalBytesHex: string;
+    readonly applicationSlotCanonicalBytesHex: string;
+    readonly applicationSlotHash: ProtocolHash;
+    readonly suiteIdentifier: ProtocolHash;
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly actionContextHash: ProtocolHash;
+    readonly applicationStatementSchemaIdentifier: number;
+    readonly rosterPosition: number | null;
+    readonly schedulePosition: number | null;
+    readonly producerSequence: string | null;
+    readonly proofHeaderHash: ProtocolHash;
+    readonly proofStreamDescriptorCanonicalBytesHex: string;
+    readonly proofByteLength: string;
+}>;
+
 export type CeremonyContextInput = Readonly<{
     readonly suiteId: ProtocolHash;
     readonly manifestHash: ProtocolHash;
@@ -105,6 +121,7 @@ export type SetupMailboxSlot = Omit<
 export type MailboxCiphertextDescriptor = Readonly<{
     readonly totalByteLength: string;
     readonly orderedChunkDigests: readonly ProtocolHash[];
+    readonly fullObjectDigest: ProtocolHash;
 }>;
 
 export type UnsignedMailboxEnvelope = Readonly<{
@@ -256,6 +273,9 @@ export type TranscriptCoreKernel = {
     validateCanonicalFoundationValue(
         input: CanonicalFoundationValueValidationInput,
     ): CanonicalFoundationValueValidation;
+    decodeProofApplicationBinding(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedProofApplicationBinding;
     deriveCeremonyContextHash(value: CeremonyContextInput): ProtocolHash;
     deriveActionContextHash(value: ActionContextInput): ProtocolHash;
     encodeMailboxKeyScheduleInput(
@@ -380,6 +400,10 @@ type TranscriptCoreKernelCommand =
           'ValidateCanonicalFoundationValue',
           'validateCanonicalFoundationValue'
       >
+    | KernelCommandFromMethod<
+          'DecodeProofApplicationBinding',
+          'decodeProofApplicationBinding'
+      >
     | Readonly<{
           readonly command: 'DeriveCeremonyContextHash';
           readonly value: CeremonyContextInput;
@@ -480,6 +504,13 @@ type TranscriptCoreKernelCommand =
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
     sealed_lattice_allocate?: (length: number) => number;
+    sealed_lattice_action_randomness_command?: (
+        command: number,
+        inputPointer: number,
+        inputLength: number,
+        statusPointer: number,
+        outputLengthPointer: number,
+    ) => number;
     sealed_lattice_accepted_setup_canonical_stream_begin?: (
         setupSessionHandle: number,
         familyCode: number,
@@ -624,6 +655,57 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         inputLength: number,
         statusPointer: number,
         outputLengthPointer: number,
+    ) => number;
+    sealed_lattice_board_verifier_begin?: (
+        configurationPointer: number,
+        configurationLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_board_verifier_cached_carrier_length?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_board_verifier_cancel?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_board_verifier_copy_cached_carrier?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_board_verifier_describe?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_board_verifier_release?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+    ) => number;
+    sealed_lattice_board_verifier_verify_unordered?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        framedCarrierPointer: number,
+        framedCarrierLength: number,
+        outputPointer: number,
+        outputCapacity: number,
+        statusPointer: number,
     ) => number;
     sealed_lattice_state_verifier_begin?: (
         configurationPointer: number,
