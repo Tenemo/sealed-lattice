@@ -12,7 +12,7 @@ pub(crate) const CANONICAL_STREAM_RUNTIME_INVALID_SESSION: u32 = u32::MAX - 1;
 const MAXIMUM_CANONICAL_STREAM_CHUNK_COUNT: usize = (MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH as usize)
     .div_ceil(FOUNDATION_PROFILE.stream_chunk_byte_length);
 pub(crate) const MAXIMUM_CANONICAL_STREAM_DESCRIPTOR_BYTE_LENGTH: usize =
-    104 + 64 * MAXIMUM_CANONICAL_STREAM_CHUNK_COUNT;
+    34 + 64 * MAXIMUM_CANONICAL_STREAM_CHUNK_COUNT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CanonicalStreamRuntimeBegin {

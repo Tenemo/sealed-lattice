@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { UntrustedStorageAuthenticatedRecoveryProtection } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
 import {
     deriveWebLockStorageNamespaceName,
     openWebLockOwnedStorageTransactionStore,
@@ -24,6 +25,73 @@ const pendingOpenRequests = new Set<
 >();
 const databaseNames = new Set<string>();
 const openedFrames: HTMLIFrameElement[] = [];
+const recoveryProtections = new Map<
+    string,
+    UntrustedStorageAuthenticatedRecoveryProtection
+>();
+
+const copyToArrayBufferView = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
+    const copy = new Uint8Array(new ArrayBuffer(bytes.byteLength));
+    copy.set(bytes);
+    return copy;
+};
+
+const recoveryProtectionFor = (
+    databaseName: string,
+): UntrustedStorageAuthenticatedRecoveryProtection => {
+    const existingProtection = recoveryProtections.get(databaseName);
+    if (existingProtection !== undefined) {
+        return existingProtection;
+    }
+    const authenticationKey = crypto.subtle.generateKey(
+        { length: 256, name: 'AES-GCM' },
+        false,
+        ['decrypt', 'encrypt'],
+    );
+    const recoveryIdentity = crypto.getRandomValues(new Uint8Array(64));
+    const protection = Object.freeze({
+        deriveDigest: async (bytes: Uint8Array) =>
+            new Uint8Array(
+                await crypto.subtle.digest(
+                    'SHA-512',
+                    copyToArrayBufferView(bytes),
+                ),
+            ),
+        open: async (sealedBytes: Uint8Array) => {
+            if (sealedBytes.byteLength < 28) {
+                throw new Error('Test recovery head is truncated.');
+            }
+            const nonce = copyToArrayBufferView(sealedBytes.slice(0, 12));
+            const ciphertext = copyToArrayBufferView(sealedBytes.slice(12));
+            return new Uint8Array(
+                await crypto.subtle.decrypt(
+                    { iv: nonce, name: 'AES-GCM' },
+                    await authenticationKey,
+                    ciphertext,
+                ),
+            );
+        },
+        recoveryIdentity,
+        seal: async (plaintext: Uint8Array) => {
+            const nonce = crypto.getRandomValues(new Uint8Array(12));
+            const ciphertext = new Uint8Array(
+                await crypto.subtle.encrypt(
+                    { iv: nonce, name: 'AES-GCM' },
+                    await authenticationKey,
+                    copyToArrayBufferView(plaintext),
+                ),
+            );
+            const sealedBytes = new Uint8Array(
+                nonce.byteLength + ciphertext.byteLength,
+            );
+            sealedBytes.set(nonce);
+            sealedBytes.set(ciphertext, nonce.byteLength);
+            return sealedBytes;
+        },
+    });
+    recoveryProtections.set(databaseName, protection);
+    return protection;
+};
 const createDatabaseName = (): string => {
     const randomBytes = new Uint8Array(16);
     crypto.getRandomValues(randomBytes);
@@ -38,6 +106,7 @@ const configurationFor = (
     databaseName: string,
     overrides: Partial<WebLockOwnedStorageConfiguration> = {},
 ): WebLockOwnedStorageConfiguration => ({
+    authenticatedRecoveryProtection: recoveryProtectionFor(databaseName),
     databaseName,
     limits: transactionLimits,
     namespace: 'browser-integration',

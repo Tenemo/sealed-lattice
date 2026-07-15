@@ -6,7 +6,6 @@ pub(in super::super) const VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_DIRECTORY: &
 
 struct VssAggregateThresholdProofMaterialReference {
     proof_bytes_hash: String,
-    proof_material_root: String,
     proof_binding_lease: crate::bgv::setup::CanonicalSetupProofBindingLease,
 }
 
@@ -152,7 +151,6 @@ fn vss_aggregate_threshold_proof_record(
         record: serde_json::json!({
             "objectType": "VssAggregateThresholdProofRecord",
             "proofBytesHash": proof_material.proof_bytes_hash,
-            "proofMaterialRoot": proof_material.proof_material_root,
         }),
         proof_binding_lease: proof_material.proof_binding_lease,
     }
@@ -193,21 +191,16 @@ fn vss_aggregate_threshold_proof_material_reference(
         || generated_vss_aggregate_threshold_proof_bytes(&request),
     );
     let proof_bytes_hash = hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
-    let proof_material_root = crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
-        VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        &proof_bytes_hash,
-    )
-    .expect("VSS aggregate threshold proof material root");
     if crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
         VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        &proof_material_root,
+        &proof_bytes_hash,
     )
     .expect("VSS aggregate threshold generated proof material lookup")
     .is_none()
     {
         authenticate_setup_proof_material_stream_for_test(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            &proof_material_root,
+            &proof_bytes_hash,
             &proof_bytes,
         )
         .expect("authenticate VSS aggregate threshold proof material stream");
@@ -217,20 +210,19 @@ fn vss_aggregate_threshold_proof_material_reference(
             .expect("begin VSS aggregate threshold proof binding session");
     crate::bgv::setup::trustee_evaluation_key_proof::verify_and_retain_vss_share_linkage_proof_binding(
         &proof_binding_session,
-        &proof_material_root,
+        &proof_bytes_hash,
         &request,
     )
     .expect("verify VSS aggregate threshold proof before releasing its bytes");
     let proof_binding_lease =
         crate::bgv::setup::finish_accepted_setup_fixture_proof_binding_session(
             proof_binding_session,
-            &proof_material_root,
+            &proof_bytes_hash,
         )
         .expect("retain VSS aggregate threshold verifier-owned binding lease");
 
     VssAggregateThresholdProofMaterialReference {
         proof_bytes_hash,
-        proof_material_root,
         proof_binding_lease,
     }
 }
@@ -254,12 +246,9 @@ fn generated_vss_aggregate_threshold_proof_bytes(request: &serde_json::Value) ->
     let proof_bytes_hash = generated["proofBytesHash"]
         .as_str()
         .expect("VSS aggregate threshold proof bytes hash");
-    let proof_material_root = generated["proofMaterialRoot"]
-        .as_str()
-        .expect("VSS aggregate threshold proof material root");
     let proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
         VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        proof_material_root,
+        proof_bytes_hash,
     )
     .expect("VSS aggregate threshold generated proof material lookup")
     .expect("VSS aggregate threshold generated proof material");
@@ -293,9 +282,6 @@ fn vss_aggregate_threshold_proof_generation_request(
     let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
         .expect("setup context hash");
     let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
-    // Bound-commitment order: the summand slots (coefficient commitments) then
-    // the single aggregate recipient share. Context hashes read off the
-    // published commitments; seeds derive from them.
     let mut context_hashes = vss_aggregate["coefficientCommitments"]
         .as_array()
         .expect("aggregate coefficient commitments")
@@ -324,20 +310,11 @@ fn vss_aggregate_threshold_proof_generation_request(
         "rnsLimbIndex": rns_limb_index,
     }))
     .expect("VSS aggregate threshold proof randomness seed");
-    let proof_randomness_nonce_hex = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "VssAggregateThresholdProofRandomness",
-        "fixture": "vss-aggregate-threshold-proof-randomness-nonce",
-        "recipientRosterPosition": recipient_roster_position,
-        "rnsLimbIndex": rns_limb_index,
-    }))
-    .expect("VSS aggregate threshold proof randomness nonce");
-
     serde_json::json!({
         "context": {
             "setupContextHash": setup_context_hash,
             "trusteeIdentity": "vss-aggregate-threshold",
             "trusteeRosterPosition": 0,
-            "shareLinkageStatementRoot": vss_aggregate["shareLinkageStatementRoot"],
         },
         "ringDegree": ring_degree,
         "vssShareLinkage": vss_aggregate,
@@ -345,8 +322,6 @@ fn vss_aggregate_threshold_proof_generation_request(
         "recipientShareMessagesByItem": vec![aggregate_message.to_vec()],
         "carryWitnessesByItem": vec![wrap_witnesses.to_vec()],
         "vssCommittedMaterialSeedsByBoundMessage": material_seeds,
-        "vssCommittedMaterialContextHashesByBoundMessage": context_hashes,
         "proofRandomnessSeedHex": proof_randomness_seed_hex,
-        "proofRandomnessNonceHex": proof_randomness_nonce_hex,
     })
 }

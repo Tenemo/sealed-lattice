@@ -234,7 +234,7 @@ describe('Canonical stream real-WASM runtime', () => {
         expect(runtime.counterSnapshot().activeSessionCount).toBe(0);
     });
 
-    it('refuses substituted, truncated, wrong-domain, and wrong-terminal streams', () => {
+    it('refuses substituted, truncated, wrong-domain, and tampered-descriptor streams', () => {
         const runtime = openCanonicalStreamWorkerRuntime({ kernel });
         const bytes = createBytes(
             foundationProfile.streamChunkByteLength + 17,
@@ -276,16 +276,14 @@ describe('Canonical stream real-WASM runtime', () => {
             expect.objectContaining({ refusalReason: 'wrongHashOrRoot' }),
         );
 
-        const wrongTerminalDescriptor = descriptor.slice();
-        wrongTerminalDescriptor[wrongTerminalDescriptor.byteLength - 1] ^= 1;
-        const wrongTerminal = runtime.openVerifier({
-            descriptorBytes: wrongTerminalDescriptor,
+        const tamperedDescriptor = descriptor.slice();
+        tamperedDescriptor[tamperedDescriptor.byteLength - 1] ^= 1;
+        const tampered = runtime.openVerifier({
+            descriptorBytes: tamperedDescriptor,
             streamDomain: canonicalStreamDomains.publicKeyShareProof,
         });
-        for (const [chunkIndex, chunk] of chunks.entries()) {
-            wrongTerminal.absorbChunk(chunkIndex, chunk.slice(0));
-        }
-        expect(() => wrongTerminal.finish()).toThrowError(
+        tampered.absorbChunk(0, chunks[0].slice(0));
+        expect(() => tampered.absorbChunk(1, chunks[1].slice(0))).toThrowError(
             expect.objectContaining({ refusalReason: 'wrongHashOrRoot' }),
         );
     });

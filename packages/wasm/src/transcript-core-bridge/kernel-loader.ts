@@ -5,30 +5,21 @@ import { registerStateVerifierKernelContext } from '../state-verifier-runtime.js
 import type {
     BgvCollectiveSetupParametersDescription,
     BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeyStatementDescription,
-    BgvLocalTrusteeSetupStateVerification,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofGeneration,
     BgvVssCommittedMaterialCommitmentComputation,
     BgvVssShareLinkageProofGeneration,
-    DecodedActionRandomnessDerivationInput,
     BgvSetupCommitmentOpeningComputation,
-    BgvTargetDecryptionShare,
-    BgvTargetDecryptionShareProofMaterial,
     DecodedMailboxAssociatedData,
     DecodedMailboxKeyScheduleInput,
-    DecodedPrivateRandomBlockInput,
     DecodedPrivateRandomCursor,
     DecodedSignedMailboxEnvelope,
     DecodedStreamDescriptor,
     EncodedMailboxAssociatedData,
     EncodedMailboxKeyScheduleInput,
-    EncodedActionRandomnessDerivationInput,
-    EncodedPrivateRandomBlockInput,
     EncodedPrivateRandomCursor,
     EncodedSignedMailboxEnvelope,
     EncodedStreamDescriptor,
-    GeneratedProofSuiteCandidate,
     CanonicalFoundationValueValidation,
     TranscriptCoreKernel,
 } from './kernel-contracts.js';
@@ -105,14 +96,6 @@ export const createTranscriptCoreKernelLoader = (
             exports,
             'sealed_lattice_state_verifier_prepare_reservation',
         );
-        const stateVerifierPrepareWitnessVote = resolveOptionalNumberExport(
-            exports,
-            'sealed_lattice_state_verifier_prepare_witness_vote',
-        );
-        const stateVerifierFinishWitnessVote = resolveOptionalNumberExport(
-            exports,
-            'sealed_lattice_state_verifier_finish_witness_vote',
-        );
         const stateVerifierVerifyRecovery = resolveOptionalNumberExport(
             exports,
             'sealed_lattice_state_verifier_verify_recovery',
@@ -186,34 +169,6 @@ export const createTranscriptCoreKernelLoader = (
                     command: 'DeriveSetupMailboxSlotHash',
                     value,
                 }).setupMailboxSlotHash,
-            encodeActionRandomnessDerivationInput: (value) =>
-                executeCommand<EncodedActionRandomnessDerivationInput>({
-                    command: 'EncodeActionRandomnessDerivationInput',
-                    value,
-                }),
-            decodeActionRandomnessDerivationInput: (input) =>
-                executeCommand<DecodedActionRandomnessDerivationInput>({
-                    command: 'DecodeActionRandomnessDerivationInput',
-                    canonicalBytesHex: input.canonicalBytesHex,
-                }),
-            deriveActionRandomnessCommitment: (input): ProtocolHash =>
-                executeCommand<{
-                    readonly actionRandomnessCommitment: ProtocolHash;
-                }>({
-                    command: 'DeriveActionRandomnessCommitment',
-                    actionRandomnessRootHex: input.actionRandomnessRootHex,
-                    value: input.value,
-                }).actionRandomnessCommitment,
-            encodePrivateRandomBlockInput: (value) =>
-                executeCommand<EncodedPrivateRandomBlockInput>({
-                    command: 'EncodePrivateRandomBlockInput',
-                    value,
-                }),
-            decodePrivateRandomBlockInput: (input) =>
-                executeCommand<DecodedPrivateRandomBlockInput>({
-                    command: 'DecodePrivateRandomBlockInput',
-                    canonicalBytesHex: input.canonicalBytesHex,
-                }),
             encodePrivateRandomCursor: (value) =>
                 executeCommand<EncodedPrivateRandomCursor>({
                     command: 'EncodePrivateRandomCursor',
@@ -223,10 +178,6 @@ export const createTranscriptCoreKernelLoader = (
                 executeCommand<DecodedPrivateRandomCursor>({
                     command: 'DecodePrivateRandomCursor',
                     canonicalBytesHex: input.canonicalBytesHex,
-                }),
-            generateProofSuiteCandidate: () =>
-                executeCommand<GeneratedProofSuiteCandidate>({
-                    command: 'GenerateProofSuiteCandidate',
                 }),
             encodeSignedMailboxEnvelope: (value) =>
                 executeCommand<EncodedSignedMailboxEnvelope>({
@@ -252,37 +203,6 @@ export const createTranscriptCoreKernelLoader = (
                     command: 'DeriveMailboxEnvelopeHash',
                     value,
                 }).envelopeHash,
-            generateBgvTargetDecryptionShareFromLocalShare: (
-                input,
-            ): BgvTargetDecryptionShare =>
-                executeCommand<BgvTargetDecryptionShare>({
-                    command: 'GenerateBgvTargetDecryptionShareFromLocalShare',
-                    setupPackage: input.setupPackage,
-                    targetAcceptedRecord: input.targetAcceptedRecord,
-                    targetCiphertexts: input.targetCiphertexts,
-                    targetCiphertextBinding: input.targetCiphertextBinding,
-                    targetShareProfile: input.targetShareProfile,
-                    trusteeIdentity: input.trusteeIdentity,
-                    localTargetShareWitness: input.localTargetShareWitness,
-                }),
-            generateBgvTargetDecryptionShareProofMaterialFromLocalWitness: (
-                input,
-            ): BgvTargetDecryptionShareProofMaterial =>
-                executeCommand<BgvTargetDecryptionShareProofMaterial>({
-                    command:
-                        'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
-                    setupPackage: input.setupPackage,
-                    targetAcceptedRecord: input.targetAcceptedRecord,
-                    targetCiphertexts: input.targetCiphertexts,
-                    targetCiphertextBinding: input.targetCiphertextBinding,
-                    targetShareProfile: input.targetShareProfile,
-                    trusteeIdentity: input.trusteeIdentity,
-                    localTargetShareWitness: input.localTargetShareWitness,
-                    targetDecryptionShare: input.targetDecryptionShare,
-                    proofStatement: input.proofStatement,
-                    proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                    proofRandomnessNonceHex: input.proofRandomnessNonceHex,
-                }),
             describeBgvRnsParameters: (): BgvRnsParametersDescription =>
                 executeCommand<BgvRnsParametersDescription>({
                     command: 'DescribeBgvRnsParameters',
@@ -310,16 +230,10 @@ export const createTranscriptCoreKernelLoader = (
                             secretCoefficients: input.secretCoefficients,
                             errorCoefficientsByKey:
                                 input.errorCoefficientsByKey,
-                            negativeIndicatorCoefficients:
-                                input.negativeIndicatorCoefficients,
                             vssCommittedMaterialSeedsByBoundMessage:
                                 input.vssCommittedMaterialSeedsByBoundMessage,
-                            vssCommittedMaterialContextHashesByBoundMessage:
-                                input.vssCommittedMaterialContextHashesByBoundMessage,
                             proofRandomnessSeedHex:
                                 input.proofRandomnessSeedHex,
-                            proofRandomnessNonceHex:
-                                input.proofRandomnessNonceHex,
                         },
                     );
                 }
@@ -331,36 +245,9 @@ export const createTranscriptCoreKernelLoader = (
                     sameSecretLinkage: input.sameSecretLinkage,
                     secretCoefficients: input.secretCoefficients,
                     errorCoefficientsByKey: input.errorCoefficientsByKey,
-                    negativeIndicatorCoefficients:
-                        input.negativeIndicatorCoefficients,
                     openingRandomnessByLimb: input.openingRandomnessByLimb,
                     proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                    proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                 });
-            },
-            describeTrusteeEvaluationKeyStatement: (
-                input,
-            ): BgvTrusteeEvaluationKeyStatementDescription => {
-                if (input.statementFamily === 'public-key-share') {
-                    return executeCommand<BgvTrusteeEvaluationKeyStatementDescription>(
-                        {
-                            command: 'DescribeTrusteeEvaluationKeyStatement',
-                            context: input.context,
-                            ringDegree: input.ringDegree,
-                            keys: input.keys,
-                            sameSecretBridge: input.sameSecretBridge,
-                        },
-                    );
-                }
-                return executeCommand<BgvTrusteeEvaluationKeyStatementDescription>(
-                    {
-                        command: 'DescribeTrusteeEvaluationKeyStatement',
-                        context: input.context,
-                        ringDegree: input.ringDegree,
-                        keys: input.keys,
-                        sameSecretLinkage: input.sameSecretLinkage,
-                    },
-                );
             },
             computeSetupCommitmentFromOpening: (
                 input,
@@ -369,7 +256,6 @@ export const createTranscriptCoreKernelLoader = (
                     command: 'ComputeSetupCommitmentFromOpening',
                     publicMatrixSeedHash: input.publicMatrixSeedHash,
                     sourceRnsLimbIndex: input.sourceRnsLimbIndex,
-                    sourceMessageModulus: input.sourceMessageModulus,
                     shamirCoefficientIndex: input.shamirCoefficientIndex,
                     messageCoefficients: input.messageCoefficients,
                     randomnessByColumn: input.randomnessByColumn,
@@ -383,14 +269,7 @@ export const createTranscriptCoreKernelLoader = (
                     commitmentRole: input.commitmentRole,
                     commitmentContext: input.commitmentContext,
                     rnsLimbIndex: input.rnsLimbIndex,
-                    rnsPrime: input.rnsPrime,
                     ringDegree: input.ringDegree,
-                    ...(input.messageCoefficientBound === undefined
-                        ? {}
-                        : {
-                              messageCoefficientBound:
-                                  input.messageCoefficientBound,
-                          }),
                     messageCoefficients: input.messageCoefficients,
                     materialSeedHex: input.materialSeedHex,
                 }),
@@ -409,10 +288,7 @@ export const createTranscriptCoreKernelLoader = (
                     carryWitnessesByItem: input.carryWitnessesByItem,
                     vssCommittedMaterialSeedsByBoundMessage:
                         input.vssCommittedMaterialSeedsByBoundMessage,
-                    vssCommittedMaterialContextHashesByBoundMessage:
-                        input.vssCommittedMaterialContextHashesByBoundMessage,
                     proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                    proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                 }),
             generateSameSecretBridgeProof: (
                 input,
@@ -424,23 +300,10 @@ export const createTranscriptCoreKernelLoader = (
                     sameSecretLinkage: input.sameSecretLinkage,
                     sameSecretBridge: input.sameSecretBridge,
                     secretCoefficients: input.secretCoefficients,
-                    negativeIndicatorCoefficients:
-                        input.negativeIndicatorCoefficients,
                     openingRandomnessByLimb: input.openingRandomnessByLimb,
                     vssCommittedMaterialSeedsByBoundMessage:
                         input.vssCommittedMaterialSeedsByBoundMessage,
-                    vssCommittedMaterialContextHashesByBoundMessage:
-                        input.vssCommittedMaterialContextHashesByBoundMessage,
                     proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                    proofRandomnessNonceHex: input.proofRandomnessNonceHex,
-                }),
-            verifyLocalTrusteeSetupState: (
-                input,
-            ): BgvLocalTrusteeSetupStateVerification =>
-                executeCommand<BgvLocalTrusteeSetupStateVerification>({
-                    command: 'VerifyLocalTrusteeSetupState',
-                    setupContext: input.setupContext,
-                    localStateCommitment: input.localStateCommitment,
                 }),
         };
         registerKernelContexts(kernel, runtime);
@@ -464,8 +327,6 @@ export const createTranscriptCoreKernelLoader = (
             stateVerifierPrepareOutput !== undefined &&
             stateVerifierPrepareRecovery !== undefined &&
             stateVerifierPrepareReservation !== undefined &&
-            stateVerifierPrepareWitnessVote !== undefined &&
-            stateVerifierFinishWitnessVote !== undefined &&
             stateVerifierVerifyRecovery !== undefined &&
             stateVerifierVerifyReservation !== undefined
         ) {
@@ -481,11 +342,9 @@ export const createTranscriptCoreKernelLoader = (
                 release: stateVerifierRelease,
                 runExclusive: runExclusiveKernelOperation,
                 finishOutput: stateVerifierFinishOutput,
-                finishWitnessVote: stateVerifierFinishWitnessVote,
                 prepareOutput: stateVerifierPrepareOutput,
                 prepareRecovery: stateVerifierPrepareRecovery,
                 prepareReservation: stateVerifierPrepareReservation,
-                prepareWitnessVote: stateVerifierPrepareWitnessVote,
                 verifyRecovery: stateVerifierVerifyRecovery,
                 verifyReservation: stateVerifierVerifyReservation,
             });

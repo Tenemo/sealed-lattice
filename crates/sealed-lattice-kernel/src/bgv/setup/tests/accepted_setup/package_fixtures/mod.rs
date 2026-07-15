@@ -19,6 +19,8 @@ static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     CollectiveSetupVerificationFixture,
 > = OnceLock::new();
 
+const DEVELOPMENT_RING_DEGREE: usize = 128;
+
 struct VssMaterialPackageComponents {
     vss_coefficient_commitments: serde_json::Value,
     vss_coefficient_commitment_material: serde_json::Value,
@@ -80,10 +82,11 @@ impl CollectiveSetupVerificationFixture {
         verification_request: &serde_json::Value,
     ) -> crate::encoding::CanonicalResult<serde_json::Value> {
         let proof_binding_session = self.begin_proof_binding_session_for_package(package);
-        crate::bgv::setup::accepted_setup::verify_collective_bgv_setup_package_in_proof_binding_session(
+        crate::bgv::setup::accepted_setup::verify_collective_bgv_setup_package_for_test_ring_degree_in_proof_binding_session(
             package,
             verification_request,
             proof_binding_session,
+            DEVELOPMENT_RING_DEGREE,
         )
     }
 
@@ -94,10 +97,11 @@ impl CollectiveSetupVerificationFixture {
         proof_binding_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
     ) -> crate::encoding::CanonicalResult<serde_json::Value> {
         crate::bgv::setup::accepted_setup::
-            verify_collective_bgv_setup_package_in_proof_binding_session(
+            verify_collective_bgv_setup_package_for_test_ring_degree_in_proof_binding_session(
                 package,
                 verification_request,
                 proof_binding_session,
+                DEVELOPMENT_RING_DEGREE,
             )
     }
 
@@ -203,7 +207,7 @@ pub(super) fn collective_setup_intent_package() -> serde_json::Value {
 pub(super) fn minimal_collective_setup_package_for_participant_count(
     participant_count: u64,
 ) -> serde_json::Value {
-    build_collective_setup_package_fixture(128, participant_count)
+    build_collective_setup_package_fixture(DEVELOPMENT_RING_DEGREE, participant_count)
 }
 
 fn build_collective_setup_package_fixture(
@@ -292,23 +296,11 @@ fn build_collective_setup_package_fixture_parts(
             });
             let registration_root = derive_canonical_object_hash(&registration_payload)
                 .expect("setup-intent registration root");
-            let signature_context_hash = derive_canonical_object_hash(&serde_json::json!({
-                "objectType": "CollectiveBgvSetupIntentSignatureContext",
-                "setupIntentRegistrationRoot": registration_root,
-            }))
-            .expect("setup-intent signature context hash");
             let signature_envelope = create_protocol_signature_fixture(
                 &signature_seed_label,
                 serde_json::json!({
                     "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
-                    "ceremonyId": ceremony_id,
-                    "manifestHash": manifest_hash,
                     "objectRoot": registration_root,
-                    "signerRole": "Trustee",
-                    "signerIdentity": trustee_identity,
-                    "recoveryEpoch": 0,
-                    "deviceEpoch": 0,
-                    "contextHash": signature_context_hash,
                 }),
             )
             .expect("setup-intent signature fixture")
@@ -316,6 +308,9 @@ fn build_collective_setup_package_fixture_parts(
 
             serde_json::json!({
                 "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
+                "trusteeIdentity": trustee_identity,
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
                 "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
                 "signatureEnvelope": signature_envelope,
             })
@@ -376,15 +371,7 @@ fn build_collective_setup_package_fixture_parts(
         &vss_coefficient_commitments,
         participant_count,
     );
-    let public_key_shares = public_key_shares_object(
-        ceremony_id,
-        &manifest_hash,
-        &roster_hash,
-        setup_parameters_hash,
-        setup_epoch,
-        &common_randomness,
-        participant_count,
-    );
+    let public_key_shares = public_key_shares_object(participant_count);
     let evaluator_key_schedule = evaluator_key_schedule_object(
         ceremony_id,
         &manifest_hash,
@@ -396,7 +383,7 @@ fn build_collective_setup_package_fixture_parts(
         &public_key_shares,
         participant_count,
     );
-    let mut package = serde_json::json!({
+    let package = serde_json::json!({
         "objectType": "SetupPackage",
         "setupContext": setup_context,
         "setupIntent": setup_intent,
@@ -411,8 +398,6 @@ fn build_collective_setup_package_fixture_parts(
         "galoisKeyShareBatches": [],
         "trusteeEvaluationKeyProofs": {},
     });
-    rebind_collective_setup_package_hash(&mut package);
-
     CollectiveSetupPackageFixture { package }
 }
 
@@ -441,7 +426,6 @@ fn build_public_key_share_succinct_proof_bearing_collective_setup_package()
     )
     .expect("cancel public-key share fixture proof binding session");
     package["publicKeyShareSuccinctProofs"] = succinct_proof_fixture.proof_set.clone();
-    rebind_collective_setup_package_hash(&mut package);
     CachedPublicKeyShareCollectiveSetupFixture {
         verification_fixture: CollectiveSetupVerificationFixture {
             package,
@@ -472,8 +456,7 @@ fn build_descriptor_backed_vss_collective_setup_fixture_from_package(
         &mut finalized_fixture.package,
         &finalized_fixture.proof_binding_leases,
     );
-    let mut package = finalized_fixture.package;
-    rebind_collective_setup_package_hash(&mut package);
+    let package = finalized_fixture.package;
 
     CachedDescriptorBackedVssCollectiveSetupFixture {
         verification_fixture: CollectiveSetupVerificationFixture {
@@ -513,7 +496,6 @@ fn build_collective_public_key_bearing_collective_setup_package()
     let proof_binding_leases = public_key_share_fixture.proof_binding_leases;
     let mut package = public_key_share_fixture.package;
     package["collectivePublicKey"] = collective_public_key_object(&package);
-    rebind_collective_setup_package_hash(&mut package);
 
     CollectiveSetupVerificationFixture {
         package,

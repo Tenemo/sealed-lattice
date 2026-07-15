@@ -27,7 +27,6 @@ import {
     canonicalTuple,
     concatenateBytes,
     foundationHash512,
-    hashItem,
     unsigned16LittleEndian,
     unsigned32LittleEndian,
     unsigned64Item,
@@ -84,12 +83,6 @@ const deriveChunkDigest = (
 const streamDescriptorFor = (stateBytes: Uint8Array): Uint8Array => {
     const chunks = chunkState(stateBytes);
     const chunkDigests = chunks.map(deriveChunkDigest);
-    const fullObjectDigest = foundationHash512(
-        'sealed-lattice/transport/full-object/v1',
-        asciiItem(stateStreamDomain),
-        unsigned64Item(BigInt(stateBytes.byteLength)),
-        variableBytesItem(stateBytes),
-    );
     return canonicalTuple(
         0x1800,
         unsigned64Item(BigInt(stateBytes.byteLength)),
@@ -101,7 +94,6 @@ const streamDescriptorFor = (stateBytes: Uint8Array): Uint8Array => {
                 ...chunkDigests,
             ),
         ),
-        hashItem(fullObjectDigest),
     );
 };
 
@@ -571,7 +563,8 @@ describe('Authenticated checkpoint store', () => {
             }),
         ).rejects.toMatchObject({ code: 'ResourceLimit' });
         await boundedStore.recover(identity.checkpointLineageIdentifier);
-        expect(adapter.keys()).toEqual([]);
+        expect(adapter.keys()).toHaveLength(1);
+        expect(adapter.keys()[0]).toMatch(/\/recovery\/current-head$/u);
     });
 
     it('refuses every changed resume cursor, source, operation, and boundary coordinate', async () => {
@@ -688,7 +681,7 @@ describe('Authenticated checkpoint store', () => {
         );
     });
 
-    it('recovers an active replacement even when obsolete chunk ciphertext is corrupt', async () => {
+    it('refuses recovery when obsolete committed chunk ciphertext is corrupt', async () => {
         const checkpointStore = openStore();
         const identity = await checkpointStore.beginOperation(0);
         const firstState = stateBytesFor(18);
@@ -735,16 +728,13 @@ describe('Authenticated checkpoint store', () => {
         }
 
         const restartedCheckpointStore = openStore();
-        await restartedCheckpointStore.recover(
-            identity.checkpointLineageIdentifier,
-        );
-        const resumed = await restartedCheckpointStore.resume({
-            checkpointLineageIdentifier: identity.checkpointLineageIdentifier,
-            expectedBoundary: expectedBoundary(replacementBoundary),
-        });
-        expect(await restoreBytes(resumed)).toEqual(replacementState);
-        for (const objectKey of obsoleteChunkObjectKeys) {
-            expect(adapter.rawRead(objectKey)).toBeUndefined();
+        await expect(
+            restartedCheckpointStore.recover(
+                identity.checkpointLineageIdentifier,
+            ),
+        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
+        for (const objectKey of retainedObsoleteChunkObjectKeys) {
+            expect(adapter.rawRead(objectKey)).toBeDefined();
         }
     });
 

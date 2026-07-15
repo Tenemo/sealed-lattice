@@ -19,10 +19,6 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
     require_setup_package_shape(setup_package)?;
     let setup_context_hashes = collective_bgv_setup_context_hashes_from_package(setup_package)?;
     let setup_package_hash = derive_collective_setup_package_hash(setup_package)?;
-    let ceremony_id = string_at_path(setup_package, &["setupContext", "ceremonyId"])?.to_string();
-    let setup_epoch = string_at_path(setup_package, &["setupContext", "setupEpoch"])?.to_string();
-    let election_manifest_hash =
-        hash_at_path(setup_package, &["setupContext", "manifestHash"])?.to_string();
     let public_matrix_seed_hash =
         hash_at_path(setup_package, &["commonRandomness", "publicMatrixSeedHash"])?.to_string();
     // Setup-intent registrations define the roster; position + 1 is its nonzero Shamir point.
@@ -42,6 +38,7 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
             setup_package,
             &[VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD],
         )?,
+        &setup_context_hashes.setup_context_hash,
         &public_matrix_seed_hash,
         &participants,
         q_share_rns_limb_count,
@@ -49,11 +46,6 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
     Ok(SetupBinding {
         setup_package_hash,
         setup_context_hash: setup_context_hashes.setup_context_hash,
-        ceremony_id,
-        setup_epoch,
-        election_manifest_hash,
-        roster_hash: setup_context_hashes.roster_hash,
-        setup_parameters_hash: setup_context_hashes.setup_parameters_hash,
         public_matrix_seed_hash,
         participants,
         aggregate_threshold_commitment_set,
@@ -62,6 +54,7 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
 
 fn read_aggregate_threshold_commitment_set_binding(
     aggregate_set: &Value,
+    setup_context_hash: &str,
     setup_public_matrix_seed_hash: &str,
     participants: &[ParticipantBinding],
     rns_limb_count: usize,
@@ -87,6 +80,7 @@ fn read_aggregate_threshold_commitment_set_binding(
     verify_vss_public_aggregate_threshold_commitment_set(
         aggregate_set,
         &VssPublicAggregateThresholdCommitmentSetContext {
+            setup_context_hash,
             public_matrix_seed_hash: setup_public_matrix_seed_hash,
             participant_count: participants.len(),
             rns_limb_count,
@@ -128,7 +122,6 @@ fn read_aggregate_threshold_commitment_set_binding(
                     .to_string(),
                 aggregate_opening_root: hash_at_path(record, &["aggregateOpeningRoot"])?
                     .to_string(),
-                #[cfg(test)]
                 aggregate_commitment: value_at_path(record, &["commitment"])?.clone(),
             });
         }
@@ -160,12 +153,6 @@ pub(super) fn read_target_accepted_binding(
     )?;
     let expected_record_hash =
         derive_canonical_object_hash(&target_accepted_record_hash_preimage(record)?)?;
-    compare_hash_field(
-        record,
-        "targetAcceptedRecordHash",
-        &expected_record_hash,
-        "target accepted record hash",
-    )?;
 
     Ok(TargetAcceptedBinding {
         target_accepted_record_hash: expected_record_hash,
@@ -208,7 +195,6 @@ pub(super) fn read_target_share_profile(
     }
 
     Ok(TargetShareProfile {
-        decryption_threshold,
         minimum_shares_for_interpolation,
         decryption_share_quorum,
     })

@@ -245,7 +245,9 @@ pub(crate) fn compute_setup_commitment_from_opening_request(
         .and_then(Value::as_str)
         .ok_or_else(|| invalid_commitment_input("publicMatrixSeedHash must be a string"))?;
     let source_rns_limb_index = read_usize(request, "sourceRnsLimbIndex")?;
-    let source_message_modulus = read_u64(request, "sourceMessageModulus")?;
+    let source_message_modulus = *DATA_PRIMES.get(source_rns_limb_index).ok_or_else(|| {
+        invalid_commitment_input("sourceRnsLimbIndex is outside the Q_share basis")
+    })?;
     let shamir_coefficient_index = read_u64(request, "shamirCoefficientIndex")?;
     let ring_degree = read_usize(request, "ringDegree")?;
     let message_coefficients = read_unsigned_message_coefficients(request, "messageCoefficients")?;
@@ -260,11 +262,8 @@ pub(crate) fn compute_setup_commitment_from_opening_request(
         &randomness_by_column,
         ring_degree,
     )?;
-    let commitment_root = setup_commitment_root(&commitment)?;
-
     Ok(json!({
         "commitment": setup_commitment_full_value(&commitment),
-        "commitmentRoot": commitment_root,
     }))
 }
 

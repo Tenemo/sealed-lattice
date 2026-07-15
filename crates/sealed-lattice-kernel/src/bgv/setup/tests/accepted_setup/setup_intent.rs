@@ -29,7 +29,6 @@ fn collective_setup_parameters_expose_operative_foundation_parameters() {
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
 
     assert_eq!(setup_parameters["participantCount"], 10);
-    assert_eq!(setup_parameters["qShare"]["objectType"], "QSharePrimeList");
     assert_eq!(
         setup_parameters["qShare"]["primes"]
             .as_array()
@@ -100,7 +99,7 @@ fn collective_setup_intent_refuses_missing_and_wrong_object_types() {
 #[test]
 fn collective_setup_intent_refuses_duplicate_trustee_identities() {
     let mut duplicate = collective_setup_intent_package();
-    duplicate["setupIntent"]["trusteeRegistrations"][1]["signatureEnvelope"]["signedRoot"]["signerIdentity"] =
+    duplicate["setupIntent"]["trusteeRegistrations"][1]["trusteeIdentity"] =
         serde_json::json!("trustee-0");
     rebind_collective_setup_intent_registration_with_signature_seed(
         &mut duplicate,
@@ -165,19 +164,7 @@ fn collective_setup_intent_refuses_tampered_signature_bytes() {
 fn collective_setup_verifier_binds_private_vss_envelopes_to_registered_mailbox_keys() {
     let mut package = collective_setup_intent_package();
     let coefficient_set = vss_public_coefficient_commitment_set_object(&package, 128);
-    let coefficient_view = serde_json::json!({
-        "vssCoefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"],
-        "sourceTrusteeRecords": coefficient_set["sourceTrusteeRecords"]
-            .as_array()
-            .expect("source trustee records")
-            .iter()
-            .enumerate()
-            .map(|(source_trustee_roster_position, source_record)| serde_json::json!({
-                "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                "sourceTrusteeCommitmentRoot": source_record["sourceCoefficientCommitmentRoot"],
-            }))
-            .collect::<Vec<_>>(),
-    });
+    let coefficient_view = coefficient_set.clone();
     let setup_context = &package["setupContext"];
     let private_vss_envelope_commitments = private_vss_envelope_commitments_object(
         setup_context["ceremonyId"].as_str().expect("ceremony id"),
@@ -200,7 +187,6 @@ fn collective_setup_verifier_binds_private_vss_envelopes_to_registered_mailbox_k
     package["setupIntent"]["trusteeRegistrations"][0]["privateVssMailboxPublicKeyHash"] =
         serde_json::json!(valid_hash('8'));
     rebind_collective_setup_intent_registration(&mut package, 0);
-    rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
@@ -238,7 +224,6 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
         .as_array_mut()
         .expect("reveal records")
         .pop();
-    rebind_collective_setup_package_hash(&mut missing_reveal);
     let missing_reveal_result =
         verify_collective_bgv_setup_package(&missing_reveal, &serde_json::json!({}))
             .expect("verification response");
@@ -246,7 +231,6 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
 
     let mut wrong_seed = collective_setup_intent_package();
     wrong_seed["commonRandomness"]["publicMatrixSeedHash"] = serde_json::json!(valid_hash('9'));
-    rebind_collective_setup_package_hash(&mut wrong_seed);
     let wrong_seed_result =
         verify_collective_bgv_setup_package(&wrong_seed, &serde_json::json!({}))
             .expect("verification response");

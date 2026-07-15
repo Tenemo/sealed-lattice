@@ -5,6 +5,9 @@ import type {
 
 export type CollectiveBgvSetupIntentTrusteeRegistration = Readonly<{
     readonly objectType: 'CollectiveBgvSetupIntentTrusteeRegistration';
+    readonly trusteeIdentity: string;
+    readonly recoveryEpoch: number;
+    readonly deviceEpoch: number;
     readonly privateVssMailboxPublicKeyHash: ProtocolHash;
     readonly signatureEnvelope: ProtocolSignatureEnvelope;
 }>;

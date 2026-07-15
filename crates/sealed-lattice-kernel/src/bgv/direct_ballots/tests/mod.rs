@@ -103,7 +103,7 @@ fn setup_package() -> Value {
 }
 
 fn setup_package_with_seed(setup_seed: &str) -> Value {
-    let mut package = json!({
+    json!({
         "objectType": "SetupPackage",
         "setupContext": {
             "ceremonyId": "direct-encrypted-ballot-test-ceremony",
@@ -118,8 +118,5 @@ fn setup_package_with_seed(setup_seed: &str) -> Value {
             ).expect("threshold hash"),
             "testBinding": setup_seed,
         }
-    });
-    package["setupPackageHash"] =
-        Value::String(derive_canonical_object_hash(&package).expect("setup package hash"));
-    package
+    })
 }

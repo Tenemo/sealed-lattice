@@ -5,13 +5,17 @@ use super::super::relation::{
     TrusteeEvaluationKeyWitness, private_vss_share_lifted_carry_bound,
     vss_share_linkage_lincheck_roster_position,
 };
-use super::super::{TRACE_SPLIT, invalid_succinct_setup_proof, signed_value_residue};
+use super::super::{
+    TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND, TRACE_SPLIT, invalid_succinct_setup_proof,
+    signed_value_residue,
+};
 use super::claim_masking::{mask_digit_columns, masked_half_coefficients};
 use super::salted_tree::{SaltedTree, commit_salted_extension_row_pairs};
 use super::{COLUMN_MASK_DOMAIN, LEAF_SALT_DOMAIN};
 use crate::bgv::evaluator::engine::negacyclic_mul;
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::modular_arithmetic::{add_mod_fast, mul_mod_fast};
+use crate::bgv::parameters::PLAINTEXT_MODULUS;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH;
 use crate::encoding::CanonicalResult;
 
@@ -574,13 +578,7 @@ fn validate_target_decryption_share_witness(
     let message_count = statement
         .limb_statements
         .iter()
-        .map(|limb_statement| {
-            1 + limb_statement
-                .role_statements
-                .iter()
-                .map(|role_statement| role_statement.smudging_commitments.len())
-                .sum::<usize>()
-        })
+        .map(|limb_statement| 1 + limb_statement.role_statements.len())
         .sum::<usize>();
     // Committed-material commitments carry no algebraic opening randomness;
     // the trees hide via their masks and salts.
@@ -595,10 +593,7 @@ fn validate_target_decryption_share_witness(
                 "target-decryption aggregate message bound does not fit i64",
             )
         })?;
-    let message_bound_i64 =
-        i64::try_from(statement.smudging_message_coefficient_bound).map_err(|_| {
-            invalid_succinct_setup_proof("target-decryption smudging bound does not fit i64")
-        })?;
+    let message_bound_i64 = TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND * 2 + 1;
 
     let mut limb_message_offset = 0;
     for limb_statement in &statement.limb_statements {
@@ -626,7 +621,7 @@ fn validate_target_decryption_share_witness(
                 })
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
-        let plaintext_multiple = statement.plaintext_multiple % limb_statement.target_rns_prime;
+        let plaintext_multiple = PLAINTEXT_MODULUS % limb_statement.target_rns_prime;
         let mut smudging_message_offset = limb_message_offset + 1;
         for role_statement in &limb_statement.role_statements {
             let mut expected_partial = negacyclic_mul(
@@ -634,50 +629,37 @@ fn validate_target_decryption_share_witness(
                 &aggregate_share,
                 limb_statement.target_rns_prime,
             )?;
-            let mut interpolation_power =
-                statement.interpolation_point % limb_statement.target_rns_prime;
-            for smudging_message in witness.target_decryption_message_vectors()
-                [smudging_message_offset
-                    ..smudging_message_offset + role_statement.smudging_commitments.len()]
-                .iter()
+            let flooding_noise_message =
+                &witness.target_decryption_message_vectors()[smudging_message_offset];
+            if flooding_noise_message.len() != ring_degree
+                || flooding_noise_message
+                    .iter()
+                    .any(|coefficient| *coefficient < 0 || *coefficient >= message_bound_i64)
             {
-                if smudging_message.len() != ring_degree
-                    || smudging_message
-                        .iter()
-                        .any(|coefficient| *coefficient < 0 || *coefficient >= message_bound_i64)
-                {
-                    return Err(invalid_succinct_setup_proof(
-                        "target-decryption smudging message vector is outside the encoded coefficient range",
-                    ));
-                }
-                let smudging_scale = mul_mod_fast(
+                return Err(invalid_succinct_setup_proof(
+                    "target-decryption flooding-noise message vector is outside the encoded coefficient range",
+                ));
+            }
+            for (partial, encoded_coefficient) in
+                expected_partial.iter_mut().zip(flooding_noise_message)
+            {
+                let signed_coefficient = encoded_coefficient
+                    .checked_sub(TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND)
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof(
+                            "target-decryption flooding-noise coefficient decoding overflowed",
+                        )
+                    })?;
+                let flooding_noise_residue =
+                    signed_value_residue(signed_coefficient, limb_statement.target_rns_prime);
+                let flooding_noise_term = mul_mod_fast(
                     plaintext_multiple,
-                    interpolation_power,
+                    flooding_noise_residue,
                     limb_statement.target_rns_prime,
                 );
-                for (partial, encoded_coefficient) in
-                    expected_partial.iter_mut().zip(smudging_message)
-                {
-                    let signed_coefficient = encoded_coefficient
-                        .checked_sub(statement.smudging_signed_coefficient_offset)
-                        .ok_or_else(|| {
-                            invalid_succinct_setup_proof(
-                                "target-decryption smudging coefficient decoding overflowed",
-                            )
-                        })?;
-                    let smudging_residue =
-                        signed_value_residue(signed_coefficient, limb_statement.target_rns_prime);
-                    let smudging_term = mul_mod_fast(
-                        smudging_scale,
-                        smudging_residue,
-                        limb_statement.target_rns_prime,
-                    );
-                    *partial =
-                        add_mod_fast(*partial, smudging_term, limb_statement.target_rns_prime);
-                }
-                interpolation_power = mul_mod_fast(
-                    interpolation_power,
-                    statement.interpolation_point % limb_statement.target_rns_prime,
+                *partial = add_mod_fast(
+                    *partial,
+                    flooding_noise_term,
                     limb_statement.target_rns_prime,
                 );
             }
@@ -686,7 +668,7 @@ fn validate_target_decryption_share_witness(
                     "target-decryption witness does not reconstruct the released partial",
                 ));
             }
-            smudging_message_offset += role_statement.smudging_commitments.len();
+            smudging_message_offset += 1;
         }
         limb_message_offset = smudging_message_offset;
     }

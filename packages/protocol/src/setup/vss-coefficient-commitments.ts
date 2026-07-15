@@ -1,7 +1,6 @@
 // These embedded coefficient commitments supply openings for the same-secret
 // bridge; transported public setup material uses the VSS commitment sets.
 export {
-    acceptedBgvSetupQSharePrimes,
     setupCommitmentRandomnessWidth,
     type SetupCommitmentValue,
     type VssCoefficientCommitmentSet,

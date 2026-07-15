@@ -1,49 +1,68 @@
-mod accepted_setup_registry;
+#[cfg(test)]
 mod bindings;
 mod ciphertext_codec;
+#[cfg(test)]
 mod command;
+#[cfg(test)]
 mod json_fields;
+#[cfg(test)]
 mod opening;
+#[cfg(test)]
 mod proof_material;
+#[cfg(test)]
 mod proof_relation;
+#[cfg(test)]
 mod proof_slice;
+#[cfg(test)]
 mod result_release;
+#[cfg(test)]
 mod share_generation;
+#[cfg(test)]
 mod share_records;
+#[cfg(test)]
 mod share_statement;
 
+#[cfg(test)]
 use bindings::*;
 pub(crate) use ciphertext_codec::direct_target_ciphertext_hash;
+#[cfg(test)]
 use ciphertext_codec::*;
-pub(crate) use command::{
-    absorb_bgv_target_decryption_result_release_share_from_request,
-    begin_bgv_target_decryption_result_release_from_request,
-    finish_bgv_target_decryption_result_release_from_request,
-};
 #[cfg(test)]
 pub(crate) use command::{
+    absorb_bgv_target_decryption_result_release_share_for_test,
+    begin_bgv_target_decryption_result_release_for_test,
     derive_bgv_target_decryption_share_proof_statement_from_request,
+    finish_bgv_target_decryption_result_release_for_test,
+    generate_bgv_target_decryption_share_from_local_share_request,
+    generate_bgv_target_decryption_share_proof_request_for_test,
     verify_bgv_target_decryption_share_proof_statement_binding_from_request,
 };
-pub(crate) use command::{
-    generate_bgv_target_decryption_share_from_local_share_request,
-    generate_bgv_target_decryption_share_proof_material_from_local_witness_request,
-};
+#[cfg(test)]
 use json_fields::*;
+#[cfg(test)]
 use opening::*;
+#[cfg(test)]
 use proof_material::*;
+#[cfg(test)]
 use proof_relation::*;
+#[cfg(test)]
 use proof_slice::*;
+#[cfg(test)]
 use result_release::*;
+#[cfg(test)]
 use share_generation::*;
+#[cfg(test)]
 use share_records::*;
+#[cfg(test)]
 use share_statement::*;
 
+#[cfg(test)]
 use serde_json::Value;
 use serde_json::json;
 
 use crate::{encoding::CanonicalResult, hashing::derive_canonical_object_hash};
 
+#[cfg(test)]
 use crate::{
     bgv::{
         coefficient_codec::coefficient_vector_from_le_hex,
@@ -56,8 +75,8 @@ use crate::{
         parameters::{BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
         serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object},
         setup::{
-            TARGET_DECRYPTION_SHARE_PROOF_FAMILY, TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND,
-            VssPublicAggregateThresholdCommitmentSetContext,
+            TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND,
+            TARGET_DECRYPTION_SHARE_PROOF_FAMILY, VssPublicAggregateThresholdCommitmentSetContext,
             accepted_setup_participant_roster_from_package,
             collective_bgv_setup_context_hashes_from_package, derive_collective_setup_package_hash,
             verify_vss_public_aggregate_threshold_commitment_set,
@@ -73,6 +92,7 @@ use crate::{
 
 #[cfg(test)]
 use crate::bgv::evaluator::engine::DevelopmentBgvKey;
+#[cfg(test)]
 use crate::bgv::{
     coefficient_codec::coefficient_vector_le_hex,
     evaluator::{
@@ -80,33 +100,37 @@ use crate::bgv::{
         prg::DeterministicSampler,
     },
 };
+#[cfg(test)]
 use crate::hashing::hash512_hex;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 
-const TARGET_DECRYPTION_SMUDGING_SEED_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/target-decryption-smudging-seed";
-const TARGET_DECRYPTION_SMUDGING_ZERO_SHARE_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/target-decryption-smudging-zero-share";
-const TARGET_DECRYPTION_SMUDGING_COMMITMENT_MATERIAL_SEED_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/target-decryption-smudging-commitment-material-seed";
-const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
-    "target-decryption-smudging-polynomial-coefficient";
+#[cfg(test)]
+const TARGET_DECRYPTION_FLOODING_NOISE_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/target-decryption-flooding-noise";
+#[cfg(test)]
+const TARGET_DECRYPTION_FLOODING_NOISE_COMMITMENT_MATERIAL_SEED_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/target-decryption-flooding-noise-commitment-material-seed";
+#[cfg(test)]
+const TARGET_DECRYPTION_FLOODING_NOISE_COMMITMENT_ROLE: &str = "target-decryption-flooding-noise";
+#[cfg(test)]
 const TARGET_DECRYPTION_SMUDGING_ROLES: [&str; 2] = ["targetId", "targetOrder"];
 
+#[cfg(test)]
 #[derive(Clone)]
 struct TargetShareProfile {
-    decryption_threshold: usize,
     minimum_shares_for_interpolation: usize,
     decryption_share_quorum: usize,
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 struct ParticipantBinding {
     trustee_identity: String,
     roster_position: usize,
 }
 
+#[cfg(test)]
 impl ParticipantBinding {
     fn interpolation_point(&self) -> CanonicalResult<u64> {
         self.roster_position
@@ -121,41 +145,40 @@ impl ParticipantBinding {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 struct SetupBinding {
     setup_package_hash: String,
     setup_context_hash: String,
-    ceremony_id: String,
-    setup_epoch: String,
-    election_manifest_hash: String,
-    roster_hash: String,
-    setup_parameters_hash: String,
     public_matrix_seed_hash: String,
     participants: Vec<ParticipantBinding>,
     aggregate_threshold_commitment_set: AggregateThresholdCommitmentSetBinding,
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 struct AggregateThresholdCommitmentSetBinding {
     rns_limb_count: usize,
     recipient_records: Vec<Vec<AggregateThresholdCommitmentRecordBinding>>,
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 struct AggregateThresholdCommitmentRecordBinding {
     rns_prime: u64,
     aggregate_commitment_root: String,
     aggregate_opening_root: String,
-    #[cfg(test)]
     aggregate_commitment: Value,
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 struct TargetAcceptedBinding {
     target_accepted_record_hash: String,
     target_ciphertext_hash: String,
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 struct TargetCiphertextPair {
     target_id: Ciphertext,
@@ -168,5 +191,3 @@ struct TargetCiphertextPair {
 
 #[cfg(test)]
 mod tests;
-pub(crate) use accepted_setup_registry::register_verified_target_release_setup;
-use accepted_setup_registry::verified_target_release_setup_binding;

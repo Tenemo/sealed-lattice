@@ -17,8 +17,7 @@ pub(crate) use prove::prove_evaluation_key_share;
 #[cfg(test)]
 pub(crate) use prove::prove_evaluation_key_share_with_test_limb_batch_size;
 pub(crate) use vss_committed_material::{
-    VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP, VssCommittedMaterialTreeInput,
-    vss_committed_material_roots_by_commitment_field,
+    VssCommittedMaterialTreeInput, vss_committed_material_roots_by_commitment_field,
 };
 
 const COLUMN_MASK_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/column-mask";

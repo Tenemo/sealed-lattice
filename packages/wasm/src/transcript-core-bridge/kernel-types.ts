@@ -3,13 +3,12 @@ import type { CanonicalError, ProtocolHash } from '@sealed-lattice/types';
 import type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
+    BgvPublicKeyShareStatementContext,
     BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeyStatementDescription,
     BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
-    BgvLocalTrusteeSetupStateVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofContext,
@@ -18,20 +17,14 @@ import type {
     BgvVssShareLinkageProofContext,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
-    BgvTargetDecryptionShare,
-    BgvTargetDecryptionShareProofMaterial,
-    BgvTargetDecryptionResultReleaseBegin,
-    BgvTargetDecryptionResultReleaseCompletion,
 } from './kernel-types/bgv.js';
 
 export type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeyStatementDescription,
     BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
-    BgvLocalTrusteeSetupStateVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofContext,
@@ -40,19 +33,7 @@ export type {
     BgvVssShareLinkageProofContext,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
-    BgvTargetDecryptionShare,
-    BgvTargetDecryptionShareProofMaterial,
-    BgvTargetDecryptionResultReleaseBegin,
-    BgvTargetDecryptionResultReleaseShareEvidence,
-    BgvTargetDecryptionResultReleaseCompletion,
 } from './kernel-types/bgv.js';
-type BgvTargetDecryptionLocalCommandContext = Readonly<{
-    readonly setupPackage: unknown;
-    readonly targetAcceptedRecord: unknown;
-    readonly targetCiphertexts: unknown;
-    readonly targetCiphertextBinding: unknown;
-    readonly targetShareProfile: unknown;
-}>;
 
 export type BgvCollectiveSetupVerificationInput = Readonly<{
     readonly setupPackage: unknown;
@@ -123,7 +104,6 @@ export type SetupMailboxSlot = Omit<
 export type MailboxCiphertextDescriptor = Readonly<{
     readonly totalByteLength: string;
     readonly orderedChunkDigests: readonly ProtocolHash[];
-    readonly fullObjectDigest: ProtocolHash;
 }>;
 
 export type UnsignedMailboxEnvelope = Readonly<{
@@ -176,56 +156,12 @@ export type PrivateRandomCursor = Readonly<{
     readonly nextUnreadBitOffsetInBufferedBlock?: number;
 }>;
 
-export type ActionRandomnessDerivationInput = Readonly<{
-    readonly suiteId: ProtocolHash;
-    readonly ceremonyContextHash: ProtocolHash;
-    readonly actionContextHash: ProtocolHash;
-    readonly participantId: string;
-}>;
-
-export type PrivateRandomBlockInput = Readonly<
-    ActionRandomnessDerivationInput & {
-        readonly family: number;
-        readonly purpose: number;
-        readonly derivationContextHash: ProtocolHash;
-        readonly attemptIdentifierHex: string;
-        readonly counter: string;
-    }
->;
-
-export type EncodedActionRandomnessDerivationInput = Readonly<{
-    readonly canonicalBytesHex: string;
-}>;
-
-export type DecodedActionRandomnessDerivationInput = Readonly<{
-    readonly value: ActionRandomnessDerivationInput;
-}>;
-
-export type EncodedPrivateRandomBlockInput = Readonly<{
-    readonly canonicalBytesHex: string;
-}>;
-
-export type DecodedPrivateRandomBlockInput = Readonly<{
-    readonly value: PrivateRandomBlockInput;
-}>;
-
 export type EncodedPrivateRandomCursor = Readonly<{
     readonly canonicalBytesHex: string;
 }>;
 
 export type DecodedPrivateRandomCursor = Readonly<{
     readonly value: PrivateRandomCursor;
-}>;
-
-export type GeneratedProofSuiteCandidate = Readonly<{
-    readonly suiteId: ProtocolHash;
-    readonly canonicalSuiteRecordHex: string;
-    readonly artifacts: readonly Readonly<{
-        readonly artifactKind: number;
-        readonly canonicalArtifactHex: string;
-        readonly byteLength: number;
-        readonly artifactHash: ProtocolHash;
-    }>[];
 }>;
 
 export type EncodedSignedMailboxEnvelope = Readonly<{
@@ -245,15 +181,7 @@ export type AcceptedSetupSession = Readonly<{
     ): BgvCollectiveSetupVerification;
 }>;
 
-type BgvTrusteeEvaluationKeyContext = Extract<
-    BgvTrusteeEvaluationKeyStatementContext,
-    { readonly evaluatorKeyScheduleRoot: ProtocolHash }
->;
-
-type BgvPublicKeyShareContext = Extract<
-    BgvTrusteeEvaluationKeyStatementContext,
-    { readonly sameSecretBridgeStatementRoot: ProtocolHash }
->;
+type BgvTrusteeEvaluationKeyContext = BgvTrusteeEvaluationKeyStatementContext;
 
 type BgvEvaluationKeyStatementKey = Exclude<
     BgvTrusteeEvaluationKeyStatementKey,
@@ -271,7 +199,7 @@ type BgvTrusteeEvaluationKeyStatementCommonInput<Context, Key> = Readonly<{
     readonly keys: readonly Key[];
 }>;
 
-export type BgvTrusteeEvaluationKeyStatementInput =
+type BgvTrusteeEvaluationKeyStatementInput =
     | Readonly<
           BgvTrusteeEvaluationKeyStatementCommonInput<
               BgvTrusteeEvaluationKeyContext,
@@ -284,7 +212,7 @@ export type BgvTrusteeEvaluationKeyStatementInput =
     | Readonly<
           Omit<
               BgvTrusteeEvaluationKeyStatementCommonInput<
-                  BgvPublicKeyShareContext,
+                  BgvPublicKeyShareStatementContext,
                   BgvPublicKeyShareStatementKey
               >,
               'keys'
@@ -298,12 +226,10 @@ export type BgvTrusteeEvaluationKeyStatementInput =
 type BgvTrusteeEvaluationKeyProofCommonInput = Readonly<{
     readonly secretCoefficients: readonly number[];
     readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
-    readonly negativeIndicatorCoefficients: readonly number[];
     readonly proofRandomnessSeedHex: string;
-    readonly proofRandomnessNonceHex: string;
 }>;
 
-export type BgvTrusteeEvaluationKeyProofInput =
+type BgvTrusteeEvaluationKeyProofInput =
     | Readonly<
           Extract<
               BgvTrusteeEvaluationKeyStatementInput,
@@ -320,12 +246,10 @@ export type BgvTrusteeEvaluationKeyProofInput =
           > &
               BgvTrusteeEvaluationKeyProofCommonInput & {
                   readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-                  readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
               }
       >;
 
 export type TranscriptCoreKernel = {
-    readonly exportedFunctionNames: readonly string[];
     beginAcceptedSetupSession(): AcceptedSetupSession;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
     validateCanonicalFoundationValue(
@@ -352,29 +276,12 @@ export type TranscriptCoreKernel = {
         readonly canonicalBytesHex: string;
     }): DecodedStreamDescriptor;
     deriveSetupMailboxSlotHash(value: SetupMailboxSlot): ProtocolHash;
-    encodeActionRandomnessDerivationInput(
-        value: ActionRandomnessDerivationInput,
-    ): EncodedActionRandomnessDerivationInput;
-    decodeActionRandomnessDerivationInput(input: {
-        readonly canonicalBytesHex: string;
-    }): DecodedActionRandomnessDerivationInput;
-    deriveActionRandomnessCommitment(input: {
-        readonly actionRandomnessRootHex: string;
-        readonly value: ActionRandomnessDerivationInput;
-    }): ProtocolHash;
-    encodePrivateRandomBlockInput(
-        value: PrivateRandomBlockInput,
-    ): EncodedPrivateRandomBlockInput;
-    decodePrivateRandomBlockInput(input: {
-        readonly canonicalBytesHex: string;
-    }): DecodedPrivateRandomBlockInput;
     encodePrivateRandomCursor(
         value: PrivateRandomCursor,
     ): EncodedPrivateRandomCursor;
     decodePrivateRandomCursor(input: {
         readonly canonicalBytesHex: string;
     }): DecodedPrivateRandomCursor;
-    generateProofSuiteCandidate(): GeneratedProofSuiteCandidate;
     encodeSignedMailboxEnvelope(
         value: SignedMailboxEnvelope,
     ): EncodedSignedMailboxEnvelope;
@@ -385,22 +292,6 @@ export type TranscriptCoreKernel = {
         readonly kemCiphertextHex: string;
     }): ProtocolHash;
     deriveMailboxEnvelopeHash(value: UnsignedMailboxEnvelope): ProtocolHash;
-    generateBgvTargetDecryptionShareFromLocalShare(
-        input: BgvTargetDecryptionLocalCommandContext & {
-            readonly trusteeIdentity: string;
-            readonly localTargetShareWitness: unknown;
-        },
-    ): BgvTargetDecryptionShare;
-    generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(
-        input: BgvTargetDecryptionLocalCommandContext & {
-            readonly trusteeIdentity: string;
-            readonly localTargetShareWitness: unknown;
-            readonly targetDecryptionShare: unknown;
-            readonly proofStatement: unknown;
-            readonly proofRandomnessSeedHex: string;
-            readonly proofRandomnessNonceHex: string;
-        },
-    ): BgvTargetDecryptionShareProofMaterial;
     describeBgvRnsParameters(): BgvRnsParametersDescription;
     describeCollectiveBgvSetupParameters(input?: {
         readonly participantCount?: number;
@@ -412,18 +303,13 @@ export type TranscriptCoreKernel = {
         readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
         readonly privateEnvelope: unknown;
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
-        readonly expectedLocalVerificationRoot?: ProtocolHash;
     }): BgvPrivateVssShareEnvelopeVerification;
     generateTrusteeEvaluationKeyProof(
         input: BgvTrusteeEvaluationKeyProofInput,
     ): BgvTrusteeEvaluationKeyProofGeneration;
-    describeTrusteeEvaluationKeyStatement(
-        input: BgvTrusteeEvaluationKeyStatementInput,
-    ): BgvTrusteeEvaluationKeyStatementDescription;
     computeSetupCommitmentFromOpening(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceRnsLimbIndex: number;
-        readonly sourceMessageModulus: number;
         readonly shamirCoefficientIndex: number;
         readonly messageCoefficients: readonly number[];
         readonly randomnessByColumn: readonly (readonly number[])[];
@@ -433,9 +319,7 @@ export type TranscriptCoreKernel = {
         readonly commitmentRole: string;
         readonly commitmentContext: Record<string, unknown>;
         readonly rnsLimbIndex: number;
-        readonly rnsPrime: number;
         readonly ringDegree: number;
-        readonly messageCoefficientBound?: number;
         readonly messageCoefficients: readonly number[];
         readonly materialSeedHex: string;
     }): BgvVssCommittedMaterialCommitmentComputation;
@@ -447,9 +331,7 @@ export type TranscriptCoreKernel = {
         readonly recipientShareMessagesByItem: readonly (readonly number[])[];
         readonly carryWitnessesByItem: readonly (readonly number[])[];
         readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-        readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
         readonly proofRandomnessSeedHex: string;
-        readonly proofRandomnessNonceHex: string;
     }): BgvVssShareLinkageProofGeneration;
     generateSameSecretBridgeProof(input: {
         readonly context: BgvSameSecretBridgeProofContext;
@@ -457,47 +339,17 @@ export type TranscriptCoreKernel = {
         readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
         readonly sameSecretBridge: BgvTrusteeEvaluationKeySameSecretBridge;
         readonly secretCoefficients: readonly number[];
-        readonly negativeIndicatorCoefficients: readonly number[];
         readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
         readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-        readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
         readonly proofRandomnessSeedHex: string;
-        readonly proofRandomnessNonceHex: string;
     }): BgvSameSecretBridgeProofGeneration;
-    beginBgvTargetDecryptionResultRelease(input: {
-        readonly releaseVerificationId: string;
-        readonly acceptedSetupHandle: number;
-        readonly targetAcceptedRecord: unknown;
-        readonly targetCiphertexts: unknown;
-        readonly targetCiphertextBinding: unknown;
-        readonly targetShareProfile: unknown;
-    }): BgvTargetDecryptionResultReleaseBegin;
-    absorbBgvTargetDecryptionResultReleaseShare(input: {
-        readonly releaseVerificationId: string;
-        readonly targetShareProof: unknown;
-    }): void;
-    finishBgvTargetDecryptionResultRelease(input: {
-        readonly releaseVerificationId: string;
-    }): BgvTargetDecryptionResultReleaseCompletion;
-    verifyLocalTrusteeSetupState(input: {
-        readonly setupContext: unknown;
-        readonly localStateCommitment: unknown;
-    }): BgvLocalTrusteeSetupStateVerification;
 };
 
-export type TranscriptCoreKernelContextOwner = Pick<
-    TranscriptCoreKernel,
-    'exportedFunctionNames'
->;
+export type TranscriptCoreKernelContextOwner = object;
 
 export type PublishedSdkKernel = Pick<
     TranscriptCoreKernel,
-    | 'beginAcceptedSetupSession'
-    | 'exportedFunctionNames'
-    | 'verifyPrivateVssShareEnvelope'
-    | 'beginBgvTargetDecryptionResultRelease'
-    | 'absorbBgvTargetDecryptionResultReleaseShare'
-    | 'finishBgvTargetDecryptionResultRelease'
+    'beginAcceptedSetupSession' | 'verifyPrivateVssShareEnvelope'
 >;
 
 type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
@@ -564,26 +416,6 @@ type TranscriptCoreKernelCommand =
           readonly value: SetupMailboxSlot;
       }>
     | Readonly<{
-          readonly command: 'EncodeActionRandomnessDerivationInput';
-          readonly value: ActionRandomnessDerivationInput;
-      }>
-    | KernelCommandFromMethod<
-          'DecodeActionRandomnessDerivationInput',
-          'decodeActionRandomnessDerivationInput'
-      >
-    | KernelCommandFromMethod<
-          'DeriveActionRandomnessCommitment',
-          'deriveActionRandomnessCommitment'
-      >
-    | Readonly<{
-          readonly command: 'EncodePrivateRandomBlockInput';
-          readonly value: PrivateRandomBlockInput;
-      }>
-    | KernelCommandFromMethod<
-          'DecodePrivateRandomBlockInput',
-          'decodePrivateRandomBlockInput'
-      >
-    | Readonly<{
           readonly command: 'EncodePrivateRandomCursor';
           readonly value: PrivateRandomCursor;
       }>
@@ -591,9 +423,6 @@ type TranscriptCoreKernelCommand =
           'DecodePrivateRandomCursor',
           'decodePrivateRandomCursor'
       >
-    | Readonly<{
-          readonly command: 'GenerateProofSuiteCandidate';
-      }>
     | Readonly<{
           readonly command: 'EncodeSignedMailboxEnvelope';
           readonly value: SignedMailboxEnvelope;
@@ -610,14 +439,6 @@ type TranscriptCoreKernelCommand =
           readonly command: 'DeriveMailboxEnvelopeHash';
           readonly value: UnsignedMailboxEnvelope;
       }>
-    | KernelCommandFromMethod<
-          'GenerateBgvTargetDecryptionShareFromLocalShare',
-          'generateBgvTargetDecryptionShareFromLocalShare'
-      >
-    | KernelCommandFromMethod<
-          'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
-          'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness'
-      >
     | {
           readonly command: 'DescribeBgvRnsParameters';
       }
@@ -639,10 +460,6 @@ type TranscriptCoreKernelCommand =
           'generateTrusteeEvaluationKeyProof'
       >
     | KernelCommandFromMethod<
-          'DescribeTrusteeEvaluationKeyStatement',
-          'describeTrusteeEvaluationKeyStatement'
-      >
-    | KernelCommandFromMethod<
           'ComputeSetupCommitmentFromOpening',
           'computeSetupCommitmentFromOpening'
       >
@@ -657,22 +474,6 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'GenerateSameSecretBridgeProof',
           'generateSameSecretBridgeProof'
-      >
-    | KernelCommandFromMethod<
-          'BeginBgvTargetDecryptionResultRelease',
-          'beginBgvTargetDecryptionResultRelease'
-      >
-    | KernelCommandFromMethod<
-          'AbsorbBgvTargetDecryptionResultReleaseShare',
-          'absorbBgvTargetDecryptionResultReleaseShare'
-      >
-    | KernelCommandFromMethod<
-          'FinishBgvTargetDecryptionResultRelease',
-          'finishBgvTargetDecryptionResultRelease'
-      >
-    | KernelCommandFromMethod<
-          'VerifyLocalTrusteeSetupState',
-          'verifyLocalTrusteeSetupState'
       >;
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
@@ -902,17 +703,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         canonicalRecoveryTransitionCarrierLength: number,
         statusPointer: number,
     ) => number;
-    sealed_lattice_state_verifier_prepare_witness_vote?: (
-        sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-        verifiedIntentHandle: number,
-        witnessParticipantIdentityPointer: number,
-        witnessParticipantIdentityLength: number,
-        signatureMessageOutputPointer: number,
-        signatureMessageOutputLength: number,
-        statusPointer: number,
-    ) => number;
     sealed_lattice_state_verifier_prepare_reservation?: (
         sessionHandle: number,
         capabilityPointer: number,
@@ -956,17 +746,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         canonicalReservationIntentCarrierLength: number,
         canonicalStateCertificatePointer: number,
         canonicalStateCertificateLength: number,
-        statusPointer: number,
-    ) => number;
-    sealed_lattice_state_verifier_finish_witness_vote?: (
-        sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-        preparedHandle: number,
-        signaturePointer: number,
-        signatureLength: number,
-        carrierOutputPointer: number,
-        carrierOutputLength: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_transcript_core_command_with_length?: (

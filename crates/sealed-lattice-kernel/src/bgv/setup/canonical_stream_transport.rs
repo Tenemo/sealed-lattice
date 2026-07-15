@@ -70,14 +70,14 @@ struct VerifiedCanonicalSetupProofBinding {
 #[derive(Clone)]
 #[cfg(test)]
 pub(in crate::bgv::setup) struct CanonicalSetupProofBindingLease {
-    proof_material_root: String,
+    proof_bytes_hash: String,
     binding: VerifiedCanonicalSetupProofBinding,
 }
 
 #[cfg(test)]
 impl CanonicalSetupProofBindingLease {
-    pub(in crate::bgv::setup) fn proof_material_root(&self) -> &str {
-        &self.proof_material_root
+    pub(in crate::bgv::setup) fn proof_bytes_hash(&self) -> &str {
+        &self.proof_bytes_hash
     }
 }
 
@@ -101,7 +101,7 @@ impl AcceptedSetupProofBindingSession {
                 component_materials: BTreeMap::new(),
                 component_material_roots: BTreeSet::new(),
                 proof_materials: BTreeMap::new(),
-                proof_material_roots: BTreeSet::new(),
+                proof_bytes_hashes: BTreeSet::new(),
                 public_key_share_materials: BTreeMap::new(),
                 public_key_share_material_roots: BTreeSet::new(),
             },
@@ -119,9 +119,9 @@ pub(in crate::bgv::setup) fn begin_accepted_setup_fixture_proof_binding_session(
 #[cfg(test)]
 pub(in crate::bgv::setup) fn finish_accepted_setup_fixture_proof_binding_session(
     session: AcceptedSetupProofBindingSession,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
 ) -> CanonicalResult<CanonicalSetupProofBindingLease> {
-    let lease = accepted_setup_proof_binding_lease(session.session_handle, proof_material_root)?
+    let lease = accepted_setup_proof_binding_lease(session.session_handle, proof_bytes_hash)?
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidProtocolObject,
@@ -138,7 +138,7 @@ struct AcceptedSetupProofBindingSessionState {
         BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>,
     component_material_roots: BTreeSet<String>,
     proof_materials: BTreeMap<String, VerifiedCanonicalProofMaterial>,
-    proof_material_roots: BTreeSet<String>,
+    proof_bytes_hashes: BTreeSet<String>,
     public_key_share_materials: BTreeMap<String, VerifiedCanonicalPublicKeyShareMaterialStoreEntry>,
     public_key_share_material_roots: BTreeSet<String>,
 }
@@ -184,7 +184,7 @@ impl AcceptedSetupProofBindingSessionState {
     fn material_roots(&self, store: AcceptedSetupMaterialStore) -> &BTreeSet<String> {
         match store {
             AcceptedSetupMaterialStore::Component => &self.component_material_roots,
-            AcceptedSetupMaterialStore::Proof => &self.proof_material_roots,
+            AcceptedSetupMaterialStore::Proof => &self.proof_bytes_hashes,
             AcceptedSetupMaterialStore::PublicKeyShare => &self.public_key_share_material_roots,
         }
     }
@@ -192,7 +192,7 @@ impl AcceptedSetupProofBindingSessionState {
     fn material_roots_mut(&mut self, store: AcceptedSetupMaterialStore) -> &mut BTreeSet<String> {
         match store {
             AcceptedSetupMaterialStore::Component => &mut self.component_material_roots,
-            AcceptedSetupMaterialStore::Proof => &mut self.proof_material_roots,
+            AcceptedSetupMaterialStore::Proof => &mut self.proof_bytes_hashes,
             AcceptedSetupMaterialStore::PublicKeyShare => &mut self.public_key_share_material_roots,
         }
     }
@@ -334,7 +334,7 @@ pub(crate) fn active_accepted_setup_proof_binding_session(
     Ok(AcceptedSetupProofBindingSession { session_handle })
 }
 
-pub(in crate::bgv::setup) fn reserve_accepted_setup_material_root(
+fn reserve_accepted_setup_material_root(
     session_handle: u32,
     store: AcceptedSetupMaterialStore,
     material_root: &str,
@@ -370,7 +370,7 @@ pub(in crate::bgv::setup) fn reserve_accepted_setup_material_root(
     Ok(())
 }
 
-pub(in crate::bgv::setup) fn release_accepted_setup_material_root(
+fn release_accepted_setup_material_root(
     session_handle: u32,
     store: AcceptedSetupMaterialStore,
     material_root: &str,
@@ -401,7 +401,7 @@ fn retain_accepted_setup_material(
 }
 
 #[cfg(test)]
-pub(in crate::bgv::setup) fn accepted_setup_session_owns_material_root(
+fn accepted_setup_session_owns_material_root(
     session_handle: u32,
     store: AcceptedSetupMaterialStore,
     material_root: &str,
@@ -430,24 +430,24 @@ pub(in crate::bgv::setup) fn accepted_setup_public_key_share_material(
 pub(in crate::bgv::setup) fn take_accepted_setup_proof_material_bytes(
     session_handle: u32,
     proof_family: &str,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
 ) -> CanonicalResult<Option<SetupProofMaterialBytes>> {
     let mut registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
     let session = registry.session_mut(session_handle)?;
-    let Some(material) = session.proof_materials.get(proof_material_root) else {
+    let Some(material) = session.proof_materials.get(proof_bytes_hash) else {
         return Ok(None);
     };
     if material.proof_family != proof_family {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "accepted-setup proof material root belongs to a different proof family",
+            "accepted-setup proof bytes hash belongs to a different proof family",
         ));
     }
     Ok(session
         .proof_materials
-        .remove(proof_material_root)
+        .remove(proof_bytes_hash)
         .map(|material| material.proof_bytes))
 }
 
@@ -478,17 +478,17 @@ pub(in crate::bgv::setup) fn accepted_setup_component_material(
 pub(in crate::bgv::setup) fn retain_accepted_setup_proof_binding(
     session_handle: u32,
     proof_family: &'static str,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
     verification_binding_hash: String,
 ) -> CanonicalResult<()> {
     let mut session_registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
     let session = session_registry.session_mut(session_handle)?;
-    if session.bindings.contains_key(proof_material_root) {
+    if session.bindings.contains_key(proof_bytes_hash) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "accepted-setup proof binding root is already retained by this session",
+            "accepted-setup proof bytes hash is already retained by this session",
         ));
     }
 
@@ -496,7 +496,7 @@ pub(in crate::bgv::setup) fn retain_accepted_setup_proof_binding(
         let mut materials = verified_canonical_proof_materials()
             .lock()
             .map_err(|_| canonical_proof_store_error())?;
-        let material = materials.get(proof_material_root).ok_or_else(|| {
+        let material = materials.get(proof_bytes_hash).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidProtocolObject,
                 "accepted-setup proof binding requires authenticated proof bytes",
@@ -505,16 +505,16 @@ pub(in crate::bgv::setup) fn retain_accepted_setup_proof_binding(
         if material.proof_family != proof_family {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
-                "canonical setup proof material root belongs to a different proof family",
+                "canonical setup proof bytes hash belongs to a different proof family",
             ));
         }
         materials
-            .remove(proof_material_root)
+            .remove(proof_bytes_hash)
             .expect("authenticated setup proof material remains present");
     }
 
     session.bindings.insert(
-        proof_material_root.to_string(),
+        proof_bytes_hash.to_string(),
         VerifiedCanonicalSetupProofBinding {
             proof_family,
             verification_binding_hash,
@@ -529,26 +529,26 @@ pub(in crate::bgv::setup) fn retain_accepted_setup_proof_binding(
 pub(in crate::bgv::setup) fn consume_accepted_setup_proof_binding(
     session_handle: u32,
     proof_family: &str,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
     verification_binding_hash: &str,
 ) -> CanonicalResult<bool> {
     let mut registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
     let session = registry.session_mut(session_handle)?;
-    let Some(binding) = session.bindings.get(proof_material_root) else {
+    let Some(binding) = session.bindings.get(proof_bytes_hash) else {
         return Ok(false);
     };
     if binding.proof_family != proof_family {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "accepted-setup proof binding root belongs to a different proof family",
+            "accepted-setup proof bytes hash belongs to a different proof family",
         ));
     }
     if binding.verification_binding_hash != verification_binding_hash {
         return Ok(false);
     }
-    session.bindings.remove(proof_material_root);
+    session.bindings.remove(proof_bytes_hash);
     Ok(true)
 }
 
@@ -558,7 +558,7 @@ pub(in crate::bgv::setup) fn consume_accepted_setup_proof_binding(
 #[cfg(test)]
 pub(in crate::bgv::setup) fn accepted_setup_proof_binding_lease(
     session_handle: u32,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
 ) -> CanonicalResult<Option<CanonicalSetupProofBindingLease>> {
     let registry = accepted_setup_proof_binding_session_registry()
         .lock()
@@ -566,10 +566,10 @@ pub(in crate::bgv::setup) fn accepted_setup_proof_binding_lease(
     let session = registry.session(session_handle)?;
     Ok(session
         .bindings
-        .get(proof_material_root)
+        .get(proof_bytes_hash)
         .cloned()
         .map(|binding| CanonicalSetupProofBindingLease {
-            proof_material_root: proof_material_root.to_string(),
+            proof_bytes_hash: proof_bytes_hash.to_string(),
             binding,
         }))
 }
@@ -585,7 +585,7 @@ pub(in crate::bgv::setup) fn restore_accepted_setup_proof_binding_lease(
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
     let session = registry.session_mut(session_handle)?;
-    match session.bindings.entry(lease.proof_material_root.clone()) {
+    match session.bindings.entry(lease.proof_bytes_hash.clone()) {
         Entry::Vacant(entry) => {
             entry.insert(lease.binding.clone());
             Ok(())
@@ -659,25 +659,25 @@ fn verified_canonical_proof_materials()
 #[cfg(test)]
 pub(in crate::bgv::setup) fn verified_canonical_setup_proof_material_bytes(
     proof_family: &str,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
 ) -> CanonicalResult<Option<SetupProofMaterialBytes>> {
-    verified_canonical_proof_material_bytes(proof_family, proof_material_root)
+    verified_canonical_proof_material_bytes(proof_family, proof_bytes_hash)
 }
 
 pub(crate) fn verified_canonical_proof_material_bytes(
     proof_family: &str,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
 ) -> CanonicalResult<Option<BgvProofMaterialBytes>> {
     let materials = verified_canonical_proof_materials()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    let Some(material) = materials.get(proof_material_root) else {
+    let Some(material) = materials.get(proof_bytes_hash) else {
         return Ok(None);
     };
     if material.proof_family != proof_family {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "canonical setup proof material root belongs to a different proof family",
+            "canonical setup proof bytes hash belongs to a different proof family",
         ));
     }
     Ok(Some(Arc::clone(&material.proof_bytes)))
@@ -685,44 +685,45 @@ pub(crate) fn verified_canonical_proof_material_bytes(
 
 pub(crate) fn take_verified_canonical_proof_material_bytes(
     proof_family: &str,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
 ) -> CanonicalResult<Option<BgvProofMaterialBytes>> {
     let mut materials = verified_canonical_proof_materials()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    let Some(material) = materials.get(proof_material_root) else {
+    let Some(material) = materials.get(proof_bytes_hash) else {
         return Ok(None);
     };
     if material.proof_family != proof_family {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "canonical proof material root belongs to a different proof family",
+            "canonical proof bytes hash belongs to a different proof family",
         ));
     }
     Ok(materials
-        .remove(proof_material_root)
+        .remove(proof_bytes_hash)
         .map(|material| material.proof_bytes))
 }
 
 #[cfg(test)]
 pub(in crate::bgv::setup) fn evict_verified_canonical_setup_proof_materials(
-    proof_material_roots: &[String],
+    proof_bytes_hashes: &[String],
 ) {
-    evict_verified_canonical_proof_materials(proof_material_roots);
+    evict_verified_canonical_proof_materials(proof_bytes_hashes);
 }
 
-pub(crate) fn evict_verified_canonical_proof_materials(proof_material_roots: &[String]) {
+#[cfg(test)]
+pub(crate) fn evict_verified_canonical_proof_materials(proof_bytes_hashes: &[String]) {
     let Ok(mut materials) = verified_canonical_proof_materials().lock() else {
         return;
     };
-    for proof_material_root in proof_material_roots {
-        materials.remove(proof_material_root);
+    for proof_bytes_hash in proof_bytes_hashes {
+        materials.remove(proof_bytes_hash);
     }
 }
 
 pub(crate) fn retain_generated_canonical_proof_material(
     proof_family: &'static str,
-    proof_material_root: String,
+    proof_bytes_hash: String,
     proof_bytes: Vec<u8>,
 ) -> CanonicalResult<BgvProofMaterialBytes> {
     validate_generated_proof_stream(proof_family, &proof_bytes)?;
@@ -730,7 +731,7 @@ pub(crate) fn retain_generated_canonical_proof_material(
     let mut materials = verified_canonical_proof_materials()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    match materials.entry(proof_material_root) {
+    match materials.entry(proof_bytes_hash) {
         Entry::Vacant(entry) => {
             entry.insert(VerifiedCanonicalProofMaterial {
                 proof_bytes: Arc::clone(&proof_bytes),
@@ -740,7 +741,7 @@ pub(crate) fn retain_generated_canonical_proof_material(
         }
         Entry::Occupied(_) => Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "canonical generated proof material root is already retained",
+            "canonical generated proof bytes hash is already retained",
         )),
     }
 }
@@ -1199,7 +1200,7 @@ fn retain_standalone_stream_material(
         }
         Entry::Occupied(_) => Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "canonical proof material root is already retained",
+            "canonical proof bytes hash is already retained",
         )),
     }
 }
@@ -1529,11 +1530,11 @@ mod tests {
 
     #[test]
     fn accepted_setup_proof_bindings_are_one_shot_and_session_scoped() {
-        let proof_material_root = "c1".repeat(MATERIAL_ROOT_BYTE_LENGTH);
-        evict_verified_canonical_proof_materials(std::slice::from_ref(&proof_material_root));
+        let proof_bytes_hash = "c1".repeat(MATERIAL_ROOT_BYTE_LENGTH);
+        evict_verified_canonical_proof_materials(std::slice::from_ref(&proof_bytes_hash));
         retain_generated_canonical_proof_material(
             "public-key-share",
-            proof_material_root.clone(),
+            proof_bytes_hash.clone(),
             vec![0xc1; 17],
         )
         .expect("authenticated proof material fixture");
@@ -1545,22 +1546,20 @@ mod tests {
         crate::bgv::setup::retain_accepted_setup_proof_binding(
             first_session,
             "public-key-share",
-            &proof_material_root,
+            &proof_bytes_hash,
             "binding-c1".to_string(),
         )
         .expect("retain verifier-derived binding in first session");
-        let fixture_lease = crate::bgv::setup::accepted_setup_proof_binding_lease(
-            first_session,
-            &proof_material_root,
-        )
-        .expect("test fixture binding lookup")
-        .expect("test fixture binding lease");
+        let fixture_lease =
+            crate::bgv::setup::accepted_setup_proof_binding_lease(first_session, &proof_bytes_hash)
+                .expect("test fixture binding lookup")
+                .expect("test fixture binding lease");
 
         assert!(
             !crate::bgv::setup::consume_accepted_setup_proof_binding(
                 second_session,
                 "public-key-share",
-                &proof_material_root,
+                &proof_bytes_hash,
                 "binding-c1",
             )
             .expect("another valid session cannot see the first session's binding")
@@ -1569,7 +1568,7 @@ mod tests {
             crate::bgv::setup::consume_accepted_setup_proof_binding(
                 first_session,
                 "same-secret-bridge",
-                &proof_material_root,
+                &proof_bytes_hash,
                 "binding-c1",
             )
             .is_err(),
@@ -1579,7 +1578,7 @@ mod tests {
             !crate::bgv::setup::consume_accepted_setup_proof_binding(
                 first_session,
                 "public-key-share",
-                &proof_material_root,
+                &proof_bytes_hash,
                 "wrong-binding",
             )
             .expect("a wrong statement binding is a non-consuming mismatch")
@@ -1588,7 +1587,7 @@ mod tests {
             crate::bgv::setup::consume_accepted_setup_proof_binding(
                 first_session,
                 "public-key-share",
-                &proof_material_root,
+                &proof_bytes_hash,
                 "binding-c1",
             )
             .expect("owning session consumes its exact binding")
@@ -1597,7 +1596,7 @@ mod tests {
             !crate::bgv::setup::consume_accepted_setup_proof_binding(
                 first_session,
                 "public-key-share",
-                &proof_material_root,
+                &proof_bytes_hash,
                 "binding-c1",
             )
             .expect("consumed binding is not reusable")
@@ -1618,7 +1617,7 @@ mod tests {
             crate::bgv::setup::consume_accepted_setup_proof_binding(
                 restored_session,
                 "public-key-share",
-                &proof_material_root,
+                &proof_bytes_hash,
                 "binding-c1",
             )
             .expect("restored test fixture binding is owned by its fresh session")

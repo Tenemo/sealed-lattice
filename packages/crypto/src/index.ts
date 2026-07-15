@@ -11,23 +11,18 @@ export { deriveCanonicalObjectHash } from './hashes.js';
 export {
     BrowserLocalKeyProviderError,
     openBrowserLocalExternalKeyProvider,
-    signStateWitnessVoteMessage,
 } from './browser-local-key-provider.js';
 export type {
     BrowserLocalExternalKeyProvider,
     BrowserLocalExternalKeyProviderInput,
-    BrowserLocalActionRandomnessCapability,
     BrowserLocalKeyProviderFailureCode,
     BrowserLocalMailboxCapability,
-    BrowserLocalSetupMailboxSlot,
     BrowserLocalSigningCapability,
 } from './browser-local-key-provider.js';
-export { verifySignedObjectSignature } from './signatures.js';
 export {
     AuthenticatedMailboxCleanupError,
     openAuthenticatedMailbox,
     sealAuthenticatedMailbox,
-    sealResetSafeSetupMailbox,
 } from './authenticated-mailbox.js';
 export type {
     AuthenticatedMailboxCarrier,
@@ -46,7 +41,6 @@ export type {
     MailboxKeyScheduleInput,
     MailboxPayloadType,
     OpenedAuthenticatedMailbox,
-    ResetSafeSetupMailboxSealInput,
     SignedMailboxEnvelope,
     UnsignedMailboxEnvelope,
 } from './authenticated-mailbox.js';

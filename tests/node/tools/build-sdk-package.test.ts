@@ -47,10 +47,10 @@ describe('SDK package build', () => {
             'C:/repository/temp/build-scratch/sdk-package-declarations/build-second/index.d.ts';
         const declarationSource = (buildName: string): string =>
             [
-                `//#region ../../temp/build-scratch/sdk-package-declarations/${buildName}/verified-setup-capability.d.ts`,
-                'type VerifiedSetup = object;',
+                `//#region ../../temp/build-scratch/sdk-package-declarations/${buildName}/setup-verification-input.d.ts`,
+                'type VerifySetupPackageInput = object;',
                 `//#region ../../temp/build-scratch/sdk-package-declarations/${buildName}/index.d.ts`,
-                'export type { VerifiedSetup };',
+                'export type { VerifySetupPackageInput };',
             ].join('\n');
 
         const firstNormalizedSource = normalizeSdkDeclarationSourceMarkers({
@@ -66,7 +66,7 @@ describe('SDK package build', () => {
 
         expect(firstNormalizedSource).toBe(secondNormalizedSource);
         expect(firstNormalizedSource).toContain(
-            '//#region src/verified-setup-capability.d.ts',
+            '//#region src/setup-verification-input.d.ts',
         );
         expect(firstNormalizedSource).toContain('//#region src/index.ts');
         expect(firstNormalizedSource).not.toContain('build-first');

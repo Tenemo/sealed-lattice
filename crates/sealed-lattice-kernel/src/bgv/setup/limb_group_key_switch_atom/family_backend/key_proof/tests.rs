@@ -31,14 +31,14 @@ fn g_degree_adjustment_rejects_helper_above_the_sumcheck_bound() {
         shifted.extend_from_slice(&g);
         let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &shifted);
 
-        let mut salt_seed = 0xa7c3_u64;
+        let mut private_randomness = PrivateProofRandomness::for_test(0xa7c3);
         let mut prover_transcript = Transcript::new(PROTOCOL_LABEL);
         let commitment = fri_commit(
             &parameters,
             &mut prover_transcript,
             &codeword,
             &offset,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("fri commit");
         let query_positions = prover_transcript.challenge_positions("key-query", coset_size, 40);
@@ -82,7 +82,7 @@ fn honest_multi_digit_key_verifies() {
             query_count: 40,
             mask_degree: 0,
         };
-        let mut salt_seed = 0x1234 + digit_count as u64;
+        let mut private_randomness = PrivateProofRandomness::for_test(0x1234 + digit_count as u64);
         let proof = prove_round_one_key_fri(
             &parameters,
             ring_degree,
@@ -90,7 +90,7 @@ fn honest_multi_digit_key_verifies() {
             &secret,
             &digits,
             &proof_parameters,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("prove");
         assert!(
@@ -115,7 +115,7 @@ fn prover_and_verifier_transcript_order_matches() {
         query_count: 40,
         mask_degree: 16,
     };
-    let mut salt_seed = 0x5a17_u64;
+    let mut private_randomness = PrivateProofRandomness::for_test(0x5a17);
     let (proof_result, prover_events) = capture_transcript_order_audit(|| {
         prove_round_one_key_fri(
             &parameters,
@@ -124,7 +124,7 @@ fn prover_and_verifier_transcript_order_matches() {
             &secret,
             &digits,
             &proof_parameters,
-            &mut salt_seed,
+            &mut private_randomness,
         )
     });
     let proof = proof_result.expect("audit proof generation");
@@ -166,7 +166,7 @@ fn masked_multi_digit_key_verifies() {
         query_count: 40,
         mask_degree: 16,
     };
-    let mut salt_seed = 0x5eed;
+    let mut private_randomness = PrivateProofRandomness::for_test(0x5eed);
     let proof = prove_round_one_key_fri(
         &parameters,
         ring_degree,
@@ -174,7 +174,7 @@ fn masked_multi_digit_key_verifies() {
         &secret,
         &digits,
         &proof_parameters,
-        &mut salt_seed,
+        &mut private_randomness,
     )
     .expect("prove");
     assert!(
@@ -198,7 +198,7 @@ fn one_tampered_digit_error_is_caught_by_the_batch() {
         query_count: 40,
         mask_degree: 0,
     };
-    let mut salt_seed = 0x9;
+    let mut private_randomness = PrivateProofRandomness::for_test(0x9);
     let result = prove_round_one_key_fri(
         &parameters,
         ring_degree,
@@ -206,7 +206,7 @@ fn one_tampered_digit_error_is_caught_by_the_batch() {
         &secret,
         &digits,
         &proof_parameters,
-        &mut salt_seed,
+        &mut private_randomness,
     );
     match result {
         Err(_) => {}
@@ -238,7 +238,8 @@ fn honest_committed_component_material_verifies() {
             query_count: 40,
             mask_degree,
         };
-        let mut salt_seed = 0xc0ff_ee22 + mask_degree as u64;
+        let mut private_randomness =
+            PrivateProofRandomness::for_test(0xc0ff_ee22 + mask_degree as u64);
         let proof = prove_key_fri_with_component_b(
             &parameters,
             ring_degree,
@@ -251,7 +252,7 @@ fn honest_committed_component_material_verifies() {
             &ZERO_STATEMENT_BINDING,
             0,
             &proof_parameters,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("prove");
         assert!(
@@ -297,7 +298,8 @@ fn tampered_committed_component_material_is_rejected_by_the_relation() {
             query_count: 40,
             mask_degree,
         };
-        let mut salt_seed = 0xc0ff_ee11 + mask_degree as u64;
+        let mut private_randomness =
+            PrivateProofRandomness::for_test(0xc0ff_ee11 + mask_degree as u64);
         let result = prove_key_fri_with_component_b(
             &parameters,
             ring_degree,
@@ -310,7 +312,7 @@ fn tampered_committed_component_material_is_rejected_by_the_relation() {
             &ZERO_STATEMENT_BINDING,
             0,
             &proof_parameters,
-            &mut salt_seed,
+            &mut private_randomness,
         );
         match result {
             Err(_) => {}
@@ -399,7 +401,7 @@ fn out_of_range_carry_is_rejected() {
         query_count: 40,
         mask_degree: 0,
     };
-    let mut salt_seed = 0x4321;
+    let mut private_randomness = PrivateProofRandomness::for_test(0x4321);
     let result = prove_key_fri(
         &parameters,
         ring_degree,
@@ -411,7 +413,7 @@ fn out_of_range_carry_is_rejected() {
         &ZERO_STATEMENT_BINDING,
         0,
         &proof_parameters,
-        &mut salt_seed,
+        &mut private_randomness,
     );
     match result {
         Err(_) => {}
@@ -447,7 +449,7 @@ fn wrong_shared_secret_breaks_every_digit() {
         query_count: 40,
         mask_degree: 0,
     };
-    let mut salt_seed = 0xabc;
+    let mut private_randomness = PrivateProofRandomness::for_test(0xabc);
     let result = prove_round_one_key_fri(
         &parameters,
         ring_degree,
@@ -455,7 +457,7 @@ fn wrong_shared_secret_breaks_every_digit() {
         &wrong_secret,
         &digits,
         &proof_parameters,
-        &mut salt_seed,
+        &mut private_randomness,
     );
     match result {
         Err(_) => {}
@@ -481,7 +483,7 @@ fn tampered_lookup_terminal_is_rejected() {
         query_count: 40,
         mask_degree: 0,
     };
-    let mut salt_seed = 0xc0ffee;
+    let mut private_randomness = PrivateProofRandomness::for_test(0xc0ffee);
     let mut proof = prove_round_one_key_fri(
         &parameters,
         ring_degree,
@@ -489,7 +491,7 @@ fn tampered_lookup_terminal_is_rejected() {
         &secret,
         &digits,
         &proof_parameters,
-        &mut salt_seed,
+        &mut private_randomness,
     )
     .expect("prove");
     proof.lookup_terminal = parameters.add(&proof.lookup_terminal, &parameters.one());
@@ -512,7 +514,7 @@ fn tampered_table_terminal_is_rejected() {
         query_count: 40,
         mask_degree: 0,
     };
-    let mut salt_seed = 0xbadf00d;
+    let mut private_randomness = PrivateProofRandomness::for_test(0xbadf00d);
     let mut proof = prove_round_one_key_fri(
         &parameters,
         ring_degree,
@@ -520,7 +522,7 @@ fn tampered_table_terminal_is_rejected() {
         &secret,
         &digits,
         &proof_parameters,
-        &mut salt_seed,
+        &mut private_randomness,
     )
     .expect("prove");
     proof.table_terminals[0] = parameters.add(&proof.table_terminals[0], &parameters.one());
@@ -541,7 +543,7 @@ fn honest_galois_key_verifies() {
         query_count: 40,
         mask_degree: 0,
     };
-    let mut salt_seed = 0x6a10;
+    let mut private_randomness = PrivateProofRandomness::for_test(0x6a10);
     let proof = prove_key_fri(
         &parameters,
         ring_degree,
@@ -553,7 +555,7 @@ fn honest_galois_key_verifies() {
         &ZERO_STATEMENT_BINDING,
         0,
         &proof_parameters,
-        &mut salt_seed,
+        &mut private_randomness,
     )
     .expect("prove");
     assert!(
@@ -584,7 +586,7 @@ fn galois_proof_bound_to_its_element() {
         query_count: 40,
         mask_degree: 0,
     };
-    let mut salt_seed = 0x6a11;
+    let mut private_randomness = PrivateProofRandomness::for_test(0x6a11);
     let proof = prove_key_fri(
         &parameters,
         ring_degree,
@@ -596,7 +598,7 @@ fn galois_proof_bound_to_its_element() {
         &ZERO_STATEMENT_BINDING,
         0,
         &proof_parameters,
-        &mut salt_seed,
+        &mut private_randomness,
     )
     .expect("prove");
     let other_source = KeySource::Galois { galois_element: 7 };
@@ -642,7 +644,7 @@ fn honest_round_two_key_verifies() {
         query_count: 40,
         mask_degree: 0,
     };
-    let mut salt_seed = 0x7b20;
+    let mut private_randomness = PrivateProofRandomness::for_test(0x7b20);
     let proof = prove_key_fri(
         &parameters,
         ring_degree,
@@ -654,7 +656,7 @@ fn honest_round_two_key_verifies() {
         &ZERO_STATEMENT_BINDING,
         0,
         &proof_parameters,
-        &mut salt_seed,
+        &mut private_randomness,
     )
     .expect("prove");
     assert!(

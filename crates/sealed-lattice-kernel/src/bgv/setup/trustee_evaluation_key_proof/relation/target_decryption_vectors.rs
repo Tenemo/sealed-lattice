@@ -116,10 +116,9 @@ pub(crate) fn build_target_decryption_share_public_vectors(
     }
 
     if let Some(limb_statement) = active_target_limb {
-        let interpolation_point = input.statement.interpolation_point % input.modulus;
-        let plaintext_multiple = input.statement.plaintext_multiple % input.modulus;
+        let plaintext_multiple = (PLAINTEXT_MODULUS_I64 as u64) % input.modulus;
         let coefficient_offset = signed_value_residue(
-            input.statement.smudging_signed_coefficient_offset,
+            TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND,
             input.modulus,
         );
         let limb_message_offset = input
@@ -142,18 +141,6 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                     "target-decryption share target vectors do not match the ring degree",
                 ));
             }
-            let mut interpolation_power = interpolation_point;
-            let mut smudging_scales = Vec::with_capacity(role_statement.smudging_commitments.len());
-            for _ in 0..role_statement.smudging_commitments.len() {
-                smudging_scales.push(mul_mod_fast(
-                    plaintext_multiple,
-                    interpolation_power,
-                    input.modulus,
-                ));
-                interpolation_power =
-                    mul_mod_fast(interpolation_power, interpolation_point, input.modulus);
-            }
-
             for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
                 let alpha_value =
                     &input.relation_alpha[role_index * LINCHECK_REPETITIONS + repetition];
@@ -191,28 +178,26 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                     scaled_u_sum = tower.add(&scaled_u_sum, scaled_u_value);
                 }
 
-                for (smudging_index, smudging_scale) in smudging_scales.iter().enumerate() {
-                    add_scaled_extension_vector_to_message_digits(
-                        AddScaledExtensionVectorToMessageDigitsInput {
-                            message_encoding_vectors: &mut message_encoding_vectors,
-                            message_encoding_offsets: &message_encoding_offsets,
-                            message_encoding_layouts: &message_encoding_layouts,
-                            message_index: smudging_message_offset + smudging_index,
-                            source: &scaled_u,
-                            coefficient: *smudging_scale,
-                            modulus: input.modulus,
-                        },
-                        tower,
-                    )?;
-                    let offset_scale =
-                        mul_mod_fast(*smudging_scale, coefficient_offset, input.modulus);
-                    relation_claim = tower.add(
-                        &relation_claim,
-                        &tower.scale_base(&scaled_u_sum, offset_scale),
-                    );
-                }
+                add_scaled_extension_vector_to_message_digits(
+                    AddScaledExtensionVectorToMessageDigitsInput {
+                        message_encoding_vectors: &mut message_encoding_vectors,
+                        message_encoding_offsets: &message_encoding_offsets,
+                        message_encoding_layouts: &message_encoding_layouts,
+                        message_index: smudging_message_offset,
+                        source: &scaled_u,
+                        coefficient: plaintext_multiple,
+                        modulus: input.modulus,
+                    },
+                    tower,
+                )?;
+                let offset_scale =
+                    mul_mod_fast(plaintext_multiple, coefficient_offset, input.modulus);
+                relation_claim = tower.add(
+                    &relation_claim,
+                    &tower.scale_base(&scaled_u_sum, offset_scale),
+                );
             }
-            smudging_message_offset += role_statement.smudging_commitments.len();
+            smudging_message_offset += 1;
         }
     }
 

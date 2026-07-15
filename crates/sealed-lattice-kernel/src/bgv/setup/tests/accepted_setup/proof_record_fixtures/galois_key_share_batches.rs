@@ -68,14 +68,11 @@ pub(in super::super) fn galois_key_share_batches_object(
                 let key_switch_domain = format!("galois-{rotation}");
                 let mut material_record = serde_json::json!({
                     "objectType": "GaloisKeyShareMaterial",
-                    "rotation": rotation,
-                    "level": level,
-                    "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
                 });
                 let authenticated_material_root =
                     authenticate_evaluation_key_share_component_material_fixture(
                         EvaluationKeyShareProofFamily::Galois,
-                        &material_record,
+                        level,
                         EvaluationKeyShareDerivedMaterialBinding {
                             trustee_identity: &trustee_identity,
                             trustee_roster_position,
@@ -92,8 +89,6 @@ pub(in super::super) fn galois_key_share_batches_object(
             }
             serde_json::json!({
                 "objectType": "GaloisKeyShareBatch",
-                "trusteeIdentity": trustee_identity.as_str(),
-                "trusteeRosterPosition": trustee_roster_position,
                 "galoisKeyShareMaterialRecords": galois_key_share_material_records,
             })
         })

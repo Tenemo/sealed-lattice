@@ -44,7 +44,6 @@ const expectedManifestHash = '1'.repeat(128);
 const expectedRosterHash = '2'.repeat(128);
 
 const publicKeyShareMaterialSource = {
-    publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
     pullChunk: vi.fn(({ chunkIndex, expectedByteLength }: ChunkPullRequest) => {
         if (chunkIndex === 0) {
             const chunk = Uint8Array.of(0xaa, 0xbb, 0xcc, 0xdd).buffer;
@@ -66,34 +65,28 @@ const setupVerificationBindings = {
     expectedManifestHash,
     expectedRosterHash,
     transportedPublicKeyShareMaterial: {
-        objectType: 'SetupTransportedPublicKeyShareMaterial',
         publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
-        descriptorBytes: canonicalStreamDescriptorFixture(4, 8, 9),
+        descriptorBytes: canonicalStreamDescriptorFixture(4, 8),
     },
     publicKeyShareMaterialChunkSource: publicKeyShareMaterialSource,
     transportedPublicKeyShareProofMaterial: {
-        objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
         proofMaterials: [],
     },
     transportedVssShareLinkageProofMaterial: {
-        objectType: 'SetupTransportedVssShareLinkageProofMaterialSet',
         proofMaterials: [],
     },
     transportedSameSecretBridgeProofMaterial: {
-        objectType: 'SetupTransportedSameSecretBridgeProofMaterialSet',
         proofMaterials: [],
     },
     transportedEvaluationKeyShareProofMaterial: {
-        objectType: 'SetupTransportedEvaluationKeyShareProofMaterialSet',
         proofMaterials: [],
     },
 } as const;
 
 const componentMaterial = (keySwitchComponentMaterialRoot: string) =>
     ({
-        objectType: 'SetupTransportedEvaluationKeyShareComponentMaterial',
         keySwitchComponentMaterialRoot,
-        descriptorBytes: canonicalStreamDescriptorFixture(4, 0x53, 0x4c),
+        descriptorBytes: canonicalStreamDescriptorFixture(4, 0x53),
     }) as const;
 
 const setupPackageWithComponentReferences = (
@@ -201,8 +194,6 @@ describe('evaluation-key component material streaming before terminal verificati
             }),
             ...setupVerificationBindings,
             transportedEvaluationKeyShareComponentMaterial: {
-                objectType:
-                    'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                 componentMaterials: [
                     componentMaterial(componentMaterialRoot),
                     componentMaterial(secondComponentMaterialRoot),
@@ -260,8 +251,6 @@ describe('evaluation-key component material streaming before terminal verificati
             }),
             ...setupVerificationBindings,
             transportedEvaluationKeyShareComponentMaterial: {
-                objectType:
-                    'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                 componentMaterials: [callerMaterial],
             },
             evaluationKeyShareComponentMaterialChunkSources: [
@@ -316,8 +305,6 @@ describe('evaluation-key component material streaming before terminal verificati
                 }),
                 ...setupVerificationBindings,
                 transportedEvaluationKeyShareComponentMaterial: {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     componentMaterials: [
                         componentMaterial(componentMaterialRoot),
                     ],
@@ -340,8 +327,6 @@ describe('evaluation-key component material streaming before terminal verificati
                 }),
                 ...setupVerificationBindings,
                 transportedEvaluationKeyShareComponentMaterial: {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     componentMaterials: [
                         componentMaterial(componentMaterialRoot),
                     ],
@@ -365,8 +350,6 @@ describe('evaluation-key component material streaming before terminal verificati
                 }),
                 ...setupVerificationBindings,
                 transportedEvaluationKeyShareComponentMaterial: {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     componentMaterials: [
                         componentMaterial(componentMaterialRoot),
                     ],
@@ -390,8 +373,6 @@ describe('evaluation-key component material streaming before terminal verificati
                 }),
                 ...setupVerificationBindings,
                 transportedEvaluationKeyShareComponentMaterial: {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     componentMaterials: [
                         componentMaterial(componentMaterialRoot),
                     ],
@@ -414,8 +395,6 @@ describe('evaluation-key component material streaming before terminal verificati
                 }),
                 ...setupVerificationBindings,
                 transportedEvaluationKeyShareComponentMaterial: {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     componentMaterials: [
                         componentMaterial(componentMaterialRoot),
                     ],
@@ -438,8 +417,6 @@ describe('evaluation-key component material streaming before terminal verificati
                 }),
                 ...setupVerificationBindings,
                 transportedEvaluationKeyShareComponentMaterial: {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     componentMaterials: [
                         componentMaterial(secondComponentMaterialRoot),
                     ],
@@ -465,8 +442,6 @@ describe('evaluation-key component material streaming before terminal verificati
                 }),
                 ...setupVerificationBindings,
                 transportedEvaluationKeyShareComponentMaterial: {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     componentMaterials: [
                         componentMaterial(componentMaterialRoot),
                     ],

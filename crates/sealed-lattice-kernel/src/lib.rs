@@ -26,19 +26,17 @@ use bgv::{
 };
 use foundation::{
     CanonicalStreamRuntimeBegin, STATE_DURABLE_BINDING_BYTE_LENGTH,
-    STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH,
-    absorb_canonical_stream_chunk, authenticate_mailbox_gcm_chunk, begin_canonical_stream_verifier,
-    begin_canonical_stream_writer, begin_mailbox_gcm_encryptor, begin_mailbox_gcm_verifier,
-    begin_state_verifier_session, cancel_canonical_stream, cancel_mailbox_gcm,
-    cancel_state_verifier_session, certify_verified_state_intent,
-    certify_verified_state_intent_from_unordered_vote_carriers, decrypt_mailbox_gcm_chunk,
-    describe_verified_state_object, encrypt_mailbox_gcm_chunk, finish_canonical_stream_verifier,
-    finish_canonical_stream_writer, finish_mailbox_gcm_authentication,
-    finish_mailbox_gcm_decryptor, finish_mailbox_gcm_encryptor,
+    STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, absorb_canonical_stream_chunk,
+    authenticate_mailbox_gcm_chunk, begin_canonical_stream_verifier, begin_canonical_stream_writer,
+    begin_mailbox_gcm_encryptor, begin_mailbox_gcm_verifier, begin_state_verifier_session,
+    cancel_canonical_stream, cancel_mailbox_gcm, cancel_state_verifier_session,
+    certify_verified_state_intent, certify_verified_state_intent_from_unordered_vote_carriers,
+    decrypt_mailbox_gcm_chunk, describe_verified_state_object, encrypt_mailbox_gcm_chunk,
+    finish_canonical_stream_verifier, finish_canonical_stream_writer,
+    finish_mailbox_gcm_authentication, finish_mailbox_gcm_decryptor, finish_mailbox_gcm_encryptor,
     finish_state_output_intent_verification, finish_state_output_verification,
-    finish_state_witness_vote, prepare_state_witness_vote, release_verified_state_object,
-    run_local_storage_root_command, verify_state_recovery, verify_state_recovery_intent,
-    verify_state_reservation, verify_state_reservation_intent,
+    release_verified_state_object, run_local_storage_root_command, verify_state_recovery,
+    verify_state_recovery_intent, verify_state_reservation, verify_state_reservation_intent,
 };
 
 use encoding::run_accepted_setup_command;
@@ -1226,136 +1224,6 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_certify_unordered_votes(
         }
         Err(status) => {
             unsafe {
-                write_u32_if_present(status_pointer, status);
-            }
-            0
-        }
-    }
-}
-
-/// Prepares the exact state-witness envelope and copies its 64-byte signature
-/// message. The returned handle can be finished once with an ML-DSA-65
-/// signature from the named roster witness.
-///
-/// # Safety
-///
-/// Every input pointer must name its declared readable range. The message
-/// output must name exactly 64 writable bytes. A non-null status pointer must
-/// point to one writable `u32` in WASM memory.
-#[unsafe(no_mangle)]
-#[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn sealed_lattice_state_verifier_prepare_witness_vote(
-    session_handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
-    verified_intent_handle: u32,
-    witness_participant_id_pointer: *const u8,
-    witness_participant_id_length: usize,
-    signature_message_output_pointer: *mut u8,
-    signature_message_output_length: usize,
-    status_pointer: *mut u32,
-) -> u32 {
-    if signature_message_output_pointer.is_null()
-        || signature_message_output_length != foundation::Hash512::BYTE_LENGTH
-    {
-        unsafe {
-            write_u32_if_present(
-                status_pointer,
-                u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code()),
-            );
-        }
-        return 0;
-    }
-    let capability = unsafe { canonical_stream_input(capability_pointer, capability_length) };
-    let witness_participant_id = unsafe {
-        canonical_stream_input(
-            witness_participant_id_pointer,
-            witness_participant_id_length,
-        )
-    };
-    let signature_message_output = unsafe {
-        slice::from_raw_parts_mut(
-            signature_message_output_pointer,
-            signature_message_output_length,
-        )
-    };
-    match prepare_state_witness_vote(
-        session_handle,
-        capability,
-        verified_intent_handle,
-        witness_participant_id,
-        signature_message_output,
-    ) {
-        Ok(handle) => {
-            unsafe {
-                write_u32_if_present(status_pointer, 0);
-            }
-            handle
-        }
-        Err(status) => {
-            signature_message_output.fill(0);
-            unsafe {
-                write_u32_if_present(status_pointer, status);
-            }
-            0
-        }
-    }
-}
-
-/// Finishes one prepared state-witness vote, verifies its signature, and
-/// copies the exact canonical signed carrier.
-///
-/// # Safety
-///
-/// Every input pointer must name its declared readable range. The carrier
-/// output must name exactly `STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH` writable
-/// bytes. A non-null status pointer must point to one writable `u32` in WASM
-/// memory.
-#[unsafe(no_mangle)]
-#[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn sealed_lattice_state_verifier_finish_witness_vote(
-    session_handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
-    prepared_handle: u32,
-    signature_pointer: *const u8,
-    signature_length: usize,
-    carrier_output_pointer: *mut u8,
-    carrier_output_length: usize,
-    status_pointer: *mut u32,
-) -> u32 {
-    if carrier_output_pointer.is_null()
-        || carrier_output_length != STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH
-    {
-        unsafe {
-            write_u32_if_present(
-                status_pointer,
-                u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code()),
-            );
-        }
-        return 0;
-    }
-    let capability = unsafe { canonical_stream_input(capability_pointer, capability_length) };
-    let signature = unsafe { canonical_stream_input(signature_pointer, signature_length) };
-    match finish_state_witness_vote(session_handle, capability, prepared_handle, signature) {
-        Ok(canonical_carrier) => {
-            unsafe {
-                ptr::copy_nonoverlapping(
-                    canonical_carrier.as_ptr(),
-                    carrier_output_pointer,
-                    canonical_carrier.len(),
-                );
-                write_u32_if_present(status_pointer, 0);
-            }
-            1
-        }
-        Err(status) => {
-            unsafe {
-                ptr::write_bytes(
-                    carrier_output_pointer,
-                    0,
-                    STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH,
-                );
                 write_u32_if_present(status_pointer, status);
             }
             0

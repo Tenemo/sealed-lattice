@@ -1,4 +1,6 @@
+#[cfg(test)]
 use num_bigint::BigInt;
+#[cfg(test)]
 use num_traits::{ToPrimitive, Zero};
 
 use crate::{
@@ -23,12 +25,14 @@ use crate::bgv::serialization::canonical_bytes_hex;
 use rayon::prelude::*;
 
 mod ciphertext_records;
+#[cfg(test)]
 mod decryption;
 mod operations;
 
 #[cfg(test)]
 pub(crate) use ciphertext_records::ciphertext_canonical_bytes_hex;
 pub(crate) use ciphertext_records::ciphertext_object_root;
+#[cfg(test)]
 pub(crate) use decryption::decryption_accumulator_to_coefficients;
 pub(crate) use operations::{
     add_plaintext_coefficients, ciphertext_add, ciphertext_negate, ciphertext_sub,

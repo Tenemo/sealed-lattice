@@ -22,14 +22,5 @@ pub(super) fn direct_ballot_slots(scores: &[u64]) -> Vec<u64> {
 }
 
 pub(super) fn setup_package_hash(setup_package: &Value) -> CanonicalResult<String> {
-    setup_package
-        .get("setupPackageHash")
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setupPackage.setupPackageHash must be present",
-            )
-        })
+    crate::bgv::setup::derive_collective_setup_package_hash(setup_package)
 }

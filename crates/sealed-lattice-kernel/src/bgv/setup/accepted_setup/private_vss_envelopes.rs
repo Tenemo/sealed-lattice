@@ -8,7 +8,6 @@ pub(super) struct PrivateVssEnvelopeBinding {
     pub(super) recipient_identity: String,
     pub(super) source_trustee_commitment_root: String,
     pub(super) private_envelope_hash: String,
-    pub(super) local_verification_root: String,
 }
 
 pub(super) type PrivateVssEnvelopeBindingMap = BTreeMap<(u64, u64), PrivateVssEnvelopeBinding>;
@@ -25,6 +24,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
     };
     if !commitment_set.is_object() {
         return Ok(Some(private_vss_envelope_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "privateVssEnvelopeCommitmentsNotObject",
             "privateVssEnvelopeCommitments must be a root-bound object, not an array or scalar",
             "setupPackage.privateVssEnvelopeCommitments",
@@ -34,6 +34,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
         != Some(PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE)
     {
         return Ok(Some(private_vss_envelope_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "privateVssEnvelopeCommitmentSetTypeMismatch",
             "privateVssEnvelopeCommitments.objectType must be PrivateVssEnvelopeCommitmentSet",
             "setupPackage.privateVssEnvelopeCommitments.objectType",
@@ -46,20 +47,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
             "setupContext was required before private VSS envelope verification",
         )
     })?;
-    let Some(set_root) = commitment_set
-        .get("privateVssEnvelopeCommitmentRoot")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(setup_refusals(
-            vec!["privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot".to_string()],
-            Vec::new(),
-        )));
-    };
-    validate_hash_string(
-        set_root,
-        "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
-    )?;
-
     let roster = super::accepted_roster_from_package(setup_package)?;
     let expected_envelope_count = roster.participant_count * roster.participant_count;
     let public_matrix_seed_hash = setup_package
@@ -72,13 +59,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
                 "commonRandomness.publicMatrixSeedHash was required before private VSS envelope verification",
             )
         })?;
-    let vss_coefficient_commitment_root = accepted_vss_coefficient_commitment_root(setup_package)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "an accepted VSS coefficient commitment root was required before private VSS envelope verification",
-            )
-        })?;
+    let vss_coefficient_commitment_root = accepted_vss_coefficient_commitment_root(setup_package)?;
     let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
     let source_trustee_commitment_roots =
         source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
@@ -89,11 +70,12 @@ pub(super) fn verify_private_vss_envelope_commitments(
         trustee_registrations,
         &source_trustee_commitment_roots,
         public_matrix_seed_hash,
-        vss_coefficient_commitment_root,
+        &vss_coefficient_commitment_root,
     )? {
         Ok(bindings) => {
             if bindings.len() != expected_envelope_count as usize {
                 return Ok(Some(private_vss_envelope_refusal(
+                    crate::foundation::RefusalReason::WrongTypeOrLength,
                     "privateVssEnvelopeCountMismatch",
                     "privateVssEnvelopeCommitments.envelopeReferences must cover every source-trustee-recipient trustee pair",
                     "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
@@ -102,6 +84,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
         }
         Err(refusal) => {
             return Ok(Some(private_vss_envelope_refusal(
+                refusal.refusal_reason,
                 refusal.reason_code,
                 refusal.message,
                 refusal.object_path,
@@ -109,36 +92,64 @@ pub(super) fn verify_private_vss_envelope_commitments(
         }
     }
 
-    let mut root_input = json!({
+    Ok(None)
+}
+
+pub(super) fn private_vss_envelope_commitment_root(
+    setup_package: &Value,
+) -> CanonicalResult<String> {
+    let commitment_set = setup_package
+        .get("privateVssEnvelopeCommitments")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "private VSS envelope commitments are required",
+            )
+        })?;
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setup context is required for the private VSS envelope commitment root",
+        )
+    })?;
+    let public_matrix_seed_hash = setup_package
+        .get("commonRandomness")
+        .and_then(|common_randomness| common_randomness.get("publicMatrixSeedHash"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "public matrix seed hash is required for the private VSS envelope commitment root",
+            )
+        })?;
+    let vss_coefficient_commitment_root = accepted_vss_coefficient_commitment_root(setup_package)?;
+    let envelope_references = array_at_path(commitment_set, &["envelopeReferences"])?
+        .iter()
+        .map(|reference| {
+            compare_required_string(
+                string_at_path(reference, &["objectType"])?,
+                PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE,
+                "private VSS envelope commitment objectType",
+            )?;
+            Ok(json!({
+                "objectType": PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE,
+                "sourceTrusteeIdentity": string_at_path(reference, &["sourceTrusteeIdentity"])?,
+                "sourceTrusteeRosterPosition": unsigned_at_path(reference, &["sourceTrusteeRosterPosition"])?,
+                "recipientIdentity": string_at_path(reference, &["recipientIdentity"])?,
+                "recipientRosterPosition": unsigned_at_path(reference, &["recipientRosterPosition"])?,
+                "privateEnvelopeHash": hash_at_path(reference, &["privateEnvelopeHash"])?,
+                "encryptedEnvelopeHash": hash_at_path(reference, &["encryptedEnvelopeHash"])?,
+            }))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    derive_canonical_object_hash(&json!({
         "objectType": PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE,
         "setupContextHash": setup_context_hash(setup_context)?,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-        "envelopeReferences": commitment_set.get("envelopeReferences").cloned().unwrap_or(Value::Null),
-    });
-    let root_input_object = root_input
-        .as_object_mut()
-        .expect("private VSS envelope commitment set object was checked");
-    if let Some(envelope_references) = root_input_object
-        .get_mut("envelopeReferences")
-        .and_then(Value::as_array_mut)
-    {
-        for envelope_reference in envelope_references {
-            if let Some(envelope_reference_object) = envelope_reference.as_object_mut() {
-                envelope_reference_object.remove("encryptedEnvelope");
-            }
-        }
-    }
-    let expected_root = derive_canonical_object_hash(&root_input)?;
-    if set_root != expected_root {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeCommitmentRootMismatch",
-            "privateVssEnvelopeCommitmentRoot does not match the canonical private VSS envelope commitment set",
-            "setupPackage.privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
-        )?));
-    }
-
-    Ok(None)
+        "envelopeReferences": envelope_references,
+    }))
 }
 
 pub(super) fn private_vss_envelope_bindings_from_package(
@@ -172,13 +183,7 @@ pub(super) fn private_vss_envelope_bindings_from_package(
                 "commonRandomness.publicMatrixSeedHash was required before private VSS binding extraction",
             )
         })?;
-    let vss_coefficient_commitment_root = accepted_vss_coefficient_commitment_root(setup_package)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "an accepted VSS coefficient commitment root was required before private VSS binding extraction",
-            )
-        })?;
+    let vss_coefficient_commitment_root = accepted_vss_coefficient_commitment_root(setup_package)?;
 
     match private_vss_envelope_bindings_from_set(
         commitment_set,
@@ -187,7 +192,7 @@ pub(super) fn private_vss_envelope_bindings_from_package(
         trustee_registrations,
         &source_trustee_commitment_roots,
         public_matrix_seed_hash,
-        vss_coefficient_commitment_root,
+        &vss_coefficient_commitment_root,
     )? {
         Ok(bindings) => Ok(bindings),
         Err(refusal) => Err(CanonicalError::new(
@@ -211,6 +216,7 @@ fn private_vss_envelope_bindings_from_set(
         .and_then(Value::as_array)
     else {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "privateVssEnvelopeReferencesMissing",
             "privateVssEnvelopeCommitments.envelopeReferences must contain every source-trustee-recipient envelope commitment",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
@@ -220,6 +226,7 @@ fn private_vss_envelope_bindings_from_set(
     let expected_envelope_count = (roster.participant_count * roster.participant_count) as usize;
     if envelope_references.len() != expected_envelope_count {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "privateVssEnvelopeReferenceCountMismatch",
             "privateVssEnvelopeCommitments.envelopeReferences must contain one record for every source-trustee-recipient trustee pair",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
@@ -251,6 +258,7 @@ fn private_vss_envelope_bindings_from_set(
             .is_some()
         {
             return Ok(Err(Refusal::new(
+                crate::foundation::RefusalReason::Equivocation,
                 "privateVssEnvelopeReferenceDuplicate",
                 "privateVssEnvelopeCommitments.envelopeReferences must have distinct source-trustee-recipient trustee pairs",
                 "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
@@ -274,6 +282,7 @@ fn private_vss_envelope_binding_from_reference(
         != Some(PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE)
     {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "privateVssEnvelopeReferenceTypeMismatch",
             "private VSS envelope commitment objectType must be PrivateVssEnvelopeCommitment",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.objectType",
@@ -286,6 +295,7 @@ fn private_vss_envelope_binding_from_reference(
         Some(value) => value,
         None => {
             return Ok(Err(Refusal::new(
+                crate::foundation::RefusalReason::MissingPrerequisite,
                 "privateVssEnvelopeSourceTrusteeMissing",
                 "private VSS envelope commitment must bind sourceTrusteeIdentity",
                 "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.sourceTrusteeIdentity",
@@ -299,6 +309,7 @@ fn private_vss_envelope_binding_from_reference(
         Some(value) => value,
         None => {
             return Ok(Err(Refusal::new(
+                crate::foundation::RefusalReason::MissingPrerequisite,
                 "privateVssEnvelopeSourceTrusteePositionMissing",
                 "private VSS envelope commitment must bind sourceTrusteeRosterPosition",
                 "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.sourceTrusteeRosterPosition",
@@ -311,6 +322,7 @@ fn private_vss_envelope_binding_from_reference(
         != Some(source_trustee_identity)
     {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::WrongContext,
             "privateVssEnvelopeSourceTrusteeMismatch",
             "private VSS envelope commitment source trustee must match the setup-intent trustee identity",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.sourceTrusteeIdentity",
@@ -324,6 +336,7 @@ fn private_vss_envelope_binding_from_reference(
         Some(value) => value,
         None => {
             return Ok(Err(Refusal::new(
+                crate::foundation::RefusalReason::MissingPrerequisite,
                 "privateVssEnvelopeRecipientMissing",
                 "private VSS envelope commitment must bind recipientIdentity",
                 "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.recipientIdentity",
@@ -337,6 +350,7 @@ fn private_vss_envelope_binding_from_reference(
         Some(value) => value,
         None => {
             return Ok(Err(Refusal::new(
+                crate::foundation::RefusalReason::MissingPrerequisite,
                 "privateVssEnvelopeRecipientPositionMissing",
                 "private VSS envelope commitment must bind recipientRosterPosition",
                 "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.recipientRosterPosition",
@@ -349,6 +363,7 @@ fn private_vss_envelope_binding_from_reference(
         != Some(recipient_identity)
     {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::WrongContext,
             "privateVssEnvelopeRecipientMismatch",
             "private VSS envelope commitment recipient must match the setup-intent trustee identity",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.recipientIdentity",
@@ -377,13 +392,10 @@ fn private_vss_envelope_binding_from_reference(
             ));
         }
     };
-    for field_name in [
-        "privateEnvelopeHash",
-        "localVerificationRoot",
-        "encryptedEnvelopeHash",
-    ] {
+    for field_name in ["privateEnvelopeHash", "encryptedEnvelopeHash"] {
         let Some(hash) = envelope_reference.get(field_name).and_then(Value::as_str) else {
             return Ok(Err(Refusal::new(
+                crate::foundation::RefusalReason::MissingPrerequisite,
                 "privateVssEnvelopeHashMissing",
                 format!("private VSS envelope commitment must bind {field_name}"),
                 format!(
@@ -423,8 +435,6 @@ fn private_vss_envelope_binding_from_reference(
         recipient_identity: recipient_identity.to_string(),
         source_trustee_commitment_root: expected_source_trustee_commitment_root.to_string(),
         private_envelope_hash: value_string(envelope_reference, "privateEnvelopeHash")?.to_string(),
-        local_verification_root: value_string(envelope_reference, "localVerificationRoot")?
-            .to_string(),
     }))
 }
 
@@ -436,6 +446,7 @@ fn verify_encrypted_private_vss_envelope(
 ) -> CanonicalResult<Result<(), Refusal>> {
     if !encrypted_envelope.is_object() {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "privateVssEncryptedEnvelopeNotObject",
             "encryptedEnvelope must be a root-bound object",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope",
@@ -445,6 +456,7 @@ fn verify_encrypted_private_vss_envelope(
         != Some(ENCRYPTED_PRIVATE_VSS_ENVELOPE_OBJECT_TYPE)
     {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "privateVssEncryptedEnvelopeTypeMismatch",
             "encryptedEnvelope.objectType must be EncryptedPrivateVssShareEnvelope",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.objectType",
@@ -456,6 +468,7 @@ fn verify_encrypted_private_vss_envelope(
         != Some(expected_recipient_mailbox_public_key_hash)
     {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::WrongHashOrRoot,
             "privateVssEncryptedEnvelopeBindingMismatch",
             "encryptedEnvelope.recipientMailboxPublicKeyHash must match the accepted recipient mailbox key",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.recipientMailboxPublicKeyHash",
@@ -463,6 +476,7 @@ fn verify_encrypted_private_vss_envelope(
     }
     if encrypted_envelope.get("privateEnvelopeAad") != Some(expected_aad) {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::WrongHashOrRoot,
             "privateVssEncryptedEnvelopeAadMismatch",
             "encryptedEnvelope.privateEnvelopeAad must match the accepted private envelope associated-data object",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.privateEnvelopeAad",
@@ -474,6 +488,7 @@ fn verify_encrypted_private_vss_envelope(
         .and_then(Value::as_str)
     else {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "privateVssEncryptedEnvelopeCiphertextMissing",
             "encryptedEnvelope.kemCiphertextBytesHex must be present",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.kemCiphertextBytesHex",
@@ -489,6 +504,7 @@ fn verify_encrypted_private_vss_envelope(
         .and_then(Value::as_str)
     else {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "privateVssEncryptedEnvelopeNonceMissing",
             "encryptedEnvelope.aeadNonceHex must be present",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.aeadNonceHex",
@@ -500,6 +516,7 @@ fn verify_encrypted_private_vss_envelope(
         .and_then(Value::as_str)
     else {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "privateVssEncryptedEnvelopeCiphertextMissing",
             "encryptedEnvelope.ciphertextBytesHex must be present",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.ciphertextBytesHex",
@@ -510,6 +527,7 @@ fn verify_encrypted_private_vss_envelope(
     let expected_encrypted_envelope_hash = derive_canonical_object_hash(encrypted_envelope)?;
     if encrypted_envelope_hash != expected_encrypted_envelope_hash {
         return Ok(Err(Refusal::new(
+            crate::foundation::RefusalReason::WrongHashOrRoot,
             "privateVssEncryptedEnvelopeHashMismatch",
             "encryptedEnvelopeHash does not match the canonical encrypted private VSS envelope object",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelopeHash",
@@ -544,12 +562,18 @@ fn private_vss_envelope_aad_value(
 }
 
 fn private_vss_envelope_refusal(
+    refusal_reason: crate::foundation::RefusalReason,
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
 ) -> CanonicalResult<Refusals> {
     Ok(setup_refusals(
         Vec::new(),
-        vec![Refusal::new(reason_code, message, object_path)],
+        vec![Refusal::new(
+            refusal_reason,
+            reason_code,
+            message,
+            object_path,
+        )],
     ))
 }

@@ -182,60 +182,47 @@ fn round_one_aggregate_recomputation_rejects_malformed_components() {
 
 #[test]
 fn trustee_proof_statements_reject_noncanonical_context_and_hash_fields() {
-    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
-        "ctxbad01",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        3,
-    )
-    .expect("development instance");
-    statement.context.setup_context_hash = "00".repeat(63);
-    assert!(
-        statement.validate_shape().is_err(),
-        "setupContextHash must be a complete lowercase 512-bit protocol hash"
-    );
+    let mutation_cases: [(&str, &str, fn(&mut TrusteeEvaluationKeyStatement)); 4] = [
+        (
+            "ctxbad01",
+            "setupContextHash must be a complete lowercase 512-bit protocol hash",
+            |statement| statement.context.setup_context_hash = "00".repeat(63),
+        ),
+        (
+            "ctxbad02",
+            "binding roots must be complete lowercase 512-bit protocol hashes",
+            |statement| statement.context.binding_roots[0] = "aa".repeat(63),
+        ),
+        (
+            "ctxbad03",
+            "key-switch context tokens must reject whitespace",
+            |statement| {
+                statement.keys_mut()[0].key_switch_domain = "relinearization round one".to_string();
+            },
+        ),
+        (
+            "ctxbad04",
+            "same-secret linkage public matrix seed hash must be canonical",
+            |statement| {
+                statement
+                    .same_secret_linkage_mut()
+                    .expect("same-secret linkage")
+                    .public_matrix_seed_hash = "bb".repeat(63);
+            },
+        ),
+    ];
 
-    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
-        "ctxbad02",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        3,
-    )
-    .expect("development instance");
-    statement.context.binding_roots[0] = "aa".repeat(63);
-    assert!(
-        statement.validate_shape().is_err(),
-        "binding roots must be complete lowercase 512-bit protocol hashes"
-    );
-
-    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
-        "ctxbad03",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        3,
-    )
-    .expect("development instance");
-    statement.keys_mut()[0].key_switch_domain = "relinearization round one".to_string();
-    assert!(
-        statement.validate_shape().is_err(),
-        "key-switch context tokens must reject whitespace"
-    );
-
-    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
-        "ctxbad04",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        3,
-    )
-    .expect("development instance");
-    statement
-        .same_secret_linkage_mut()
-        .expect("same-secret linkage")
-        .public_matrix_seed_hash = "bb".repeat(63);
-    assert!(
-        statement.validate_shape().is_err(),
-        "same-secret linkage public matrix seed hash must be canonical"
-    );
+    for (fixture_seed, rejection_message, mutate_statement) in mutation_cases {
+        let (mut statement, _) = generate_development_trustee_instance_with_linkage(
+            fixture_seed,
+            &[round_one(2)],
+            SMALL_RING_DEGREE,
+            3,
+        )
+        .expect("development instance");
+        mutate_statement(&mut statement);
+        assert!(statement.validate_shape().is_err(), "{rejection_message}");
+    }
 }
 
 #[test]
@@ -245,32 +232,36 @@ fn private_vss_statement_rejects_noncanonical_context_and_hash_fields() {
         .validate_shape()
         .expect("canonical private VSS statement");
 
-    let mut statement = private_vss_statement_for_context_tests();
-    statement.context.setup_context_hash = "11".repeat(63);
-    assert!(
-        statement.validate_shape().is_err(),
-        "private VSS setupContextHash must be canonical"
-    );
+    let mutation_cases: [(&str, fn(&mut TrusteeEvaluationKeyStatement)); 3] = [
+        (
+            "private VSS setupContextHash must be canonical",
+            |statement| statement.context.setup_context_hash = "11".repeat(63),
+        ),
+        (
+            "private VSS public matrix seed hash must be canonical",
+            |statement| {
+                statement
+                    .private_vss_share_mut()
+                    .expect("private VSS statement")
+                    .public_matrix_seed_hash = "66".repeat(63);
+            },
+        ),
+        (
+            "private VSS coefficient commitment roots must be canonical",
+            |statement| {
+                statement
+                    .private_vss_share_mut()
+                    .expect("private VSS statement")
+                    .coefficient_commitment_roots[0] = "77".repeat(63);
+            },
+        ),
+    ];
 
-    let mut statement = private_vss_statement_for_context_tests();
-    statement
-        .private_vss_share_mut()
-        .expect("private VSS statement")
-        .public_matrix_seed_hash = "66".repeat(63);
-    assert!(
-        statement.validate_shape().is_err(),
-        "private VSS public matrix seed hash must be canonical"
-    );
-
-    let mut statement = private_vss_statement_for_context_tests();
-    statement
-        .private_vss_share_mut()
-        .expect("private VSS statement")
-        .coefficient_commitment_roots[0] = "77".repeat(63);
-    assert!(
-        statement.validate_shape().is_err(),
-        "private VSS coefficient commitment roots must be canonical"
-    );
+    for (rejection_message, mutate_statement) in mutation_cases {
+        let mut statement = private_vss_statement_for_context_tests();
+        mutate_statement(&mut statement);
+        assert!(statement.validate_shape().is_err(), "{rejection_message}");
+    }
 }
 
 // Private-VSS message (Shamir coefficient) columns are committed witnesses

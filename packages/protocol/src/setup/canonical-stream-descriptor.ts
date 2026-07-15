@@ -6,7 +6,7 @@ const maximumCanonicalStreamChunkCount = Math.ceil(
     maximumCanonicalStreamByteLength / foundationProfile.streamChunkByteLength,
 );
 const maximumCanonicalStreamDescriptorByteLength =
-    104 + canonicalHashByteLength * maximumCanonicalStreamChunkCount;
+    34 + canonicalHashByteLength * maximumCanonicalStreamChunkCount;
 
 const isUint8Array = (value: unknown): value is Uint8Array =>
     ArrayBuffer.isView(value) &&

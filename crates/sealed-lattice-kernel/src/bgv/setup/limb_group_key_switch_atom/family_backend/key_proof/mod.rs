@@ -33,6 +33,7 @@ use super::low_degree::{
 };
 use super::merkle::{MerkleDigest, sorted_unique_indices};
 use super::polynomial;
+use super::private_randomness::PrivateProofRandomness;
 use super::transcript::Transcript;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 

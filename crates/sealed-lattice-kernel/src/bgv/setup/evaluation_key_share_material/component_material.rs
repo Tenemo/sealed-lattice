@@ -166,15 +166,16 @@ pub(in crate::bgv::setup) struct EvaluationKeyShareDerivedMaterialBinding<'a> {
 pub(in crate::bgv::setup) struct DecodedEvaluationKeyShareComponentMaterial {
     pub(in crate::bgv::setup) component_b_by_digit: Vec<Vec<Vec<u64>>>,
     pub(in crate::bgv::setup) ring_degree: usize,
+    pub(in crate::bgv::setup) component_vector_root: String,
 }
 
 pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_root(
     proof_family: EvaluationKeyShareProofFamily,
-    proof_record: &Value,
+    level: usize,
+    component_vector_root: &str,
     derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
     ring_degree: usize,
 ) -> CanonicalResult<String> {
-    let level = value_u64(proof_record, "level")?;
     derive_canonical_object_hash(&json!({
         "objectType": "EvaluationKeyShareComponentMaterialReference",
         "proofFamily": proof_family.proof_family(),
@@ -184,16 +185,15 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
         "keySwitchSeedHex": derived_binding.key_switch_seed_hex,
         "level": level,
         "ringDegree": ring_degree,
-        "keySwitchComponentVectorRoot": string_field(
-            proof_record,
-            "keySwitchComponentVectorRoot",
-        )?,
+        "keySwitchComponentVectorRoot": component_vector_root,
     }))
 }
 
 pub(in crate::bgv::setup) fn component_b_vectors_from_record(
     proof_family: EvaluationKeyShareProofFamily,
     record: &Value,
+    level: usize,
+    ring_degree: usize,
     derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
     accepted_setup_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
@@ -209,13 +209,15 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_record(
     )?;
     let decoded_material = decode_evaluation_key_share_component_vectors(
         proof_family,
-        record,
+        level,
+        ring_degree,
         derived_binding,
         &chunks,
     )?;
     let canonical_material_root = evaluation_key_share_component_material_reference_root(
         proof_family,
-        record,
+        level,
+        &decoded_material.component_vector_root,
         derived_binding,
         decoded_material.ring_degree,
     )?;
@@ -298,7 +300,8 @@ impl<'a> CanonicalComponentMaterialReader<'a> {
 
 fn decode_evaluation_key_share_component_vectors(
     proof_family: EvaluationKeyShareProofFamily,
-    record: &Value,
+    level: usize,
+    ring_degree: usize,
     derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
     material_chunks: &[Vec<u8>],
 ) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
@@ -309,26 +312,11 @@ fn decode_evaluation_key_share_component_vectors(
             "evaluation-key component material has the wrong format marker",
         ));
     }
-    let level = usize::try_from(reader.read_u64()?).map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material level does not fit usize",
-        )
-    })?;
-    let ring_degree = usize::try_from(reader.read_u64()?).map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material ringDegree does not fit usize",
-        )
-    })?;
     let digit_count = level.checked_add(1).ok_or_else(|| {
         invalid_evaluation_key_share_material("evaluation-key digit count overflowed")
     })?;
     let limb_count = digit_count;
-    if level != value_usize(record, "level")?
-        || ring_degree == 0
-        || ring_degree > POLYNOMIAL_DEGREE
-        || limb_count == 0
-        || limb_count > DATA_PRIMES.len()
-    {
+    if ring_degree == 0 || limb_count == 0 || limb_count > DATA_PRIMES.len() {
         return Err(invalid_evaluation_key_share_material(
             "evaluation-key component material shape does not match the proof record",
         ));
@@ -336,12 +324,8 @@ fn decode_evaluation_key_share_component_vectors(
     validate_hex_string(derived_binding.key_switch_seed_hex, "keySwitchSeedHex")?;
     let mut component_b_by_digit = vec![vec![Vec::<u64>::new(); limb_count]; digit_count];
     let mut entries = Vec::with_capacity(digit_count * limb_count);
-    for (digit_index, component_b_limbs) in component_b_by_digit.iter_mut().enumerate() {
-        for (rns_limb_index, (component_b_limb, &rns_prime)) in component_b_limbs
-            .iter_mut()
-            .zip(DATA_PRIMES.iter())
-            .enumerate()
-        {
+    for component_b_limbs in &mut component_b_by_digit {
+        for (component_b_limb, &rns_prime) in component_b_limbs.iter_mut().zip(DATA_PRIMES.iter()) {
             let mut coefficients = Vec::with_capacity(ring_degree);
             for _ in 0..ring_degree {
                 let coefficient = reader.read_u64()?;
@@ -353,9 +337,6 @@ fn decode_evaluation_key_share_component_vectors(
                 coefficients.push(coefficient);
             }
             entries.push(json!({
-                "digitIndex": digit_index,
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": rns_prime,
                 "coefficientsLeHex": coefficient_vector_le_hex(&coefficients),
             }));
             *component_b_limb = coefficients;
@@ -366,7 +347,7 @@ fn decode_evaluation_key_share_component_vectors(
             "evaluation-key component material has trailing bytes",
         ));
     }
-    let expected_root = evaluation_key_share_component_vector_root(
+    let component_vector_root = evaluation_key_share_component_vector_root(
         proof_family,
         derived_binding.key_switch_domain,
         derived_binding.key_switch_seed_hex,
@@ -374,15 +355,11 @@ fn decode_evaluation_key_share_component_vectors(
         ring_degree,
         &entries,
     )?;
-    if string_field(record, "keySwitchComponentVectorRoot")? != expected_root {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component vector root does not match authenticated public material",
-        ));
-    }
 
     Ok(DecodedEvaluationKeyShareComponentMaterial {
         component_b_by_digit,
         ring_degree,
+        component_vector_root,
     })
 }
 
@@ -404,7 +381,7 @@ pub(in crate::bgv::setup) enum VerifiedComponentMaterialBacking {
     Memory(Vec<Vec<u8>>),
 }
 
-// Stream lifecycle: begin validates the manifest and opens a staging sink,
+// Stream lifecycle: begin validates the descriptor and opens a staging sink,
 // absorb validates and stages each chunk, and finish authenticates the complete
 // stream and registers its verified handle.
 pub(crate) use component_material_stream::{

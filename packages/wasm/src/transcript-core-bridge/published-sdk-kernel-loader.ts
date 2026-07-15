@@ -29,7 +29,6 @@ export const createPublishedSdkKernelBindings = (
 ): PublishedSdkKernel => {
     return {
         beginAcceptedSetupSession: () => openAcceptedSetupSession(getKernel()),
-        exportedFunctionNames: runtime.exportedFunctionNames,
         verifyPrivateVssShareEnvelope: (input) =>
             runtime.executeCommand<
                 ReturnType<PublishedSdkKernel['verifyPrivateVssShareEnvelope']>
@@ -43,41 +42,6 @@ export const createPublishedSdkKernelBindings = (
                     input.sourceTrusteeCoefficientCommitmentMaterialRecords,
                 privateEnvelope: input.privateEnvelope,
                 expectedPrivateEnvelopeHash: input.expectedPrivateEnvelopeHash,
-                expectedLocalVerificationRoot:
-                    input.expectedLocalVerificationRoot,
-            }),
-        beginBgvTargetDecryptionResultRelease: (input) =>
-            runtime.executeCommand<
-                ReturnType<
-                    PublishedSdkKernel['beginBgvTargetDecryptionResultRelease']
-                >
-            >({
-                command: 'BeginBgvTargetDecryptionResultRelease',
-                releaseVerificationId: input.releaseVerificationId,
-                acceptedSetupHandle: input.acceptedSetupHandle,
-                targetAcceptedRecord: input.targetAcceptedRecord,
-                targetCiphertexts: input.targetCiphertexts,
-                targetCiphertextBinding: input.targetCiphertextBinding,
-                targetShareProfile: input.targetShareProfile,
-            }),
-        absorbBgvTargetDecryptionResultReleaseShare: (input) =>
-            runtime.executeCommand<
-                ReturnType<
-                    PublishedSdkKernel['absorbBgvTargetDecryptionResultReleaseShare']
-                >
-            >({
-                command: 'AbsorbBgvTargetDecryptionResultReleaseShare',
-                releaseVerificationId: input.releaseVerificationId,
-                targetShareProof: input.targetShareProof,
-            }),
-        finishBgvTargetDecryptionResultRelease: (input) =>
-            runtime.executeCommand<
-                ReturnType<
-                    PublishedSdkKernel['finishBgvTargetDecryptionResultRelease']
-                >
-            >({
-                command: 'FinishBgvTargetDecryptionResultRelease',
-                releaseVerificationId: input.releaseVerificationId,
             }),
     };
 };

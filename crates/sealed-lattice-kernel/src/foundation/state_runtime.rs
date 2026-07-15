@@ -21,7 +21,6 @@ pub(crate) const STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH: usize = 32;
 const STATE_VERIFIER_IDENTITY_BYTE_LENGTH: usize = 64;
 const STATE_VERIFIER_HASH_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
 pub(crate) const STATE_DURABLE_BINDING_BYTE_LENGTH: usize = 674;
-pub(crate) const STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH: usize = 3_801;
 
 const STATE_VERIFIER_CONFIGURATION_VERSION: u16 = 1;
 const FIXED_CONFIGURATION_BYTE_LENGTH: usize = 2 + 3 * Hash512::BYTE_LENGTH + 2 + 4;
@@ -46,18 +45,12 @@ struct StateVerifierRuntimeSession {
     capability: Zeroizing<[u8; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH]>,
     handle: u32,
     verifier: StateVerifier,
-    prepared_witness_votes: HashMap<u32, super::ObjectEnvelope>,
     verified_objects: HashMap<u32, RuntimeVerifiedStateObject>,
 }
 
 impl StateVerifierRuntimeSession {
     fn require_object_capacity(&self) -> RuntimeResult<()> {
-        if self
-            .verified_objects
-            .len()
-            .saturating_add(self.prepared_witness_votes.len())
-            >= MAXIMUM_RETAINED_VERIFIED_STATE_OBJECT_COUNT
-        {
+        if self.verified_objects.len() >= MAXIMUM_RETAINED_VERIFIED_STATE_OBJECT_COUNT {
             return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
         }
         Ok(())
@@ -167,7 +160,6 @@ impl StateVerifierRuntimeRegistry {
             capability: Zeroizing::new(capability),
             handle,
             verifier,
-            prepared_witness_votes: HashMap::new(),
             verified_objects: HashMap::new(),
         });
         Ok(handle)
@@ -526,69 +518,6 @@ impl StateVerifierRuntimeRegistry {
         Ok(object_handle)
     }
 
-    fn prepare_witness_vote(
-        &mut self,
-        session_handle: u32,
-        capability: &[u8],
-        verified_intent_handle: u32,
-        witness_participant_id: ParticipantIdentity,
-        signature_message_output: &mut [u8],
-    ) -> RuntimeResult<u32> {
-        if signature_message_output.len() != STATE_VERIFIER_HASH_BYTE_LENGTH {
-            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
-        }
-        let (envelope, signature_message) = {
-            let session = self.require_active_session(session_handle, capability)?;
-            session.require_object_capacity()?;
-            let binding = match session.verified_objects.get(&verified_intent_handle) {
-                Some(RuntimeVerifiedStateObject::ReservationIntent(intent)) => {
-                    intent.durable_binding()
-                }
-                Some(RuntimeVerifiedStateObject::OutputIntent(intent)) => intent.durable_binding(),
-                Some(RuntimeVerifiedStateObject::RecoveryIntent(intent)) => {
-                    intent.durable_binding()
-                }
-                Some(_) => return Err(refusal_status(RefusalReason::WrongTypeOrLength)),
-                None => return Err(refusal_status(RefusalReason::ConsumedState)),
-            };
-            session
-                .verifier
-                .prepare_state_witness_vote(binding, witness_participant_id)
-                .map_err(|error| refusal_status(error.refusal_reason))?
-        };
-        let prepared_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
-        signature_message_output.copy_from_slice(signature_message.as_bytes());
-        self.require_active_session_mut(session_handle, capability)?
-            .prepared_witness_votes
-            .insert(prepared_handle, envelope);
-        Ok(prepared_handle)
-    }
-
-    fn finish_witness_vote(
-        &mut self,
-        session_handle: u32,
-        capability: &[u8],
-        prepared_handle: u32,
-        signature: &[u8],
-    ) -> RuntimeResult<Vec<u8>> {
-        let signature = signature
-            .try_into()
-            .map_err(|_| refusal_status(RefusalReason::WrongTypeOrLength))?;
-        let session = self.require_active_session_mut(session_handle, capability)?;
-        let envelope = session
-            .prepared_witness_votes
-            .remove(&prepared_handle)
-            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
-        let canonical_carrier = session
-            .verifier
-            .finish_prepared_state_witness_vote(envelope, signature)
-            .map_err(|error| refusal_status(error.refusal_reason))?;
-        if canonical_carrier.len() != STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH {
-            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
-        }
-        Ok(canonical_carrier)
-    }
-
     fn describe(
         &self,
         session_handle: u32,
@@ -613,10 +542,6 @@ impl StateVerifierRuntimeRegistry {
             .verified_objects
             .remove(&verified_object_handle)
             .is_none()
-            && session
-                .prepared_witness_votes
-                .remove(&verified_object_handle)
-                .is_none()
         {
             return Err(refusal_status(RefusalReason::ConsumedState));
         }
@@ -930,36 +855,6 @@ pub(crate) fn certify_verified_state_intent_from_unordered_vote_carriers(
             verified_intent_handle,
             &canonical_vote_carriers,
         )
-    })
-}
-
-pub(crate) fn prepare_state_witness_vote(
-    session_handle: u32,
-    capability: &[u8],
-    verified_intent_handle: u32,
-    witness_participant_id: &[u8],
-    signature_message_output: &mut [u8],
-) -> RuntimeResult<u32> {
-    let witness_participant_id = decode_participant_identity(witness_participant_id)?;
-    with_runtime_registry(|registry| {
-        registry.prepare_witness_vote(
-            session_handle,
-            capability,
-            verified_intent_handle,
-            witness_participant_id,
-            signature_message_output,
-        )
-    })
-}
-
-pub(crate) fn finish_state_witness_vote(
-    session_handle: u32,
-    capability: &[u8],
-    prepared_handle: u32,
-    signature: &[u8],
-) -> RuntimeResult<Vec<u8>> {
-    with_runtime_registry(|registry| {
-        registry.finish_witness_vote(session_handle, capability, prepared_handle, signature)
     })
 }
 

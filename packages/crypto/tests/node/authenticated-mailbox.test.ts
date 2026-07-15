@@ -9,7 +9,6 @@ import {
     AuthenticatedMailboxCleanupError,
     openAuthenticatedMailbox,
     sealAuthenticatedMailbox,
-    sealResetSafeSetupMailbox,
     type AuthenticatedMailboxCarrier,
     type AuthenticatedMailboxGcmRuntime,
     type AuthenticatedMailboxInboundSlotAuthority,
@@ -29,6 +28,7 @@ import {
     hash512Hex,
     openBrowserLocalExternalKeyProvider,
 } from '#packages/crypto/src/index';
+import { createBrowserLocalKeyOperations } from '#packages/crypto/tests/support/browser-local-key-operations';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -111,26 +111,6 @@ const kernel: AuthenticatedMailboxKernel = {
         objectHash('test/mailbox-envelope', value),
 };
 
-const privateRandomnessKernel = {
-    encodeActionRandomnessDerivationInput: (value: unknown) => ({
-        canonicalBytesHex: canonicalBytesHex(value),
-    }),
-    deriveActionRandomnessCommitment: (input: {
-        readonly actionRandomnessRootHex: string;
-        readonly value: unknown;
-    }) => objectHash('test/action-randomness-commitment', input),
-    encodePrivateRandomBlockInput: (value: unknown) => ({
-        canonicalBytesHex: canonicalBytesHex(value),
-    }),
-    deriveSetupMailboxSlotHash: (value: unknown) =>
-        objectHash('test/setup-mailbox-slot', value),
-};
-
-const resetSafeKernel = Object.freeze({
-    ...kernel,
-    ...privateRandomnessKernel,
-});
-
 const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
     if (left.byteLength !== right.byteLength) {
         return false;
@@ -192,10 +172,6 @@ const makeStreamBoundary = (): AuthenticatedMailboxStreamBoundary => ({
                 return {
                     totalByteLength: String(totalByteLength),
                     orderedChunkDigests: chunkDigests,
-                    fullObjectDigest: hash512Hex(
-                        'test/mailbox-stream-full',
-                        chunkDigests.map(hexToBytes),
-                    ),
                 };
             },
             state: () => state,
@@ -239,10 +215,6 @@ const makeStreamBoundary = (): AuthenticatedMailboxStreamBoundary => ({
             },
             chunkCount,
             finish: () => {
-                const fullDigest = hash512Hex(
-                    'test/mailbox-stream-full',
-                    observedChunkDigests.map(hexToBytes),
-                );
                 if (
                     state !== 'active' ||
                     observedChunkDigests.length !== chunkCount ||
@@ -250,8 +222,7 @@ const makeStreamBoundary = (): AuthenticatedMailboxStreamBoundary => ({
                         (digest, chunkIndex) =>
                             digest !==
                             descriptor.orderedChunkDigests[chunkIndex],
-                    ) ||
-                    fullDigest !== descriptor.fullObjectDigest
+                    )
                 ) {
                     state = 'failed';
                     throw Object.assign(new Error('stream digest mismatch'), {
@@ -427,6 +398,10 @@ const makeOutboundCache = (): {
         cache: {
             reserve: (input) => {
                 const key = slotKey(input.producerSlot);
+                const chunkCount = Math.ceil(
+                    input.plaintextByteLength /
+                        foundationProfile.streamChunkByteLength,
+                );
                 const cached = records.get(key);
                 const stagedChunks: Uint8Array[] = [];
                 let cancelled = false;
@@ -461,7 +436,7 @@ const makeOutboundCache = (): {
                         if (
                             cached !== undefined ||
                             cancelled ||
-                            stagedChunks.length !== input.chunkCount
+                            stagedChunks.length !== chunkCount
                         ) {
                             return Promise.reject(
                                 new Error('Invalid cache commit state.'),
@@ -584,7 +559,10 @@ const makeStagingBoundary = (input?: {
     const observation = { disposeCount: 0 };
     return {
         boundary: {
-            open: ({ chunkCount }) => {
+            open: ({ totalByteLength }) => {
+                const chunkCount = Math.ceil(
+                    totalByteLength / foundationProfile.streamChunkByteLength,
+                );
                 const chunks: Uint8Array[] = [];
                 let disposed = false;
                 let sealed = false;
@@ -753,25 +731,11 @@ describe('authenticated mailbox', () => {
         const sourceKeys = keyPair(0x21);
         const recipientKeys = keyPair(0x51);
         const sourceProvider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: sourceKeys.signing.publicKey,
-                secretKey: sourceKeys.signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: sourceKeys.mailbox.publicKey,
-                decapsulationKey: sourceKeys.mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations(sourceKeys),
             entropy: deterministicEntropy(40),
         });
         const recipientProvider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: recipientKeys.signing.publicKey,
-                secretKey: recipientKeys.signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: recipientKeys.mailbox.publicKey,
-                decapsulationKey: recipientKeys.mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations(recipientKeys),
             entropy: deterministicEntropy(80),
         });
         const plaintext = new Uint8Array(
@@ -964,124 +928,20 @@ describe('authenticated mailbox', () => {
         }
     });
 
-    it('retransmits a reset-safe producer slot from its byte-identical cache without consuming plaintext again', async () => {
-        const sourceKeys = keyPair(0x24);
-        const recipientKeys = keyPair(0x54);
-        let entropyCallCount = 0;
-        const sourceProvider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: sourceKeys.signing.publicKey,
-                secretKey: sourceKeys.signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: sourceKeys.mailbox.publicKey,
-                decapsulationKey: sourceKeys.mailbox.secretKey,
-            },
-            entropy: (byteLength) => {
-                entropyCallCount += 1;
-                return new Uint8Array(byteLength).fill(entropyCallCount);
-            },
-        });
-        const actionRandomnessRoot = new Uint8Array(64).fill(0xa5);
-        const context = {
-            suiteId: associatedData.suiteId,
-            ceremonyContextHash: associatedData.ceremonyContextHash,
-            actionContextHash: associatedData.actionContextHash,
-            participantId: associatedData.sourceParticipantId,
-        } as const;
-        const actionRandomnessCapability = sourceProvider.bindActionRandomness({
-            actionRandomnessRoot,
-            expectedActionRandomnessCommitment:
-                privateRandomnessKernel.deriveActionRandomnessCommitment({
-                    actionRandomnessRootHex: bytesToHex(actionRandomnessRoot),
-                    value: context,
-                }),
-            context,
-            kernel: privateRandomnessKernel,
-        });
-        actionRandomnessRoot.fill(0);
-        const entropyCallsAfterSelfTests = entropyCallCount;
-        const plaintext = textEncoder.encode(
-            canonicalJson({ objectType: 'PrivateVssShareEnvelope', value: 9 }),
-        );
-        const outbound = makeOutboundCache();
-        const firstCiphertext: Uint8Array[] = [];
-        let plaintextPullCount = 0;
-        const seal = (ciphertext: Uint8Array[]) =>
-            sealResetSafeSetupMailbox({
-                associatedData,
-                actionRandomnessCapability,
-                emitCiphertextChunk: ({ bytes }) => {
-                    ciphertext.push(new Uint8Array(bytes).slice());
-                    return Promise.resolve();
-                },
-                gcmRuntime: makeGcmRuntime({ authenticationFinished: false }),
-                kernel: resetSafeKernel,
-                outboundCache: outbound.cache,
-                plaintextByteLength: plaintext.byteLength,
-                pullPlaintextChunk: (input) => {
-                    plaintextPullCount += 1;
-                    return sourceFromBytes(plaintext)(input);
-                },
-                recipientEncapsulationKey: recipientKeys.mailbox.publicKey,
-                sourceSigningCapability: sourceProvider.signingCapability,
-                sourceVerificationKey: sourceKeys.signing.publicKey,
-                streamBoundary: makeStreamBoundary(),
-            });
-        const firstCarrier = await seal(firstCiphertext);
-        const pullCountAfterFirstSeal = plaintextPullCount;
-        const retransmittedCiphertext: Uint8Array[] = [];
-        const retransmittedCarrier = await seal(retransmittedCiphertext);
-        expect(retransmittedCarrier).toEqual(firstCarrier);
-        expect(retransmittedCiphertext).toEqual(firstCiphertext);
-        expect(plaintextPullCount).toBe(pullCountAfterFirstSeal);
-        expect(entropyCallCount).toBe(entropyCallsAfterSelfTests);
-
-        sourceProvider.revokeActionRandomnessCapability(
-            actionRandomnessCapability,
-        );
-        const afterRevocation: Uint8Array[] = [];
-        expect(await seal(afterRevocation)).toEqual(firstCarrier);
-        expect(afterRevocation).toEqual(firstCiphertext);
-        sourceProvider.close();
-        plaintext.fill(0);
-    });
-
     it('refuses wrong bindings and hostile cryptographic bytes before releasing plaintext', async () => {
         const sourceKeys = keyPair(0x31);
         const recipientKeys = keyPair(0x61);
         const wrongRecipientKeys = keyPair(0x71);
         const sourceProvider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: sourceKeys.signing.publicKey,
-                secretKey: sourceKeys.signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: sourceKeys.mailbox.publicKey,
-                decapsulationKey: sourceKeys.mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations(sourceKeys),
             entropy: deterministicEntropy(100),
         });
         const recipientProvider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: recipientKeys.signing.publicKey,
-                secretKey: recipientKeys.signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: recipientKeys.mailbox.publicKey,
-                decapsulationKey: recipientKeys.mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations(recipientKeys),
             entropy: deterministicEntropy(120),
         });
         const wrongRecipientProvider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: wrongRecipientKeys.signing.publicKey,
-                secretKey: wrongRecipientKeys.signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: wrongRecipientKeys.mailbox.publicKey,
-                decapsulationKey: wrongRecipientKeys.mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations(wrongRecipientKeys),
             entropy: deterministicEntropy(140),
         });
         const plaintext = textEncoder.encode(
@@ -1175,14 +1035,7 @@ describe('authenticated mailbox', () => {
         }
         const authenticatedRecipientProvider =
             openBrowserLocalExternalKeyProvider({
-                signing: {
-                    expectedVerificationKey: recipientKeys.signing.publicKey,
-                    secretKey: recipientKeys.signing.secretKey,
-                },
-                mailbox: {
-                    expectedEncapsulationKey: recipientKeys.mailbox.publicKey,
-                    decapsulationKey: recipientKeys.mailbox.secretKey,
-                },
+                ...createBrowserLocalKeyOperations(recipientKeys),
                 entropy: deterministicEntropy(150),
             });
 
@@ -1310,25 +1163,11 @@ describe('authenticated mailbox', () => {
         const sourceKeys = keyPair(0x41);
         const recipientKeys = keyPair(0x71);
         const sourceProvider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: sourceKeys.signing.publicKey,
-                secretKey: sourceKeys.signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: sourceKeys.mailbox.publicKey,
-                decapsulationKey: sourceKeys.mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations(sourceKeys),
             entropy: deterministicEntropy(160),
         });
         const recipientProvider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: recipientKeys.signing.publicKey,
-                secretKey: recipientKeys.signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: recipientKeys.mailbox.publicKey,
-                decapsulationKey: recipientKeys.mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations(recipientKeys),
             entropy: deterministicEntropy(180),
         });
         const plaintext = textEncoder.encode('cleanup-path-mailbox-payload');

@@ -1,26 +1,10 @@
-import type { CanonicalSignedRootObject } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
     canonicalJson,
-    deriveCanonicalObjectHash,
     hash512Hex,
     openCanonicalJsonByteSource,
-    verifySignedObjectSignature,
 } from '#packages/crypto/src/index';
-import {
-    createMlDsaKeyPairFixture,
-    createProtocolSignatureFixture,
-} from '#packages/crypto/tests/support/protocol-signature-fixtures';
-
-const contextHash = deriveCanonicalObjectHash({
-    objectType: 'ActionContextHash',
-    context: 'crypto-test',
-});
-const manifestHash = deriveCanonicalObjectHash({
-    objectType: 'ManifestHash',
-    manifest: 'crypto-test',
-});
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -74,23 +58,6 @@ const streamCanonicalJson = (
         source.cancel();
     }
 };
-
-const createSignedRoot = (
-    objectRoot = deriveCanonicalObjectHash({
-        objectType: 'VssShareAcceptanceHash',
-        object: 'root',
-    }),
-): CanonicalSignedRootObject => ({
-    objectType: 'VssShareAcceptance',
-    ceremonyId: 'ceremony',
-    manifestHash,
-    objectRoot,
-    signerRole: 'Trustee',
-    signerIdentity: 'trustee',
-    recoveryEpoch: 0,
-    deviceEpoch: 0,
-    contextHash,
-});
 
 describe('crypto primitive boundary', () => {
     it('hashes large byte parts without argument spreading', () => {
@@ -295,150 +262,5 @@ describe('crypto primitive boundary', () => {
             expect(() => openCanonicalJsonByteSource(rejectedValue)).toThrow();
         }
         expect(accessorReadCount).toBe(0);
-    });
-
-    it('creates deterministic ML-DSA fixtures and verifies signed roots', () => {
-        const keyPair = createMlDsaKeyPairFixture('crypto-test-board');
-        const signedRoot = createSignedRoot();
-        const signature = createProtocolSignatureFixture({
-            publicKeyBytesHex: keyPair.publicKeyBytesHex,
-            publicKeyHash: keyPair.publicKeyHash,
-            secretKeyBytesHex: keyPair.secretKeyBytesHex,
-            signedRoot,
-        });
-
-        expect(keyPair.publicKeyHash).toBe(
-            deriveCanonicalObjectHash({
-                objectType: 'MlDsa65PublicKeyHash',
-                publicKeyBytesHex: keyPair.publicKeyBytesHex,
-            }),
-        );
-        expect(
-            createProtocolSignatureFixture({
-                publicKeyBytesHex: keyPair.publicKeyBytesHex,
-                publicKeyHash: keyPair.publicKeyHash,
-                secretKeyBytesHex: keyPair.secretKeyBytesHex,
-                signedRoot,
-            }),
-        ).toEqual(signature);
-        expect(
-            verifySignedObjectSignature(signature, {
-                ...signedRoot,
-                publicKeyHash: keyPair.publicKeyHash,
-            }),
-        ).toEqual({ isValid: true, value: signature });
-        expect(
-            verifySignedObjectSignature(signature, {
-                ...signedRoot,
-                publicKeyHash: deriveCanonicalObjectHash({
-                    objectType: 'PublicKeyHash',
-                    key: 'wrong',
-                }),
-            }),
-        ).toEqual({ isValid: false, refusalReason: 'wrongContext' });
-    });
-
-    it('rejects tampered signed roots and non-canonical hex encodings', () => {
-        const keyPair = createMlDsaKeyPairFixture('crypto-test-metadata');
-        const signedRoot = createSignedRoot();
-        const signature = createProtocolSignatureFixture({
-            publicKeyBytesHex: keyPair.publicKeyBytesHex,
-            publicKeyHash: keyPair.publicKeyHash,
-            secretKeyBytesHex: keyPair.secretKeyBytesHex,
-            signedRoot,
-        });
-        const tamperedSignedRoot = {
-            ...signature.signedRoot,
-            recoveryEpoch: 999,
-        };
-        const tamperedSignedRootSignature = {
-            ...signature,
-            signedRoot: tamperedSignedRoot,
-        };
-        const uppercaseHexSignature = {
-            ...signature,
-            publicKeyBytesHex: signature.publicKeyBytesHex.toUpperCase(),
-            signatureBytesHex: signature.signatureBytesHex.toUpperCase(),
-        };
-
-        expect(
-            verifySignedObjectSignature(tamperedSignedRootSignature, {
-                ...tamperedSignedRoot,
-                publicKeyHash: keyPair.publicKeyHash,
-            }),
-        ).toEqual({ isValid: false, refusalReason: 'invalidSignature' });
-        expect(
-            verifySignedObjectSignature(uppercaseHexSignature, {
-                ...signedRoot,
-                publicKeyHash: keyPair.publicKeyHash,
-            }),
-        ).toEqual({ isValid: false, refusalReason: 'invalidSignature' });
-    });
-
-    it('rejects signatures over malformed signed-root hash bindings', () => {
-        const keyPair = createMlDsaKeyPairFixture('crypto-test-bad-root');
-        const {
-            objectRoot: omittedObjectRoot,
-            ...signedRootWithoutObjectRoot
-        } = createSignedRoot();
-        void omittedObjectRoot;
-        const malformedRoots: CanonicalSignedRootObject[] = [
-            {
-                ...createSignedRoot(),
-                manifestHash: 'not-a-hash',
-            },
-            {
-                ...createSignedRoot(),
-                objectRoot: 'not-a-hash',
-            },
-            {
-                ...createSignedRoot(),
-                contextHash: 'not-a-hash',
-            },
-        ];
-
-        for (const signedRoot of malformedRoots) {
-            const signature = createProtocolSignatureFixture({
-                publicKeyBytesHex: keyPair.publicKeyBytesHex,
-                publicKeyHash: keyPair.publicKeyHash,
-                secretKeyBytesHex: keyPair.secretKeyBytesHex,
-                signedRoot,
-            });
-
-            expect(
-                verifySignedObjectSignature(signature, {
-                    ...signedRoot,
-                    publicKeyHash: keyPair.publicKeyHash,
-                }),
-            ).toMatchObject({
-                isValid: false,
-                refusalReason: 'wrongTypeOrLength',
-            });
-        }
-
-        const validSignature = createProtocolSignatureFixture({
-            publicKeyBytesHex: keyPair.publicKeyBytesHex,
-            publicKeyHash: keyPair.publicKeyHash,
-            secretKeyBytesHex: keyPair.secretKeyBytesHex,
-            signedRoot: createSignedRoot(),
-        });
-        const signedRootMissingObjectRoot = {
-            ...signedRootWithoutObjectRoot,
-        } as CanonicalSignedRootObject;
-        expect(
-            verifySignedObjectSignature(
-                {
-                    ...validSignature,
-                    signedRoot: signedRootMissingObjectRoot,
-                },
-                {
-                    ...signedRootMissingObjectRoot,
-                    publicKeyHash: keyPair.publicKeyHash,
-                },
-            ),
-        ).toEqual({
-            isValid: false,
-            refusalReason: 'wrongTypeOrLength',
-        });
     });
 });

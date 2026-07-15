@@ -16,6 +16,10 @@ use crate::bgv::setup::vss_commitment::{
 // rows.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct VssShareLinkageCommitment {
+    // The prover needs the context-bound seed domain that produced these
+    // roots. It comes from the canonical public commitment body rather than
+    // from a caller-supplied witness field.
+    pub(crate) commitment_context_hash: String,
     pub(crate) material_roots_by_commitment_field:
         Vec<super::super::merkle_commitment::MerkleDigest>,
 }

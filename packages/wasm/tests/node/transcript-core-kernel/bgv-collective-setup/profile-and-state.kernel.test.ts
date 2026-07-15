@@ -1,15 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createLocalTrusteeSetupStateCommitment } from '#packages/protocol/src/setup/local-trustee-setup-state';
-import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
-
-const validHash = (fill: string): string => fill.repeat(128);
-const setupRequest = {
-    ceremonyId: 'ceremony-main',
-    manifestHash: validHash('a'),
-    rosterHash: validHash('b'),
-} as const;
 
 describe('collective BGV setup kernel commands', () => {
     it('exposes the canonical logical-slot rotation schedule', async () => {
@@ -30,36 +21,4 @@ describe('collective BGV setup kernel commands', () => {
         );
     });
 
-    it('verifies protocol-built local trustee setup state commitments', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const parameters = kernel.describeCollectiveBgvSetupParameters({
-            participantCount: 4,
-        });
-        const setupContext = {
-            ceremonyId: setupRequest.ceremonyId,
-            manifestHash: setupRequest.manifestHash,
-            rosterHash: setupRequest.rosterHash,
-            setupParametersHash: parameters.setupParametersHash,
-            setupEpoch: 'setup-epoch-1',
-            participantCount: 4,
-        } satisfies CollectiveBgvSetupContext;
-        const localStateCommitment = createLocalTrusteeSetupStateCommitment({
-            setupContext,
-            trusteeIdentity: 'trustee-3',
-            trusteeRosterPosition: 3,
-            thresholdShareCommitmentRecipientRoot: validHash('1'),
-            aggregateThresholdShareRoot: validHash('2'),
-        });
-
-        expect(
-            kernel.verifyLocalTrusteeSetupState({
-                setupContext,
-                localStateCommitment,
-            }),
-        ).toMatchObject({
-            trusteeIdentity: 'trustee-3',
-            trusteeRosterPosition: 3,
-            localStateRoot: localStateCommitment.localStateRoot,
-        });
-    });
 });

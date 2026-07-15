@@ -26,13 +26,9 @@ use self::proof_record_fixtures::{
     vss_public_coefficient_commitment_set_object,
 };
 use self::record_rebinding::{
-    private_vss_envelope_commitment_set_root_input, rebind_collective_evaluator_key_schedule_root,
-    rebind_collective_private_vss_envelope_commitment_root, rebind_collective_public_key_root,
-    rebind_collective_public_key_share_roots, rebind_collective_public_key_succinct_proof_roots,
-    rebind_collective_setup_intent_registration,
+    private_vss_envelope_commitment_set_root_input, rebind_collective_setup_intent_registration,
     rebind_collective_setup_intent_registration_with_signature_seed,
-    rebind_collective_setup_intent_signatures, rebind_collective_setup_package_hash,
-    rebind_first_private_vss_encrypted_envelope_hash,
+    rebind_collective_setup_intent_signatures, rebind_first_private_vss_encrypted_envelope_hash,
 };
 
 use super::super::accepted_setup::{
@@ -99,7 +95,6 @@ fn assert_minimal_collective_setup_package_refused(
 ) {
     let mut fixture = descriptor_backed_vss_collective_setup_fixture();
     mutate(&mut fixture.package);
-    rebind_collective_setup_package_hash(&mut fixture.package);
     let result = fixture.verify().expect("verification response");
     assert_eq!(
         result["isValid"], false,
@@ -118,7 +113,6 @@ fn assert_collective_public_key_bearing_setup_package_refused(
 ) {
     let mut fixture = collective_public_key_bearing_collective_setup_fixture();
     mutate(&mut fixture.package);
-    rebind_collective_setup_package_hash(&mut fixture.package);
     let result = fixture.verify().expect("verification response");
     assert_eq!(
         result["isValid"], false,

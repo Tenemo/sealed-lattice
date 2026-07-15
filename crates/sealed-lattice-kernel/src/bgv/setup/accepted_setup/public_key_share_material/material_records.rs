@@ -10,23 +10,16 @@ pub(super) fn decode_public_key_share_material_bindings(
     material: &VerifiedCanonicalPublicKeyShareMaterial,
 ) -> CanonicalResult<(BTreeMap<u64, PublicKeyShareMaterialBinding>, Vec<Value>)> {
     let roster = super::accepted_roster_from_setup_context(setup_context)?;
-    if material.records.len() != roster.participant_count as usize {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "public-key share material participant count does not match the accepted roster",
-        ));
-    }
-    if material.ring_degree != ring_degree {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "public-key share material ring degree must match the material set",
-        ));
-    }
+    let decoded_material = decode_verified_canonical_public_key_share_material(
+        material,
+        roster.participant_count,
+        ring_degree,
+    )?;
 
     let mut bindings = BTreeMap::new();
     let mut material_root_references = Vec::new();
     for expected_roster_position in 0..roster.participant_count {
-        let material_record = material
+        let material_record = decoded_material
             .records
             .get(expected_roster_position as usize)
             .ok_or_else(|| {
@@ -35,12 +28,6 @@ pub(super) fn decode_public_key_share_material_bindings(
                     "public-key share material is missing a trustee record",
                 )
             })?;
-        if material_record.trustee_roster_position != expected_roster_position {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share material trustee order is not canonical",
-            ));
-        }
         let share_record = share_records
             .get(&expected_roster_position)
             .ok_or_else(|| {
@@ -50,7 +37,11 @@ pub(super) fn decode_public_key_share_material_bindings(
                 )
             })?;
         let trustee_identity = value_string(share_record, "trusteeIdentity")?.to_string();
-        let public_key_share_root = value_string(share_record, "publicKeyShareRoot")?.to_string();
+        let public_key_share_root = derive_public_key_share_root(
+            setup_context,
+            common_binding.public_matrix_seed_hash.as_str(),
+            share_record,
+        )?;
         let share_hashes = share_record
             .get("shareCoefficientVectorHash512ByLimb")
             .and_then(Value::as_array)
@@ -62,20 +53,8 @@ pub(super) fn decode_public_key_share_material_bindings(
             })?;
         let mut coefficients_by_limb = Vec::with_capacity(DATA_PRIMES.len());
         let mut limb_records = Vec::with_capacity(DATA_PRIMES.len());
-        if material_record.limbs.len() != DATA_PRIMES.len() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "public-key share material must contain one coefficient vector per Q_share limb",
-            ));
-        }
         for rns_limb_index in 0..DATA_PRIMES.len() {
             let material_limb = &material_record.limbs[rns_limb_index];
-            if material_limb.coefficients.len() != ring_degree {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "public-key share coefficient vector width does not match the material ring degree",
-                ));
-            }
             let coefficient_hash =
                 public_key_share_coefficient_vector_hash(&material_limb.coefficients);
             if share_hashes
@@ -105,22 +84,14 @@ pub(super) fn decode_public_key_share_material_bindings(
         });
         let public_key_share_material_root = derive_canonical_object_hash(&material_root_input)?;
         let binding = PublicKeyShareMaterialBinding {
-            trustee_identity,
-            trustee_roster_position: expected_roster_position,
-            public_key_share_root,
-            public_key_share_material_root,
             coefficients_by_limb,
         };
-        material_root_references.push(public_key_share_material_root_reference(&binding));
-        if bindings
-            .insert(binding.trustee_roster_position, binding)
-            .is_some()
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share material contains duplicate trustee records",
-            ));
-        }
+        material_root_references.push(json!({
+            "trusteeIdentity": trustee_identity,
+            "trusteeRosterPosition": expected_roster_position,
+            "publicKeyShareMaterialRoot": public_key_share_material_root,
+        }));
+        bindings.insert(expected_roster_position, binding);
     }
     Ok((bindings, material_root_references))
 }
@@ -156,44 +127,6 @@ pub(in super::super) fn verify_public_key_share_material_set(
         share_records,
         proof_binding_session,
     )?;
-    let serialized_material_roots = material_set
-        .get("publicKeyShareMaterialRoots")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareMaterial.publicKeyShareMaterialRoots must be an ordered array",
-            )
-        })?;
-    if serialized_material_roots.len() != material_root_references.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "publicKeyShareMaterial.publicKeyShareMaterialRoots must match the ordered material records",
-        ));
-    }
-    for (serialized_material_root, material_root_reference) in serialized_material_roots
-        .iter()
-        .zip(&material_root_references)
-    {
-        let serialized_material_root = serialized_material_root.as_str().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareMaterial.publicKeyShareMaterialRoots entries must be protocol hashes",
-            )
-        })?;
-        validate_hash_string(
-            serialized_material_root,
-            "publicKeyShareMaterial.publicKeyShareMaterialRoots",
-        )?;
-        if serialized_material_root
-            != value_string(material_root_reference, "publicKeyShareMaterialRoot")?
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "publicKeyShareMaterial.publicKeyShareMaterialRoots must match the ordered material records",
-            ));
-        }
-    }
     let material_set_root = value_string(material_set, "publicKeyShareMaterialSetRoot")?;
     validate_hash_string(
         material_set_root,

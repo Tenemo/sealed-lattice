@@ -22,20 +22,8 @@ impl<'a> VssRecordVerificationContext<'a> {
                 "setupContext was required before VSS response verification",
             )
         })?;
-        let private_vss_envelope_commitment_root = setup_package
-            .get("privateVssEnvelopeCommitments")
-            .and_then(|commitments| commitments.get("privateVssEnvelopeCommitmentRoot"))
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "private VSS envelope commitment root was required before VSS response verification",
-                )
-            })?;
-        validate_hash_string(
-            private_vss_envelope_commitment_root,
-            "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
-        )?;
+        let private_vss_envelope_commitment_root =
+            private_vss_envelope_commitment_root(setup_package)?;
 
         Ok(Self {
             setup_context,
@@ -44,7 +32,7 @@ impl<'a> VssRecordVerificationContext<'a> {
             source_trustee_commitment_roots: source_trustee_commitment_roots_from_vss_commitments(
                 setup_package,
             )?,
-            private_vss_envelope_commitment_root: private_vss_envelope_commitment_root.to_string(),
+            private_vss_envelope_commitment_root,
             private_vss_envelope_bindings: private_vss_envelope_bindings_from_package(
                 setup_package,
                 trustee_registrations,
@@ -76,15 +64,17 @@ impl VssResponseKind {
 
     fn refusal(
         self,
-        complaint_reason_code: &'static str,
-        acceptance_reason_code: &'static str,
+        refusal_reason: crate::foundation::RefusalReason,
+        complaint_refusal_code: &'static str,
+        acceptance_refusal_code: &'static str,
         message: impl Into<String>,
         field_name: Option<&str>,
     ) -> Refusal {
         Refusal::new(
+            refusal_reason,
             match self {
-                Self::Complaint => complaint_reason_code,
-                Self::Acceptance => acceptance_reason_code,
+                Self::Complaint => complaint_refusal_code,
+                Self::Acceptance => acceptance_refusal_code,
             },
             message,
             match field_name {
@@ -96,11 +86,13 @@ impl VssResponseKind {
 
     fn variant_refusal(
         self,
+        refusal_reason: crate::foundation::RefusalReason,
         reason_code: &'static str,
         message: impl Into<String>,
         field_name: Option<&str>,
     ) -> Refusal {
         Refusal::new(
+            refusal_reason,
             reason_code,
             message,
             match field_name {
@@ -132,7 +124,6 @@ pub(super) struct VerifiedVssResponseRecord {
     recipient_roster_position: u64,
     expected_source_trustee_commitment_root: String,
     expected_private_envelope_hash: String,
-    expected_local_verification_root: String,
 }
 
 pub(super) fn verify_vss_response_record_binding(
@@ -143,6 +134,7 @@ pub(super) fn verify_vss_response_record_binding(
 ) -> CanonicalResult<Result<VerifiedVssResponseRecord, Refusal>> {
     if record.get("objectType").and_then(Value::as_str) != Some(kind.expected_object_type()) {
         return Ok(Err(kind.refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "vssComplaintTypeMismatch",
             "vssShareAcceptanceTypeMismatch",
             format!(
@@ -152,11 +144,16 @@ pub(super) fn verify_vss_response_record_binding(
             Some("objectType"),
         )));
     }
-    let Some(source_trustee_roster_position) = record
-        .get("sourceTrusteeRosterPosition")
-        .and_then(Value::as_u64)
+    let source_trustee_roster_position_value = record.get("sourceTrusteeRosterPosition");
+    let Some(source_trustee_roster_position) =
+        source_trustee_roster_position_value.and_then(Value::as_u64)
     else {
         return Ok(Err(kind.refusal(
+            if source_trustee_roster_position_value.is_some() {
+                crate::foundation::RefusalReason::WrongTypeOrLength
+            } else {
+                crate::foundation::RefusalReason::MissingPrerequisite
+            },
             "vssComplaintSourceTrusteePositionMissing",
             "vssShareAcceptanceSourceTrusteePositionMissing",
             "VSS response must bind sourceTrusteeRosterPosition",
@@ -168,6 +165,7 @@ pub(super) fn verify_vss_response_record_binding(
         .get(&source_trustee_roster_position)
     else {
         return Ok(Err(kind.refusal(
+            crate::foundation::RefusalReason::WrongContext,
             "vssComplaintSourceTrusteeMismatch",
             "vssShareAcceptanceSourceTrusteeMismatch",
             "VSS response source trustee position must identify a setup-intent trustee",
@@ -175,11 +173,15 @@ pub(super) fn verify_vss_response_record_binding(
         )));
     };
 
-    let Some(recipient_roster_position) = record
-        .get("recipientRosterPosition")
-        .and_then(Value::as_u64)
+    let recipient_roster_position_value = record.get("recipientRosterPosition");
+    let Some(recipient_roster_position) = recipient_roster_position_value.and_then(Value::as_u64)
     else {
         return Ok(Err(kind.refusal(
+            if recipient_roster_position_value.is_some() {
+                crate::foundation::RefusalReason::WrongTypeOrLength
+            } else {
+                crate::foundation::RefusalReason::MissingPrerequisite
+            },
             "vssComplaintRecipientPositionMissing",
             "vssShareAcceptanceRecipientPositionMissing",
             "VSS response must bind recipientRosterPosition",
@@ -191,6 +193,7 @@ pub(super) fn verify_vss_response_record_binding(
         .get(&recipient_roster_position)
     else {
         return Ok(Err(kind.refusal(
+            crate::foundation::RefusalReason::WrongContext,
             "vssComplaintRecipientMismatch",
             "vssShareAcceptanceRecipientMismatch",
             "VSS response recipient position must identify a setup-intent trustee",
@@ -199,6 +202,7 @@ pub(super) fn verify_vss_response_record_binding(
     };
     if !seen_pairs.insert((source_trustee_roster_position, recipient_roster_position)) {
         return Ok(Err(kind.refusal(
+            crate::foundation::RefusalReason::Equivocation,
             "vssComplaintDuplicate",
             "vssShareAcceptanceDuplicate",
             "VSS response records must use distinct source-recipient pairs",
@@ -221,6 +225,7 @@ pub(super) fn verify_vss_response_record_binding(
         .get(&(source_trustee_roster_position, recipient_roster_position))
     else {
         return Ok(Err(kind.refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "vssComplaintPrivateEnvelopeBindingMissing",
             "vssShareAcceptancePrivateEnvelopeBindingMissing",
             "VSS response must match a private envelope commitment for its source-recipient pair",
@@ -230,6 +235,7 @@ pub(super) fn verify_vss_response_record_binding(
     if private_envelope_binding.source_trustee_identity.as_str() != source_trustee_identity.as_str()
     {
         return Ok(Err(kind.refusal(
+            crate::foundation::RefusalReason::WrongContext,
             "vssComplaintPrivateEnvelopeSourceTrusteeMismatch",
             "vssShareAcceptancePrivateEnvelopeSourceTrusteeMismatch",
             "VSS response source trustee position must match the private envelope commitment",
@@ -238,6 +244,7 @@ pub(super) fn verify_vss_response_record_binding(
     }
     if private_envelope_binding.recipient_identity.as_str() != recipient_identity.as_str() {
         return Ok(Err(kind.refusal(
+            crate::foundation::RefusalReason::WrongContext,
             "vssComplaintPrivateEnvelopeRecipientMismatch",
             "vssShareAcceptancePrivateEnvelopeRecipientMismatch",
             "VSS response recipient position must match the private envelope commitment",
@@ -248,6 +255,7 @@ pub(super) fn verify_vss_response_record_binding(
         != expected_source_trustee_commitment_root
     {
         return Ok(Err(kind.refusal(
+            crate::foundation::RefusalReason::WrongHashOrRoot,
             "vssComplaintPrivateEnvelopeSourceTrusteeCommitmentRootMismatch",
             "vssShareAcceptancePrivateEnvelopeSourceTrusteeCommitmentRootMismatch",
             "VSS response source commitment root must match the private envelope commitment",
@@ -263,7 +271,6 @@ pub(super) fn verify_vss_response_record_binding(
         expected_source_trustee_commitment_root: expected_source_trustee_commitment_root
             .to_string(),
         expected_private_envelope_hash: private_envelope_binding.private_envelope_hash.clone(),
-        expected_local_verification_root: private_envelope_binding.local_verification_root.clone(),
     }))
 }
 
@@ -281,6 +288,7 @@ pub(super) fn verify_vss_response_record(
 
     let Some(signature_envelope) = record.get("signatureEnvelope") else {
         return Ok(Err(kind.variant_refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             kind.signature_missing_reason_code(),
             "VSS response must include the signed ML-DSA envelope",
             Some("signatureEnvelope"),
@@ -288,6 +296,7 @@ pub(super) fn verify_vss_response_record(
     };
     if !signature_envelope.is_object() {
         return Ok(Err(kind.variant_refusal(
+            crate::foundation::RefusalReason::InvalidSignature,
             "InvalidSignature",
             "VSS response signatureEnvelope must be an object",
             Some("signatureEnvelope"),
@@ -298,6 +307,7 @@ pub(super) fn verify_vss_response_record(
         .and_then(Value::as_object)
     else {
         return Ok(Err(kind.variant_refusal(
+            crate::foundation::RefusalReason::InvalidSignature,
             "InvalidSignedRoot",
             "VSS response signatureEnvelope must include a signedRoot object",
             Some("signatureEnvelope.signedRoot"),
@@ -305,6 +315,7 @@ pub(super) fn verify_vss_response_record(
     };
     let Some(record_root) = signed_root.get("objectRoot").and_then(Value::as_str) else {
         return Ok(Err(kind.variant_refusal(
+            crate::foundation::RefusalReason::InvalidSignature,
             "InvalidSignedRoot",
             "VSS response signedRoot must bind objectRoot",
             Some("signatureEnvelope.signedRoot.objectRoot"),
@@ -314,54 +325,22 @@ pub(super) fn verify_vss_response_record(
         record_root,
         "VSS response signatureEnvelope.signedRoot.objectRoot",
     )?;
-    let Some(recovery_epoch) = signed_root.get("recoveryEpoch").and_then(Value::as_u64) else {
-        return Ok(Err(kind.variant_refusal(
-            "InvalidSignedRoot",
-            "VSS response signedRoot recoveryEpoch must be a non-negative integer",
-            Some("signatureEnvelope.signedRoot.recoveryEpoch"),
+    let Some(recipient_registration) = verification_context
+        .trustee_registrations
+        .get(&verified_record.recipient_roster_position)
+    else {
+        return Ok(Err(kind.refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
+            "vssComplaintSigningKeyRegistrationMissing",
+            "vssShareAcceptanceSigningKeyRegistrationMissing",
+            "VSS response recipient is missing from setupIntent registrations",
+            Some("recipientRosterPosition"),
         )));
     };
-    let Some(device_epoch) = signed_root.get("deviceEpoch").and_then(Value::as_u64) else {
-        return Ok(Err(kind.variant_refusal(
-            "InvalidSignedRoot",
-            "VSS response signedRoot deviceEpoch must be a non-negative integer",
-            Some("signatureEnvelope.signedRoot.deviceEpoch"),
-        )));
-    };
-
-    match kind {
-        VssResponseKind::Complaint => {
-            let Some(complaint_evidence_root) =
-                record.get("complaintEvidenceRoot").and_then(Value::as_str)
-            else {
-                return Ok(Err(kind.variant_refusal(
-                    "vssComplaintHashMissing",
-                    "VSS complaint must bind complaintEvidenceRoot",
-                    Some("complaintEvidenceRoot"),
-                )));
-            };
-            validate_hash_string(
-                complaint_evidence_root,
-                "vssComplaints.complaintRecords.complaintEvidenceRoot",
-            )?;
-            if record
-                .get("complaintReasonCode")
-                .and_then(Value::as_str)
-                .filter(|reason_code| !reason_code.is_empty())
-                .is_none()
-            {
-                return Ok(Err(kind.variant_refusal(
-                    "vssComplaintReasonMissing",
-                    "VSS complaint must bind a non-empty complaintReasonCode",
-                    Some("complaintReasonCode"),
-                )));
-            }
-        }
-        VssResponseKind::Acceptance => {}
-    }
+    let recovery_epoch = recipient_registration.recovery_epoch;
+    let device_epoch = recipient_registration.device_epoch;
 
     let payload = vss_response_payload_value(
-        record,
         verification_context,
         &verified_record,
         kind,
@@ -371,46 +350,24 @@ pub(super) fn verify_vss_response_record(
     let expected_root = derive_canonical_object_hash(&payload)?;
     if record_root != expected_root {
         return Ok(Err(kind.variant_refusal(
+            crate::foundation::RefusalReason::WrongHashOrRoot,
             kind.root_mismatch_reason_code(),
             "VSS response signed object root does not match its canonical payload",
             Some("signatureEnvelope.signedRoot.objectRoot"),
         )));
     }
 
-    let Some(recipient_registration) = verification_context
-        .trustee_registrations
-        .get(&verified_record.recipient_roster_position)
-    else {
-        return Ok(Err(kind.refusal(
-            "vssComplaintSigningKeyRegistrationMissing",
-            "vssShareAcceptanceSigningKeyRegistrationMissing",
-            "VSS response recipient is missing from setupIntent registrations",
-            Some("recipientRosterPosition"),
-        )));
-    };
-    let signature_context_hash = derive_canonical_object_hash(&json!({
-        "objectType": format!("{}SignatureContext", kind.expected_object_type()),
-        "payloadRoot": expected_root,
-    }))?;
-    let manifest_hash = setup_context_string(verification_context.setup_context, "manifestHash")?;
-    let ceremony_id = setup_context_string(verification_context.setup_context, "ceremonyId")?;
     match verify_protocol_signature_envelope(
         signature_envelope,
         &ProtocolSignatureExpectation {
             object_type: kind.expected_object_type(),
-            signer_role: "Trustee",
-            signer_identity: &verified_record.recipient_identity,
-            ceremony_id,
             public_key_hash: &recipient_registration.signing_public_key_hash,
-            manifest_hash,
             object_root: &expected_root,
-            context_hash: &signature_context_hash,
-            recovery_epoch,
-            device_epoch,
         },
     )? {
         Ok(()) => Ok(Ok(())),
         Err(failure) => Ok(Err(kind.variant_refusal(
+            protocol_signature_refusal_reason(failure.reason_code),
             failure.reason_code,
             failure.message,
             Some("signatureEnvelope"),
@@ -419,14 +376,13 @@ pub(super) fn verify_vss_response_record(
 }
 
 fn vss_response_payload_value(
-    record: &Value,
     verification_context: &VssRecordVerificationContext<'_>,
     verified_record: &VerifiedVssResponseRecord,
     kind: VssResponseKind,
     recovery_epoch: u64,
     device_epoch: u64,
 ) -> CanonicalResult<Value> {
-    let mut payload = json!({
+    Ok(json!({
         "objectType": kind.expected_object_type(),
         "setupContextHash": setup_context_hash(verification_context.setup_context)?,
         "sourceTrusteeIdentity": verified_record.source_trustee_identity.as_str(),
@@ -438,27 +394,7 @@ fn vss_response_payload_value(
         "privateEnvelopeHash": verified_record.expected_private_envelope_hash.as_str(),
         "recoveryEpoch": recovery_epoch,
         "deviceEpoch": device_epoch,
-    });
-    let payload_object = payload.as_object_mut().expect("JSON object literal");
-    match kind {
-        VssResponseKind::Complaint => {
-            payload_object.insert(
-                "complaintEvidenceRoot".to_string(),
-                Value::String(value_string(record, "complaintEvidenceRoot")?.to_string()),
-            );
-            payload_object.insert(
-                "complaintReasonCode".to_string(),
-                Value::String(value_string(record, "complaintReasonCode")?.to_string()),
-            );
-        }
-        VssResponseKind::Acceptance => {
-            payload_object.insert(
-                "localVerificationRoot".to_string(),
-                Value::String(verified_record.expected_local_verification_root.clone()),
-            );
-        }
-    }
-    Ok(payload)
+    }))
 }
 
 pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
@@ -467,12 +403,8 @@ pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
     // Each source trustee is identified by its coefficient commitment set root:
     // the per-source-trustee root over that trustee's coefficient commitments,
     // which the private envelopes and share acceptances bind against.
-    let (commitment_set_field, source_root_field) = (
-        "vssPublicCoefficientCommitmentSet",
-        "sourceCoefficientCommitmentRoot",
-    );
     let source_trustee_records = setup_package
-        .get(commitment_set_field)
+        .get("vssPublicCoefficientCommitmentSet")
         .and_then(|commitment_set| commitment_set.get("sourceTrusteeRecords"))
         .and_then(Value::as_array)
         .ok_or_else(|| {
@@ -485,18 +417,13 @@ pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
     for (source_trustee_roster_position, source_trustee_record) in
         source_trustee_records.iter().enumerate()
     {
-        let source_trustee_commitment_root = source_trustee_record
-            .get(source_root_field)
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "source trustee VSS commitment record must bind its per-trustee coefficient commitment root",
-                )
-            })?;
+        let source_trustee_commitment_root =
+            crate::bgv::setup::vss_commitment::vss_public_source_coefficient_record_root(
+                source_trustee_record,
+            )?;
         source_trustee_roots.insert(
             source_trustee_roster_position as u64,
-            source_trustee_commitment_root.to_string(),
+            source_trustee_commitment_root,
         );
     }
 

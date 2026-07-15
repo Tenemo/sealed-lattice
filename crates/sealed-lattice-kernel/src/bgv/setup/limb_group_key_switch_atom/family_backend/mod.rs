@@ -23,6 +23,7 @@ pub(crate) mod key_proof;
 pub(crate) mod low_degree;
 pub(crate) mod merkle;
 pub(crate) mod polynomial;
+mod private_randomness;
 pub(crate) mod proof_codec;
 pub(crate) mod schedule;
 pub(crate) mod statement_bridge;

@@ -16,6 +16,7 @@ pub(super) enum VssPublicMaterialVerification {
 
 pub(super) fn verify_vss_public_material(
     setup_package: &Value,
+    expected_trustees: &BTreeMap<u64, String>,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<VssPublicMaterialVerification> {
     let public_material_fields = [
@@ -33,6 +34,7 @@ pub(super) fn verify_vss_public_material(
     if !missing_fields.is_empty() {
         return Ok(VssPublicMaterialVerification::Refused(
             vss_public_material_refusal(
+                crate::foundation::RefusalReason::MissingPrerequisite,
                 "vssPublicMaterialIncomplete",
                 format!(
                     "VSS public material is required; missing {}",
@@ -43,10 +45,15 @@ pub(super) fn verify_vss_public_material(
         ));
     }
 
-    match verify_vss_public_material_binding(setup_package, proof_binding_session) {
+    match verify_vss_public_material_binding(
+        setup_package,
+        expected_trustees,
+        proof_binding_session,
+    ) {
         Ok(ring_degree) => Ok(VssPublicMaterialVerification::Verified { ring_degree }),
         Err(error) => Ok(VssPublicMaterialVerification::Refused(
             vss_public_material_refusal(
+                crate::foundation::RefusalReason::MalformedEncoding,
                 "vssPublicMaterialMalformed",
                 format!("VSS public material is malformed: {}", error.message),
                 "setupPackage",
@@ -57,6 +64,7 @@ pub(super) fn verify_vss_public_material(
 
 fn verify_vss_public_material_binding(
     setup_package: &Value,
+    expected_trustees: &BTreeMap<u64, String>,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<usize> {
     let coefficient_set = setup_package
@@ -74,6 +82,13 @@ fn verify_vss_public_material_binding(
     let proof_material_set = setup_package
         .get(VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD)
         .ok_or_else(|| public_material_error("share-linkage proof material set"))?;
+
+    verify_vss_public_material_roster_bindings(
+        coefficient_set,
+        recipient_share_set,
+        aggregate_threshold_set,
+        expected_trustees,
+    )?;
 
     let proof_material_request = serde_json::Map::from_iter([
         ("statement".to_string(), statement.clone()),
@@ -153,18 +168,115 @@ fn verify_vss_public_material_binding(
     Ok(ring_degree)
 }
 
+fn verify_vss_public_material_roster_bindings(
+    coefficient_set: &Value,
+    recipient_share_set: &Value,
+    aggregate_threshold_set: &Value,
+    expected_trustees: &BTreeMap<u64, String>,
+) -> CanonicalResult<()> {
+    let participant_count = expected_trustees.len();
+    let coefficient_sources = array_at_path(coefficient_set, &["sourceTrusteeRecords"])?;
+    let recipient_sources = array_at_path(recipient_share_set, &["sourceTrusteeRecords"])?;
+    if coefficient_sources.len() != participant_count
+        || recipient_sources.len() != participant_count
+    {
+        return Err(public_material_error(
+            "VSS public source records must cover the accepted setup roster",
+        ));
+    }
+
+    for source_roster_position in 0..participant_count {
+        let expected_identity = expected_trustees
+            .get(&(source_roster_position as u64))
+            .ok_or_else(|| {
+                public_material_error("accepted setup roster positions must be contiguous")
+            })?;
+        for source_record in [
+            &coefficient_sources[source_roster_position],
+            &recipient_sources[source_roster_position],
+        ] {
+            compare_required_string(
+                string_at_path(source_record, &["sourceTrusteeIdentity"])?,
+                expected_identity,
+                "VSS public source trustee identity",
+            )?;
+        }
+
+        let recipient_records = array_at_path(
+            &recipient_sources[source_roster_position],
+            &["recipientShareCommitments"],
+        )?;
+        let expected_record_count = participant_count
+            .checked_mul(DATA_PRIMES.len())
+            .ok_or_else(|| public_material_error("VSS recipient coordinate count overflowed"))?;
+        if recipient_records.len() != expected_record_count {
+            return Err(public_material_error(
+                "VSS recipient-share records must cover the accepted setup roster",
+            ));
+        }
+        for recipient_roster_position in 0..participant_count {
+            let expected_recipient_identity = expected_trustees
+                .get(&(recipient_roster_position as u64))
+                .ok_or_else(|| {
+                    public_material_error("accepted setup roster positions must be contiguous")
+                })?;
+            for rns_limb_index in 0..DATA_PRIMES.len() {
+                let record_index = recipient_roster_position * DATA_PRIMES.len() + rns_limb_index;
+                compare_required_string(
+                    string_at_path(&recipient_records[record_index], &["recipientIdentity"])?,
+                    expected_recipient_identity,
+                    "VSS public recipient trustee identity",
+                )?;
+            }
+        }
+    }
+
+    let aggregate_records = array_at_path(aggregate_threshold_set, &["recipientRecords"])?;
+    let expected_aggregate_count = participant_count
+        .checked_mul(DATA_PRIMES.len())
+        .ok_or_else(|| public_material_error("VSS aggregate coordinate count overflowed"))?;
+    if aggregate_records.len() != expected_aggregate_count {
+        return Err(public_material_error(
+            "VSS aggregate records must cover the accepted setup roster",
+        ));
+    }
+    for recipient_roster_position in 0..participant_count {
+        let expected_recipient_identity = expected_trustees
+            .get(&(recipient_roster_position as u64))
+            .ok_or_else(|| {
+                public_material_error("accepted setup roster positions must be contiguous")
+            })?;
+        for rns_limb_index in 0..DATA_PRIMES.len() {
+            let record_index = recipient_roster_position * DATA_PRIMES.len() + rns_limb_index;
+            compare_required_string(
+                string_at_path(&aggregate_records[record_index], &["recipientIdentity"])?,
+                expected_recipient_identity,
+                "VSS aggregate recipient trustee identity",
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
 fn public_material_error(message: &'static str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
 fn vss_public_material_refusal(
+    refusal_reason: crate::foundation::RefusalReason,
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
 ) -> CanonicalResult<Refusals> {
     Ok(setup_refusals(
         Vec::new(),
-        vec![Refusal::new(reason_code, message, object_path)],
+        vec![Refusal::new(
+            refusal_reason,
+            reason_code,
+            message,
+            object_path,
+        )],
     ))
 }
 
@@ -182,6 +294,7 @@ mod tests {
                 "vssShareLinkageStatement": {},
                 "vssShareLinkageProofMaterialSet": {},
             }),
+            &BTreeMap::new(),
             None,
         )
         .expect("complete VSS public material refusal") else {

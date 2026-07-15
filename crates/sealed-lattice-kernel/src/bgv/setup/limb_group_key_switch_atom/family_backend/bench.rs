@@ -12,6 +12,7 @@ use super::super::proof_field::sixteen_limb_group_field_parameters;
 use super::key_proof::{
     KeyFriProofParameters, KeySource, prove_round_one_key_fri, verify_round_one_key_fri,
 };
+use super::private_randomness::PrivateProofRandomness;
 use super::proof_codec::encode_key_proof;
 use super::test_support::build_synthetic_key_fixture;
 
@@ -97,7 +98,7 @@ fn round_one_key_prover_cost() {
         };
         let (secret, digits, public) =
             build_synthetic_key_fixture(ring_degree, digit_count, &KeySource::RoundOne);
-        let mut salt_seed = 0x1234;
+        let mut private_randomness = PrivateProofRandomness::for_test(0x1234);
         let prove_start = Instant::now();
         let proof = prove_round_one_key_fri(
             &parameters,
@@ -106,7 +107,7 @@ fn round_one_key_prover_cost() {
             &secret,
             &digits,
             &proof_parameters,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("prove");
         let prove_ms = prove_start.elapsed().as_secs_f64() * 1000.0;

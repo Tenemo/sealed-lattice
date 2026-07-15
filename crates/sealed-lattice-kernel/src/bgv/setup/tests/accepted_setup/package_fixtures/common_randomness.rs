@@ -43,24 +43,12 @@ pub(super) fn common_randomness_object(
             "revealHex": reveal_hex,
         });
         let reveal_hash = derive_canonical_object_hash(&reveal_payload).expect("reveal hash");
-        let reveal_context_hash = derive_canonical_object_hash(&serde_json::json!({
-            "objectType": "CommonRandomnessRevealSignatureContext",
-            "payloadRoot": reveal_hash.as_str(),
-        }))
-        .expect("reveal signature context hash");
         let signature_seed_label = setup_trustee_signature_seed_label(&trustee_identity);
         let reveal_signature_fixture = create_protocol_signature_fixture(
             &signature_seed_label,
             serde_json::json!({
                 "objectType": "CommonRandomnessReveal",
-                "ceremonyId": ceremony_id,
-                "manifestHash": manifest_hash,
                 "objectRoot": reveal_hash.as_str(),
-                "signerRole": "Trustee",
-                "signerIdentity": trustee_identity.as_str(),
-                "recoveryEpoch": 0,
-                "deviceEpoch": 0,
-                "contextHash": reveal_context_hash,
             }),
         )
         .expect("reveal signature fixture");
@@ -82,23 +70,11 @@ pub(super) fn common_randomness_object(
             "revealHash": reveal_hash.as_str(),
         });
         let commit_hash = derive_canonical_object_hash(&commit_payload).expect("commit hash");
-        let commit_context_hash = derive_canonical_object_hash(&serde_json::json!({
-            "objectType": "CommonRandomnessCommitSignatureContext",
-            "payloadRoot": commit_hash.as_str(),
-        }))
-        .expect("commit signature context hash");
         let commit_signature_fixture = create_protocol_signature_fixture(
             &signature_seed_label,
             serde_json::json!({
                 "objectType": "CommonRandomnessCommit",
-                "ceremonyId": ceremony_id,
-                "manifestHash": manifest_hash,
                 "objectRoot": commit_hash.as_str(),
-                "signerRole": "Trustee",
-                "signerIdentity": trustee_identity.as_str(),
-                "recoveryEpoch": 0,
-                "deviceEpoch": 0,
-                "contextHash": commit_context_hash,
             }),
         )
         .expect("commit signature fixture");

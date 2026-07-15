@@ -1,7 +1,6 @@
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import type {
-    CanonicalSignedRootObject,
     ProtocolHash,
     ProtocolSignatureEnvelope,
 } from '@sealed-lattice/types';
@@ -42,20 +41,6 @@ const decodeHexField = (
     return bytes;
 };
 
-const canonicalSignedRootValue = (
-    signedRoot: CanonicalSignedRootObject,
-): CanonicalSignedRootObject => ({
-    objectType: signedRoot.objectType,
-    ceremonyId: signedRoot.ceremonyId,
-    manifestHash: signedRoot.manifestHash,
-    objectRoot: signedRoot.objectRoot,
-    signerRole: signedRoot.signerRole,
-    signerIdentity: signedRoot.signerIdentity,
-    recoveryEpoch: signedRoot.recoveryEpoch,
-    deviceEpoch: signedRoot.deviceEpoch,
-    contextHash: signedRoot.contextHash,
-});
-
 const canonicalProtocolSignatureMessage = (
     signature: Pick<ProtocolSignatureEnvelope, 'publicKeyHash' | 'signedRoot'>,
 ): Uint8Array =>
@@ -63,7 +48,7 @@ const canonicalProtocolSignatureMessage = (
         canonicalJson({
             messageDomain: 'sealed-lattice/protocol-signature',
             publicKeyHash: signature.publicKeyHash,
-            signedRoot: canonicalSignedRootValue(signature.signedRoot),
+            signedRoot: signature.signedRoot,
         }),
     );
 

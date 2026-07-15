@@ -15,9 +15,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
     package: &serde_json::Value,
     accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> RelinearizationKeyShareRoundsFixture {
-    let setup_context = &package["setupContext"];
-    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
-        .expect("setup context hash");
     let schedule = &package["evaluatorKeySchedule"];
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
@@ -92,15 +89,11 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
             }
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundOne",
-                "trusteeIdentity": trustee_identity.as_str(),
-                "trusteeRosterPosition": trustee_roster_position,
-                "level": level,
-                "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
             });
             let authenticated_material_root =
                 authenticate_evaluation_key_share_component_material_fixture(
                     EvaluationKeyShareProofFamily::Relinearization,
-                    &record,
+                    level,
                     EvaluationKeyShareDerivedMaterialBinding {
                         trustee_identity: &trustee_identity,
                         trustee_roster_position,
@@ -157,15 +150,11 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
             let trustee_identity = format!("trustee-{trustee_roster_position}");
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundTwo",
-                "trusteeIdentity": trustee_identity.as_str(),
-                "trusteeRosterPosition": trustee_roster_position,
-                "level": level,
-                "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
             });
             let authenticated_material_root =
                 authenticate_evaluation_key_share_component_material_fixture(
                     EvaluationKeyShareProofFamily::Relinearization,
-                    &record,
+                    level,
                     EvaluationKeyShareDerivedMaterialBinding {
                         trustee_identity: &trustee_identity,
                         trustee_roster_position,
@@ -184,10 +173,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
 
     let rounds = serde_json::json!({
         "objectType": "RelinearizationKeyShareRounds",
-        "setupContextHash": setup_context_hash,
-        "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-        "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
-        "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
         "roundOneRecords": round_one_records,
         "roundTwoRecords": round_two_records,
     });

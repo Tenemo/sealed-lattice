@@ -36,7 +36,7 @@ const VSS_COMMITTED_MATERIAL_LEAF_SALT_DOMAIN: &str =
 
 // Covers three 339-evaluation opening sets plus two additional sets. The
 // trace-size minimum below preserves the committed degree bound.
-pub(crate) const VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP: usize = 2048;
+const VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP: usize = 2048;
 
 pub(crate) fn vss_committed_material_column_mask_degree(trace_size: usize) -> usize {
     VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP.min(trace_size)
@@ -298,13 +298,9 @@ pub(super) fn regenerate_bound_committed_material(
         .vss_committed_material_seeds_by_bound_message()
         .len()
         != bound_commitments.len()
-        || witness
-            .vss_committed_material_context_hashes_by_bound_message()
-            .len()
-            != bound_commitments.len()
     {
         return Err(invalid_succinct_setup_proof(
-            "committed-material witness must carry one seed and one context hash per bound commitment",
+            "committed-material witness must carry one seed per bound commitment",
         ));
     }
     let messages = bound_message_coefficients(statement, witness)?;
@@ -328,8 +324,7 @@ pub(super) fn regenerate_bound_committed_material(
                 ring_degree: statement.ring_degree,
                 material_seed_hex: &witness.vss_committed_material_seeds_by_bound_message()
                     [bound_message_index],
-                commitment_context_hash: &witness
-                    .vss_committed_material_context_hashes_by_bound_message()[bound_message_index],
+                commitment_context_hash: &bound_commitment.commitment_context_hash,
             })?;
         for (commitment_field_position, field_tree) in field_trees.iter().enumerate() {
             let expected_root = bound_commitment

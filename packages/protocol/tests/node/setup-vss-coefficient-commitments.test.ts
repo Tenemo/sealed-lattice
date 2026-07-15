@@ -55,7 +55,9 @@ const coefficientCommitmentInput = {
     setupContext,
     publicMatrixSeedHash,
     setupCommitmentComputer,
-    ...setupParameters,
+    qSharePrimes,
+    ringDegree,
+    thresholdDegree,
 } as const;
 const sourceTrusteeIdentity = (sourceTrusteeRosterPosition: number): string =>
     `trustee-${String(sourceTrusteeRosterPosition)}`;
@@ -426,8 +428,12 @@ describe('VSS coefficient commitment builders', () => {
                 sourceTrusteeOpeningState(0),
             ]),
         );
-        const { vssCoefficientCommitmentRoot, ...commitmentSetWithoutRoot } =
-            bundle.commitmentSet;
+        const repeatedBundle = createVssCoefficientCommitmentBundle(
+            coefficientCommitmentBundleInput([
+                sourceTrusteeOpeningState(1),
+                sourceTrusteeOpeningState(0),
+            ]),
+        );
         const firstMaterialRecord =
             bundle.privateOpeningMaterialBySourceTrustee[0]
                 ?.sourceTrusteeCoefficientCommitmentMaterialRecords[0];
@@ -439,24 +445,24 @@ describe('VSS coefficient commitment builders', () => {
             ),
         ).toEqual([0, 1]);
         expect(bundle.commitmentSet.setupContextHash).toBe(setupContextHash);
-        expect(vssCoefficientCommitmentRoot).toBe(
-            deriveCanonicalObjectHash(commitmentSetWithoutRoot),
+        expect(deriveCanonicalObjectHash(bundle.commitmentSet)).toBe(
+            deriveCanonicalObjectHash(repeatedBundle.commitmentSet),
         );
-        expect(firstMaterialRecord?.commitmentRoot).toBe(
-            setupCommitmentComputer({
+        const recomputedCommitment = setupCommitmentComputer({
                 publicMatrixSeedHash,
                 sourceRnsLimbIndex: firstOpening.rnsLimbIndex,
-                sourceMessageModulus: firstOpening.rnsPrime,
                 shamirCoefficientIndex: firstOpening.shamirCoefficientIndex,
                 messageCoefficients: firstOpening.coefficientMessage,
                 randomnessByColumn: firstOpening.randomnessByColumn,
                 ringDegree,
-            }).commitmentRoot,
-        );
+            }).commitment;
+        expect(firstMaterialRecord?.commitment).toEqual(recomputedCommitment);
         expect(
+            deriveCanonicalObjectHash(recomputedCommitment),
+        ).toBe(
             bundle.privateOpeningMaterialBySourceTrustee[0]
                 ?.coefficientOpenings[0]?.commitmentRoot,
-        ).toBe(firstMaterialRecord?.commitmentRoot);
+        );
     });
 
     it.each(malformedCoefficientCommitmentBundleCases)(

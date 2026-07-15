@@ -16,20 +16,12 @@ use crate::{
 
 const PROTOCOL_SIGNATURE_MESSAGE_DOMAIN: &str = "sealed-lattice/protocol-signature";
 const SUPPORTED_ML_DSA_CONTEXT_STRING: &str = "sealed-lattice:v1";
-const MAX_SAFE_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 
 #[derive(Debug)]
 pub(crate) struct ProtocolSignatureExpectation<'a> {
     pub object_type: &'a str,
-    pub signer_role: &'a str,
-    pub signer_identity: &'a str,
-    pub ceremony_id: &'a str,
     pub public_key_hash: &'a str,
-    pub manifest_hash: &'a str,
     pub object_root: &'a str,
-    pub context_hash: &'a str,
-    pub recovery_epoch: u64,
-    pub device_epoch: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,28 +50,14 @@ struct ParsedProtocolSignature<'a> {
 #[derive(Clone, Copy, Debug)]
 struct ParsedSignedRoot<'a> {
     object_type: &'a str,
-    ceremony_id: &'a str,
-    manifest_hash: &'a str,
     object_root: &'a str,
-    signer_role: &'a str,
-    signer_identity: &'a str,
-    recovery_epoch: u64,
-    device_epoch: u64,
-    context_hash: &'a str,
 }
 
 impl ParsedSignedRoot<'_> {
-    fn canonical_value(&self) -> Value {
+    fn wire_value(&self) -> Value {
         let mut signed_root = Map::new();
         signed_root.insert("objectType".into(), self.object_type.into());
-        signed_root.insert("ceremonyId".into(), self.ceremony_id.into());
-        signed_root.insert("manifestHash".into(), self.manifest_hash.into());
         signed_root.insert("objectRoot".into(), self.object_root.into());
-        signed_root.insert("signerRole".into(), self.signer_role.into());
-        signed_root.insert("signerIdentity".into(), self.signer_identity.into());
-        signed_root.insert("recoveryEpoch".into(), self.recovery_epoch.into());
-        signed_root.insert("deviceEpoch".into(), self.device_epoch.into());
-        signed_root.insert("contextHash".into(), self.context_hash.into());
         Value::Object(signed_root)
     }
 }
@@ -180,25 +158,11 @@ fn parse_signed_root(
     };
 
     let object_type = required_nonempty_string(signed_root, "objectType")?;
-    let ceremony_id = required_nonempty_string(signed_root, "ceremonyId")?;
-    let signer_role = required_nonempty_string(signed_root, "signerRole")?;
-    let signer_identity = required_nonempty_string(signed_root, "signerIdentity")?;
-    let context_hash = required_hash(signed_root, "contextHash")?;
-    let recovery_epoch = required_epoch(signed_root, "recoveryEpoch")?;
-    let device_epoch = required_epoch(signed_root, "deviceEpoch")?;
-    let manifest_hash = required_hash(signed_root, "manifestHash")?;
     let object_root = required_hash(signed_root, "objectRoot")?;
 
     Ok(ParsedSignedRoot {
         object_type,
-        ceremony_id,
-        manifest_hash,
         object_root,
-        signer_role,
-        signer_identity,
-        recovery_epoch,
-        device_epoch,
-        context_hash,
     })
 }
 
@@ -214,24 +178,6 @@ fn validate_expectation(
             "Signature root object type does not match the expected object.",
         ));
     }
-    if signed_root.signer_role != expectation.signer_role {
-        return Some(ProtocolSignatureFailure::new(
-            "WrongSignerRole",
-            "Signature root signer role does not match the expected role.",
-        ));
-    }
-    if signed_root.signer_identity != expectation.signer_identity {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidSignedRoot",
-            "Signature root signer identity does not match the expected identity.",
-        ));
-    }
-    if signed_root.ceremony_id != expectation.ceremony_id {
-        return Some(ProtocolSignatureFailure::new(
-            "WrongCeremony",
-            "Signature root ceremony does not match the expected ceremony.",
-        ));
-    }
     if signature.public_key_hash != expectation.public_key_hash {
         return Some(ProtocolSignatureFailure::new(
             "WrongPublicKey",
@@ -239,37 +185,10 @@ fn validate_expectation(
         ));
     }
 
-    for (field_name, actual_hash, expected_hash) in [
-        (
-            "manifestHash",
-            signed_root.manifest_hash,
-            expectation.manifest_hash,
-        ),
-        (
-            "objectRoot",
-            signed_root.object_root,
-            expectation.object_root,
-        ),
-    ] {
-        if actual_hash != expected_hash {
-            return Some(ProtocolSignatureFailure::new(
-                "InvalidSignedRoot",
-                format!("Signature root {field_name} does not match the expected binding."),
-            ));
-        }
-    }
-    if signed_root.context_hash != expectation.context_hash {
+    if signed_root.object_root != expectation.object_root {
         return Some(ProtocolSignatureFailure::new(
             "InvalidSignedRoot",
-            "Signature root context hash does not match the expected context.",
-        ));
-    }
-    if signed_root.recovery_epoch != expectation.recovery_epoch
-        || signed_root.device_epoch != expectation.device_epoch
-    {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidSignedRoot",
-            "Signature root epochs do not match the expected object.",
+            "Signature root objectRoot does not match the expected binding.",
         ));
     }
 
@@ -308,7 +227,7 @@ fn canonical_protocol_signature_message(
     canonical_json(&json!({
         "messageDomain": PROTOCOL_SIGNATURE_MESSAGE_DOMAIN,
         "publicKeyHash": public_key_hash,
-        "signedRoot": signed_root.canonical_value(),
+        "signedRoot": signed_root.wire_value(),
     }))
 }
 
@@ -363,22 +282,6 @@ fn required_hash<'a>(
         })
 }
 
-fn required_epoch(
-    signed_root: &Map<String, Value>,
-    field_name: &str,
-) -> Result<u64, ProtocolSignatureFailure> {
-    signed_root
-        .get(field_name)
-        .and_then(Value::as_u64)
-        .filter(|value| *value <= MAX_SAFE_JSON_INTEGER)
-        .ok_or_else(|| {
-            ProtocolSignatureFailure::new(
-                "InvalidSignedRoot",
-                format!("Signed-root {field_name} must be a safe non-negative integer."),
-            )
-        })
-}
-
 #[cfg(test)]
 #[derive(Debug)]
 pub(crate) struct ProtocolSignatureFixture {
@@ -394,7 +297,7 @@ pub(crate) fn create_protocol_signature_fixture(
     let parsed_signed_root = parse_signed_root(Some(&signed_root)).map_err(|failure| {
         CanonicalError::new(CanonicalErrorCode::InvalidFixture, failure.message)
     })?;
-    let canonical_signed_root = parsed_signed_root.canonical_value();
+    let canonical_signed_root = parsed_signed_root.wire_value();
     let seed = key_fixture_seed(seed_label)?;
     let (public_key, private_key) = ml_dsa_65::KG::keygen_from_seed(&seed);
     let public_key_bytes_hex = crate::hashing::to_hex(&public_key.into_bytes());
@@ -484,35 +387,16 @@ mod tests {
             "fixture": "signed-object",
         }))
         .expect("object root");
-        let context_hash = derive_canonical_object_hash(&json!({
-            "objectType": "ProtocolSignatureTestObject",
-            "fixture": "signature-context",
-        }))
-        .expect("context hash");
         let signed_root = json!({
             "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
-            "ceremonyId": "ceremony-main",
-            "manifestHash": object_root,
             "objectRoot": object_root,
-            "signerRole": "Trustee",
-            "signerIdentity": "trustee-0",
-            "recoveryEpoch": 0,
-            "deviceEpoch": 0,
-            "contextHash": context_hash,
         });
         let fixture =
             create_protocol_signature_fixture("trustee-0", signed_root).expect("signature fixture");
         let expectation = ProtocolSignatureExpectation {
             object_type: "CollectiveBgvSetupIntentTrusteeRegistration",
-            signer_role: "Trustee",
-            signer_identity: "trustee-0",
-            ceremony_id: "ceremony-main",
             public_key_hash: &fixture.public_key_hash,
-            manifest_hash: &object_root,
             object_root: &object_root,
-            context_hash: &context_hash,
-            recovery_epoch: 0,
-            device_epoch: 0,
         };
 
         verify_protocol_signature_envelope(&fixture.envelope, &expectation)
@@ -521,59 +405,38 @@ mod tests {
     }
 
     #[test]
-    fn rejects_signature_root_missing_manifest_or_object_binding() {
+    fn rejects_signature_root_missing_object_binding() {
         let object_root = derive_canonical_object_hash(&json!({
             "objectType": "ProtocolSignatureTestObject",
             "fixture": "signed-object",
         }))
         .expect("object root");
-        let context_hash = derive_canonical_object_hash(&json!({
-            "objectType": "ProtocolSignatureTestObject",
-            "fixture": "signature-context",
-        }))
-        .expect("context hash");
         let fixture = create_protocol_signature_fixture(
             "trustee-0",
             json!({
                 "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
-                "ceremonyId": "ceremony-main",
-                "manifestHash": object_root,
                 "objectRoot": object_root,
-                "signerRole": "Trustee",
-                "signerIdentity": "trustee-0",
-                "recoveryEpoch": 0,
-                "deviceEpoch": 0,
-                "contextHash": context_hash,
             }),
         )
         .expect("signature fixture");
         let expectation = ProtocolSignatureExpectation {
             object_type: "CollectiveBgvSetupIntentTrusteeRegistration",
-            signer_role: "Trustee",
-            signer_identity: "trustee-0",
-            ceremony_id: "ceremony-main",
             public_key_hash: &fixture.public_key_hash,
-            manifest_hash: &object_root,
             object_root: &object_root,
-            context_hash: &context_hash,
-            recovery_epoch: 0,
-            device_epoch: 0,
         };
 
-        for missing_field in ["manifestHash", "objectRoot"] {
-            let mut incomplete_envelope = fixture.envelope.clone();
-            incomplete_envelope["signedRoot"]
-                .as_object_mut()
-                .expect("signed root object")
-                .remove(missing_field)
-                .expect("required binding exists in fixture");
+        let mut incomplete_envelope = fixture.envelope.clone();
+        incomplete_envelope["signedRoot"]
+            .as_object_mut()
+            .expect("signed root object")
+            .remove("objectRoot")
+            .expect("required binding exists in fixture");
 
-            let failure = verify_protocol_signature_envelope(&incomplete_envelope, &expectation)
-                .expect("verification should run")
-                .expect_err("missing required binding must be rejected");
+        let failure = verify_protocol_signature_envelope(&incomplete_envelope, &expectation)
+            .expect("verification should run")
+            .expect_err("missing required binding must be rejected");
 
-            assert_eq!(failure.reason_code, "InvalidSignedRoot");
-        }
+        assert_eq!(failure.reason_code, "InvalidSignedRoot");
     }
 
     #[test]
@@ -583,37 +446,23 @@ mod tests {
             "fixture": "signed-object",
         }))
         .expect("object root");
-        let context_hash = derive_canonical_object_hash(&json!({
+        let tampered_object_root = derive_canonical_object_hash(&json!({
             "objectType": "ProtocolSignatureTestObject",
-            "fixture": "signature-context",
+            "fixture": "tampered-object",
         }))
-        .expect("context hash");
+        .expect("tampered object root");
         let signed_root = json!({
             "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
-            "ceremonyId": "ceremony-main",
-            "manifestHash": object_root,
             "objectRoot": object_root,
-            "signerRole": "Trustee",
-            "signerIdentity": "trustee-0",
-            "recoveryEpoch": 0,
-            "deviceEpoch": 0,
-            "contextHash": context_hash,
         });
         let fixture =
             create_protocol_signature_fixture("trustee-0", signed_root).expect("signature fixture");
         let mut tampered_envelope = fixture.envelope.clone();
-        tampered_envelope["signedRoot"]["recoveryEpoch"] = json!(1);
+        tampered_envelope["signedRoot"]["objectRoot"] = json!(tampered_object_root);
         let expectation = ProtocolSignatureExpectation {
             object_type: "CollectiveBgvSetupIntentTrusteeRegistration",
-            signer_role: "Trustee",
-            signer_identity: "trustee-0",
-            ceremony_id: "ceremony-main",
             public_key_hash: &fixture.public_key_hash,
-            manifest_hash: &object_root,
-            object_root: &object_root,
-            context_hash: &context_hash,
-            recovery_epoch: 1,
-            device_epoch: 0,
+            object_root: &tampered_object_root,
         };
 
         let failure = verify_protocol_signature_envelope(&tampered_envelope, &expectation)

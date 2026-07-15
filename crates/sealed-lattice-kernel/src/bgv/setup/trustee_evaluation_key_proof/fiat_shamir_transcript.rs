@@ -1,6 +1,6 @@
 use super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement};
 use crate::bgv::proof_suite::{
-    CanonicalProofTranscript, CanonicalTranscriptEngine, common_proof_suite_id,
+    CanonicalProofTranscript, CanonicalTranscriptEngine, common_proof_transcript_domain_id,
 };
 #[cfg(test)]
 use crate::bgv::setup::transcript_order_audit::{
@@ -31,7 +31,7 @@ impl HashChainTranscriptCore {
         let core = Self {
             transcript: CanonicalProofTranscript::new(
                 1,
-                common_proof_suite_id(),
+                common_proof_transcript_domain_id(),
                 application_statement_schema_identifier,
                 protocol_label.as_bytes(),
             ),

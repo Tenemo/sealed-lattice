@@ -1082,26 +1082,6 @@ fn unordered_state_votes_are_authenticated_before_duplicate_and_equivocation_res
         ),
         RefusalReason::MalformedEncoding,
     );
-
-    let binding = verified_intent.durable_binding();
-    let (prepared_envelope, signature_message) = verifier
-        .prepare_state_witness_vote(binding, fixture.participant_identities[1])
-        .expect("state witness vote prepares");
-    let prepared_signature = fixture.private_keys[1]
-        .try_sign_with_seed(
-            &[0x81; 32],
-            signature_message.as_bytes(),
-            OBJECT_SIGNATURE_CONTEXT,
-        )
-        .expect("prepared state witness vote signs");
-    let prepared_carrier = verifier
-        .finish_prepared_state_witness_vote(prepared_envelope, prepared_signature)
-        .expect("prepared state witness vote finishes");
-    assert_eq!(
-        prepared_carrier,
-        fixture.vote_carrier(1, reservation_hash, producer_sequence),
-        "the closed preparation path produces the exact canonical carrier",
-    );
 }
 
 fn assert_reservation_only_setup_capability_verifies_recovers_and_refuses_outputs(

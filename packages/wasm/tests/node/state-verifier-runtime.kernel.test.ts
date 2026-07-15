@@ -180,15 +180,6 @@ describe('State verifier real-WASM runtime in Node', () => {
     });
 
     it('verifies an exact quorum and consumes streamed output without exposing its bytes', () => {
-        expect(kernel.exportedFunctionNames).toEqual(
-            expect.arrayContaining([
-                'sealed_lattice_state_verifier_begin',
-                'sealed_lattice_state_verifier_describe',
-                'sealed_lattice_state_verifier_finish_output',
-                'sealed_lattice_state_verifier_verify_recovery',
-                'sealed_lattice_state_verifier_verify_reservation',
-            ]),
-        );
         const session = openSession(kernel, vector);
         try {
             const reservation = verifyReservation(session, vector);

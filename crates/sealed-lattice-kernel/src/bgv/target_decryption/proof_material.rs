@@ -5,24 +5,21 @@ const TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE: &str =
 const TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/target-decryption/share-proof/proof-bytes";
 
-pub(super) struct TargetDecryptionShareProofMaterialGenerationInput<'a> {
+pub(super) struct VerifiedLocalTargetDecryptionShareProofMaterialGenerationInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) target_accepted: &'a TargetAcceptedBinding,
     pub(super) target_ciphertexts: &'a TargetCiphertextPair,
-    pub(super) target_share_profile: &'a TargetShareProfile,
     pub(super) participant: &'a ParticipantBinding,
-    pub(super) local_target_share_witness: &'a Value,
+    pub(super) local_target_share_witness: &'a LocalTargetDecryptionShareWitness,
     pub(super) target_decryption_share: &'a Value,
     pub(super) proof_statement: &'a Value,
     pub(super) proof_randomness_seed_hex: &'a str,
-    pub(super) proof_randomness_nonce_hex: &'a str,
 }
 
 pub(super) struct TargetDecryptionShareProofMaterialVerificationInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) target_accepted: &'a TargetAcceptedBinding,
     pub(super) target_ciphertexts: &'a TargetCiphertextPair,
-    pub(super) target_share_profile: &'a TargetShareProfile,
     pub(super) participant: &'a ParticipantBinding,
     pub(super) target_decryption_share: &'a Value,
     pub(super) proof_statement: &'a Value,
@@ -53,35 +50,30 @@ impl Drop for TargetProofMaterialEvictionGuard {
     }
 }
 
-pub(super) fn generate_target_decryption_share_proof_material_from_local_witness(
-    input: TargetDecryptionShareProofMaterialGenerationInput<'_>,
+pub(super) fn generate_target_decryption_share_proof_material_from_verified_local_witness(
+    input: VerifiedLocalTargetDecryptionShareProofMaterialGenerationInput<'_>,
 ) -> CanonicalResult<Value> {
-    validate_target_decryption_share_proof_statement_shape(
-        input.proof_statement,
-        input.setup_binding,
-        input.target_accepted,
-        input.target_ciphertexts,
-        input.target_share_profile,
-        input.participant,
-        input.target_decryption_share,
-    )?;
     let proof_slice_request =
-        target_decryption_share_all_active_limbs_proof_request_from_local_witness(
-            TargetDecryptionShareAllActiveLimbsProofRequestInput {
+        target_decryption_share_all_active_limbs_proof_request_from_verified_local_witness(
+            VerifiedLocalTargetDecryptionShareAllActiveLimbsProofRequestInput {
                 setup_binding: input.setup_binding,
                 target_accepted: input.target_accepted,
                 target_ciphertexts: input.target_ciphertexts,
-                target_share_profile: input.target_share_profile,
                 participant: input.participant,
                 local_target_share_witness: input.local_target_share_witness,
                 target_decryption_share: input.target_decryption_share,
                 proof_statement: input.proof_statement,
                 proof_randomness_seed_hex: input.proof_randomness_seed_hex,
-                proof_randomness_nonce_hex: input.proof_randomness_nonce_hex,
             },
         )?;
+    generate_and_retain_target_decryption_share_proof_material(&proof_slice_request)
+}
+
+fn generate_and_retain_target_decryption_share_proof_material(
+    proof_slice_request: &Value,
+) -> CanonicalResult<Value> {
     let proof_bytes = crate::bgv::setup::generate_target_decryption_share_proof_bytes_from_request(
-        &proof_slice_request,
+        proof_slice_request,
     )?;
     let proof_bytes_hash = hash512_hex(
         TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN,
@@ -109,7 +101,6 @@ pub(super) fn verify_target_decryption_share_proof_material(
         input.setup_binding,
         input.target_accepted,
         input.target_ciphertexts,
-        input.target_share_profile,
         input.participant,
         input.target_decryption_share,
     )?;

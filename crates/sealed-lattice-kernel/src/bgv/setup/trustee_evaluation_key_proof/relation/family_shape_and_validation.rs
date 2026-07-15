@@ -149,6 +149,10 @@ fn validate_vss_committed_material_commitment_shape(
     commitment: &VssShareLinkageCommitment,
     field_name: &str,
 ) -> CanonicalResult<()> {
+    validate_protocol_hash_hex(
+        &format!("{field_name}.commitmentContextHash"),
+        &commitment.commitment_context_hash,
+    )?;
     if commitment.material_roots_by_commitment_field.len()
         != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
     {
@@ -273,7 +277,6 @@ impl TrusteeEvaluationKeyStatement {
                 private_vss_share.source_trustee_identity.as_str(),
                 private_vss_share.recipient_identity.as_str(),
                 private_vss_share.source_trustee_commitment_root.as_str(),
-                private_vss_share.share_values_hash.as_str(),
             ] {
                 append_len_prefixed_str(&mut preimage, field);
             }
@@ -434,7 +437,6 @@ impl TrusteeEvaluationKeyStatement {
                     .trustee_roster_position
                     .to_le_bytes(),
             );
-            preimage.extend_from_slice(&target_decryption_share.interpolation_point.to_le_bytes());
             preimage.extend_from_slice(
                 &target_decryption_share
                     .aggregate_message_coefficient_bound
@@ -464,39 +466,16 @@ impl TrusteeEvaluationKeyStatement {
                     preimage.extend_from_slice(&coefficient_vector_hash(
                         &role_statement.released_partial_decryption,
                     ));
-                    append_usize(
+                    append_len_prefixed_str(
                         &mut preimage,
-                        role_statement.smudging_commitment_roots.len(),
+                        &role_statement.flooding_noise_commitment_root,
                     );
-                    for root in &role_statement.smudging_commitment_roots {
-                        append_len_prefixed_str(&mut preimage, root);
-                    }
-                    append_usize(&mut preimage, role_statement.smudging_commitments.len());
-                    for commitment in &role_statement.smudging_commitments {
-                        append_vss_public_commitment(&mut preimage, commitment);
-                    }
+                    append_vss_public_commitment(
+                        &mut preimage,
+                        &role_statement.flooding_noise_commitment,
+                    );
                 }
             }
-            append_usize(
-                &mut preimage,
-                target_decryption_share.smudging_polynomial_degree,
-            );
-            preimage.extend_from_slice(
-                &target_decryption_share
-                    .smudging_coefficient_bound
-                    .to_le_bytes(),
-            );
-            preimage.extend_from_slice(
-                &target_decryption_share
-                    .smudging_signed_coefficient_offset
-                    .to_le_bytes(),
-            );
-            preimage.extend_from_slice(
-                &target_decryption_share
-                    .smudging_message_coefficient_bound
-                    .to_le_bytes(),
-            );
-            preimage.extend_from_slice(&target_decryption_share.plaintext_multiple.to_le_bytes());
         } else {
             preimage.push(0);
         }
@@ -627,15 +606,6 @@ impl TrusteeEvaluationKeyStatement {
                     "target-decryption share trustee must match the proof context",
                 ));
             }
-            if self.context.binding_roots[1]
-                != target_decryption_share.active_credential_binding_root
-                || self.context.binding_roots[2]
-                    != target_decryption_share.smudging_commitment_set_root
-            {
-                return Err(invalid_succinct_setup_proof(
-                    "target-decryption share context roots must match the statement roots",
-                ));
-            }
             validate_target_decryption_share_statement(target_decryption_share, self.ring_degree)?;
         }
         validate_masked_claim_lift_window(self)?;
@@ -711,7 +681,7 @@ fn validate_masked_claim_lift_window(
             &smudging_upper_bound,
         );
         if required_smudging_residue_count
-                > TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT
+                > TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_FLOODING_NOISE_MESSAGE_MASKED_CLAIM_FIELD_COUNT
             {
                 return Err(invalid_succinct_setup_proof(
                     "target-decryption smudging-message masked consistency claims need more carried limb fields",
@@ -746,20 +716,6 @@ fn validate_target_decryption_share_statement(
             "target-decryption share statement must include at least one active target limb",
         ));
     }
-    if statement.smudging_polynomial_degree == 0 {
-        return Err(invalid_succinct_setup_proof(
-            "target-decryption smudging polynomial degree must be positive",
-        ));
-    }
-    if statement.smudging_coefficient_bound < 0
-        || statement.smudging_signed_coefficient_offset != statement.smudging_coefficient_bound
-        || statement.smudging_message_coefficient_bound
-            != (statement.smudging_coefficient_bound as u64) * 2 + 1
-    {
-        return Err(invalid_succinct_setup_proof(
-            "target-decryption smudging numeric bounds do not match the statement shape",
-        ));
-    }
     let mut previous_limb_index = None;
     for limb_statement in &statement.limb_statements {
         validate_protocol_hash_hex(
@@ -785,12 +741,7 @@ fn validate_target_decryption_share_statement(
             ));
         }
         previous_limb_index = Some(limb_statement.target_rns_limb_index);
-        if statement.interpolation_point == 0
-            || statement.interpolation_point >= limb_statement.target_rns_prime
-            || statement.plaintext_multiple == 0
-            || statement.plaintext_multiple >= limb_statement.target_rns_prime
-            || statement.aggregate_message_coefficient_bound < limb_statement.target_rns_prime
-        {
+        if statement.aggregate_message_coefficient_bound < limb_statement.target_rns_prime {
             return Err(invalid_succinct_setup_proof(
                 "target-decryption share numeric fields are outside the target field",
             ));
@@ -835,20 +786,10 @@ fn validate_target_decryption_share_statement(
                     "target-decryption share ciphertext and released partial must be canonical target-limb vectors",
                 ));
             }
-            if role_statement.smudging_commitments.len() != statement.smudging_polynomial_degree
-                || role_statement.smudging_commitment_roots.len()
-                    != statement.smudging_polynomial_degree
-            {
-                return Err(invalid_succinct_setup_proof(
-                    "target-decryption smudging commitments must cover every nonconstant polynomial degree",
-                ));
-            }
-            for commitment_root in &role_statement.smudging_commitment_roots {
-                validate_protocol_hash_hex(
-                    "targetDecryptionShare.smudgingCommitmentRoot",
-                    commitment_root,
-                )?;
-            }
+            validate_protocol_hash_hex(
+                "targetDecryptionShare.floodingNoiseCommitmentRoot",
+                &role_statement.flooding_noise_commitment_root,
+            )?;
         }
     }
     for commitment in statement.limb_statements.iter().flat_map(|limb_statement| {
@@ -856,7 +797,7 @@ fn validate_target_decryption_share_statement(
             limb_statement
                 .role_statements
                 .iter()
-                .flat_map(|role_statement| role_statement.smudging_commitments.iter()),
+                .map(|role_statement| &role_statement.flooding_noise_commitment),
         )
     }) {
         validate_vss_committed_material_commitment_shape(
@@ -891,10 +832,6 @@ fn validate_private_vss_share_statement(
     validate_protocol_hash_hex(
         "privateVssShare.sourceTrusteeCommitmentRoot",
         &statement.source_trustee_commitment_root,
-    )?;
-    validate_protocol_hash_hex(
-        "privateVssShare.shareValuesHash",
-        &statement.share_values_hash,
     )?;
     if statement.source_rns_limb_index >= DATA_PRIMES.len()
         || DATA_PRIMES[statement.source_rns_limb_index] != statement.source_message_modulus

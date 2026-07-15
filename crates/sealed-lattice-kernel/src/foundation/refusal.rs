@@ -65,6 +65,26 @@ impl RefusalReason {
             Self::ConsumedState => "consumedState",
         }
     }
+
+    /// Decodes the language-neutral name used at JavaScript and evidence boundaries.
+    pub fn try_from_name(name: &str) -> Result<Self, Self> {
+        match name {
+            "malformedEncoding" => Ok(Self::MalformedEncoding),
+            "unsupportedVersionOrSuite" => Ok(Self::UnsupportedVersionOrSuite),
+            "outsideSupportedProfile" => Ok(Self::OutsideSupportedProfile),
+            "wrongContext" => Ok(Self::WrongContext),
+            "wrongTypeOrLength" => Ok(Self::WrongTypeOrLength),
+            "wrongHashOrRoot" => Ok(Self::WrongHashOrRoot),
+            "invalidSignature" => Ok(Self::InvalidSignature),
+            "duplicateIdentity" => Ok(Self::DuplicateIdentity),
+            "equivocation" => Ok(Self::Equivocation),
+            "missingPrerequisite" => Ok(Self::MissingPrerequisite),
+            "invalidProof" => Ok(Self::InvalidProof),
+            "invalidArithmeticRelation" => Ok(Self::InvalidArithmeticRelation),
+            "consumedState" => Ok(Self::ConsumedState),
+            _ => Err(Self::MalformedEncoding),
+        }
+    }
 }
 
 impl fmt::Display for RefusalReason {
@@ -129,6 +149,7 @@ mod tests {
                 .expect("assigned refusal code decodes");
             assert_eq!(reason.canonical_code(), expected_code);
             assert_eq!(reason.name(), expected_name);
+            assert_eq!(RefusalReason::try_from_name(expected_name), Ok(reason));
         }
     }
 
@@ -137,6 +158,16 @@ mod tests {
         for code in [0, 0x000e, 0x0100, u16::MAX] {
             assert_eq!(
                 RefusalReason::try_from_canonical_code(code),
+                Err(RefusalReason::MalformedEncoding)
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_refusal_names_fail_as_malformed_encoding() {
+        for name in ["", "InvalidProof", "invalid-proof", "unknown"] {
+            assert_eq!(
+                RefusalReason::try_from_name(name),
                 Err(RefusalReason::MalformedEncoding)
             );
         }

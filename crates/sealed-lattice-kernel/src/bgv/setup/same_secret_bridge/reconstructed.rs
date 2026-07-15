@@ -29,8 +29,6 @@ pub(super) struct ReconstructedSameSecretBridgeProofVerification<'a> {
 }
 
 pub(in crate::bgv::setup) struct AuthoritativeSameSecretBridgeTarget<'a> {
-    pub(in crate::bgv::setup) rns_prime: u64,
-    pub(in crate::bgv::setup) coefficient_commitment_root: &'a str,
     pub(in crate::bgv::setup) commitment_body: &'a Value,
 }
 
@@ -102,7 +100,8 @@ pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
                     "same-secret bridge qShareRnsLimbCount exceeds the available Q_share primes",
                 )
             })?;
-            let coefficient_commitment_root = hash_at_path(record, &["coefficientCommitmentRoot"])?;
+            let coefficient_commitment_root =
+                super::super::vss_commitment::vss_public_commitment_body_root(record)?;
             let commitment_body = value_at_path(record, &["commitment"])?;
             compare_required_string(
                 string_at_path(commitment_body, &["objectType"])?,
@@ -131,15 +130,11 @@ pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
             )?;
             compare_required_string(
                 &derive_canonical_object_hash(commitment_body)?,
-                coefficient_commitment_root,
+                &coefficient_commitment_root,
                 "authoritative bridge target commitment body root",
             )?;
 
-            Ok(AuthoritativeSameSecretBridgeTarget {
-                rns_prime: canonical_prime,
-                coefficient_commitment_root,
-                commitment_body,
-            })
+            Ok(AuthoritativeSameSecretBridgeTarget { commitment_body })
         })
         .collect()
 }
@@ -151,23 +146,22 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
     vss_coefficient_commitments: &Value,
     expected_position: usize,
 ) -> CanonicalResult<Value> {
-    let trustee_identity = string_at_path(bridge_statement, &["trusteeIdentity"])?;
+    let source_records = array_at_path(coefficient_commitment_set, &["sourceTrusteeRecords"])?;
+    let source_record = source_records.get(expected_position).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "same-secret bridge coefficient commitments are missing the proof source",
+        )
+    })?;
+    let trustee_identity = string_at_path(source_record, &["sourceTrusteeIdentity"])?;
     let public_matrix_seed_hash = hash_at_path(statement_set, &["publicMatrixSeedHash"])?;
     let ring_degree = read_positive_usize_at_path(
         statement_set,
         &["ringDegree"],
         "same-secret bridge proof verification ringDegree",
     )?;
-    let q_share_rns_limb_count = read_positive_usize_at_path(
-        statement_set,
-        &["qShareRnsLimbCount"],
-        "same-secret bridge proof verification qShareRnsLimbCount",
-    )?;
-    let threshold_degree = read_positive_usize_at_path(
-        statement_set,
-        &["thresholdDegree"],
-        "same-secret bridge proof verification thresholdDegree",
-    )?;
+    let (_participant_count, q_share_rns_limb_count, threshold_degree) =
+        super::same_secret_bridge_profile(statement_set, coefficient_commitment_set)?;
     let source_constant_commitments =
         super::super::source_constant_commitments::canonical_source_constant_commitments_from_bridge_statement(
             vss_coefficient_commitments,
@@ -198,18 +192,16 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
 pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
     input: ReconstructedSameSecretBridgeProofVerification<'_>,
 ) -> CanonicalResult<Value> {
-    let trustee_identity = string_at_path(input.bridge_statement, &["trusteeIdentity"])?;
-    compare_required_u64(
-        unsigned_at_path(input.bridge_statement, &["trusteeRosterPosition"])?,
-        input.expected_position as u64,
-        "same-secret bridge statement trusteeRosterPosition",
-    )?;
+    let source_records =
+        array_at_path(input.coefficient_commitment_set, &["sourceTrusteeRecords"])?;
+    let source_record = source_records.get(input.expected_position).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "same-secret bridge coefficient commitments are missing the proof source",
+        )
+    })?;
+    let trustee_identity = string_at_path(source_record, &["sourceTrusteeIdentity"])?;
 
-    compare_required_u64(
-        unsigned_at_path(input.bridge_statement, &["ringDegree"])?,
-        input.ring_degree as u64,
-        "same-secret bridge statement ringDegree",
-    )?;
     let authoritative_targets = authoritative_same_secret_bridge_targets(
         input.coefficient_commitment_set,
         trustee_identity,
@@ -218,14 +210,6 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
         input.threshold_degree,
         input.ring_degree,
     )?;
-    let bridge_rns_primes = authoritative_targets
-        .iter()
-        .map(|target| target.rns_prime)
-        .collect::<Vec<_>>();
-    let target_constant_commitment_roots = authoritative_targets
-        .iter()
-        .map(|target| target.coefficient_commitment_root.to_string())
-        .collect::<Vec<_>>();
     let target_constant_commitments = authoritative_targets
         .iter()
         .map(|target| target.commitment_body.clone())
@@ -246,8 +230,6 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
             "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
             "sourceTrusteeIdentity": trustee_identity,
             "sourceTrusteeRosterPosition": input.expected_position,
-            "bridgeRnsPrimes": bridge_rns_primes,
-            "targetConstantCommitmentRoots": target_constant_commitment_roots,
             "targetConstantCommitments": target_constant_commitments,
         },
     }))
@@ -264,12 +246,12 @@ pub(super) fn verify_reconstructed_same_secret_bridge_proof(
 }
 
 pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_binding_hash(
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
     proof_verification_request: &Value,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "SameSecretBridgeProofVerificationBinding",
-        "proofMaterialRoot": proof_material_root,
+        "proofBytesHash": proof_bytes_hash,
         "verificationRequest": proof_verification_request,
     }))
 }
@@ -277,12 +259,12 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_binding_hash(
 #[cfg(test)]
 pub(in crate::bgv::setup) fn verify_and_retain_same_secret_bridge_proof_binding(
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
     proof_verification_request: &Value,
 ) -> CanonicalResult<()> {
     let proof_bytes = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
         SAME_SECRET_BRIDGE_PROOF_FAMILY,
-        proof_material_root,
+        proof_bytes_hash,
     )?
     .ok_or_else(|| {
         CanonicalError::new(
@@ -290,23 +272,21 @@ pub(in crate::bgv::setup) fn verify_and_retain_same_secret_bridge_proof_binding(
             "same-secret bridge proof binding requires authenticated proof bytes",
         )
     })?;
-    let proof_bytes_hash = proof_bytes.hash512_hex(SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN)?;
+    let recomputed_proof_bytes_hash =
+        proof_bytes.hash512_hex(SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN)?;
     compare_required_string(
-        proof_material_root,
-        &crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
-            SAME_SECRET_BRIDGE_PROOF_FAMILY,
-            &proof_bytes_hash,
-        )?,
-        "same-secret bridge proof material root",
+        proof_bytes_hash,
+        &recomputed_proof_bytes_hash,
+        "same-secret bridge proof bytes hash",
     )?;
     verify_reconstructed_same_secret_bridge_proof(proof_verification_request, &proof_bytes)?;
     drop(proof_bytes);
     crate::bgv::setup::retain_accepted_setup_proof_binding(
         proof_binding_session.session_handle,
         SAME_SECRET_BRIDGE_PROOF_FAMILY,
-        proof_material_root,
+        proof_bytes_hash,
         same_secret_bridge_proof_verification_binding_hash(
-            proof_material_root,
+            proof_bytes_hash,
             proof_verification_request,
         )?,
     )?;

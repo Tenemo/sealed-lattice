@@ -18,6 +18,7 @@ import {
     createRuntimeBuildManifestHashAccumulator,
     createSuiteArtifactHashAccumulator,
     createSuiteIdentifierAccumulator,
+    decodeRuntimeBuildManifest,
     runtimeBuildBytesToHex,
     type RuntimeAssetRole,
 } from '#packages/wasm/src/runtime-build-canonical';
@@ -152,8 +153,31 @@ type FixtureOverrides = Readonly<{
     artifactReferenceByteLength?: number;
     duplicateArtifactPath?: boolean;
     executableReferenceByteLength?: number;
+    operationProfiles?: readonly Uint8Array[];
     reorderAssets?: boolean;
 }>;
+
+const operationProfileForRandomUse = (
+    family: number,
+    purpose: number,
+): Uint8Array => {
+    const randomUse = canonicalTuple(
+        0x1806,
+        unsigned16Item(family),
+        unsigned16Item(purpose),
+    );
+    const boundary = canonicalTuple(
+        0x1807,
+        canonicalItem(0x04, unsigned32LittleEndian(0)),
+        unsigned16Item(0x1610),
+        nestedTupleListItem([randomUse]),
+    );
+    return canonicalTuple(
+        0x1808,
+        unsigned16Item(1),
+        nestedTupleListItem([boundary]),
+    );
+};
 
 const createFixture = (overrides: FixtureOverrides = {}) => {
     const assets: readonly AssetFixture[] = Object.freeze([
@@ -227,7 +251,7 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
         asciiItem(suiteRecordPath),
         asciiListItem(orderedArtifactPaths),
         nestedTupleListItem(assetReferences),
-        nestedTupleListItem([]),
+        nestedTupleListItem(overrides.operationProfiles ?? []),
     );
     const manifestHash = deriveHash(
         createRuntimeBuildManifestHashAccumulator(
@@ -434,6 +458,58 @@ const runFixture = async (input: {
 };
 
 describe('runtime build preflight', () => {
+    it('matches the Rust proof-family randomness purpose ranges', () => {
+        const assignments = [
+            [0x1211, 1, 2],
+            [0x1212, 3, 4],
+            [0x1214, 5, 6],
+            [0x1216, 7, 8],
+            [0x1217, 9, 40],
+            [0x1302, 41, 42],
+            [0x1621, 43, 44],
+            [0x2110, 45, 46],
+            [0x2111, 47, 48],
+        ] as const;
+
+        for (const [family, firstPurpose, lastPurpose] of assignments) {
+            for (const purpose of [firstPurpose, lastPurpose, 0xfffe]) {
+                const fixture = createFixture({
+                    operationProfiles: [
+                        operationProfileForRandomUse(family, purpose),
+                    ],
+                });
+                expect(() =>
+                    decodeRuntimeBuildManifest(fixture.manifestBytes),
+                ).not.toThrow();
+            }
+
+            for (const purpose of [firstPurpose - 1, lastPurpose + 1]) {
+                const fixture = createFixture({
+                    operationProfiles: [
+                        operationProfileForRandomUse(family, purpose),
+                    ],
+                });
+                expect(() =>
+                    decodeRuntimeBuildManifest(fixture.manifestBytes),
+                ).toThrow('A checkpoint random-use profile is unassigned.');
+            }
+        }
+
+        for (const [family, purpose] of [
+            [0x1213, 0xfffe],
+            [0xffff, 1],
+        ] as const) {
+            const fixture = createFixture({
+                operationProfiles: [
+                    operationProfileForRandomUse(family, purpose),
+                ],
+            });
+            expect(() =>
+                decodeRuntimeBuildManifest(fixture.manifestBytes),
+            ).toThrow('A checkpoint random-use profile is unassigned.');
+        }
+    });
+
     it('authenticates every inert fetch and cache reread before activation', async () => {
         const { activation, fetcher, workerHarness } = await runFixture({});
 

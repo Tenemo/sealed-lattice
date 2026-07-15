@@ -4,13 +4,14 @@ use crate::hashing::derive_canonical_object_hash;
 
 const SETUP_INTENT_OBJECT_TYPE: &str = "CollectiveBgvSetupIntent";
 const SETUP_INTENT_REGISTRATION_OBJECT_TYPE: &str = "CollectiveBgvSetupIntentTrusteeRegistration";
-const SETUP_INTENT_SIGNATURE_CONTEXT_OBJECT_TYPE: &str = "CollectiveBgvSetupIntentSignatureContext";
 
 #[derive(Clone)]
 pub(super) struct SetupIntentTrusteeRegistration {
     pub(super) trustee_identity: String,
     pub(super) signing_public_key_hash: String,
     pub(super) private_vss_mailbox_public_key_hash: String,
+    pub(super) recovery_epoch: u64,
+    pub(super) device_epoch: u64,
 }
 
 pub(super) type SetupIntentTrusteeRegistrationMap = BTreeMap<u64, SetupIntentTrusteeRegistration>;
@@ -31,6 +32,7 @@ pub(super) fn verify_setup_intent(
     };
     if !setup_intent.is_object() {
         return Ok(SetupIntentVerification::Refused(setup_intent_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "setupIntentNotObject",
             "setupIntent must be an object",
             "setupPackage.setupIntent",
@@ -38,6 +40,7 @@ pub(super) fn verify_setup_intent(
     }
     if setup_intent.get("objectType").and_then(Value::as_str) != Some(SETUP_INTENT_OBJECT_TYPE) {
         return Ok(SetupIntentVerification::Refused(setup_intent_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "setupIntentTypeMismatch",
             format!("setupIntent.objectType must be {SETUP_INTENT_OBJECT_TYPE}"),
             "setupPackage.setupIntent.objectType",
@@ -49,6 +52,7 @@ pub(super) fn verify_setup_intent(
         .and_then(Value::as_array)
     else {
         return Ok(SetupIntentVerification::Refused(setup_intent_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "setupIntentTrusteeRegistrationsMalformed",
             "setupIntent.trusteeRegistrations must be an array",
             "setupPackage.setupIntent.trusteeRegistrations",
@@ -63,6 +67,7 @@ pub(super) fn verify_setup_intent(
     let roster = super::accepted_roster_from_setup_context(setup_context)?;
     if registration_values.len() != roster.participant_count as usize {
         return Ok(SetupIntentVerification::Refused(setup_intent_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "setupIntentTrusteeRegistrationCountMismatch",
             "setupIntent.trusteeRegistrations must contain one signed registration per participant",
             "setupPackage.setupIntent.trusteeRegistrations",
@@ -90,6 +95,7 @@ pub(super) fn verify_setup_intent(
         };
         if !trustee_identities.insert(registration.trustee_identity.clone()) {
             return Ok(SetupIntentVerification::Refused(setup_intent_refusal(
+                crate::foundation::RefusalReason::Equivocation,
                 "setupIntentTrusteeIdentityDuplicate",
                 "setupIntent.trusteeRegistrations must bind distinct trustee identities",
                 "setupPackage.setupIntent.trusteeRegistrations",
@@ -97,6 +103,7 @@ pub(super) fn verify_setup_intent(
         }
         if !signing_public_key_hashes.insert(registration.signing_public_key_hash.clone()) {
             return Ok(SetupIntentVerification::Refused(setup_intent_refusal(
+                crate::foundation::RefusalReason::Equivocation,
                 "setupIntentSigningKeyDuplicate",
                 "setupIntent.trusteeRegistrations must bind distinct signing keys",
                 "setupPackage.setupIntent.trusteeRegistrations",
@@ -106,6 +113,7 @@ pub(super) fn verify_setup_intent(
             .insert(registration.private_vss_mailbox_public_key_hash.clone())
         {
             return Ok(SetupIntentVerification::Refused(setup_intent_refusal(
+                crate::foundation::RefusalReason::Equivocation,
                 "setupIntentMailboxKeyDuplicate",
                 "setupIntent.trusteeRegistrations must bind distinct private VSS mailbox keys",
                 "setupPackage.setupIntent.trusteeRegistrations",
@@ -125,6 +133,7 @@ fn verify_setup_intent_registration(
     const REGISTRATION_PATH: &str = "setupPackage.setupIntent.trusteeRegistrations";
     if !registration_value.is_object() {
         return Ok(Err(setup_intent_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "setupIntentTrusteeRegistrationNotObject",
             "setup-intent trustee registrations must be objects",
             REGISTRATION_PATH,
@@ -134,6 +143,7 @@ fn verify_setup_intent_registration(
         != Some(SETUP_INTENT_REGISTRATION_OBJECT_TYPE)
     {
         return Ok(Err(setup_intent_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "setupIntentTrusteeRegistrationTypeMismatch",
             format!(
                 "setup-intent trustee registrations must use {SETUP_INTENT_REGISTRATION_OBJECT_TYPE}"
@@ -143,48 +153,52 @@ fn verify_setup_intent_registration(
     }
     let Some(signature_envelope) = registration_value.get("signatureEnvelope") else {
         return Ok(Err(setup_intent_refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "setupIntentSignatureEnvelopeMissing",
             "setup-intent trustee registration must include an ML-DSA signature envelope",
             format!("{REGISTRATION_PATH}.signatureEnvelope"),
         )?));
     };
-    let Some(signed_root) = signature_envelope
-        .get("signedRoot")
-        .and_then(Value::as_object)
+    let Some(trustee_identity) = registration_value
+        .get("trusteeIdentity")
+        .and_then(Value::as_str)
     else {
         return Ok(Err(setup_intent_refusal(
-            "InvalidSignedRoot",
-            "setup-intent signature envelope must include a signedRoot object",
-            format!("{REGISTRATION_PATH}.signatureEnvelope.signedRoot"),
-        )?));
-    };
-    let Some(trustee_identity) = signed_root.get("signerIdentity").and_then(Value::as_str) else {
-        return Ok(Err(setup_intent_refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "setupIntentTrusteeIdentityMissing",
-            "setup-intent signed root must bind signerIdentity",
-            format!("{REGISTRATION_PATH}.signatureEnvelope.signedRoot.signerIdentity"),
+            "setup-intent trustee registration must bind trusteeIdentity",
+            format!("{REGISTRATION_PATH}.trusteeIdentity"),
         )?));
     };
     if trustee_identity.is_empty() || trustee_identity.nfc().collect::<String>() != trustee_identity
     {
         return Ok(Err(setup_intent_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "setupIntentTrusteeIdentityMalformed",
             "setup-intent trustee identity must be non-empty NFC text",
-            format!("{REGISTRATION_PATH}.signatureEnvelope.signedRoot.signerIdentity"),
+            format!("{REGISTRATION_PATH}.trusteeIdentity"),
         )?));
     }
-    let Some(recovery_epoch) = signed_root.get("recoveryEpoch").and_then(Value::as_u64) else {
+    let Some(recovery_epoch) = registration_value
+        .get("recoveryEpoch")
+        .and_then(Value::as_u64)
+    else {
         return Ok(Err(setup_intent_refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "setupIntentTrusteeEpochMissing",
-            "setup-intent signed root must bind recoveryEpoch",
-            format!("{REGISTRATION_PATH}.signatureEnvelope.signedRoot.recoveryEpoch"),
+            "setup-intent trustee registration must bind recoveryEpoch",
+            format!("{REGISTRATION_PATH}.recoveryEpoch"),
         )?));
     };
-    let Some(device_epoch) = signed_root.get("deviceEpoch").and_then(Value::as_u64) else {
+    let Some(device_epoch) = registration_value
+        .get("deviceEpoch")
+        .and_then(Value::as_u64)
+    else {
         return Ok(Err(setup_intent_refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "setupIntentTrusteeEpochMissing",
-            "setup-intent signed root must bind deviceEpoch",
-            format!("{REGISTRATION_PATH}.signatureEnvelope.signedRoot.deviceEpoch"),
+            "setup-intent trustee registration must bind deviceEpoch",
+            format!("{REGISTRATION_PATH}.deviceEpoch"),
         )?));
     };
     let Some(signing_public_key_hash) = signature_envelope
@@ -192,6 +206,7 @@ fn verify_setup_intent_registration(
         .and_then(Value::as_str)
     else {
         return Ok(Err(setup_intent_refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "setupIntentSigningKeyHashMissing",
             "setup-intent signature envelope must bind publicKeyHash",
             format!("{REGISTRATION_PATH}.signatureEnvelope.publicKeyHash"),
@@ -206,6 +221,7 @@ fn verify_setup_intent_registration(
         .and_then(Value::as_str)
     else {
         return Ok(Err(setup_intent_refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "setupIntentMailboxKeyHashMissing",
             "setup-intent trustee registration must bind privateVssMailboxPublicKeyHash",
             format!("{REGISTRATION_PATH}.privateVssMailboxPublicKeyHash"),
@@ -227,27 +243,17 @@ fn verify_setup_intent_registration(
         "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
     });
     let registration_root = derive_canonical_object_hash(&registration_payload)?;
-    let signature_context_hash = derive_canonical_object_hash(&json!({
-        "objectType": SETUP_INTENT_SIGNATURE_CONTEXT_OBJECT_TYPE,
-        "setupIntentRegistrationRoot": registration_root,
-    }))?;
     let verification = verify_protocol_signature_envelope(
         signature_envelope,
         &ProtocolSignatureExpectation {
             object_type: SETUP_INTENT_REGISTRATION_OBJECT_TYPE,
-            signer_role: "Trustee",
-            signer_identity: trustee_identity,
-            ceremony_id: setup_context_string(setup_context, "ceremonyId")?,
             public_key_hash: signing_public_key_hash,
-            manifest_hash: setup_context_string(setup_context, "manifestHash")?,
             object_root: &registration_root,
-            context_hash: &signature_context_hash,
-            recovery_epoch,
-            device_epoch,
         },
     )?;
     if let Err(failure) = verification {
         return Ok(Err(setup_intent_refusal(
+            protocol_signature_refusal_reason(failure.reason_code),
             failure.reason_code,
             failure.message,
             format!("{REGISTRATION_PATH}.signatureEnvelope"),
@@ -258,6 +264,8 @@ fn verify_setup_intent_registration(
         trustee_identity: trustee_identity.to_string(),
         signing_public_key_hash: signing_public_key_hash.to_string(),
         private_vss_mailbox_public_key_hash: private_vss_mailbox_public_key_hash.to_string(),
+        recovery_epoch,
+        device_epoch,
     }))
 }
 
@@ -303,20 +311,16 @@ pub(super) fn setup_intent_trustee_registrations_from_package(
                 "setup-intent registration signatureEnvelope is required",
             )
         })?;
-        let signed_root = signature_envelope.get("signedRoot").ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setup-intent registration signedRoot is required",
-            )
-        })?;
         let registration = SetupIntentTrusteeRegistration {
-            trustee_identity: value_string(signed_root, "signerIdentity")?.to_string(),
+            trustee_identity: value_string(registration_value, "trusteeIdentity")?.to_string(),
             signing_public_key_hash: value_string(signature_envelope, "publicKeyHash")?.to_string(),
             private_vss_mailbox_public_key_hash: value_string(
                 registration_value,
                 "privateVssMailboxPublicKeyHash",
             )?
             .to_string(),
+            recovery_epoch: value_u64(registration_value, "recoveryEpoch")?,
+            device_epoch: value_u64(registration_value, "deviceEpoch")?,
         };
         registrations.insert(roster_position, registration);
     }
@@ -334,6 +338,7 @@ pub(super) fn expected_trustees_from_setup_intent(
         .collect()
 }
 
+#[cfg(test)]
 pub(crate) fn accepted_setup_participant_roster_from_package(
     setup_package: &Value,
 ) -> CanonicalResult<Vec<(usize, String)>> {
@@ -367,6 +372,7 @@ pub(super) fn verify_setup_intent_roster_hash(
         return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
+                crate::foundation::RefusalReason::WrongHashOrRoot,
                 "setupRosterHashMismatch",
                 "setupContext.rosterHash must match the setup-intent trustee identity and signing-key registrations",
                 "setupPackage.setupContext.rosterHash",
@@ -398,12 +404,18 @@ pub(super) fn setup_intent_roster_hash_from_registrations(
 }
 
 fn setup_intent_refusal(
+    refusal_reason: crate::foundation::RefusalReason,
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
 ) -> CanonicalResult<Refusals> {
     Ok(setup_refusals(
         Vec::new(),
-        vec![Refusal::new(reason_code, message, object_path)],
+        vec![Refusal::new(
+            refusal_reason,
+            reason_code,
+            message,
+            object_path,
+        )],
     ))
 }

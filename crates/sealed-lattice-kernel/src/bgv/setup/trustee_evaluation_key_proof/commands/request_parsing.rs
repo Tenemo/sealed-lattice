@@ -8,19 +8,16 @@ use super::super::relation::{
 use super::VssPublicCommandCommitmentExpectation;
 use super::decoding::{
     read_i64_array, read_i64_matrix, read_i64_matrix2, read_string, read_string_array, read_u64,
-    read_u64_array,
 };
 use super::target_decryption_parsing::{
     key_descriptor_from_value, vss_share_linkage_commitment_from_value,
 };
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
 use crate::encoding::CanonicalResult;
+use crate::hashing::derive_canonical_object_hash;
 use serde_json::Value;
 
-// The same-secret bridge statement fields shared by the bridge proof
-// parser and the public-key share relation. Every commitment body is
-// validated against its expected canonical root, and every parsed field enters
-// the statement hash, so the target material cannot be swapped after proving.
 fn same_secret_bridge_fields_from_value(
     statement_value: &Value,
     ring_degree: usize,
@@ -29,9 +26,6 @@ fn same_secret_bridge_fields_from_value(
         read_string(statement_value, "sourceTrusteeIdentity")?.to_string();
     let source_trustee_roster_position = read_u64(statement_value, "sourceTrusteeRosterPosition")?;
     let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
-    let bridge_rns_primes = read_u64_array(statement_value, "bridgeRnsPrimes")?;
-    let target_constant_commitment_roots =
-        read_string_array(statement_value, "targetConstantCommitmentRoots")?;
     let target_constant_commitment_values = statement_value
         .get("targetConstantCommitments")
         .and_then(Value::as_array)
@@ -40,17 +34,19 @@ fn same_secret_bridge_fields_from_value(
                 "sameSecretBridge.targetConstantCommitments must be an array",
             )
         })?;
-    if target_constant_commitment_roots.len() != bridge_rns_primes.len()
-        || target_constant_commitment_values.len() != bridge_rns_primes.len()
-    {
+    if target_constant_commitment_values.len() != DATA_PRIMES.len() {
         return Err(invalid_succinct_setup_proof(
-            "sameSecretBridge primes, roots, and commitments must be aligned",
+            "sameSecretBridge must contain one target commitment for every Q_share limb",
         ));
     }
+    let target_constant_commitment_roots = target_constant_commitment_values
+        .iter()
+        .map(derive_canonical_object_hash)
+        .collect::<CanonicalResult<Vec<_>>>()?;
     let target_constant_commitments = target_constant_commitment_values
         .iter()
         .zip(target_constant_commitment_roots.iter())
-        .zip(bridge_rns_primes.iter())
+        .zip(DATA_PRIMES.iter())
         .enumerate()
         .map(
             |(target_rns_limb_index, ((value, expected_commitment_root), target_rns_prime))| {
@@ -72,7 +68,7 @@ fn same_secret_bridge_fields_from_value(
         public_matrix_seed_hash,
         source_trustee_identity,
         source_trustee_roster_position,
-        bridge_rns_primes,
+        bridge_rns_primes: DATA_PRIMES.to_vec(),
         target_constant_commitment_roots,
         target_constant_commitments,
     })
@@ -126,7 +122,7 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn statement_from_reques
         .ok_or_else(|| invalid_succinct_setup_proof("keys must be an array"))?;
     let keys = key_values
         .iter()
-        .map(key_descriptor_from_value)
+        .map(|key_value| key_descriptor_from_value(key_value, request))
         .collect::<CanonicalResult<Vec<_>>>()?;
     // The key kinds decide the family, and the family decides which labeled
     // binding roots the context must carry.
@@ -205,12 +201,6 @@ pub(super) fn vss_share_linkage_statement_from_request(
         context_value,
         SuccinctSetupProofFamilyShape::VssShareLinkage,
     )?;
-    let share_linkage_statement_root = read_string(statement_value, "shareLinkageStatementRoot")?;
-    if context.binding_roots[0] != share_linkage_statement_root {
-        return Err(invalid_succinct_setup_proof(
-            "share-linkage context root must match the share-linkage statement root",
-        ));
-    }
     let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
     let is_threshold_aggregate = match statement_value.get("isThresholdAggregate") {
         None | Some(Value::Null) => false,
@@ -293,10 +283,6 @@ pub(super) fn vss_share_linkage_witness_from_request(
                 request,
                 "vssCommittedMaterialSeedsByBoundMessage",
             )?,
-            vss_committed_material_context_hashes_by_bound_message: read_string_array(
-                request,
-                "vssCommittedMaterialContextHashesByBoundMessage",
-            )?,
         },
     })
 }
@@ -344,13 +330,13 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn same_secret_bridge_st
 pub(super) fn same_secret_bridge_witness_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyWitness> {
+    let secret_coefficients = read_i64_array(request, "secretCoefficients")?;
+    let negative_indicator_coefficients =
+        super::negative_indicator_coefficients_from_ternary_secret(&secret_coefficients)?;
     Ok(TrusteeEvaluationKeyWitness::SameSecretBridge {
-        secret_coefficients: read_i64_array(request, "secretCoefficients")?,
+        secret_coefficients,
         linkage: SameSecretLinkageWitness {
-            negative_indicator_coefficients: read_i64_array(
-                request,
-                "negativeIndicatorCoefficients",
-            )?,
+            negative_indicator_coefficients,
             opening_randomness_by_limb: read_i64_matrix(request, "openingRandomnessByLimb")?,
         },
         committed_material: VssCommittedMaterialWitness {
@@ -358,12 +344,45 @@ pub(super) fn same_secret_bridge_witness_from_request(
                 request,
                 "vssCommittedMaterialSeedsByBoundMessage",
             )?,
-            vss_committed_material_context_hashes_by_bound_message: read_string_array(
-                request,
-                "vssCommittedMaterialContextHashesByBoundMessage",
-            )?,
         },
     })
+}
+
+#[cfg(test)]
+mod same_secret_bridge_witness_tests {
+    use super::*;
+
+    #[test]
+    fn derives_negative_indicators_from_the_ternary_secret() {
+        let mut request = serde_json::json!({
+            "secretCoefficients": [-1, 0, 1],
+            "openingRandomnessByLimb": [],
+            "vssCommittedMaterialSeedsByBoundMessage": [],
+        });
+        let witness = same_secret_bridge_witness_from_request(&request)
+            .expect("a ternary same-secret witness must parse");
+        let TrusteeEvaluationKeyWitness::SameSecretBridge {
+            secret_coefficients,
+            linkage,
+            ..
+        } = witness
+        else {
+            panic!("the same-secret parser must return a same-secret witness");
+        };
+        assert_eq!(secret_coefficients, [-1, 0, 1]);
+        assert_eq!(linkage.negative_indicator_coefficients, [1, 0, 0]);
+
+        request["secretCoefficients"][1] = serde_json::json!(2);
+        let Err(error) = same_secret_bridge_witness_from_request(&request) else {
+            panic!("a non-ternary same-secret witness must reject");
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("secretCoefficients must contain only ternary coefficients"),
+            "unexpected non-ternary secret error: {error}"
+        );
+    }
 }
 
 pub(super) fn vss_share_linkage_item_from_value(

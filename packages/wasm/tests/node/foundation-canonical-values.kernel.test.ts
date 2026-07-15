@@ -270,21 +270,6 @@ describe('Canonical foundation values in real WASM', () => {
         ).not.toBe(actionContextHash);
     });
 
-    it('refuses to publish a suite while required artifact semantics are incomplete', () => {
-        let observedError: unknown;
-        try {
-            kernel.generateProofSuiteCandidate();
-        } catch (error) {
-            observedError = error;
-        }
-
-        expect(observedError).toBeInstanceOf(TranscriptCoreKernelCommandError);
-        expect(observedError).toMatchObject({ code: 'InvalidProtocolObject' });
-        expect((observedError as Error).message).toBe(
-            'InvalidProtocolObject: proof-suite candidate generation is unavailable because required suite semantics are incomplete',
-        );
-    });
-
     it('round-trips every operative local-storage schema through the WASM foundation decoder', async () => {
         const bindingItems = [
             hashItem(new Uint8Array(64).fill(0x11)),

@@ -21,16 +21,11 @@ pub(in super::super::super) fn vss_public_coefficient_commitment_set_object(
             )
         })
         .collect::<Vec<_>>();
-    let mut set = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssPublicCoefficientCommitmentSet",
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "sourceTrusteeRecords": source_trustee_records,
-    });
-    set["coefficientCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&set).expect("VSS coefficient commitment root")
-    );
-
-    set
+    })
 }
 
 pub(super) fn vss_public_source_coefficient_record(
@@ -59,17 +54,11 @@ pub(super) fn vss_public_source_coefficient_record(
             })
         })
         .collect::<Vec<_>>();
-    let mut source_record = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssPublicSourceCoefficientCommitments",
         "sourceTrusteeIdentity": source_trustee_identity,
         "coefficientCommitments": coefficient_commitments,
-    });
-    source_record["sourceCoefficientCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&source_record)
-            .expect("VSS source coefficient commitment root")
-    );
-
-    source_record
+    })
 }
 
 pub(super) fn vss_public_coefficient_commitment_record(
@@ -106,17 +95,14 @@ pub(super) fn vss_public_coefficient_commitment_record(
             "commitmentRole": "coefficient",
             "commitmentContext": commitment_context,
             "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
             "ringDegree": ring_degree,
             "messageCoefficients": coefficient_message,
-            "messageCoefficientBound": rns_prime,
             "materialSeedHex": material_seed_hex,
         }))
         .expect("VSS coefficient committed-material commitment");
 
     serde_json::json!({
         "objectType": "VssPublicCoefficientCommitment",
-        "coefficientCommitmentRoot": computation["commitmentRoot"],
         "commitment": computation["commitment"],
     })
 }
@@ -138,16 +124,11 @@ pub(in super::super::super) fn vss_public_recipient_share_commitment_set_object(
             )
         })
         .collect::<Vec<_>>();
-    let mut recipient_set = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssPublicRecipientShareCommitmentSet",
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "sourceTrusteeRecords": source_trustee_records,
-    });
-    recipient_set["recipientShareCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&recipient_set).expect("VSS recipient-share commitment root")
-    );
-
-    recipient_set
+    })
 }
 
 pub(super) fn vss_public_source_recipient_share_record(
@@ -172,17 +153,11 @@ pub(super) fn vss_public_source_recipient_share_record(
             })
         })
         .collect::<Vec<_>>();
-    let mut source_record = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssPublicSourceRecipientShareCommitments",
         "sourceTrusteeIdentity": source_trustee_identity,
         "recipientShareCommitments": recipient_share_commitments,
-    });
-    source_record["sourceRecipientShareCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&source_record)
-            .expect("VSS source recipient-share commitment root")
-    );
-
-    source_record
+    })
 }
 
 pub(super) fn vss_public_recipient_share_commitment_record(
@@ -225,10 +200,8 @@ pub(super) fn vss_public_recipient_share_commitment_record(
             "commitmentRole": "recipient-share",
             "commitmentContext": commitment_context,
             "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
             "ringDegree": ring_degree,
             "messageCoefficients": share_coefficients,
-            "messageCoefficientBound": rns_prime,
             "materialSeedHex": material_seed_hex,
         }))
         .expect("VSS recipient-share committed-material commitment");
@@ -236,7 +209,6 @@ pub(super) fn vss_public_recipient_share_commitment_record(
     serde_json::json!({
         "objectType": "VssPublicRecipientShareCommitment",
         "recipientIdentity": recipient_identity,
-        "shareCommitmentRoot": computation["commitmentRoot"],
         "commitment": computation["commitment"],
     })
 }
@@ -256,9 +228,6 @@ pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_obj
             package,
             &recipient_coordinates,
         );
-    // The proven "T = sum" bindings are a sibling of the records, added after the
-    // set root so they are bound by their own statements (which reference the
-    // committed roots), not folded into the commitment set root.
     let aggregate_threshold_proofs = super::aggregate_threshold::vss_aggregate_threshold_proofs(
         package,
         &aggregate_set,
@@ -292,16 +261,11 @@ pub(super) fn vss_public_aggregate_threshold_commitment_set_without_proofs_for_c
             )
         })
         .collect::<Vec<_>>();
-    let mut aggregate_set = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitmentSet",
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "recipientRecords": recipient_records,
-    });
-    aggregate_set["aggregateThresholdCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&aggregate_set).expect("aggregate threshold commitment root")
-    );
-
-    aggregate_set
+    })
 }
 
 pub(super) fn vss_public_aggregate_threshold_commitment_record(
@@ -353,10 +317,8 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
             "commitmentRole": "aggregate-threshold-share",
             "commitmentContext": commitment_context,
             "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
             "ringDegree": ring_degree,
             "messageCoefficients": aggregate_message,
-            "messageCoefficientBound": rns_prime,
             "materialSeedHex": material_seed_hex,
         }))
         .expect("VSS aggregate committed-material commitment");
@@ -364,7 +326,6 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
     serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
         "recipientIdentity": recipient_identity,
-        "aggregateCommitmentRoot": computation["commitmentRoot"],
         "aggregateOpeningRoot": computation["openingRoot"],
         "commitment": computation["commitment"],
     })

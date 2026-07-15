@@ -14,10 +14,11 @@ use super::column_commitment::{ColumnOpening, ColumnRow};
 use super::key_proof::KeyFriProof;
 use super::low_degree::{FriLayerOpening, FriProof, FriQueryAnswer};
 use super::merkle::{BatchedMerkleOpening, MERKLE_DIGEST_BYTES, MerkleDigest};
+use super::private_randomness::PROOF_SALT_BYTE_LENGTH;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-const CODEC_MAGIC: &[u8; 8] = b"SLKSATM1";
-const SALT_BYTES: usize = 8;
+const CODEC_MAGIC: &[u8; 8] = b"SLKSATM2";
+const SALT_BYTES: usize = PROOF_SALT_BYTE_LENGTH;
 
 fn invalid_codec(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::MalformedLength, message)
@@ -318,6 +319,7 @@ mod tests {
     use super::super::key_proof::{
         KeyFriProofParameters, KeySource, prove_round_one_key_fri, verify_round_one_key_fri,
     };
+    use super::super::private_randomness::PrivateProofRandomness;
     use super::super::test_support::build_synthetic_key_fixture;
     use super::*;
 
@@ -336,7 +338,7 @@ mod tests {
             query_count: 40,
             mask_degree: 0,
         };
-        let mut salt_seed = 0x2024;
+        let mut private_randomness = PrivateProofRandomness::for_test(0x2024);
         let proof = prove_round_one_key_fri(
             &parameters,
             ring_degree,
@@ -344,7 +346,7 @@ mod tests {
             &secret,
             &digits,
             &proof_parameters,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("prove");
         (public, ring_degree, proof_parameters, proof)

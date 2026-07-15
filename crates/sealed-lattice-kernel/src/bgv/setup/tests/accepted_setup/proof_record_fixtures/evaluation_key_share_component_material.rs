@@ -105,7 +105,7 @@ pub(in super::super) fn evaluation_key_share_fixture_material(
 // verification resolve the authenticated bytes from the verifier-owned store.
 pub(in super::super) fn authenticate_evaluation_key_share_component_material_fixture(
     proof_family: EvaluationKeyShareProofFamily,
-    record: &serde_json::Value,
+    level: u64,
     derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
     ring_degree: usize,
     fixture_material: &EvaluationKeyShareFixtureMaterial,
@@ -113,13 +113,14 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
 ) -> String {
     let material_root = evaluation_key_share_component_material_reference_root(
         proof_family,
-        record,
+        usize::try_from(level).expect("component material level fits usize"),
+        &fixture_material.component_vector_root,
         derived_binding,
         ring_degree,
     )
     .expect("evaluation-key component material reference root");
     let material_bytes = encode_evaluation_key_share_component_material(
-        record,
+        level,
         ring_degree,
         &fixture_material.component_b_by_digit,
     );
@@ -154,32 +155,25 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
 }
 
 fn encode_evaluation_key_share_component_material(
-    record: &serde_json::Value,
+    level: u64,
     ring_degree: usize,
     component_b_by_digit: &[Vec<Vec<u64>>],
 ) -> Vec<u8> {
-    const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
+    const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV2";
 
-    let level = record["level"].as_u64().expect("component material level");
-    let ring_degree = u64::try_from(ring_degree).expect("component material ring degree fits u64");
     let digit_count = level
         .checked_add(1)
         .expect("component material digit count");
     let expected_digit_count =
         usize::try_from(digit_count).expect("component material digit count fits usize");
-    let expected_ring_degree =
-        usize::try_from(ring_degree).expect("component material ring degree fits usize");
     assert_eq!(component_b_by_digit.len(), expected_digit_count);
 
     let mut bytes = Vec::new();
     bytes.extend_from_slice(COMPONENT_MATERIAL_MAGIC);
-    for word in [level, ring_degree] {
-        bytes.extend_from_slice(&word.to_le_bytes());
-    }
     for component_b_by_limb in component_b_by_digit {
         assert_eq!(component_b_by_limb.len(), expected_digit_count);
         for coefficients in component_b_by_limb {
-            assert_eq!(coefficients.len(), expected_ring_degree);
+            assert_eq!(coefficients.len(), ring_degree);
             for coefficient in coefficients {
                 bytes.extend_from_slice(&coefficient.to_le_bytes());
             }
@@ -329,19 +323,12 @@ fn evaluation_key_component_vector_root(
 ) -> String {
     let entries = component_b_by_digit
         .iter()
-        .enumerate()
-        .flat_map(|(digit_index, component_b_by_limb)| {
-            component_b_by_limb
-                .iter()
-                .enumerate()
-                .map(move |(rns_limb_index, coefficients)| {
-                    serde_json::json!({
-                        "digitIndex": digit_index,
-                        "rnsLimbIndex": rns_limb_index,
-                        "rnsPrime": DATA_PRIMES[rns_limb_index],
-                        "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
-                    })
+        .flat_map(|component_b_by_limb| {
+            component_b_by_limb.iter().map(|coefficients| {
+                serde_json::json!({
+                    "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
                 })
+            })
         })
         .collect::<Vec<_>>();
     evaluation_key_share_component_vector_root(
@@ -365,9 +352,11 @@ pub(in super::super) fn relinearization_key_switch_seed_for_test(
     round: &str,
     level: u64,
 ) -> String {
+    let evaluator_key_schedule_root =
+        derive_canonical_object_hash(schedule).expect("evaluator-key schedule root");
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "RelinearizationKeySwitchPublicSampleSeed",
-        "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
+        "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "round": round,
         "level": level,
@@ -383,9 +372,11 @@ pub(in super::super) fn galois_key_switch_seed_for_test(
     rotation: u64,
     level: u64,
 ) -> String {
+    let evaluator_key_schedule_root =
+        derive_canonical_object_hash(schedule).expect("evaluator-key schedule root");
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "GaloisKeySwitchPublicSampleSeed",
-        "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
+        "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "rotation": rotation,
         "level": level,
@@ -616,10 +607,7 @@ mod tests {
             Some(&source),
         );
         let mut record = serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "level": level,
-            "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
+            "objectType": "RelinearizationKeyShareRoundOne",
         });
         let correct_binding = EvaluationKeyShareDerivedMaterialBinding {
             trustee_identity,
@@ -633,7 +621,7 @@ mod tests {
         let authenticated_material_root =
             authenticate_evaluation_key_share_component_material_fixture(
                 proof_family,
-                &record,
+                level,
                 correct_binding,
                 ring_degree,
                 &fixture_material,
@@ -644,6 +632,8 @@ mod tests {
         let decoded_material = component_b_vectors_from_record(
             proof_family,
             &record,
+            usize::try_from(level).expect("level fits usize"),
+            ring_degree,
             correct_binding,
             &accepted_setup_session,
         )
@@ -652,6 +642,21 @@ mod tests {
         assert_eq!(
             decoded_material.component_b_by_digit,
             fixture_material.component_b_by_digit
+        );
+
+        let wrong_ring_degree_error = component_b_vectors_from_record(
+            proof_family,
+            &record,
+            usize::try_from(level).expect("level fits usize"),
+            ring_degree + 1,
+            correct_binding,
+            &accepted_setup_session,
+        )
+        .err()
+        .expect("the authoritative ring degree must determine the exact sidecar length");
+        assert_eq!(
+            wrong_ring_degree_error.code,
+            CanonicalErrorCode::InvalidFixture
         );
 
         let wrong_key_switch_seed_hex = repeated_test_seed(0xb2);
@@ -689,6 +694,8 @@ mod tests {
             let error = component_b_vectors_from_record(
                 proof_family,
                 &record,
+                usize::try_from(level).expect("level fits usize"),
+                ring_degree,
                 substituted_binding,
                 &accepted_setup_session,
             )

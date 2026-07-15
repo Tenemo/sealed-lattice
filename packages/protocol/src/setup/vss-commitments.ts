@@ -2,9 +2,9 @@ export type {
     VssPublicCoefficientCommitmentSet,
     VssPublicRecipientShareCommitmentSet,
     VssPublicAggregateThresholdCommitmentSet,
-    LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
 } from './vss-commitments/commitment-sets.js';
 export type {
+    VssShareLinkageProofMaterialSet,
     VssShareLinkageStatement,
     VssSameSecretBridgeProofMaterialSet,
     VssSameSecretBridgeStatementSet,

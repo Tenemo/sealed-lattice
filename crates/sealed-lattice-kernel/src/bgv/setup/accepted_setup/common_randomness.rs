@@ -14,6 +14,7 @@ pub(super) fn verify_common_randomness(
     };
     if !common_randomness.is_object() {
         return Ok(Some(common_randomness_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "commonRandomnessNotObject",
             "commonRandomness must be a JSON object",
             "setupPackage.commonRandomness",
@@ -22,6 +23,7 @@ pub(super) fn verify_common_randomness(
     if common_randomness.get("objectType").and_then(Value::as_str) != Some("SetupCommonRandomness")
     {
         return Ok(Some(common_randomness_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "commonRandomnessObjectTypeMismatch",
             "commonRandomness.objectType must be SetupCommonRandomness",
             "setupPackage.commonRandomness.objectType",
@@ -56,6 +58,7 @@ pub(super) fn verify_common_randomness(
     };
     if commit_records.len() != roster.participant_count as usize {
         return Ok(Some(common_randomness_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "commonRandomnessCommitCountMismatch",
             "commonRandomness.commitRecords must contain one commit per participant",
             "setupPackage.commonRandomness.commitRecords",
@@ -63,6 +66,7 @@ pub(super) fn verify_common_randomness(
     }
     if reveal_records.len() != roster.participant_count as usize {
         return Ok(Some(common_randomness_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "commonRandomnessRevealCountMismatch",
             "commonRandomness.revealRecords must contain one reveal per participant",
             "setupPackage.commonRandomness.revealRecords",
@@ -81,6 +85,7 @@ pub(super) fn verify_common_randomness(
             .is_some()
         {
             return Ok(Some(common_randomness_refusal(
+                crate::foundation::RefusalReason::Equivocation,
                 "commonRandomnessCommitDuplicate",
                 "commonRandomness.commitRecords contains duplicate roster positions",
                 "setupPackage.commonRandomness.commitRecords",
@@ -98,6 +103,7 @@ pub(super) fn verify_common_randomness(
         let Some(committed_reveal_hash) = commit_reveal_hashes_by_position.get(&roster_position)
         else {
             return Ok(Some(common_randomness_refusal(
+                crate::foundation::RefusalReason::MissingPrerequisite,
                 "commonRandomnessRevealWithoutCommit",
                 "commonRandomness.revealRecords contains a reveal without a matching commit",
                 "setupPackage.commonRandomness.revealRecords",
@@ -105,6 +111,7 @@ pub(super) fn verify_common_randomness(
         };
         if committed_reveal_hash != &reveal_hash {
             return Ok(Some(common_randomness_refusal(
+                crate::foundation::RefusalReason::WrongHashOrRoot,
                 "commonRandomnessRevealHashMismatch",
                 "common-randomness reveal hash does not match the participant commit",
                 "setupPackage.commonRandomness.revealRecords",
@@ -115,6 +122,7 @@ pub(super) fn verify_common_randomness(
             .is_some()
         {
             return Ok(Some(common_randomness_refusal(
+                crate::foundation::RefusalReason::Equivocation,
                 "commonRandomnessRevealDuplicate",
                 "commonRandomness.revealRecords contains duplicate roster positions",
                 "setupPackage.commonRandomness.revealRecords",
@@ -123,6 +131,7 @@ pub(super) fn verify_common_randomness(
     }
     if ordered_reveal_hashes.len() != roster.participant_count as usize {
         return Ok(Some(common_randomness_refusal(
+            crate::foundation::RefusalReason::WrongHashOrRoot,
             "commonRandomnessRevealCoverageMismatch",
             "commonRandomness.revealRecords must cover the full foundation roster",
             "setupPackage.commonRandomness.revealRecords",
@@ -147,6 +156,7 @@ pub(super) fn verify_common_randomness(
         != Some(expected_public_matrix_seed_hash.as_str())
     {
         return Ok(Some(common_randomness_refusal(
+            crate::foundation::RefusalReason::WrongHashOrRoot,
             "commonRandomnessPublicMatrixSeedMismatch",
             "commonRandomness.publicMatrixSeedHash does not match the ordered reveal set",
             "setupPackage.commonRandomness.publicMatrixSeedHash",
@@ -179,7 +189,6 @@ fn verify_common_randomness_commit_record(
     let commit_hash = derive_canonical_object_hash(&commit_payload)?;
     verify_common_randomness_signature(
         commit_record,
-        setup_context,
         &participant,
         &CommonRandomnessSignatureExpectation {
             object_type: "CommonRandomnessCommit",
@@ -215,7 +224,6 @@ fn verify_common_randomness_reveal_record(
     let reveal_hash = derive_canonical_object_hash(&reveal_payload)?;
     verify_common_randomness_signature(
         reveal_record,
-        setup_context,
         &participant,
         &CommonRandomnessSignatureExpectation {
             object_type: "CommonRandomnessReveal",
@@ -272,45 +280,11 @@ fn verify_common_randomness_participant_record_shape(
             format!("{object_type}.rosterPosition is missing from setupIntent registrations"),
         ));
     };
-    let signature_envelope = record.get("signatureEnvelope").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{object_type}.signatureEnvelope is required"),
-        )
-    })?;
-    let signed_root = signature_envelope
-        .get("signedRoot")
-        .and_then(Value::as_object)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("{object_type}.signatureEnvelope.signedRoot must be an object"),
-            )
-        })?;
-    let recovery_epoch = signed_root
-        .get("recoveryEpoch")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("{object_type} signed root must bind recoveryEpoch"),
-            )
-        })?;
-    let device_epoch = signed_root
-        .get("deviceEpoch")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("{object_type} signed root must bind deviceEpoch"),
-            )
-        })?;
-
     Ok(CommonRandomnessParticipantBinding {
         roster_position,
         trustee_identity: registration.trustee_identity.clone(),
-        recovery_epoch,
-        device_epoch,
+        recovery_epoch: registration.recovery_epoch,
+        device_epoch: registration.device_epoch,
     })
 }
 
@@ -354,7 +328,6 @@ struct CommonRandomnessSignatureExpectation<'a> {
 
 fn verify_common_randomness_signature(
     record: &Value,
-    setup_context: &Value,
     participant: &CommonRandomnessParticipantBinding,
     expectation: &CommonRandomnessSignatureExpectation<'_>,
 ) -> CanonicalResult<()> {
@@ -370,31 +343,18 @@ fn verify_common_randomness_signature(
                 ),
             )
         })?;
-    let context_hash = derive_canonical_object_hash(&json!({
-        "objectType": format!("{}SignatureContext", expectation.object_type),
-        "payloadRoot": expectation.object_root,
-    }))?;
     let signature_envelope = record.get("signatureEnvelope").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             format!("{}.signatureEnvelope is required", expectation.object_type),
         )
     })?;
-    let manifest_hash = setup_context_string(setup_context, "manifestHash")?;
-    let ceremony_id = setup_context_string(setup_context, "ceremonyId")?;
     let verification = verify_protocol_signature_envelope(
         signature_envelope,
         &ProtocolSignatureExpectation {
             object_type: expectation.object_type,
-            signer_role: "Trustee",
-            signer_identity: &participant.trustee_identity,
-            ceremony_id,
             public_key_hash: &registration.signing_public_key_hash,
-            manifest_hash,
             object_root: expectation.object_root,
-            context_hash: &context_hash,
-            recovery_epoch: participant.recovery_epoch,
-            device_epoch: participant.device_epoch,
         },
     )?;
     match verification {
@@ -427,12 +387,18 @@ fn validate_common_randomness_reveal_hex(reveal_hex: &str) -> CanonicalResult<()
 }
 
 fn common_randomness_refusal(
+    refusal_reason: crate::foundation::RefusalReason,
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
 ) -> CanonicalResult<Refusals> {
     Ok(setup_refusals(
         Vec::new(),
-        vec![Refusal::new(reason_code, message, object_path)],
+        vec![Refusal::new(
+            refusal_reason,
+            reason_code,
+            message,
+            object_path,
+        )],
     ))
 }

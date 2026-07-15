@@ -16,28 +16,34 @@ import {
     validateCommonInput,
 } from './encoding.js';
 
-type PublicKeyShareRootFields = Pick<
-    PublicKeyShareRecord,
-    | 'trusteeIdentity'
-    | 'trusteeRosterPosition'
-    | 'shareCoefficientVectorHash512ByLimb'
->;
-
-const publicKeyShareRootInput = (
+export const derivePublicKeyShareRoot = (
     setupContext: PublicKeyShareSetInput['setupContext'],
     publicMatrixSeedHash: PublicKeyShareSetInput['publicMatrixSeedHash'],
-    shareRecord: PublicKeyShareRootFields,
-) => ({
-    objectType: 'PublicKeyShare',
-    setupContextHash: deriveCollectiveBgvSetupContextHash(setupContext),
-    trusteeIdentity: shareRecord.trusteeIdentity,
-    trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-    publicMatrixSeedHash,
-    shareCoefficientVectorHash512ByLimb:
-        shareRecord.shareCoefficientVectorHash512ByLimb,
-});
+    shareRecord: PublicKeyShareRecord,
+) =>
+    deriveCanonicalObjectHash({
+        objectType: 'PublicKeyShare',
+        setupContextHash: deriveCollectiveBgvSetupContextHash(setupContext),
+        trusteeIdentity: shareRecord.trusteeIdentity,
+        trusteeRosterPosition: shareRecord.trusteeRosterPosition,
+        publicMatrixSeedHash,
+        shareCoefficientVectorHash512ByLimb:
+            shareRecord.shareCoefficientVectorHash512ByLimb,
+    });
 
-const validateShareContribution = (
+export const derivePublicKeyShareSetRoot = (
+    setupContext: PublicKeyShareSetInput['setupContext'],
+    publicMatrixSeedHash: PublicKeyShareSetInput['publicMatrixSeedHash'],
+    publicKeyShares: PublicKeyShareSet,
+) =>
+    deriveCanonicalObjectHash({
+        objectType: 'PublicKeyShareSet',
+        setupContextHash: deriveCollectiveBgvSetupContextHash(setupContext),
+        publicMatrixSeedHash,
+        shareRecords: publicKeyShares.shareRecords,
+    });
+
+const validatePublicKeyShare = (
     contribution: PublicKeyShareContributionInput,
     expectedRosterPosition: number,
     qSharePrimes: readonly number[],
@@ -49,7 +55,7 @@ const validateShareContribution = (
     );
     if (contribution.trusteeRosterPosition !== expectedRosterPosition) {
         throw new Error(
-            'shareContributions roster positions must be contiguous from zero.',
+            'public-key shares must follow contiguous roster order from zero.',
         );
     }
     if (
@@ -75,56 +81,31 @@ export const createPublicKeyShareSet = (
 ): PublicKeyShareSet => {
     validateCommonInput(input);
     const shareContributions = sortedByRosterPosition(input.shareContributions);
-    if (shareContributions.length !== input.participantCount) {
+    if (shareContributions.length !== input.setupContext.participantCount) {
         throw new Error(
             'shareContributions must contain one public-key share per participant.',
         );
     }
     const shareRecords = shareContributions.map(
         (contribution, expectedRosterPosition) => {
-            validateShareContribution(
+            validatePublicKeyShare(
                 contribution,
                 expectedRosterPosition,
                 input.qSharePrimes,
             );
-            const shareRecordWithoutRoot = {
+            return {
                 objectType: 'PublicKeyShare',
                 trusteeIdentity: contribution.trusteeIdentity,
                 trusteeRosterPosition: contribution.trusteeRosterPosition,
                 shareCoefficientVectorHash512ByLimb:
                     contribution.shareCoefficientVectorHash512ByLimb,
-            } as const satisfies Omit<
-                PublicKeyShareRecord,
-                'publicKeyShareRoot'
-            >;
-
-            return {
-                ...shareRecordWithoutRoot,
-                publicKeyShareRoot: deriveCanonicalObjectHash(
-                    publicKeyShareRootInput(
-                        input.setupContext,
-                        input.publicMatrixSeedHash,
-                        shareRecordWithoutRoot,
-                    ),
-                ),
             } satisfies PublicKeyShareRecord;
         },
     );
-    const shareSetWithoutRoot = {
-        objectType: 'PublicKeyShareSet',
-        shareRecords,
-    } as const satisfies Omit<PublicKeyShareSet, 'publicKeyShareSetRoot'>;
 
     return {
-        ...shareSetWithoutRoot,
-        publicKeyShareSetRoot: deriveCanonicalObjectHash({
-            objectType: shareSetWithoutRoot.objectType,
-            setupContextHash: deriveCollectiveBgvSetupContextHash(
-                input.setupContext,
-            ),
-            publicMatrixSeedHash: input.publicMatrixSeedHash,
-            shareRecords,
-        }),
+        objectType: 'PublicKeyShareSet',
+        shareRecords,
     } satisfies PublicKeyShareSet;
 };
 
@@ -133,63 +114,23 @@ export const publicKeyShareRecordsByRosterPosition = (
         PublicKeyShareMaterialSetInput,
         | 'setupContext'
         | 'qSharePrimes'
-        | 'participantCount'
         | 'publicMatrixSeedHash'
         | 'publicKeyShares'
     >,
 ): ReadonlyMap<number, PublicKeyShareRecord> => {
-    assertProtocolHash(
-        input.publicKeyShares.publicKeyShareSetRoot,
-        'publicKeyShares.publicKeyShareSetRoot',
-    );
-    if (
-        input.publicKeyShares.publicKeyShareSetRoot !==
-        deriveCanonicalObjectHash({
-            objectType: input.publicKeyShares.objectType,
-            setupContextHash: deriveCollectiveBgvSetupContextHash(
-                input.setupContext,
-            ),
-            publicMatrixSeedHash: input.publicMatrixSeedHash,
-            shareRecords: input.publicKeyShares.shareRecords,
-        })
-    ) {
-        throw new Error(
-            'publicKeyShares.publicKeyShareSetRoot must bind the authoritative setup context, publicMatrixSeedHash, and share records.',
-        );
-    }
-    const shareRecords = sortedByRosterPosition(
-        input.publicKeyShares.shareRecords,
-    );
-    if (shareRecords.length !== input.participantCount) {
+    const shareRecords = input.publicKeyShares.shareRecords;
+    if (shareRecords.length !== input.setupContext.participantCount) {
         throw new Error(
             'publicKeyShares.shareRecords must contain one share per participant.',
         );
     }
     const recordsByRosterPosition = new Map<number, PublicKeyShareRecord>();
     shareRecords.forEach((shareRecord, expectedRosterPosition) => {
-        validateShareContribution(
+        validatePublicKeyShare(
             shareRecord,
             expectedRosterPosition,
             input.qSharePrimes,
         );
-        assertProtocolHash(
-            shareRecord.publicKeyShareRoot,
-            'publicKeyShares.shareRecords.publicKeyShareRoot',
-        );
-        if (
-            shareRecord.publicKeyShareRoot !==
-            deriveCanonicalObjectHash(
-                publicKeyShareRootInput(
-                    input.setupContext,
-                    input.publicMatrixSeedHash,
-                    shareRecord,
-                ),
-            )
-        ) {
-            throw new Error(
-                'publicKeyShares.shareRecords.publicKeyShareRoot must bind the parent setup context and publicMatrixSeedHash.',
-            );
-        }
         recordsByRosterPosition.set(
             shareRecord.trusteeRosterPosition,
             shareRecord,

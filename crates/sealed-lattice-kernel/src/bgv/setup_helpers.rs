@@ -25,29 +25,12 @@ pub(super) fn read_non_empty_string<'a>(
     Ok(field)
 }
 
-pub(super) fn object_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Value> {
-    value
-        .get(field_name)
-        .filter(|field| field.is_object())
-        .ok_or_else(|| invalid_setup_fixture(format!("{field_name} must be an object")))
-}
-
 pub(super) fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
     value
         .get(field_name)
         .and_then(Value::as_str)
         .filter(|field| !field.is_empty())
         .ok_or_else(|| invalid_setup_fixture(format!("{field_name} must be a non-empty string")))
-}
-
-pub(super) fn hash_string_field<'a>(
-    value: &'a Value,
-    field_name: &str,
-) -> CanonicalResult<&'a str> {
-    value
-        .get(field_name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid_setup_fixture(format!("{field_name} must be a protocol hash")))
 }
 
 pub(super) fn u64_field(value: &Value, field_name: &str) -> CanonicalResult<u64> {
@@ -84,20 +67,6 @@ pub(super) fn is_lowercase_protocol_hash(hash: &str) -> bool {
         && hash
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-pub(super) fn read_optional_u64(value: &Value, field_name: &str) -> CanonicalResult<Option<u64>> {
-    value
-        .get(field_name)
-        .map(|field| {
-            field.as_u64().ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!("{field_name} must be a non-negative integer"),
-                )
-            })
-        })
-        .transpose()
 }
 
 pub(super) fn string_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalResult<&'a str> {

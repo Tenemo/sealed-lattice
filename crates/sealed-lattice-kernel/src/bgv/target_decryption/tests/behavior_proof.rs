@@ -70,7 +70,7 @@ fn target_share_proof_statement_binds_local_witness_and_share() {
     );
     assert_eq!(
         statement["targetDecryptionShareHash"],
-        local_share["targetDecryptionShareHash"]
+        json!(target_decryption_share_hash(&local_share).expect("target share hash"))
     );
     assert_eq!(
         statement["aggregateOpeningCredentials"]
@@ -80,16 +80,14 @@ fn target_share_proof_statement_binds_local_witness_and_share() {
         CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1
     );
 
-    let root_input = target_decryption_share_proof_statement_root_preimage(&statement)
-        .expect("statement root preimage");
     assert_eq!(
-        statement["proofStatementRoot"],
-        json!(derive_canonical_object_hash(&root_input).expect("statement root"))
+        proof_request["context"]["targetShareProofStatementRoot"],
+        json!(target_decryption_share_proof_statement_root(&statement).expect("statement root"))
     );
 }
 
 #[test]
-fn target_share_proof_relation_rejects_rebound_wrong_partial_decryption() {
+fn target_share_proof_relation_rejects_wrong_partial_decryption() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
     let target_share_profile = target_share_profile(&setup_package);
@@ -111,15 +109,6 @@ fn target_share_proof_relation_rejects_rebound_wrong_partial_decryption() {
         "trustee-1",
     );
     change_first_partial_decryption_coefficient(&mut local_share);
-    rebind_target_decryption_share_hashes(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &mut local_share,
-        "trustee-1",
-    );
 
     let error = derive_share_proof_statement(TargetShareProofStatementInput {
         setup_package: &setup_package,
@@ -138,7 +127,7 @@ fn target_share_proof_relation_rejects_rebound_wrong_partial_decryption() {
 }
 
 #[test]
-fn target_share_proof_statement_binding_rejects_rebound_wrong_aggregate_commitment_body() {
+fn target_share_proof_statement_binding_rejects_wrong_aggregate_commitment_body() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
     let target_share_profile = target_share_profile(&setup_package);
@@ -170,19 +159,18 @@ fn target_share_proof_statement_binding_rejects_rebound_wrong_aggregate_commitme
         trustee_identity: "trustee-1",
     })
     .expect("target share proof statement");
-    let first_material_root = statement["aggregateOpeningCredentials"][0]
-        ["aggregateCommitment"]["commitmentFields"][0]["materialRootHex"]
+    let first_material_root = statement["aggregateOpeningCredentials"][0]["aggregateCommitment"]
+        ["commitmentFields"][0]["materialRootHex"]
         .as_str()
         .expect("first aggregate commitment material root")
         .to_string();
     let mut tampered_material_root_bytes = crate::transcript_core::decode_hex(&first_material_root)
         .expect("aggregate material root bytes");
     tampered_material_root_bytes[0] ^= 0x01;
-    statement["aggregateOpeningCredentials"][0]["aggregateCommitment"]["commitmentFields"][0]["materialRootHex"] = json!(
-        crate::transcript_core::encode_hex(&tampered_material_root_bytes)
-    );
-    rebind_share_proof_statement_root(&mut statement);
-
+    statement["aggregateOpeningCredentials"][0]["aggregateCommitment"]["commitmentFields"][0]
+        ["materialRootHex"] = json!(crate::transcript_core::encode_hex(
+        &tampered_material_root_bytes
+    ));
     let error = verify_share_proof_statement_binding(TargetShareProofStatementBindingInput {
         setup_package: &setup_package,
         accepted_record: &accepted_record,
@@ -221,7 +209,6 @@ fn target_result_release_rejects_wrong_target_ciphertext_before_proof_bytes() {
     );
     let mut wrong_target_record = accepted_record.clone();
     wrong_target_record["targetCiphertextHash"] = json!("8".repeat(128));
-    rebind_target_accepted_record_hash(&mut wrong_target_record);
 
     let error = staged_target_result_release(
         &setup_package,

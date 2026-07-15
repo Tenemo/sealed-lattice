@@ -93,6 +93,7 @@ impl VssPublicMessageEncodingLayout {
 }
 
 pub(crate) struct VssPublicCoefficientCommitmentSetContext<'a> {
+    pub(crate) setup_context_hash: &'a str,
     pub(crate) public_matrix_seed_hash: &'a str,
     pub(crate) participant_count: usize,
     pub(crate) rns_limb_count: usize,
@@ -101,6 +102,7 @@ pub(crate) struct VssPublicCoefficientCommitmentSetContext<'a> {
 }
 
 pub(crate) struct VssPublicRecipientShareCommitmentSetContext<'a> {
+    pub(crate) setup_context_hash: &'a str,
     pub(crate) public_matrix_seed_hash: &'a str,
     pub(crate) participant_count: usize,
     pub(crate) rns_limb_count: usize,
@@ -108,6 +110,7 @@ pub(crate) struct VssPublicRecipientShareCommitmentSetContext<'a> {
 }
 
 pub(crate) struct VssPublicAggregateThresholdCommitmentSetContext<'a> {
+    pub(crate) setup_context_hash: &'a str,
     pub(crate) public_matrix_seed_hash: &'a str,
     pub(crate) participant_count: usize,
     pub(crate) rns_limb_count: usize,
@@ -146,10 +149,13 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set(
         })?;
 
     let mut verified_source_trustee_records = Vec::with_capacity(source_trustee_records.len());
-    for source_record in source_trustee_records {
+    for (source_trustee_roster_position, source_record) in source_trustee_records.iter().enumerate()
+    {
         verified_source_trustee_records.push(verify_vss_public_source_coefficient_record(
             VssPublicSourceCoefficientRecordInput {
                 source_record,
+                setup_context_hash: context.setup_context_hash,
+                source_trustee_roster_position,
                 expected_coefficient_count,
                 threshold_degree: context.threshold_degree,
                 ring_degree: context.ring_degree,
@@ -162,16 +168,7 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set(
         "publicMatrixSeedHash": context.public_matrix_seed_hash,
         "sourceTrusteeRecords": verified_source_trustee_records,
     }))?;
-    let coefficient_commitment_root =
-        hash_at_path(coefficient_set, &["coefficientCommitmentRoot"])?;
-    if expected_set_root != coefficient_commitment_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "VSS coefficient commitment set root does not match its source records",
-        ));
-    }
-
-    Ok(coefficient_commitment_root.to_string())
+    Ok(expected_set_root)
 }
 
 pub(crate) fn verify_vss_public_recipient_share_commitment_set(
@@ -206,10 +203,13 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set(
         })?;
 
     let mut verified_source_trustee_records = Vec::with_capacity(source_trustee_records.len());
-    for source_record in source_trustee_records {
+    for (source_trustee_roster_position, source_record) in source_trustee_records.iter().enumerate()
+    {
         verified_source_trustee_records.push(verify_vss_public_source_recipient_share_record(
             VssPublicSourceRecipientShareRecordInput {
                 source_record,
+                setup_context_hash: context.setup_context_hash,
+                source_trustee_roster_position,
                 expected_recipient_share_count,
                 rns_limb_count: context.rns_limb_count,
                 ring_degree: context.ring_degree,
@@ -222,16 +222,7 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set(
         "publicMatrixSeedHash": context.public_matrix_seed_hash,
         "sourceTrusteeRecords": verified_source_trustee_records,
     }))?;
-    let recipient_share_commitment_root =
-        hash_at_path(recipient_set, &["recipientShareCommitmentRoot"])?;
-    if expected_set_root != recipient_share_commitment_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "VSS recipient-share commitment set root does not match its source records",
-        ));
-    }
-
-    Ok(recipient_share_commitment_root.to_string())
+    Ok(expected_set_root)
 }
 
 pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set(
@@ -270,6 +261,8 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set(
         verified_recipient_records.push(verify_vss_public_aggregate_threshold_record(
             VssPublicAggregateThresholdRecordInput {
                 recipient_record,
+                setup_context_hash: context.setup_context_hash,
+                expected_recipient_roster_position: recipient_record_index / context.rns_limb_count,
                 expected_rns_limb_index: recipient_record_index % context.rns_limb_count,
                 ring_degree: context.ring_degree,
             },
@@ -281,16 +274,7 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set(
         "publicMatrixSeedHash": context.public_matrix_seed_hash,
         "recipientRecords": verified_recipient_records,
     }))?;
-    let aggregate_threshold_commitment_root =
-        hash_at_path(aggregate_set, &["aggregateThresholdCommitmentRoot"])?;
-    if expected_set_root != aggregate_threshold_commitment_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "VSS aggregate threshold commitment set root does not match its recipient records",
-        ));
-    }
-
-    Ok(aggregate_threshold_commitment_root.to_string())
+    Ok(expected_set_root)
 }
 
 fn invalid_vss_public_input(message: impl Into<String>) -> CanonicalError {
@@ -304,9 +288,10 @@ mod record_verification;
 mod share_linkage;
 
 use readers::*;
-use record_verification::*;
+pub(crate) use record_verification::*;
 
 pub(crate) use committed_material::compute_vss_committed_material_commitment_request;
+#[cfg(test)]
 pub(crate) use committed_material::{
     VssCommittedMaterialCommitmentInput, compute_vss_committed_material_commitment,
 };
@@ -319,6 +304,7 @@ pub(in crate::bgv::setup) use message_encoding::{
     vss_public_share_linkage_packed_message_encoding_layout,
     vss_public_share_linkage_source_message_encoding_layout,
 };
+#[cfg(test)]
 pub(crate) use record_verification::validate_standalone_vss_committed_material_commitment;
 pub(crate) use share_linkage::verify_vss_share_linkage_bindings_request;
 #[cfg(test)]

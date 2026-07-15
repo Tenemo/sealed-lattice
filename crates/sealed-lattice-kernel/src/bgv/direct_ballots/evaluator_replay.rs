@@ -12,16 +12,8 @@ fn usize_to_u64(value: usize, name: &str) -> CanonicalResult<u64> {
     })
 }
 
-fn setup_package_hash(setup_package: &Value) -> CanonicalResult<&str> {
-    setup_package
-        .get("setupPackageHash")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setup package must include setupPackageHash",
-            )
-        })
+fn setup_package_hash(setup_package: &Value) -> CanonicalResult<String> {
+    crate::bgv::setup::derive_collective_setup_package_hash(setup_package)
 }
 
 pub(crate) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {

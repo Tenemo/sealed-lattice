@@ -188,12 +188,12 @@ pub(in crate::bgv::setup) type SetupProofMaterialBytes = BgvProofMaterialBytes;
 
 pub(in crate::bgv::setup) fn take_verified_setup_proof_material_bytes(
     proof_family: &str,
-    expected_proof_material_root: &str,
+    expected_proof_bytes_hash: &str,
     proof_material_path: &str,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    validate_hash_string(expected_proof_material_root, proof_material_path)?;
-    // A proof-material root is an owned, single-use lease for one setup
+    validate_hash_string(expected_proof_bytes_hash, proof_material_path)?;
+    // A proof-bytes hash is an owned, single-use lease for one setup
     // verification call. Remove it from the canonical store before decoding so
     // the store cannot retain the complete corpus while the verifier advances
     // through later records. The returned Arc keeps only the proof currently
@@ -203,11 +203,11 @@ pub(in crate::bgv::setup) fn take_verified_setup_proof_material_bytes(
         Some(proof_binding_session) => crate::bgv::setup::take_accepted_setup_proof_material_bytes(
             proof_binding_session.session_handle,
             proof_family,
-            expected_proof_material_root,
+            expected_proof_bytes_hash,
         ),
         None => crate::bgv::setup::take_verified_canonical_proof_material_bytes(
             proof_family,
-            expected_proof_material_root,
+            expected_proof_bytes_hash,
         ),
     }?
     .ok_or_else(|| {

@@ -1,22 +1,25 @@
-use std::{mem, sync::Arc};
+use std::sync::Arc;
 
 use super::*;
 use crate::foundation::{CanonicalStreamDomain, VerifiedCanonicalStreamSummary};
 
 #[derive(Clone)]
-pub(in crate::bgv::setup) struct CanonicalPublicKeyShareMaterialLimb {
-    pub(in crate::bgv::setup) coefficients: Vec<u64>,
+pub(super) struct CanonicalPublicKeyShareMaterialLimb {
+    pub(super) coefficients: Vec<u64>,
 }
 
 #[derive(Clone)]
-pub(in crate::bgv::setup) struct CanonicalPublicKeyShareMaterialRecord {
-    pub(in crate::bgv::setup) trustee_roster_position: u64,
-    pub(in crate::bgv::setup) limbs: Vec<CanonicalPublicKeyShareMaterialLimb>,
+pub(super) struct CanonicalPublicKeyShareMaterialRecord {
+    pub(super) limbs: Vec<CanonicalPublicKeyShareMaterialLimb>,
+}
+
+pub(super) struct DecodedCanonicalPublicKeyShareMaterial {
+    pub(super) records: Vec<CanonicalPublicKeyShareMaterialRecord>,
 }
 
 pub(in crate::bgv::setup) struct VerifiedCanonicalPublicKeyShareMaterial {
-    pub(in crate::bgv::setup) ring_degree: usize,
-    pub(in crate::bgv::setup) records: Vec<CanonicalPublicKeyShareMaterialRecord>,
+    chunks: Vec<Vec<u8>>,
+    total_byte_length: u64,
 }
 
 pub(in crate::bgv::setup) type VerifiedCanonicalPublicKeyShareMaterialHandle =
@@ -27,14 +30,15 @@ pub(in crate::bgv::setup) struct VerifiedCanonicalPublicKeyShareMaterialStoreEnt
 }
 
 pub(in crate::bgv::setup) struct CanonicalPublicKeyShareMaterialStream {
-    decoder: CanonicalPublicKeyShareMaterialDecoder,
+    chunks: Vec<Vec<u8>>,
+    observed_byte_length: u64,
     total_byte_length: u64,
 }
 
 pub(in crate::bgv::setup) fn begin_verified_canonical_public_key_share_material_stream(
     total_byte_length: u64,
 ) -> CanonicalResult<CanonicalPublicKeyShareMaterialStream> {
-    if total_byte_length == 0
+    if total_byte_length < minimum_public_key_share_material_byte_length()?
         || total_byte_length > maximum_public_key_share_material_byte_length()?
     {
         return Err(CanonicalError::new(
@@ -43,7 +47,8 @@ pub(in crate::bgv::setup) fn begin_verified_canonical_public_key_share_material_
         ));
     }
     Ok(CanonicalPublicKeyShareMaterialStream {
-        decoder: CanonicalPublicKeyShareMaterialDecoder::new(),
+        chunks: Vec::new(),
+        observed_byte_length: 0,
         total_byte_length,
     })
 }
@@ -52,7 +57,30 @@ pub(in crate::bgv::setup) fn absorb_verified_canonical_public_key_share_material
     stream: &mut CanonicalPublicKeyShareMaterialStream,
     chunk: &[u8],
 ) -> CanonicalResult<()> {
-    stream.decoder.absorb(chunk)
+    let chunk_byte_length = u64::try_from(chunk.len()).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share material chunk length does not fit u64",
+        )
+    })?;
+    let observed_byte_length = stream
+        .observed_byte_length
+        .checked_add(chunk_byte_length)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public-key share material stream length overflowed u64",
+            )
+        })?;
+    if observed_byte_length > stream.total_byte_length {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share material stream exceeds its declared length",
+        ));
+    }
+    stream.observed_byte_length = observed_byte_length;
+    stream.chunks.push(chunk.to_vec());
+    Ok(())
 }
 
 pub(in crate::bgv::setup) fn finish_verified_canonical_public_key_share_material_stream(
@@ -67,8 +95,17 @@ pub(in crate::bgv::setup) fn finish_verified_canonical_public_key_share_material
             "public-key share material does not match its authenticated stream summary",
         ));
     }
+    if stream.observed_byte_length != stream.total_byte_length {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share material stream ended before its declared length",
+        ));
+    }
     Ok(VerifiedCanonicalPublicKeyShareMaterialStoreEntry {
-        material: Arc::new(stream.decoder.finish()?),
+        material: Arc::new(VerifiedCanonicalPublicKeyShareMaterial {
+            chunks: stream.chunks,
+            total_byte_length: stream.total_byte_length,
+        }),
     })
 }
 
@@ -77,353 +114,258 @@ pub(in crate::bgv::setup) fn cancel_verified_canonical_public_key_share_material
 ) {
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PublicKeyShareMaterialDecodePhase {
-    Magic,
-    Version,
-    ParticipantCount,
-    RnsLimbCount,
-    RingDegree,
-    TrusteeRosterPosition,
-    RnsLimbIndex,
-    RnsPrime,
-    Coefficient,
-    Complete,
-}
-
-struct CanonicalPublicKeyShareMaterialDecoder {
-    phase: PublicKeyShareMaterialDecodePhase,
-    pending_bytes: Vec<u8>,
+pub(super) fn decode_verified_canonical_public_key_share_material(
+    material: &VerifiedCanonicalPublicKeyShareMaterial,
     participant_count: u64,
     ring_degree: usize,
-    records: Vec<CanonicalPublicKeyShareMaterialRecord>,
-    current_limbs: Vec<CanonicalPublicKeyShareMaterialLimb>,
-    current_coefficients: Vec<u64>,
-    current_rns_prime: u64,
-    expected_roster_position: usize,
-    expected_rns_limb_index: usize,
-    expected_coefficient_index: usize,
-}
-
-impl CanonicalPublicKeyShareMaterialDecoder {
-    fn new() -> Self {
-        Self {
-            phase: PublicKeyShareMaterialDecodePhase::Magic,
-            pending_bytes: Vec::new(),
-            participant_count: 0,
-            ring_degree: 0,
-            records: Vec::new(),
-            current_limbs: Vec::new(),
-            current_coefficients: Vec::new(),
-            current_rns_prime: 0,
-            expected_roster_position: 0,
-            expected_rns_limb_index: 0,
-            expected_coefficient_index: 0,
-        }
+) -> CanonicalResult<DecodedCanonicalPublicKeyShareMaterial> {
+    if !super::super::participant_count_is_supported(participant_count) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share material participant count is outside the accepted setup profile",
+        ));
+    }
+    if ring_degree == 0 || ring_degree > POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share material ring degree is outside the accepted setup profile",
+        ));
+    }
+    if material.total_byte_length
+        != public_key_share_material_byte_length(participant_count, ring_degree)?
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share material length does not match the accepted roster and ring degree",
+        ));
     }
 
-    fn absorb(&mut self, chunk: &[u8]) -> CanonicalResult<()> {
-        if self.phase == PublicKeyShareMaterialDecodePhase::Complete && !chunk.is_empty() {
-            return Err(public_key_share_material_decode_error(
-                "public-key share material has trailing bytes",
-            ));
-        }
-        self.pending_bytes.extend_from_slice(chunk);
-        let mut consumed_byte_length = 0_usize;
-        loop {
-            let available_bytes = &self.pending_bytes[consumed_byte_length..];
-            let consumed = match self.phase {
-                PublicKeyShareMaterialDecodePhase::Magic => {
-                    if available_bytes.len() < PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC.len() {
-                        break;
-                    }
-                    if &available_bytes[..PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC.len()]
-                        != PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC
-                    {
-                        return Err(public_key_share_material_decode_error(
-                            "public-key share material binary magic does not match",
-                        ));
-                    }
-                    self.phase = PublicKeyShareMaterialDecodePhase::Version;
-                    PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC.len()
-                }
-                PublicKeyShareMaterialDecodePhase::Version => {
-                    let Some((version, byte_length)) =
-                        decode_varuint(available_bytes, "binary version")?
-                    else {
-                        break;
-                    };
-                    if version != PUBLIC_KEY_SHARE_MATERIAL_BINARY_VERSION {
-                        return Err(public_key_share_material_decode_error(
-                            "public-key share material binary version is unsupported",
-                        ));
-                    }
-                    self.phase = PublicKeyShareMaterialDecodePhase::ParticipantCount;
-                    byte_length
-                }
-                PublicKeyShareMaterialDecodePhase::ParticipantCount => {
-                    let Some((participant_count, byte_length)) =
-                        decode_varuint(available_bytes, "participantCount")?
-                    else {
-                        break;
-                    };
-                    if !super::super::participant_count_is_supported(participant_count) {
-                        return Err(CanonicalError::new(
-                            CanonicalErrorCode::MalformedLength,
-                            "public-key share material participant count is outside the accepted setup profile",
-                        ));
-                    }
-                    self.participant_count = participant_count;
-                    self.records =
-                        Vec::with_capacity(usize::try_from(participant_count).map_err(|_| {
-                            CanonicalError::new(
-                                CanonicalErrorCode::MalformedLength,
-                                "public-key share material participant count does not fit usize",
-                            )
-                        })?);
-                    self.phase = PublicKeyShareMaterialDecodePhase::RnsLimbCount;
-                    byte_length
-                }
-                PublicKeyShareMaterialDecodePhase::RnsLimbCount => {
-                    let Some((rns_limb_count, byte_length)) =
-                        decode_varuint(available_bytes, "rnsLimbCount")?
-                    else {
-                        break;
-                    };
-                    if rns_limb_count != DATA_PRIMES.len() as u64 {
-                        return Err(CanonicalError::new(
-                            CanonicalErrorCode::ComponentMismatch,
-                            "public-key share material RNS limb count does not match Q_share",
-                        ));
-                    }
-                    self.phase = PublicKeyShareMaterialDecodePhase::RingDegree;
-                    byte_length
-                }
-                PublicKeyShareMaterialDecodePhase::RingDegree => {
-                    let Some((ring_degree, byte_length)) =
-                        decode_varuint(available_bytes, "ringDegree")?
-                    else {
-                        break;
-                    };
-                    self.ring_degree = usize::try_from(ring_degree).map_err(|_| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::MalformedLength,
-                            "public-key share material ring degree does not fit usize",
-                        )
-                    })?;
-                    if self.ring_degree == 0 || self.ring_degree > POLYNOMIAL_DEGREE {
-                        return Err(CanonicalError::new(
-                            CanonicalErrorCode::MalformedLength,
-                            "public-key share material ring degree is outside the accepted setup profile",
-                        ));
-                    }
-                    self.current_limbs = Vec::with_capacity(DATA_PRIMES.len());
-                    self.phase = PublicKeyShareMaterialDecodePhase::TrusteeRosterPosition;
-                    byte_length
-                }
-                PublicKeyShareMaterialDecodePhase::TrusteeRosterPosition => {
-                    let Some((roster_position, byte_length)) =
-                        decode_varuint(available_bytes, "trusteeRosterPosition")?
-                    else {
-                        break;
-                    };
-                    if roster_position != self.expected_roster_position as u64 {
-                        return Err(public_key_share_material_decode_error(
-                            "public-key share material trustee order is not canonical",
-                        ));
-                    }
-                    self.expected_rns_limb_index = 0;
-                    self.phase = PublicKeyShareMaterialDecodePhase::RnsLimbIndex;
-                    byte_length
-                }
-                PublicKeyShareMaterialDecodePhase::RnsLimbIndex => {
-                    let Some((rns_limb_index, byte_length)) =
-                        decode_varuint(available_bytes, "rnsLimbIndex")?
-                    else {
-                        break;
-                    };
-                    if rns_limb_index != self.expected_rns_limb_index as u64 {
-                        return Err(public_key_share_material_decode_error(
-                            "public-key share material RNS limb order is not canonical",
-                        ));
-                    }
-                    self.phase = PublicKeyShareMaterialDecodePhase::RnsPrime;
-                    byte_length
-                }
-                PublicKeyShareMaterialDecodePhase::RnsPrime => {
-                    let Some(rns_prime) = decode_unsigned64(available_bytes) else {
-                        break;
-                    };
-                    if DATA_PRIMES.get(self.expected_rns_limb_index).copied() != Some(rns_prime) {
-                        return Err(CanonicalError::new(
-                            CanonicalErrorCode::ComponentMismatch,
-                            "public-key share material RNS prime does not match Q_share",
-                        ));
-                    }
-                    self.current_rns_prime = rns_prime;
-                    self.current_coefficients = Vec::with_capacity(self.ring_degree);
-                    self.expected_coefficient_index = 0;
-                    self.phase = PublicKeyShareMaterialDecodePhase::Coefficient;
-                    8
-                }
-                PublicKeyShareMaterialDecodePhase::Coefficient => {
-                    let Some(coefficient) = decode_unsigned64(available_bytes) else {
-                        break;
-                    };
-                    if coefficient >= self.current_rns_prime {
-                        return Err(CanonicalError::new(
-                            CanonicalErrorCode::ComponentMismatch,
-                            "public-key share material coefficient is not a canonical residue",
-                        ));
-                    }
-                    self.current_coefficients.push(coefficient);
-                    self.expected_coefficient_index += 1;
-                    if self.expected_coefficient_index == self.ring_degree {
-                        self.finish_limb()?;
-                    }
-                    8
-                }
-                PublicKeyShareMaterialDecodePhase::Complete => {
-                    if available_bytes.is_empty() {
-                        break;
-                    }
-                    return Err(public_key_share_material_decode_error(
-                        "public-key share material has trailing bytes",
+    let mut reader = CanonicalPublicKeyShareMaterialReader::new(&material.chunks);
+    if reader.read_fixed::<8>()?.as_slice() != PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC {
+        return Err(public_key_share_material_decode_error(
+            "public-key share material binary magic does not match",
+        ));
+    }
+
+    let participant_capacity = usize::try_from(participant_count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share material participant count does not fit usize",
+        )
+    })?;
+    let mut records = Vec::with_capacity(participant_capacity);
+    for _trustee_roster_position in 0..participant_count {
+        let mut limbs = Vec::with_capacity(DATA_PRIMES.len());
+        for rns_prime in DATA_PRIMES {
+            let mut coefficients = Vec::with_capacity(ring_degree);
+            for _coefficient_index in 0..ring_degree {
+                let coefficient = reader.read_unsigned64()?;
+                if coefficient >= rns_prime {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::ComponentMismatch,
+                        "public-key share material coefficient is not a canonical residue",
                     ));
                 }
-            };
-            consumed_byte_length = consumed_byte_length.checked_add(consumed).ok_or_else(|| {
+                coefficients.push(coefficient);
+            }
+            limbs.push(CanonicalPublicKeyShareMaterialLimb { coefficients });
+        }
+        records.push(CanonicalPublicKeyShareMaterialRecord { limbs });
+    }
+
+    Ok(DecodedCanonicalPublicKeyShareMaterial { records })
+}
+
+struct CanonicalPublicKeyShareMaterialReader<'a> {
+    chunks: &'a [Vec<u8>],
+    chunk_index: usize,
+    byte_index: usize,
+}
+
+impl<'a> CanonicalPublicKeyShareMaterialReader<'a> {
+    fn new(chunks: &'a [Vec<u8>]) -> Self {
+        Self {
+            chunks,
+            chunk_index: 0,
+            byte_index: 0,
+        }
+    }
+
+    fn read_fixed<const BYTE_LENGTH: usize>(&mut self) -> CanonicalResult<[u8; BYTE_LENGTH]> {
+        let mut bytes = [0_u8; BYTE_LENGTH];
+        let mut destination_offset = 0;
+        while destination_offset < BYTE_LENGTH {
+            let chunk = self.chunks.get(self.chunk_index).ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "public-key share material stream offset overflowed usize",
+                    "public-key share material ended before its canonical body was complete",
                 )
             })?;
-        }
-        if consumed_byte_length != 0 {
-            self.pending_bytes.drain(..consumed_byte_length);
-        }
-
-        Ok(())
-    }
-
-    fn finish_limb(&mut self) -> CanonicalResult<()> {
-        self.current_limbs
-            .push(CanonicalPublicKeyShareMaterialLimb {
-                coefficients: mem::take(&mut self.current_coefficients),
-            });
-        self.expected_rns_limb_index += 1;
-        if self.expected_rns_limb_index < DATA_PRIMES.len() {
-            self.phase = PublicKeyShareMaterialDecodePhase::RnsLimbIndex;
-            return Ok(());
-        }
-
-        self.records.push(CanonicalPublicKeyShareMaterialRecord {
-            trustee_roster_position: self.expected_roster_position as u64,
-            limbs: mem::take(&mut self.current_limbs),
-        });
-        self.expected_roster_position += 1;
-        if self.expected_roster_position
-            == usize::try_from(self.participant_count).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "public-key share material participant count does not fit usize",
-                )
-            })?
-        {
-            self.phase = PublicKeyShareMaterialDecodePhase::Complete;
-        } else {
-            self.current_limbs = Vec::with_capacity(DATA_PRIMES.len());
-            self.phase = PublicKeyShareMaterialDecodePhase::TrusteeRosterPosition;
-        }
-
-        Ok(())
-    }
-
-    fn finish(self) -> CanonicalResult<VerifiedCanonicalPublicKeyShareMaterial> {
-        if self.phase != PublicKeyShareMaterialDecodePhase::Complete
-            || !self.pending_bytes.is_empty()
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "public-key share material stream ended before its canonical object was complete",
-            ));
-        }
-
-        Ok(VerifiedCanonicalPublicKeyShareMaterial {
-            ring_degree: self.ring_degree,
-            records: self.records,
-        })
-    }
-}
-
-fn decode_varuint(bytes: &[u8], field_name: &str) -> CanonicalResult<Option<(u64, usize)>> {
-    let mut shift = 0_u32;
-    let mut value = 0_u64;
-    for byte_index in 0..10 {
-        let Some(byte) = bytes.get(byte_index).copied() else {
-            return Ok(None);
-        };
-        let payload = u64::from(byte & 0x7f);
-        if byte_index == 9 && payload > 1 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                format!("{field_name} binary varuint exceeds u64"),
-            ));
-        }
-        value |= payload << shift;
-        if byte & 0x80 == 0 {
-            let mut canonical = Vec::new();
-            crate::encoding::append_varuint(&mut canonical, value);
-            let consumed_byte_length = byte_index + 1;
-            if canonical.as_slice() != &bytes[..consumed_byte_length] {
-                return Err(public_key_share_material_decode_error(format!(
-                    "{field_name} binary varuint is not minimally encoded"
-                )));
+            if self.byte_index == chunk.len() {
+                self.chunk_index += 1;
+                self.byte_index = 0;
+                continue;
             }
-            return Ok(Some((value, consumed_byte_length)));
+            let copied_byte_length =
+                (BYTE_LENGTH - destination_offset).min(chunk.len() - self.byte_index);
+            bytes[destination_offset..destination_offset + copied_byte_length]
+                .copy_from_slice(&chunk[self.byte_index..self.byte_index + copied_byte_length]);
+            destination_offset += copied_byte_length;
+            self.byte_index += copied_byte_length;
         }
-        shift += 7;
+        Ok(bytes)
     }
 
-    Err(CanonicalError::new(
-        CanonicalErrorCode::MalformedLength,
-        format!("{field_name} binary varuint is too long"),
-    ))
+    fn read_unsigned64(&mut self) -> CanonicalResult<u64> {
+        Ok(u64::from_le_bytes(self.read_fixed::<8>()?))
+    }
 }
 
-fn decode_unsigned64(bytes: &[u8]) -> Option<u64> {
-    let bytes: [u8; 8] = bytes.get(..8)?.try_into().ok()?;
-    Some(u64::from_le_bytes(bytes))
+fn public_key_share_material_byte_length(
+    participant_count: u64,
+    ring_degree: usize,
+) -> CanonicalResult<u64> {
+    let rns_limb_count = u64::try_from(DATA_PRIMES.len()).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share material RNS limb count does not fit u64",
+        )
+    })?;
+    let ring_degree = u64::try_from(ring_degree).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share material ring degree does not fit u64",
+        )
+    })?;
+    let magic_byte_length =
+        u64::try_from(PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC.len()).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public-key share material magic length does not fit u64",
+            )
+        })?;
+    participant_count
+        .checked_mul(rns_limb_count)
+        .and_then(|value| value.checked_mul(ring_degree))
+        .and_then(|value| value.checked_mul(8))
+        .and_then(|value| value.checked_add(magic_byte_length))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public-key share material length overflowed u64",
+            )
+        })
+}
+
+fn minimum_public_key_share_material_byte_length() -> CanonicalResult<u64> {
+    public_key_share_material_byte_length(super::super::MINIMUM_SUPPORTED_PARTICIPANT_COUNT, 1)
 }
 
 fn maximum_public_key_share_material_byte_length() -> CanonicalResult<u64> {
-    let coefficient_bytes_per_limb = u64::try_from(POLYNOMIAL_DEGREE)
-        .ok()
-        .and_then(|degree| degree.checked_mul(8))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "public-key share material coefficient length overflowed u64",
-            )
-        })?;
-    let bytes_per_limb = coefficient_bytes_per_limb.checked_add(18).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "public-key share material limb length overflowed u64",
-        )
-    })?;
-    super::super::MAXIMUM_SUPPORTED_PARTICIPANT_COUNT
-        .checked_mul(DATA_PRIMES.len() as u64)
-        .and_then(|value| value.checked_mul(bytes_per_limb))
-        .and_then(|value| value.checked_add(128))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "public-key share material maximum length overflowed u64",
-            )
-        })
+    public_key_share_material_byte_length(
+        super::super::MAXIMUM_SUPPORTED_PARTICIPANT_COUNT,
+        POLYNOMIAL_DEGREE,
+    )
 }
 
 fn public_key_share_material_decode_error(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_PARTICIPANT_COUNT: u64 = 3;
+    const TEST_RING_DEGREE: usize = 2;
+
+    fn encoded_material() -> Vec<u8> {
+        let mut bytes = PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC.to_vec();
+        for trustee_roster_position in 0..TEST_PARTICIPANT_COUNT {
+            for (rns_limb_index, _rns_prime) in DATA_PRIMES.iter().enumerate() {
+                for coefficient_index in 0..TEST_RING_DEGREE {
+                    let coefficient = trustee_roster_position
+                        + u64::try_from(rns_limb_index).expect("RNS limb index fits u64")
+                        + u64::try_from(coefficient_index).expect("coefficient index fits u64");
+                    bytes.extend_from_slice(&coefficient.to_le_bytes());
+                }
+            }
+        }
+        bytes
+    }
+
+    fn verified_material(bytes: Vec<u8>) -> VerifiedCanonicalPublicKeyShareMaterial {
+        VerifiedCanonicalPublicKeyShareMaterial {
+            total_byte_length: u64::try_from(bytes.len()).expect("material length fits u64"),
+            chunks: bytes.chunks(5).map(<[u8]>::to_vec).collect(),
+        }
+    }
+
+    #[test]
+    fn decoder_uses_the_authoritative_shape_across_chunk_boundaries() {
+        let material = verified_material(encoded_material());
+        let decoded = decode_verified_canonical_public_key_share_material(
+            &material,
+            TEST_PARTICIPANT_COUNT,
+            TEST_RING_DEGREE,
+        )
+        .expect("canonical public-key share material");
+
+        assert_eq!(
+            decoded.records.len(),
+            usize::try_from(TEST_PARTICIPANT_COUNT).expect("participant count fits usize")
+        );
+        assert_eq!(decoded.records[1].limbs.len(), DATA_PRIMES.len());
+        assert_eq!(decoded.records[1].limbs[2].coefficients, vec![3, 4]);
+    }
+
+    #[test]
+    fn decoder_rejects_a_body_with_the_wrong_authoritative_length() {
+        let mut bytes = encoded_material();
+        bytes.pop();
+        let material = verified_material(bytes);
+        let Err(error) = decode_verified_canonical_public_key_share_material(
+            &material,
+            TEST_PARTICIPANT_COUNT,
+            TEST_RING_DEGREE,
+        ) else {
+            panic!("truncated public-key share material must be rejected");
+        };
+
+        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
+    }
+
+    #[test]
+    fn decoder_rejects_a_noncanonical_coefficient() {
+        let mut bytes = encoded_material();
+        bytes[PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC.len()
+            ..PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC.len() + 8]
+            .copy_from_slice(&DATA_PRIMES[0].to_le_bytes());
+        let material = verified_material(bytes);
+        let Err(error) = decode_verified_canonical_public_key_share_material(
+            &material,
+            TEST_PARTICIPANT_COUNT,
+            TEST_RING_DEGREE,
+        ) else {
+            panic!("noncanonical public-key share coefficient must be rejected");
+        };
+
+        assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
+    }
+
+    #[test]
+    fn decoder_rejects_the_previous_binary_format_magic() {
+        let mut bytes = encoded_material();
+        bytes[..PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC.len()].copy_from_slice(b"SLPKSMV1");
+        let material = verified_material(bytes);
+        let Err(error) = decode_verified_canonical_public_key_share_material(
+            &material,
+            TEST_PARTICIPANT_COUNT,
+            TEST_RING_DEGREE,
+        ) else {
+            panic!("obsolete public-key share material encoding must be rejected");
+        };
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+    }
 }

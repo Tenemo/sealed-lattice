@@ -12,7 +12,6 @@ mod mailbox_gcm;
 mod mailbox_gcm_runtime;
 mod participant_identity;
 mod private_randomness;
-mod proof_application;
 mod refusal;
 mod runtime_build;
 mod schemas;
@@ -81,19 +80,10 @@ pub use participant_identity::{
     ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, ParticipantIdentity, ParticipantIdentityParseError,
     derive_participant_identity,
 };
+pub(crate) use private_randomness::PrivateRandomnessDomain;
 pub use private_randomness::{
-    ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_RANDOMNESS_ROOT_BYTE_LENGTH,
-    ActionRandomnessDerivationInput, MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-    ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, OrdinaryProofCoinInput,
-    PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, PRIVATE_PROOF_SALT_PURPOSE,
-    PRIVATE_RANDOM_BLOCK_BYTE_LENGTH, PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER,
-    PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH, PersistentProofCoinInput,
-    PrivateRandomBlockInput, PrivateRandomCursor, RANDOM_CURSOR_SCHEMA_IDENTIFIER,
-    derive_application_statement_hash, derive_relation_plan_variant_hash,
-};
-pub(crate) use private_randomness::{ActionRandomness, PrivateRandomnessDomain};
-pub use proof_application::{
-    PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER, ProofApplicationCoordinates, ProofApplicationSlot,
+    PRIVATE_PROOF_SALT_PURPOSE, PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH,
+    PrivateRandomCursor, RANDOM_CURSOR_SCHEMA_IDENTIFIER,
 };
 pub use refusal::{RefusalReason, VerificationResult};
 pub use runtime_build::{
@@ -126,12 +116,10 @@ pub use state::{
 };
 pub(crate) use state_runtime::{
     STATE_DURABLE_BINDING_BYTE_LENGTH, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
-    STATE_WITNESS_VOTE_CARRIER_BYTE_LENGTH, begin_state_verifier_session,
-    cancel_state_verifier_session, certify_verified_state_intent,
+    begin_state_verifier_session, cancel_state_verifier_session, certify_verified_state_intent,
     certify_verified_state_intent_from_unordered_vote_carriers, describe_verified_state_object,
     finish_state_output_intent_verification, finish_state_output_verification,
-    finish_state_witness_vote, prepare_state_witness_vote, release_verified_state_object,
-    verify_state_recovery, verify_state_recovery_intent, verify_state_reservation,
-    verify_state_reservation_intent,
+    release_verified_state_object, verify_state_recovery, verify_state_recovery_intent,
+    verify_state_reservation, verify_state_reservation_intent,
 };
 pub use text::{DisplayTextError, StabilizedDisplayText};

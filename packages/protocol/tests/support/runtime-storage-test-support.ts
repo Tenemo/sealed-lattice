@@ -1,7 +1,9 @@
 import {
+    createRuntimeRecordAuthenticatedRecoveryProtection,
     openUntrustedStorageTransactionStore,
     type RuntimeStorageAuthorityContext,
     type UntrustedStorageAdapter,
+    type UntrustedStorageAuthenticatedRecoveryProtection,
     type UntrustedStorageAtomicMutation,
     type UntrustedStorageRecoveryReport,
     type UntrustedStorageTransactionLimits,
@@ -155,6 +157,29 @@ const createIdentifierFactory = (): ((
     };
 };
 
+const authenticatedRecoveryProtections = new WeakMap<
+    InMemoryRuntimeStorageAdapter,
+    Promise<UntrustedStorageAuthenticatedRecoveryProtection>
+>();
+
+const authenticatedRecoveryProtectionFor = (
+    adapter: InMemoryRuntimeStorageAdapter,
+): Promise<UntrustedStorageAuthenticatedRecoveryProtection> => {
+    let protection = authenticatedRecoveryProtections.get(adapter);
+    if (protection === undefined) {
+        protection = generateRuntimeStorageEncryptionKey().then(
+            (encryptionKey) =>
+                createRuntimeRecordAuthenticatedRecoveryProtection({
+                    authorityContext: runtimeAuthorityContext(),
+                    encryptionKey,
+                    maximumRecordSealingCount: 0x1_0000_0000,
+                }),
+        );
+        authenticatedRecoveryProtections.set(adapter, protection);
+    }
+    return protection;
+};
+
 export const openRuntimeTestStore = async (input?: {
     adapter?: InMemoryRuntimeStorageAdapter;
     limits?: Partial<UntrustedStorageTransactionLimits>;
@@ -167,6 +192,8 @@ export const openRuntimeTestStore = async (input?: {
     const adapter = input?.adapter ?? new InMemoryRuntimeStorageAdapter();
     const opened = await openUntrustedStorageTransactionStore({
         adapter,
+        authenticatedRecoveryProtection:
+            await authenticatedRecoveryProtectionFor(adapter),
         createIdentifier: createIdentifierFactory(),
         limits: { ...defaultLimits, ...input?.limits },
         monotonicClockMilliseconds: () => 0,

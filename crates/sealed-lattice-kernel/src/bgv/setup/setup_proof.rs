@@ -12,13 +12,10 @@ pub(in crate::bgv::setup) use self::material_transport::{
     authenticate_setup_proof_material_stream_in_session_for_test,
 };
 
-use serde_json::json;
-
 use crate::{
     bgv::setup_helpers::validate_hash_string,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::CanonicalStreamDomain,
-    hashing::derive_canonical_object_hash,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,41 +118,16 @@ impl SetupProofFamily {
 
     pub(in crate::bgv::setup) const fn binding_labels(self) -> &'static [&'static str] {
         match self {
-            Self::PublicKeyShare => &[
-                "sameSecretBridgeStatementRoot",
-                "sameSecretBridgeProofRecordRoot",
-            ],
-            Self::PrivateVssShare => &[
-                "sourceTrusteeCommitmentRoot",
-                "privateEnvelopeAadHash",
-                "shareValuesHash",
-            ],
-            Self::VssShareLinkage => &["shareLinkageStatementRoot"],
+            Self::PublicKeyShare => &[],
+            Self::PrivateVssShare => &[],
+            Self::VssShareLinkage => &[],
             Self::SameSecretBridge | Self::TargetDecryptionAggregateOpening => &[],
-            Self::TargetDecryptionShare => &[
-                "targetShareProofStatementRoot",
-                "activeCredentialBindingRoot",
-                "smudgingCommitmentSetRoot",
-            ],
-            Self::TrusteeEvaluationKey => &[
-                "evaluatorKeyScheduleRoot",
-                "sourceConstantCoefficientCommitmentRoot",
-            ],
+            Self::TargetDecryptionShare => &["targetShareProofStatementRoot"],
+            Self::TrusteeEvaluationKey => &["evaluatorKeyScheduleRoot"],
         }
     }
 }
 
 fn setup_proof_error(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::ComponentMismatch, message)
-}
-
-pub(in crate::bgv::setup) fn setup_proof_material_reference_root(
-    proof_family: &str,
-    proof_bytes_hash: &str,
-) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "SetupProofMaterialReference",
-        "proofFamily": proof_family,
-        "proofBytesHash": proof_bytes_hash,
-    }))
 }

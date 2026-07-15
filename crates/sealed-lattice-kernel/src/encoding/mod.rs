@@ -7,7 +7,6 @@ mod foundation_command;
 mod json_ingress;
 mod mailbox_command;
 mod private_randomness_command;
-mod proof_suite_command;
 
 const MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH: usize = 256 * 1024 * 1024;
 

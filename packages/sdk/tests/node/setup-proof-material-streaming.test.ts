@@ -12,21 +12,19 @@ type ChunkPullRequest = Readonly<{
     readonly expectedByteLength: number;
 }>;
 type TestProofMaterialSource = Readonly<{
-    readonly proofMaterialRoot: string;
+    readonly proofBytesHash: string;
     readonly pullChunk: Mock<
         (input: ChunkPullRequest) => Promise<ArrayBuffer | undefined>
     >;
 }>;
 type ProofMaterialTransportCase = Readonly<{
     readonly fieldName: string;
-    readonly materialSetObjectType: string;
-    readonly materialObjectType: string;
     readonly proofFamily: string;
     readonly runtimeFamily: number;
 }>;
 
-const proofMaterialRoot = '1'.repeat(128);
-const alternateProofMaterialRoot = '2'.repeat(128);
+const proofBytesHash = '1'.repeat(128);
+const alternateProofBytesHash = '2'.repeat(128);
 const expectedManifestHash = '3'.repeat(128);
 const expectedRosterHash = '4'.repeat(128);
 const publicKeyShareMaterialRoot = '5'.repeat(128);
@@ -69,57 +67,40 @@ const publicPackage = (await import('../../src/index.js')) as Readonly<{
 const setupProofMaterialTransportCases = [
     {
         fieldName: 'transportedPublicKeyShareProofMaterial',
-        materialSetObjectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
-        materialObjectType: 'SetupTransportedPublicKeyShareProofMaterial',
         proofFamily: 'public-key-share',
         runtimeFamily: 4,
     },
     {
         fieldName: 'transportedVssShareLinkageProofMaterial',
-        materialSetObjectType:
-            'SetupTransportedVssShareLinkageProofMaterialSet',
-        materialObjectType: 'SetupTransportedVssShareLinkageProofMaterial',
         proofFamily: 'vss-share-linkage',
         runtimeFamily: 2,
     },
     {
         fieldName: 'transportedSameSecretBridgeProofMaterial',
-        materialSetObjectType:
-            'SetupTransportedSameSecretBridgeProofMaterialSet',
-        materialObjectType: 'SetupTransportedSameSecretBridgeProofMaterial',
         proofFamily: 'same-secret-bridge',
         runtimeFamily: 3,
     },
     {
         fieldName: 'transportedEvaluationKeyShareProofMaterial',
-        materialSetObjectType:
-            'SetupTransportedEvaluationKeyShareProofMaterialSet',
-        materialObjectType: 'SetupTransportedEvaluationKeyShareProofMaterial',
         proofFamily: 'trustee-evaluation-key',
         runtimeFamily: 5,
     },
 ] as const;
 
-const transportedProofMaterialSet = <
-    const TransportCase extends ProofMaterialTransportCase,
->(
-    transportCase: TransportCase,
-    root = proofMaterialRoot,
+const transportedProofMaterialSet = (
+    transportCase: ProofMaterialTransportCase,
+    hash = proofBytesHash,
 ): Readonly<{
-    readonly objectType: TransportCase['materialSetObjectType'];
     readonly proofMaterials: readonly [
         Readonly<{
-            readonly objectType: TransportCase['materialObjectType'];
-            readonly proofMaterialRoot: string;
+            readonly proofBytesHash: string;
             readonly descriptorBytes: Uint8Array;
         }>,
     ];
 }> => ({
-    objectType: transportCase.materialSetObjectType,
     proofMaterials: [
         {
-            objectType: transportCase.materialObjectType,
-            proofMaterialRoot: root,
+            proofBytesHash: hash,
             descriptorBytes: canonicalStreamDescriptorFixture(
                 3,
                 transportCase.runtimeFamily,
@@ -129,13 +110,13 @@ const transportedProofMaterialSet = <
 });
 
 const proofMaterialSource = (
-    root: string,
+    hash: string,
     firstByte: number,
 ): TestProofMaterialSource => {
     const chunk = Uint8Array.of(firstByte, firstByte + 1, firstByte + 2).buffer;
 
     return {
-        proofMaterialRoot: root,
+        proofBytesHash: hash,
         pullChunk: vi.fn(({ chunkIndex, expectedByteLength }) => {
             if (chunkIndex === 0) {
                 expect(expectedByteLength).toBe(chunk.byteLength);
@@ -155,39 +136,31 @@ const setupVerificationBindings = {
     expectedManifestHash,
     expectedRosterHash,
     transportedPublicKeyShareMaterial: {
-        objectType: 'SetupTransportedPublicKeyShareMaterial',
         publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
-        descriptorBytes: canonicalStreamDescriptorFixture(3, 8, 9),
+        descriptorBytes: canonicalStreamDescriptorFixture(3, 8),
     },
     publicKeyShareMaterialChunkSource: {
-        publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
         pullChunk: requiredPublicKeyShareMaterialSource.pullChunk,
     },
     transportedPublicKeyShareProofMaterial: {
-        objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
         proofMaterials: [],
     },
     transportedVssShareLinkageProofMaterial: {
-        objectType: 'SetupTransportedVssShareLinkageProofMaterialSet',
         proofMaterials: [],
     },
     transportedSameSecretBridgeProofMaterial: {
-        objectType: 'SetupTransportedSameSecretBridgeProofMaterialSet',
         proofMaterials: [],
     },
     transportedEvaluationKeyShareProofMaterial: {
-        objectType: 'SetupTransportedEvaluationKeyShareProofMaterialSet',
         proofMaterials: [],
     },
     transportedEvaluationKeyShareComponentMaterial: {
-        objectType: 'SetupTransportedEvaluationKeyShareComponentMaterialSet',
         componentMaterials: [],
     },
 } as const;
 
 const setupPackageWithoutEvaluationKeyComponentReferences = {
     objectType: 'SetupPackage',
-    setupPackageHash: proofMaterialRoot,
     relinearizationKeyShareRounds: {
         objectType: 'RelinearizationKeyShareRounds',
         roundOneRecords: [],
@@ -255,7 +228,7 @@ describe('canonical setup material streaming in the public package', () => {
     it.each(setupProofMaterialTransportCases)(
         'authenticates $proofFamily bytes before terminal verification',
         async (transportCase) => {
-            const source = proofMaterialSource(proofMaterialRoot, 17);
+            const source = proofMaterialSource(proofBytesHash, 17);
 
             const verification = await publicPackage.verifySetupPackage({
                 setupPackage:
@@ -277,7 +250,7 @@ describe('canonical setup material streaming in the public package', () => {
                     transportCase.runtimeFamily,
                 ),
                 family: transportCase.runtimeFamily,
-                materialRoot: proofMaterialRoot,
+                materialRoot: proofBytesHash,
                 pullChunk: source.pullChunk,
             });
             expect(lifecycleEvents).toEqual([
@@ -291,12 +264,12 @@ describe('canonical setup material streaming in the public package', () => {
         },
     );
 
-    it('returns a process-local verified setup capability without exposing the kernel handle', async () => {
+    it('returns a genuine verification result without a process-local capability', async () => {
         const kernel = createFreshMockKernel();
         kernel.acceptedSetupSession.verifyCollectiveBgvSetup.mockReturnValueOnce(
             {
                 isValid: true,
-                value: { acceptedSetupHandle: 37 },
+                value: undefined,
             },
         );
         createFreshMockKernel = () => kernel;
@@ -304,20 +277,17 @@ describe('canonical setup material streaming in the public package', () => {
         const verification = await publicPackage.verifySetupPackage({
             setupPackage: setupPackageWithoutEvaluationKeyComponentReferences,
             ...setupVerificationBindings,
+            expectedSetupPackageHash: proofBytesHash,
         });
 
-        expect(verification).not.toHaveProperty('acceptedSetupHandle');
-        expect(verification.isValid).toBe(true);
-        if (!verification.isValid) {
-            throw new Error('Expected setup verification to succeed.');
-        }
-        expect(verification.value.verifiedSetup).toMatchObject({
-            setupPackageHash: proofMaterialRoot,
-        });
-        expect(Object.keys(verification.value.verifiedSetup)).toEqual([
-            'setupPackageHash',
-        ]);
-        expect(Object.isFrozen(verification.value.verifiedSetup)).toBe(true);
+        expect(verification).toEqual({ isValid: true, value: undefined });
+        expect(
+            kernel.acceptedSetupSession.verifyCollectiveBgvSetup,
+        ).toHaveBeenCalledWith(
+            expect.objectContaining({
+                expectedSetupPackageHash: proofBytesHash,
+            }),
+        );
     });
 
     it('authenticates public-key share material before terminal verification', async () => {
@@ -327,18 +297,16 @@ describe('canonical setup material streaming in the public package', () => {
             setupPackage: setupPackageWithoutEvaluationKeyComponentReferences,
             ...setupVerificationBindings,
             transportedPublicKeyShareMaterial: {
-                objectType: 'SetupTransportedPublicKeyShareMaterial',
                 publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
-                descriptorBytes: canonicalStreamDescriptorFixture(3, 8, 9),
+                descriptorBytes: canonicalStreamDescriptorFixture(3, 8),
             },
             publicKeyShareMaterialChunkSource: {
-                publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
                 pullChunk: source.pullChunk,
             },
         });
 
         expect(readMaterial).toHaveBeenCalledExactlyOnceWith({
-            descriptorBytes: canonicalStreamDescriptorFixture(3, 8, 9),
+            descriptorBytes: canonicalStreamDescriptorFixture(3, 8),
             family: 9,
             materialRoot: publicKeyShareMaterialRoot,
             pullChunk: source.pullChunk,
@@ -348,13 +316,10 @@ describe('canonical setup material streaming in the public package', () => {
     it('authenticates private VSS proof bytes before verification', async () => {
         const privateVssTransportCase = {
             fieldName: 'transportedVssShareLinkageProofMaterial',
-            materialSetObjectType:
-                'SetupTransportedPrivateVssShareProofMaterialSet',
-            materialObjectType: 'SetupTransportedPrivateVssShareProofMaterial',
             proofFamily: 'vss-opening-carry',
             runtimeFamily: 1,
         } as const;
-        const source = proofMaterialSource(alternateProofMaterialRoot, 29);
+        const source = proofMaterialSource(alternateProofBytesHash, 29);
 
         const verification = await publicPackage.verifyPrivateVssShare({
             setupContext: {
@@ -362,17 +327,17 @@ describe('canonical setup material streaming in the public package', () => {
                 manifestHash: expectedManifestHash,
                 rosterHash: expectedRosterHash,
                 setupEpoch: 'epoch',
-                setupParametersHash: proofMaterialRoot,
+                setupParametersHash: proofBytesHash,
                 participantCount: 1,
             },
-            publicMatrixSeedHash: proofMaterialRoot,
+            publicMatrixSeedHash: proofBytesHash,
             sourceTrusteeCoefficientCommitmentMaterialRecords: [],
             sourceTrusteeCoefficientCommitmentRecord: {},
             privateEnvelope: {},
             transportedPrivateVssShareProofMaterial:
                 transportedProofMaterialSet(
                     privateVssTransportCase,
-                    alternateProofMaterialRoot,
+                    alternateProofBytesHash,
                 ),
             privateVssShareProofMaterialChunkSources: [source],
         });
@@ -385,7 +350,7 @@ describe('canonical setup material streaming in the public package', () => {
         expect(readMaterial).toHaveBeenCalledExactlyOnceWith({
             descriptorBytes: canonicalStreamDescriptorFixture(3, 1),
             family: 1,
-            materialRoot: alternateProofMaterialRoot,
+            materialRoot: alternateProofBytesHash,
             pullChunk: source.pullChunk,
         });
         expect(mockKernel.verifyPrivateVssShareEnvelope).toHaveBeenCalledOnce();
@@ -401,8 +366,7 @@ describe('canonical setup material streaming in the public package', () => {
                         roundOneRecords: [
                             {
                                 objectType: 'RelinearizationKeyShareRoundOne',
-                                keySwitchComponentMaterialRoot:
-                                    proofMaterialRoot,
+                                keySwitchComponentMaterialRoot: proofBytesHash,
                             },
                         ],
                         roundTwoRecords: [],
@@ -414,7 +378,7 @@ describe('canonical setup material streaming in the public package', () => {
                                 {
                                     objectType: 'GaloisKeyShareMaterial',
                                     keySwitchComponentMaterialRoot:
-                                        proofMaterialRoot,
+                                        proofBytesHash,
                                 },
                             ],
                         },
@@ -422,13 +386,9 @@ describe('canonical setup material streaming in the public package', () => {
                 },
                 ...setupVerificationBindings,
                 transportedEvaluationKeyShareComponentMaterial: {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     componentMaterials: [
                         {
-                            objectType:
-                                'SetupTransportedEvaluationKeyShareComponentMaterial',
-                            keySwitchComponentMaterialRoot: proofMaterialRoot,
+                            keySwitchComponentMaterialRoot: proofBytesHash,
                             descriptorBytes: canonicalStreamDescriptorFixture(
                                 3,
                                 6,
@@ -438,8 +398,8 @@ describe('canonical setup material streaming in the public package', () => {
                 },
                 evaluationKeyShareComponentMaterialChunkSources: [
                     {
-                        keySwitchComponentMaterialRoot: proofMaterialRoot,
-                        pullChunk: proofMaterialSource(proofMaterialRoot, 47)
+                        keySwitchComponentMaterialRoot: proofBytesHash,
+                        pullChunk: proofMaterialSource(proofBytesHash, 47)
                             .pullChunk,
                     },
                 ],
@@ -461,13 +421,9 @@ describe('canonical setup material streaming in the public package', () => {
                     setupPackageWithoutEvaluationKeyComponentReferences,
                 ...setupVerificationBindings,
                 transportedPublicKeyShareProofMaterial: {
-                    objectType:
-                        'SetupTransportedPublicKeyShareProofMaterialSet',
                     proofMaterials: [
                         {
-                            objectType:
-                                'SetupTransportedPublicKeyShareProofMaterial',
-                            proofMaterialRoot,
+                            proofBytesHash,
                             descriptorBytes: oversizedDescriptor,
                         },
                     ],
@@ -486,7 +442,7 @@ describe('canonical setup material streaming in the public package', () => {
             transportedPublicKeyShareProofMaterial:
                 transportedProofMaterialSet(transportCase),
             setupProofMaterialChunkSources: [
-                proofMaterialSource(proofMaterialRoot, 53),
+                proofMaterialSource(proofBytesHash, 53),
             ],
         } satisfies Parameters<typeof publicPackage.verifySetupPackage>[0];
         readMaterial.mockRejectedValueOnce(

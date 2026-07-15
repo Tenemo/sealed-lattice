@@ -24,7 +24,7 @@ export { assertNonNegativeSafeInteger, assertPositiveSafeInteger };
 export { assertNonEmptyString };
 
 export const publicKeyShareMaterialBinaryMagic = new Uint8Array([
-    0x53, 0x4c, 0x50, 0x4b, 0x53, 0x4d, 0x56, 0x31,
+    0x53, 0x4c, 0x50, 0x4b, 0x53, 0x4d, 0x56, 0x32,
 ]);
 
 export const coefficientVectorHash512 = (
@@ -47,10 +47,9 @@ export const sortedByRosterPosition = <
 export const validateCommonInput = (
     input: Pick<
         PublicKeyShareSetInput,
-        'participantCount' | 'qSharePrimes' | 'publicMatrixSeedHash'
+        'qSharePrimes' | 'publicMatrixSeedHash'
     >,
 ): void => {
-    assertPositiveSafeInteger(input.participantCount, 'participantCount');
     if (input.qSharePrimes.length === 0) {
         throw new Error('qSharePrimes must contain at least one RNS prime.');
     }

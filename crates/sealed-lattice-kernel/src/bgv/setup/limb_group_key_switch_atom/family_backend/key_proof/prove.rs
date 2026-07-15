@@ -10,7 +10,7 @@ pub(in super::super) fn prove_round_one_key_fri<const LIMB_COUNT: usize>(
     secret: &[i64],
     digits: &[DigitWitness],
     proof_parameters: &KeyFriProofParameters,
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     prove_key_fri(
         parameters,
@@ -23,7 +23,7 @@ pub(in super::super) fn prove_round_one_key_fri<const LIMB_COUNT: usize>(
         &ZERO_STATEMENT_BINDING,
         0,
         proof_parameters,
-        salt_seed,
+        private_randomness,
     )
 }
 
@@ -44,7 +44,7 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
     statement_binding: &[u8; 64],
     schedule_index: u64,
     proof_parameters: &KeyFriProofParameters,
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     let component_b: Vec<&[[u64; LIMB_COUNT]]> = public
         .digits
@@ -63,7 +63,7 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
         statement_binding,
         schedule_index,
         proof_parameters,
-        salt_seed,
+        private_randomness,
     )
 }
 
@@ -86,7 +86,7 @@ pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
     statement_binding: &[u8; 64],
     schedule_index: u64,
     proof_parameters: &KeyFriProofParameters,
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     prove_key_fri_streamed(
         parameters,
@@ -100,7 +100,7 @@ pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
         statement_binding,
         schedule_index,
         proof_parameters,
-        salt_seed,
+        private_randomness,
     )
 }
 
@@ -125,7 +125,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     statement_binding: &[u8; 64],
     schedule_index: u64,
     proof_parameters: &KeyFriProofParameters,
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     if public.digits.len() != digits.len() || digits.is_empty() {
         return Err(invalid_key("digit public and witness counts must match"));
@@ -146,7 +146,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         digits,
         component_b,
         linkage_inputs,
-        salt_seed,
+        private_randomness,
     )?;
     let base_count = plan.base_column_count();
     let material_count = material_column_count(digit_count);
@@ -154,7 +154,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     // Round 1 (streamed): witness columns plus the carry-range multiplicity
     // columns, committed one codeword at a time.
     let mut base_builder =
-        StreamedColumnCommitmentBuilder::begin(layout.coset_size, base_count, salt_seed)?;
+        StreamedColumnCommitmentBuilder::begin(layout.coset_size, base_count, private_randomness)?;
     for column in 0..base_count {
         let coefficients = plan.base_column_coefficients(parameters, &trace_domain, column);
         let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
@@ -164,8 +164,11 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
 
     // Commit each masked material column once. The same deterministic plan
     // regenerates individual columns later when producing openings.
-    let mut material_builder =
-        StreamedColumnCommitmentBuilder::begin(layout.coset_size, material_count, salt_seed)?;
+    let mut material_builder = StreamedColumnCommitmentBuilder::begin(
+        layout.coset_size,
+        material_count,
+        private_randomness,
+    )?;
     for digit in 0..material_count {
         let coefficients = plan.material_column_coefficients(parameters, &trace_domain, digit);
         let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
@@ -201,11 +204,11 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     // Round 2 (streamed): the logUp fraction columns, which depend on `mu`. The
     // lookup and table terminals are computed from the on-domain values and
     // bound into the transcript.
-    plan.set_lookup_challenge(mu, salt_seed);
+    plan.set_lookup_challenge(mu, private_randomness);
     let aux_count = plan.aux_column_count();
     let (lookup_terminal, table_terminals) = plan.lookup_terminals(parameters)?;
     let mut aux_builder =
-        StreamedColumnCommitmentBuilder::begin(layout.coset_size, aux_count, salt_seed)?;
+        StreamedColumnCommitmentBuilder::begin(layout.coset_size, aux_count, private_randomness)?;
     for column in 0..aux_count {
         let coefficients = plan.aux_column_coefficients(parameters, &trace_domain, column)?;
         let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
@@ -637,7 +640,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let mut quotient_builder = StreamedColumnCommitmentBuilder::begin(
         layout.coset_size,
         QUOTIENT_COLUMN_COUNT,
-        salt_seed,
+        private_randomness,
     )?;
     for coefficients in &quotient_coefficients {
         let codeword = coset_evaluate_coefficients(&coset_domain, &offset, coefficients);
@@ -709,7 +712,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         &mut transcript,
         &combination,
         &offset,
-        salt_seed,
+        private_randomness,
     )?;
     drop(combination);
     let query_positions = transcript.challenge_positions(

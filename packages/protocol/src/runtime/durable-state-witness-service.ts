@@ -1,18 +1,9 @@
 import { shake256 } from '@noble/hashes/sha3.js';
 import {
-    canonicalJson,
-    signStateWitnessVoteMessage,
-    type BrowserLocalSigningCapability,
-} from '@sealed-lattice/crypto';
-import type { VerificationResult } from '@sealed-lattice/types';
-import {
     copyVerifiedStateDurableBinding,
     stateWitnessVoteKinds,
-    type PreparedStateWitnessVote,
     type StateDurableBindingDescription,
-    type StateVerifierSession,
     type VerifiedStateDurableBinding,
-    type VerifiedStateIntent,
 } from '@sealed-lattice/wasm';
 
 import {
@@ -24,7 +15,6 @@ import {
     createRuntimeRecordProtection,
     mapStorageError,
     readRuntimeRecord,
-    sampleRuntimeIdentifier,
     stageRuntimeRecordWrite,
     type RuntimeStorageAuthorityContext,
 } from './authenticated-runtime-record.js';
@@ -35,37 +25,11 @@ import type {
 
 const durableStateRecordVersion = 1;
 const hashByteLength = 64;
-const participantIdentityByteLength = 64;
-const maximumUnsigned64 = 0xffff_ffff_ffff_ffffn;
-const stateRecordOperationDomain =
-    'sealed-lattice/runtime/state-witness-record/v1';
 const exactOutputRecordOperationDomain =
     'sealed-lattice/runtime/state-exact-output-record/v1';
 const stateExactOutputHashDomain = 'sealed-lattice/state/exact-output/v1';
 const exactOutputRecordHeaderByteLength = 204;
 const textEncoder = new TextEncoder();
-
-type StoredStateVote = {
-    intentObjectHash: string;
-    journalIdentifier: string;
-    signedCarrier?: string;
-    voteKind: number;
-    witnessVoteSequence: string;
-};
-
-type StoredStateRecord = {
-    capabilityKind: number;
-    currentEpoch: string;
-    currentPredecessorTransitionHash?: string;
-    exactOutputByteLength?: string;
-    exactOutputHash?: string;
-    outputIntentObjectHash?: string;
-    recordVersion: number;
-    reservationIntentObjectHash?: string;
-    stateKey: string;
-    subjectParticipantIdentity: string;
-    votes: StoredStateVote[];
-};
 
 type OpenedExactOutputRecord = {
     capabilityKind: number;
@@ -76,10 +40,8 @@ type OpenedExactOutputRecord = {
 };
 
 export type DurableStateWitnessServiceLimits = Readonly<{
-    maximumCachedVoteCount: number;
     maximumExactOutputByteLength: number;
     maximumRecordSealingCount: number;
-    maximumSignedCarrierByteLength: number;
     transactionLifetimeMilliseconds: number;
 }>;
 
@@ -91,140 +53,7 @@ export type DurableStateWitnessService = Readonly<{
     readExactOutput(input: {
         verifiedOutputBinding: VerifiedStateDurableBinding;
     }): Promise<Uint8Array>;
-    signOrReplayBrowserLocalVote(input: {
-        voteIssuer: BrowserLocalStateWitnessVoteIssuer;
-    }): Promise<Uint8Array>;
 }>;
-
-declare const browserLocalStateWitnessVoteIssuerBrand: unique symbol;
-
-export type BrowserLocalStateWitnessVoteIssuer = Readonly<{
-    readonly [browserLocalStateWitnessVoteIssuerBrand]: true;
-}>;
-
-type BrowserLocalStateWitnessVoteIssuerState = Readonly<{
-    issue(): Promise<Uint8Array>;
-    verifiedIntentBinding: VerifiedStateDurableBinding;
-}>;
-
-const browserLocalStateWitnessVoteIssuerStates = new WeakMap<
-    object,
-    BrowserLocalStateWitnessVoteIssuerState
->();
-const stateVoteOperationTailsByStore = new WeakMap<
-    UntrustedStorageTransactionStore,
-    Map<string, Promise<void>>
->();
-
-const runSerializedStateVoteOperation = async <Value>(input: {
-    logicalRecordKey: string;
-    operation(): Promise<Value>;
-    store: UntrustedStorageTransactionStore;
-}): Promise<Value> => {
-    let operationTails = stateVoteOperationTailsByStore.get(input.store);
-    if (operationTails === undefined) {
-        operationTails = new Map();
-        stateVoteOperationTailsByStore.set(input.store, operationTails);
-    }
-    const previousTail =
-        operationTails.get(input.logicalRecordKey) ?? Promise.resolve();
-    const operationResult = previousTail.then(() => input.operation());
-    const currentTail = operationResult.then(
-        () => undefined,
-        () => undefined,
-    );
-    operationTails.set(input.logicalRecordKey, currentTail);
-    try {
-        return await operationResult;
-    } finally {
-        if (operationTails.get(input.logicalRecordKey) === currentTail) {
-            operationTails.delete(input.logicalRecordKey);
-            if (operationTails.size === 0) {
-                stateVoteOperationTailsByStore.delete(input.store);
-            }
-        }
-    }
-};
-
-const requirePreparedVoteValue = <Value>(
-    result: VerificationResult<Value>,
-    operation: string,
-): Value => {
-    if (!result.isValid) {
-        throw new AuthenticatedRuntimeRecordError(
-            'InvalidInput',
-            `${operation} refused at the state-verifier boundary: ${result.refusalReason}.`,
-        );
-    }
-    return result.value;
-};
-
-export const createBrowserLocalStateWitnessVoteIssuer = (input: {
-    session: StateVerifierSession;
-    signingCapability: BrowserLocalSigningCapability;
-    verifiedIntent: VerifiedStateIntent;
-    witnessParticipantIdentity: Uint8Array;
-}): BrowserLocalStateWitnessVoteIssuer => {
-    const verifiedIntentBinding = requirePreparedVoteValue(
-        input.session.durableBindingFor(input.verifiedIntent),
-        'State witness binding derivation',
-    );
-    const witnessParticipantIdentity = copyBoundedBytes(
-        input.witnessParticipantIdentity,
-        participantIdentityByteLength,
-        'witnessParticipantIdentity',
-    );
-    let issuedCarrier: Promise<Uint8Array> | undefined;
-    const issue = (): Promise<Uint8Array> => {
-        issuedCarrier ??= Promise.resolve().then((): Uint8Array => {
-            const preparedVote =
-                requirePreparedVoteValue<PreparedStateWitnessVote>(
-                    input.session.prepareWitnessVote({
-                        verifiedIntent: input.verifiedIntent,
-                        witnessParticipantIdentity,
-                    }),
-                    'State witness vote preparation',
-                );
-            let signatureMessage: Uint8Array | undefined;
-            let signature: Uint8Array | undefined;
-            try {
-                signatureMessage = requirePreparedVoteValue(
-                    preparedVote.copySignatureMessage(),
-                    'State witness signature-message copy',
-                );
-                signature = signStateWitnessVoteMessage({
-                    capability: input.signingCapability,
-                    signatureMessage,
-                });
-                return requirePreparedVoteValue(
-                    preparedVote.finish(signature),
-                    'State witness vote finish',
-                );
-            } catch (error) {
-                preparedVote.cancel();
-                throw error;
-            } finally {
-                signatureMessage?.fill(0);
-                signature?.fill(0);
-            }
-        });
-        return issuedCarrier.then((carrier) => carrier.slice());
-    };
-    const issuer = Object.freeze(
-        Object.create(null) as object,
-    ) as BrowserLocalStateWitnessVoteIssuer;
-    browserLocalStateWitnessVoteIssuerStates.set(
-        issuer,
-        Object.freeze({ issue, verifiedIntentBinding }),
-    );
-    return issuer;
-};
-
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.getPrototypeOf(value) === Object.prototype;
 
 const requireSafePositiveInteger = (value: number, label: string): void => {
     if (!Number.isSafeInteger(value) || value <= 0) {
@@ -250,297 +79,6 @@ const closeTransactionAfterFailure = async (
         );
     }
     return mappedOperationFailure;
-};
-
-const requireUnsigned64Decimal = (value: unknown, label: string): bigint => {
-    if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            `${label} is not a canonical unsigned-64 decimal string.`,
-        );
-    }
-    const parsed = BigInt(value);
-    if (parsed > maximumUnsigned64) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            `${label} exceeds the unsigned-64 range.`,
-        );
-    }
-    return parsed;
-};
-
-const hexToBytes = (
-    value: unknown,
-    expectedByteLength: number,
-    label: string,
-): Uint8Array => {
-    if (
-        typeof value !== 'string' ||
-        value.length !== expectedByteLength * 2 ||
-        !/^[0-9a-f]+$/u.test(value)
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            `${label} is not canonical lowercase hexadecimal.`,
-        );
-    }
-    const bytes = new Uint8Array(expectedByteLength);
-    for (let byteIndex = 0; byteIndex < bytes.byteLength; byteIndex += 1) {
-        bytes[byteIndex] = Number.parseInt(
-            value.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
-        );
-    }
-    return bytes;
-};
-
-const variableHexToBytes = (
-    value: unknown,
-    maximumByteLength: number,
-    label: string,
-): Uint8Array => {
-    if (
-        typeof value !== 'string' ||
-        value.length % 2 !== 0 ||
-        value.length > maximumByteLength * 2 ||
-        !/^(?:[0-9a-f]{2})*$/u.test(value)
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            `${label} is not bounded canonical hexadecimal.`,
-        );
-    }
-    return hexToBytes(value, value.length / 2, label);
-};
-
-const optionalHash = (value: unknown, label: string): string | undefined => {
-    if (value === undefined) {
-        return undefined;
-    }
-    return bytesToHex(hexToBytes(value, hashByteLength, label));
-};
-
-const requireExactKeys = (
-    value: Record<string, unknown>,
-    requiredKeys: readonly string[],
-    optionalKeys: readonly string[],
-    label: string,
-): void => {
-    const acceptedKeys = new Set([...requiredKeys, ...optionalKeys]);
-    if (
-        requiredKeys.some((key) => !(key in value)) ||
-        Object.keys(value).some((key) => !acceptedKeys.has(key))
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            `${label} has the wrong fields.`,
-        );
-    }
-};
-
-const encodeCanonicalRecord = (value: unknown): Uint8Array =>
-    textEncoder.encode(canonicalJson(value));
-
-const parseCanonicalJson = (
-    bytes: Uint8Array,
-    label: string,
-): Record<string, unknown> => {
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(
-            new TextDecoder('utf-8', { fatal: true }).decode(bytes),
-        );
-    } catch (error) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            `${label} is not valid UTF-8 canonical JSON.`,
-            error,
-        );
-    }
-    if (
-        !isPlainRecord(parsed) ||
-        !bytesEqual(bytes, encodeCanonicalRecord(parsed))
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            `${label} is not canonical JSON.`,
-        );
-    }
-    return parsed;
-};
-
-const decodeStateRecord = (
-    bytes: Uint8Array,
-    limits: DurableStateWitnessServiceLimits,
-): StoredStateRecord => {
-    const value = parseCanonicalJson(bytes, 'durable state record');
-    requireExactKeys(
-        value,
-        [
-            'capabilityKind',
-            'currentEpoch',
-            'recordVersion',
-            'stateKey',
-            'subjectParticipantIdentity',
-            'votes',
-        ],
-        [
-            'currentPredecessorTransitionHash',
-            'exactOutputByteLength',
-            'exactOutputHash',
-            'outputIntentObjectHash',
-            'reservationIntentObjectHash',
-        ],
-        'durable state record',
-    );
-    if (
-        value.recordVersion !== durableStateRecordVersion ||
-        !Number.isInteger(value.capabilityKind) ||
-        !Array.isArray(value.votes) ||
-        value.votes.length > limits.maximumCachedVoteCount
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            'Durable state record has invalid fixed fields.',
-        );
-    }
-    const stateKey = bytesToHex(
-        hexToBytes(value.stateKey, hashByteLength, 'stateKey'),
-    );
-    const subjectParticipantIdentity = bytesToHex(
-        hexToBytes(
-            value.subjectParticipantIdentity,
-            participantIdentityByteLength,
-            'subjectParticipantIdentity',
-        ),
-    );
-    const currentEpoch = requireUnsigned64Decimal(
-        value.currentEpoch,
-        'currentEpoch',
-    ).toString();
-    const votes: StoredStateVote[] = [];
-    let previousSequence = -1n;
-    for (const [voteIndex, untrustedVote] of value.votes.entries()) {
-        if (!isPlainRecord(untrustedVote)) {
-            throw new AuthenticatedRuntimeRecordError(
-                'AuthenticationFailed',
-                `votes[${voteIndex}] is not a record.`,
-            );
-        }
-        requireExactKeys(
-            untrustedVote,
-            [
-                'intentObjectHash',
-                'journalIdentifier',
-                'voteKind',
-                'witnessVoteSequence',
-            ],
-            ['signedCarrier'],
-            `votes[${voteIndex}]`,
-        );
-        const witnessVoteSequence = requireUnsigned64Decimal(
-            untrustedVote.witnessVoteSequence,
-            `votes[${voteIndex}].witnessVoteSequence`,
-        );
-        if (
-            witnessVoteSequence <= previousSequence ||
-            (untrustedVote.voteKind !== stateWitnessVoteKinds.reservation &&
-                untrustedVote.voteKind !== stateWitnessVoteKinds.output &&
-                untrustedVote.voteKind !== stateWitnessVoteKinds.recovery)
-        ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'AuthenticationFailed',
-                'Durable state votes are not strictly sequence ordered.',
-            );
-        }
-        previousSequence = witnessVoteSequence;
-        votes.push({
-            intentObjectHash: bytesToHex(
-                hexToBytes(
-                    untrustedVote.intentObjectHash,
-                    hashByteLength,
-                    `votes[${voteIndex}].intentObjectHash`,
-                ),
-            ),
-            journalIdentifier: bytesToHex(
-                hexToBytes(
-                    untrustedVote.journalIdentifier,
-                    32,
-                    `votes[${voteIndex}].journalIdentifier`,
-                ),
-            ),
-            ...(untrustedVote.signedCarrier === undefined
-                ? {}
-                : {
-                      signedCarrier: bytesToHex(
-                          variableHexToBytes(
-                              untrustedVote.signedCarrier,
-                              limits.maximumSignedCarrierByteLength,
-                              `votes[${voteIndex}].signedCarrier`,
-                          ),
-                      ),
-                  }),
-            voteKind: untrustedVote.voteKind,
-            witnessVoteSequence: witnessVoteSequence.toString(),
-        });
-    }
-    const reservationIntentObjectHash = optionalHash(
-        value.reservationIntentObjectHash,
-        'reservationIntentObjectHash',
-    );
-    const outputIntentObjectHash = optionalHash(
-        value.outputIntentObjectHash,
-        'outputIntentObjectHash',
-    );
-    const exactOutputHash = optionalHash(
-        value.exactOutputHash,
-        'exactOutputHash',
-    );
-    const exactOutputByteLength =
-        value.exactOutputByteLength === undefined
-            ? undefined
-            : requireUnsigned64Decimal(
-                  value.exactOutputByteLength,
-                  'exactOutputByteLength',
-              ).toString();
-    if (
-        (outputIntentObjectHash !== undefined &&
-            reservationIntentObjectHash === undefined) ||
-        (exactOutputHash === undefined) !==
-            (exactOutputByteLength === undefined) ||
-        (exactOutputHash !== undefined && outputIntentObjectHash === undefined)
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            'Durable state lock fields are inconsistent.',
-        );
-    }
-    return {
-        capabilityKind: value.capabilityKind as number,
-        currentEpoch,
-        ...(value.currentPredecessorTransitionHash === undefined
-            ? {}
-            : {
-                  currentPredecessorTransitionHash: optionalHash(
-                      value.currentPredecessorTransitionHash,
-                      'currentPredecessorTransitionHash',
-                  ),
-              }),
-        ...(exactOutputByteLength === undefined
-            ? {}
-            : { exactOutputByteLength }),
-        ...(exactOutputHash === undefined ? {} : { exactOutputHash }),
-        ...(outputIntentObjectHash === undefined
-            ? {}
-            : { outputIntentObjectHash }),
-        recordVersion: durableStateRecordVersion,
-        ...(reservationIntentObjectHash === undefined
-            ? {}
-            : { reservationIntentObjectHash }),
-        stateKey,
-        subjectParticipantIdentity,
-        votes,
-    };
 };
 
 const encodeExactOutputRecord = (
@@ -675,20 +213,9 @@ const deriveStateExactOutputHash = (
     }
 };
 
-const stateRecordKey = (binding: StateDurableBindingDescription): string =>
-    `state-witness/${bytesToHex(binding.stateKey)}`;
-
 const exactOutputRecordKey = (
     binding: StateDurableBindingDescription,
 ): string => `state-exact-output/${bytesToHex(binding.stateKey)}`;
-
-const optionalHashHex = (value: Uint8Array | undefined): string | undefined =>
-    value === undefined ? undefined : bytesToHex(value);
-
-const sameOptionalHash = (
-    left: string | undefined,
-    right: Uint8Array | undefined,
-): boolean => left === optionalHashHex(right);
 
 const requireBindingContext = (
     binding: StateDurableBindingDescription,
@@ -731,153 +258,6 @@ const copyVerifiedBinding = (
     }
     requireBindingContext(description, authorityContext);
     return description;
-};
-
-const freshStateRecord = (
-    binding: StateDurableBindingDescription,
-): StoredStateRecord => ({
-    capabilityKind: binding.capabilityKind,
-    currentEpoch: '0',
-    recordVersion: durableStateRecordVersion,
-    stateKey: bytesToHex(binding.stateKey),
-    subjectParticipantIdentity: bytesToHex(binding.subjectParticipantIdentity),
-    votes: [],
-});
-
-const requireRecordIdentity = (
-    record: StoredStateRecord,
-    binding: StateDurableBindingDescription,
-): void => {
-    if (
-        record.capabilityKind !== binding.capabilityKind ||
-        record.stateKey !== bytesToHex(binding.stateKey) ||
-        record.subjectParticipantIdentity !==
-            bytesToHex(binding.subjectParticipantIdentity)
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            'Durable state record does not match its verifier-derived state key.',
-        );
-    }
-};
-
-const findVote = (
-    record: StoredStateRecord,
-    binding: StateDurableBindingDescription,
-): StoredStateVote | undefined =>
-    record.votes.find(
-        (vote) =>
-            BigInt(vote.witnessVoteSequence) === binding.witnessVoteSequence,
-    );
-
-const applyIntentLock = (
-    record: StoredStateRecord,
-    binding: StateDurableBindingDescription,
-): void => {
-    requireRecordIdentity(record, binding);
-    const currentEpoch = BigInt(record.currentEpoch);
-    const currentPredecessorTransitionHash =
-        record.currentPredecessorTransitionHash;
-    switch (binding.voteKind) {
-        case stateWitnessVoteKinds.reservation: {
-            if (
-                binding.subjectEpoch !== currentEpoch ||
-                !sameOptionalHash(
-                    currentPredecessorTransitionHash,
-                    binding.predecessorTransitionHash,
-                ) ||
-                (record.reservationIntentObjectHash !== undefined &&
-                    record.reservationIntentObjectHash !==
-                        bytesToHex(binding.intentObjectHash))
-            ) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'Conflict',
-                    'The reservation conflicts with the durable state lock.',
-                );
-            }
-            record.reservationIntentObjectHash = bytesToHex(
-                binding.intentObjectHash,
-            );
-            break;
-        }
-        case stateWitnessVoteKinds.output: {
-            if (
-                binding.subjectEpoch !== currentEpoch ||
-                !sameOptionalHash(
-                    currentPredecessorTransitionHash,
-                    binding.predecessorTransitionHash,
-                ) ||
-                binding.reservationIntentObjectHash === undefined ||
-                binding.outputIntentObjectHash === undefined ||
-                binding.exactOutputHash === undefined ||
-                binding.exactOutputByteLength === undefined ||
-                record.reservationIntentObjectHash !==
-                    bytesToHex(binding.reservationIntentObjectHash) ||
-                (record.outputIntentObjectHash !== undefined &&
-                    record.outputIntentObjectHash !==
-                        bytesToHex(binding.outputIntentObjectHash))
-            ) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'Conflict',
-                    'The output conflicts with the durable reservation lock.',
-                );
-            }
-            record.outputIntentObjectHash = bytesToHex(
-                binding.outputIntentObjectHash,
-            );
-            record.exactOutputHash = bytesToHex(binding.exactOutputHash);
-            record.exactOutputByteLength =
-                binding.exactOutputByteLength.toString();
-            break;
-        }
-        case stateWitnessVoteKinds.recovery: {
-            const preservedReservationIntent = optionalHashHex(
-                binding.reservationIntentObjectHash,
-            );
-            const preservedOutputIntent = optionalHashHex(
-                binding.outputIntentObjectHash,
-            );
-            const firstObservedRecovery =
-                record.votes.length === 0 &&
-                record.reservationIntentObjectHash === undefined &&
-                record.outputIntentObjectHash === undefined;
-            if (
-                (!firstObservedRecovery &&
-                    binding.subjectEpoch !== currentEpoch + 1n) ||
-                binding.subjectEpoch === 0n ||
-                (!firstObservedRecovery &&
-                    !sameOptionalHash(
-                        currentPredecessorTransitionHash,
-                        binding.predecessorTransitionHash,
-                    )) ||
-                (record.reservationIntentObjectHash !== undefined &&
-                    record.reservationIntentObjectHash !==
-                        preservedReservationIntent) ||
-                (record.outputIntentObjectHash !== undefined &&
-                    record.outputIntentObjectHash !== preservedOutputIntent)
-            ) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'Conflict',
-                    'The recovery transition does not preserve the durable state lock.',
-                );
-            }
-            if (preservedReservationIntent === undefined) {
-                delete record.reservationIntentObjectHash;
-            } else {
-                record.reservationIntentObjectHash = preservedReservationIntent;
-            }
-            if (preservedOutputIntent === undefined) {
-                delete record.outputIntentObjectHash;
-            } else {
-                record.outputIntentObjectHash = preservedOutputIntent;
-            }
-            record.currentEpoch = binding.subjectEpoch.toString();
-            record.currentPredecessorTransitionHash = bytesToHex(
-                binding.intentObjectHash,
-            );
-            break;
-        }
-    }
 };
 
 const requireExactOutputCacheMatches = async (input: {
@@ -940,10 +320,6 @@ export const openDurableStateWitnessService = (input: {
     store: UntrustedStorageTransactionStore;
 }): DurableStateWitnessService => {
     requireSafePositiveInteger(
-        input.limits.maximumCachedVoteCount,
-        'maximumCachedVoteCount',
-    );
-    requireSafePositiveInteger(
         input.limits.maximumExactOutputByteLength,
         'maximumExactOutputByteLength',
     );
@@ -958,10 +334,6 @@ export const openDurableStateWitnessService = (input: {
         );
     }
     requireSafePositiveInteger(
-        input.limits.maximumSignedCarrierByteLength,
-        'maximumSignedCarrierByteLength',
-    );
-    requireSafePositiveInteger(
         input.limits.transactionLifetimeMilliseconds,
         'transactionLifetimeMilliseconds',
     );
@@ -970,9 +342,8 @@ export const openDurableStateWitnessService = (input: {
         authorityContext: input.authorityContext,
         cryptoProvider: input.cryptoProvider,
         encryptionKey: input.encryptionKey,
+        maximumRecordSealingCount: limits.maximumRecordSealingCount,
     });
-    const issuedJournalIdentifiers = new Set<string>();
-    const issuedNonces = new Set<string>();
 
     const cacheExactOutput: DurableStateWitnessService['cacheExactOutput'] =
         async ({ exactOutputBytes, verifiedOutputBinding }) => {
@@ -1055,9 +426,7 @@ export const openDurableStateWitnessService = (input: {
             try {
                 await stageRuntimeRecordWrite({
                     expectedCurrentSealedBytes: null,
-                    issuedNonces,
                     logicalRecordKey,
-                    maximumRecordSealingCount: limits.maximumRecordSealingCount,
                     operationDomain: exactOutputRecordOperationDomain,
                     plaintext,
                     protection,
@@ -1108,265 +477,7 @@ export const openDurableStateWitnessService = (input: {
             return exactOutputBytes;
         };
 
-    const signOrReplayIssuedVote = async (
-        issuerState: BrowserLocalStateWitnessVoteIssuerState,
-        binding: StateDurableBindingDescription,
-        logicalRecordKey: string,
-    ): Promise<Uint8Array> => {
-        let lockedRecord = await readRuntimeRecord({
-            logicalRecordKey,
-            operationDomain: stateRecordOperationDomain,
-            protection,
-            store: input.store,
-        });
-        let record =
-            lockedRecord === undefined
-                ? freshStateRecord(binding)
-                : decodeStateRecord(lockedRecord.plaintext, limits);
-        lockedRecord?.plaintext.fill(0);
-        const existingVote = findVote(record, binding);
-        if (
-            existingVote !== undefined &&
-            (existingVote.intentObjectHash !==
-                bytesToHex(binding.intentObjectHash) ||
-                existingVote.voteKind !== binding.voteKind)
-        ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'Conflict',
-                'The witness sequence is already locked to another intent.',
-            );
-        }
-        if (existingVote?.signedCarrier !== undefined) {
-            return variableHexToBytes(
-                existingVote.signedCarrier,
-                limits.maximumSignedCarrierByteLength,
-                'signedCarrier',
-            );
-        }
-        if (existingVote === undefined) {
-            applyIntentLock(record, binding);
-            if (record.votes.length >= limits.maximumCachedVoteCount) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'ResourceLimit',
-                    'The durable state vote cache is full.',
-                );
-            }
-            record.votes.push({
-                intentObjectHash: bytesToHex(binding.intentObjectHash),
-                journalIdentifier: bytesToHex(
-                    sampleRuntimeIdentifier(
-                        protection,
-                        issuedJournalIdentifiers,
-                        'state vote journal identifier',
-                    ),
-                ),
-                voteKind: binding.voteKind,
-                witnessVoteSequence: binding.witnessVoteSequence.toString(),
-            });
-            record.votes.sort((left, right) =>
-                BigInt(left.witnessVoteSequence) <
-                BigInt(right.witnessVoteSequence)
-                    ? -1
-                    : 1,
-            );
-        }
-        const lockPlaintext = encodeCanonicalRecord(record);
-        const lockTransaction = await input.store.beginTransaction({
-            lifetimeMilliseconds: limits.transactionLifetimeMilliseconds,
-        });
-        try {
-            await stageRuntimeRecordWrite({
-                expectedCurrentSealedBytes: lockedRecord?.sealedBytes ?? null,
-                issuedNonces,
-                logicalRecordKey,
-                maximumRecordSealingCount: limits.maximumRecordSealingCount,
-                operationDomain: stateRecordOperationDomain,
-                plaintext: lockPlaintext,
-                protection,
-                transaction: lockTransaction,
-            });
-            await lockTransaction.commit();
-        } catch (error) {
-            const mapped = await closeTransactionAfterFailure(
-                lockTransaction,
-                error,
-            );
-            if (mapped.code !== 'Conflict') {
-                throw mapped;
-            }
-            lockedRecord = await readRuntimeRecord({
-                logicalRecordKey,
-                operationDomain: stateRecordOperationDomain,
-                protection,
-                store: input.store,
-            });
-            if (lockedRecord === undefined) {
-                throw mapped;
-            }
-            record = decodeStateRecord(lockedRecord.plaintext, limits);
-            lockedRecord.plaintext.fill(0);
-            const racedVote = findVote(record, binding);
-            if (
-                racedVote === undefined ||
-                racedVote.intentObjectHash !==
-                    bytesToHex(binding.intentObjectHash) ||
-                racedVote.voteKind !== binding.voteKind
-            ) {
-                throw mapped;
-            }
-            if (racedVote.signedCarrier !== undefined) {
-                return variableHexToBytes(
-                    racedVote.signedCarrier,
-                    limits.maximumSignedCarrierByteLength,
-                    'signedCarrier',
-                );
-            }
-        } finally {
-            lockPlaintext.fill(0);
-        }
-
-        const signedCarrier = copyBoundedBytes(
-            await issuerState.issue(),
-            limits.maximumSignedCarrierByteLength,
-            'signed state-witness carrier',
-        );
-        const current = await readRuntimeRecord({
-            logicalRecordKey,
-            operationDomain: stateRecordOperationDomain,
-            protection,
-            store: input.store,
-        });
-        if (current === undefined) {
-            signedCarrier.fill(0);
-            throw new AuthenticatedRuntimeRecordError(
-                'MissingRecord',
-                'The durable intent lock disappeared before carrier caching.',
-            );
-        }
-        record = decodeStateRecord(current.plaintext, limits);
-        current.plaintext.fill(0);
-        const vote = findVote(record, binding);
-        if (
-            vote === undefined ||
-            vote.intentObjectHash !== bytesToHex(binding.intentObjectHash) ||
-            vote.voteKind !== binding.voteKind
-        ) {
-            signedCarrier.fill(0);
-            throw new AuthenticatedRuntimeRecordError(
-                'Conflict',
-                'The durable intent lock changed before carrier caching.',
-            );
-        }
-        if (vote.signedCarrier !== undefined) {
-            signedCarrier.fill(0);
-            return variableHexToBytes(
-                vote.signedCarrier,
-                limits.maximumSignedCarrierByteLength,
-                'signedCarrier',
-            );
-        }
-        vote.signedCarrier = bytesToHex(signedCarrier);
-        const carrierPlaintext = encodeCanonicalRecord(record);
-        const carrierTransaction = await input.store.beginTransaction({
-            lifetimeMilliseconds: limits.transactionLifetimeMilliseconds,
-        });
-        try {
-            await stageRuntimeRecordWrite({
-                expectedCurrentSealedBytes: current.sealedBytes,
-                issuedNonces,
-                logicalRecordKey,
-                maximumRecordSealingCount: limits.maximumRecordSealingCount,
-                operationDomain: stateRecordOperationDomain,
-                plaintext: carrierPlaintext,
-                protection,
-                transaction: carrierTransaction,
-            });
-            await carrierTransaction.commit();
-            return signedCarrier.slice();
-        } catch (error) {
-            const mapped = await closeTransactionAfterFailure(
-                carrierTransaction,
-                error,
-            );
-            if (mapped.code !== 'Conflict') {
-                throw mapped;
-            }
-            const selected = await readRuntimeRecord({
-                logicalRecordKey,
-                operationDomain: stateRecordOperationDomain,
-                protection,
-                store: input.store,
-            });
-            if (selected === undefined) {
-                throw mapped;
-            }
-            const selectedRecord = decodeStateRecord(
-                selected.plaintext,
-                limits,
-            );
-            selected.plaintext.fill(0);
-            const selectedVote = findVote(selectedRecord, binding);
-            if (
-                selectedVote?.intentObjectHash !==
-                    bytesToHex(binding.intentObjectHash) ||
-                selectedVote.voteKind !== binding.voteKind ||
-                selectedVote.signedCarrier === undefined
-            ) {
-                throw mapped;
-            }
-            return variableHexToBytes(
-                selectedVote.signedCarrier,
-                limits.maximumSignedCarrierByteLength,
-                'signedCarrier',
-            );
-        } finally {
-            carrierPlaintext.fill(0);
-            signedCarrier.fill(0);
-        }
-    };
-
-    const signOrReplayBrowserLocalVote: DurableStateWitnessService['signOrReplayBrowserLocalVote'] =
-        async ({ voteIssuer }) => {
-            if (
-                (typeof voteIssuer !== 'object' &&
-                    typeof voteIssuer !== 'function') ||
-                voteIssuer === null
-            ) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'InvalidInput',
-                    'The state-witness vote issuer is not an opaque browser-local issuer.',
-                );
-            }
-            const issuerState =
-                browserLocalStateWitnessVoteIssuerStates.get(voteIssuer);
-            if (issuerState === undefined) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'InvalidInput',
-                    'The state-witness vote issuer was not created by the browser-local issuer boundary.',
-                );
-            }
-            const binding = copyVerifiedBinding(
-                issuerState.verifiedIntentBinding,
-                protection.authorityContext,
-            );
-            const logicalRecordKey = stateRecordKey(binding);
-            return runSerializedStateVoteOperation({
-                logicalRecordKey,
-                operation: () =>
-                    signOrReplayIssuedVote(
-                        issuerState,
-                        binding,
-                        logicalRecordKey,
-                    ),
-                store: input.store,
-            });
-        };
-
-    return Object.freeze({
-        cacheExactOutput,
-        readExactOutput,
-        signOrReplayBrowserLocalVote,
-    });
+    return Object.freeze({ cacheExactOutput, readExactOutput });
 };
 
 export { AuthenticatedRuntimeRecordError as DurableStateWitnessServiceError };

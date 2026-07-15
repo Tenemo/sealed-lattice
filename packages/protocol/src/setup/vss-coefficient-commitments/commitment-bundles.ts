@@ -35,7 +35,10 @@ const validateCommitmentCommonInput = (
 ): void => {
     assertProtocolHash(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
-    assertPositiveSafeInteger(input.participantCount, 'participantCount');
+    assertPositiveSafeInteger(
+        input.setupContext.participantCount,
+        'setupContext.participantCount',
+    );
     assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
     input.qSharePrimes.forEach((qSharePrime, rnsLimbIndex) => {
         assertPositiveSafeInteger(
@@ -49,9 +52,6 @@ const createVssSourceTrusteeCoefficientCommitmentContribution = (
     input: VssSourceTrusteeCoefficientCommitmentContributionInput,
 ): VssSourceTrusteeOpeningMaterial => {
     validateCommitmentCommonInput(input);
-    const setupContextHash = deriveCollectiveBgvSetupContextHash(
-        input.setupContext,
-    );
     const sourceTrusteeState = input.sourceTrusteeOpeningState;
     assertNonEmptyString(
         sourceTrusteeState.sourceTrusteeIdentity,
@@ -62,7 +62,8 @@ const createVssSourceTrusteeCoefficientCommitmentContribution = (
         'sourceTrusteeRosterPosition',
     );
     if (
-        sourceTrusteeState.sourceTrusteeRosterPosition >= input.participantCount
+        sourceTrusteeState.sourceTrusteeRosterPosition >=
+        input.setupContext.participantCount
     ) {
         throw new Error(
             'sourceTrusteeRosterPosition must be inside the accepted participant count.',
@@ -77,7 +78,7 @@ const createVssSourceTrusteeCoefficientCommitmentContribution = (
     const materialRecords: VssCoefficientCommitmentMaterialRecord[] = [];
     const coefficientCommitments: VssCoefficientCommitmentRecord[] = [];
     const sourceTrusteePrivateOpenings: VssCoefficientOpeningMaterial[] = [];
-    input.qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {
+    input.qSharePrimes.forEach((_rnsPrime, rnsLimbIndex) => {
         for (
             let shamirCoefficientIndex = 0;
             shamirCoefficientIndex < input.thresholdDegree;
@@ -94,69 +95,38 @@ const createVssSourceTrusteeCoefficientCommitmentContribution = (
             const commitmentComputation = input.setupCommitmentComputer({
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 sourceRnsLimbIndex: rnsLimbIndex,
-                sourceMessageModulus: rnsPrime,
                 shamirCoefficientIndex,
                 messageCoefficients: openingState.coefficientMessage,
                 randomnessByColumn: openingState.randomnessByColumn,
                 ringDegree: input.ringDegree,
             });
+            const commitmentRoot = deriveCanonicalObjectHash(
+                commitmentComputation.commitment,
+            );
             sourceTrusteePrivateOpenings.push({
                 ...openingState,
-                commitmentRoot: commitmentComputation.commitmentRoot,
+                commitmentRoot,
             });
             coefficientCommitments.push({
                 objectType: 'VssCoefficientCommitment',
-                setupContextHash,
-                sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
-                sourceTrusteeRosterPosition:
-                    sourceTrusteeState.sourceTrusteeRosterPosition,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                rnsLimbIndex,
-                rnsPrime,
-                shamirCoefficientIndex,
-                commitmentRoot: commitmentComputation.commitmentRoot,
+                commitmentRoot,
             });
             const materialRecord = {
                 objectType: 'VssCoefficientCommitmentMaterial',
-                setupContextHash,
-                sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
-                sourceTrusteeRosterPosition:
-                    sourceTrusteeState.sourceTrusteeRosterPosition,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                rnsLimbIndex,
-                rnsPrime,
-                shamirCoefficientIndex,
-                commitmentRoot: commitmentComputation.commitmentRoot,
                 commitment: commitmentComputation.commitment,
             } satisfies VssCoefficientCommitmentMaterialRecord;
             materialRecords.push(materialRecord);
         }
     });
-    const sourceTrusteeRecordWithoutRoot = {
+    const sourceTrusteeRecord = {
         objectType: 'VssSourceTrusteeCoefficientCommitments',
-        setupContextHash,
         sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
         sourceTrusteeRosterPosition:
             sourceTrusteeState.sourceTrusteeRosterPosition,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
         coefficientCommitments,
-    } as const satisfies Omit<
-        VssSourceTrusteeCoefficientCommitmentRecord,
-        'sourceTrusteeCommitmentRoot'
-    >;
-    const sourceTrusteeRecord = {
-        ...sourceTrusteeRecordWithoutRoot,
-        sourceTrusteeCommitmentRoot: deriveCanonicalObjectHash(
-            sourceTrusteeRecordWithoutRoot,
-        ),
-    } satisfies VssSourceTrusteeCoefficientCommitmentRecord;
+    } as const satisfies VssSourceTrusteeCoefficientCommitmentRecord;
 
     return {
-        sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
-        sourceTrusteeRosterPosition:
-            sourceTrusteeState.sourceTrusteeRosterPosition,
-        sourceTrusteeCommitmentRoot:
-            sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
         sourceTrusteeCoefficientCommitmentRecord: sourceTrusteeRecord,
         sourceTrusteeCoefficientCommitmentMaterialRecords: materialRecords,
         coefficientOpenings: sourceTrusteePrivateOpenings,
@@ -177,7 +147,7 @@ export const createVssCoefficientCommitmentBundle = (
     );
     assertFullSourceTrusteeReferenceCoverage(
         sortedReferences,
-        input.participantCount,
+        input.setupContext.participantCount,
     );
 
     const sourceTrusteeContributions = sortedReferences.map(
@@ -188,7 +158,6 @@ export const createVssCoefficientCommitmentBundle = (
                 setupCommitmentComputer: input.setupCommitmentComputer,
                 qSharePrimes: input.qSharePrimes,
                 ringDegree: input.ringDegree,
-                participantCount: input.participantCount,
                 thresholdDegree: input.thresholdDegree,
                 sourceTrusteeOpeningState: loadSourceTrusteeOpeningState(
                     sourceTrusteeOpeningStateProvider,
@@ -201,21 +170,12 @@ export const createVssCoefficientCommitmentBundle = (
     );
     const privateOpeningMaterialBySourceTrustee = sourceTrusteeContributions;
 
-    const commitmentSetWithoutRoot = {
+    const commitmentSet = {
         objectType: 'VssCoefficientCommitmentSet',
         setupContextHash,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         sourceTrusteeRecords,
-    } as const satisfies Omit<
-        VssCoefficientCommitmentSet,
-        'vssCoefficientCommitmentRoot'
-    >;
-    const commitmentSet = {
-        ...commitmentSetWithoutRoot,
-        vssCoefficientCommitmentRoot: deriveCanonicalObjectHash(
-            commitmentSetWithoutRoot,
-        ),
-    } satisfies VssCoefficientCommitmentSet;
+    } as const satisfies VssCoefficientCommitmentSet;
     return {
         commitmentSet,
         privateOpeningMaterialBySourceTrustee,

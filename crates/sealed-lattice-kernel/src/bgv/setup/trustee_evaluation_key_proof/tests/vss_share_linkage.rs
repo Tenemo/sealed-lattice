@@ -1,4 +1,3 @@
-use super::super::merkle_commitment::MerkleDigest;
 use super::super::relation::{
     SetupProofStatement, VssCommittedMaterialWitness, VssShareLinkageCommitment,
     VssShareLinkageItem, VssShareLinkageStatement, masked_claim_bounds_for_global_claim,
@@ -8,10 +7,8 @@ use super::super::{
     VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT,
 };
 use super::*;
-use crate::bgv::setup::compute_vss_committed_material_commitment_request;
 use crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_TRIT_BASE;
 use crate::encoding::CanonicalErrorCode;
-use crate::hashing::hash512_hex;
 use num_bigint::BigInt;
 use serde_json::json;
 
@@ -55,6 +52,22 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
         )
         .is_err(),
         "proving must reject a witness message that does not open the published material commitment"
+    );
+
+    let (mut wrong_context_statement, wrong_context_witness) = vss_share_linkage_instance();
+    wrong_context_statement
+        .vss_share_linkage_mut()
+        .expect("statement")
+        .recipient_share_commitment
+        .commitment_context_hash = repeated_hash("a7");
+    assert!(
+        prove_evaluation_key_share(
+            &wrong_context_statement,
+            &wrong_context_witness,
+            PROOF_RANDOMNESS_SEED,
+        )
+        .is_err(),
+        "proving must derive the tree domain from the public commitment context hash"
     );
 
     let (mut tampered_statement, _unused_witness) = vss_share_linkage_instance();
@@ -275,7 +288,7 @@ fn vss_threshold_aggregate_instance() -> (
             setup_context_hash: repeated_hash("11"),
             trustee_identity: "vss-threshold-aggregate".to_string(),
             trustee_roster_position: 0,
-            binding_roots: vec![repeated_hash("a3")],
+            binding_roots: Vec::new(),
         },
         ring_degree,
         proof: SetupProofStatement::VssShareLinkage(VssShareLinkageStatement {
@@ -337,10 +350,6 @@ fn vss_threshold_aggregate_instance() -> (
                 .iter()
                 .map(|computation| computation.material_seed_hex.clone())
                 .collect(),
-            vss_committed_material_context_hashes_by_bound_message: bound_commitment_computations
-                .iter()
-                .map(|computation| computation.context_hash.clone())
-                .collect(),
         },
     };
 
@@ -400,13 +409,12 @@ fn vss_share_linkage_instance() -> (
 
     let source_coefficient_commitment_root = repeated_hash("91");
     let source_recipient_share_commitment_root = repeated_hash("92");
-    let share_linkage_statement_root = repeated_hash("93");
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             setup_context_hash: repeated_hash("11"),
             trustee_identity: "vss-share-linkage".to_string(),
             trustee_roster_position: 0,
-            binding_roots: vec![share_linkage_statement_root],
+            binding_roots: Vec::new(),
         },
         ring_degree,
         proof: SetupProofStatement::VssShareLinkage(VssShareLinkageStatement {
@@ -587,10 +595,6 @@ fn vss_share_linkage_instance() -> (
                 .iter()
                 .map(|computation| computation.material_seed_hex.clone())
                 .collect(),
-            vss_committed_material_context_hashes_by_bound_message: bound_commitment_computations
-                .iter()
-                .map(|computation| computation.context_hash.clone())
-                .collect(),
         },
     };
 
@@ -740,10 +744,9 @@ fn share_linkage_item_for_test(
 struct CommitmentComputationForTest {
     commitment: VssShareLinkageCommitment,
     commitment_root: String,
-    // The holder's regeneration inputs, threaded into the witness so the
-    // prover rebuilds byte-identical material trees and the binding rows hold.
+    // The holder's regeneration seed, threaded into the witness so the prover
+    // rebuilds byte-identical material trees and the binding rows hold.
     material_seed_hex: String,
-    context_hash: String,
 }
 
 fn commitment_computation_for_test(
@@ -754,55 +757,20 @@ fn commitment_computation_for_test(
     ring_degree: usize,
     message_coefficients: &[u64],
 ) -> CommitmentComputationForTest {
-    // A distinct valid protocol-hash-shaped seed per commitment, derived from
-    // the role and the canonical context so distinct commitments hide with
-    // distinct masks and salts.
-    let context_bytes =
-        serde_json::to_vec(&commitment_context).expect("serialize commitment context for seed");
-    let material_seed_hex = hash512_hex(
-        "sealed-lattice/test/vss-committed-material-seed",
-        &[commitment_role.as_bytes(), &context_bytes],
+    let material = test_committed_material_commitment(
+        commitment_role,
+        commitment_context,
+        rns_limb_index,
+        rns_prime,
+        ring_degree,
+        message_coefficients,
+        rns_prime,
     );
-    let request = json!({
-        "commitmentRole": commitment_role,
-        "commitmentContext": commitment_context,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-        "ringDegree": ring_degree,
-        "messageCoefficients": message_coefficients,
-        "materialSeedHex": material_seed_hex,
-    });
-    let response = compute_vss_committed_material_commitment_request(&request)
-        .expect("committed-material commitment");
-    let material_roots_by_commitment_field = response["commitment"]["commitmentFields"]
-        .as_array()
-        .expect("commitment fields")
-        .iter()
-        .map(|field| {
-            let bytes = crate::transcript_core::decode_hex(
-                field["materialRootHex"]
-                    .as_str()
-                    .expect("material root hex"),
-            )
-            .expect("material root bytes");
-            let digest: MerkleDigest = bytes.as_slice().try_into().expect("full Merkle digest");
-            digest
-        })
-        .collect();
 
     CommitmentComputationForTest {
-        commitment: VssShareLinkageCommitment {
-            material_roots_by_commitment_field,
-        },
-        commitment_root: response["commitmentRoot"]
-            .as_str()
-            .expect("commitment root")
-            .to_string(),
-        material_seed_hex,
-        context_hash: response["commitmentContextHash"]
-            .as_str()
-            .expect("context hash")
-            .to_string(),
+        commitment: material.commitment,
+        commitment_root: material.commitment_root,
+        material_seed_hex: material.material_seed_hex,
     }
 }
 

@@ -16,16 +16,11 @@ const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const deriveCollectiveBgvSetupRosterHash =
     publicApiRuntimeRecord.deriveCollectiveBgvSetupRosterHash as DeriveCollectiveBgvSetupRosterHash;
 const expectedPublicRuntimeExportNames = [
-    'ThresholdParameterDerivationError',
     'deriveCollectiveBgvSetupRosterHash',
-    'deriveFrozenRosterParameters',
     'derivePollSpecHash',
-    'deriveThresholdParameters',
-    'deriveThresholdParametersHash',
     'validatePollSpec',
     'verifyPrivateVssShare',
     'verifySetupPackage',
-    'verifyTargetDecryptionResult',
 ] as const;
 
 describe('election foundation public package API in Node', () => {
@@ -76,14 +71,14 @@ describe('election foundation public package API in Node', () => {
         ).toBe(expectedSetupRosterHash);
     });
 
-    it('publishes an opaque setup capability without a serializable kernel handle', () => {
+    it('publishes setup verification as a result-only operation', () => {
         const declarations = readFileSync(
             new URL('../../dist/index.d.ts', import.meta.url),
             'utf8',
         );
 
-        expect(declarations).toContain('VerifiedSetup');
-        expect(declarations).toContain('readonly verifiedSetup: VerifiedSetup');
-        expect(declarations).not.toContain('acceptedSetupHandle');
+        expect(declarations).toContain(
+            'type SetupPackageVerification = VerificationResult<void>;',
+        );
     });
 });

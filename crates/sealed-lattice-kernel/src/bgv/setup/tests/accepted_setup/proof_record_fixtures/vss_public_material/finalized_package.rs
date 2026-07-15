@@ -29,16 +29,6 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         same_secret_bridge_proof_material_set_object(&package);
     package["sameSecretBridgeProofMaterialSet"] = same_secret_bridge_proof_material_set.value;
 
-    // The small canonical BDLOP commitment-root set remains public. Bridge
-    // construction above consumes the full opening material and carries only
-    // the constant commitment bodies its proof needs. The final package omits
-    // the prover-only full opening material below.
-
-    // The private VSS envelopes bind (as AAD) to the accepted coefficient
-    // commitment root and each source trustee's per-trustee coefficient root,
-    // which are the commitment set root and each source record's
-    // sourceCoefficientCommitmentRoot, so rebuild the envelopes against that
-    // coefficient view.
     let ceremony_id = package["setupContext"]["ceremonyId"]
         .as_str()
         .expect("ceremony id")
@@ -60,23 +50,7 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         .expect("setup epoch")
         .to_string();
     let common_randomness = package["commonRandomness"].clone();
-    let coefficient_set = &package["vssPublicCoefficientCommitmentSet"];
-    let source_records = coefficient_set["sourceTrusteeRecords"]
-        .as_array()
-        .expect("source trustee records")
-        .iter()
-        .enumerate()
-        .map(|(source_trustee_roster_position, source_record)| {
-            serde_json::json!({
-                "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                "sourceTrusteeCommitmentRoot": source_record["sourceCoefficientCommitmentRoot"],
-            })
-        })
-        .collect::<Vec<_>>();
-    let coefficient_view = serde_json::json!({
-        "vssCoefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"],
-        "sourceTrusteeRecords": source_records,
-    });
+    let coefficient_view = package["vssPublicCoefficientCommitmentSet"].clone();
     let rebuilt_envelopes = super::super::package_fixtures::private_vss_envelope_commitments_object(
         &ceremony_id,
         &manifest_hash,
@@ -87,8 +61,6 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         &coefficient_view,
         participant_count,
     );
-    // The VSS share acceptances reference the rebuilt envelopes and the same
-    // coefficient view, so rebuild them to match.
     let rebuilt_acceptances = super::super::package_fixtures::vss_share_acceptances_object(
         &ceremony_id,
         &manifest_hash,
@@ -107,7 +79,6 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         .expect("collective setup package")
         .remove("vssCoefficientCommitmentMaterial");
 
-    rebind_collective_setup_package_hash(&mut package);
     let mut proof_binding_leases = aggregate_threshold_commitment_set.proof_binding_leases;
     proof_binding_leases.extend(share_linkage_proof_material_set.proof_binding_leases);
     proof_binding_leases.extend(same_secret_bridge_proof_material_set.proof_binding_leases);

@@ -6,6 +6,7 @@ const MAX_SETUP_CONTEXT_TOKEN_BYTES: usize = 128;
 fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal> {
     if value.is_empty() {
         return Some(Refusal::new(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "setupContextTokenMissing",
             format!("setupContext.{field_name} must be a non-empty setup context token"),
             format!("setupPackage.setupContext.{field_name}"),
@@ -13,6 +14,7 @@ fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal
     }
     if value.len() > MAX_SETUP_CONTEXT_TOKEN_BYTES {
         return Some(Refusal::new(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "setupContextTokenMalformed",
             format!(
                 "setupContext.{field_name} must be at most {MAX_SETUP_CONTEXT_TOKEN_BYTES} bytes"
@@ -25,6 +27,7 @@ fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal
             || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/' | b'@' | b'+')
     }) {
         return Some(Refusal::new(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "setupContextTokenMalformed",
             format!(
                 "setupContext.{field_name} contains a character outside the setup context token alphabet"
@@ -50,6 +53,7 @@ pub(super) fn verify_context(
         return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
+                crate::foundation::RefusalReason::MalformedEncoding,
                 "setupContextNotObject",
                 "setupContext must be a JSON object",
                 "setupPackage.setupContext".to_string(),
@@ -75,6 +79,7 @@ pub(super) fn verify_context(
             return Ok(Some(setup_refusals(
                 Vec::new(),
                 vec![Refusal::new(
+                    crate::foundation::RefusalReason::MalformedEncoding,
                     "setupContextHashMalformed",
                     format!("setupContext.{field_name} must be a protocol hash"),
                     format!("setupPackage.setupContext.{field_name}"),
@@ -88,6 +93,7 @@ pub(super) fn verify_context(
             return Ok(Some(setup_refusals(
                 Vec::new(),
                 vec![Refusal::new(
+                    crate::foundation::RefusalReason::MalformedEncoding,
                     "setupContextTokenMalformed",
                     format!("setupContext.{field_name} must be a setup context token"),
                     format!("setupPackage.setupContext.{field_name}"),
@@ -112,6 +118,7 @@ pub(super) fn verify_context(
         return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
+                crate::foundation::RefusalReason::OutsideSupportedProfile,
                 "participantCountOutsideSupportedRange",
                 "setupContext.participantCount must be a supported roster size in 3..=20",
                 "setupPackage.setupContext.participantCount".to_string(),
@@ -132,6 +139,7 @@ pub(super) fn verify_context(
         return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
+                crate::foundation::RefusalReason::WrongHashOrRoot,
                 "setupParametersHashMismatch",
                 "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
                 "setupPackage.setupContext.setupParametersHash".to_string(),

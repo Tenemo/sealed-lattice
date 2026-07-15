@@ -14,9 +14,6 @@ describe('crypto package public API', () => {
             'openBrowserLocalExternalKeyProvider',
             'openCanonicalJsonByteSource',
             'sealAuthenticatedMailbox',
-            'sealResetSafeSetupMailbox',
-            'signStateWitnessVoteMessage',
-            'verifySignedObjectSignature',
         ]);
     });
 });

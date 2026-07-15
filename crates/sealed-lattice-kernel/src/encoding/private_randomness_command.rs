@@ -2,65 +2,10 @@ use serde_json::{Map, Value, json};
 
 use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::foundation::{
-    ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomness, ActionRandomnessDerivationInput,
     CanonicalDecodeLimits, Hash512, PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH,
-    ParticipantIdentity, PrivateRandomBlockInput, PrivateRandomCursor,
+    PrivateRandomCursor,
 };
 use crate::transcript_core::{decode_hex, encode_hex};
-
-pub(super) fn encode_action_randomness_derivation_input(request: &Value) -> CanonicalResult<Value> {
-    let request = required_object(request, "command request")?;
-    let input = action_randomness_derivation_input_from_json(required_value(request, "value")?)?;
-    Ok(json!({
-        "canonicalBytesHex": encode_hex(&input.encode().map_err(schema_error)?),
-    }))
-}
-
-pub(super) fn decode_action_randomness_derivation_input(request: &Value) -> CanonicalResult<Value> {
-    let request = required_object(request, "command request")?;
-    let canonical_bytes = decode_hex(required_string(request, "canonicalBytesHex")?)?;
-    let input = ActionRandomnessDerivationInput::decode(
-        &canonical_bytes,
-        &CanonicalDecodeLimits::default(),
-    )
-    .map_err(schema_error)?;
-    Ok(json!({ "value": action_randomness_derivation_input_to_json(input) }))
-}
-
-pub(super) fn derive_action_randomness_commitment(request: &Value) -> CanonicalResult<Value> {
-    let request = required_object(request, "command request")?;
-    let input = action_randomness_derivation_input_from_json(required_value(request, "value")?)?;
-    let action_randomness = ActionRandomness::derive(
-        required_hex_array::<ACTION_RANDOMNESS_ROOT_BYTE_LENGTH>(
-            request,
-            "actionRandomnessRootHex",
-        )?,
-        input,
-    )
-    .map_err(schema_error)?;
-    Ok(json!({
-        "actionRandomnessCommitment": action_randomness
-            .action_randomness_commitment()
-            .to_lowercase_hex(),
-    }))
-}
-
-pub(super) fn encode_private_random_block_input(request: &Value) -> CanonicalResult<Value> {
-    let request = required_object(request, "command request")?;
-    let input = private_random_block_input_from_json(required_value(request, "value")?)?;
-    Ok(json!({
-        "canonicalBytesHex": encode_hex(&input.encode().map_err(schema_error)?),
-    }))
-}
-
-pub(super) fn decode_private_random_block_input(request: &Value) -> CanonicalResult<Value> {
-    let request = required_object(request, "command request")?;
-    let canonical_bytes = decode_hex(required_string(request, "canonicalBytesHex")?)?;
-    let input =
-        PrivateRandomBlockInput::decode(&canonical_bytes, &CanonicalDecodeLimits::default())
-            .map_err(schema_error)?;
-    Ok(json!({ "value": private_random_block_input_to_json(input) }))
-}
 
 pub(super) fn encode_private_random_cursor(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
@@ -92,65 +37,6 @@ fn cursor_from_json(value: &Value) -> CanonicalResult<PrivateRandomCursor> {
         optional_u16(object, "nextUnreadBitOffsetInBufferedBlock")?,
     )
     .map_err(schema_error)
-}
-
-fn action_randomness_derivation_input_from_json(
-    value: &Value,
-) -> CanonicalResult<ActionRandomnessDerivationInput> {
-    let object = required_object(value, "action-randomness derivation input")?;
-    Ok(ActionRandomnessDerivationInput::new(
-        required_hash(object, "suiteId")?,
-        required_hash(object, "ceremonyContextHash")?,
-        required_hash(object, "actionContextHash")?,
-        ParticipantIdentity::from_bytes(required_hex_array::<64>(object, "participantId")?),
-    ))
-}
-
-fn action_randomness_derivation_input_to_json(input: ActionRandomnessDerivationInput) -> Value {
-    json!({
-        "suiteId": input.suite_id().to_lowercase_hex(),
-        "ceremonyContextHash": input.ceremony_context_hash().to_lowercase_hex(),
-        "actionContextHash": input.action_context_hash().to_lowercase_hex(),
-        "participantId": input.participant_id().to_lowercase_hex(),
-    })
-}
-
-fn private_random_block_input_from_json(value: &Value) -> CanonicalResult<PrivateRandomBlockInput> {
-    let object = required_object(value, "private-random block input")?;
-    PrivateRandomBlockInput::from_assigned_pair(
-        action_randomness_derivation_input_from_json(value)?,
-        required_u16(object, "family")?,
-        required_u16(object, "purpose")?,
-        required_hash(object, "derivationContextHash")?,
-        required_hex_array::<PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH>(
-            object,
-            "attemptIdentifierHex",
-        )?,
-        required_u64_decimal(object, "counter")?,
-    )
-    .map_err(schema_error)
-}
-
-fn private_random_block_input_to_json(input: PrivateRandomBlockInput) -> Value {
-    let mut value = action_randomness_derivation_input_to_json(input.derivation_input());
-    let object = value
-        .as_object_mut()
-        .expect("action-randomness derivation input JSON is an object");
-    object.insert("family".to_owned(), Value::from(input.family()));
-    object.insert("purpose".to_owned(), Value::from(input.purpose()));
-    object.insert(
-        "derivationContextHash".to_owned(),
-        Value::String(input.derivation_context_hash().to_lowercase_hex()),
-    );
-    object.insert(
-        "attemptIdentifierHex".to_owned(),
-        Value::String(encode_hex(&input.attempt_identifier())),
-    );
-    object.insert(
-        "counter".to_owned(),
-        Value::String(input.counter().to_string()),
-    );
-    value
 }
 
 fn cursor_to_json(cursor: PrivateRandomCursor) -> Value {
@@ -205,12 +91,6 @@ fn required_u16(object: &Map<String, Value>, field_name: &str) -> CanonicalResul
         .as_u64()
         .ok_or_else(|| invalid_value(format!("{field_name} must be an unsigned integer")))?;
     u16::try_from(value).map_err(|_| invalid_value(format!("{field_name} does not fit u16")))
-}
-
-fn required_hash(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<Hash512> {
-    Ok(Hash512::from_bytes(required_hex_array::<64>(
-        object, field_name,
-    )?))
 }
 
 fn optional_u16(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<Option<u16>> {
@@ -274,15 +154,6 @@ mod tests {
 
     use super::super::command::run_transcript_core_command_inner;
 
-    fn action_derivation_value() -> Value {
-        json!({
-            "suiteId": "11".repeat(64),
-            "ceremonyContextHash": "22".repeat(64),
-            "actionContextHash": "33".repeat(64),
-            "participantId": "44".repeat(64),
-        })
-    }
-
     fn cursor_value() -> Value {
         json!({
             "family": 0x0200,
@@ -292,90 +163,6 @@ mod tests {
             "nextCounter": "9",
             "nextUnreadBitOffsetInBufferedBlock": 137,
         })
-    }
-
-    #[test]
-    fn action_and_block_inputs_round_trip_and_commitment_is_context_bound() {
-        let action_value = action_derivation_value();
-        let encoded_action = run_transcript_core_command_inner(
-            json!({
-                "command": "EncodeActionRandomnessDerivationInput",
-                "value": action_value,
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("action derivation input encodes");
-        let decoded_action = run_transcript_core_command_inner(
-            json!({
-                "command": "DecodeActionRandomnessDerivationInput",
-                "canonicalBytesHex": encoded_action["canonicalBytesHex"],
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("action derivation input decodes");
-        assert_eq!(decoded_action["value"], action_derivation_value());
-
-        let commitment = run_transcript_core_command_inner(
-            json!({
-                "command": "DeriveActionRandomnessCommitment",
-                "actionRandomnessRootHex": "5a".repeat(64),
-                "value": action_derivation_value(),
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("action randomness commitment derives");
-        let mut changed_context = action_derivation_value();
-        changed_context["actionContextHash"] = Value::String("34".repeat(64));
-        let changed_commitment = run_transcript_core_command_inner(
-            json!({
-                "command": "DeriveActionRandomnessCommitment",
-                "actionRandomnessRootHex": "5a".repeat(64),
-                "value": changed_context,
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("changed commitment derives");
-        assert_ne!(
-            commitment["actionRandomnessCommitment"],
-            changed_commitment["actionRandomnessCommitment"]
-        );
-
-        let mut block_value = action_derivation_value();
-        let block_object = block_value.as_object_mut().expect("block object");
-        block_object.insert("family".to_owned(), Value::from(0x0200));
-        block_object.insert("purpose".to_owned(), Value::from(2));
-        block_object.insert(
-            "derivationContextHash".to_owned(),
-            Value::String("55".repeat(64)),
-        );
-        block_object.insert(
-            "attemptIdentifierHex".to_owned(),
-            Value::String("66".repeat(32)),
-        );
-        block_object.insert("counter".to_owned(), Value::String(u64::MAX.to_string()));
-        let encoded_block = run_transcript_core_command_inner(
-            json!({
-                "command": "EncodePrivateRandomBlockInput",
-                "value": block_value,
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("private-random block input encodes");
-        let decoded_block = run_transcript_core_command_inner(
-            json!({
-                "command": "DecodePrivateRandomBlockInput",
-                "canonicalBytesHex": encoded_block["canonicalBytesHex"],
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("private-random block input decodes");
-        assert_eq!(decoded_block["value"], block_value);
     }
 
     #[test]

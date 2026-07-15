@@ -2,5 +2,4 @@ export { createSetupPackageVerificationInput } from './setup-package-assembly/ve
 export type {
     SetupPackage,
     SetupPackageVerificationInput,
-    SetupPackageVerificationInputSource,
 } from './setup-package-assembly/types.js';

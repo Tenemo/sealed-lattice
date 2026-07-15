@@ -13,10 +13,7 @@ import {
 import {
     decapsulateClosedMailboxCiphertext,
     encapsulateFreshMailbox,
-    encapsulateResetSafeSetupMailbox,
     signFreshMailboxEnvelope,
-    signResetSafeSetupMailboxEnvelope,
-    type BrowserLocalActionRandomnessCapability,
     type BrowserLocalMailboxCapability,
     type BrowserLocalSigningCapability,
 } from './browser-local-key-provider.js';
@@ -81,7 +78,6 @@ export type MailboxAssociatedDataExpectation = Omit<
 export type MailboxCiphertextDescriptor = Readonly<{
     readonly totalByteLength: string;
     readonly orderedChunkDigests: readonly ProtocolHash[];
-    readonly fullObjectDigest: ProtocolHash;
 }>;
 
 export type UnsignedMailboxEnvelope = Readonly<{
@@ -241,7 +237,6 @@ export type AuthenticatedMailboxOutboundCache = Readonly<{
      * an already authenticated, byte-identical retransmission source.
      */
     reserve(input: {
-        readonly chunkCount: number;
         readonly plaintextByteLength: number;
         readonly producerSlot: AuthenticatedMailboxProducerSlot;
     }): Promise<AuthenticatedMailboxOutboundCacheLease>;
@@ -284,7 +279,6 @@ export type AuthenticatedMailboxStagingBoundary = Readonly<{
      * atomically removes or abandons all lease-owned state.
      */
     open(input: {
-        readonly chunkCount: number;
         readonly envelopeHash: ProtocolHash;
         readonly totalByteLength: number;
     }): Promise<AuthenticatedMailboxStagingLease>;
@@ -311,12 +305,6 @@ type AuthenticatedMailboxSealCommonInput = Readonly<{
 }>;
 
 export type AuthenticatedMailboxSealInput = AuthenticatedMailboxSealCommonInput;
-
-export type ResetSafeSetupMailboxSealInput = Readonly<
-    AuthenticatedMailboxSealCommonInput & {
-        readonly actionRandomnessCapability: BrowserLocalActionRandomnessCapability;
-    }
->;
 
 export type AuthenticatedMailboxOpenInput = Readonly<{
     readonly abortSignal?: AbortSignal;
@@ -862,7 +850,6 @@ const cachedSeal = async (
 
 const sealMailbox = async (
     input: AuthenticatedMailboxSealCommonInput,
-    actionRandomnessCapability?: BrowserLocalActionRandomnessCapability,
 ): Promise<AuthenticatedMailboxCarrier> => {
     const plaintextByteLength = requireMailboxByteLength(
         input.plaintextByteLength,
@@ -880,7 +867,6 @@ const sealMailbox = async (
     );
     const chunkCount = expectedChunkCount(plaintextByteLength);
     const cacheLease = await input.outboundCache.reserve({
-        chunkCount,
         plaintextByteLength,
         producerSlot: producerSlot(input.associatedData),
     });
@@ -903,23 +889,10 @@ const sealMailbox = async (
     let result: AuthenticatedMailboxCarrier | undefined;
     try {
         throwIfAborted(input.abortSignal);
-        const resetSafeEncapsulation =
-            actionRandomnessCapability === undefined
-                ? undefined
-                : encapsulateResetSafeSetupMailbox({
-                      actionRandomnessCapability,
-                      signingCapability: input.sourceSigningCapability,
-                      slot: input.associatedData,
-                      recipientEncapsulationKey,
-                  });
-        const freshEncapsulation =
-            resetSafeEncapsulation === undefined
-                ? encapsulateFreshMailbox({
-                      signingCapability: input.sourceSigningCapability,
-                      recipientEncapsulationKey,
-                  })
-                : undefined;
-        const encapsulation = resetSafeEncapsulation ?? freshEncapsulation!;
+        const encapsulation = encapsulateFreshMailbox({
+            signingCapability: input.sourceSigningCapability,
+            recipientEncapsulationKey,
+        });
         envelopeAttemptIdentifier = encapsulation.envelopeAttemptIdentifier;
         sharedSecret = encapsulation.sharedSecret;
         const kemCiphertextHex = bytesToHex(encapsulation.ciphertext);
@@ -1001,18 +974,11 @@ const sealMailbox = async (
             };
             const envelopeHash =
                 input.kernel.deriveMailboxEnvelopeHash(unsignedEnvelope);
-            const sourceSignature =
-                resetSafeEncapsulation === undefined
-                    ? signFreshMailboxEnvelope({
-                          signingCapability: input.sourceSigningCapability,
-                          signingPermit: freshEncapsulation!.signingPermit,
-                          envelopeHash,
-                      })
-                    : signResetSafeSetupMailboxEnvelope({
-                          signingCapability: input.sourceSigningCapability,
-                          signingPermit: resetSafeEncapsulation.signingPermit,
-                          envelopeHash,
-                      });
+            const sourceSignature = signFreshMailboxEnvelope({
+                signingCapability: input.sourceSigningCapability,
+                signingPermit: encapsulation.signingPermit,
+                envelopeHash,
+            });
             try {
                 const encodedEnvelope =
                     input.kernel.encodeSignedMailboxEnvelope({
@@ -1096,11 +1062,6 @@ const sealMailbox = async (
 export const sealAuthenticatedMailbox = async (
     input: AuthenticatedMailboxSealInput,
 ): Promise<AuthenticatedMailboxCarrier> => sealMailbox(input);
-
-export const sealResetSafeSetupMailbox = async (
-    input: ResetSafeSetupMailboxSealInput,
-): Promise<AuthenticatedMailboxCarrier> =>
-    sealMailbox(input, input.actionRandomnessCapability);
 
 export const openAuthenticatedMailbox = async (
     input: AuthenticatedMailboxOpenInput,
@@ -1235,7 +1196,6 @@ export const openAuthenticatedMailbox = async (
                     canonicalAssociatedData.fill(0);
                 }
                 stagingLease = await input.stagingBoundary.open({
-                    chunkCount: streamVerifier.chunkCount,
                     envelopeHash: input.carrier.envelopeHash,
                     totalByteLength: plaintextByteLength,
                 });

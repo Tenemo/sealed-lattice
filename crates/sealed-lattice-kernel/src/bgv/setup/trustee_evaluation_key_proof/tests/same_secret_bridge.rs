@@ -546,10 +546,6 @@ pub(super) fn same_secret_bridge_instance() -> (
                 .iter()
                 .map(|material| material.material_seed_hex.clone())
                 .collect(),
-            vss_committed_material_context_hashes_by_bound_message: target_constant_material
-                .iter()
-                .map(|material| material.context_hash.clone())
-                .collect(),
         },
     };
 
@@ -644,11 +640,6 @@ fn attach_same_secret_bridge_to_key_statement(
         .iter()
         .map(|material| material.material_seed_hex.clone())
         .collect();
-    committed_material.vss_committed_material_context_hashes_by_bound_message =
-        target_constant_material
-            .iter()
-            .map(|material| material.context_hash.clone())
-            .collect();
     statement.validate_shape().expect("key statement shape");
 
     (statement, witness)

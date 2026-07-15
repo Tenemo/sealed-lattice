@@ -300,7 +300,7 @@ impl LimbColumnLayout {
                             TargetDecryptionMessageClaimKind::AggregateOpening => {
                                 TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT
                             }
-                            TargetDecryptionMessageClaimKind::SmudgingOpening => {
+                            TargetDecryptionMessageClaimKind::FloodingNoiseOpening => {
                                 TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT
                             }
                         }

@@ -13,10 +13,8 @@ import {
     bytesToHex,
     createRuntimeRecordProtection,
     mapStorageError,
-    openRuntimeRecord,
     readRuntimeRecord,
     sampleRuntimeIdentifier,
-    sealRuntimeRecord,
     stageRuntimeRecordWrite,
     type RuntimeStorageAuthorityContext,
 } from './authenticated-runtime-record.js';
@@ -51,13 +49,6 @@ const stagingManifestOperationDomain =
     'sealed-lattice/authenticated-mailbox/staging-manifest/v1';
 const stagingChunkOperationDomain =
     'sealed-lattice/authenticated-mailbox/staging-chunk/v1';
-const authenticatedRecoveryHeadOperationDomain =
-    'sealed-lattice/authenticated-mailbox/recovery-head/v1';
-const authenticatedRecoveryHeadLogicalRecordKey =
-    'mailbox/recovery/current-head';
-const authenticatedRecoveryIdentityDomain =
-    'sealed-lattice/authenticated-mailbox/recovery-identity/v1';
-
 export type AuthenticatedMailboxStorageLimits = Readonly<{
     maximumCarrierByteLength: number;
     maximumMailboxByteLength: number;
@@ -119,7 +110,6 @@ type StoredProducerSlot = Readonly<{
 }>;
 
 type StoredStreamJournal = Readonly<{
-    chunkCount: number;
     producerSlot?: StoredProducerSlot;
     envelopeHash?: ProtocolHash;
     publicationIdentifier: string;
@@ -128,7 +118,6 @@ type StoredStreamJournal = Readonly<{
 }>;
 
 type StoredChunkDescriptor = Readonly<{
-    byteLength: number;
     digest: string;
 }>;
 
@@ -374,6 +363,17 @@ const validateStreamShape = (
     }
 };
 
+const streamChunkCount = (
+    totalByteLength: number,
+    limits: AuthenticatedMailboxStorageLimits,
+): number => {
+    const chunkCount = Math.ceil(
+        totalByteLength / foundationProfile.streamChunkByteLength,
+    );
+    validateStreamShape(totalByteLength, chunkCount, limits);
+    return chunkCount;
+};
+
 const expectedChunkByteLength = (
     totalByteLength: number,
     chunkCount: number,
@@ -552,13 +552,7 @@ const decodeChunkDescriptors = (
         value.map((descriptor, chunkIndex) => {
             if (
                 !isRecord(descriptor) ||
-                !hasExactKeys(descriptor, ['byteLength', 'digest']) ||
-                descriptor.byteLength !==
-                    expectedChunkByteLength(
-                        totalByteLength,
-                        value.length,
-                        chunkIndex,
-                    ) ||
+                !hasExactKeys(descriptor, ['digest']) ||
                 typeof descriptor.digest !== 'string' ||
                 !chunkDigestPattern.test(descriptor.digest)
             ) {
@@ -569,7 +563,6 @@ const decodeChunkDescriptors = (
             }
 
             return Object.freeze({
-                byteLength: descriptor.byteLength,
                 digest: descriptor.digest,
             });
         }),
@@ -585,14 +578,12 @@ const decodeStreamJournal = (
     const expectedKeys =
         kind === 'outbound'
             ? [
-                  'chunkCount',
                   'producerSlot',
                   'publicationIdentifier',
                   'recordVersion',
                   'totalByteLength',
               ]
             : [
-                  'chunkCount',
                   'envelopeHash',
                   'publicationIdentifier',
                   'recordVersion',
@@ -610,19 +601,15 @@ const decodeStreamJournal = (
             'Stored mailbox stream journal has an unsupported version.',
         );
     }
-    if (
-        typeof value.totalByteLength !== 'number' ||
-        typeof value.chunkCount !== 'number'
-    ) {
+    if (typeof value.totalByteLength !== 'number') {
         throw new AuthenticatedMailboxStorageError(
             'AuthenticationFailed',
             'Stored mailbox stream journal lengths are invalid.',
         );
     }
-    validateStreamShape(value.totalByteLength, value.chunkCount, limits);
+    streamChunkCount(value.totalByteLength, limits);
 
     return Object.freeze({
-        chunkCount: value.chunkCount,
         ...(kind === 'outbound'
             ? { producerSlot: decodeProducerSlot(value.producerSlot) }
             : {
@@ -644,14 +631,12 @@ const encodeStreamJournal = (journal: StoredStreamJournal): Uint8Array =>
     encodeCanonicalJson(
         journal.producerSlot === undefined
             ? {
-                  chunkCount: journal.chunkCount,
                   envelopeHash: journal.envelopeHash,
                   publicationIdentifier: journal.publicationIdentifier,
                   recordVersion,
                   totalByteLength: journal.totalByteLength,
               }
             : {
-                  chunkCount: journal.chunkCount,
                   producerSlot: journal.producerSlot,
                   publicationIdentifier: journal.publicationIdentifier,
                   recordVersion,
@@ -898,71 +883,10 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
             ? {}
             : { cryptoProvider: configuration.cryptoProvider }),
         encryptionKey: configuration.encryptionKey,
+        maximumRecordSealingCount: limits.maximumRecordSealingCount,
     });
     const issuedIdentifiers = new Set<string>();
-    const issuedNonces = new Set<string>();
-    const recoveryIdentity = sha512(
-        encodeCanonicalJson({
-            actionContextHash: bytesToHex(
-                protection.authorityContext.actionContextHash,
-            ),
-            ceremonyContextHash: bytesToHex(
-                protection.authorityContext.ceremonyContextHash,
-            ),
-            domain: authenticatedRecoveryIdentityDomain,
-            ownerParticipantIdentity: bytesToHex(
-                protection.authorityContext.ownerParticipantIdentity,
-            ),
-            runtimeBuildManifestHash: bytesToHex(
-                protection.authorityContext.runtimeBuildManifestHash,
-            ),
-            suiteIdentifier: bytesToHex(
-                protection.authorityContext.suiteIdentifier,
-            ),
-        }),
-    );
-    configuration.store.configureAuthenticatedRecovery({
-        deriveDigest: (bytes) => {
-            try {
-                return sha512(bytes);
-            } finally {
-                bytes.fill(0);
-            }
-        },
-        open: async (sealedHeadBytes) => {
-            try {
-                return await openRuntimeRecord({
-                    logicalRecordKey: authenticatedRecoveryHeadLogicalRecordKey,
-                    operationDomain: authenticatedRecoveryHeadOperationDomain,
-                    protection,
-                    sealedBytes: sealedHeadBytes,
-                });
-            } finally {
-                sealedHeadBytes.fill(0);
-            }
-        },
-        protectionIdentity: protection.encryptionKey,
-        recoveryIdentity,
-        seal: async (headPlaintext) => {
-            try {
-                return await sealRuntimeRecord({
-                    issuedNonces,
-                    logicalRecordKey: authenticatedRecoveryHeadLogicalRecordKey,
-                    maximumRecordSealingCount: limits.maximumRecordSealingCount,
-                    operationDomain: authenticatedRecoveryHeadOperationDomain,
-                    plaintext: headPlaintext,
-                    protection,
-                });
-            } finally {
-                headPlaintext.fill(0);
-            }
-        },
-    });
-    recoveryIdentity.fill(0);
-    const activeOutboundSlots = new Map<
-        string,
-        Readonly<{ chunkCount: number; plaintextByteLength: number }>
-    >();
+    const activeOutboundSlots = new Map<string, number>();
     const activeInboundSlots = new Map<
         string,
         Readonly<{
@@ -989,9 +913,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                           expectedCurrentSealedBytes:
                               input.expectedCurrentSealedBytes,
                       }),
-                issuedNonces,
                 logicalRecordKey: input.logicalRecordKey,
-                maximumRecordSealingCount: limits.maximumRecordSealingCount,
                 operationDomain: input.operationDomain,
                 plaintext: input.plaintext,
                 protection,
@@ -1134,7 +1056,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
             );
         }
         await cleanupStreamChunks({
-            chunkCount: journal.chunkCount,
+            chunkCount: streamChunkCount(journal.totalByteLength, limits),
             chunkKey: (chunkIndex) =>
                 outboundChunkKey({
                     chunkIndex,
@@ -1147,6 +1069,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
 
     const readChunk = async (input: {
         descriptor: StoredChunkDescriptor;
+        expectedByteLength: number;
         logicalRecordKey: string;
         operationDomain: string;
     }): Promise<ArrayBuffer> => {
@@ -1164,7 +1087,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
         }
         try {
             if (
-                opened.plaintext.byteLength !== input.descriptor.byteLength ||
+                opened.plaintext.byteLength !== input.expectedByteLength ||
                 deriveChunkDigest(opened.plaintext) !== input.descriptor.digest
             ) {
                 throw new AuthenticatedMailboxStorageError(
@@ -1185,12 +1108,14 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
 
     const outboundCache: AuthenticatedMailboxOutboundCache = Object.freeze({
         reserve: async ({
-            chunkCount,
             plaintextByteLength,
             producerSlot: untrustedProducerSlot,
         }) => {
             try {
-                validateStreamShape(plaintextByteLength, chunkCount, limits);
+                const chunkCount = streamChunkCount(
+                    plaintextByteLength,
+                    limits,
+                );
                 const producerSlot = normalizeProducerSlot(
                     untrustedProducerSlot,
                 );
@@ -1204,9 +1129,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                     activeOutboundSlots.get(slotFingerprint);
                 if (activeReservation !== undefined) {
                     const declarationsMatch =
-                        activeReservation.chunkCount === chunkCount &&
-                        activeReservation.plaintextByteLength ===
-                            plaintextByteLength;
+                        activeReservation === plaintextByteLength;
                     throw new AuthenticatedMailboxStorageError(
                         declarationsMatch ? 'Conflict' : 'Equivocation',
                         declarationsMatch
@@ -1303,11 +1226,17 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                             }
                             const descriptor =
                                 manifest.chunkDescriptors[chunkIndex];
+                            const descriptorByteLength =
+                                expectedChunkByteLength(
+                                    manifest.plaintextByteLength,
+                                    manifest.chunkDescriptors.length,
+                                    chunkIndex,
+                                );
                             if (
                                 descriptor === undefined ||
                                 !Number.isSafeInteger(chunkIndex) ||
                                 chunkIndex < 0 ||
-                                expectedByteLength !== descriptor.byteLength
+                                expectedByteLength !== descriptorByteLength
                             ) {
                                 throw new AuthenticatedMailboxStorageError(
                                     'InvalidInput',
@@ -1317,6 +1246,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
 
                             return readChunk({
                                 descriptor,
+                                expectedByteLength: descriptorByteLength,
                                 logicalRecordKey: outboundChunkKey({
                                     chunkIndex,
                                     publicationIdentifier:
@@ -1356,7 +1286,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                     ),
                 );
                 const journal: StoredStreamJournal = Object.freeze({
-                    chunkCount,
                     producerSlot,
                     publicationIdentifier,
                     recordVersion,
@@ -1373,10 +1302,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                 } finally {
                     journalPlaintext.fill(0);
                 }
-                activeOutboundSlots.set(
-                    slotFingerprint,
-                    Object.freeze({ chunkCount, plaintextByteLength }),
-                );
+                activeOutboundSlots.set(slotFingerprint, plaintextByteLength);
 
                 const chunkDescriptors: StoredChunkDescriptor[] = [];
                 let state:
@@ -1421,11 +1347,16 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                     }
                     const descriptor =
                         committedManifest.chunkDescriptors[input.chunkIndex];
+                    const descriptorByteLength = expectedChunkByteLength(
+                        committedManifest.plaintextByteLength,
+                        committedManifest.chunkDescriptors.length,
+                        input.chunkIndex,
+                    );
                     if (
                         descriptor === undefined ||
                         !Number.isSafeInteger(input.chunkIndex) ||
                         input.chunkIndex < 0 ||
-                        input.expectedByteLength !== descriptor.byteLength
+                        input.expectedByteLength !== descriptorByteLength
                     ) {
                         throw new AuthenticatedMailboxStorageError(
                             'InvalidInput',
@@ -1435,6 +1366,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
 
                     return readChunk({
                         descriptor,
+                        expectedByteLength: descriptorByteLength,
                         logicalRecordKey: outboundChunkKey({
                             chunkIndex: input.chunkIndex,
                             publicationIdentifier,
@@ -1491,7 +1423,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                             'outbound mailbox chunk',
                         );
                         const descriptor = Object.freeze({
-                            byteLength: chunk.byteLength,
                             digest: deriveChunkDigest(chunk),
                         });
                         try {
@@ -1567,11 +1498,8 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                             }
                             await stageRuntimeRecordWrite({
                                 expectedCurrentSealedBytes: null,
-                                issuedNonces,
                                 logicalRecordKey:
                                     outboundManifestKey(slotFingerprint),
-                                maximumRecordSealingCount:
-                                    limits.maximumRecordSealingCount,
                                 operationDomain:
                                     outboundManifestOperationDomain,
                                 plaintext: manifestPlaintext,
@@ -1930,7 +1858,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
         manifest: OpenedStoredRecord<StoredStagingManifest>;
     }): Promise<StoredStreamJournal> => {
         const journal: StoredStreamJournal = Object.freeze({
-            chunkCount: input.manifest.record.chunkDescriptors.length,
             envelopeHash: input.envelopeHash,
             publicationIdentifier: input.manifest.record.publicationIdentifier,
             recordVersion,
@@ -1943,9 +1870,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
         try {
             await stageRuntimeRecordWrite({
                 expectedCurrentSealedBytes: null,
-                issuedNonces,
                 logicalRecordKey: stagingJournalKey(input.envelopeHash),
-                maximumRecordSealingCount: limits.maximumRecordSealingCount,
                 operationDomain: stagingJournalOperationDomain,
                 plaintext: journalPlaintext,
                 protection,
@@ -1976,7 +1901,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
             );
         }
         await cleanupStreamChunks({
-            chunkCount: journal.chunkCount,
+            chunkCount: streamChunkCount(journal.totalByteLength, limits),
             chunkKey: (chunkIndex) =>
                 stagingChunkKey({
                     chunkIndex,
@@ -1988,17 +1913,13 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
     };
 
     const stagingBoundary: AuthenticatedMailboxStagingBoundary = Object.freeze({
-        open: ({
-            chunkCount,
-            envelopeHash: untrustedEnvelopeHash,
-            totalByteLength,
-        }) => {
+        open: ({ envelopeHash: untrustedEnvelopeHash, totalByteLength }) => {
             try {
                 const envelopeHash = requireProtocolHash(
                     untrustedEnvelopeHash,
                     'envelopeHash',
                 );
-                validateStreamShape(totalByteLength, chunkCount, limits);
+                const chunkCount = streamChunkCount(totalByteLength, limits);
                 if (activeStagingEnvelopes.has(envelopeHash)) {
                     throw new AuthenticatedMailboxStorageError(
                         'Conflict',
@@ -2014,7 +1935,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                 );
                 activeStagingEnvelopes.add(envelopeHash);
                 const journal: StoredStreamJournal = Object.freeze({
-                    chunkCount,
                     envelopeHash,
                     publicationIdentifier,
                     recordVersion,
@@ -2151,7 +2071,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                             try {
                                 await prepare();
                                 const descriptor = Object.freeze({
-                                    byteLength: chunk.byteLength,
                                     digest: deriveChunkDigest(chunk),
                                 });
                                 await writeRecord({
@@ -2226,11 +2145,8 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                                 }
                                 await stageRuntimeRecordWrite({
                                     expectedCurrentSealedBytes: null,
-                                    issuedNonces,
                                     logicalRecordKey:
                                         stagingManifestKey(envelopeHash),
-                                    maximumRecordSealingCount:
-                                        limits.maximumRecordSealingCount,
                                     operationDomain:
                                         stagingManifestOperationDomain,
                                     plaintext: manifestPlaintext,
@@ -2309,11 +2225,17 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                                 return undefined;
                             }
                             const descriptor = chunkDescriptors[chunkIndex];
+                            const descriptorByteLength =
+                                expectedChunkByteLength(
+                                    totalByteLength,
+                                    chunkCount,
+                                    chunkIndex,
+                                );
                             if (
                                 descriptor === undefined ||
                                 !Number.isSafeInteger(chunkIndex) ||
                                 chunkIndex < 0 ||
-                                expectedByteLength !== descriptor.byteLength
+                                expectedByteLength !== descriptorByteLength
                             ) {
                                 throw new AuthenticatedMailboxStorageError(
                                     'InvalidInput',
@@ -2337,6 +2259,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
 
                             return readChunk({
                                 descriptor,
+                                expectedByteLength: descriptorByteLength,
                                 logicalRecordKey: stagingChunkKey({
                                     chunkIndex,
                                     envelopeHash,

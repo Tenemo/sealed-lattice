@@ -58,11 +58,6 @@ pub(super) fn accepted_vss_material_seed(commitment_context_hash: &str) -> Strin
     )
 }
 
-pub(super) struct SameSecretBridgeCommittedMaterialRegenerationInputs {
-    pub(super) seeds_by_bound_message: Vec<String>,
-    pub(super) context_hashes_by_bound_message: Vec<String>,
-}
-
 pub(super) fn same_secret_bridge_target_constant_records_from_fixture_package(
     package: &serde_json::Value,
     trustee_roster_position: u64,
@@ -82,10 +77,10 @@ pub(super) fn same_secret_bridge_target_constant_records_from_fixture_package(
         .collect()
 }
 
-pub(super) fn same_secret_bridge_committed_material_regeneration_inputs_from_fixture_package(
+pub(super) fn same_secret_bridge_committed_material_seeds_from_fixture_package(
     package: &serde_json::Value,
     trustee_roster_position: u64,
-) -> SameSecretBridgeCommittedMaterialRegenerationInputs {
+) -> Vec<String> {
     let context_hashes_by_bound_message =
         same_secret_bridge_target_constant_records_from_fixture_package(
             package,
@@ -99,15 +94,10 @@ pub(super) fn same_secret_bridge_committed_material_regeneration_inputs_from_fix
                 .to_string()
         })
         .collect::<Vec<_>>();
-    let seeds_by_bound_message = context_hashes_by_bound_message
+    context_hashes_by_bound_message
         .iter()
         .map(|context_hash| accepted_vss_material_seed(context_hash))
-        .collect::<Vec<_>>();
-
-    SameSecretBridgeCommittedMaterialRegenerationInputs {
-        seeds_by_bound_message,
-        context_hashes_by_bound_message,
-    }
+        .collect()
 }
 
 const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";

@@ -1,7 +1,5 @@
 use super::*;
 
-use crate::hashing::derive_canonical_object_hash;
-
 use crate::bgv::coefficient_codec::coefficient_vector_hash512;
 
 // Canonical per-limb hash of a public-key share coefficient vector, bound into
@@ -20,17 +18,13 @@ pub(in crate::bgv::setup) fn public_key_share_coefficient_vector_hash(
 
 #[derive(Clone)]
 pub(super) struct PublicKeyShareMaterialBinding {
-    trustee_identity: String,
-    trustee_roster_position: u64,
-    pub(super) public_key_share_root: String,
-    pub(super) public_key_share_material_root: String,
     pub(super) coefficients_by_limb: Vec<Vec<u64>>,
 }
 
 pub(super) fn verify_collective_public_key_material(
     setup_package: &Value,
     ring_degree: usize,
-    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
+    material_bindings: &BTreeMap<u64, PublicKeyShareMaterialBinding>,
 ) -> CanonicalResult<Option<Refusals>> {
     let Some(aggregate_object) = setup_package.get("collectivePublicKey") else {
         return Ok(Some(setup_refusals(
@@ -40,8 +34,9 @@ pub(super) fn verify_collective_public_key_material(
     };
     if !aggregate_object.is_object() {
         return Ok(Some(public_key_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "collectivePublicKeyNotObject",
-            "collectivePublicKey must be a root-bound object",
+            "collectivePublicKey must be an object",
             "setupPackage.collectivePublicKey",
         )?));
     }
@@ -49,112 +44,24 @@ pub(super) fn verify_collective_public_key_material(
         != Some(COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE)
     {
         return Ok(Some(public_key_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "collectivePublicKeyTypeMismatch",
             "collectivePublicKey.objectType must be CollectivePublicKey",
             "setupPackage.collectivePublicKey.objectType",
         )?));
     }
-    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "setupContext was required before collective public-key verification",
-        )
-    })?;
-    let material_set = setup_package.get("publicKeyShareMaterial").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "publicKeyShareMaterial was required before collective public-key verification",
-        )
-    })?;
-    let succinct_proof_set = setup_package
-        .get("publicKeyShareSuccinctProofs")
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareSuccinctProofs was required before collective public-key verification",
-            )
-        })?;
-    let common_binding = public_key_common_binding(setup_package)?;
-    let share_records = public_key_share_records_by_roster_position(setup_package)?;
-    let public_key_share_set_root = value_string(
-        setup_package.get("publicKeyShares").ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "publicKeyShares was required before collective public-key verification",
-            )
-        })?,
-        "publicKeyShareSetRoot",
-    )?;
-    let material_bindings = match verify_public_key_share_material_set(
-        material_set,
-        setup_context,
-        &common_binding,
-        ring_degree,
-        public_key_share_set_root,
-        &share_records,
-        proof_binding_session,
-    ) {
-        Ok(bindings) => bindings,
-        Err(error) => {
-            return Ok(Some(public_key_refusal(
-                "collectivePublicKeySourceMaterialVerificationFailed",
-                error.message,
-                "setupPackage.publicKeyShareMaterial",
-            )?));
-        }
-    };
     let roster = super::accepted_roster_from_package(setup_package)?;
     if let Err(error) = verify_collective_public_key_coefficients(
         aggregate_object,
-        &material_bindings,
+        material_bindings,
         ring_degree,
         roster.participant_count,
     ) {
         return Ok(Some(public_key_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "collectivePublicKeyVerificationFailed",
             error.message,
             "setupPackage.collectivePublicKey",
-        )?));
-    }
-    let Some(collective_public_key_root) = aggregate_object
-        .get("collectivePublicKeyRoot")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(setup_refusals(
-            vec!["collectivePublicKey.collectivePublicKeyRoot".to_string()],
-            Vec::new(),
-        )));
-    };
-    validate_hash_string(
-        collective_public_key_root,
-        "collectivePublicKey.collectivePublicKeyRoot",
-    )?;
-    let root_input = json!({
-        "objectType": COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE,
-        "setupContextHash": setup_context_hash(setup_context)?,
-        "publicMatrixSeedHash": common_binding.public_matrix_seed_hash.as_str(),
-        "publicKeyShareSetRoot": public_key_share_set_root,
-        "publicKeyShareMaterialSetRoot": value_string(
-            material_set,
-            "publicKeyShareMaterialSetRoot",
-        )?,
-        "publicKeyShareSuccinctProofSetRoot": value_string(
-            succinct_proof_set,
-            "publicKeyShareSuccinctProofSetRoot",
-        )?,
-        "aggregateCoefficientVectorsByLimb": aggregate_object
-            .get("aggregateCoefficientVectorsByLimb")
-            .ok_or_else(|| CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "collectivePublicKey.aggregateCoefficientVectorsByLimb is required",
-            ))?,
-    });
-    let expected_root = derive_canonical_object_hash(&root_input)?;
-    if collective_public_key_root != expected_root {
-        return Ok(Some(public_key_refusal(
-            "collectivePublicKeyRootMismatch",
-            "collectivePublicKeyRoot does not match the canonical collective public key",
-            "setupPackage.collectivePublicKey.collectivePublicKeyRoot",
         )?));
     }
     Ok(None)

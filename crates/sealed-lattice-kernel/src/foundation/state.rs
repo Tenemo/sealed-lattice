@@ -10,8 +10,8 @@ use super::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
     CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError, Hash512,
-    ML_DSA_65_SIGNATURE_BYTE_LENGTH, ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster,
-    SignedCarrier, VerificationResult, hash_foundation_tuple_512 as hash512, signature_message,
+    ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster, SignedCarrier, VerificationResult,
+    hash_foundation_tuple_512 as hash512,
 };
 
 pub const STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER: u16 = 0x1610;
@@ -1830,68 +1830,6 @@ impl StateVerifier {
             ));
         }
         Ok(())
-    }
-
-    pub(crate) fn prepare_state_witness_vote(
-        &self,
-        binding: StateDurableBinding,
-        witness_participant_id: ParticipantIdentity,
-    ) -> StateResult<(ObjectEnvelope, Hash512)> {
-        if binding.suite_id != self.suite_id
-            || binding.ceremony_context_hash != self.ceremony_context_hash
-            || binding.action_context_hash != self.action_context_hash
-        {
-            return Err(StateError::new(
-                RefusalReason::WrongContext,
-                "state vote binding belongs to another verifier context",
-            ));
-        }
-        if witness_participant_id == binding.subject_participant_id {
-            return Err(StateError::new(
-                RefusalReason::WrongContext,
-                "the state subject cannot witness its own intent",
-            ));
-        }
-        self.roster_position(witness_participant_id)?;
-        let envelope = ObjectEnvelope {
-            suite_id: self.suite_id,
-            object_type: FoundationObjectType::StateWitnessVote,
-            ceremony_context_hash: self.ceremony_context_hash,
-            action_context_hash: self.action_context_hash,
-            recovery_epoch: 0,
-            recovery_transition_hash: None,
-            producer_participant_id: Some(witness_participant_id),
-            producer_sequence: binding.witness_vote_sequence()?,
-            ordered_prerequisite_hashes: Vec::new(),
-            payload_bytes: StateWitnessVotePayload {
-                intent_object_hash: binding.intent_object_hash,
-            }
-            .encode()?,
-        };
-        let roster_hash = self.roster.roster_hash().map_err(StateError::from_schema)?;
-        let message = signature_message(&envelope, roster_hash).map_err(StateError::from_schema)?;
-        Ok((envelope, message))
-    }
-
-    pub(crate) fn finish_prepared_state_witness_vote(
-        &self,
-        envelope: ObjectEnvelope,
-        signature: [u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
-    ) -> StateResult<Vec<u8>> {
-        let carrier = SignedCarrier {
-            envelope,
-            signature,
-        };
-        carrier
-            .verify_signature(&self.roster)
-            .into_result()
-            .map_err(|refusal_reason| {
-                StateError::new(
-                    refusal_reason,
-                    "state witness vote signature does not verify",
-                )
-            })?;
-        carrier.encode().map_err(StateError::from_schema)
     }
 
     fn verify_certificate(

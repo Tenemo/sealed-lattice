@@ -1,8 +1,6 @@
 use super::*;
 
 use super::same_secret_bridge_verification::VerifiedSameSecretBridgeMaterial;
-use crate::hashing::derive_canonical_object_hash;
-
 pub(super) fn verify_evaluator_key_schedule(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Refusals>> {
@@ -14,6 +12,7 @@ pub(super) fn verify_evaluator_key_schedule(
     };
     if !schedule.is_object() {
         return Ok(Some(evaluator_key_schedule_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "evaluatorKeyScheduleNotObject",
             "evaluatorKeySchedule must be a root-bound object, not an array or scalar",
             "setupPackage.evaluatorKeySchedule",
@@ -23,6 +22,7 @@ pub(super) fn verify_evaluator_key_schedule(
         != Some(EVALUATOR_KEY_SCHEDULE_OBJECT_TYPE)
     {
         return Ok(Some(evaluator_key_schedule_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "evaluatorKeyScheduleTypeMismatch",
             "evaluatorKeySchedule.objectType must be EvaluatorKeySchedule",
             "setupPackage.evaluatorKeySchedule.objectType",
@@ -37,6 +37,7 @@ pub(super) fn verify_evaluator_key_schedule(
     if let Err(error) = verify_context_fields_match(schedule, setup_context, "evaluatorKeySchedule")
     {
         return Ok(Some(evaluator_key_schedule_refusal(
+            crate::foundation::RefusalReason::WrongContext,
             "evaluatorKeyScheduleContextMismatch",
             error.message,
             "setupPackage.evaluatorKeySchedule",
@@ -52,6 +53,7 @@ pub(super) fn verify_evaluator_key_schedule(
     for (field_name, expected_value) in [("publicMatrixSeedHash", public_matrix_seed_hash)] {
         if schedule.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(evaluator_key_schedule_refusal(
+                crate::foundation::RefusalReason::WrongHashOrRoot,
                 "evaluatorKeySchedulePublicBindingMismatch",
                 format!("evaluatorKeySchedule.{field_name} must match accepted common randomness"),
                 format!("setupPackage.evaluatorKeySchedule.{field_name}"),
@@ -59,22 +61,14 @@ pub(super) fn verify_evaluator_key_schedule(
         }
     }
 
-    let public_key_share_set_root = setup_package
-        .get("publicKeyShares")
-        .and_then(|share_set| share_set.get("publicKeyShareSetRoot"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "publicKeyShareSetRoot was required before evaluator-key schedule verification",
-            )
-        })?;
+    let public_key_share_set_root = derive_public_key_share_set_root(setup_package)?;
     if schedule
         .get("publicKeyShareSetRoot")
         .and_then(Value::as_str)
-        != Some(public_key_share_set_root)
+        != Some(public_key_share_set_root.as_str())
     {
         return Ok(Some(evaluator_key_schedule_refusal(
+            crate::foundation::RefusalReason::WrongHashOrRoot,
             "evaluatorKeyScheduleSetupRootMismatch",
             "evaluatorKeySchedule.publicKeyShareSetRoot must match the accepted public-key share set root",
             "setupPackage.evaluatorKeySchedule.publicKeyShareSetRoot",
@@ -86,6 +80,7 @@ pub(super) fn verify_evaluator_key_schedule(
         != Some(&expected_relinearization_level_schedule)
     {
         return Ok(Some(evaluator_key_schedule_refusal(
+            crate::foundation::RefusalReason::WrongHashOrRoot,
             "evaluatorKeyScheduleRelinearizationMismatch",
             "evaluatorKeySchedule.relinearizationLevelSchedule must match the frozen foundation-roster relinearization levels",
             "setupPackage.evaluatorKeySchedule.relinearizationLevelSchedule",
@@ -94,38 +89,12 @@ pub(super) fn verify_evaluator_key_schedule(
     let expected_required_galois_key_schedule = expected_required_galois_key_schedule()?;
     if schedule.get("requiredGaloisKeySchedule") != Some(&expected_required_galois_key_schedule) {
         return Ok(Some(evaluator_key_schedule_refusal(
+            crate::foundation::RefusalReason::WrongHashOrRoot,
             "evaluatorKeyScheduleGaloisMismatch",
             "evaluatorKeySchedule.requiredGaloisKeySchedule must match the frozen foundation-roster Galois key schedule",
             "setupPackage.evaluatorKeySchedule.requiredGaloisKeySchedule",
         )?));
     }
-    let Some(evaluator_key_schedule_root) = schedule
-        .get("evaluatorKeyScheduleRoot")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(setup_refusals(
-            vec!["evaluatorKeySchedule.evaluatorKeyScheduleRoot".to_string()],
-            Vec::new(),
-        )));
-    };
-    validate_hash_string(
-        evaluator_key_schedule_root,
-        "evaluatorKeySchedule.evaluatorKeyScheduleRoot",
-    )?;
-    let mut root_input = schedule.clone();
-    root_input
-        .as_object_mut()
-        .expect("evaluator key schedule object was checked")
-        .remove("evaluatorKeyScheduleRoot");
-    let expected_root = derive_canonical_object_hash(&root_input)?;
-    if evaluator_key_schedule_root != expected_root {
-        return Ok(Some(evaluator_key_schedule_refusal(
-            "evaluatorKeyScheduleRootMismatch",
-            "evaluatorKeyScheduleRoot does not match the canonical evaluator-key schedule",
-            "setupPackage.evaluatorKeySchedule.evaluatorKeyScheduleRoot",
-        )?));
-    }
-
     Ok(None)
 }
 
@@ -145,13 +114,19 @@ pub(super) fn verify_context_fields_match(
 }
 
 fn evaluator_key_schedule_refusal(
+    refusal_reason: crate::foundation::RefusalReason,
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
 ) -> CanonicalResult<Refusals> {
     Ok(setup_refusals(
         Vec::new(),
-        vec![Refusal::new(reason_code, message, object_path)],
+        vec![Refusal::new(
+            refusal_reason,
+            reason_code,
+            message,
+            object_path,
+        )],
     ))
 }
 

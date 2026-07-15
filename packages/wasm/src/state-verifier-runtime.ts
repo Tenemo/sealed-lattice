@@ -85,17 +85,6 @@ type StateVerifierKernelContext = Readonly<{
         canonicalStateCertificateLength: number,
         statusPointer: number,
     ): number;
-    finishWitnessVote(
-        sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-        preparedHandle: number,
-        signaturePointer: number,
-        signatureLength: number,
-        carrierOutputPointer: number,
-        carrierOutputLength: number,
-        statusPointer: number,
-    ): number;
     prepareOutput(
         sessionHandle: number,
         capabilityPointer: number,
@@ -131,17 +120,6 @@ type StateVerifierKernelContext = Readonly<{
         expectedAuthorizationHashLength: number,
         canonicalReservationIntentCarrierPointer: number,
         canonicalReservationIntentCarrierLength: number,
-        statusPointer: number,
-    ): number;
-    prepareWitnessVote(
-        sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-        verifiedIntentHandle: number,
-        witnessParticipantIdentityPointer: number,
-        witnessParticipantIdentityLength: number,
-        signatureMessageOutputPointer: number,
-        signatureMessageOutputLength: number,
         statusPointer: number,
     ): number;
     verifyRecovery(
@@ -194,8 +172,6 @@ const stateVerifierCapabilityByteLength = 32;
 const stateDurableBindingByteLength = 674;
 const stateIdentityByteLength = 64;
 const stateHashByteLength = 64;
-const stateWitnessVoteCarrierByteLength = 3_801;
-const mlDsa65SignatureByteLength = 3_309;
 const wasm32WordByteLength = 4;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
 const fixedConfigurationByteLength = 2 + 3 * stateHashByteLength + 2 + 4;
@@ -215,7 +191,6 @@ declare const verifiedStateReservationIntentBrand: unique symbol;
 declare const verifiedStateOutputIntentBrand: unique symbol;
 declare const verifiedStateRecoveryIntentBrand: unique symbol;
 declare const verifiedStateDurableBindingBrand: unique symbol;
-declare const preparedStateWitnessVoteBrand: unique symbol;
 
 export const stateWitnessVoteKinds = Object.freeze({
     reservation: 1,
@@ -267,13 +242,6 @@ export type VerifiedStateIntent =
 
 export type UntrustedStateWitnessVoteCarrier = Readonly<{
     canonicalCarrier: Uint8Array;
-}>;
-
-export type PreparedStateWitnessVote = Readonly<{
-    readonly [preparedStateWitnessVoteBrand]: true;
-    cancel(): void;
-    copySignatureMessage(): VerificationResult<Uint8Array>;
-    finish(signature: Uint8Array): VerificationResult<Uint8Array>;
 }>;
 
 export type VerifiedStateReservation = Readonly<{
@@ -336,7 +304,7 @@ export type StateRecoveryIntentVerification = Omit<
     'canonicalStateCertificate'
 >;
 
-export type StateOutputVerificationLeaseState =
+type StateOutputVerificationLeaseState =
     | 'active'
     | 'cancelled'
     | 'completed'
@@ -366,7 +334,7 @@ export type StateOutputIntentVerificationLease = Readonly<{
     state(): StateOutputVerificationLeaseState;
 }>;
 
-export type StateVerifierSessionState = 'active' | 'cancelled';
+type StateVerifierSessionState = 'active' | 'cancelled';
 
 export type StateVerifierSession = Readonly<{
     cancel(): void;
@@ -406,10 +374,6 @@ export type StateVerifierSession = Readonly<{
             | VerifiedStateReservation
             | VerifiedStateReservationIntent,
     ): VerificationResult<undefined>;
-    prepareWitnessVote(input: {
-        verifiedIntent: VerifiedStateIntent;
-        witnessParticipantIdentity: Uint8Array;
-    }): VerificationResult<PreparedStateWitnessVote>;
     state(): StateVerifierSessionState;
     verifyRecovery(
         input: StateRecoveryVerification,
@@ -462,18 +426,11 @@ type VerifiedObjectRecord = {
     session: StateVerifierSessionImplementation;
 };
 
-type PreparedStateWitnessVoteRecord = {
-    active: boolean;
-    handle: number;
-    signatureMessage: Uint8Array;
-};
-
 const verifiedObjectRecords = new WeakMap<object, VerifiedObjectRecord>();
 const durableBindingDescriptions = new WeakMap<
     object,
     StateDurableBindingDescription
 >();
-
 const copyDurableBindingDescription = (
     description: StateDurableBindingDescription,
 ): StateDurableBindingDescription =>
@@ -1125,7 +1082,6 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
     readonly #outputLeases = new Set<
         StateOutputVerificationLeaseImplementation<unknown>
     >();
-    readonly #preparedWitnessVotes = new Set<PreparedStateWitnessVoteRecord>();
     #capabilityPointer: number;
     #state: StateVerifierSessionState = 'active';
 
@@ -1502,135 +1458,6 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
             );
         } finally {
             framedCarriers.fill(0);
-        }
-    }
-
-    public prepareWitnessVote(input: {
-        verifiedIntent: VerifiedStateIntent;
-        witnessParticipantIdentity: Uint8Array;
-    }): VerificationResult<PreparedStateWitnessVote> {
-        if (this.#state !== 'active') {
-            return refused('consumedState');
-        }
-        if (
-            typeof input !== 'object' ||
-            input === null ||
-            Array.isArray(input)
-        ) {
-            return refused('wrongTypeOrLength');
-        }
-        const witnessIdentityRefusal = requireCopiedBytes(
-            input.witnessParticipantIdentity,
-            stateIdentityByteLength,
-        );
-        if (witnessIdentityRefusal !== undefined) {
-            return refused(witnessIdentityRefusal);
-        }
-        const resolved = resolveVerifiedObject(input.verifiedIntent, this, [
-            'output-intent',
-            'recovery-intent',
-            'reservation-intent',
-        ]);
-        if ('refusalReason' in resolved) {
-            return refused(resolved.refusalReason);
-        }
-        const witnessParticipantIdentity = Uint8Array.from(
-            input.witnessParticipantIdentity,
-        );
-        let identityPointer = 0;
-        let messagePointer = 0;
-        let statusPointer = 0;
-        let preparedHandle = 0;
-        try {
-            identityPointer = allocateAndCopy(
-                this.#context,
-                witnessParticipantIdentity,
-            );
-            messagePointer = allocateZeroed(this.#context, stateHashByteLength);
-            statusPointer = allocateZeroed(this.#context, wasm32WordByteLength);
-            preparedHandle = this.#context.runExclusive(
-                'state witness vote preparation',
-                () =>
-                    this.#context.prepareWitnessVote(
-                        this.#handle,
-                        this.#capabilityPointer,
-                        stateVerifierCapabilityByteLength,
-                        resolved.record.handle,
-                        identityPointer,
-                        witnessParticipantIdentity.byteLength,
-                        messagePointer,
-                        stateHashByteLength,
-                        statusPointer,
-                    ),
-            );
-            const refusalReason = decodeStatus(
-                new DataView(
-                    this.#context.memory.buffer,
-                    statusPointer,
-                    wasm32WordByteLength,
-                ).getUint32(0, true),
-            );
-            if (refusalReason !== undefined) {
-                if (preparedHandle !== 0) {
-                    throw new StateVerifierInternalError(
-                        'A refused state-vote preparation returned a handle.',
-                    );
-                }
-                return refused(refusalReason);
-            }
-            if (preparedHandle === 0) {
-                throw new StateVerifierInternalError(
-                    'State-vote preparation returned no handle.',
-                );
-            }
-            const record: PreparedStateWitnessVoteRecord = {
-                active: true,
-                handle: preparedHandle,
-                signatureMessage: new Uint8Array(
-                    this.#context.memory.buffer,
-                    messagePointer,
-                    stateHashByteLength,
-                ).slice(),
-            };
-            this.#preparedWitnessVotes.add(record);
-            const prepared = Object.freeze({
-                cancel: (): void => this.#cancelPreparedWitnessVote(record),
-                copySignatureMessage: (): VerificationResult<Uint8Array> =>
-                    record.active && this.#state === 'active'
-                        ? valid(record.signatureMessage.slice())
-                        : refused('consumedState'),
-                finish: (
-                    signature: Uint8Array,
-                ): VerificationResult<Uint8Array> =>
-                    this.#finishPreparedWitnessVote(record, signature),
-            }) as PreparedStateWitnessVote;
-            return valid(prepared);
-        } catch (error) {
-            if (preparedHandle !== 0) {
-                const status = this.#context.release(
-                    this.#handle,
-                    this.#capabilityPointer,
-                    stateVerifierCapabilityByteLength,
-                    preparedHandle,
-                );
-                decodeStatus(status);
-            }
-            if (error instanceof StateVerifierRefusalError) {
-                return refused(error.refusalReason);
-            }
-            throw error;
-        } finally {
-            witnessParticipantIdentity.fill(0);
-            for (const [pointer, byteLength] of [
-                [identityPointer, stateIdentityByteLength],
-                [messagePointer, stateHashByteLength],
-                [statusPointer, wasm32WordByteLength],
-            ] as const) {
-                if (pointer !== 0) {
-                    zeroMemory(this.#context, pointer, byteLength);
-                    this.#context.deallocate(pointer, byteLength);
-                }
-            }
         }
     }
 
@@ -2023,11 +1850,6 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         for (const outputLease of [...this.#outputLeases]) {
             outputLease.cancel();
         }
-        for (const preparedVote of this.#preparedWitnessVotes) {
-            preparedVote.active = false;
-            preparedVote.signatureMessage.fill(0);
-        }
-        this.#preparedWitnessVotes.clear();
         const status = this.#context.runExclusive(
             'state verifier cancellation',
             () =>
@@ -2056,128 +1878,6 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
             stateVerifierCapabilityByteLength,
         );
         this.#capabilityPointer = 0;
-    }
-
-    #cancelPreparedWitnessVote(record: PreparedStateWitnessVoteRecord): void {
-        if (!record.active) {
-            return;
-        }
-        record.active = false;
-        record.signatureMessage.fill(0);
-        this.#preparedWitnessVotes.delete(record);
-        if (this.#state !== 'active') {
-            return;
-        }
-        const refusalReason = decodeStatus(
-            this.#context.runExclusive(
-                'prepared state witness vote cancellation',
-                () =>
-                    this.#context.release(
-                        this.#handle,
-                        this.#capabilityPointer,
-                        stateVerifierCapabilityByteLength,
-                        record.handle,
-                    ),
-            ),
-        );
-        if (refusalReason !== undefined) {
-            throw new StateVerifierRefusalError(refusalReason);
-        }
-    }
-
-    #finishPreparedWitnessVote(
-        record: PreparedStateWitnessVoteRecord,
-        signature: Uint8Array,
-    ): VerificationResult<Uint8Array> {
-        if (!record.active || this.#state !== 'active') {
-            record.signatureMessage.fill(0);
-            return refused('consumedState');
-        }
-        const signatureRefusal = requireCopiedBytes(
-            signature,
-            mlDsa65SignatureByteLength,
-        );
-        if (signatureRefusal !== undefined) {
-            return refused(signatureRefusal);
-        }
-        const copiedSignature = Uint8Array.from(signature);
-        let signaturePointer = 0;
-        let carrierPointer = 0;
-        let statusPointer = 0;
-        let finishInvoked = false;
-        try {
-            signaturePointer = allocateAndCopy(this.#context, copiedSignature);
-            carrierPointer = allocateZeroed(
-                this.#context,
-                stateWitnessVoteCarrierByteLength,
-            );
-            statusPointer = allocateZeroed(this.#context, wasm32WordByteLength);
-            finishInvoked = true;
-            const returnedCarrier = this.#context.runExclusive(
-                'prepared state witness vote finish',
-                () =>
-                    this.#context.finishWitnessVote(
-                        this.#handle,
-                        this.#capabilityPointer,
-                        stateVerifierCapabilityByteLength,
-                        record.handle,
-                        signaturePointer,
-                        copiedSignature.byteLength,
-                        carrierPointer,
-                        stateWitnessVoteCarrierByteLength,
-                        statusPointer,
-                    ),
-            );
-            const refusalReason = decodeStatus(
-                new DataView(
-                    this.#context.memory.buffer,
-                    statusPointer,
-                    wasm32WordByteLength,
-                ).getUint32(0, true),
-            );
-            if (refusalReason !== undefined) {
-                if (returnedCarrier !== 0) {
-                    throw new StateVerifierInternalError(
-                        'A refused state-vote finish returned success.',
-                    );
-                }
-                return refused(refusalReason);
-            }
-            if (returnedCarrier !== 1) {
-                throw new StateVerifierInternalError(
-                    'A successful state-vote finish returned no carrier.',
-                );
-            }
-            return valid(
-                new Uint8Array(
-                    this.#context.memory.buffer,
-                    carrierPointer,
-                    stateWitnessVoteCarrierByteLength,
-                ).slice(),
-            );
-        } catch (error) {
-            if (error instanceof StateVerifierRefusalError) {
-                return refused(error.refusalReason);
-            }
-            throw error;
-        } finally {
-            copiedSignature.fill(0);
-            if (finishInvoked) {
-                record.active = false;
-                record.signatureMessage.fill(0);
-                this.#preparedWitnessVotes.delete(record);
-            }
-            for (const [pointer, byteLength] of [
-                [signaturePointer, mlDsa65SignatureByteLength],
-                [carrierPointer, stateWitnessVoteCarrierByteLength],
-                [statusPointer, wasm32WordByteLength],
-            ] as const) {
-                if (pointer !== 0) {
-                    zeroMemory(this.#context, pointer, byteLength);
-                    this.#context.deallocate(pointer, byteLength);
-                }
-            }
-        }
     }
 
     #finishOutputIntent(

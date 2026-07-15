@@ -34,13 +34,3 @@ pub(super) fn verify_stored_public_key_share_material_set(
 
     Ok((bindings, material_roots))
 }
-
-pub(super) fn public_key_share_material_root_reference(
-    binding: &PublicKeyShareMaterialBinding,
-) -> Value {
-    json!({
-        "trusteeIdentity": binding.trustee_identity,
-        "trusteeRosterPosition": binding.trustee_roster_position,
-        "publicKeyShareMaterialRoot": binding.public_key_share_material_root,
-    })
-}

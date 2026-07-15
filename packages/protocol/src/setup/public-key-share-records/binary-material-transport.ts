@@ -10,51 +10,76 @@ import {
     type BinaryChunkedPublicKeyShareMaterialSet,
     type PublicKeyShareMaterialChunkSource,
     type PublicKeyShareMaterialRecord,
+    type PublicKeyShareSet,
 } from './constants-and-types.js';
 import {
     assertPublicKeyShareMaterialInput,
     createPublicKeyShareMaterialEncodingSource,
+    derivePublicKeyShareMaterialRoot,
     publicKeyShareMaterialRecordsFromContributions,
 } from './embedded-material-records.js';
 import { deriveCollectiveBgvSetupContextHash } from './encoding.js';
+import { derivePublicKeyShareSetRoot } from './share-statement-records.js';
 
 const binaryChunkedPublicKeyShareMaterialSet = (
     input: Readonly<{
         readonly setupContext: CollectiveBgvSetupContext;
         readonly ringDegree: number;
         readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyShareSetRoot: ProtocolHash;
+        readonly publicKeyShares: PublicKeyShareSet;
         readonly publicKeyShareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
     }>,
 ): BinaryChunkedPublicKeyShareMaterialSet => {
     const publicKeyShareMaterialRoots = input.publicKeyShareMaterialRecords.map(
-        (materialRecord) => materialRecord.publicKeyShareMaterialRoot,
-    );
-    const materialSetWithoutRoot = {
-        objectType: 'PublicKeyShareMaterialSet',
-        publicKeyShareMaterialRoots,
-    } as const satisfies Omit<
-        BinaryChunkedPublicKeyShareMaterialSet,
-        'publicKeyShareMaterialSetRoot'
-    >;
+        (materialRecord, trusteeRosterPosition) => {
+            const shareRecord =
+                input.publicKeyShares.shareRecords[trusteeRosterPosition];
+            if (shareRecord === undefined) {
+                throw new Error(
+                    'public-key share material must have one accepted share record per trustee.',
+                );
+            }
 
+            return derivePublicKeyShareMaterialRoot(
+                input,
+                shareRecord,
+                materialRecord,
+            );
+        },
+    );
     return {
-        ...materialSetWithoutRoot,
+        objectType: 'PublicKeyShareMaterialSet',
         publicKeyShareMaterialSetRoot: deriveCanonicalObjectHash({
-            objectType: materialSetWithoutRoot.objectType,
+            objectType: 'PublicKeyShareMaterialSet',
             setupContextHash: deriveCollectiveBgvSetupContextHash(
                 input.setupContext,
             ),
             ringDegree: input.ringDegree,
             publicMatrixSeedHash: input.publicMatrixSeedHash,
-            publicKeyShareSetRoot: input.publicKeyShareSetRoot,
-            publicKeyShareMaterialRoots:
-                input.publicKeyShareMaterialRecords.map((materialRecord) => ({
-                    trusteeIdentity: materialRecord.trusteeIdentity,
-                    trusteeRosterPosition: materialRecord.trusteeRosterPosition,
-                    publicKeyShareMaterialRoot:
-                        materialRecord.publicKeyShareMaterialRoot,
-                })),
+            publicKeyShareSetRoot: derivePublicKeyShareSetRoot(
+                input.setupContext,
+                input.publicMatrixSeedHash,
+                input.publicKeyShares,
+            ),
+            publicKeyShareMaterialRoots: publicKeyShareMaterialRoots.map(
+                (publicKeyShareMaterialRoot, trusteeRosterPosition) => {
+                    const shareRecord =
+                        input.publicKeyShares.shareRecords[
+                            trusteeRosterPosition
+                        ];
+                    if (shareRecord === undefined) {
+                        throw new Error(
+                            'public-key share material must have one accepted share record per trustee.',
+                        );
+                    }
+
+                    return {
+                        trusteeIdentity: shareRecord.trusteeIdentity,
+                        trusteeRosterPosition,
+                        publicKeyShareMaterialRoot,
+                    };
+                },
+            ),
         }),
     } satisfies BinaryChunkedPublicKeyShareMaterialSet;
 };
@@ -77,15 +102,12 @@ const finishPublicKeyShareMaterialTransport = async (
         'writePublicKeyShareMaterial descriptorBytes',
     );
     const publicKeyShareMaterialChunkSource = {
-        publicKeyShareMaterialSetRoot:
-            materialSet.publicKeyShareMaterialSetRoot,
         pullChunk: encodingSource.pullChunk,
     } satisfies PublicKeyShareMaterialChunkSource;
 
     return {
         materialSet,
         transportedPublicKeyShareMaterial: {
-            objectType: 'SetupTransportedPublicKeyShareMaterial',
             publicKeyShareMaterialSetRoot:
                 materialSet.publicKeyShareMaterialSetRoot,
             descriptorBytes,
@@ -104,7 +126,7 @@ export const createBinaryChunkedPublicKeyShareMaterialBundle = async (
         setupContext: input.setupContext,
         ringDegree: input.ringDegree,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
-        publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
+        publicKeyShares: input.publicKeyShares,
         publicKeyShareMaterialRecords: shareMaterialRecords,
     });
 

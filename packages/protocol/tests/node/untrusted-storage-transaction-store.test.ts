@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    openUntrustedStorageTransactionStore,
+    openPositivelyVerifiedStorageTransactionStore,
     UntrustedStorageTransactionStore,
     type UntrustedStorageAdapter,
     type UntrustedStorageAtomicMutation,
@@ -209,7 +209,7 @@ const openTestStore = async (input?: {
     store: UntrustedStorageTransactionStore;
 }> => {
     const adapter = input?.adapter ?? new DeterministicInMemoryStorageAdapter();
-    const result = await openUntrustedStorageTransactionStore({
+    const result = await openPositivelyVerifiedStorageTransactionStore({
         adapter,
         createIdentifier:
             input?.createIdentifier ?? createDeterministicIdentifierFactory(),
@@ -1022,7 +1022,7 @@ describe('untrusted storage transaction store', () => {
             'CorruptIndex',
         );
         await expectStorageError(
-            openUntrustedStorageTransactionStore({
+            openPositivelyVerifiedStorageTransactionStore({
                 adapter: oversizedIndexStore.adapter,
                 createIdentifier: createDeterministicIdentifierFactory(),
                 limits: defaultLimits,
@@ -1058,7 +1058,7 @@ describe('untrusted storage transaction store', () => {
             'MalformedLength',
         );
         await expectStorageError(
-            openUntrustedStorageTransactionStore({
+            openPositivelyVerifiedStorageTransactionStore({
                 adapter: oversizedObjectStore.adapter,
                 createIdentifier: createDeterministicIdentifierFactory(),
                 limits: { ...defaultLimits, maximumLeaseByteLength: 3 },
@@ -1082,7 +1082,7 @@ describe('untrusted storage transaction store', () => {
         );
 
         await expectStorageError(
-            openUntrustedStorageTransactionStore({
+            openPositivelyVerifiedStorageTransactionStore({
                 adapter,
                 createIdentifier: createDeterministicIdentifierFactory(),
                 limits: {
@@ -1109,7 +1109,7 @@ describe('untrusted storage transaction store', () => {
         );
 
         await expectStorageError(
-            openUntrustedStorageTransactionStore({
+            openPositivelyVerifiedStorageTransactionStore({
                 adapter,
                 createIdentifier: createDeterministicIdentifierFactory(),
                 limits: { ...defaultLimits, maximumOwnedRecordCount: 1 },
@@ -1125,7 +1125,7 @@ describe('untrusted storage transaction store', () => {
             new Uint8Array([1]),
         );
         await expectStorageError(
-            openUntrustedStorageTransactionStore({
+            openPositivelyVerifiedStorageTransactionStore({
                 adapter: longKeyAdapter,
                 createIdentifier: createDeterministicIdentifierFactory(),
                 limits: defaultLimits,

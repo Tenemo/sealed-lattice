@@ -1,4 +1,4 @@
-import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
+import { hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -12,7 +12,7 @@ type JsonRecord = Record<string, unknown>;
 type CanonicalProofMaterialBuild = Readonly<{
     readonly proofMaterialSet: JsonRecord;
     readonly canonicalProofMaterials: readonly Readonly<{
-        readonly proofMaterialRoot: string;
+        readonly proofBytesHash: string;
         readonly descriptorBytes: Uint8Array;
     }>[];
 }>;
@@ -25,16 +25,7 @@ type ProofMaterialCase = Readonly<{
     readonly proofMaterialSetObjectType:
         | 'VssShareLinkageProofMaterialSet'
         | 'VssSameSecretBridgeProofMaterialSet';
-    readonly transportSetObjectType:
-        | 'SetupTransportedVssShareLinkageProofMaterialSet'
-        | 'SetupTransportedSameSecretBridgeProofMaterialSet';
-    readonly transportMaterialObjectType:
-        | 'SetupTransportedVssShareLinkageProofMaterial'
-        | 'SetupTransportedSameSecretBridgeProofMaterial';
     readonly proofBytesHashDomain: string;
-    readonly proofRecordRootField:
-        | 'sameSecretBridgeProofRecordRoot'
-        | undefined;
     readonly identityFields: (recordIndex: number) => JsonRecord;
     readonly createTransport: (build: CanonicalProofMaterialBuild) => Readonly<{
         readonly proofMaterialSet: JsonRecord;
@@ -47,26 +38,22 @@ const proofMaterialCases = [
         proofFamily: 'vss-share-linkage',
         proofRecordObjectType: 'VssShareLinkageProofRecord',
         proofMaterialSetObjectType: 'VssShareLinkageProofMaterialSet',
-        transportSetObjectType:
-            'SetupTransportedVssShareLinkageProofMaterialSet',
-        transportMaterialObjectType:
-            'SetupTransportedVssShareLinkageProofMaterial',
         proofBytesHashDomain:
             'sealed-lattice/setup/vss-share-linkage/proof-bytes',
-        proofRecordRootField: undefined,
         identityFields: (recordIndex: number): JsonRecord => ({
-            vssShareLinkage: {
+            coverage: [{
                 sourceTrusteeRosterPosition: 0,
                 recipientRosterPosition: recordIndex,
                 sourceRnsLimbIndex: 0,
-                shareLinkageStatementRoot: 'a'.repeat(128),
-                publicMatrixSeedHash: 'b'.repeat(128),
-                additionalLinkageItems: [],
-            },
+            }],
         }),
         createTransport: (build) => {
             const transport =
-                createBinaryChunkedVssShareLinkageProofMaterialTransport(build);
+                createBinaryChunkedVssShareLinkageProofMaterialTransport(
+                    build as unknown as Parameters<
+                        typeof createBinaryChunkedVssShareLinkageProofMaterialTransport
+                    >[0],
+                );
 
             return {
                 proofMaterialSet: transport.proofMaterialSet,
@@ -79,19 +66,9 @@ const proofMaterialCases = [
         proofFamily: 'same-secret-bridge',
         proofRecordObjectType: 'VssSameSecretBridgeProofRecord',
         proofMaterialSetObjectType: 'VssSameSecretBridgeProofMaterialSet',
-        transportSetObjectType:
-            'SetupTransportedSameSecretBridgeProofMaterialSet',
-        transportMaterialObjectType:
-            'SetupTransportedSameSecretBridgeProofMaterial',
         proofBytesHashDomain:
             'sealed-lattice/setup/same-secret-bridge/proof-bytes',
-        proofRecordRootField: 'sameSecretBridgeProofRecordRoot',
-        identityFields: (recordIndex: number): JsonRecord => ({
-            sameSecretBridgeStatementRoot: `${String(recordIndex)}`.padStart(
-                128,
-                'c',
-            ),
-        }),
+        identityFields: (): JsonRecord => ({}),
         createTransport: (build) => {
             const transport =
                 createBinaryChunkedSameSecretBridgeProofMaterialTransport(
@@ -121,29 +98,17 @@ const canonicalProofMaterialBuild = (
             proofMaterialCase.proofBytesHashDomain,
             [proofBytes],
         );
-        const proofMaterialRoot = deriveCanonicalObjectHash({
-            objectType: 'SetupProofMaterialReference',
-            proofFamily: proofMaterialCase.proofFamily,
-            proofBytesHash,
-        });
-        const recordWithoutRoot = {
+        const proofRecord = {
             objectType: proofMaterialCase.proofRecordObjectType,
             ...proofMaterialCase.identityFields(recordIndex),
             proofBytesHash,
-            proofMaterialRoot,
         };
         canonicalProofMaterials.push({
-            proofMaterialRoot,
+            proofBytesHash,
             descriptorBytes,
         });
 
-        return proofMaterialCase.proofRecordRootField === undefined
-            ? recordWithoutRoot
-            : {
-                  ...recordWithoutRoot,
-                  [proofMaterialCase.proofRecordRootField]:
-                      deriveCanonicalObjectHash(recordWithoutRoot),
-              };
+        return proofRecord;
     });
     return {
         proofMaterialSet: {
@@ -159,15 +124,12 @@ describe('VSS canonical proof material transport', () => {
         'maps $proofFamily semantic references to descriptor sidecars',
         (proofMaterialCase) => {
             const build = canonicalProofMaterialBuild(proofMaterialCase, [
-                canonicalStreamDescriptorFixture(3, 1, 2),
-                canonicalStreamDescriptorFixture(3, 4, 5),
+                canonicalStreamDescriptorFixture(3, 1),
+                canonicalStreamDescriptorFixture(3, 4),
             ]);
             const transported = proofMaterialCase.createTransport(build);
 
             expect(transported.proofMaterialSet).toBe(build.proofMaterialSet);
-            expect(transported.transportedProofMaterialSet.objectType).toBe(
-                proofMaterialCase.transportSetObjectType,
-            );
             const transportedProofMaterials = transported
                 .transportedProofMaterialSet
                 .proofMaterials as readonly JsonRecord[];
@@ -175,11 +137,8 @@ describe('VSS canonical proof material transport', () => {
             transportedProofMaterials.forEach((material, materialIndex) => {
                 const expectedMaterial =
                     build.canonicalProofMaterials[materialIndex];
-                expect(material.objectType).toBe(
-                    proofMaterialCase.transportMaterialObjectType,
-                );
-                expect(material.proofMaterialRoot).toBe(
-                    expectedMaterial?.proofMaterialRoot,
+                expect(material.proofBytesHash).toBe(
+                    expectedMaterial?.proofBytesHash,
                 );
                 expect(material.descriptorBytes).toEqual(
                     expectedMaterial?.descriptorBytes,
@@ -189,7 +148,7 @@ describe('VSS canonical proof material transport', () => {
     );
 
     it.each(proofMaterialCases)(
-        'rejects $proofFamily canonical material whose root does not match a proof record',
+        'rejects $proofFamily canonical material whose hash does not match a proof record',
         (proofMaterialCase) => {
             const build = canonicalProofMaterialBuild(proofMaterialCase, [
                 Uint8Array.of(1),
@@ -201,7 +160,7 @@ describe('VSS canonical proof material transport', () => {
                     canonicalProofMaterials: [
                         {
                             ...build.canonicalProofMaterials[0],
-                            proofMaterialRoot: 'd'.repeat(128),
+                            proofBytesHash: 'd'.repeat(128),
                         },
                     ],
                 }),

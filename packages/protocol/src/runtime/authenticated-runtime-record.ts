@@ -1,6 +1,9 @@
+import { sha512 } from '@noble/hashes/sha2.js';
+
 import {
     UntrustedStorageTransactionError,
     type UntrustedStorageTransaction,
+    type UntrustedStorageAuthenticatedRecoveryProtection,
     type UntrustedStorageTransactionStore,
 } from './untrusted-storage-transaction-store.js';
 
@@ -12,6 +15,12 @@ const hashByteLength = 64;
 const participantIdentityByteLength = 64;
 const identifierByteLength = 32;
 const maximumAesGcmRandomNonceInvocationCount = 0x1_0000_0000;
+const authenticatedRecoveryHeadOperationDomain =
+    'sealed-lattice/runtime/recovery-head/v1';
+const authenticatedRecoveryHeadLogicalRecordKey =
+    'runtime/recovery/current-head';
+const authenticatedRecoveryIdentityDomain =
+    'sealed-lattice/runtime/recovery-identity/v1';
 
 export type RuntimeStorageAuthorityContext = Readonly<{
     actionContextHash: Uint8Array;
@@ -53,7 +62,24 @@ type RuntimeRecordProtection = Readonly<{
     authorityContext: RuntimeStorageAuthorityContext;
     encryptionKey: CryptoKey;
     cryptoProvider: Crypto;
+    keySealingState: RuntimeRecordKeySealingState;
+    localSealingState: RuntimeRecordLocalSealingState;
+    maximumRecordSealingCount: number;
 }>;
+
+type RuntimeRecordKeySealingState = {
+    issuedNonces: Set<string>;
+    sealingCount: number;
+};
+
+type RuntimeRecordLocalSealingState = {
+    sealingCount: number;
+};
+
+const runtimeRecordKeySealingStates = new WeakMap<
+    CryptoKey,
+    RuntimeRecordKeySealingState
+>();
 
 type OpenedRuntimeRecord = Readonly<{
     plaintext: Uint8Array;
@@ -170,6 +196,7 @@ export const createRuntimeRecordProtection = (input: {
     authorityContext: RuntimeStorageAuthorityContext;
     cryptoProvider?: Crypto;
     encryptionKey: CryptoKey;
+    maximumRecordSealingCount: number;
 }): RuntimeRecordProtection => {
     const cryptoProvider = input.cryptoProvider ?? globalThis.crypto;
     if (cryptoProvider?.subtle === undefined) {
@@ -179,10 +206,31 @@ export const createRuntimeRecordProtection = (input: {
         );
     }
     requireEncryptionKey(input.encryptionKey);
+    if (
+        !Number.isSafeInteger(input.maximumRecordSealingCount) ||
+        input.maximumRecordSealingCount <= 0 ||
+        input.maximumRecordSealingCount >
+            maximumAesGcmRandomNonceInvocationCount
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidConfiguration',
+            'maximumRecordSealingCount must be a positive safe integer no greater than the AES-GCM random-nonce invocation ceiling.',
+        );
+    }
+    let keySealingState = runtimeRecordKeySealingStates.get(
+        input.encryptionKey,
+    );
+    if (keySealingState === undefined) {
+        keySealingState = { issuedNonces: new Set<string>(), sealingCount: 0 };
+        runtimeRecordKeySealingStates.set(input.encryptionKey, keySealingState);
+    }
     return Object.freeze({
         authorityContext: copyAuthorityContext(input.authorityContext),
         cryptoProvider,
         encryptionKey: input.encryptionKey,
+        keySealingState,
+        localSealingState: { sealingCount: 0 },
+        maximumRecordSealingCount: input.maximumRecordSealingCount,
     });
 };
 
@@ -309,28 +357,27 @@ export const sampleRuntimeIdentifier = (
     );
 
 export const sealRuntimeRecord = async (input: {
-    issuedNonces: Set<string>;
     logicalRecordKey: string;
-    maximumRecordSealingCount: number;
     operationDomain: string;
     plaintext: Uint8Array;
     protection: RuntimeRecordProtection;
 }): Promise<Uint8Array> => {
     if (
-        !Number.isSafeInteger(input.maximumRecordSealingCount) ||
-        input.maximumRecordSealingCount <= 0 ||
-        input.maximumRecordSealingCount >
-            maximumAesGcmRandomNonceInvocationCount
+        input.protection.localSealingState.sealingCount >=
+        input.protection.maximumRecordSealingCount
     ) {
         throw new AuthenticatedRuntimeRecordError(
-            'InvalidConfiguration',
-            'maximumRecordSealingCount must be a positive safe integer no greater than the AES-GCM random-nonce invocation ceiling.',
+            'ResourceLimit',
+            'The runtime-record protection reached its configured sealing limit.',
         );
     }
-    if (input.issuedNonces.size >= input.maximumRecordSealingCount) {
+    if (
+        input.protection.keySealingState.sealingCount >=
+        maximumAesGcmRandomNonceInvocationCount
+    ) {
         throw new AuthenticatedRuntimeRecordError(
             'ResourceLimit',
-            'The action-scoped runtime-record key reached its configured sealing limit.',
+            'The runtime-record key reached the AES-GCM random-nonce invocation ceiling.',
         );
     }
     const plaintext = copyBoundedBytes(
@@ -342,9 +389,11 @@ export const sealRuntimeRecord = async (input: {
     const nonce = sampleRandomBytes(
         input.protection,
         aesGcmNonceByteLength,
-        input.issuedNonces,
+        input.protection.keySealingState.issuedNonces,
         'AES-GCM nonce',
     );
+    input.protection.localSealingState.sealingCount += 1;
+    input.protection.keySealingState.sealingCount += 1;
     const associatedData = recordAssociatedData(input);
     const cryptoNonce = copyToArrayBufferView(nonce);
     const cryptoAssociatedData = copyToArrayBufferView(associatedData);
@@ -394,7 +443,7 @@ export const sealRuntimeRecord = async (input: {
     }
 };
 
-export const openRuntimeRecord = async (input: {
+const openRuntimeRecord = async (input: {
     logicalRecordKey: string;
     operationDomain: string;
     protection: RuntimeRecordProtection;
@@ -465,6 +514,64 @@ export const openRuntimeRecord = async (input: {
     }
 };
 
+export const createRuntimeRecordAuthenticatedRecoveryProtection = (input: {
+    authorityContext: RuntimeStorageAuthorityContext;
+    cryptoProvider?: Crypto;
+    encryptionKey: CryptoKey;
+    maximumRecordSealingCount: number;
+}): UntrustedStorageAuthenticatedRecoveryProtection => {
+    const protection = createRuntimeRecordProtection(input);
+    const recoveryIdentity = sha512(
+        concatenateBytes([
+            encodeVariableBytes(
+                textEncoder.encode(authenticatedRecoveryIdentityDomain),
+            ),
+            protection.authorityContext.runtimeBuildManifestHash,
+            protection.authorityContext.suiteIdentifier,
+            protection.authorityContext.ceremonyContextHash,
+            protection.authorityContext.actionContextHash,
+            protection.authorityContext.ownerParticipantIdentity,
+        ]),
+    );
+    const configuredRecoveryIdentity = recoveryIdentity.slice();
+    recoveryIdentity.fill(0);
+
+    return Object.freeze({
+        deriveDigest: (bytes: Uint8Array): Uint8Array => {
+            try {
+                return sha512(bytes);
+            } finally {
+                bytes.fill(0);
+            }
+        },
+        open: async (sealedHeadBytes: Uint8Array): Promise<Uint8Array> => {
+            try {
+                return await openRuntimeRecord({
+                    logicalRecordKey: authenticatedRecoveryHeadLogicalRecordKey,
+                    operationDomain: authenticatedRecoveryHeadOperationDomain,
+                    protection,
+                    sealedBytes: sealedHeadBytes,
+                });
+            } finally {
+                sealedHeadBytes.fill(0);
+            }
+        },
+        recoveryIdentity: configuredRecoveryIdentity,
+        seal: async (headPlaintext: Uint8Array): Promise<Uint8Array> => {
+            try {
+                return await sealRuntimeRecord({
+                    logicalRecordKey: authenticatedRecoveryHeadLogicalRecordKey,
+                    operationDomain: authenticatedRecoveryHeadOperationDomain,
+                    plaintext: headPlaintext,
+                    protection,
+                });
+            } finally {
+                headPlaintext.fill(0);
+            }
+        },
+    });
+};
+
 export const readRuntimeRecord = async (input: {
     logicalRecordKey: string;
     operationDomain: string;
@@ -532,9 +639,7 @@ export const readRuntimeRecord = async (input: {
 
 export const stageRuntimeRecordWrite = async (input: {
     expectedCurrentSealedBytes?: Uint8Array | null;
-    issuedNonces: Set<string>;
     logicalRecordKey: string;
-    maximumRecordSealingCount: number;
     operationDomain: string;
     plaintext: Uint8Array;
     protection: RuntimeRecordProtection;

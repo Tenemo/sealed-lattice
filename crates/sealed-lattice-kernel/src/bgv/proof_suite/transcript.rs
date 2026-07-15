@@ -225,8 +225,8 @@ impl CanonicalProofTranscript {
     }
 }
 
-/// Shared distinct-query sampler used while the live proof families migrate to
-/// the common profile. The caller supplies a deterministic 64-byte challenge
+/// Shared distinct-query sampler for proof transcript tests. The caller
+/// supplies a deterministic 64-byte challenge
 /// block for one logical output and counter. Every output starts at counter
 /// zero, and rejected or duplicate candidates consume its draw ceiling.
 #[cfg(test)]

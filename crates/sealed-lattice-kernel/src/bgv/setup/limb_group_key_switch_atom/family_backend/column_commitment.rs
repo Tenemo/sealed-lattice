@@ -16,6 +16,7 @@ use super::merkle::{
     BatchedMerkleOpening, MerkleDigest, MerkleTree, StreamingLeafHasher, consistent_sorted_leaves,
     leaf_hash, verify_merkle_batch,
 };
+use super::private_randomness::{PROOF_SALT_BYTE_LENGTH, PrivateProofRandomness};
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 // The in-memory commitment is the byte-identity oracle the streamed builder
@@ -54,11 +55,11 @@ fn row_words<const LIMB_COUNT: usize>(values: &[[u64; LIMB_COUNT]]) -> Vec<u64> 
 
 #[cfg(test)]
 impl<const LIMB_COUNT: usize> ColumnCommitment<LIMB_COUNT> {
-    // Commit a set of columns, each of the same power-of-two length. `salt_seed`
-    // advances a deterministic per-attempt salt stream.
+    // Commit a set of columns, each of the same power-of-two length. The
+    // private randomness advances once for every committed row salt.
     pub(super) fn commit(
         columns: Vec<Vec<[u64; LIMB_COUNT]>>,
-        salt_seed: &mut u64,
+        private_randomness: &mut PrivateProofRandomness,
     ) -> CanonicalResult<Self> {
         if columns.is_empty() {
             return Err(invalid_column("column set must be non-empty"));
@@ -74,10 +75,7 @@ impl<const LIMB_COUNT: usize> ColumnCommitment<LIMB_COUNT> {
         let mut salts = Vec::with_capacity(domain_size);
         let mut leaves = Vec::with_capacity(domain_size);
         for index in 0..domain_size {
-            *salt_seed = salt_seed
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1_442_695_040_888_963_407);
-            let salt = salt_seed.to_le_bytes().to_vec();
+            let salt = private_randomness.next_salt().to_vec();
             let row = columns
                 .iter()
                 .map(|column| column[index])
@@ -125,14 +123,14 @@ pub(super) struct StreamedColumnCommitmentBuilder<const LIMB_COUNT: usize> {
     domain_size: usize,
     column_count: usize,
     absorbed_columns: usize,
-    salts: Vec<[u8; 8]>,
+    salts: Vec<[u8; PROOF_SALT_BYTE_LENGTH]>,
     states: Vec<StreamingLeafHasher>,
 }
 
 pub(super) struct StreamedColumnCommitment {
     domain_size: usize,
     column_count: usize,
-    salts: Vec<[u8; 8]>,
+    salts: Vec<[u8; PROOF_SALT_BYTE_LENGTH]>,
     tree: MerkleTree,
 }
 
@@ -140,7 +138,7 @@ impl<const LIMB_COUNT: usize> StreamedColumnCommitmentBuilder<LIMB_COUNT> {
     pub(super) fn begin(
         domain_size: usize,
         column_count: usize,
-        salt_seed: &mut u64,
+        private_randomness: &mut PrivateProofRandomness,
     ) -> CanonicalResult<Self> {
         if column_count == 0 {
             return Err(invalid_column("column set must be non-empty"));
@@ -154,10 +152,7 @@ impl<const LIMB_COUNT: usize> StreamedColumnCommitmentBuilder<LIMB_COUNT> {
         let mut salts = Vec::with_capacity(domain_size);
         let mut states = Vec::with_capacity(domain_size);
         for index in 0..domain_size {
-            *salt_seed = salt_seed
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1_442_695_040_888_963_407);
-            let salt = salt_seed.to_le_bytes();
+            let salt = private_randomness.next_salt();
             states.push(StreamingLeafHasher::new(index, &salt, row_byte_length));
             salts.push(salt);
         }
@@ -337,8 +332,9 @@ mod tests {
             column(&parameters, size, 2),
             column(&parameters, size, 3),
         ];
-        let mut salt_seed = 0x1;
-        let commitment = ColumnCommitment::commit(columns.clone(), &mut salt_seed).expect("commit");
+        let mut private_randomness = PrivateProofRandomness::for_test(0x1);
+        let commitment =
+            ColumnCommitment::commit(columns.clone(), &mut private_randomness).expect("commit");
         let indices = [3_usize, 3, 100, 7, 200];
         let opening = commitment.open(&indices);
         let opened = verify_column_opening(&commitment.root(), size, 3, &opening)
@@ -356,10 +352,10 @@ mod tests {
 
     #[test]
     fn streamed_commitment_is_byte_identical_to_in_memory() {
-        // Same columns, same salt seed: the streamed builder must produce the
-        // same root, the same salts, and openings that verify identically to
-        // the in-memory path. This pins the streamed leaf framing to the
-        // canonical single-shot `leaf_hash`.
+        // Same columns, same private randomness: the streamed builder must
+        // produce the same root, the same salts, and openings that verify
+        // identically to the in-memory path. This pins the streamed leaf
+        // framing to the canonical single-shot `leaf_hash`.
         let parameters = sixteen_limb_group_field_parameters();
         let size = 256;
         let columns = vec![
@@ -369,14 +365,17 @@ mod tests {
             column(&parameters, size, 44),
         ];
 
-        let mut in_memory_seed = 0xfeed;
+        let mut in_memory_randomness = PrivateProofRandomness::for_test(0xfeed);
         let in_memory =
-            ColumnCommitment::commit(columns.clone(), &mut in_memory_seed).expect("commit");
+            ColumnCommitment::commit(columns.clone(), &mut in_memory_randomness).expect("commit");
 
-        let mut streamed_seed = 0xfeed;
-        let mut builder =
-            StreamedColumnCommitmentBuilder::<13>::begin(size, columns.len(), &mut streamed_seed)
-                .expect("begin");
+        let mut streamed_randomness = PrivateProofRandomness::for_test(0xfeed);
+        let mut builder = StreamedColumnCommitmentBuilder::<13>::begin(
+            size,
+            columns.len(),
+            &mut streamed_randomness,
+        )
+        .expect("begin");
         for codeword in &columns {
             builder.absorb_column(codeword).expect("absorb");
         }
@@ -384,8 +383,14 @@ mod tests {
 
         assert_eq!(streamed.root(), in_memory.root(), "roots must match");
         assert_eq!(
-            in_memory_seed, streamed_seed,
-            "both paths must advance the salt seed identically"
+            in_memory_randomness.consumed_byte_length(),
+            streamed_randomness.consumed_byte_length(),
+            "both paths must consume the same private-randomness bytes"
+        );
+        assert_eq!(
+            in_memory_randomness.next_salt(),
+            streamed_randomness.next_salt(),
+            "both paths must leave the private-randomness stream at the same position"
         );
 
         // Openings assembled from caller-collected values must equal the
@@ -431,16 +436,18 @@ mod tests {
         let size = 64;
         let parameters = sixteen_limb_group_field_parameters();
         let columns = [column(&parameters, size, 1), column(&parameters, size, 2)];
-        let mut seed = 0x77;
+        let mut private_randomness = PrivateProofRandomness::for_test(0x77);
         let mut builder =
-            StreamedColumnCommitmentBuilder::<13>::begin(size, 2, &mut seed).expect("begin");
+            StreamedColumnCommitmentBuilder::<13>::begin(size, 2, &mut private_randomness)
+                .expect("begin");
         builder.absorb_column(&columns[0]).expect("absorb");
         // Finalizing before every declared column is rejected.
         assert!(builder.finalize().is_err());
 
-        let mut seed = 0x78;
+        let mut private_randomness = PrivateProofRandomness::for_test(0x78);
         let mut builder =
-            StreamedColumnCommitmentBuilder::<13>::begin(size, 1, &mut seed).expect("begin");
+            StreamedColumnCommitmentBuilder::<13>::begin(size, 1, &mut private_randomness)
+                .expect("begin");
         builder.absorb_column(&columns[0]).expect("absorb");
         // Absorbing more columns than declared is rejected.
         assert!(builder.absorb_column(&columns[1]).is_err());

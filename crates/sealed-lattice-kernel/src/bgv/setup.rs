@@ -1,7 +1,5 @@
 use serde_json::{Value, json};
 
-use crate::foundation::RefusalReason;
-
 mod accepted_setup;
 mod canonical_stream_transport;
 mod commitment;
@@ -11,7 +9,6 @@ mod evaluation_key_share_material;
 // evaluation-key statements (the schedule layer under
 // `limb_group_key_switch_atom::family_backend::schedule`).
 mod limb_group_key_switch_atom;
-mod local_trustee_state;
 mod private_vss;
 mod private_vss_share_proof;
 mod same_secret_bridge;
@@ -29,9 +26,11 @@ mod vss;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use accepted_setup::accepted_setup_participant_roster_from_package;
 pub(in crate::bgv) use accepted_setup::derive_collective_setup_package_hash;
 pub(crate) use accepted_setup::{
-    accepted_setup_participant_roster_from_package, describe_collective_bgv_setup_parameters,
+    describe_collective_bgv_setup_parameters,
     describe_collective_bgv_setup_parameters_for_participant_count,
     verify_collective_bgv_setup_package_in_session_from_request,
 };
@@ -51,21 +50,20 @@ pub(in crate::bgv::setup) use canonical_stream_transport::{
     restore_accepted_setup_proof_binding_lease, retain_accepted_setup_proof_binding,
     verified_canonical_setup_proof_material_bytes,
 };
+#[cfg(test)]
 pub(crate) use canonical_stream_transport::{
-    TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY, absorb_bgv_canonical_stream_chunk,
-    active_accepted_setup_proof_binding_session, begin_accepted_setup_canonical_stream,
-    begin_accepted_setup_proof_binding_session, begin_bgv_canonical_material_reader,
-    begin_bgv_canonical_stream, cancel_accepted_setup_proof_binding_session,
-    cancel_bgv_canonical_material_reader, cancel_bgv_canonical_stream,
-    evict_verified_canonical_proof_materials, finish_bgv_canonical_material_reader,
-    finish_bgv_canonical_stream, read_bgv_canonical_material_chunk,
-    retain_generated_canonical_proof_material, take_verified_canonical_proof_material_bytes,
+    TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY, evict_verified_canonical_proof_materials,
 };
-pub(crate) use commitment::{
-    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-    compute_setup_commitment_from_opening_request,
+pub(crate) use canonical_stream_transport::{
+    absorb_bgv_canonical_stream_chunk, active_accepted_setup_proof_binding_session,
+    begin_accepted_setup_canonical_stream, begin_accepted_setup_proof_binding_session,
+    begin_bgv_canonical_material_reader, begin_bgv_canonical_stream,
+    cancel_accepted_setup_proof_binding_session, cancel_bgv_canonical_material_reader,
+    cancel_bgv_canonical_stream, finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
+    read_bgv_canonical_material_chunk, retain_generated_canonical_proof_material,
+    take_verified_canonical_proof_material_bytes,
 };
-pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
+pub(crate) use commitment::compute_setup_commitment_from_opening_request;
 pub(crate) use private_vss::verify_private_vss_share_envelope_from_request;
 #[cfg(test)]
 pub(in crate::bgv::setup) use same_secret_bridge::{
@@ -77,12 +75,11 @@ pub(crate) use same_secret_bridge::{
     verify_vss_same_secret_bridge_statement_set_request,
 };
 pub(crate) use setup_proof::ProofByteSource;
-pub(crate) use trustee_evaluation_key_proof::describe_trustee_evaluation_key_statement_from_request;
-pub(crate) use trustee_evaluation_key_proof::generate_target_decryption_share_proof_bytes_from_request;
-pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_source_from_request;
+#[cfg(test)]
 pub(crate) use trustee_evaluation_key_proof::{
-    TARGET_DECRYPTION_SHARE_PROOF_FAMILY, TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND,
-    VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP,
+    TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND, TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+    generate_target_decryption_share_proof_bytes_from_request,
+    verify_target_decryption_share_proof_source_from_request,
 };
 
 pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
@@ -90,88 +87,24 @@ pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
     session_handle: u32,
 ) -> crate::encoding::CanonicalResult<Value> {
     let session = active_accepted_setup_proof_binding_session(session_handle)?;
-    let mut response =
-        verify_collective_bgv_setup_package_in_session_from_request(request, session)?;
-    if response.get("isValid").and_then(Value::as_bool) == Some(true) {
-        let accepted_setup_handle =
-            crate::bgv::target_decryption::register_verified_target_release_setup(
-                &request["setupPackage"],
-            )?;
-        response["value"]["acceptedSetupHandle"] = Value::from(accepted_setup_handle);
-    }
-    Ok(response)
+    verify_collective_bgv_setup_package_in_session_from_request(request, session)
 }
 
-pub(super) fn setup_refusal_reason(reason_code: &str) -> RefusalReason {
-    if reason_code.contains("Signature") {
-        RefusalReason::InvalidSignature
-    } else if reason_code.contains("Proof") {
-        RefusalReason::InvalidProof
-    } else if reason_code.contains("Unsupported") {
-        RefusalReason::UnsupportedVersionOrSuite
-    } else if reason_code.contains("Consumed") || reason_code.contains("Replay") {
-        RefusalReason::ConsumedState
-    } else if reason_code.contains("Duplicate")
-        || reason_code.contains("Equivocation")
-        || reason_code.contains("Conflict")
-    {
-        RefusalReason::Equivocation
-    } else if reason_code.contains("Missing") {
-        RefusalReason::MissingPrerequisite
-    } else if reason_code.contains("HashMismatch")
-        || reason_code.contains("RootMismatch")
-        || reason_code.contains("BindingMismatch")
-        || reason_code.contains("DigestMismatch")
-        || reason_code.contains("CoverageMismatch")
-        || reason_code.contains("SeedMismatch")
-        || reason_code.contains("AadMismatch")
-    {
-        RefusalReason::WrongHashOrRoot
-    } else if reason_code.contains("Context")
-        || reason_code.contains("RosterHashMismatch")
-        || reason_code.contains("SourceTrusteeMismatch")
-        || reason_code.contains("RecipientMismatch")
-        || reason_code.contains("IdentityMismatch")
-    {
-        RefusalReason::WrongContext
-    } else if reason_code.contains("Outside")
-        || reason_code.contains("outside")
-        || reason_code.contains("SupportedRange")
-    {
-        RefusalReason::OutsideSupportedProfile
-    } else if reason_code.contains("Abort") || reason_code.contains("Relation") {
-        RefusalReason::InvalidArithmeticRelation
-    } else if reason_code.contains("Malformed") || reason_code.contains("NotObject") {
-        RefusalReason::MalformedEncoding
-    } else if reason_code.contains("Type")
-        || reason_code.contains("Length")
-        || reason_code.contains("Count")
-        || reason_code.contains("Position")
-        || reason_code.contains("Prime")
-        || reason_code.contains("RingDegree")
-        || reason_code.contains("Domain")
-        || reason_code.contains("Empty")
-        || reason_code.contains("Invalid")
-    {
-        RefusalReason::WrongTypeOrLength
-    } else {
-        RefusalReason::MalformedEncoding
-    }
-}
 #[cfg(test)]
 pub(crate) use trustee_evaluation_key_proof::verify_vss_share_linkage_proof_material_set_from_request;
 pub(crate) use trustee_evaluation_key_proof::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
 };
 pub(crate) use vss_commitment::{
-    VssAggregateThresholdProofContext, VssPublicAggregateThresholdCommitmentSetContext,
-    compute_vss_committed_material_commitment_request,
-    validate_standalone_vss_committed_material_commitment,
-    verify_vss_public_aggregate_threshold_commitment_set,
+    VssAggregateThresholdProofContext, compute_vss_committed_material_commitment_request,
     verify_vss_public_aggregate_threshold_proofs,
 };
+#[cfg(test)]
 pub(crate) use vss_commitment::{
-    VssCommittedMaterialCommitmentInput, compute_vss_committed_material_commitment,
+    VssCommittedMaterialCommitmentInput, VssPublicAggregateThresholdCommitmentSetContext,
+    compute_vss_committed_material_commitment,
+    validate_standalone_vss_committed_material_commitment,
+    verify_vss_public_aggregate_threshold_commitment_set,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) const TEST_CHECKPOINT_ROOT_ENVIRONMENT_VARIABLE: &str =
@@ -197,8 +130,8 @@ use crate::{
         modular_arithmetic::add_mod,
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         setup_helpers::{
-            array_at_path, hash_at_path, read_non_empty_string, read_optional_u64, string_at_path,
-            unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
+            array_at_path, hash_at_path, read_non_empty_string, string_at_path, unsigned_at_path,
+            usize_at_path, validate_hash_string, value_at_path,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -211,22 +144,21 @@ use crate::bgv::{
     ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
 };
 
-// The roster-derived context hashes that target-decryption commitment contexts
-// and proof statements bind to. The roster hash is read from the accepted setup
-// package's setupContext. The setup-parameters and Q_share hashes are the deterministic roster-derived
-// identities recomputed from the accepted-setup parameter set, so a target
-// decryption verified against a package pins the same setup identity the setup
-// acceptance established.
+// The context hashes that target-decryption commitment contexts and proof
+// statements bind to. The setup-context hash canonically binds setupContext,
+// including rosterHash. The setup-parameters hash is recomputed from the
+// accepted roster so target decryption pins the setup identity established by
+// setup acceptance.
+#[cfg(test)]
 pub(crate) struct CollectiveBgvSetupContextHashes {
     pub(crate) setup_context_hash: String,
-    pub(crate) roster_hash: String,
     pub(crate) setup_parameters_hash: String,
 }
 
+#[cfg(test)]
 pub(crate) fn collective_bgv_setup_context_hashes_from_package(
     setup_package: &Value,
 ) -> CanonicalResult<CollectiveBgvSetupContextHashes> {
-    let roster_hash = hash_at_path(setup_package, &["setupContext", "rosterHash"])?.to_string();
     let roster = accepted_setup::accepted_roster_from_package(setup_package)?;
 
     Ok(CollectiveBgvSetupContextHashes {
@@ -234,7 +166,6 @@ pub(crate) fn collective_bgv_setup_context_hashes_from_package(
             setup_package,
             &["setupContext"],
         )?)?,
-        roster_hash,
         setup_parameters_hash: accepted_setup::setup_parameters_hash_for_roster(&roster)?,
     })
 }

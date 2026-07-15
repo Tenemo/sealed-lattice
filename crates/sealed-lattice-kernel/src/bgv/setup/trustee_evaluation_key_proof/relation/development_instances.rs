@@ -16,8 +16,9 @@ use crate::bgv::setup::commitment::compute_setup_big_signed_lifted_commitment;
 use crate::bgv::setup::sampling::dense_public_residues_with_degree;
 use crate::bgv::setup::setup_proof::SetupProofFamily;
 use crate::encoding::CanonicalResult;
-use crate::hashing::hash_framed_parts_512 as hash512;
+use crate::hashing::{derive_canonical_object_hash, hash_framed_parts_512 as hash512};
 use num_bigint::BigInt;
+use serde_json::json;
 
 const WITNESS_SECRET_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/witness-secret";
 
@@ -133,17 +134,43 @@ const ROUND_ONE_AGGREGATE_DOMAIN: &str =
 // shared secret.
 fn generate_development_key(
     kind: EvaluationKeyShareKind,
-    key_switch_seed_hex: &str,
+    public_matrix_seed_hash: &str,
+    evaluator_key_schedule_root: &str,
     level: usize,
     ring_degree: usize,
     secret_coefficients: &[i64],
 ) -> CanonicalResult<(EvaluationKeyShareDescriptor, Vec<Vec<i64>>)> {
-    let key_switch_domain = match kind {
-        EvaluationKeyShareKind::RelinearizationRoundOne => "relinearization-round-one".to_string(),
-        EvaluationKeyShareKind::RelinearizationRoundTwo => "relinearization-round-two".to_string(),
-        EvaluationKeyShareKind::GaloisRotation { galois_element } => {
-            format!("rotation-{galois_element}")
-        }
+    let (key_switch_domain, key_switch_seed_hex) = match kind {
+        EvaluationKeyShareKind::RelinearizationRoundOne => (
+            "relinearization".to_string(),
+            derive_canonical_object_hash(&json!({
+                "objectType": "RelinearizationKeySwitchPublicSampleSeed",
+                "publicMatrixSeedHash": public_matrix_seed_hash,
+                "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
+                "round": "round-one",
+                "level": level,
+            }))?,
+        ),
+        EvaluationKeyShareKind::RelinearizationRoundTwo => (
+            "relinearization".to_string(),
+            derive_canonical_object_hash(&json!({
+                "objectType": "RelinearizationKeySwitchPublicSampleSeed",
+                "publicMatrixSeedHash": public_matrix_seed_hash,
+                "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
+                "round": "round-two",
+                "level": level,
+            }))?,
+        ),
+        EvaluationKeyShareKind::GaloisRotation { galois_element } => (
+            format!("galois-{galois_element}"),
+            derive_canonical_object_hash(&json!({
+                "objectType": "GaloisKeySwitchPublicSampleSeed",
+                "publicMatrixSeedHash": public_matrix_seed_hash,
+                "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
+                "rotation": galois_element,
+                "level": level,
+            }))?,
+        ),
         EvaluationKeyShareKind::PublicKeyShare => {
             return Err(invalid_succinct_setup_proof(
                 "the public-key share family uses its own development generator",
@@ -153,7 +180,7 @@ fn generate_development_key(
     let digit_count = level + 1;
     let error_coefficients_by_digit = sample_development_errors(
         &key_switch_domain,
-        key_switch_seed_hex,
+        &key_switch_seed_hex,
         digit_count,
         ring_degree,
     );
@@ -194,7 +221,7 @@ fn generate_development_key(
     }
     let component_b_by_digit = build_component_material(
         &key_switch_domain,
-        key_switch_seed_hex,
+        &key_switch_seed_hex,
         level,
         ring_degree,
         secret_coefficients,
@@ -207,7 +234,7 @@ fn generate_development_key(
             kind,
             level,
             key_switch_domain,
-            key_switch_seed_hex: key_switch_seed_hex.to_string(),
+            key_switch_seed_hex,
             component_b_by_digit,
             round_one_aggregate_diagonal,
         },
@@ -256,15 +283,6 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
     let secret_coefficients =
         DeterministicSampler::new(WITNESS_SECRET_DOMAIN, &[key_switch_seed_hex.as_bytes()])
             .ternary(ring_degree);
-    let mut keys = Vec::with_capacity(key_requests.len());
-    let mut error_coefficients_by_key = Vec::with_capacity(key_requests.len());
-    for (request_index, (kind, level)) in key_requests.iter().enumerate() {
-        let key_seed = format!("{key_switch_seed_hex}-{request_index}");
-        let (descriptor, errors) =
-            generate_development_key(*kind, &key_seed, *level, ring_degree, &secret_coefficients)?;
-        keys.push(descriptor);
-        error_coefficients_by_key.push(errors);
-    }
     let public_matrix_seed_hash = {
         let digest = hash512(
             LINKAGE_MATRIX_SEED_DOMAIN,
@@ -275,6 +293,22 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>()
     };
+    let context = development_context(key_switch_seed_hex);
+    let evaluator_key_schedule_root = &context.binding_roots[0];
+    let mut keys = Vec::with_capacity(key_requests.len());
+    let mut error_coefficients_by_key = Vec::with_capacity(key_requests.len());
+    for (kind, level) in key_requests {
+        let (descriptor, errors) = generate_development_key(
+            *kind,
+            &public_matrix_seed_hash,
+            evaluator_key_schedule_root,
+            *level,
+            ring_degree,
+            &secret_coefficients,
+        )?;
+        keys.push(descriptor);
+        error_coefficients_by_key.push(errors);
+    }
     let negative_indicator_coefficients = secret_coefficients
         .iter()
         .map(|coefficient| i64::from(*coefficient < 0))
@@ -332,7 +366,7 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
 
     Ok((
         TrusteeEvaluationKeyStatement {
-            context: development_context(key_switch_seed_hex),
+            context,
             ring_degree,
             proof: SetupProofStatement::TrusteeEvaluationKey {
                 keys,
@@ -432,7 +466,6 @@ pub(crate) fn generate_development_public_key_share_instance(
     let mut target_constant_commitments = Vec::with_capacity(DATA_PRIMES.len());
     let mut target_constant_commitment_roots = Vec::with_capacity(DATA_PRIMES.len());
     let mut material_seeds = Vec::with_capacity(DATA_PRIMES.len());
-    let mut material_context_hashes = Vec::with_capacity(DATA_PRIMES.len());
     for (target_rns_limb_index, target_rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
         let target_message_coefficients = secret_coefficients
             .iter()
@@ -488,7 +521,6 @@ pub(crate) fn generate_development_public_key_share_instance(
         )?);
         target_constant_commitment_roots.push(computation.commitment_root);
         material_seeds.push(material_seed_hex);
-        material_context_hashes.push(computation.commitment_context_hash);
     }
     let same_secret_bridge = SameSecretBridgeStatement {
         public_matrix_seed_hash: public_matrix_seed_hash.clone(),
@@ -517,7 +549,6 @@ pub(crate) fn generate_development_public_key_share_instance(
             negative_indicator_coefficients,
             committed_material: VssCommittedMaterialWitness {
                 vss_committed_material_seeds_by_bound_message: material_seeds,
-                vss_committed_material_context_hashes_by_bound_message: material_context_hashes,
             },
         },
     ))

@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn commitment_command_computes_canonical_roots() -> CanonicalResult<()> {
+    fn commitment_command_derives_the_source_prime() -> CanonicalResult<()> {
         let public_matrix_seed_hash = valid_hash('e');
         let message = message_coefficients();
         let randomness = randomness_columns(1);
@@ -183,7 +183,6 @@ mod tests {
             "command": "ComputeSetupCommitmentFromOpening",
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "sourceRnsLimbIndex": 0,
-            "sourceMessageModulus": DATA_PRIMES[0],
             "shamirCoefficientIndex": 1,
             "messageCoefficients": message,
             "randomnessByColumn": randomness,
@@ -191,31 +190,27 @@ mod tests {
         }))?;
 
         assert_eq!(
-            response["commitmentRoot"]
-                .as_str()
-                .expect("commitment root")
-                .len(),
-            128
+            response["commitment"]["sourceMessageModulus"],
+            json!(DATA_PRIMES[0]),
         );
+        assert!(response.get("commitmentRoot").is_none());
 
         Ok(())
     }
 
     #[test]
-    fn commitment_command_rejects_wrong_source_prime() {
+    fn commitment_command_rejects_an_out_of_range_source_limb() {
         let public_matrix_seed_hash = valid_hash('f');
-        let mut wrong_prime_request = json!({
+        let request = json!({
             "command": "ComputeSetupCommitmentFromOpening",
             "publicMatrixSeedHash": public_matrix_seed_hash,
-            "sourceRnsLimbIndex": 0,
-            "sourceMessageModulus": DATA_PRIMES[0],
+            "sourceRnsLimbIndex": DATA_PRIMES.len(),
             "shamirCoefficientIndex": 1,
             "messageCoefficients": message_coefficients(),
             "randomnessByColumn": randomness_columns(1),
             "ringDegree": TEST_RING_DEGREE,
         });
-        wrong_prime_request["sourceMessageModulus"] = json!(DATA_PRIMES[1]);
-        assert!(compute_setup_commitment_from_opening_request(&wrong_prime_request).is_err());
+        assert!(compute_setup_commitment_from_opening_request(&request).is_err());
     }
 
     #[test]

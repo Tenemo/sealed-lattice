@@ -336,6 +336,7 @@ mod tests {
     use super::super::key_proof::{
         KeyFriProofParameters, ZERO_STATEMENT_BINDING, prove_key_fri, verify_key_fri,
     };
+    use super::super::private_randomness::PrivateProofRandomness;
     use super::*;
     use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS};
 
@@ -526,7 +527,7 @@ mod tests {
             query_count: 40,
             mask_degree: 0,
         };
-        let mut salt_seed = 0xb41d;
+        let mut private_randomness = PrivateProofRandomness::for_test(0xb41d);
         let proof = prove_key_fri(
             &parameters,
             ring_degree,
@@ -538,7 +539,7 @@ mod tests {
             &ZERO_STATEMENT_BINDING,
             0,
             &proof_parameters,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("bridged material proves");
         assert!(
@@ -625,7 +626,8 @@ mod tests {
                 query_count: 40,
                 mask_degree: 0,
             };
-            let mut salt_seed = 0x517 + group_start_limb as u64;
+            let mut private_randomness =
+                PrivateProofRandomness::for_test(0x517 + group_start_limb as u64);
             let proof = prove_key_fri(
                 &parameters,
                 ring_degree,
@@ -637,7 +639,7 @@ mod tests {
                 &ZERO_STATEMENT_BINDING,
                 group_start_limb as u64,
                 &proof_parameters,
-                &mut salt_seed,
+                &mut private_randomness,
             )
             .expect("split group proves");
             assert!(

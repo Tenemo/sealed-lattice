@@ -15,6 +15,7 @@ pub(in super::super) fn verify_public_key_shares(
     };
     if !share_set.is_object() {
         return Ok(Some(public_key_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "publicKeySharesNotObject",
             "publicKeyShares must be a root-bound object, not an array or scalar",
             "setupPackage.publicKeyShares",
@@ -23,20 +24,14 @@ pub(in super::super) fn verify_public_key_shares(
     if share_set.get("objectType").and_then(Value::as_str) != Some(PUBLIC_KEY_SHARE_SET_OBJECT_TYPE)
     {
         return Ok(Some(public_key_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "publicKeyShareSetTypeMismatch",
             "publicKeyShares.objectType must be PublicKeyShareSet",
             "setupPackage.publicKeyShares.objectType",
         )?));
     }
 
-    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "setupContext was required before public-key share verification",
-        )
-    })?;
     let roster = super::accepted_roster_from_package(setup_package)?;
-    let common_binding = public_key_common_binding(setup_package)?;
     let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
     let Some(share_records) = share_set.get("shareRecords").and_then(Value::as_array) else {
         return Ok(Some(setup_refusals(
@@ -46,50 +41,20 @@ pub(in super::super) fn verify_public_key_shares(
     };
     if share_records.len() != roster.participant_count as usize {
         return Ok(Some(public_key_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "publicKeyShareCountMismatch",
             "publicKeyShares.shareRecords must contain one share per trustee",
             "setupPackage.publicKeyShares.shareRecords",
         )?));
     }
-    let mut seen_roster_positions = BTreeSet::new();
-    for share_record in share_records {
+    for (expected_roster_position, share_record) in share_records.iter().enumerate() {
         if let Some(response) = verify_public_key_share_record(
             share_record,
-            setup_context,
+            expected_roster_position as u64,
             &expected_trustees,
-            &common_binding,
-            &mut seen_roster_positions,
         )? {
             return Ok(Some(response));
         }
-    }
-
-    let Some(public_key_share_set_root) = share_set
-        .get("publicKeyShareSetRoot")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(setup_refusals(
-            vec!["publicKeyShares.publicKeyShareSetRoot".to_string()],
-            Vec::new(),
-        )));
-    };
-    validate_hash_string(
-        public_key_share_set_root,
-        "publicKeyShares.publicKeyShareSetRoot",
-    )?;
-    let root_input = json!({
-        "objectType": PUBLIC_KEY_SHARE_SET_OBJECT_TYPE,
-        "setupContextHash": setup_context_hash(setup_context)?,
-        "publicMatrixSeedHash": common_binding.public_matrix_seed_hash.as_str(),
-        "shareRecords": share_records,
-    });
-    let expected_root = derive_canonical_object_hash(&root_input)?;
-    if public_key_share_set_root != expected_root {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareSetRootMismatch",
-            "publicKeyShareSetRoot does not match the canonical public-key share set",
-            "setupPackage.publicKeyShares.publicKeyShareSetRoot",
-        )?));
     }
 
     Ok(None)
@@ -97,13 +62,12 @@ pub(in super::super) fn verify_public_key_shares(
 
 fn verify_public_key_share_record(
     share_record: &Value,
-    setup_context: &Value,
+    expected_roster_position: u64,
     expected_trustees: &BTreeMap<u64, String>,
-    common_binding: &PublicKeyCommonBinding,
-    seen_roster_positions: &mut BTreeSet<u64>,
 ) -> CanonicalResult<Option<Refusals>> {
     if !share_record.is_object() {
         return Ok(Some(public_key_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "publicKeyShareNotObject",
             "public-key share records must be objects",
             "setupPackage.publicKeyShares.shareRecords",
@@ -112,6 +76,7 @@ fn verify_public_key_share_record(
     if share_record.get("objectType").and_then(Value::as_str) != Some(PUBLIC_KEY_SHARE_OBJECT_TYPE)
     {
         return Ok(Some(public_key_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "publicKeyShareTypeMismatch",
             "public-key share objectType must be PublicKeyShare",
             "setupPackage.publicKeyShares.shareRecords.objectType",
@@ -119,10 +84,11 @@ fn verify_public_key_share_record(
     }
     let trustee_identity = value_string(share_record, "trusteeIdentity")?;
     let trustee_roster_position = value_u64(share_record, "trusteeRosterPosition")?;
-    if !seen_roster_positions.insert(trustee_roster_position) {
+    if trustee_roster_position != expected_roster_position {
         return Ok(Some(public_key_refusal(
-            "publicKeyShareDuplicate",
-            "public-key share records must have distinct trustee roster positions",
+            crate::foundation::RefusalReason::WrongTypeOrLength,
+            "publicKeyShareOrderMismatch",
+            "public-key share records must follow canonical roster order",
             "setupPackage.publicKeyShares.shareRecords",
         )?));
     }
@@ -132,6 +98,7 @@ fn verify_public_key_share_record(
         != Some(trustee_identity)
     {
         return Ok(Some(public_key_refusal(
+            crate::foundation::RefusalReason::WrongContext,
             "publicKeyShareTrusteeMismatch",
             "public-key share trustee identity must match the accepted setup roster",
             "setupPackage.publicKeyShares.shareRecords.trusteeIdentity",
@@ -144,38 +111,68 @@ fn verify_public_key_share_record(
         return Ok(Some(response));
     }
 
-    let Some(public_key_share_root) = share_record
-        .get("publicKeyShareRoot")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(setup_refusals(
-            vec!["publicKeyShares.shareRecords.publicKeyShareRoot".to_string()],
-            Vec::new(),
-        )));
-    };
-    validate_hash_string(
-        public_key_share_root,
-        "publicKeyShares.shareRecords.publicKeyShareRoot",
-    )?;
-    let root_input = json!({
+    Ok(None)
+}
+
+pub(in crate::bgv::setup) fn derive_public_key_share_root(
+    setup_context: &Value,
+    public_matrix_seed_hash: &str,
+    share_record: &Value,
+) -> CanonicalResult<String> {
+    let share_coefficient_hashes = share_record
+        .get("shareCoefficientVectorHash512ByLimb")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "public-key share coefficient hashes are required to derive the share root",
+            )
+        })?;
+    derive_canonical_object_hash(&json!({
         "objectType": PUBLIC_KEY_SHARE_OBJECT_TYPE,
         "setupContextHash": setup_context_hash(setup_context)?,
-        "trusteeIdentity": trustee_identity,
-        "trusteeRosterPosition": trustee_roster_position,
-        "publicMatrixSeedHash": common_binding.public_matrix_seed_hash.as_str(),
-        "shareCoefficientVectorHash512ByLimb": share_coefficient_hashes
-            .expect("public-key share limb hashes were checked"),
-    });
-    let expected_root = derive_canonical_object_hash(&root_input)?;
-    if public_key_share_root != expected_root {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareRootMismatch",
-            "publicKeyShareRoot does not match the canonical public-key share",
-            "setupPackage.publicKeyShares.shareRecords.publicKeyShareRoot",
-        )?));
-    }
+        "trusteeIdentity": value_string(share_record, "trusteeIdentity")?,
+        "trusteeRosterPosition": value_u64(share_record, "trusteeRosterPosition")?,
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "shareCoefficientVectorHash512ByLimb": share_coefficient_hashes,
+    }))
+}
 
-    Ok(None)
+pub(in crate::bgv::setup) fn derive_public_key_share_set_root(
+    setup_package: &Value,
+) -> CanonicalResult<String> {
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupContext is required to derive the public-key share set root",
+        )
+    })?;
+    let public_matrix_seed_hash = setup_package
+        .get("commonRandomness")
+        .and_then(|common_randomness| common_randomness.get("publicMatrixSeedHash"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "publicMatrixSeedHash is required to derive the public-key share set root",
+            )
+        })?;
+    let share_records = setup_package
+        .get("publicKeyShares")
+        .and_then(|share_set| share_set.get("shareRecords"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "public-key share records are required to derive the share set root",
+            )
+        })?;
+    derive_canonical_object_hash(&json!({
+        "objectType": PUBLIC_KEY_SHARE_SET_OBJECT_TYPE,
+        "setupContextHash": setup_context_hash(setup_context)?,
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "shareRecords": share_records,
+    }))
 }
 
 fn verify_public_key_share_limb_hashes(
@@ -194,6 +191,7 @@ fn verify_public_key_share_limb_hashes(
     };
     if limb_hashes.len() != DATA_PRIMES.len() {
         return Ok(Some(public_key_refusal(
+            crate::foundation::RefusalReason::WrongTypeOrLength,
             "publicKeyShareCoefficientLimbCountMismatch",
             "public-key share must bind one coefficient hash for every Q_share limb",
             LIMB_HASHES_OBJECT_PATH,

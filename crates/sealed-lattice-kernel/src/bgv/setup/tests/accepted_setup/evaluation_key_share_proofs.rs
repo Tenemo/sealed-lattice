@@ -8,10 +8,8 @@ fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
     assert_collective_public_key_bearing_setup_package_refused(
         "relinearization key-share rounds replaced with a malformed object",
         |package| {
-            let evaluator_key_schedule_root =
-                package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"].clone();
             package["relinearizationKeyShareRounds"] = serde_json::json!({
-                "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
+                "objectType": "MalformedRelinearizationKeyShareRounds",
             });
         },
         "wrongTypeOrLength",

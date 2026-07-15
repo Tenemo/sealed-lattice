@@ -32,13 +32,13 @@ use serde_json::{Value, json};
 
 use crate::{
     bgv::coefficient_codec::coefficient_vector_le_hex,
-    bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    bgv::parameters::DATA_PRIMES,
     bgv::setup_helpers::string_field,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::VerifiedCanonicalStreamSummary,
 };
 
-const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
+const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV2";
 
 // Key-share families whose component material this module encodes; the family
 // string scopes the component hash domains and material references.
@@ -59,24 +59,6 @@ impl EvaluationKeyShareProofFamily {
 
 fn invalid_evaluation_key_share_material(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
-}
-
-fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
-    value
-        .get(field_name)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            invalid_evaluation_key_share_material(format!(
-                "{field_name} must be an unsigned integer"
-            ))
-        })
-}
-
-fn value_usize(value: &Value, field_name: &str) -> CanonicalResult<usize> {
-    let unsigned = value_u64(value, field_name)?;
-    usize::try_from(unsigned).map_err(|_| {
-        invalid_evaluation_key_share_material(format!("{field_name} does not fit usize"))
-    })
 }
 
 fn validate_hex_string(value: &str, field_name: &str) -> CanonicalResult<()> {

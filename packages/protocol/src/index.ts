@@ -1,21 +1,10 @@
-export { restoreAndPrepareLocalTargetDecryptionShareWitness } from './target-decryption/local-target-share-witness.js';
-export type {
-    PreparedLocalTargetDecryptionShareWitness,
-    RestoredLocalTargetDecryptionShareWitnessInput,
-    TargetDecryptionAggregateOpeningMaterialSource,
-} from './target-decryption/local-target-share-witness.js';
-export { createBgvTargetDecryptionShareCanonicalProofMaterialTransport } from './target-decryption/proof-material-transport.js';
-export type {
-    BgvTargetDecryptionShareCanonicalMaterialExport,
-    BgvTargetDecryptionShareCanonicalProofMaterialTransport,
-    BgvTargetDecryptionShareProofMaterial,
-} from './target-decryption/proof-material-transport.js';
 export { derivePollSpecHash, validatePollSpec } from './lifecycle/poll-spec.js';
 export {
     openUntrustedStorageTransactionStore,
     UntrustedStorageTransactionError,
     UntrustedStorageTransactionStore,
 } from './runtime/untrusted-storage-transaction-store.js';
+export { createRuntimeRecordAuthenticatedRecoveryProtection } from './runtime/authenticated-runtime-record.js';
 export type {
     UntrustedStorageAdapter,
     UntrustedStorageAuthenticatedRecoveryProtection,
@@ -43,32 +32,15 @@ export type {
     BrowserLocalAuthenticatedMailboxStorageConfiguration,
 } from './runtime/authenticated-mailbox-storage.js';
 export {
-    createBrowserLocalStateWitnessVoteIssuer,
     DurableStateWitnessServiceError,
     openDurableStateWitnessService,
 } from './runtime/durable-state-witness-service.js';
 export type {
-    BrowserLocalStateWitnessVoteIssuer,
     DurableStateWitnessService,
     DurableStateWitnessServiceErrorCode,
     DurableStateWitnessServiceLimits,
     RuntimeStorageAuthorityContext,
 } from './runtime/durable-state-witness-service.js';
-export {
-    DurableProofApplicationServiceError,
-    openDurableProofApplicationService,
-} from './runtime/durable-proof-application-service.js';
-export type {
-    DurableProofApplicationChargeResult,
-    DurableProofApplicationOperationCharge,
-    DurableProofApplicationReservation,
-    DurableProofApplicationReservationInput,
-    DurableProofApplicationResourceCeilings,
-    DurableProofApplicationResourceCounters,
-    DurableProofApplicationService,
-    DurableProofApplicationServiceErrorCode,
-    DurableProofApplicationServiceLimits,
-} from './runtime/durable-proof-application-service.js';
 export {
     AuthenticatedCheckpointStoreError,
     openAuthenticatedCheckpointStore,
@@ -87,10 +59,8 @@ export type {
 } from './runtime/authenticated-checkpoint-store.js';
 export { deriveCollectiveBgvSetupRosterHash } from './roster/index.js';
 export type { CollectiveBgvSetupRosterEntryInput } from './roster/index.js';
-export { createPrivateVssMailboxDeliverySet } from './setup/private-vss-mailbox-delivery.js';
 export type {
     CanonicalProofMaterialChunkPull,
-    CanonicalProofMaterialChunkSink,
     SetupProofMaterialChunkSource,
 } from './setup/setup-proof-material-transport.js';
 export {
@@ -104,17 +74,14 @@ export {
     createGaloisKeyShareBatches,
     createRelinearizationKeyShareRounds,
     createTrusteeEvaluationKeyProofs,
-    evaluationKeyShareComponentVectorRoot,
 } from './setup/evaluation-key-proof-records.js';
 export { createEvaluatorKeySchedule } from './setup/evaluator-key-schedule.js';
 export {
-    acceptedBgvSetupQSharePrimes,
     createVssSourceTrusteeCoefficientOpeningState,
     createVssSourceTrusteeCoefficientOpeningStateProvider,
     createVssCoefficientCommitmentBundle,
     setupCommitmentRandomnessWidth,
 } from './setup/vss-coefficient-commitments.js';
-export { createEncryptedLocalTrusteeSetupStateFromVerifiedShares } from './setup/local-trustee-setup-state.js';
 export { copyCanonicalStreamDescriptor } from './setup/canonical-stream-descriptor.js';
 export { createSetupPackageVerificationInput } from './setup/setup-package-assembly.js';
 export {
@@ -125,7 +92,6 @@ export {
     createVssShareAcceptanceRecord,
     createVssShareAcceptanceSet,
     createVssShareComplaintRecord,
-    createVssShareComplaintRecordFromLocalVerification,
 } from './setup/vss-share-verification-records.js';
 export type {
     EvaluationKeyShareComponentMaterialChunkSource,
@@ -149,13 +115,8 @@ export type {
     VssOpeningRandomByteSource,
 } from './setup/vss-coefficient-commitments.js';
 export type {
-    EncryptedLocalTrusteeSetupState,
-    LocalTrusteeSetupStateCommitment,
-} from './setup/local-trustee-setup-state.js';
-export type {
     SetupPackage,
     SetupPackageVerificationInput,
-    SetupPackageVerificationInputSource,
 } from './setup/setup-package-assembly.js';
 export type {
     TransportedSameSecretBridgeProofMaterialSet,
@@ -167,8 +128,3 @@ export type {
     VssShareAcceptanceRecord,
     VssShareComplaintRecord,
 } from './setup/vss-share-verification-records.js';
-export {
-    deriveFrozenRosterParameters,
-    deriveThresholdParameters,
-    deriveThresholdParametersHash,
-} from './lifecycle/thresholds.js';

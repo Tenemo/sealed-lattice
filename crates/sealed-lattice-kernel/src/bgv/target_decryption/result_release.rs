@@ -161,7 +161,6 @@ fn absorb_target_result_release_share(
         &session.setup_binding,
         &session.target_accepted,
         &session.target_ciphertexts,
-        &session.target_share_profile,
         target_share_proof,
     )?;
     if !session
@@ -290,7 +289,6 @@ fn verify_target_share_release_entry(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
     share_proof: &Value,
 ) -> CanonicalResult<VerifiedTargetShareRelease> {
     let target_decryption_share = value_at_path(share_proof, &["targetDecryptionShare"])?;
@@ -312,7 +310,6 @@ fn verify_target_share_release_entry(
             setup_binding,
             target_accepted,
             target_ciphertexts,
-            target_share_profile,
             participant,
             target_decryption_share,
             proof_statement,
@@ -337,8 +334,8 @@ fn verify_target_share_release_entry(
         evidence: json!({
             "trusteeIdentity": participant.trustee_identity,
             "rosterPosition": participant.roster_position,
-            "targetDecryptionShareHash": hash_at_path(target_decryption_share, &["targetDecryptionShareHash"])?,
-            "proofStatementRoot": hash_at_path(proof_statement, &["proofStatementRoot"])?,
+            "targetDecryptionShareHash": target_decryption_share_hash(target_decryption_share)?,
+            "proofStatementRoot": target_decryption_share_proof_statement_root(proof_statement)?,
             "proofBytesHash": hash_at_path(proof_material, &["proofBytesHash"])?,
         }),
     })

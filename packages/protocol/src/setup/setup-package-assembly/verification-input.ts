@@ -1,12 +1,9 @@
 import { assertProtocolHash } from '../common-fields.js';
 
-import type {
-    SetupPackageVerificationInput,
-    SetupPackageVerificationInputSource,
-} from './types.js';
+import type { SetupPackageVerificationInput } from './types.js';
 
 export const createSetupPackageVerificationInput = (
-    input: SetupPackageVerificationInputSource,
+    input: SetupPackageVerificationInput,
 ): SetupPackageVerificationInput => {
     assertProtocolHash(input.expectedManifestHash, 'expectedManifestHash');
     assertProtocolHash(input.expectedRosterHash, 'expectedRosterHash');

@@ -1,18 +1,5 @@
 use super::*;
 
-pub(super) struct TargetDecryptionShareAllActiveLimbsProofRequestInput<'a> {
-    pub(super) setup_binding: &'a SetupBinding,
-    pub(super) target_accepted: &'a TargetAcceptedBinding,
-    pub(super) target_ciphertexts: &'a TargetCiphertextPair,
-    pub(super) target_share_profile: &'a TargetShareProfile,
-    pub(super) participant: &'a ParticipantBinding,
-    pub(super) local_target_share_witness: &'a Value,
-    pub(super) target_decryption_share: &'a Value,
-    pub(super) proof_statement: &'a Value,
-    pub(super) proof_randomness_seed_hex: &'a str,
-    pub(super) proof_randomness_nonce_hex: &'a str,
-}
-
 pub(super) struct TargetDecryptionShareAllActiveLimbsProofStatementInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) target_ciphertexts: &'a TargetCiphertextPair,
@@ -21,27 +8,29 @@ pub(super) struct TargetDecryptionShareAllActiveLimbsProofStatementInput<'a> {
     pub(super) proof_statement: &'a Value,
 }
 
-pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_witness(
-    input: TargetDecryptionShareAllActiveLimbsProofRequestInput<'_>,
+pub(super) struct VerifiedLocalTargetDecryptionShareAllActiveLimbsProofRequestInput<'a> {
+    pub(super) setup_binding: &'a SetupBinding,
+    pub(super) target_accepted: &'a TargetAcceptedBinding,
+    pub(super) target_ciphertexts: &'a TargetCiphertextPair,
+    pub(super) participant: &'a ParticipantBinding,
+    pub(super) local_target_share_witness: &'a LocalTargetDecryptionShareWitness,
+    pub(super) target_decryption_share: &'a Value,
+    pub(super) proof_statement: &'a Value,
+    pub(super) proof_randomness_seed_hex: &'a str,
+}
+
+pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_verified_local_witness(
+    input: VerifiedLocalTargetDecryptionShareAllActiveLimbsProofRequestInput<'_>,
 ) -> CanonicalResult<Value> {
     validate_target_decryption_share_proof_statement_shape(
         input.proof_statement,
         input.setup_binding,
         input.target_accepted,
         input.target_ciphertexts,
-        input.target_share_profile,
         input.participant,
         input.target_decryption_share,
     )?;
-    let local_witness = verify_target_decryption_relation_from_local_witness(
-        input.setup_binding,
-        input.target_accepted,
-        input.target_ciphertexts,
-        input.target_share_profile,
-        input.participant,
-        input.local_target_share_witness,
-        input.target_decryption_share,
-    )?;
+    let local_witness = input.local_target_share_witness;
     let active_limb_count = input.target_ciphertexts.target_id.level + 1;
     for target_role in TARGET_DECRYPTION_SMUDGING_ROLES {
         let selected_ciphertext =
@@ -54,18 +43,12 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
         }
     }
 
-    let mut message_vectors = Vec::with_capacity(
-        active_limb_count * (1 + TARGET_DECRYPTION_SMUDGING_ROLES.len() * POLYNOMIAL_DEGREE),
-    );
-    // Committed-material regeneration inputs in the statement's bound-commitment
-    // order: per limb statement the aggregate, then each role's smudging
-    // commitments.
-    let mut bound_material_seeds = Vec::with_capacity(
-        active_limb_count * (1 + TARGET_DECRYPTION_SMUDGING_ROLES.len() * POLYNOMIAL_DEGREE),
-    );
-    let mut bound_material_context_hashes = Vec::with_capacity(
-        active_limb_count * (1 + TARGET_DECRYPTION_SMUDGING_ROLES.len() * POLYNOMIAL_DEGREE),
-    );
+    let mut message_vectors =
+        Vec::with_capacity(active_limb_count * (1 + TARGET_DECRYPTION_SMUDGING_ROLES.len()));
+    // Committed-material regeneration inputs follow the statement order: the
+    // aggregate opening, then one private flooding-noise opening per role.
+    let mut bound_material_seeds =
+        Vec::with_capacity(active_limb_count * (1 + TARGET_DECRYPTION_SMUDGING_ROLES.len()));
     for target_rns_limb_index in 0..active_limb_count {
         let Some(target_rns_prime) = DATA_PRIMES.get(target_rns_limb_index).copied() else {
             return Err(CanonicalError::new(
@@ -102,34 +85,22 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
             "target proof slice aggregate message",
         )?);
         bound_material_seeds.push(aggregate_opening.aggregate_material_seed_hex.clone());
-        bound_material_context_hashes
-            .push(aggregate_opening.aggregate_commitment_context_hash.clone());
         for target_role in TARGET_DECRYPTION_SMUDGING_ROLES {
-            let smudging_openings = target_decryption_smudging_proof_openings_for_slice(
+            let flooding_noise_opening = target_decryption_flooding_noise_proof_opening_for_slice(
                 input.setup_binding,
                 input.target_accepted,
-                input.target_share_profile,
-                &local_witness.smudging_seed_hex,
-                &local_witness.smudging_polynomial_openings,
+                input.participant,
+                &local_witness.private_flooding_seed_hex,
+                &local_witness.flooding_noise_openings,
                 target_role,
                 target_rns_limb_index,
                 target_rns_prime,
             )?;
-            message_vectors.extend(
-                smudging_openings
-                    .iter()
-                    .map(|opening| {
-                        u64_coefficients_to_i64(
-                            &opening.message_coefficients,
-                            "target proof slice smudging message",
-                        )
-                    })
-                    .collect::<CanonicalResult<Vec<_>>>()?,
-            );
-            for smudging_opening in smudging_openings {
-                bound_material_seeds.push(smudging_opening.material_seed_hex);
-                bound_material_context_hashes.push(smudging_opening.commitment_context_hash);
-            }
+            message_vectors.push(u64_coefficients_to_i64(
+                &flooding_noise_opening.message_coefficients,
+                "target proof slice flooding-noise message",
+            )?);
+            bound_material_seeds.push(flooding_noise_opening.material_seed_hex);
         }
     }
 
@@ -145,10 +116,7 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
         )?;
     proof_request["targetDecryptionMessageVectors"] = json!(message_vectors);
     proof_request["vssCommittedMaterialSeedsByBoundMessage"] = json!(bound_material_seeds);
-    proof_request["vssCommittedMaterialContextHashesByBoundMessage"] =
-        json!(bound_material_context_hashes);
     proof_request["proofRandomnessSeedHex"] = json!(input.proof_randomness_seed_hex);
-    proof_request["proofRandomnessNonceHex"] = json!(input.proof_randomness_nonce_hex);
 
     Ok(proof_request)
 }
@@ -177,25 +145,13 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
     }
     let active_credential_binding_root =
         aggregate_opening_credential_binding_root(statement_aggregate_bindings)?;
-    let proof_statement_root =
-        hash_at_path(input.proof_statement, &["proofStatementRoot"])?.to_string();
+    let proof_statement_root = target_decryption_share_proof_statement_root(input.proof_statement)?;
     let smudging_commitment_set =
         value_at_path(input.proof_statement, &["smudgingCommitmentSet"])?.clone();
-    let smudging_commitment_set_root =
-        hash_at_path(&smudging_commitment_set, &["smudgingCommitmentSetRoot"])?;
-    let aggregate_message_coefficient_bound = (0..active_limb_count)
-        .map(|target_rns_limb_index| DATA_PRIMES[target_rns_limb_index])
-        .max()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "target proof material must include at least one active limb",
-            )
-        })?;
 
     let mut limb_statements = Vec::with_capacity(active_limb_count);
     for target_rns_limb_index in 0..active_limb_count {
-        let Some(target_rns_prime) = DATA_PRIMES.get(target_rns_limb_index).copied() else {
+        if DATA_PRIMES.get(target_rns_limb_index).is_none() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
                 "target proof slice limb is outside the selected BGV basis",
@@ -209,18 +165,17 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
                     "target proof statement is missing the requested aggregate binding",
                 )
             })?;
-        let aggregate_commitment_root =
-            hash_at_path(preliminary_aggregate_binding, &["aggregateCommitmentRoot"])?.to_string();
         let aggregate_opening_root =
             hash_at_path(preliminary_aggregate_binding, &["aggregateOpeningRoot"])?.to_string();
-        let statement_aggregate_binding = target_statement_aggregate_binding(
+        let aggregate_commitment =
+            value_at_path(preliminary_aggregate_binding, &["aggregateCommitment"])?.clone();
+        let aggregate_commitment_root = derive_canonical_object_hash(&aggregate_commitment)?;
+        target_statement_aggregate_binding(
             input.proof_statement,
             target_rns_limb_index,
             &aggregate_commitment_root,
             &aggregate_opening_root,
         )?;
-        let aggregate_commitment =
-            value_at_path(statement_aggregate_binding, &["aggregateCommitment"])?.clone();
         let mut role_statements = Vec::with_capacity(TARGET_DECRYPTION_SMUDGING_ROLES.len());
         for target_role in TARGET_DECRYPTION_SMUDGING_ROLES {
             let selected_ciphertext =
@@ -242,15 +197,12 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
                     )
                 })?;
             role_statements.push(json!({
-                "targetRole": target_role,
                 "targetCiphertextComponentOne": target_ciphertext_component_one,
                 "releasedPartialDecryption": released_partials[target_rns_limb_index],
             }));
         }
         limb_statements.push(json!({
             "targetRnsLimbIndex": target_rns_limb_index,
-            "targetRnsPrime": target_rns_prime,
-            "aggregateCommitmentRoot": aggregate_commitment_root,
             "aggregateOpeningRoot": aggregate_opening_root,
             "aggregateCommitment": aggregate_commitment,
             "targetRoleStatements": role_statements,
@@ -263,8 +215,6 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
             "trusteeIdentity": input.participant.trustee_identity,
             "trusteeRosterPosition": input.participant.roster_position,
             "targetShareProofStatementRoot": proof_statement_root,
-            "activeCredentialBindingRoot": active_credential_binding_root,
-            "smudgingCommitmentSetRoot": smudging_commitment_set_root,
         },
         "ringDegree": POLYNOMIAL_DEGREE,
         "targetDecryptionShare": {
@@ -273,11 +223,8 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
             "trusteeIdentity": input.participant.trustee_identity,
             "trusteeRosterPosition": input.participant.roster_position,
             "activeCredentialBindingRoot": active_credential_binding_root,
-            "interpolationPoint": input.participant.interpolation_point()?,
             "targetRnsLimbStatements": limb_statements,
-            "aggregateMessageCoefficientBound": aggregate_message_coefficient_bound,
             "smudgingCommitmentSet": smudging_commitment_set,
-            "plaintextMultiple": PLAINTEXT_MODULUS,
         },
     }))
 }

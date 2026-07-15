@@ -2,12 +2,13 @@ use super::*;
 
 // Canonical binary key-switch component vector material: the same format the
 // chunked component-material transport carries.
-const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
+const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV2";
 
 pub(super) fn decode_component_material_bytes(
     material_bytes: &[u8],
     expected_level: usize,
     expected_digit_count: usize,
+    expected_ring_degree: usize,
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     let read_word = |cursor: &mut usize| -> CanonicalResult<u64> {
         let end = cursor
@@ -30,16 +31,12 @@ pub(super) fn decode_component_material_bytes(
         ));
     }
     let mut cursor = 8_usize;
-    let level = usize::try_from(read_word(&mut cursor)?)
-        .map_err(|_| invalid_succinct_setup_proof("component material level does not fit usize"))?;
-    let ring_degree = usize::try_from(read_word(&mut cursor)?).map_err(|_| {
-        invalid_succinct_setup_proof("component material ring degree does not fit usize")
-    })?;
-    let limb_count = level
+    let limb_count = expected_level
         .checked_add(1)
         .ok_or_else(|| invalid_succinct_setup_proof("component material limb count overflowed"))?;
     let digit_count = expected_digit_count;
-    if level != expected_level || limb_count > DATA_PRIMES.len() {
+    let ring_degree = expected_ring_degree;
+    if digit_count != limb_count || limb_count > DATA_PRIMES.len() || ring_degree == 0 {
         return Err(invalid_succinct_setup_proof(
             "component material shape does not match the key descriptor level",
         ));

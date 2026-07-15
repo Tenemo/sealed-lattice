@@ -15,16 +15,18 @@ pub(super) fn array_value<'a>(
         })
 }
 
-// The accepted VSS coefficient commitment root that later phases (private VSS
-// envelopes, share acceptances, transport) bind against: the coefficient
-// commitment set root.
 pub(in super::super) fn accepted_vss_coefficient_commitment_root(
     setup_package: &Value,
-) -> Option<&str> {
-    setup_package
+) -> CanonicalResult<String> {
+    let commitment_set = setup_package
         .get("vssPublicCoefficientCommitmentSet")
-        .and_then(|commitment_set| commitment_set.get("coefficientCommitmentRoot"))
-        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "VSS public coefficient commitment set is required",
+            )
+        })?;
+    crate::bgv::setup::vss_commitment::vss_public_coefficient_commitment_set_root(commitment_set)
 }
 
 pub(super) fn value_string<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {

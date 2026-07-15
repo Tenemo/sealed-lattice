@@ -9,7 +9,6 @@ pub(in super::super::super) struct DescriptorBackedVssProofMaterialFixture {
 struct RetainedVssProofMaterial {
     proof_family: &'static str,
     proof_bytes_hash_domain: &'static str,
-    proof_material_root: String,
     proof_bytes_hash: String,
     proof_bytes: Option<Vec<u8>>,
     proof_binding_lease: Option<crate::bgv::setup::CanonicalSetupProofBindingLease>,
@@ -46,7 +45,7 @@ impl DescriptorBackedVssProofMaterialFixture {
             if let Some(existing_material) =
                 crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
                     material.proof_family,
-                    &material.proof_material_root,
+                    &material.proof_bytes_hash,
                 )
                 .expect("VSS proof material lookup")
             {
@@ -62,7 +61,7 @@ impl DescriptorBackedVssProofMaterialFixture {
 
             authenticate_setup_proof_material_stream_for_test(
                 material.proof_family,
-                &material.proof_material_root,
+                &material.proof_bytes_hash,
                 proof_bytes,
             )
             .expect("authenticate VSS proof material stream");
@@ -82,85 +81,46 @@ impl DescriptorBackedVssProofMaterialFixture {
 struct ProofMaterialFamilyFields {
     proof_family: &'static str,
     proof_bytes_hash_domain: &'static str,
-    proof_record_root_field: Option<&'static str>,
 }
 
 const VSS_SHARE_LINKAGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
     ProofMaterialFamilyFields {
         proof_family: VSS_SHARE_LINKAGE_PROOF_FAMILY,
         proof_bytes_hash_domain: VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
-        proof_record_root_field: None,
     };
 
 const SAME_SECRET_BRIDGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
     ProofMaterialFamilyFields {
         proof_family: SAME_SECRET_BRIDGE_PROOF_FAMILY,
         proof_bytes_hash_domain: SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
-        proof_record_root_field: Some("sameSecretBridgeProofRecordRoot"),
     };
 
-// The raw proof builders keep bytes only long enough to checkpoint prover work.
-// This transform publishes the production descriptor record, retains the bytes
-// in the authenticated-material store. No verifier consumes inline proof bytes.
-fn rewrite_proof_material_set_for_authenticated_store(
-    proof_material_set: &mut serde_json::Value,
+fn retain_proof_material_set(
+    proof_material_set: &serde_json::Value,
     fields: &ProofMaterialFamilyFields,
     proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
 ) -> Vec<RetainedVssProofMaterial> {
     let proof_records = proof_material_set["proofRecords"]
-        .as_array_mut()
+        .as_array()
         .expect("proof material set proof records");
     let mut retained_proof_materials = Vec::with_capacity(proof_records.len());
-    for proof_record in proof_records.iter_mut() {
+    for proof_record in proof_records {
         let proof_bytes_hash = proof_record["proofBytesHash"]
             .as_str()
             .expect("proof bytes hash")
             .to_string();
-        let proof_material_root =
-            crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
-                fields.proof_family,
-                &proof_bytes_hash,
-            )
-            .expect("setup proof material reference root");
-        assert_eq!(
-            proof_record["proofMaterialRoot"]
-                .as_str()
-                .expect("descriptor-backed proof material root"),
-            proof_material_root,
-            "descriptor-backed proof material root",
-        );
         let proof_binding_lease = proof_binding_leases
             .iter()
-            .find(|lease| lease.proof_material_root() == proof_material_root)
+            .find(|lease| lease.proof_bytes_hash() == proof_bytes_hash)
             .cloned()
             .expect("descriptor-backed proof binding");
-        let retained_material = RetainedVssProofMaterial {
+        retained_proof_materials.push(RetainedVssProofMaterial {
             proof_family: fields.proof_family,
             proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
-            proof_material_root: proof_material_root.clone(),
-            proof_bytes_hash: proof_bytes_hash.clone(),
+            proof_bytes_hash,
             proof_bytes: None,
             proof_binding_lease: Some(proof_binding_lease),
-        };
-
-        let record_object = proof_record
-            .as_object_mut()
-            .expect("proof material record object");
-        if let Some(proof_record_root_field) = fields.proof_record_root_field {
-            record_object.remove(proof_record_root_field);
-        }
-        record_object.insert(
-            "proofMaterialRoot".to_string(),
-            serde_json::json!(&proof_material_root),
-        );
-        if let Some(proof_record_root_field) = fields.proof_record_root_field {
-            proof_record[proof_record_root_field] = serde_json::json!(
-                derive_canonical_object_hash(proof_record)
-                    .expect("descriptor-backed proof material record root")
-            );
-        }
-
-        retained_proof_materials.push(retained_material);
+        });
     }
 
     retained_proof_materials
@@ -175,24 +135,19 @@ fn retained_aggregate_threshold_proof_materials(
         .expect("VSS aggregate threshold proof records")
         .iter()
         .map(|proof_record| {
-            let proof_material_root = proof_record["proofMaterialRoot"]
-                .as_str()
-                .expect("VSS aggregate threshold proof material root")
-                .to_string();
             let proof_bytes_hash = proof_record["proofBytesHash"]
                 .as_str()
                 .expect("VSS aggregate threshold proof bytes hash")
                 .to_string();
             let proof_binding_lease = proof_binding_leases
                 .iter()
-                .find(|lease| lease.proof_material_root() == proof_material_root)
+                .find(|lease| lease.proof_bytes_hash() == proof_bytes_hash)
                 .cloned()
                 .expect("VSS aggregate threshold proof binding");
 
             RetainedVssProofMaterial {
                 proof_family: VSS_SHARE_LINKAGE_PROOF_FAMILY,
                 proof_bytes_hash_domain: VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
-                proof_material_root,
                 proof_bytes_hash,
                 proof_bytes: None,
                 proof_binding_lease: Some(proof_binding_lease),
@@ -208,13 +163,13 @@ pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
     let aggregate_retained_proof_materials =
         retained_aggregate_threshold_proof_materials(package, proof_binding_leases);
 
-    let share_linkage_proof_materials = rewrite_proof_material_set_for_authenticated_store(
-        &mut package["vssShareLinkageProofMaterialSet"],
+    let share_linkage_proof_materials = retain_proof_material_set(
+        &package["vssShareLinkageProofMaterialSet"],
         &VSS_SHARE_LINKAGE_PROOF_MATERIAL_FIELDS,
         proof_binding_leases,
     );
-    let same_secret_bridge_proof_materials = rewrite_proof_material_set_for_authenticated_store(
-        &mut package["sameSecretBridgeProofMaterialSet"],
+    let same_secret_bridge_proof_materials = retain_proof_material_set(
+        &package["sameSecretBridgeProofMaterialSet"],
         &SAME_SECRET_BRIDGE_PROOF_MATERIAL_FIELDS,
         proof_binding_leases,
     );
@@ -252,21 +207,21 @@ fn vss_share_linkage_uses_authenticated_descriptor_material() {
         proof_binding_session.session_handle,
     )
     .expect("cancel direct share-linkage fixture binding session");
-    let first_proof_material_root =
-        package["vssShareLinkageProofMaterialSet"]["proofRecords"][0]["proofMaterialRoot"]
+    let first_proof_bytes_hash =
+        package["vssShareLinkageProofMaterialSet"]["proofRecords"][0]["proofBytesHash"]
             .as_str()
-            .expect("first VSS share-linkage proof material root");
+            .expect("first VSS share-linkage proof bytes hash");
     assert!(
         crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            first_proof_material_root,
+            first_proof_bytes_hash,
         )
         .expect("lookup consumed VSS share-linkage proof material")
         .is_none(),
         "verification must release each authenticated VSS proof source as it advances",
     );
     crate::bgv::setup::evict_verified_canonical_setup_proof_materials(&[
-        first_proof_material_root.to_string()
+        first_proof_bytes_hash.to_string()
     ]);
     let missing_material_error =
         crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(&request, None)
@@ -316,21 +271,21 @@ fn same_secret_bridge_uses_authenticated_descriptor_material() {
         proof_binding_session.session_handle,
     )
     .expect("cancel direct same-secret fixture binding session");
-    let first_proof_material_root = package["sameSecretBridgeProofMaterialSet"]["proofRecords"][0]
-        ["proofMaterialRoot"]
-        .as_str()
-        .expect("first same-secret bridge proof material root");
+    let first_proof_bytes_hash =
+        package["sameSecretBridgeProofMaterialSet"]["proofRecords"][0]["proofBytesHash"]
+            .as_str()
+            .expect("first same-secret bridge proof bytes hash");
     assert!(
         crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
             SAME_SECRET_BRIDGE_PROOF_FAMILY,
-            first_proof_material_root,
+            first_proof_bytes_hash,
         )
         .expect("lookup consumed same-secret bridge proof material")
         .is_none(),
         "verification must release each authenticated bridge proof source as it advances",
     );
     crate::bgv::setup::evict_verified_canonical_setup_proof_materials(&[
-        first_proof_material_root.to_string()
+        first_proof_bytes_hash.to_string()
     ]);
     let missing_material_error =
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(&request, None)

@@ -1,11 +1,12 @@
 use super::*;
 
 use crate::bgv::direct_ballots::{
-    DirectBallotPackedBatchedPairEvaluatorInput, direct_ballot_comparison_domain_max,
-    direct_ballot_evaluator_working_level, direct_ballot_plaintext_target_slots,
+    direct_ballot_comparison_domain_max, direct_ballot_evaluator_working_level,
+    direct_ballot_plaintext_target_slots,
     run_direct_ballot_packed_batched_pair_evaluator_for_top_counts,
+    DirectBallotPackedBatchedPairEvaluatorInput,
 };
-use crate::bgv::evaluator::circuit::{EvaluatorContext, modulus_switch_to};
+use crate::bgv::evaluator::circuit::{modulus_switch_to, EvaluatorContext};
 use crate::bgv::evaluator::engine::{ciphertext_add, ciphertext_object_root};
 use crate::bgv::evaluator::top_k::{
     evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs, pack_direct_score_slots,
@@ -164,7 +165,6 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
         read_target_share_profile(&target_share_profile_value, &setup_binding)
             .expect("target share profile");
     let quorum = target_share_profile_binding.decryption_share_quorum;
-
     phase("generating the proof-backed share quorum with real succinct proofs");
     let mut target_share_proofs = Vec::with_capacity(quorum);
     for participant in setup_binding.participants.iter().take(quorum) {
@@ -177,56 +177,23 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
             &target_share_profile_value,
             trustee_identity,
         );
-        let target_decryption_share = generate_local_share(
-            &setup_package,
-            &accepted,
-            &target_ciphertext_binding,
-            &target_ciphertexts,
-            &target_share_profile_value,
-            &local_target_share_witness_value,
-            trustee_identity,
-        );
-        let proof_statement = derive_share_proof_statement(TargetShareProofStatementInput {
-            setup_package: &setup_package,
-            accepted_record: &accepted,
-            target_ciphertext_binding: &target_ciphertext_binding,
-            target_ciphertexts: &target_ciphertexts,
-            target_share_profile: &target_share_profile_value,
-            local_target_share_witness_value: &local_target_share_witness_value,
-            target_decryption_share: &target_decryption_share,
-            trustee_identity,
-        })
-        .expect("target share proof statement");
-        let proof_material =
+        let target_share_proof =
             with_staged_aggregate_opening_material(&local_target_share_witness_value, || {
-                generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
-                    &json!({
-                        "setupPackage": setup_package,
-                        "localTargetShareWitness": local_target_share_witness_value,
-                        "targetAcceptedRecord": accepted,
-                        "targetCiphertextBinding": target_ciphertext_binding,
-                        "targetCiphertexts": target_ciphertexts,
-                        "targetShareProfile": target_share_profile_value,
-                        "trusteeIdentity": trustee_identity,
-                        "targetDecryptionShare": target_decryption_share,
-                        "proofStatement": proof_statement,
-                        "proofRandomnessSeedHex": hash512_hex(
-                            "sealed-lattice/tests/replay-release-proof-randomness-seed",
-                            &[trustee_identity.as_bytes()],
-                        ),
-                        "proofRandomnessNonceHex": hash512_hex(
-                            "sealed-lattice/tests/replay-release-proof-randomness-nonce",
-                            &[trustee_identity.as_bytes()],
-                        ),
-                    }),
-                )
+                generate_bgv_target_decryption_share_proof_request_for_test(&json!({
+                    "setupPackage": setup_package,
+                    "localTargetShareWitness": local_target_share_witness_value,
+                    "targetAcceptedRecord": accepted,
+                    "targetCiphertextBinding": target_ciphertext_binding,
+                    "targetCiphertexts": target_ciphertexts,
+                    "trusteeIdentity": trustee_identity,
+                    "proofRandomnessSeedHex": hash512_hex(
+                        "sealed-lattice/tests/replay-release-proof-randomness-seed",
+                        &[trustee_identity.as_bytes()],
+                    ),
+                }))
             })
-            .expect("target share proof material");
-        target_share_proofs.push(json!({
-            "targetDecryptionShare": target_decryption_share,
-            "proofStatement": proof_statement,
-            "proofMaterial": proof_material,
-        }));
+            .expect("target share proof");
+        target_share_proofs.push(target_share_proof);
         phase(&format!("proved share for {trustee_identity}"));
     }
 
@@ -265,7 +232,7 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
     );
 
     phase("verifying a finished session cannot finish twice");
-    finish_bgv_target_decryption_result_release_from_request(&json!({
+    finish_bgv_target_decryption_result_release_for_test(&json!({
         "releaseVerificationId": release_verification_id,
     }))
     .expect_err("a consumed release session must refuse a second finish");

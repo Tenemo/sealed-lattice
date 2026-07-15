@@ -8,12 +8,12 @@ fn setup_proof_stream_family(proof_family: &str) -> CanonicalResult<SetupProofFa
 
 pub(crate) fn authenticate_setup_proof_material_stream_for_test(
     proof_family: &str,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
     proof_bytes: &[u8],
 ) -> CanonicalResult<()> {
     authenticate_setup_proof_material_stream_for_test_inner(
         proof_family,
-        proof_material_root,
+        proof_bytes_hash,
         proof_bytes,
         None,
     )
@@ -21,13 +21,13 @@ pub(crate) fn authenticate_setup_proof_material_stream_for_test(
 
 pub(crate) fn authenticate_setup_proof_material_stream_in_session_for_test(
     proof_family: &str,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
     proof_bytes: &[u8],
     accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<()> {
     authenticate_setup_proof_material_stream_for_test_inner(
         proof_family,
-        proof_material_root,
+        proof_bytes_hash,
         proof_bytes,
         Some(accepted_setup_session),
     )
@@ -35,7 +35,7 @@ pub(crate) fn authenticate_setup_proof_material_stream_in_session_for_test(
 
 fn authenticate_setup_proof_material_stream_for_test_inner(
     proof_family: &str,
-    proof_material_root: &str,
+    proof_bytes_hash: &str,
     proof_bytes: &[u8],
     accepted_setup_session: Option<crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<()> {
@@ -56,7 +56,7 @@ fn authenticate_setup_proof_material_stream_for_test_inner(
             format!("setup proof canonical stream descriptor did not encode: {error}"),
         )
     })?;
-    let material_root_bytes = crate::transcript_core::decode_hex(proof_material_root)?;
+    let material_root_bytes = crate::transcript_core::decode_hex(proof_bytes_hash)?;
     let stream = match accepted_setup_session {
         Some(accepted_setup_session) => crate::bgv::setup::begin_accepted_setup_canonical_stream(
             family_code,

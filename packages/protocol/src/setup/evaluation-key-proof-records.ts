@@ -15,7 +15,6 @@ export {
     type TrusteeEvaluationKeyProofSet,
     type TrusteeEvaluationKeyWitnessInput,
 } from './evaluation-key-proof-records/constants-and-types.js';
-export { evaluationKeyShareComponentVectorRoot } from './evaluation-key-proof-records/encoding.js';
 export {
     createGaloisKeyShareBatches,
     createRelinearizationKeyShareRounds,

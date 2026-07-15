@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
+fn private_flooding_noise_is_independent_and_plaintext_scaled() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
     let target_share_profile_value = target_share_profile(&setup_package);
@@ -29,8 +29,8 @@ fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
     );
 
     let mut interpolation_points = Vec::with_capacity(selected_participants.len());
-    let mut target_id_smudging_by_participant = Vec::with_capacity(selected_participants.len());
-    let mut target_order_smudging_by_participant = Vec::with_capacity(selected_participants.len());
+    let mut target_id_noise_by_participant = Vec::with_capacity(selected_participants.len());
+    let mut target_order_noise_by_participant = Vec::with_capacity(selected_participants.len());
     for participant in selected_participants {
         interpolation_points.push(
             participant
@@ -52,7 +52,6 @@ fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
                     &setup_binding,
                     &target_accepted,
                     &target_ciphertext_pair,
-                    &target_share_profile_binding,
                     participant,
                 )
                 .expect("local target-share witness")
@@ -90,28 +89,28 @@ fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
         )
         .expect("unsmudged target-order partials");
 
-        target_id_smudging_by_participant.push(
+        target_id_noise_by_participant.push(
             limbwise_difference(&released_target_id_partials, &unsmudged_target_id_partials)
-                .expect("target-id smudging difference"),
+                .expect("target-id flooding-noise difference"),
         );
-        target_order_smudging_by_participant.push(
+        target_order_noise_by_participant.push(
             limbwise_difference(
                 &released_target_order_partials,
                 &unsmudged_target_order_partials,
             )
-            .expect("target-order smudging difference"),
+            .expect("target-order flooding-noise difference"),
         );
     }
 
-    assert_smudging_recombines_to_zero(
+    assert_flooding_noise_is_independent(
         "target-id",
         &interpolation_points,
-        &target_id_smudging_by_participant,
+        &target_id_noise_by_participant,
     );
-    assert_smudging_recombines_to_zero(
+    assert_flooding_noise_is_independent(
         "target-order",
         &interpolation_points,
-        &target_order_smudging_by_participant,
+        &target_order_noise_by_participant,
     );
 }
 

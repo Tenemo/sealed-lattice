@@ -17,21 +17,21 @@ mod low_degree_proof;
 mod merkle_commitment;
 mod proof_codec;
 mod prover;
-pub(crate) use prover::VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP;
 mod relation;
 mod verifier;
 
-pub(crate) use commands::describe_trustee_evaluation_key_statement_from_request;
-pub(crate) use commands::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
-#[cfg(test)]
-pub(crate) use commands::verify_target_decryption_share_proof_bytes_from_request;
-pub(crate) use commands::verify_target_decryption_share_proof_source_from_request;
 #[cfg(test)]
 pub(crate) use commands::verify_vss_share_linkage_proof_material_set_from_request;
 pub(crate) use commands::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
     verify_same_secret_bridge_proof_source_from_request,
+};
+#[cfg(test)]
+pub(crate) use commands::{
+    generate_target_decryption_share_proof_bytes_from_request,
+    verify_target_decryption_share_proof_bytes_from_request,
+    verify_target_decryption_share_proof_source_from_request,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use commands::{
@@ -40,7 +40,9 @@ pub(in crate::bgv::setup) use commands::{
 };
 
 pub(in crate::bgv::setup) use commands::{
-    VssPublicCommandCommitmentExpectation, verified_vss_share_linkage_proof_material_bytes,
+    ReconstructedVssShareLinkageStatement, VssPublicCommandCommitmentExpectation,
+    VssShareLinkageMaterialRecordStatementInput, verified_vss_share_linkage_proof_material_bytes,
+    verify_vss_share_linkage_material_record_statement,
     verify_vss_share_linkage_proof_source_from_request,
     verify_vss_share_linkage_statement_and_proof_material_set_from_request,
     vss_share_linkage_commitment_from_value, vss_share_linkage_proof_verification_binding_hash,
@@ -120,9 +122,10 @@ pub(crate) const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str =
     SetupProofFamily::VssShareLinkage.wire_label();
 pub(crate) const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str =
     SetupProofFamily::SameSecretBridge.wire_label();
+#[cfg(test)]
 pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str =
     SetupProofFamily::TargetDecryptionShare.wire_label();
-pub(crate) const TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND: i64 = 16;
+pub(crate) const TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND: i64 = 16;
 #[cfg(test)]
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],

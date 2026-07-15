@@ -71,27 +71,6 @@ const vector = (
     schemaIdentifier,
 });
 
-const proofApplicationSlot = (
-    statementSchemaIdentifier: number,
-    rosterPosition: number,
-    producerSequence?: bigint,
-): Uint8Array =>
-    canonicalTuple(
-        0x0109,
-        hashItem(repeatedBytes(64, 0x11)),
-        hashItem(repeatedBytes(64, 0x22)),
-        hashItem(repeatedBytes(64, 0x33)),
-        unsigned16Item(statementSchemaIdentifier),
-        presentOptionalItem(0x03, unsigned16LittleEndian(rosterPosition)),
-        emptyOptionalItem(0x04),
-        producerSequence === undefined
-            ? emptyOptionalItem(0x05)
-            : presentOptionalItem(
-                  0x05,
-                  unsigned64LittleEndian(producerSequence),
-              ),
-    );
-
 const createRosterVectors = (): Readonly<{
     entry: Uint8Array;
     roster: Uint8Array;
@@ -256,7 +235,6 @@ const createMailboxVectors = (): Readonly<{
         0x1800,
         unsigned64Item(plaintextByteLength),
         hashListItem([repeatedBytes(64, 0xaa)]),
-        hashItem(repeatedBytes(64, 0xbb)),
     );
     return {
         associatedData,
@@ -389,57 +367,6 @@ const createLocalStorageVectors =
         ];
     };
 
-const createPrivateRandomnessVectors =
-    (): readonly FoundationCanonicalTestVector[] => {
-        const derivationItems = [
-            hashItem(repeatedBytes(64, 0x11)),
-            hashItem(repeatedBytes(64, 0x22)),
-            hashItem(repeatedBytes(64, 0x33)),
-            participantIdentityItem(repeatedBytes(64, 0x44)),
-        ] as const;
-        const persistentSlot = proofApplicationSlot(0x2110, 0);
-        const ordinarySlot = proofApplicationSlot(0x1302, 0, 5n);
-        return [
-            vector(
-                'private random block input',
-                0x0400,
-                canonicalTuple(
-                    0x0400,
-                    ...derivationItems,
-                    unsigned16Item(0x0116),
-                    unsigned16Item(1),
-                    hashItem(repeatedBytes(64, 0x55)),
-                    fixedBytesItem(repeatedBytes(32, 0x66)),
-                    unsigned64Item(7n),
-                ),
-            ),
-            vector(
-                'persistent proof coin input',
-                0x0401,
-                canonicalTuple(
-                    0x0401,
-                    nestedTupleItem(persistentSlot),
-                    hashItem(repeatedBytes(64, 0x77)),
-                ),
-            ),
-            vector(
-                'action randomness derivation input',
-                0x0402,
-                canonicalTuple(0x0402, ...derivationItems),
-            ),
-            vector(
-                'ordinary proof coin input',
-                0x0403,
-                canonicalTuple(
-                    0x0403,
-                    nestedTupleItem(ordinarySlot),
-                    hashItem(repeatedBytes(64, 0x88)),
-                    fixedBytesItem(repeatedBytes(32, 0x99)),
-                ),
-            ),
-        ];
-    };
-
 const createStateVectors = (): readonly FoundationCanonicalTestVector[] => [
     vector(
         'state reservation intent',
@@ -560,7 +487,6 @@ const createRuntimeVectors = (): readonly FoundationCanonicalTestVector[] => {
                 0x1800,
                 unsigned64Item(19n),
                 hashListItem([repeatedBytes(64, 0x21)]),
-                hashItem(repeatedBytes(64, 0x22)),
             ),
         ),
         vector('runtime asset reference', 0x1801, assets[0]),
@@ -577,7 +503,6 @@ export const createFoundationCanonicalTestVectors =
         const roster = createRosterVectors();
         const manifest = createManifestVectors();
         const objectEnvelope = createObjectEnvelope();
-        const proofSlot = proofApplicationSlot(0x2110, 0);
         const mailbox = createMailboxVectors();
         const vectors = [
             vector('object envelope', 0x0100, objectEnvelope),
@@ -590,7 +515,6 @@ export const createFoundationCanonicalTestVectors =
                     fixedBytesItem(repeatedBytes(3_309, 0x5a)),
                 ),
             ),
-            vector('proof application slot', 0x0109, proofSlot),
             vector('manifest', 0x0110, manifest.manifest),
             vector('option definition', 0x0111, manifest.optionDefinition),
             vector('action definition', 0x0112, manifest.actionDefinition),
@@ -608,24 +532,22 @@ export const createFoundationCanonicalTestVectors =
             vector('mailbox associated data', 0x0201, mailbox.associatedData),
             vector('signed mailbox envelope', 0x0202, mailbox.signedEnvelope),
             ...createLocalStorageVectors(),
-            ...createPrivateRandomnessVectors(),
             ...createStateVectors(),
             ...createRuntimeVectors(),
         ];
-        if (vectors.length !== 40) {
+        if (vectors.length !== 35) {
             throw new Error(
-                `Expected 40 foundation schema vectors, received ${String(vectors.length)}.`,
+                `Expected 35 foundation schema vectors, received ${String(vectors.length)}.`,
             );
         }
         return vectors;
     };
 
 export const foundationCanonicalSchemaIdentifiers = [
-    0x0100, 0x0101, 0x0109, 0x0110, 0x0111, 0x0112, 0x0113, 0x0114, 0x0115,
-    0x0116, 0x0117, 0x0118, 0x0200, 0x0201, 0x0202, 0x0300, 0x0301, 0x0302,
-    0x0303, 0x0304, 0x0305, 0x0306, 0x0307, 0x0308, 0x0400, 0x0401, 0x0402,
-    0x0403, 0x1610, 0x1611, 0x1612, 0x1613, 0x1614, 0x1800, 0x1801, 0x1802,
-    0x1804, 0x1806, 0x1807, 0x1808,
+    0x0100, 0x0101, 0x0110, 0x0111, 0x0112, 0x0113, 0x0114, 0x0115, 0x0116,
+    0x0117, 0x0118, 0x0200, 0x0201, 0x0202, 0x0300, 0x0301, 0x0302, 0x0303,
+    0x0304, 0x0305, 0x0306, 0x0307, 0x0308, 0x1610, 0x1611, 0x1612, 0x1613,
+    0x1614, 0x1800, 0x1801, 0x1802, 0x1804, 0x1806, 0x1807, 0x1808,
 ] as const;
 
 export const createDeterministicCanonicalByteFragments = (

@@ -11,8 +11,12 @@ import {
     openIndexedDbUntrustedStorageAdapter,
 } from './indexed-db-untrusted-storage-adapter.js';
 import {
+    openPositivelyVerifiedStorageTransactionStore,
     openUntrustedStorageTransactionStore,
+    type UntrustedStorageAdapter,
+    type UntrustedStorageAuthenticatedRecoveryProtection,
     type UntrustedStorageRecoveryReport,
+    type UntrustedStorageTransactionStoreOpenResult,
     type UntrustedStorageTransactionLimits,
     type UntrustedStorageTransactionStore,
 } from './untrusted-storage-transaction-store.js';
@@ -47,7 +51,7 @@ class WebLockOwnedStorageError extends Error {
     }
 }
 
-export type WebLockOwnedStorageState = 'open' | 'closing' | 'closed' | 'failed';
+type WebLockOwnedStorageState = 'open' | 'closing' | 'closed' | 'failed';
 
 export type WebLockOwnedStorageTransactionStore = Readonly<{
     recoveryReport: UntrustedStorageRecoveryReport;
@@ -56,7 +60,7 @@ export type WebLockOwnedStorageTransactionStore = Readonly<{
     state(): WebLockOwnedStorageState;
 }>;
 
-export type WebLockOwnedStorageConfiguration = Readonly<{
+type WebLockOwnedStorageBaseConfiguration = Readonly<{
     databaseName: string;
     namespace: string;
     limits: UntrustedStorageTransactionLimits;
@@ -67,8 +71,14 @@ export type WebLockOwnedStorageConfiguration = Readonly<{
     lockManager?: LockManager | null;
 }>;
 
+export type WebLockOwnedStorageConfiguration =
+    WebLockOwnedStorageBaseConfiguration &
+        Readonly<{
+            authenticatedRecoveryProtection: UntrustedStorageAuthenticatedRecoveryProtection;
+        }>;
+
 type WebLockOwnedBrowserActionStorageCustodyConfiguration =
-    WebLockOwnedStorageConfiguration &
+    WebLockOwnedStorageBaseConfiguration &
         Readonly<{
             binding: BrowserActionStorageRootBinding;
             cryptoProvider?: Crypto;
@@ -505,8 +515,11 @@ const normalizeLockRequestFailure = (
     );
 };
 
-export const openWebLockOwnedStorageTransactionStore = async (
-    configuration: WebLockOwnedStorageConfiguration,
+const openWebLockOwnedStorageTransactionStoreWithFactory = async (
+    configuration: WebLockOwnedStorageBaseConfiguration,
+    openTransactionStore: (
+        adapter: UntrustedStorageAdapter,
+    ) => Promise<UntrustedStorageTransactionStoreOpenResult>,
 ): Promise<WebLockOwnedStorageTransactionStore> => {
     const lockName = deriveWebLockStorageNamespaceName(configuration);
     const lockManager = resolveLockManager(configuration.lockManager);
@@ -557,12 +570,7 @@ export const openWebLockOwnedStorageTransactionStore = async (
                     });
                     activeAdapter = adapter;
                     assertLockRequestStillHeld();
-                    const openedStore =
-                        await openUntrustedStorageTransactionStore({
-                            adapter,
-                            limits: configuration.limits,
-                            namespace: configuration.namespace,
-                        });
+                    const openedStore = await openTransactionStore(adapter);
                     assertLockRequestStillHeld();
                     const releaseLock = createDeferred<void>();
                     ownedHandle = new OwnedStorageTransactionStore({
@@ -632,6 +640,21 @@ export const openWebLockOwnedStorageTransactionStore = async (
     return acquiredHandle.promise;
 };
 
+export const openWebLockOwnedStorageTransactionStore = async (
+    configuration: WebLockOwnedStorageConfiguration,
+): Promise<WebLockOwnedStorageTransactionStore> =>
+    openWebLockOwnedStorageTransactionStoreWithFactory(
+        configuration,
+        (adapter) =>
+            openUntrustedStorageTransactionStore({
+                adapter,
+                authenticatedRecoveryProtection:
+                    configuration.authenticatedRecoveryProtection,
+                limits: configuration.limits,
+                namespace: configuration.namespace,
+            }),
+    );
+
 /**
  * Opens browser action-storage custody inside a dedicated worker and retains
  * its IndexedDB connection and cryptographic kernel under one exclusive Web
@@ -648,7 +671,15 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
         );
     }
     const ownedStorage =
-        await openWebLockOwnedStorageTransactionStore(configuration);
+        await openWebLockOwnedStorageTransactionStoreWithFactory(
+            configuration,
+            (adapter) =>
+                openPositivelyVerifiedStorageTransactionStore({
+                    adapter,
+                    limits: configuration.limits,
+                    namespace: configuration.namespace,
+                }),
+        );
     if (!(ownedStorage instanceof OwnedStorageTransactionStore)) {
         await ownedStorage.close();
         throw new WebLockOwnedStorageError(

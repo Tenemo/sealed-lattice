@@ -135,7 +135,7 @@ export type UntrustedStorageTransactionStoreOpenResult = Readonly<{
 type IdentifierKind = 'lease' | 'transaction';
 type IdentifierFactory = (kind: IdentifierKind) => string;
 
-export type UntrustedStorageTransactionStoreConfiguration = Readonly<{
+type UntrustedStorageTransactionStoreBaseConfiguration = Readonly<{
     adapter: UntrustedStorageAdapter;
     namespace: string;
     limits: UntrustedStorageTransactionLimits;
@@ -146,10 +146,23 @@ export type UntrustedStorageTransactionStoreConfiguration = Readonly<{
 export type UntrustedStorageAuthenticatedRecoveryProtection = Readonly<{
     deriveDigest(bytes: Uint8Array): Promise<Uint8Array> | Uint8Array;
     open(sealedHeadBytes: Uint8Array): Promise<Uint8Array>;
-    protectionIdentity: object;
     recoveryIdentity: Uint8Array;
     seal(headPlaintext: Uint8Array): Promise<Uint8Array>;
 }>;
+
+export type UntrustedStorageTransactionStoreConfiguration =
+    UntrustedStorageTransactionStoreBaseConfiguration &
+        Readonly<{
+            authenticatedRecoveryProtection: UntrustedStorageAuthenticatedRecoveryProtection;
+        }>;
+
+const positivelyVerifiedRecordBootstrap = Symbol(
+    'positively-verified-record-bootstrap',
+);
+
+type PositivelyVerifiedRecordBootstrapConfiguration =
+    UntrustedStorageTransactionStoreBaseConfiguration &
+        Readonly<{ [positivelyVerifiedRecordBootstrap]: true }>;
 
 type StoredAuthenticatedRecoveryHeadRecord = Readonly<{
     lastTransactionIdentifier: string;
@@ -173,7 +186,7 @@ type AuthenticatedRecoveryRuntime = {
     currentSealedHeadBytes: Uint8Array | undefined;
     expectedRecoveryIdentity: string;
     initialized: boolean;
-    protection: UntrustedStorageAuthenticatedRecoveryProtection;
+    readonly protection: UntrustedStorageAuthenticatedRecoveryProtection;
 };
 
 type LeaseRecord = {
@@ -507,6 +520,40 @@ const decodeAuthenticatedRecoveryHead = (input: {
     return head;
 };
 
+const createAuthenticatedRecoveryRuntime = (
+    protection: UntrustedStorageAuthenticatedRecoveryProtection,
+): AuthenticatedRecoveryRuntime => {
+    if (
+        !isUint8Array(protection.recoveryIdentity) ||
+        protection.recoveryIdentity.byteLength !== 64 ||
+        protection.recoveryIdentity.every((byte) => byte === 0) ||
+        typeof protection.deriveDigest !== 'function' ||
+        typeof protection.open !== 'function' ||
+        typeof protection.seal !== 'function'
+    ) {
+        throw new UntrustedStorageTransactionError(
+            'MalformedLength',
+            'authenticated recovery protection has an invalid identity or callback.',
+        );
+    }
+    const recoveryIdentity = protection.recoveryIdentity.slice();
+    const expectedRecoveryIdentity = bytesToHex(recoveryIdentity);
+    const configuredProtection = Object.freeze({
+        deriveDigest: protection.deriveDigest,
+        open: protection.open,
+        recoveryIdentity,
+        seal: protection.seal,
+    });
+
+    return {
+        currentHead: undefined,
+        currentSealedHeadBytes: undefined,
+        expectedRecoveryIdentity,
+        initialized: false,
+        protection: configuredProtection,
+    };
+};
+
 export class UntrustedStorageTransactionStore {
     readonly #adapter: UntrustedStorageAdapter;
     readonly #createIdentifier: IdentifierFactory;
@@ -526,10 +573,12 @@ export class UntrustedStorageTransactionStore {
             transaction: new Set<string>(),
         };
     #exclusiveOperationTail: Promise<void> = Promise.resolve();
-    #authenticatedRecovery: AuthenticatedRecoveryRuntime | undefined;
+    readonly #authenticatedRecovery: AuthenticatedRecoveryRuntime | undefined;
 
     public constructor(
-        configuration: UntrustedStorageTransactionStoreConfiguration,
+        configuration:
+            | UntrustedStorageTransactionStoreConfiguration
+            | PositivelyVerifiedRecordBootstrapConfiguration,
     ) {
         if (
             configuration.namespace.length > 64 ||
@@ -563,72 +612,12 @@ export class UntrustedStorageTransactionStore {
             this.#maximumIndexValueByteLength,
             this.#recoveryHeadKey.length,
         );
-    }
-
-    public configureAuthenticatedRecovery(
-        protection: UntrustedStorageAuthenticatedRecoveryProtection,
-    ): void {
-        if (this.#transactions.size !== 0) {
-            throw new UntrustedStorageTransactionError(
-                'InvalidState',
-                'authenticated recovery cannot be configured while transactions are live.',
-            );
-        }
-        if (
-            !isUint8Array(protection.recoveryIdentity) ||
-            protection.recoveryIdentity.byteLength !== 64 ||
-            protection.recoveryIdentity.every((byte) => byte === 0) ||
-            typeof protection.deriveDigest !== 'function' ||
-            typeof protection.open !== 'function' ||
-            typeof protection.protectionIdentity !== 'object' ||
-            protection.protectionIdentity === null ||
-            typeof protection.seal !== 'function'
-        ) {
-            throw new UntrustedStorageTransactionError(
-                'MalformedLength',
-                'authenticated recovery protection has an invalid identity or callback.',
-            );
-        }
-        const recoveryIdentity = protection.recoveryIdentity.slice();
-        const expectedRecoveryIdentity = bytesToHex(recoveryIdentity);
-        const configuredProtection = Object.freeze({
-            deriveDigest: protection.deriveDigest,
-            open: protection.open,
-            protectionIdentity: protection.protectionIdentity,
-            recoveryIdentity,
-            seal: protection.seal,
-        });
-        if (this.#authenticatedRecovery !== undefined) {
-            if (
-                this.#authenticatedRecovery.expectedRecoveryIdentity !==
-                expectedRecoveryIdentity
-            ) {
-                recoveryIdentity.fill(0);
-                throw new UntrustedStorageTransactionError(
-                    'AuthenticationFailed',
-                    'authenticated recovery was reconfigured for another storage authority.',
-                );
-            }
-            if (
-                this.#authenticatedRecovery.protection.protectionIdentity !==
-                configuredProtection.protectionIdentity
-            ) {
-                recoveryIdentity.fill(0);
-                throw new UntrustedStorageTransactionError(
-                    'AuthenticationFailed',
-                    'authenticated recovery was reconfigured with another record-protection authority.',
-                );
-            }
-            this.#authenticatedRecovery.protection = configuredProtection;
-            return;
-        }
-        this.#authenticatedRecovery = {
-            currentHead: undefined,
-            currentSealedHeadBytes: undefined,
-            expectedRecoveryIdentity,
-            initialized: false,
-            protection: configuredProtection,
-        };
+        this.#authenticatedRecovery =
+            positivelyVerifiedRecordBootstrap in configuration
+                ? undefined
+                : createAuthenticatedRecoveryRuntime(
+                      configuration.authenticatedRecoveryProtection,
+                  );
     }
 
     public async recover(): Promise<UntrustedStorageRecoveryReport> {
@@ -2360,6 +2349,23 @@ export const openUntrustedStorageTransactionStore = async (
     configuration: UntrustedStorageTransactionStoreConfiguration,
 ): Promise<UntrustedStorageTransactionStoreOpenResult> => {
     const store = new UntrustedStorageTransactionStore(configuration);
+    const recoveryReport = await store.recover();
+
+    return { recoveryReport, store };
+};
+
+/**
+ * Internal bootstrap store for records whose accepting reader positively
+ * verifies every retained byte against an external cryptographic commitment.
+ * Generic runtime records must use openUntrustedStorageTransactionStore.
+ */
+export const openPositivelyVerifiedStorageTransactionStore = async (
+    configuration: UntrustedStorageTransactionStoreBaseConfiguration,
+): Promise<UntrustedStorageTransactionStoreOpenResult> => {
+    const store = new UntrustedStorageTransactionStore({
+        ...configuration,
+        [positivelyVerifiedRecordBootstrap]: true,
+    });
     const recoveryReport = await store.recover();
 
     return { recoveryReport, store };

@@ -1,14 +1,14 @@
 use serde_json::{Map, Value, json};
 
 use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+use crate::foundation::LocalStorageRecoveryValue;
 use crate::foundation::{
-    ACTION_DEFINITION_SCHEMA_IDENTIFIER, ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
-    ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER,
-    ActionContext, ActionDefinition, ActionRandomnessDerivationInput, ActionStorageDerivationInput,
-    BOARD_POLICY_SCHEMA_IDENTIFIER, BoardPolicy, CHECKPOINT_BOUNDARY_PROFILE_SCHEMA_IDENTIFIER,
-    CHECKPOINT_RANDOM_USE_PROFILE_SCHEMA_IDENTIFIER, CanonicalCodecError, CanonicalDecodeLimits,
-    CeremonyContext, CheckpointBoundaryProfile, CheckpointRandomUseProfile,
-    DEVICE_WRAPPED_STORAGE_ROOT_SCHEMA_IDENTIFIER,
+    ACTION_DEFINITION_SCHEMA_IDENTIFIER, ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
+    ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER, ActionContext, ActionDefinition,
+    ActionStorageDerivationInput, BOARD_POLICY_SCHEMA_IDENTIFIER, BoardPolicy,
+    CHECKPOINT_BOUNDARY_PROFILE_SCHEMA_IDENTIFIER, CHECKPOINT_RANDOM_USE_PROFILE_SCHEMA_IDENTIFIER,
+    CanonicalCodecError, CanonicalDecodeLimits, CeremonyContext, CheckpointBoundaryProfile,
+    CheckpointRandomUseProfile, DEVICE_WRAPPED_STORAGE_ROOT_SCHEMA_IDENTIFIER,
     DEVICE_WRAPPING_ASSOCIATED_DATA_SCHEMA_IDENTIFIER, DISTRIBUTION_RECORD_SCHEMA_IDENTIFIER,
     DeviceWrappedStorageRoot, DeviceWrappingAssociatedData, DistributionRecord, Hash512,
     IncrementalCanonicalTupleDecoder, LOCAL_RECORD_ASSOCIATED_DATA_SCHEMA_IDENTIFIER,
@@ -17,11 +17,8 @@ use crate::foundation::{
     LocalRecordKeyInput, MAILBOX_ASSOCIATED_DATA_SCHEMA_IDENTIFIER,
     MAILBOX_KEY_SCHEDULE_INPUT_SCHEMA_IDENTIFIER, MANIFEST_SCHEMA_IDENTIFIER,
     MailboxAssociatedData, MailboxKeyScheduleInput, Manifest, OBJECT_ENVELOPE_SCHEMA_IDENTIFIER,
-    OPTION_DEFINITION_SCHEMA_IDENTIFIER, ObjectEnvelope, OptionDefinition,
-    PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER,
-    PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER, PersistentProofCoinInput, PrivateRandomBlockInput,
-    PrivateRandomCursor, ProofApplicationSlot, RANDOM_CURSOR_SCHEMA_IDENTIFIER,
-    ROSTER_ENTRY_SCHEMA_IDENTIFIER, ROSTER_SCHEMA_IDENTIFIER,
+    OPTION_DEFINITION_SCHEMA_IDENTIFIER, ObjectEnvelope, OptionDefinition, PrivateRandomCursor,
+    RANDOM_CURSOR_SCHEMA_IDENTIFIER, ROSTER_ENTRY_SCHEMA_IDENTIFIER, ROSTER_SCHEMA_IDENTIFIER,
     RUNTIME_ASSET_REFERENCE_SCHEMA_IDENTIFIER, RUNTIME_BUILD_MANIFEST_SCHEMA_IDENTIFIER,
     RUNTIME_OPERATION_PROFILE_SCHEMA_IDENTIFIER, Roster, RosterEntry, RuntimeAssetReference,
     RuntimeBuildManifest, RuntimeOperationProfile, SIGNED_CARRIER_SCHEMA_IDENTIFIER,
@@ -33,9 +30,6 @@ use crate::foundation::{
     SUITE_RECORD_SCHEMA_IDENTIFIER, SignedCarrier, SignedMailboxEnvelope, StateCertificate,
     StateOutputIntentPayload, StateRecoveryTransitionPayload, StateReservationIntentPayload,
     StateWitnessVotePayload, StorageRootCommitmentPayload, StreamDescriptor, SuiteRecord,
-};
-use crate::foundation::{
-    LocalStorageRecoveryValue, ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER, OrdinaryProofCoinInput,
 };
 use crate::transcript_core::{decode_hex, encode_hex};
 
@@ -126,14 +120,6 @@ pub(super) fn validate_canonical_foundation_value(request: &Value) -> CanonicalR
         STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER => {
             round_trip_schema!(StreamDescriptor, canonical_bytes, limits)
         }
-        PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER => {
-            let value =
-                ProofApplicationSlot::decode(&canonical_bytes, &limits).map_err(schema_error)?;
-            (
-                value.encode().map_err(schema_error)?,
-                Some(value.application_slot_hash().map_err(schema_error)?),
-            )
-        }
         MAILBOX_KEY_SCHEDULE_INPUT_SCHEMA_IDENTIFIER => {
             round_trip_schema!(MailboxKeyScheduleInput, canonical_bytes, limits)
         }
@@ -174,18 +160,6 @@ pub(super) fn validate_canonical_foundation_value(request: &Value) -> CanonicalR
         ),
         ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER => {
             round_trip_schema!(ActionStorageDerivationInput, canonical_bytes, limits)
-        }
-        PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER => {
-            round_trip_schema!(PrivateRandomBlockInput, canonical_bytes, limits)
-        }
-        PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER => {
-            round_trip_schema!(PersistentProofCoinInput, canonical_bytes, limits)
-        }
-        ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER => {
-            round_trip_schema!(ActionRandomnessDerivationInput, canonical_bytes, limits)
-        }
-        ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER => {
-            round_trip_schema!(OrdinaryProofCoinInput, canonical_bytes, limits)
         }
         RANDOM_CURSOR_SCHEMA_IDENTIFIER => {
             round_trip_schema!(PrivateRandomCursor, canonical_bytes, limits)

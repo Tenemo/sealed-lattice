@@ -14,7 +14,6 @@ use super::{
 use super::{CanonicalItem, hash_foundation_tuple_512 as hash512};
 
 const CHUNK_DIGEST_DOMAIN: &str = "sealed-lattice/transport/chunk/v1";
-const FULL_OBJECT_DIGEST_DOMAIN: &str = "sealed-lattice/transport/full-object/v1";
 pub const MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH: u64 = 2_147_483_648;
 
 /// The verifier-owned stream domains accepted by the foundation profile.
@@ -221,7 +220,6 @@ pub struct CanonicalStreamVerifier {
     descriptor: StreamDescriptor,
     next_chunk_index: usize,
     observed_byte_length: u64,
-    full_object_hasher: Shake256,
     state_exact_output_hasher: Option<StateExactOutputHasher>,
     refusal_reason: Option<RefusalReason>,
 }
@@ -236,7 +234,6 @@ pub struct CanonicalStreamWriter {
     next_chunk_index: usize,
     observed_byte_length: u64,
     ordered_chunk_digests: Vec<Hash512>,
-    full_object_hasher: Shake256,
     error: Option<RefusalReason>,
 }
 
@@ -246,7 +243,6 @@ impl CanonicalStreamWriter {
         total_byte_length: u64,
     ) -> Result<Self, RefusalReason> {
         let expected_chunk_count = expected_chunk_count(total_byte_length)?;
-        let full_object_hasher = initialize_full_object_hasher(stream_domain, total_byte_length)?;
         Ok(Self {
             stream_domain,
             total_byte_length,
@@ -254,7 +250,6 @@ impl CanonicalStreamWriter {
             next_chunk_index: 0,
             observed_byte_length: 0,
             ordered_chunk_digests: Vec::with_capacity(expected_chunk_count),
-            full_object_hasher,
             error: None,
         })
     }
@@ -284,15 +279,8 @@ impl CanonicalStreamWriter {
             return Err(RefusalReason::WrongTypeOrLength);
         }
 
-        let mut reader = self.full_object_hasher.finalize_xof();
-        let mut full_object_digest = [0u8; Hash512::BYTE_LENGTH];
-        reader.read(&mut full_object_digest);
-        StreamDescriptor::new(
-            self.total_byte_length,
-            self.ordered_chunk_digests,
-            Hash512::from_bytes(full_object_digest),
-        )
-        .map_err(|error| error.refusal_reason)
+        StreamDescriptor::new(self.total_byte_length, self.ordered_chunk_digests)
+            .map_err(|error| error.refusal_reason)
     }
 
     fn absorb_chunk_inner(
@@ -317,7 +305,6 @@ impl CanonicalStreamWriter {
             chunk_index,
             chunk_bytes,
         )?);
-        self.full_object_hasher.update(chunk_bytes);
         self.observed_byte_length = self
             .observed_byte_length
             .checked_add(
@@ -336,8 +323,6 @@ impl CanonicalStreamVerifier {
         descriptor: StreamDescriptor,
     ) -> Result<Self, RefusalReason> {
         validate_descriptor(&descriptor)?;
-        let full_object_hasher =
-            initialize_full_object_hasher(stream_domain, descriptor.total_byte_length)?;
         let state_exact_output_hasher = stream_domain
             .state_exact_output_capability_kind()
             .map(|capability_kind| {
@@ -350,7 +335,6 @@ impl CanonicalStreamVerifier {
             descriptor,
             next_chunk_index: 0,
             observed_byte_length: 0,
-            full_object_hasher,
             state_exact_output_hasher,
             refusal_reason: None,
         })
@@ -393,12 +377,6 @@ impl CanonicalStreamVerifier {
             return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
         }
 
-        let mut reader = self.full_object_hasher.finalize_xof();
-        let mut observed_digest = [0u8; Hash512::BYTE_LENGTH];
-        reader.read(&mut observed_digest);
-        if Hash512::from_bytes(observed_digest) != self.descriptor.full_object_digest {
-            return VerificationResult::refused(RefusalReason::WrongHashOrRoot);
-        }
         let state_exact_output_hash = match self.state_exact_output_hasher {
             Some(hasher) => match hasher.finish() {
                 Ok(digest) => Some(digest),
@@ -438,7 +416,6 @@ impl CanonicalStreamVerifier {
             return Err(RefusalReason::WrongHashOrRoot);
         }
 
-        self.full_object_hasher.update(chunk_bytes);
         if let Some(hasher) = self.state_exact_output_hasher.as_mut() {
             hasher
                 .absorb(chunk_bytes)
@@ -563,33 +540,6 @@ fn chunk_digest(
     let mut digest = [0_u8; Hash512::BYTE_LENGTH];
     reader.read(&mut digest);
     Ok(Hash512::from_bytes(digest))
-}
-
-fn initialize_full_object_hasher(
-    stream_domain: CanonicalStreamDomain,
-    total_byte_length: u64,
-) -> Result<Shake256, RefusalReason> {
-    let raw_payload_byte_length =
-        u32::try_from(total_byte_length).map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-    let raw_item_byte_length = raw_payload_byte_length
-        .checked_add(4)
-        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-    let mut hasher = Shake256::default();
-
-    hasher.update(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
-    hasher.update(&CANONICAL_TUPLE_VERSION.to_le_bytes());
-    hasher.update(&4_u32.to_le_bytes());
-    absorb_ascii_item(&mut hasher, FULL_OBJECT_DIGEST_DOMAIN)?;
-    absorb_ascii_item(&mut hasher, stream_domain.canonical_domain())?;
-    absorb_fixed_item(
-        &mut hasher,
-        CanonicalItemType::Unsigned64,
-        &total_byte_length.to_le_bytes(),
-    )?;
-    hasher.update(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
-    hasher.update(&raw_item_byte_length.to_le_bytes());
-    hasher.update(&raw_payload_byte_length.to_le_bytes());
-    Ok(hasher)
 }
 
 fn absorb_ascii_item(hasher: &mut Shake256, value: &str) -> Result<(), RefusalReason> {
@@ -782,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    fn incremental_full_object_framing_matches_the_canonical_hash() {
+    fn incremental_stream_verification_accepts_exact_boundary_lengths() {
         for byte_length in [1_usize, 31, 65_535, 1_048_576, 1_048_593] {
             let bytes = (0..byte_length)
                 .map(|index| (index.wrapping_mul(131) & 0xff) as u8)
@@ -931,24 +881,6 @@ mod tests {
             VerificationResult::refused(RefusalReason::WrongTypeOrLength)
         );
 
-        let mut wrong_terminal_descriptor = descriptor;
-        wrong_terminal_descriptor.full_object_digest = Hash512::from_bytes([0xff; 64]);
-        let mut wrong_terminal = CanonicalStreamVerifier::new(
-            CanonicalStreamDomain::EvaluatorKeyStore,
-            wrong_terminal_descriptor,
-        )
-        .expect("structurally valid descriptor");
-        for (chunk_index, chunk) in chunks.iter().copied().enumerate() {
-            assert_eq!(
-                wrong_terminal.absorb_chunk(chunk_index, chunk),
-                VerificationResult::valid(())
-            );
-        }
-        assert_eq!(
-            wrong_terminal.finish(),
-            VerificationResult::refused(RefusalReason::WrongHashOrRoot)
-        );
-
         let mut wrong_domain = CanonicalStreamVerifier::new(
             CanonicalStreamDomain::PublicKeyShareProof,
             descriptor_for(CanonicalStreamDomain::EvaluatorKeyStore, &bytes),
@@ -985,17 +917,14 @@ mod tests {
             StreamDescriptor {
                 total_byte_length: 0,
                 ordered_chunk_digests: Vec::new(),
-                full_object_digest: Hash512::from_bytes([0; 64]),
             },
             StreamDescriptor {
                 total_byte_length: 1,
                 ordered_chunk_digests: Vec::new(),
-                full_object_digest: Hash512::from_bytes([0; 64]),
             },
             StreamDescriptor {
                 total_byte_length: u64::from(u32::MAX),
                 ordered_chunk_digests: vec![Hash512::from_bytes([0; 64]); 4096],
-                full_object_digest: Hash512::from_bytes([0; 64]),
             },
         ] {
             assert!(

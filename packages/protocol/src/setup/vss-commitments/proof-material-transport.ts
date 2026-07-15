@@ -1,5 +1,8 @@
 import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js';
-import type { TransportedSetupProofMaterialSet } from '../setup-proof-material-transport.js';
+import type {
+    TransportedSetupProofMaterial,
+    TransportedSetupProofMaterialSet,
+} from '../setup-proof-material-transport.js';
 
 import {
     type GeneratedVssCanonicalProofMaterial,
@@ -9,22 +12,14 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
-export type TransportedVssShareLinkageProofMaterialSet = Readonly<
-    TransportedSetupProofMaterialSet & {
-        readonly objectType: 'SetupTransportedVssShareLinkageProofMaterialSet';
-    }
->;
+export type TransportedVssShareLinkageProofMaterialSet =
+    TransportedSetupProofMaterialSet;
 
-export type TransportedSameSecretBridgeProofMaterialSet = Readonly<
-    TransportedSetupProofMaterialSet & {
-        readonly objectType: 'SetupTransportedSameSecretBridgeProofMaterialSet';
-    }
->;
+export type TransportedSameSecretBridgeProofMaterialSet =
+    TransportedSetupProofMaterialSet;
 
 type ProofMaterialTransportParameters = Readonly<{
     readonly proofDescription: string;
-    readonly transportSetObjectType: string;
-    readonly transportMaterialObjectType: string;
 }>;
 
 const canonicalProofMaterialsToTransport = (
@@ -41,41 +36,50 @@ const canonicalProofMaterialsToTransport = (
             `${parameters.proofDescription} proof material set proofRecords must be an array.`,
         );
     }
-    const referencedRoots = proofRecords.map((proofRecordValue, proofIndex) => {
-        if (proofRecordValue === null || typeof proofRecordValue !== 'object') {
-            throw new TypeError(
-                `${parameters.proofDescription} proofRecords.${String(proofIndex)} must be an object.`,
-            );
-        }
-        const proofRecord = proofRecordValue as JsonRecord;
-        if (typeof proofRecord.proofMaterialRoot !== 'string') {
-            throw new TypeError(
-                `${parameters.proofDescription} proofRecords.${String(proofIndex)} must carry a canonical proof-material reference.`,
-            );
-        }
+    const referencedProofBytesHashes = proofRecords.map(
+        (proofRecordValue, proofIndex) => {
+            if (
+                proofRecordValue === null ||
+                typeof proofRecordValue !== 'object'
+            ) {
+                throw new TypeError(
+                    `${parameters.proofDescription} proofRecords.${String(proofIndex)} must be an object.`,
+                );
+            }
+            const proofRecord = proofRecordValue as JsonRecord;
+            if (typeof proofRecord.proofBytesHash !== 'string') {
+                throw new TypeError(
+                    `${parameters.proofDescription} proofRecords.${String(proofIndex)} must carry a proof-bytes hash.`,
+                );
+            }
 
-        return proofRecord.proofMaterialRoot;
-    });
+            return proofRecord.proofBytesHash;
+        },
+    );
     if (
-        new Set(referencedRoots).size !== referencedRoots.length ||
-        canonicalProofMaterials.length !== referencedRoots.length
+        new Set(referencedProofBytesHashes).size !==
+            referencedProofBytesHashes.length ||
+        canonicalProofMaterials.length !== referencedProofBytesHashes.length
     ) {
         throw new Error(
             `${parameters.proofDescription} canonical proof material must cover every distinct proof record exactly once.`,
         );
     }
-    const referencedRootSet = new Set(referencedRoots);
+    const referencedProofBytesHashSet = new Set(referencedProofBytesHashes);
     const transportedProofMaterials = canonicalProofMaterials.map(
-        (proofMaterial): JsonRecord => {
-            if (!referencedRootSet.delete(proofMaterial.proofMaterialRoot)) {
+        (proofMaterial): TransportedSetupProofMaterial => {
+            if (
+                !referencedProofBytesHashSet.delete(
+                    proofMaterial.proofBytesHash,
+                )
+            ) {
                 throw new Error(
-                    `${parameters.proofDescription} canonical proof material root must match exactly one proof record.`,
+                    `${parameters.proofDescription} canonical proof material hash must match exactly one proof record.`,
                 );
             }
 
             return {
-                objectType: parameters.transportMaterialObjectType,
-                proofMaterialRoot: proofMaterial.proofMaterialRoot,
+                proofBytesHash: proofMaterial.proofBytesHash,
                 descriptorBytes: copyCanonicalStreamDescriptor(
                     proofMaterial.descriptorBytes,
                     `${parameters.proofDescription} canonical proof material descriptorBytes`,
@@ -83,16 +87,15 @@ const canonicalProofMaterialsToTransport = (
             };
         },
     );
-    if (referencedRootSet.size !== 0) {
+    if (referencedProofBytesHashSet.size !== 0) {
         throw new Error(
-            `${parameters.proofDescription} canonical proof material is missing a proof record root.`,
+            `${parameters.proofDescription} canonical proof material is missing a proof record hash.`,
         );
     }
 
     return {
         proofMaterialSet,
         transportedProofMaterialSet: {
-            objectType: parameters.transportSetObjectType,
             proofMaterials: transportedProofMaterials,
         },
     };
@@ -111,17 +114,13 @@ export const createBinaryChunkedVssShareLinkageProofMaterialTransport = (
         build.canonicalProofMaterials,
         {
             proofDescription: 'vss-share-linkage',
-            transportSetObjectType:
-                'SetupTransportedVssShareLinkageProofMaterialSet',
-            transportMaterialObjectType:
-                'SetupTransportedVssShareLinkageProofMaterial',
         },
     );
 
     return {
         proofMaterialSet: moved.proofMaterialSet,
         transportedVssShareLinkageProofMaterial:
-            moved.transportedProofMaterialSet as TransportedVssShareLinkageProofMaterialSet,
+            moved.transportedProofMaterialSet,
     };
 };
 
@@ -138,16 +137,12 @@ export const createBinaryChunkedSameSecretBridgeProofMaterialTransport = (
         build.canonicalProofMaterials,
         {
             proofDescription: 'same-secret-bridge',
-            transportSetObjectType:
-                'SetupTransportedSameSecretBridgeProofMaterialSet',
-            transportMaterialObjectType:
-                'SetupTransportedSameSecretBridgeProofMaterial',
         },
     );
 
     return {
         proofMaterialSet: moved.proofMaterialSet,
         transportedSameSecretBridgeProofMaterial:
-            moved.transportedProofMaterialSet as TransportedSameSecretBridgeProofMaterialSet,
+            moved.transportedProofMaterialSet,
     };
 };

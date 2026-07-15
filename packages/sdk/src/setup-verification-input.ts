@@ -6,12 +6,9 @@ import type {
     EvaluationKeyShareComponentMaterialChunkSource,
     PublicKeyShareMaterialChunkSource,
     SetupProofMaterialChunkSource,
-    SetupPackageVerificationInputSource,
     TransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicKeyShareProofMaterialSet,
-    TransportedSameSecretBridgeProofMaterialSet,
-    TransportedVssShareLinkageProofMaterialSet,
 } from '@sealed-lattice/protocol';
 import {
     bgvCanonicalStreamFamilies,
@@ -55,8 +52,6 @@ type SetupProofMaterialTransportFieldName =
 
 type SetupProofMaterialTransportSet =
     | TransportedPublicKeyShareProofMaterialSet
-    | TransportedVssShareLinkageProofMaterialSet
-    | TransportedSameSecretBridgeProofMaterialSet
     | TransportedEvaluationKeyShareProofMaterialSet;
 
 const setupProofMaterialFamilies = Object.freeze({
@@ -407,7 +402,7 @@ export const snapshotSetupPackageVerificationInput = (
                 'publicKeyShareMaterialChunkSource',
             ),
             'publicKeyShareMaterialChunkSource',
-            ['publicKeyShareMaterialSetRoot'],
+            [],
             state,
         );
     if (publicKeyShareMaterialChunkSource === undefined) {
@@ -421,7 +416,7 @@ export const snapshotSetupPackageVerificationInput = (
                 'setupProofMaterialChunkSources',
             ),
             'setupProofMaterialChunkSources',
-            ['proofMaterialRoot'],
+            ['proofBytesHash'],
             state,
         );
     const evaluationKeyShareComponentMaterialChunkSources =
@@ -465,7 +460,7 @@ const protocolHash = (value: unknown, fieldPath: string): string => {
     return value;
 };
 
-const proofMaterialChunkSourcesByRoot = (
+const proofMaterialChunkSourcesByHash = (
     sources: readonly SetupProofMaterialChunkSource[] | undefined,
     fieldPath: string,
 ): Map<string, SetupProofMaterialChunkSource['pullChunk']> => {
@@ -477,7 +472,7 @@ const proofMaterialChunkSourcesByRoot = (
         throw new TypeError(`${fieldPath} must be a non-empty array.`);
     }
     const typedSources: readonly SetupProofMaterialChunkSource[] = sources;
-    const sourcesByRoot = new Map<
+    const sourcesByHash = new Map<
         string,
         SetupProofMaterialChunkSource['pullChunk']
     >();
@@ -487,22 +482,22 @@ const proofMaterialChunkSourcesByRoot = (
                 `${fieldPath}.${String(sourceIndex)} must be an object.`,
             );
         }
-        const materialRoot = protocolHash(
-            source.proofMaterialRoot,
-            `${fieldPath}.${String(sourceIndex)}.proofMaterialRoot`,
+        const proofBytesHash = protocolHash(
+            source.proofBytesHash,
+            `${fieldPath}.${String(sourceIndex)}.proofBytesHash`,
         );
         if (
             typeof source.pullChunk !== 'function' ||
-            sourcesByRoot.has(materialRoot)
+            sourcesByHash.has(proofBytesHash)
         ) {
             throw new TypeError(
                 `${fieldPath}.${String(sourceIndex)} must carry one unique chunk pull function.`,
             );
         }
-        sourcesByRoot.set(materialRoot, source.pullChunk);
+        sourcesByHash.set(proofBytesHash, source.pullChunk);
     });
 
-    return sourcesByRoot;
+    return sourcesByHash;
 };
 
 const authenticateCanonicalProofMaterial = async (
@@ -510,14 +505,14 @@ const authenticateCanonicalProofMaterial = async (
     input: Readonly<{
         readonly descriptorBytes: Uint8Array;
         readonly family: BgvCanonicalStreamFamily;
-        readonly materialRoot: string;
+        readonly proofBytesHash: string;
         readonly pullChunk: SetupProofMaterialChunkSource['pullChunk'];
     }>,
 ): Promise<void> => {
     await runtime.readMaterial({
         descriptorBytes: input.descriptorBytes,
         family: input.family,
-        materialRoot: input.materialRoot,
+        materialRoot: input.proofBytesHash,
         pullChunk: input.pullChunk,
     });
 };
@@ -531,16 +526,6 @@ const streamPublicKeyShareMaterial = async (
         transportedMaterial.publicKeyShareMaterialSetRoot,
         'transportedPublicKeyShareMaterial.publicKeyShareMaterialSetRoot',
     );
-    if (
-        protocolHash(
-            chunkSource.publicKeyShareMaterialSetRoot,
-            'publicKeyShareMaterialChunkSource.publicKeyShareMaterialSetRoot',
-        ) !== materialRoot
-    ) {
-        throw new TypeError(
-            'publicKeyShareMaterialChunkSource must match the transported public-key share material root.',
-        );
-    }
     if (typeof chunkSource.pullChunk !== 'function') {
         throw new TypeError(
             'publicKeyShareMaterialChunkSource.pullChunk must be a function.',
@@ -561,7 +546,7 @@ const streamSetupProofMaterialSet = async (
     runtime: BgvCanonicalStreamRuntime,
     fieldName: SetupProofMaterialTransportFieldName,
     materialSet: SetupProofMaterialTransportSet | undefined,
-    chunkSourcesByRoot: Map<string, SetupProofMaterialChunkSource['pullChunk']>,
+    chunkSourcesByHash: Map<string, SetupProofMaterialChunkSource['pullChunk']>,
 ): Promise<void> => {
     if (materialSet === undefined) {
         return;
@@ -577,11 +562,11 @@ const streamSetupProofMaterialSet = async (
     ) {
         const proofMaterialValue: unknown = proofMaterials[materialIndex];
         const proofMaterial = proofMaterialValue as JsonRecord;
-        const materialRoot = protocolHash(
-            proofMaterial.proofMaterialRoot,
-            `${fieldName}.proofMaterials.${String(materialIndex)}.proofMaterialRoot`,
+        const proofBytesHash = protocolHash(
+            proofMaterial.proofBytesHash,
+            `${fieldName}.proofMaterials.${String(materialIndex)}.proofBytesHash`,
         );
-        const pullChunk = chunkSourcesByRoot.get(materialRoot);
+        const pullChunk = chunkSourcesByHash.get(proofBytesHash);
         if (pullChunk === undefined) {
             throw new TypeError(
                 `${fieldName}.proofMaterials.${String(materialIndex)} has no canonical chunk source.`,
@@ -593,10 +578,10 @@ const streamSetupProofMaterialSet = async (
                 `${fieldName}.proofMaterials.${String(materialIndex)}.descriptorBytes`,
             ),
             family: setupProofMaterialFamilies[fieldName],
-            materialRoot,
+            proofBytesHash,
             pullChunk,
         });
-        chunkSourcesByRoot.delete(materialRoot);
+        chunkSourcesByHash.delete(proofBytesHash);
     }
 };
 
@@ -621,13 +606,16 @@ const componentFamily = (
 const evaluationKeyComponentRecord = (
     value: unknown,
     fieldPath: string,
-    expectedObjectType: string,
+    expectedObjectType?: string,
 ): JsonRecord => {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
         throw new TypeError(`${fieldPath} must be an object.`);
     }
     const record = value as JsonRecord;
-    if (record.objectType !== expectedObjectType) {
+    if (
+        expectedObjectType !== undefined &&
+        record.objectType !== expectedObjectType
+    ) {
         throw new TypeError(
             `${fieldPath} must have objectType ${expectedObjectType}.`,
         );
@@ -763,14 +751,6 @@ const streamEvaluationKeyShareComponentMaterial = async (
         }
         return;
     }
-    if (
-        transportedMaterialSet.objectType !==
-        'SetupTransportedEvaluationKeyShareComponentMaterialSet'
-    ) {
-        throw new TypeError(
-            'transportedEvaluationKeyShareComponentMaterial must be an evaluation-key component material set.',
-        );
-    }
     if (!Array.isArray(transportedMaterialSet.componentMaterials)) {
         throw new TypeError(
             'transportedEvaluationKeyShareComponentMaterial.componentMaterials must be an array.',
@@ -808,7 +788,6 @@ const streamEvaluationKeyShareComponentMaterial = async (
         const componentMaterial = evaluationKeyComponentRecord(
             componentMaterialValue,
             componentPath,
-            'SetupTransportedEvaluationKeyShareComponentMaterial',
         );
         const root = protocolHash(
             componentMaterial.keySwitchComponentMaterialRoot,
@@ -859,9 +838,7 @@ const streamEvaluationKeyShareComponentMaterial = async (
 const setupPackageVerificationInput = (
     input: VerifySetupPackageInput,
 ): KernelSetupPackageVerificationInput => {
-    const verificationInput = createSetupPackageVerificationInput(
-        input as unknown as SetupPackageVerificationInputSource,
-    );
+    const verificationInput = createSetupPackageVerificationInput(input);
 
     return {
         ...verificationInput,
@@ -892,7 +869,7 @@ export const prepareSnapshottedSetupPackageVerificationInputForKernel = async (
         descriptorSnapshotInput.transportedEvaluationKeyShareComponentMaterial,
         descriptorSnapshotInput.evaluationKeyShareComponentMaterialChunkSources,
     );
-    const chunkSourcesByRoot = proofMaterialChunkSourcesByRoot(
+    const chunkSourcesByHash = proofMaterialChunkSourcesByHash(
         descriptorSnapshotInput.setupProofMaterialChunkSources,
         'setupProofMaterialChunkSources',
     );
@@ -901,10 +878,10 @@ export const prepareSnapshottedSetupPackageVerificationInputForKernel = async (
             runtime,
             fieldName,
             descriptorSnapshotInput[fieldName],
-            chunkSourcesByRoot,
+            chunkSourcesByHash,
         );
     }
-    if (chunkSourcesByRoot.size !== 0) {
+    if (chunkSourcesByHash.size !== 0) {
         throw new TypeError(
             'setupProofMaterialChunkSources must match transported proof material references exactly.',
         );
@@ -979,7 +956,7 @@ export const snapshotPrivateVssShareVerificationInput = (
                 'privateVssShareProofMaterialChunkSources',
             ),
             'privateVssShareProofMaterialChunkSources',
-            ['proofMaterialRoot'],
+            ['proofBytesHash'],
             state,
         );
     const expectedPrivateEnvelopeHash = snapshotKernelJsonValue(
@@ -991,15 +968,6 @@ export const snapshotPrivateVssShareVerificationInput = (
         'expectedPrivateEnvelopeHash',
         state,
     ) as VerifyPrivateVssShareInput['expectedPrivateEnvelopeHash'];
-    const expectedLocalVerificationRoot = snapshotKernelJsonValue(
-        dataPropertyValue(
-            inputDescriptors,
-            'expectedLocalVerificationRoot',
-            'expectedLocalVerificationRoot',
-        ),
-        'expectedLocalVerificationRoot',
-        state,
-    ) as VerifyPrivateVssShareInput['expectedLocalVerificationRoot'];
 
     return {
         setupContext,
@@ -1016,9 +984,6 @@ export const snapshotPrivateVssShareVerificationInput = (
         ...(expectedPrivateEnvelopeHash === undefined
             ? {}
             : { expectedPrivateEnvelopeHash }),
-        ...(expectedLocalVerificationRoot === undefined
-            ? {}
-            : { expectedLocalVerificationRoot }),
     };
 };
 
@@ -1045,7 +1010,7 @@ export const prepareSnapshottedPrivateVssShareVerificationInputForKernel =
                 readonly proofMaterials: readonly unknown[];
             };
             const runtime = openBgvCanonicalStreamRuntime({ kernel });
-            const chunkSourcesByRoot = proofMaterialChunkSourcesByRoot(
+            const chunkSourcesByHash = proofMaterialChunkSourcesByHash(
                 input.privateVssShareProofMaterialChunkSources,
                 'privateVssShareProofMaterialChunkSources',
             );
@@ -1065,11 +1030,11 @@ export const prepareSnapshottedPrivateVssShareVerificationInputForKernel =
                     );
                 }
                 const proofMaterial = proofMaterialValue as JsonRecord;
-                const materialRoot = protocolHash(
-                    proofMaterial.proofMaterialRoot,
-                    `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)}.proofMaterialRoot`,
+                const proofBytesHash = protocolHash(
+                    proofMaterial.proofBytesHash,
+                    `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)}.proofBytesHash`,
                 );
-                const pullChunk = chunkSourcesByRoot.get(materialRoot);
+                const pullChunk = chunkSourcesByHash.get(proofBytesHash);
                 if (pullChunk === undefined) {
                     throw new TypeError(
                         `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)} has no canonical chunk source.`,
@@ -1081,12 +1046,12 @@ export const prepareSnapshottedPrivateVssShareVerificationInputForKernel =
                         `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)}.descriptorBytes`,
                     ),
                     family: bgvCanonicalStreamFamilies.vssOpeningCarry,
-                    materialRoot,
+                    proofBytesHash,
                     pullChunk,
                 });
-                chunkSourcesByRoot.delete(materialRoot);
+                chunkSourcesByHash.delete(proofBytesHash);
             }
-            if (chunkSourcesByRoot.size !== 0) {
+            if (chunkSourcesByHash.size !== 0) {
                 throw new TypeError(
                     'privateVssShareProofMaterialChunkSources must match transported proof material references exactly.',
                 );
@@ -1102,6 +1067,5 @@ export const prepareSnapshottedPrivateVssShareVerificationInputForKernel =
                 input.sourceTrusteeCoefficientCommitmentMaterialRecords,
             privateEnvelope: input.privateEnvelope,
             expectedPrivateEnvelopeHash: input.expectedPrivateEnvelopeHash,
-            expectedLocalVerificationRoot: input.expectedLocalVerificationRoot,
         };
     };

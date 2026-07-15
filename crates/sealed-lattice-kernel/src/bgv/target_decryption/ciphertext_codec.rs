@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn read_target_ciphertext_pair(
     ciphertexts: &Value,
     binding: &Value,
@@ -57,11 +58,13 @@ pub(super) fn read_target_ciphertext_pair(
     })
 }
 
+#[cfg(test)]
 pub(super) struct ParsedTargetCiphertext {
     ciphertext: Ciphertext,
     root: String,
 }
 
+#[cfg(test)]
 pub(super) fn parse_target_ciphertext(
     canonical_bytes_hex_value: &str,
     label: &str,

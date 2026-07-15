@@ -415,6 +415,22 @@ export const requireCanonicalRuntimePath = (path: string): string => {
     return path;
 };
 
+const privateProofSaltPurpose = 0xfffe;
+const proofRandomnessPurposeRanges: ReadonlyMap<
+    number,
+    readonly [firstPurpose: number, lastPurpose: number]
+> = new Map([
+    [0x1211, [1, 2]],
+    [0x1212, [3, 4]],
+    [0x1214, [5, 6]],
+    [0x1216, [7, 8]],
+    [0x1217, [9, 40]],
+    [0x1302, [41, 42]],
+    [0x1621, [43, 44]],
+    [0x2110, [45, 46]],
+    [0x2111, [47, 48]],
+]);
+
 const isAssignedRandomUse = (family: number, purpose: number): boolean => {
     if (purpose === 0 || purpose === 0xffff) {
         return false;
@@ -431,12 +447,13 @@ const isAssignedRandomUse = (family: number, purpose: number): boolean => {
     if (family === 0x1630) {
         return purpose <= 2;
     }
-    if (family === 0x1302) {
-        return true;
-    }
-    return [
-        0x2110, 0x2111, 0x1211, 0x1212, 0x1214, 0x1216, 0x1217, 0x1621,
-    ].includes(family);
+    const proofPurposeRange = proofRandomnessPurposeRanges.get(family);
+    return (
+        proofPurposeRange !== undefined &&
+        (purpose === privateProofSaltPurpose ||
+            (purpose >= proofPurposeRange[0] &&
+                purpose <= proofPurposeRange[1]))
+    );
 };
 
 const parseRuntimeAssetReference = (

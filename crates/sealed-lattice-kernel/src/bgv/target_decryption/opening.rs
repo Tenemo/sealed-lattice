@@ -9,19 +9,14 @@ const VSS_PUBLIC_AGGREGATE_COMMITMENT_ROLE: &str = "aggregate-threshold-share";
 pub(super) struct AggregateOpeningCheckInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) participant: &'a ParticipantBinding,
-    pub(super) setup_epoch: &'a str,
     pub(super) rns_limb_index: usize,
     pub(super) rns_prime: u64,
     pub(super) credential: &'a Value,
 }
 
 pub(super) struct AggregateOpeningRootsInput<'a> {
-    pub(super) ceremony_id: &'a str,
-    pub(super) election_manifest_hash: &'a str,
-    pub(super) roster_hash: &'a str,
-    pub(super) setup_parameters_hash: &'a str,
+    pub(super) setup_context_hash: &'a str,
     pub(super) participant: &'a ParticipantBinding,
-    pub(super) setup_epoch: &'a str,
     pub(super) rns_limb_index: usize,
     pub(super) rns_prime: u64,
     pub(super) aggregate_commitment_message_values: &'a [u64],
@@ -36,13 +31,11 @@ pub(super) struct AggregateOpeningComputation {
     #[cfg(test)]
     pub(super) commitment: Value,
     pub(super) commitment_root: String,
-    pub(super) commitment_context_hash: String,
     pub(super) opening_root: String,
 }
 
 pub(super) struct VerifiedAggregateOpeningCredential {
     pub(super) commitment_root: String,
-    pub(super) commitment_context_hash: String,
     pub(super) opening_root: String,
     pub(super) aggregate_share_values: Vec<u64>,
     pub(super) aggregate_commitment_message_values: Vec<u64>,
@@ -60,12 +53,8 @@ pub(super) fn verify_aggregate_opening_credential(
     let aggregate_share_values =
         derive_aggregate_share_values(&aggregate_commitment_message_values, input.rns_prime)?;
     let computation = compute_aggregate_opening(AggregateOpeningRootsInput {
-        ceremony_id: &input.setup_binding.ceremony_id,
-        election_manifest_hash: &input.setup_binding.election_manifest_hash,
-        roster_hash: &input.setup_binding.roster_hash,
-        setup_parameters_hash: &input.setup_binding.setup_parameters_hash,
+        setup_context_hash: &input.setup_binding.setup_context_hash,
         participant: input.participant,
-        setup_epoch: input.setup_epoch,
         rns_limb_index: input.rns_limb_index,
         rns_prime: input.rns_prime,
         aggregate_commitment_message_values: &aggregate_commitment_message_values,
@@ -87,7 +76,6 @@ pub(super) fn verify_aggregate_opening_credential(
 
     Ok(VerifiedAggregateOpeningCredential {
         commitment_root: computation.commitment_root,
-        commitment_context_hash: computation.commitment_context_hash,
         opening_root: computation.opening_root,
         aggregate_share_values,
         aggregate_commitment_message_values,
@@ -100,11 +88,7 @@ pub(super) fn compute_aggregate_opening(
 ) -> CanonicalResult<AggregateOpeningComputation> {
     let commitment_context = json!({
         "objectType": "VssPublicAggregateThresholdCommitmentContext",
-        "ceremonyId": input.ceremony_id,
-        "manifestHash": input.election_manifest_hash,
-        "rosterHash": input.roster_hash,
-        "setupParametersHash": input.setup_parameters_hash,
-        "setupEpoch": input.setup_epoch,
+        "setupContextHash": input.setup_context_hash,
         "recipientIdentity": input.participant.trustee_identity.as_str(),
         "recipientRosterPosition": input.participant.roster_position,
         "rnsLimbIndex": input.rns_limb_index,
@@ -126,7 +110,6 @@ pub(super) fn compute_aggregate_opening(
         #[cfg(test)]
         commitment: computation.commitment,
         commitment_root: computation.commitment_root,
-        commitment_context_hash: computation.commitment_context_hash,
         opening_root: computation.opening_root,
     })
 }

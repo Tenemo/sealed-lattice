@@ -36,9 +36,7 @@ export const bgvCanonicalStreamFamilies = Object.freeze({
     trusteeEvaluationKey: 5,
     relinearizationComponent: 6,
     galoisComponent: 7,
-    targetDecryptionShare: 8,
     publicKeyShareMaterial: 9,
-    targetDecryptionAggregateOpening: 11,
 } as const);
 
 export type BgvCanonicalStreamFamily =
@@ -89,12 +87,6 @@ export type BgvCanonicalStreamRuntime = Readonly<{
     }): BgvCanonicalStreamVerifierLease;
 }>;
 
-export type BgvTargetDecryptionAggregateOpeningMaterialSource = Readonly<{
-    readonly aggregateOpeningRoot: string;
-    readonly pullChunk: CanonicalStreamChunkPull;
-    readonly totalByteLength: number;
-}>;
-
 type ActiveLease = {
     chunkCount: number;
     handle: number;
@@ -133,16 +125,8 @@ const familyDomain = new Map<BgvCanonicalStreamFamily, CanonicalStreamDomain>([
         canonicalStreamDomains.evaluatorKeyStore,
     ],
     [
-        bgvCanonicalStreamFamilies.targetDecryptionShare,
-        canonicalStreamDomains.maliciousTargetShareProof,
-    ],
-    [
         bgvCanonicalStreamFamilies.publicKeyShareMaterial,
         canonicalStreamDomains.publicKeyShareMaterial,
-    ],
-    [
-        bgvCanonicalStreamFamilies.targetDecryptionAggregateOpening,
-        canonicalStreamDomains.recipientAggregateThresholdShareProof,
     ],
 ]);
 
@@ -968,56 +952,4 @@ export const openBgvCanonicalStreamRuntime = (input: {
             input.acceptedSetupSession,
         ),
     );
-};
-
-export const stageBgvTargetDecryptionAggregateOpeningMaterials = async (input: {
-    readonly abortSignal?: AbortSignal;
-    readonly kernel: TranscriptCoreKernelContextOwner;
-    readonly sources: readonly BgvTargetDecryptionAggregateOpeningMaterialSource[];
-}): Promise<void> => {
-    if (input.sources.length === 0 || input.sources.length > 17) {
-        throw new CanonicalStreamResourceError(
-            'Aggregate opening material sources must cover between one and 17 RNS limbs.',
-        );
-    }
-    const runtime = openBgvCanonicalStreamRuntime({ kernel: input.kernel });
-    const stagedSources: BgvTargetDecryptionAggregateOpeningMaterialSource[] =
-        [];
-    try {
-        for (const source of input.sources) {
-            if (source.totalByteLength !== 32_768 * 8) {
-                throw new CanonicalStreamRefusalError('wrongTypeOrLength');
-            }
-            await runtime.stageSourceMaterial({
-                ...(input.abortSignal === undefined
-                    ? {}
-                    : { abortSignal: input.abortSignal }),
-                family: bgvCanonicalStreamFamilies.targetDecryptionAggregateOpening,
-                materialRoot: source.aggregateOpeningRoot,
-                pullChunk: source.pullChunk,
-                totalByteLength: source.totalByteLength,
-            });
-            stagedSources.push(source);
-        }
-    } catch (operationFailure) {
-        let cleanupFailure: unknown;
-        for (const source of stagedSources) {
-            try {
-                await runtime.writeMaterial({
-                    emitChunk: (): Promise<void> => Promise.resolve(),
-                    family: bgvCanonicalStreamFamilies.targetDecryptionAggregateOpening,
-                    materialRoot: source.aggregateOpeningRoot,
-                });
-            } catch (error) {
-                cleanupFailure ??= error;
-            }
-        }
-        if (cleanupFailure !== undefined) {
-            throw new CanonicalStreamCleanupError(
-                operationFailure,
-                cleanupFailure,
-            );
-        }
-        throw operationFailure;
-    }
 };

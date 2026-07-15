@@ -1,5 +1,5 @@
-import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
+import { deriveCanonicalObjectHash } from "@sealed-lattice/crypto";
+import type { ProtocolHash } from "@sealed-lattice/types";
 
 import {
     assertJsonRecord,
@@ -9,16 +9,13 @@ import {
     assertProtocolHash,
     bytesFromHex,
     bytesToHex,
-} from '../common-fields.js';
-export { coefficientVectorFromLittleEndianHex } from '../coefficient-vector-encoding.js';
+} from "../common-fields.js";
+export { coefficientVectorFromLittleEndianHex } from "../coefficient-vector-encoding.js";
 
 import {
-    type EvaluationKeyShareMaterial,
     type EvaluationKeyShareProofFamily,
     type JsonRecord,
-} from './constants-and-types.js';
-
-const lowercaseHexPattern = /^[0-9a-f]+$/u;
+} from "./constants-and-types.js";
 
 export {
     assertJsonRecord,
@@ -29,19 +26,13 @@ export {
     bytesFromHex,
 };
 
-export const assertLowercaseHex = (value: string, fieldName: string): void => {
-    if (!lowercaseHexPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be lowercase hex.`);
-    }
-};
-
 export const stringRecordField = (
     record: JsonRecord,
     fieldName: string,
     objectPath: string,
 ): string => {
     const value = record[fieldName];
-    if (typeof value !== 'string' || value.length === 0) {
+    if (typeof value !== "string" || value.length === 0) {
         throw new TypeError(`${objectPath}.${fieldName} must be non-empty.`);
     }
 
@@ -55,7 +46,7 @@ export const nonNegativeIntegerRecordField = (
 ): number => {
     const value = record[fieldName];
     if (
-        typeof value !== 'number' ||
+        typeof value !== "number" ||
         !Number.isSafeInteger(value) ||
         value < 0
     ) {
@@ -73,7 +64,7 @@ const defaultProofRandomBytes = (byteLength: number): Uint8Array => {
     const cryptoProvider = globalThis.crypto;
     if (cryptoProvider === undefined) {
         throw new Error(
-            'Trustee evaluation-key proof generation requires Web Crypto getRandomValues.',
+            "Trustee evaluation-key proof generation requires Web Crypto getRandomValues.",
         );
     }
     const bytes = new Uint8Array(byteLength);
@@ -86,7 +77,7 @@ export const freshProofRandomnessHex = (): string => {
     const bytes = defaultProofRandomBytes(proofRandomnessByteLength);
     if (bytes.byteLength !== proofRandomnessByteLength) {
         throw new Error(
-            'proof randomness byte source must return exactly 64 bytes.',
+            "proof randomness byte source must return exactly 64 bytes.",
         );
     }
 
@@ -99,10 +90,12 @@ export const evaluationKeyShareComponentVectorRoot = (
     keySwitchSeedHex: string,
     level: number,
     ringDegree: number,
-    componentVectors: readonly JsonRecord[],
+    componentVectors: readonly Readonly<{
+        readonly coefficientsLeHex: string;
+    }>[],
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
-        objectType: 'EvaluationKeyShareComponentVectorSet',
+        objectType: "EvaluationKeyShareComponentVectorSet",
         proofFamily,
         keySwitchDomain,
         keySwitchSeedHex,
@@ -113,26 +106,22 @@ export const evaluationKeyShareComponentVectorRoot = (
 
 export const evaluationKeyShareComponentMaterialReferenceRoot = (
     proofFamily: EvaluationKeyShareProofFamily,
-    shareMaterial: Pick<
-        EvaluationKeyShareMaterial,
-        | 'keySwitchDomain'
-        | 'keySwitchSeedHex'
-        | 'ringDegree'
-        | 'keySwitchComponentVectorRoot'
-    >,
+    ringDegree: number,
+    keySwitchComponentVectorRoot: ProtocolHash,
+    keySwitchDomain: string,
+    keySwitchSeedHex: string,
     trusteeIdentity: string,
     trusteeRosterPosition: number,
     level: number,
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
-        objectType: 'EvaluationKeyShareComponentMaterialReference',
+        objectType: "EvaluationKeyShareComponentMaterialReference",
         proofFamily,
         trusteeIdentity,
         trusteeRosterPosition,
-        keySwitchDomain: shareMaterial.keySwitchDomain,
-        keySwitchSeedHex: shareMaterial.keySwitchSeedHex,
+        keySwitchDomain,
+        keySwitchSeedHex,
         level,
-        ringDegree: shareMaterial.ringDegree,
-        keySwitchComponentVectorRoot:
-            shareMaterial.keySwitchComponentVectorRoot,
+        ringDegree,
+        keySwitchComponentVectorRoot,
     });

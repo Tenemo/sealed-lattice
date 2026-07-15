@@ -51,6 +51,7 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
                 Ok(None)
             }
             Some(_) => Ok(Some(evaluation_key_material_refusal(
+                crate::foundation::RefusalReason::MissingPrerequisite,
                 "trusteeEvaluationKeyProofsWithoutShareRecords",
                 "trusteeEvaluationKeyProofs requires the relinearization rounds and Galois batches it proves",
                 "setupPackage.trusteeEvaluationKeyProofs",
@@ -65,6 +66,7 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
     };
     if !proof_set.is_object() {
         return Ok(Some(evaluation_key_material_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
             "trusteeEvaluationKeyProofsNotObject",
             "trusteeEvaluationKeyProofs must be a root-bound object",
             "setupPackage.trusteeEvaluationKeyProofs",
@@ -77,6 +79,7 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
         proof_binding_session,
     ) {
         return Ok(Some(evaluation_key_material_refusal(
+            crate::foundation::RefusalReason::InvalidProof,
             "trusteeEvaluationKeyProofVerificationFailed",
             error.message,
             "setupPackage.trusteeEvaluationKeyProofs",
@@ -100,12 +103,6 @@ fn verify_trustee_evaluation_key_proof_set(
             "trusteeEvaluationKeyProofs objectType must match the accepted parameters",
         ));
     }
-    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "setupContext was required before trustee evaluation-key proof verification",
-        )
-    })?;
     let roster = super::accepted_roster_from_package(setup_package)?;
     let proof_records = array_value(proof_set, "proofRecords")?;
     if proof_records.len() != roster.participant_count as usize {
@@ -113,18 +110,6 @@ fn verify_trustee_evaluation_key_proof_set(
             CanonicalErrorCode::MalformedLength,
             "trusteeEvaluationKeyProofs.proofRecords must contain one proof per trustee",
         ));
-    }
-    // Index-equals-position enforces a single canonical ordering and full dense
-    // coverage 0..n. Do this before rebuilding heavyweight aggregate inputs so
-    // malformed containers fail without paying proof-verification costs.
-    for (record_position, proof_record) in proof_records.iter().enumerate() {
-        let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
-        if trustee_roster_position != record_position as u64 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "trustee evaluation-key proof records must be ordered by roster position",
-            ));
-        }
     }
     trustee_evaluation_key_verify_progress(|| "shared-inputs-start".to_string());
     let round_one_aggregate_diagonals_by_level =
@@ -149,7 +134,7 @@ fn verify_trustee_evaluation_key_proof_set(
         });
         verify_trustee_evaluation_key_proof_record(
             proof_record,
-            setup_context,
+            trustee_roster_position,
             &statement,
             proof_binding_session,
         )
@@ -165,7 +150,7 @@ fn verify_trustee_evaluation_key_proof_set(
 
 fn verify_trustee_evaluation_key_proof_record(
     proof_record: &Value,
-    setup_context: &Value,
+    trustee_roster_position: u64,
     statement: &TrusteeEvaluationKeyStatement,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<()> {
@@ -183,36 +168,17 @@ fn verify_trustee_evaluation_key_proof_record(
             "trustee evaluation-key proof objectType must match the accepted parameters",
         ));
     }
-    verify_context_fields_match(proof_record, setup_context, "trusteeEvaluationKeyProof")?;
-    let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
-    if proof_record.get("trusteeIdentity").and_then(Value::as_str)
-        != Some(statement.context.trustee_identity.as_str())
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "trustee evaluation-key proof trusteeIdentity must match the accepted trustee secret binding",
-        ));
-    }
-    let expected_statement_hash = to_hex(&statement.statement_hash());
-    if proof_record.get("statementHash").and_then(Value::as_str)
-        != Some(expected_statement_hash.as_str())
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "trustee evaluation-key proof statementHash must match the statement rebuilt from the verified share records",
-        ));
-    }
-    let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
+    let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
     let verification_binding_hash =
         trustee_evaluation_key_proof_verification_binding_hash(proof_record, statement)?;
     if !crate::bgv::setup::consume_accepted_setup_proof_binding(
         proof_binding_session.session_handle,
         TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        proof_material_root,
+        proof_bytes_hash,
         &verification_binding_hash,
     )? {
         let proof_bytes =
-            trustee_evaluation_key_proof_bytes_from_record(proof_record, proof_binding_session)?;
+            trustee_evaluation_key_proof_bytes_from_hash(proof_bytes_hash, proof_binding_session)?;
         if value_string(proof_record, "proofBytesHash")?
             != trustee_evaluation_key_proof_material_bytes_hash(proof_bytes.as_ref())?
         {
@@ -252,9 +218,8 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_verification_binding_h
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "AcceptedSetupTrusteeEvaluationKeyProofVerificationBinding",
-        "proofMaterialRoot": trustee_evaluation_key_proof_material_root(proof_record)?,
+        "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
         "statementHash": to_hex(&statement.statement_hash()),
-        "proofRecordRoot": derive_canonical_object_hash(proof_record)?,
     }))
 }
 
@@ -295,14 +260,16 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             )
         })?;
     let scheduled_levels = scheduled_relinearization_levels()?;
+    let participant_count = super::accepted_roster_from_package(setup_package)?.participant_count;
     let mut keys = Vec::new();
-    let mut ring_degree = None;
     for level in &scheduled_levels {
         let record = relinearization_record_for_trustee_and_level(
             rounds,
             "roundOneRecords",
             inputs.trustee_roster_position,
             *level,
+            &scheduled_levels,
+            participant_count,
         )?;
         let key_switch_seed_hex =
             expected_relinearization_key_switch_seed(&binding, "round-one", *level)?;
@@ -311,6 +278,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             &binding,
             "round-one",
             *level,
+            inputs.trustee_roster_position,
             inputs.accepted_setup_session,
         )?;
         keys.push(evaluation_key_descriptor_from_verified_sample(
@@ -320,7 +288,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             key_switch_seed_hex,
             decoded_material,
             Vec::new(),
-            &mut ring_degree,
         )?);
     }
     for level in &scheduled_levels {
@@ -329,6 +296,8 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             "roundTwoRecords",
             inputs.trustee_roster_position,
             *level,
+            &scheduled_levels,
+            participant_count,
         )?;
         let aggregate_diagonal = inputs
             .round_one_aggregate_diagonals_by_level
@@ -347,6 +316,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             &binding,
             "round-two",
             *level,
+            inputs.trustee_roster_position,
             inputs.accepted_setup_session,
         )?;
         keys.push(evaluation_key_descriptor_from_verified_sample(
@@ -356,7 +326,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             key_switch_seed_hex,
             decoded_material,
             aggregate_diagonal,
-            &mut ring_degree,
         )?);
     }
     let batches = setup_package
@@ -369,11 +338,14 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             )
         })?;
     let batch = batches
-        .iter()
-        .find(|batch| {
-            batch.get("trusteeRosterPosition").and_then(Value::as_u64)
-                == Some(inputs.trustee_roster_position)
-        })
+        .get(
+            usize::try_from(inputs.trustee_roster_position).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "trustee roster position does not fit usize",
+                )
+            })?,
+        )
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -381,13 +353,15 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             )
         })?;
     let expected_schedule = expected_required_galois_key_schedule()?;
-    for schedule_entry in expected_schedule
+    for (schedule_index, schedule_entry) in expected_schedule
         .as_array()
         .expect("required Galois key schedule is an array")
+        .iter()
+        .enumerate()
     {
         let rotation = value_u64(schedule_entry, "rotation")?;
         let level = value_u64(schedule_entry, "level")?;
-        let material_record = galois_key_share_material_for_schedule(batch, rotation, level)?;
+        let material_record = galois_key_share_material_for_schedule(batch, schedule_index)?;
         let galois_element = usize::try_from(rotation).map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -397,11 +371,11 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
         let key_switch_domain = format!("galois-{rotation}");
         let key_switch_seed_hex = expected_galois_key_switch_seed(&binding, rotation, level)?;
         let decoded_material = verify_galois_key_switch_sample_binding(
-            batch,
             material_record,
             &binding,
             rotation,
             level,
+            inputs.trustee_roster_position,
             inputs.accepted_setup_session,
         )?;
         keys.push(evaluation_key_descriptor_from_verified_sample(
@@ -411,15 +385,9 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             key_switch_seed_hex,
             decoded_material,
             Vec::new(),
-            &mut ring_degree,
         )?);
     }
-    let ring_degree = ring_degree.ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key statement requires at least one share record",
-        )
-    })?;
+    let ring_degree = binding.ring_degree;
 
     // The trustee's key schedule is proven against a bridge whose proof has
     // already been verified against the canonical source VSS commitments.
@@ -485,7 +453,6 @@ fn evaluation_key_descriptor_from_verified_sample(
     key_switch_seed_hex: String,
     decoded_material: DecodedEvaluationKeyShareComponentMaterial,
     round_one_aggregate_diagonal: Vec<Vec<u64>>,
-    ring_degree: &mut Option<usize>,
 ) -> CanonicalResult<EvaluationKeyShareDescriptor> {
     let level = usize::try_from(level).map_err(|_| {
         CanonicalError::new(
@@ -493,17 +460,6 @@ fn evaluation_key_descriptor_from_verified_sample(
             "evaluation-key share level does not fit usize",
         )
     })?;
-    match ring_degree {
-        Some(existing_ring_degree) if *existing_ring_degree != decoded_material.ring_degree => {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "evaluation-key share component material must agree on one ring degree",
-            ));
-        }
-        Some(_) => {}
-        None => *ring_degree = Some(decoded_material.ring_degree),
-    }
-
     Ok(EvaluationKeyShareDescriptor {
         kind,
         level,
@@ -519,14 +475,43 @@ fn relinearization_record_for_trustee_and_level<'a>(
     record_field_name: &str,
     trustee_roster_position: u64,
     level: u64,
+    scheduled_levels: &[u64],
+    participant_count: u64,
 ) -> CanonicalResult<&'a Value> {
-    array_value(rounds, record_field_name)?
+    let level_index = scheduled_levels
         .iter()
-        .find(|record| {
-            record.get("trusteeRosterPosition").and_then(Value::as_u64)
-                == Some(trustee_roster_position)
-                && record.get("level").and_then(Value::as_u64) == Some(level)
-        })
+        .position(|scheduled_level| *scheduled_level == level)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "relinearization {record_field_name} do not cover a scheduled trustee and level"
+                ),
+            )
+        })?;
+    let participant_count = usize::try_from(participant_count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "participant count does not fit usize",
+        )
+    })?;
+    let trustee_roster_position = usize::try_from(trustee_roster_position).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "trustee roster position does not fit usize",
+        )
+    })?;
+    let records = array_value(rounds, record_field_name)?;
+    if records.len() != scheduled_levels.len() * participant_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "relinearization {record_field_name} do not cover every scheduled trustee and level"
+            ),
+        ));
+    }
+    records
+        .get(level_index * participant_count + trustee_roster_position)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -558,9 +543,29 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
         })?;
     let round_one_records = array_value(rounds, "roundOneRecords")?;
     let binding = evaluation_key_proof_common_binding(setup_package)?;
+    let scheduled_levels = scheduled_relinearization_levels()?;
+    let participant_count = usize::try_from(roster.participant_count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "participant count does not fit usize",
+        )
+    })?;
+    if round_one_records.len() != scheduled_levels.len() * participant_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "round-one aggregate requires one component contribution per trustee and scheduled level",
+        ));
+    }
     let mut aggregates_by_level = BTreeMap::<u64, (Vec<Vec<u64>>, u64)>::new();
-    for record in round_one_records {
-        let level = value_u64(record, "level")?;
+    for (record_index, record) in round_one_records.iter().enumerate() {
+        let level = scheduled_levels[record_index / participant_count];
+        let trustee_roster_position =
+            u64::try_from(record_index % participant_count).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "trustee roster position does not fit u64",
+                )
+            })?;
         let digit_count = usize::try_from(level).map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -572,6 +577,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
             &binding,
             "round-one",
             level,
+            trustee_roster_position,
             accepted_setup_session,
         )?;
         let ring_degree = decoded_material.ring_degree;
@@ -612,35 +618,15 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
     Ok(aggregate_diagonals_by_level)
 }
 
-fn trustee_evaluation_key_proof_bytes_from_record(
-    proof_record: &Value,
+fn trustee_evaluation_key_proof_bytes_from_hash(
+    proof_bytes_hash: &str,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
-    validate_hash_string(
-        proof_material_root,
-        "trusteeEvaluationKeyProof.proofMaterialRoot",
-    )?;
-    let expected_material_root = trustee_evaluation_key_proof_material_root(proof_record)?;
-    if proof_material_root != expected_material_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key proofMaterialRoot must match the canonical proof material reference",
-        ));
-    }
+    validate_hash_string(proof_bytes_hash, "trusteeEvaluationKeyProof.proofBytesHash")?;
     take_verified_setup_proof_material_bytes(
         TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        proof_material_root,
-        "trusteeEvaluationKeyProof.proofMaterialRoot",
+        proof_bytes_hash,
+        "trusteeEvaluationKeyProof.proofBytesHash",
         Some(proof_binding_session),
-    )
-}
-
-pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
-    proof_record: &Value,
-) -> CanonicalResult<String> {
-    crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
-        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        value_string(proof_record, "proofBytesHash")?,
     )
 }

@@ -201,7 +201,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         const secondChunk = deterministicBytes(37, 0x71);
         const slot = producerSlot({ direction: 'outbound' });
         const lease = await storage.outboundCache.reserve({
-            chunkCount: 2,
             plaintextByteLength: totalByteLength,
             producerSlot: slot,
         });
@@ -245,7 +244,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         ).resolves.toBeUndefined();
 
         const cachedLease = await storage.outboundCache.reserve({
-            chunkCount: 2,
             plaintextByteLength: totalByteLength,
             producerSlot: slot,
         });
@@ -263,7 +261,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         ).toEqual(secondChunk);
         await expect(
             storage.outboundCache.reserve({
-                chunkCount: 2,
                 plaintextByteLength: totalByteLength + 1,
                 producerSlot: slot,
             }),
@@ -279,13 +276,11 @@ describe('Browser-local authenticated mailbox storage', () => {
             producerSequence: '11',
         });
         const firstLease = await firstHarness.storage.outboundCache.reserve({
-            chunkCount: 1,
             plaintextByteLength: 23,
             producerSlot: slot,
         });
         await expect(
             firstHarness.storage.outboundCache.reserve({
-                chunkCount: 1,
                 plaintextByteLength: 23,
                 producerSlot: slot,
             }),
@@ -301,7 +296,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         });
         const recoveredLease =
             await restartedHarness.storage.outboundCache.reserve({
-                chunkCount: 1,
                 plaintextByteLength: 23,
                 producerSlot: slot,
             });
@@ -319,7 +313,6 @@ describe('Browser-local authenticated mailbox storage', () => {
     it('does not publish cancelled outbound chunks and removes every journal-owned record', async () => {
         const { adapter, storage } = await createHarness();
         const lease = await storage.outboundCache.reserve({
-            chunkCount: 1,
             plaintextByteLength: 31,
             producerSlot: producerSlot({
                 direction: 'outbound',
@@ -346,7 +339,6 @@ describe('Browser-local authenticated mailbox storage', () => {
             producerSequence: '13',
         });
         const lease = await firstHarness.storage.outboundCache.reserve({
-            chunkCount: 1,
             plaintextByteLength: 17,
             producerSlot: slot,
         });
@@ -371,7 +363,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         });
         const recoveredLease =
             await restartedHarness.storage.outboundCache.reserve({
-                chunkCount: 1,
                 plaintextByteLength: 17,
                 producerSlot: slot,
             });
@@ -383,7 +374,6 @@ describe('Browser-local authenticated mailbox storage', () => {
     it('keeps outbound and staging leases cleanable when transaction acquisition is unavailable', async () => {
         const harness = await createHarness();
         const outboundLease = await harness.storage.outboundCache.reserve({
-            chunkCount: 1,
             plaintextByteLength: 21,
             producerSlot: producerSlot({
                 direction: 'outbound',
@@ -414,7 +404,6 @@ describe('Browser-local authenticated mailbox storage', () => {
 
         const envelopeHash = hashHex(0x94);
         const stagingLease = await harness.storage.stagingBoundary.open({
-            chunkCount: 1,
             envelopeHash,
             totalByteLength: 27,
         });
@@ -441,7 +430,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         expect(logicalRecordKeys(harness.adapter)).toEqual([]);
 
         const replacementLease = await harness.storage.stagingBoundary.open({
-            chunkCount: 1,
             envelopeHash,
             totalByteLength: 29,
         });
@@ -464,7 +452,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         const secondChunk = deterministicBytes(19, 0x81);
         const envelopeHash = hashHex(0x91);
         const lease = await storage.stagingBoundary.open({
-            chunkCount: 2,
             envelopeHash,
             totalByteLength,
         });
@@ -517,7 +504,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         const { adapter, storage } = await createHarness();
         const initialKeys = adapter.keys();
         const lease = await storage.stagingBoundary.open({
-            chunkCount: 1,
             envelopeHash: hashHex(0x92),
             totalByteLength: 29,
         });
@@ -545,7 +531,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         const firstHarness = await createHarness();
         const envelopeHash = hashHex(0x93);
         const abandonedLease = await firstHarness.storage.stagingBoundary.open({
-            chunkCount: 1,
             envelopeHash,
             totalByteLength: 41,
         });
@@ -561,7 +546,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         });
         const replacementLease =
             await restartedHarness.storage.stagingBoundary.open({
-                chunkCount: 1,
                 envelopeHash,
                 totalByteLength: 43,
             });
@@ -746,20 +730,10 @@ describe('Browser-local authenticated mailbox storage', () => {
         );
         const objectKey = requiredObjectKey(firstHarness.adapter, indexKey);
         firstHarness.adapter.rawDelete(indexKey);
-        const reopenedStore = await openRuntimeTestStore({
-            adapter: firstHarness.adapter,
-            namespace: 'mailbox-storage-test',
-        });
-        expect(firstHarness.adapter.rawRead(objectKey)).toBeDefined();
-        const restartedHarness = await createHarness({
-            encryptionKey: firstHarness.encryptionKey,
-            storeHarness: reopenedStore,
-        });
-
         await expect(
-            restartedHarness.storage.inboundSlotAuthority.reserve({
-                ...signedCarrier,
-                producerSlot: slot,
+            openRuntimeTestStore({
+                adapter: firstHarness.adapter,
+                namespace: 'mailbox-storage-test',
             }),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
         expect(firstHarness.adapter.rawRead(objectKey)).toBeDefined();
@@ -904,7 +878,9 @@ describe('Browser-local authenticated mailbox storage', () => {
             adapter: firstHarness.adapter,
             namespace: 'mailbox-storage-test',
         });
-        expect(firstHarness.adapter.rawRead(abandonedObjectKey)).toBeDefined();
+        expect(
+            firstHarness.adapter.rawRead(abandonedObjectKey),
+        ).toBeUndefined();
         const restartedHarness = await createHarness({
             encryptionKey: firstHarness.encryptionKey,
             storeHarness: reopenedStore,
@@ -953,7 +929,7 @@ describe('Browser-local authenticated mailbox storage', () => {
                 adapter: firstHarness.adapter,
                 namespace: 'mailbox-storage-test',
             }),
-        ).rejects.toMatchObject({ code: 'CorruptIndex' });
+        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
         expect(firstHarness.adapter.rawRead(indexKey)).toBeDefined();
     });
 
@@ -982,24 +958,15 @@ describe('Browser-local authenticated mailbox storage', () => {
         }
         headBytes[Math.floor(headBytes.byteLength / 2)] ^= 0x80;
         firstHarness.adapter.rawWrite(headKey, headBytes);
-        const reopenedStore = await openRuntimeTestStore({
-            adapter: firstHarness.adapter,
-            namespace: 'mailbox-storage-test',
-        });
-        const restartedHarness = await createHarness({
-            encryptionKey: firstHarness.encryptionKey,
-            storeHarness: reopenedStore,
-        });
-
         await expect(
-            restartedHarness.storage.inboundSlotAuthority.reserve({
-                ...signedCarrier,
-                producerSlot: slot,
+            openRuntimeTestStore({
+                adapter: firstHarness.adapter,
+                namespace: 'mailbox-storage-test',
             }),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
     });
 
-    it('rejects same-context recovery reconfiguration under a different encryption key', async () => {
+    it('rejects committed mailbox records under a different encryption key', async () => {
         const firstHarness = await createHarness();
         const slot = producerSlot({
             direction: 'inbound',
@@ -1018,10 +985,14 @@ describe('Browser-local authenticated mailbox storage', () => {
         const differentEncryptionKey =
             await generateRuntimeStorageEncryptionKey();
 
+        const wrongKeyHarness = await createHarness({
+            encryptionKey: differentEncryptionKey,
+            storeHarness: firstHarness.storeHarness,
+        });
         await expect(
-            createHarness({
-                encryptionKey: differentEncryptionKey,
-                storeHarness: firstHarness.storeHarness,
+            wrongKeyHarness.storage.inboundSlotAuthority.reserve({
+                ...signedCarrier,
+                producerSlot: slot,
             }),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
 
@@ -1082,19 +1053,10 @@ describe('Browser-local authenticated mailbox storage', () => {
             indexKey,
         );
         firstHarness.adapter.rawWrite(currentObjectKey, olderCommittedBytes);
-        const reopenedStore = await openRuntimeTestStore({
-            adapter: firstHarness.adapter,
-            namespace: 'mailbox-storage-test',
-        });
-        const restartedHarness = await createHarness({
-            encryptionKey: firstHarness.encryptionKey,
-            storeHarness: reopenedStore,
-        });
-
         await expect(
-            restartedHarness.storage.inboundSlotAuthority.reserve({
-                ...carrier(0xb8),
-                producerSlot: producerSlot({ direction: 'inbound' }),
+            openRuntimeTestStore({
+                adapter: firstHarness.adapter,
+                namespace: 'mailbox-storage-test',
             }),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
         expect(firstHarness.adapter.rawRead(currentObjectKey)).toEqual(
@@ -1116,11 +1078,15 @@ describe('Browser-local authenticated mailbox storage', () => {
         }
         await reservation.value.commit();
 
+        const wrongContextHarness = await createHarness({
+            encryptionKey: firstHarness.encryptionKey,
+            runtimeBuildManifestByte: 0x56,
+            storeHarness: firstHarness.storeHarness,
+        });
         await expect(
-            createHarness({
-                encryptionKey: firstHarness.encryptionKey,
-                runtimeBuildManifestByte: 0x56,
-                storeHarness: firstHarness.storeHarness,
+            wrongContextHarness.storage.inboundSlotAuthority.reserve({
+                ...signedCarrier,
+                producerSlot: slot,
             }),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
         await expect(

@@ -1,4 +1,7 @@
-use super::super::{LINCHECK_REPETITIONS, invalid_succinct_setup_proof};
+use super::super::{
+    LINCHECK_REPETITIONS, TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND,
+    invalid_succinct_setup_proof,
+};
 use super::family_shape_and_validation::validate_context_token;
 use super::key_relation_algebra::public_key_switch_sample;
 use super::vss_vectors::VssShareLinkageCommitment;
@@ -101,7 +104,6 @@ pub(crate) struct PrivateVssShareStatement {
     pub(crate) source_trustee_commitment_root: String,
     pub(crate) source_rns_limb_index: usize,
     pub(crate) source_message_modulus: u64,
-    pub(crate) share_values_hash: String,
     pub(crate) share_values: Vec<u64>,
     pub(crate) coefficient_commitment_roots: Vec<String>,
     pub(crate) coefficient_commitments: Vec<SetupCommitmentValue>,
@@ -189,8 +191,8 @@ pub(crate) struct TargetDecryptionShareRoleStatement {
     pub(crate) target_role: String,
     pub(crate) target_ciphertext_component_one: Vec<u64>,
     pub(crate) released_partial_decryption: Vec<u64>,
-    pub(crate) smudging_commitment_roots: Vec<String>,
-    pub(crate) smudging_commitments: Vec<VssShareLinkageCommitment>,
+    pub(crate) flooding_noise_commitment_root: String,
+    pub(crate) flooding_noise_commitment: VssShareLinkageCommitment,
 }
 
 pub(crate) struct TargetDecryptionShareLimbStatement {
@@ -207,15 +209,9 @@ pub(crate) struct TargetDecryptionShareStatement {
     pub(crate) trustee_identity: String,
     pub(crate) trustee_roster_position: u64,
     pub(crate) active_credential_binding_root: String,
-    pub(crate) interpolation_point: u64,
     pub(crate) aggregate_message_coefficient_bound: u64,
     pub(crate) smudging_commitment_set_root: String,
     pub(crate) limb_statements: Vec<TargetDecryptionShareLimbStatement>,
-    pub(crate) smudging_polynomial_degree: usize,
-    pub(crate) smudging_coefficient_bound: i64,
-    pub(crate) smudging_signed_coefficient_offset: i64,
-    pub(crate) smudging_message_coefficient_bound: u64,
-    pub(crate) plaintext_multiple: u64,
 }
 
 // Setup context the proof is bound to: one canonical context hash, the trustee,
@@ -272,10 +268,9 @@ impl TrusteeEvaluationKeyStatement {
             }
             SetupProofStatement::SameSecretBridge { .. } => 0x1211,
             SetupProofStatement::TargetDecryptionShare(_) => 0x1621,
-            // The current key-bearing atom statement batches round-one,
-            // round-two, and Galois schedule entries. Its joint commitment is
-            // rooted under the hardest linked relation until those entries are
-            // emitted as individual common-profile proof applications.
+            // The key-bearing atom statement batches round-one, round-two, and
+            // Galois schedule entries. Its joint commitment uses the round-two
+            // relation identifier for transcript separation.
             SetupProofStatement::TrusteeEvaluationKey { .. } => 0x1216,
         }
     }
@@ -293,7 +288,6 @@ pub(crate) struct SameSecretLinkageWitness {
 
 pub(crate) struct VssCommittedMaterialWitness {
     pub(crate) vss_committed_material_seeds_by_bound_message: Vec<String>,
-    pub(crate) vss_committed_material_context_hashes_by_bound_message: Vec<String>,
 }
 
 // Witness material follows the same family split as the statement. Shared
@@ -335,7 +329,7 @@ pub(crate) enum TrusteeEvaluationKeyWitness {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TargetDecryptionMessageClaimKind {
     AggregateOpening,
-    SmudgingOpening,
+    FloodingNoiseOpening,
 }
 
 impl TrusteeEvaluationKeyStatement {
@@ -681,14 +675,6 @@ impl TrusteeEvaluationKeyWitness {
                 .as_slice()
         })
     }
-
-    pub(crate) fn vss_committed_material_context_hashes_by_bound_message(&self) -> &[String] {
-        self.committed_material().map_or(&[], |material| {
-            material
-                .vss_committed_material_context_hashes_by_bound_message
-                .as_slice()
-        })
-    }
 }
 
 impl EvaluationKeyShareDescriptor {
@@ -996,7 +982,7 @@ impl TrusteeEvaluationKeyStatement {
                         limb_statement
                             .role_statements
                             .iter()
-                            .flat_map(|role_statement| role_statement.smudging_commitments.iter()),
+                            .map(|role_statement| &role_statement.flooding_noise_commitment),
                     )
                 })
                 .collect()
@@ -1006,7 +992,7 @@ impl TrusteeEvaluationKeyStatement {
     }
 
     pub(crate) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 5;
-    pub(crate) const TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 4;
+    pub(crate) const TARGET_DECRYPTION_FLOODING_NOISE_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 4;
 
     // The number of active limb fields: one past the highest key level. A
     // standalone same-secret bridge statement is active on every source
@@ -1149,11 +1135,7 @@ impl TrusteeEvaluationKeyStatement {
     fn target_decryption_limb_message_count(
         limb_statement: &TargetDecryptionShareLimbStatement,
     ) -> usize {
-        1 + limb_statement
-            .role_statements
-            .iter()
-            .map(|role_statement| role_statement.smudging_commitments.len())
-            .sum::<usize>()
+        1 + limb_statement.role_statements.len()
     }
 
     pub(crate) fn target_decryption_total_message_count(&self) -> usize {
@@ -1202,7 +1184,7 @@ impl TrusteeEvaluationKeyStatement {
                 return Some(if global_message_index == offset {
                     TargetDecryptionMessageClaimKind::AggregateOpening
                 } else {
-                    TargetDecryptionMessageClaimKind::SmudgingOpening
+                    TargetDecryptionMessageClaimKind::FloodingNoiseOpening
                 });
             }
             offset += limb_message_count;
@@ -1220,8 +1202,8 @@ impl TrusteeEvaluationKeyStatement {
             TargetDecryptionMessageClaimKind::AggregateOpening => {
                 Some(statement.aggregate_message_coefficient_bound)
             }
-            TargetDecryptionMessageClaimKind::SmudgingOpening => {
-                Some(statement.smudging_message_coefficient_bound)
+            TargetDecryptionMessageClaimKind::FloodingNoiseOpening => {
+                Some((TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND as u64) * 2 + 1)
             }
         }
     }
@@ -1289,8 +1271,8 @@ impl TrusteeEvaluationKeyStatement {
             Some(TargetDecryptionMessageClaimKind::AggregateOpening) => {
                 Self::TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT
             }
-            Some(TargetDecryptionMessageClaimKind::SmudgingOpening) => {
-                Self::TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT
+            Some(TargetDecryptionMessageClaimKind::FloodingNoiseOpening) => {
+                Self::TARGET_DECRYPTION_FLOODING_NOISE_MESSAGE_MASKED_CLAIM_FIELD_COUNT
             }
             None => return Vec::new(),
         };

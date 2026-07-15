@@ -115,9 +115,8 @@ describe('transcript-core kernel in Node', () => {
                 allowUnpinnedKernel: true,
             });
 
-        const kernel = await loadMockKernel();
+        await loadMockKernel();
 
-        expect(kernel.exportedFunctionNames).toContain('memory');
         expect(getInstantiateCallCount()).toBe(1);
     });
 
@@ -155,9 +154,8 @@ describe('transcript-core kernel in Node', () => {
         rejectNextInstantiation(new Error('first load failed'));
 
         await expect(loadMockKernel()).rejects.toThrow('first load failed');
-        const kernel = await loadMockKernel();
+        await loadMockKernel();
 
-        expect(kernel.exportedFunctionNames).toContain('memory');
         expect(getInstantiateCallCount()).toBe(2);
     });
 });

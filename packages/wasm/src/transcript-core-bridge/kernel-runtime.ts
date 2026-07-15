@@ -403,7 +403,6 @@ export type TranscriptCoreKernelCommandRuntime = Readonly<{
     readonly executeCommand: <Result>(
         request: TranscriptCoreKernelCommand,
     ) => Result;
-    readonly exportedFunctionNames: readonly string[];
     readonly memory: WebAssembly.Memory;
     readonly runExclusive: <Result>(
         operationName: string,
@@ -585,11 +584,9 @@ type NumberExportName =
     | 'sealed_lattice_state_verifier_describe'
     | 'sealed_lattice_state_verifier_release'
     | 'sealed_lattice_state_verifier_finish_output'
-    | 'sealed_lattice_state_verifier_finish_witness_vote'
     | 'sealed_lattice_state_verifier_prepare_output'
     | 'sealed_lattice_state_verifier_prepare_recovery'
     | 'sealed_lattice_state_verifier_prepare_reservation'
-    | 'sealed_lattice_state_verifier_prepare_witness_vote'
     | 'sealed_lattice_state_verifier_verify_recovery'
     | 'sealed_lattice_state_verifier_verify_reservation'
     | 'sealed_lattice_transcript_core_command_with_length';
@@ -803,11 +800,6 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         wasmExports,
         'sealed_lattice_transcript_core_command_with_length',
     );
-    const exportedFunctionNames = WebAssembly.Module.exports(
-        instantiatedSource.module,
-    )
-        .map((entry) => entry.name)
-        .sort();
     let kernelOperationInProgress = false;
     const runExclusive = <Result>(
         operationName: string,
@@ -842,7 +834,6 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
         allocate,
         deallocate,
         executeCommand,
-        exportedFunctionNames,
         memory,
         runExclusive,
         wasmExports,

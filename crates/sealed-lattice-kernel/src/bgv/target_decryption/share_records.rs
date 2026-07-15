@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn read_partial_decryption_share(
     share: &Value,
     setup_binding: &SetupBinding,
@@ -31,21 +32,7 @@ pub(super) fn read_partial_decryption_share(
         participant,
     )?;
     let payload = value_at_path(share, &["sharePayload"])?;
-    let share_root = derive_canonical_object_hash(payload)?;
-    compare_hash_field(share, "shareRoot", &share_root, "target share root")?;
-    let expected_hash = derive_canonical_object_hash(&share_record_hash_input(
-        setup_binding,
-        target_accepted,
-        target_ciphertexts,
-        participant,
-        &share_root,
-    ))?;
-    compare_hash_field(
-        share,
-        "targetDecryptionShareHash",
-        &expected_hash,
-        "target decryption share hash",
-    )?;
+    target_decryption_share_hash(share)?;
     read_partial_limb_set(payload, "targetId", target_ciphertexts.target_id.level)?;
     read_partial_limb_set(
         payload,
@@ -56,6 +43,7 @@ pub(super) fn read_partial_decryption_share(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn compare_share_record_fields(
     share: &Value,
     setup_binding: &SetupBinding,
@@ -157,19 +145,13 @@ pub(super) fn read_partial_limb_set(
         .collect()
 }
 
-pub(super) fn share_record_hash_input(
-    setup_binding: &SetupBinding,
-    target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
-    participant: &ParticipantBinding,
-    share_root: &str,
-) -> Value {
-    json!({
-        "objectType": "BgvTargetDecryptionShare",
-        "setupPackageHash": setup_binding.setup_package_hash,
-        "trusteeIdentity": participant.trustee_identity,
-        "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetCiphertextHash": target_ciphertexts.target_ciphertext_hash,
-        "shareRoot": share_root,
-    })
+pub(super) fn target_decryption_share_hash(share: &Value) -> CanonicalResult<String> {
+    derive_canonical_object_hash(&json!({
+        "objectType": string_at_path(share, &["objectType"])?,
+        "setupPackageHash": hash_at_path(share, &["setupPackageHash"])?,
+        "trusteeIdentity": string_at_path(share, &["trusteeIdentity"])?,
+        "targetAcceptedRecordHash": hash_at_path(share, &["targetAcceptedRecordHash"])?,
+        "targetCiphertextHash": hash_at_path(share, &["targetCiphertextHash"])?,
+        "sharePayload": value_at_path(share, &["sharePayload"])?,
+    }))
 }

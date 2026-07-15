@@ -27,8 +27,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_succinct_publi
         .as_object_mut()
         .expect("setup package")
         .remove("publicKeyShareSuccinctProofs");
-    rebind_collective_setup_package_hash(&mut missing_succinct_proofs_package);
-
     let missing_succinct_proofs_result = missing_succinct_proofs_fixture
         .verify_values(
             &missing_succinct_proofs_package,
@@ -50,29 +48,19 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
         "heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_proof_containers",
     );
 
-    for (proof_set_name, field_name) in [
-        ("publicKeyShareSuccinctProofs", "proofRecords"),
-        (
-            "publicKeyShareSuccinctProofs",
-            "publicKeyShareSuccinctProofSetRoot",
-        ),
-    ] {
-        let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
-        let mut package = fixture.package.clone();
-        package[proof_set_name]
-            .as_object_mut()
-            .expect("public-key proof set")
-            .remove(field_name);
-        let verification_request = fixture.verification_request.clone();
-        rebind_collective_setup_package_hash(&mut package);
+    let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
+    let mut package = fixture.package.clone();
+    package["publicKeyShareSuccinctProofs"]
+        .as_object_mut()
+        .expect("public-key proof set")
+        .remove("proofRecords");
+    let verification_request = fixture.verification_request.clone();
+    let result = fixture
+        .verify_values(&package, &verification_request)
+        .expect("verification response");
 
-        let result = fixture
-            .verify_values(&package, &verification_request)
-            .expect("verification response");
-
-        assert_eq!(result["isValid"], false);
-        assert_eq!(result["refusalReason"], "invalidProof");
-    }
+    assert_eq!(result["isValid"], false);
+    assert_eq!(result["refusalReason"], "invalidProof");
 }
 
 #[test]
@@ -96,8 +84,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let tampered_hex = format!("{replacement_prefix}{}", &coefficients_hex[2..]);
     package["publicKeyShareMaterial"]["shareMaterialRecords"][0]["shareCoefficientVectorsByLimb"]
         [0]["coefficientsLeHex"] = serde_json::json!(tampered_hex);
-    rebind_collective_setup_package_hash(&mut package);
-
     let result = fixture
         .verify_values(&package, &fixture.verification_request)
         .expect("verification response");
@@ -128,23 +114,14 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         );
     let proof_record = &mut package["publicKeyShareSuccinctProofs"]["proofRecords"][0];
     proof_record["proofBytesHash"] = serde_json::json!(&proof_bytes_hash);
-    let proof_material_root =
-        crate::bgv::setup::accepted_setup::public_key_share_succinct_proof_material_root(
-            proof_record,
-        )
-        .expect("tampered public-key proof material root");
-    proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
-    rebind_collective_public_key_succinct_proof_roots(&mut package);
 
     authenticate_setup_proof_material_stream_in_session_for_test(
         crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
-        &proof_material_root,
+        &proof_bytes_hash,
         &proof_bytes,
         proof_binding_session,
     )
     .expect("authenticate tampered public-key proof material stream");
-    rebind_collective_setup_package_hash(&mut package);
-
     let result = fixture
         .verify_values_in_session(&package, &verification_request, proof_binding_session)
         .expect("verification response");
@@ -190,9 +167,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
     coefficients[0] = add_mod(coefficients[0], 1, DATA_PRIMES[0]).expect("tamper coefficient");
     package["collectivePublicKey"]["aggregateCoefficientVectorsByLimb"][0]["coefficientsLeHex"] =
         serde_json::json!(coefficient_vector_le_hex(&coefficients));
-    rebind_collective_public_key_root(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
     let result = fixture
         .verify_values(&package, &fixture.verification_request)
         .expect("verification response");
@@ -203,9 +177,9 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key_and_nested_root() {
+fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key_and_nested_root",
+        "heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key",
     );
     let missing_object_fixture = collective_public_key_bearing_collective_setup_fixture();
     let mut missing_object_package = missing_object_fixture.package.clone();
@@ -213,8 +187,6 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
         .as_object_mut()
         .expect("setup package")
         .remove("collectivePublicKey");
-    rebind_collective_setup_package_hash(&mut missing_object_package);
-
     let missing_object_result = missing_object_fixture
         .verify_values(
             &missing_object_package,
@@ -227,22 +199,4 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
         missing_object_result["refusalReason"],
         "missingPrerequisite"
     );
-
-    let missing_root_fixture = collective_public_key_bearing_collective_setup_fixture();
-    let mut missing_root_package = missing_root_fixture.package.clone();
-    missing_root_package["collectivePublicKey"]
-        .as_object_mut()
-        .expect("collective public key")
-        .remove("collectivePublicKeyRoot");
-    rebind_collective_setup_package_hash(&mut missing_root_package);
-
-    let missing_root_result = missing_root_fixture
-        .verify_values(
-            &missing_root_package,
-            &missing_root_fixture.verification_request,
-        )
-        .expect("verification response");
-
-    assert_eq!(missing_root_result["isValid"], false);
-    assert_eq!(missing_root_result["refusalReason"], "missingPrerequisite");
 }

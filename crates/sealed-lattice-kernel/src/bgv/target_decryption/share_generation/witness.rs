@@ -5,7 +5,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
 ) -> CanonicalResult<LocalTargetDecryptionShareWitness> {
     if string_at_path(witness, &["objectType"])?
@@ -16,14 +15,14 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
             "local target-decryption share witness must be LocalTrusteeTargetDecryptionProofWitnessMaterial",
         ));
     }
-    let smudging_seed_hex =
-        target_decryption_smudging_seed_hex(setup_binding, target_accepted, target_share_profile);
-    let smudging_polynomial_openings = target_decryption_smudging_polynomial_openings(
+    let private_flooding_seed_hex =
+        string_at_path(witness, &["privateFloodingSeedHex"])?.to_string();
+    let flooding_noise_openings = target_decryption_flooding_noise_openings(
         setup_binding,
         target_accepted,
         target_ciphertexts,
-        target_share_profile,
-        &smudging_seed_hex,
+        participant,
+        &private_flooding_seed_hex,
     )?;
     let opening = value_at_path(witness, &["aggregateOpening"])?;
     if string_at_path(opening, &["objectType"])? != "LocalTrusteeVssPublicAggregateOpeningWitness" {
@@ -92,7 +91,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
             verify_aggregate_opening_credential(AggregateOpeningCheckInput {
                 setup_binding,
                 participant,
-                setup_epoch: &setup_binding.setup_epoch,
                 credential,
                 rns_limb_index: limb_index,
                 rns_prime: expected_modulus,
@@ -130,7 +128,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
             limb_index,
             rns_prime: expected_modulus,
             aggregate_commitment_root: verified_credential.commitment_root,
-            aggregate_commitment_context_hash: verified_credential.commitment_context_hash,
             aggregate_opening_root: verified_credential.opening_root,
             aggregate_commitment_message_values: verified_credential
                 .aggregate_commitment_message_values,
@@ -169,8 +166,8 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
 
     Ok(LocalTargetDecryptionShareWitness {
         secret_share_by_limb,
-        smudging_seed_hex,
-        smudging_polynomial_openings,
+        private_flooding_seed_hex,
+        flooding_noise_openings,
         active_credential_bindings,
     })
 }

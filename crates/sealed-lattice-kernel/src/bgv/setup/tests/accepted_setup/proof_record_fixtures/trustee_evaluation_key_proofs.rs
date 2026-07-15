@@ -18,18 +18,6 @@ pub(in super::super) struct TrusteeEvaluationKeyProofFixture {
     pub(in super::super) proof_set: serde_json::Value,
 }
 
-pub(in super::super) fn trustee_evaluation_key_proof_material_root_from_fixture_record(
-    proof_record: &serde_json::Value,
-) -> String {
-    crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
-        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        proof_record["proofBytesHash"]
-            .as_str()
-            .expect("trustee evaluation-key proofBytesHash"),
-    )
-    .expect("trustee evaluation-key proof material root")
-}
-
 // Builds the trustee evaluation-key succinct proof set, one proof per trustee
 // covering the whole scheduled relinearization and Galois key material, bound to
 // the same-secret bridge. Each statement is rebuilt through the same
@@ -44,7 +32,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
     round_one_aggregate_diagonals_by_level: &BTreeMap<u64, Vec<Vec<u64>>>,
 ) -> TrusteeEvaluationKeyProofFixture {
-    let setup_context = &package["setupContext"];
     let participant_count = participant_count_from_package(package);
     let trustee_roster_positions = (0..participant_count).collect::<Vec<_>>();
     // The bridge material the verifier reconstructs from the package records
@@ -63,7 +50,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
 
     let mut proof_records = Vec::with_capacity(trustee_roster_positions.len());
     for trustee_roster_position in trustee_roster_positions {
-        let trustee_identity = format!("trustee-{trustee_roster_position}");
         let statement =
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package: package,
@@ -108,24 +94,16 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             },
         );
         let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
-        let mut record = serde_json::json!({
+        let record = serde_json::json!({
             "objectType": "TrusteeEvaluationKeyProof",
-            "setupContextHash": crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
-                .expect("setup context hash"),
-            "trusteeIdentity": trustee_identity.as_str(),
-            "trusteeRosterPosition": trustee_roster_position,
-            "statementHash": statement_hash_hex,
-            "proofBytesHash": proof_bytes_hash,
+            "proofBytesHash": &proof_bytes_hash,
         });
-        let proof_material_root =
-            trustee_evaluation_key_proof_material_root_from_fixture_record(&record);
         authenticate_setup_proof_material_stream_for_test(
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            &proof_material_root,
+            &proof_bytes_hash,
             &proof_bytes,
         )
         .expect("authenticate trustee evaluation-key proof material stream");
-        record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
         final_package_phase(&format!(
             "generated trustee evaluation-key proof trustee {trustee_roster_position}"
         ));
@@ -140,7 +118,7 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         crate::bgv::setup::retain_accepted_setup_proof_binding(
             proof_binding_session.session_handle,
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            &proof_material_root,
+            &proof_bytes_hash,
             verification_binding_hash,
         )
         .expect("retain trustee evaluation-key proof binding");

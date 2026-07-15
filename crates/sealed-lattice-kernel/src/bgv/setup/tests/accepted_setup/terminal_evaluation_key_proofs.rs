@@ -23,7 +23,6 @@ fn terminal_evaluation_key_bearing_collective_setup_fixture() -> (
             &relinearization.round_one_aggregate_diagonals_by_level,
         );
         package["trusteeEvaluationKeyProofs"] = trustee_proof_fixture.proof_set;
-        rebind_collective_setup_package_hash(package);
     }
 
     // Trustee-proof construction consumes the cached base-proof bindings while
@@ -103,18 +102,13 @@ fn replace_first_trustee_evaluation_key_proof_with_tampered_material(
             &proof_bytes,
         );
     let proof_record = &mut fixture.package["trusteeEvaluationKeyProofs"]["proofRecords"][0];
-    proof_record["proofBytesHash"] = serde_json::json!(proof_bytes_hash);
-    let proof_material_root = super::proof_record_fixtures::
-        trustee_evaluation_key_proof_material_root_from_fixture_record(proof_record);
-    proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
+    proof_record["proofBytesHash"] = serde_json::json!(&proof_bytes_hash);
 
     authenticate_setup_proof_material_stream_in_session_for_test(
         crate::bgv::setup::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        &proof_material_root,
+        &proof_bytes_hash,
         &proof_bytes,
         proof_binding_session,
     )
     .expect("authenticate tampered trustee proof material stream");
-
-    rebind_collective_setup_package_hash(&mut fixture.package);
 }

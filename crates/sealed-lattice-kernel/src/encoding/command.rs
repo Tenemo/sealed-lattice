@@ -22,32 +22,14 @@ enum TranscriptCoreCommand {
     DeriveMailboxKemCiphertextHash,
     DeriveMailboxEnvelopeHash,
     DeriveSetupMailboxSlotHash,
-    EncodeActionRandomnessDerivationInput,
-    DecodeActionRandomnessDerivationInput,
-    DeriveActionRandomnessCommitment,
-    EncodePrivateRandomBlockInput,
-    DecodePrivateRandomBlockInput,
     EncodePrivateRandomCursor,
     DecodePrivateRandomCursor,
-    GenerateProofSuiteCandidate,
-    ValidateProofProfileSet,
     DescribeBgvRnsParameters,
     DescribeCollectiveBgvSetupParameters,
     VerifyCollectiveBgvSetup,
     VerifyPrivateVssShareEnvelope,
     GenerateTrusteeEvaluationKeyProof,
-    DescribeTrusteeEvaluationKeyStatement,
     ComputeSetupCommitmentFromOpening,
-    VerifyLocalTrusteeSetupState,
-    // Participant-side target-share and proof generation consume local witness
-    // material inside the caller's own browser. The staged result-release path
-    // still verifies every proof before recombination; exposing local generation
-    // does not make an unproved share acceptable.
-    GenerateBgvTargetDecryptionShareFromLocalShare,
-    GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness,
-    BeginBgvTargetDecryptionResultRelease,
-    AbsorbBgvTargetDecryptionResultReleaseShare,
-    FinishBgvTargetDecryptionResultRelease,
     ComputeVssCommittedMaterialCommitment,
     GenerateVssShareLinkageProof,
     GenerateSameSecretBridgeProof,
@@ -130,32 +112,11 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         TranscriptCoreCommand::DeriveSetupMailboxSlotHash => {
             super::mailbox_command::derive_setup_mailbox_slot_hash_command(&request)
         }
-        TranscriptCoreCommand::EncodeActionRandomnessDerivationInput => {
-            super::private_randomness_command::encode_action_randomness_derivation_input(&request)
-        }
-        TranscriptCoreCommand::DecodeActionRandomnessDerivationInput => {
-            super::private_randomness_command::decode_action_randomness_derivation_input(&request)
-        }
-        TranscriptCoreCommand::DeriveActionRandomnessCommitment => {
-            super::private_randomness_command::derive_action_randomness_commitment(&request)
-        }
-        TranscriptCoreCommand::EncodePrivateRandomBlockInput => {
-            super::private_randomness_command::encode_private_random_block_input(&request)
-        }
-        TranscriptCoreCommand::DecodePrivateRandomBlockInput => {
-            super::private_randomness_command::decode_private_random_block_input(&request)
-        }
         TranscriptCoreCommand::EncodePrivateRandomCursor => {
             super::private_randomness_command::encode_private_random_cursor(&request)
         }
         TranscriptCoreCommand::DecodePrivateRandomCursor => {
             super::private_randomness_command::decode_private_random_cursor(&request)
-        }
-        TranscriptCoreCommand::GenerateProofSuiteCandidate => {
-            super::proof_suite_command::generate_proof_suite_candidate_command()
-        }
-        TranscriptCoreCommand::ValidateProofProfileSet => {
-            super::proof_suite_command::validate_proof_profile_set_command(&request)
         }
         TranscriptCoreCommand::VerifyCollectiveBgvSetup => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
@@ -166,16 +127,9 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
-        | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
-        | TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease
-        | TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare
-        | TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease
         | TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment
         | TranscriptCoreCommand::GenerateVssShareLinkageProof
-        | TranscriptCoreCommand::DescribeTrusteeEvaluationKeyStatement
-        | TranscriptCoreCommand::GenerateSameSecretBridgeProof
-        | TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare
-        | TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness => {
+        | TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
             run_bgv_command(command, &request)
         }
     }
@@ -221,39 +175,8 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof => {
             crate::bgv::setup::generate_trustee_evaluation_key_proof_from_request(request)
         }
-        TranscriptCoreCommand::DescribeTrusteeEvaluationKeyStatement => {
-            crate::bgv::setup::describe_trustee_evaluation_key_statement_from_request(request)
-        }
         TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
             crate::bgv::setup::compute_setup_commitment_from_opening_request(request)
-        }
-        TranscriptCoreCommand::VerifyLocalTrusteeSetupState => {
-            crate::bgv::setup::verify_local_trustee_setup_state_from_request(request)
-        }
-        TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare => {
-            crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_local_share_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness => {
-            crate::bgv::target_decryption::generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease => {
-            crate::bgv::target_decryption::begin_bgv_target_decryption_result_release_from_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare => {
-            crate::bgv::target_decryption::absorb_bgv_target_decryption_result_release_share_from_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease => {
-            crate::bgv::target_decryption::finish_bgv_target_decryption_result_release_from_request(
-                request,
-            )
         }
         TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment => {
             crate::bgv::setup::compute_vss_committed_material_commitment_request(request)

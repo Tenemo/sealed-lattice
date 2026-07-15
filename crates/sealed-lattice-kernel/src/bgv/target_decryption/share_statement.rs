@@ -5,7 +5,6 @@ pub(super) fn derive_target_decryption_share_proof_statement(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
     local_target_share_witness: &Value,
     target_decryption_share: &Value,
@@ -14,28 +13,37 @@ pub(super) fn derive_target_decryption_share_proof_statement(
         setup_binding,
         target_accepted,
         target_ciphertexts,
-        target_share_profile,
         participant,
         local_target_share_witness,
         target_decryption_share,
     )?;
 
-    let statement_value = target_decryption_share_proof_statement_value(
+    derive_target_decryption_share_proof_statement_from_verified_local_witness(
         setup_binding,
         target_accepted,
         target_ciphertexts,
-        target_share_profile,
         participant,
         &local_witness,
         target_decryption_share,
-    )?;
-    let proof_statement_root = derive_canonical_object_hash(
-        &target_decryption_share_proof_statement_root_preimage(&statement_value)?,
-    )?;
-    let mut statement = statement_value;
-    statement["proofStatementRoot"] = json!(proof_statement_root);
+    )
+}
 
-    Ok(statement)
+pub(super) fn derive_target_decryption_share_proof_statement_from_verified_local_witness(
+    setup_binding: &SetupBinding,
+    target_accepted: &TargetAcceptedBinding,
+    target_ciphertexts: &TargetCiphertextPair,
+    participant: &ParticipantBinding,
+    local_witness: &LocalTargetDecryptionShareWitness,
+    target_decryption_share: &Value,
+) -> CanonicalResult<Value> {
+    target_decryption_share_proof_statement_value(
+        setup_binding,
+        target_accepted,
+        target_ciphertexts,
+        participant,
+        local_witness,
+        target_decryption_share,
+    )
 }
 
 #[cfg(test)]
@@ -43,38 +51,28 @@ pub(super) fn verify_target_decryption_share_proof_statement_binding(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
     target_decryption_share: &Value,
     proof_statement: &Value,
 ) -> CanonicalResult<Value> {
-    read_partial_decryption_share(
-        target_decryption_share,
-        setup_binding,
-        target_accepted,
-        target_ciphertexts,
-    )?;
     validate_target_decryption_share_proof_statement_shape(
         proof_statement,
         setup_binding,
         target_accepted,
         target_ciphertexts,
-        target_share_profile,
         participant,
         target_decryption_share,
     )?;
 
     Ok(json!({
-        "proofStatementRoot": hash_at_path(proof_statement, &["proofStatementRoot"])?,
+        "proofStatementRoot": target_decryption_share_proof_statement_root(proof_statement)?,
     }))
 }
 
-#[cfg(test)]
 fn target_decryption_share_proof_statement_value(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
     local_witness: &LocalTargetDecryptionShareWitness,
     target_decryption_share: &Value,
@@ -114,13 +112,13 @@ fn target_decryption_share_proof_statement_value(
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     let smudging_commitment_set =
-        target_decryption_smudging_commitment_set_from_polynomial_openings(
+        target_decryption_smudging_commitment_set_from_flooding_noise_openings(
             setup_binding,
             target_accepted,
             target_ciphertexts,
-            target_share_profile,
-            &local_witness.smudging_seed_hex,
-            &local_witness.smudging_polynomial_openings,
+            participant,
+            &local_witness.private_flooding_seed_hex,
+            &local_witness.flooding_noise_openings,
         )?;
 
     Ok(json!({
@@ -133,7 +131,7 @@ fn target_decryption_share_proof_statement_value(
         "targetIdRoot": target_ciphertexts.target_id_root,
         "targetOrderRoot": target_ciphertexts.target_order_root,
         "targetCiphertextLevel": target_ciphertexts.target_id.level,
-        "targetDecryptionShareHash": hash_at_path(target_decryption_share, &["targetDecryptionShareHash"])?,
+        "targetDecryptionShareHash": target_decryption_share_hash(target_decryption_share)?,
         "smudgingCommitmentSet": smudging_commitment_set,
         "aggregateOpeningCredentials": credential_bindings,
     }))
@@ -158,6 +156,14 @@ pub(super) fn target_decryption_share_proof_statement_root_preimage(
     }))
 }
 
+pub(super) fn target_decryption_share_proof_statement_root(
+    proof_statement: &Value,
+) -> CanonicalResult<String> {
+    derive_canonical_object_hash(&target_decryption_share_proof_statement_root_preimage(
+        proof_statement,
+    )?)
+}
+
 pub(super) fn aggregate_opening_credential_binding_root(
     credential_bindings: &[Value],
 ) -> CanonicalResult<String> {
@@ -172,10 +178,15 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
     target_decryption_share: &Value,
 ) -> CanonicalResult<()> {
+    read_partial_decryption_share(
+        target_decryption_share,
+        setup_binding,
+        target_accepted,
+        target_ciphertexts,
+    )?;
     if string_at_path(proof_statement, &["objectType"])? != "BgvTargetDecryptionShareProofStatement"
     {
         return Err(CanonicalError::new(
@@ -184,16 +195,7 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
         ));
     }
 
-    let expected_statement_root = derive_canonical_object_hash(
-        &target_decryption_share_proof_statement_root_preimage(proof_statement)?,
-    )?;
-    compare_hash_field(
-        proof_statement,
-        "proofStatementRoot",
-        &expected_statement_root,
-        "target decryption share proof statement root",
-    )?;
-
+    let target_decryption_share_hash = target_decryption_share_hash(target_decryption_share)?;
     for (field_name, expected) in [
         (
             "setupPackageHash",
@@ -214,7 +216,7 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
         ),
         (
             "targetDecryptionShareHash",
-            hash_at_path(target_decryption_share, &["targetDecryptionShareHash"])?,
+            target_decryption_share_hash.as_str(),
         ),
     ] {
         compare_hash_field(
@@ -250,15 +252,19 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
     )?;
     validate_target_decryption_smudging_commitment_set(
         value_at_path(proof_statement, &["smudgingCommitmentSet"])?,
+        setup_binding,
+        target_accepted,
         target_ciphertexts,
-        target_share_profile,
+        participant,
     )
 }
 
 fn validate_target_decryption_smudging_commitment_set(
     commitment_set: &Value,
+    setup_binding: &SetupBinding,
+    target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
+    participant: &ParticipantBinding,
 ) -> CanonicalResult<()> {
     if string_at_path(commitment_set, &["objectType"])? != "TargetDecryptionSmudgingCommitmentSet" {
         return Err(CanonicalError::new(
@@ -267,21 +273,10 @@ fn validate_target_decryption_smudging_commitment_set(
         ));
     }
     let active_limb_count = target_ciphertexts.target_id.level + 1;
-    let polynomial_degree = target_share_profile
-        .minimum_shares_for_interpolation
-        .checked_sub(1)
-        .filter(|degree| *degree > 0)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "target decryption smudging polynomial degree must be positive",
-            )
-        })?;
     let records = array_at_path(commitment_set, &["commitmentRecords"])?;
     let expected_record_count = TARGET_DECRYPTION_SMUDGING_ROLES
         .len()
         .checked_mul(active_limb_count)
-        .and_then(|count| count.checked_mul(polynomial_degree))
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -291,37 +286,43 @@ fn validate_target_decryption_smudging_commitment_set(
     if records.len() != expected_record_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "target decryption smudging commitment set does not contain the expected role, limb, and polynomial-degree records",
+            "target decryption smudging commitment set must contain one record per active role and limb",
         ));
     }
     let mut record_index = 0_usize;
-    for _ in TARGET_DECRYPTION_SMUDGING_ROLES {
+    for role in TARGET_DECRYPTION_SMUDGING_ROLES {
         for (rns_limb_index, &rns_prime) in DATA_PRIMES.iter().enumerate().take(active_limb_count) {
-            for _ in 0..polynomial_degree {
-                validate_smudging_commitment_record(
-                    &records[record_index],
-                    rns_limb_index,
-                    rns_prime,
-                )?;
-                record_index += 1;
-            }
+            validate_smudging_commitment_record(
+                &records[record_index],
+                setup_binding,
+                target_accepted,
+                participant,
+                role,
+                rns_limb_index,
+                rns_prime,
+            )?;
+            record_index += 1;
         }
     }
 
-    let expected_root = derive_canonical_object_hash(&json!({
-        "objectType": "TargetDecryptionSmudgingCommitmentSet",
-        "commitmentRecords": records,
-    }))?;
-    compare_hash_field(
-        commitment_set,
-        "smudgingCommitmentSetRoot",
-        &expected_root,
-        "target decryption smudging commitment set root",
-    )
+    Ok(())
+}
+
+pub(super) fn target_decryption_smudging_commitment_set_root(
+    commitment_set: &Value,
+) -> CanonicalResult<String> {
+    derive_canonical_object_hash(&json!({
+        "objectType": string_at_path(commitment_set, &["objectType"])?,
+        "commitmentRecords": array_at_path(commitment_set, &["commitmentRecords"])?,
+    }))
 }
 
 fn validate_smudging_commitment_record(
     record: &Value,
+    setup_binding: &SetupBinding,
+    target_accepted: &TargetAcceptedBinding,
+    participant: &ParticipantBinding,
+    role: &str,
     expected_limb_index: usize,
     expected_rns_prime: u64,
 ) -> CanonicalResult<()> {
@@ -332,18 +333,24 @@ fn validate_smudging_commitment_record(
         ));
     }
     let commitment = value_at_path(record, &["commitment"])?;
-    validate_smudging_commitment_shape(commitment, expected_limb_index, expected_rns_prime)?;
-    let commitment_root = derive_canonical_object_hash(commitment)?;
-    compare_hash_field(
-        record,
-        "commitmentRoot",
-        &commitment_root,
-        "target decryption smudging commitment root",
-    )
+    validate_smudging_commitment_shape(
+        commitment,
+        setup_binding,
+        target_accepted,
+        participant,
+        role,
+        expected_limb_index,
+        expected_rns_prime,
+    )?;
+    Ok(())
 }
 
 fn validate_smudging_commitment_shape(
     commitment: &Value,
+    setup_binding: &SetupBinding,
+    target_accepted: &TargetAcceptedBinding,
+    participant: &ParticipantBinding,
+    role: &str,
     expected_limb_index: usize,
     expected_rns_prime: u64,
 ) -> CanonicalResult<()> {
@@ -354,7 +361,7 @@ fn validate_smudging_commitment_shape(
     compare_string_field(
         commitment,
         "commitmentRole",
-        TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
+        TARGET_DECRYPTION_FLOODING_NOISE_COMMITMENT_ROLE,
         "target decryption smudging commitment role",
     )?;
     compare_unsigned_field(
@@ -374,6 +381,19 @@ fn validate_smudging_commitment_shape(
         "ringDegree",
         POLYNOMIAL_DEGREE as u64,
         "target decryption smudging commitment ring degree",
+    )?;
+    compare_hash_field(
+        commitment,
+        "commitmentContextHash",
+        &target_decryption_flooding_noise_commitment_context_hash(
+            setup_binding,
+            target_accepted,
+            participant,
+            role,
+            expected_limb_index,
+            expected_rns_prime,
+        )?,
+        "target decryption flooding-noise commitment context",
     )?;
 
     Ok(())

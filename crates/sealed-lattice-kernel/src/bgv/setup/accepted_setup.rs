@@ -34,12 +34,11 @@ use self::evaluation_key_share_rounds::{
     verify_relinearization_key_switch_sample_binding,
 };
 use self::evaluator_key_schedule::{
-    verify_context_fields_match, verify_evaluator_key_schedule,
-    verify_pending_evaluation_key_material_boundary,
+    verify_evaluator_key_schedule, verify_pending_evaluation_key_material_boundary,
 };
 use self::private_vss_envelopes::{
     PrivateVssEnvelopeBindingMap, private_vss_envelope_bindings_from_package,
-    verify_private_vss_envelope_commitments,
+    private_vss_envelope_commitment_root, verify_private_vss_envelope_commitments,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
@@ -55,23 +54,23 @@ use self::public_key_share_material::{
     PublicKeyShareMaterialBinding, verify_collective_public_key_material,
     verify_public_key_share_material_set,
 };
-use self::public_key_shares::{
-    PublicKeyCommonBinding, public_key_common_binding, public_key_refusal,
-    public_key_share_records_by_roster_position, verify_public_key_share_succinct_proofs,
-    verify_public_key_shares,
-};
 #[cfg(test)]
+pub(in crate::bgv::setup) use self::public_key_shares::public_key_share_succinct_proof_verification_binding_hash;
+use self::public_key_shares::{
+    PublicKeyCommonBinding, PublicKeyShareSuccinctProofVerification, public_key_refusal,
+    verify_public_key_share_succinct_proofs, verify_public_key_shares,
+};
 pub(in crate::bgv::setup) use self::public_key_shares::{
-    public_key_share_succinct_proof_material_root,
-    public_key_share_succinct_proof_verification_binding_hash,
+    derive_public_key_share_root, derive_public_key_share_set_root,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::same_secret_bridge_verification::verified_same_secret_bridge_material_from_package;
 use self::setup_context::verify_context;
+#[cfg(test)]
 pub(crate) use self::setup_intent::accepted_setup_participant_roster_from_package;
 use self::setup_intent::{
-    SetupIntentVerification, expected_trustees_from_setup_intent, setup_context_string,
-    verify_setup_intent, verify_setup_intent_roster_hash,
+    SetupIntentVerification, expected_trustees_from_setup_intent, verify_setup_intent,
+    verify_setup_intent_roster_hash,
 };
 use self::vss_complaints_and_acceptances::{
     source_trustee_commitment_roots_from_vss_commitments, verify_vss_complaints,
@@ -113,8 +112,7 @@ const PUBLIC_KEY_SHARE_SET_OBJECT_TYPE: &str = "PublicKeyShareSet";
 const PUBLIC_KEY_SHARE_OBJECT_TYPE: &str = "PublicKeyShare";
 const PUBLIC_KEY_SHARE_MATERIAL_SET_OBJECT_TYPE: &str = "PublicKeyShareMaterialSet";
 const PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE: &str = "PublicKeyShareMaterial";
-const PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC: &[u8; 8] = b"SLPKSMV1";
-const PUBLIC_KEY_SHARE_MATERIAL_BINARY_VERSION: u64 = 1;
+const PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC: &[u8; 8] = b"SLPKSMV2";
 const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareSuccinctProofSet";
 const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_OBJECT_TYPE: &str = "PublicKeyShareSuccinctProof";
 const COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE: &str = "CollectivePublicKey";
@@ -205,6 +203,7 @@ pub(super) fn accepted_roster_from_package(
 }
 #[derive(Debug, Clone)]
 pub(super) struct Refusal {
+    refusal_reason: crate::foundation::RefusalReason,
     reason_code: &'static str,
     message: String,
     object_path: String,
@@ -212,15 +211,27 @@ pub(super) struct Refusal {
 
 impl Refusal {
     pub(super) fn new(
+        refusal_reason: crate::foundation::RefusalReason,
         reason_code: &'static str,
         message: impl Into<String>,
         object_path: impl Into<String>,
     ) -> Self {
         Self {
+            refusal_reason,
             reason_code,
             message: message.into(),
             object_path: object_path.into(),
         }
+    }
+}
+
+fn protocol_signature_refusal_reason(reason_code: &str) -> crate::foundation::RefusalReason {
+    match reason_code {
+        "InvalidSignature" | "WrongPublicKey" | "InvalidSignedRoot" => {
+            crate::foundation::RefusalReason::InvalidSignature
+        }
+        "WrongObjectType" => crate::foundation::RefusalReason::WrongTypeOrLength,
+        _ => crate::foundation::RefusalReason::MalformedEncoding,
     }
 }
 
@@ -237,7 +248,6 @@ pub(crate) fn describe_collective_bgv_setup_parameters() -> CanonicalResult<Valu
 
 fn q_share_description_value() -> Value {
     json!({
-        "objectType": "QSharePrimeList",
         "primes": DATA_PRIMES,
     })
 }
@@ -281,6 +291,7 @@ pub(crate) fn verify_collective_bgv_setup_package_in_session_from_request(
         request,
         proof_binding_session,
         &[],
+        POLYNOMIAL_DEGREE,
     )
 }
 
@@ -313,16 +324,18 @@ pub(in crate::bgv::setup) fn verify_collective_bgv_setup_intent_for_test(
 }
 
 #[cfg(test)]
-pub(in crate::bgv::setup) fn verify_collective_bgv_setup_package_in_proof_binding_session(
+pub(in crate::bgv::setup) fn verify_collective_bgv_setup_package_for_test_ring_degree_in_proof_binding_session(
     setup_package: &Value,
     request: &Value,
     proof_binding_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
+    expected_ring_degree: usize,
 ) -> CanonicalResult<Value> {
     verify_collective_bgv_setup_package_in_owned_session(
         setup_package,
         request,
         proof_binding_session,
         &[],
+        expected_ring_degree,
     )
 }
 
@@ -338,6 +351,7 @@ fn verify_collective_bgv_setup_package_inner(
         request,
         proof_binding_session,
         proof_binding_leases,
+        POLYNOMIAL_DEGREE,
     )
 }
 
@@ -347,6 +361,7 @@ fn verify_collective_bgv_setup_package_in_owned_session(
     proof_binding_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
     #[cfg(test)] proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
     #[cfg(not(test))] _proof_binding_leases: &[()],
+    expected_ring_degree: usize,
 ) -> CanonicalResult<Value> {
     #[cfg(test)]
     for proof_binding_lease in proof_binding_leases {
@@ -365,6 +380,7 @@ fn verify_collective_bgv_setup_package_in_owned_session(
         let refusals = setup_refusals(
             Vec::new(),
             vec![Refusal::new(
+                crate::foundation::RefusalReason::MalformedEncoding,
                 "setupPackageNotObject",
                 "setupPackage must be a JSON object",
                 "setupPackage".to_string(),
@@ -375,7 +391,12 @@ fn verify_collective_bgv_setup_package_in_owned_session(
         )?;
         return Ok(verification_response(refusals));
     }
-    match verify_collective_setup_package(setup_package, request, &proof_binding_session) {
+    match verify_collective_setup_package(
+        setup_package,
+        request,
+        &proof_binding_session,
+        expected_ring_degree,
+    ) {
         Ok(SetupPackageVerification::Verified) => {
             crate::bgv::setup::finish_accepted_setup_proof_binding_session(
                 proof_binding_session.session_handle,
@@ -401,6 +422,7 @@ fn verify_collective_setup_package(
     setup_package: &Value,
     request: &Value,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
+    expected_ring_degree: usize,
 ) -> CanonicalResult<SetupPackageVerification> {
     let Some(object_type) = setup_package.get("objectType").and_then(Value::as_str) else {
         return Ok(outside_accepted_parameters(
@@ -433,7 +455,7 @@ fn verify_collective_setup_package(
     if let Some(refusals) = verify_common_randomness(setup_package, &setup_intent_registrations)? {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(refusals) = verify_setup_package_hash(setup_package, request)? {
+    if let Some(refusals) = verify_expected_setup_package_hash(setup_package, request)? {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
     if let Some(refusals) =
@@ -449,13 +471,20 @@ fn verify_collective_setup_package(
     {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
-    let verified_ring_degree =
-        match verify_vss_public_material(setup_package, Some(proof_binding_session))? {
-            VssPublicMaterialVerification::Verified { ring_degree } => ring_degree,
-            VssPublicMaterialVerification::Refused(refusals) => {
-                return Ok(SetupPackageVerification::Refused(refusals));
-            }
-        };
+    if let Some(refusals) = verify_declared_vss_ring_degree(setup_package, expected_ring_degree) {
+        return Ok(SetupPackageVerification::Refused(refusals));
+    }
+    let expected_setup_trustees = expected_trustees_from_setup_intent(&setup_intent_registrations);
+    let verified_ring_degree = match verify_vss_public_material(
+        setup_package,
+        &expected_setup_trustees,
+        Some(proof_binding_session),
+    )? {
+        VssPublicMaterialVerification::Verified { ring_degree } => ring_degree,
+        VssPublicMaterialVerification::Refused(refusals) => {
+            return Ok(SetupPackageVerification::Refused(refusals));
+        }
+    };
     let verified_same_secret_bridge = match verify_same_secret_bridge_statement_set(
         setup_package,
         Some(proof_binding_session),
@@ -468,18 +497,21 @@ fn verify_collective_setup_package(
     if let Some(refusals) = verify_public_key_shares(setup_package, &setup_intent_registrations)? {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(refusals) = verify_public_key_share_succinct_proofs(
+    let public_key_share_material_bindings = match verify_public_key_share_succinct_proofs(
         setup_package,
         Some(&verified_same_secret_bridge),
         verified_ring_degree,
         proof_binding_session,
     )? {
-        return Ok(SetupPackageVerification::Refused(refusals));
-    }
+        PublicKeyShareSuccinctProofVerification::Verified(material_bindings) => material_bindings,
+        PublicKeyShareSuccinctProofVerification::Refused(refusals) => {
+            return Ok(SetupPackageVerification::Refused(refusals));
+        }
+    };
     if let Some(refusals) = verify_collective_public_key_material(
         setup_package,
         verified_ring_degree,
-        proof_binding_session,
+        &public_key_share_material_bindings,
     )? {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
@@ -494,56 +526,95 @@ fn verify_collective_setup_package(
     )? {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if verified_ring_degree != POLYNOMIAL_DEGREE {
-        return Ok(outside_accepted_parameters(
-            "the verified setup ring degree is outside the supported production profile",
-            "setupPackage.vssShareLinkageStatement.ringDegree",
-        ));
-    }
     Ok(SetupPackageVerification::Verified)
 }
 
-fn verify_setup_package_hash(
+fn verify_declared_vss_ring_degree(
+    setup_package: &Value,
+    expected_ring_degree: usize,
+) -> Option<Refusals> {
+    let Some(statement) = setup_package.get("vssShareLinkageStatement") else {
+        return Some(setup_refusals(
+            vec!["vssShareLinkageStatement".to_string()],
+            Vec::new(),
+        ));
+    };
+    if !statement.is_object() {
+        return Some(setup_refusals(
+            Vec::new(),
+            vec![Refusal::new(
+                crate::foundation::RefusalReason::MalformedEncoding,
+                "vssShareLinkageStatementNotObject",
+                "vssShareLinkageStatement must be an object",
+                "setupPackage.vssShareLinkageStatement",
+            )],
+        ));
+    }
+    let Some(ring_degree_value) = statement.get("ringDegree") else {
+        return Some(setup_refusals(
+            Vec::new(),
+            vec![Refusal::new(
+                crate::foundation::RefusalReason::MissingPrerequisite,
+                "vssShareLinkageRingDegreeMissing",
+                "vssShareLinkageStatement.ringDegree is required",
+                "setupPackage.vssShareLinkageStatement.ringDegree",
+            )],
+        ));
+    };
+    let Some(ring_degree) = ring_degree_value
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+    else {
+        return Some(setup_refusals(
+            Vec::new(),
+            vec![Refusal::new(
+                crate::foundation::RefusalReason::WrongTypeOrLength,
+                "vssShareLinkageRingDegreeTypeMismatch",
+                "vssShareLinkageStatement.ringDegree must be an unsigned integer that fits usize",
+                "setupPackage.vssShareLinkageStatement.ringDegree",
+            )],
+        ));
+    };
+    if ring_degree != expected_ring_degree {
+        return Some(setup_refusals(
+            Vec::new(),
+            vec![Refusal::new(
+                crate::foundation::RefusalReason::OutsideSupportedProfile,
+                "outsideCollectiveBgvSetupParameters",
+                "the declared setup ring degree is outside the selected verification profile",
+                "setupPackage.vssShareLinkageStatement.ringDegree",
+            )],
+        ));
+    }
+
+    None
+}
+
+fn verify_expected_setup_package_hash(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<Option<Refusals>> {
-    let Some(setup_package_hash) = setup_package
-        .get("setupPackageHash")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(setup_refusals(
-            vec!["setupPackageHash".to_string()],
-            Vec::new(),
-        )));
+    let Some(expected_hash_from_request) = request.get("expectedSetupPackageHash") else {
+        return Ok(None);
     };
-    validate_hash_string(setup_package_hash, "setupPackage.setupPackageHash")?;
-
-    let expected_hash = derive_collective_setup_package_hash(setup_package)?;
-    if setup_package_hash != expected_hash {
+    let expected_hash_from_request = expected_hash_from_request.as_str().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "expectedSetupPackageHash must be a string",
+        )
+    })?;
+    validate_hash_string(expected_hash_from_request, "expectedSetupPackageHash")?;
+    let setup_package_hash = derive_collective_setup_package_hash(setup_package)?;
+    if expected_hash_from_request != setup_package_hash {
         return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
-                "setupPackageHashMismatch",
-                "SetupPackageHash does not match the canonical setup package payload",
-                "setupPackage.setupPackageHash".to_string(),
+                crate::foundation::RefusalReason::WrongHashOrRoot,
+                "expectedSetupPackageHashMismatch",
+                "setup package hash does not match expectedSetupPackageHash",
+                "expectedSetupPackageHash".to_string(),
             )],
         )));
-    }
-    if let Some(expected_hash_from_request) = request
-        .get("expectedSetupPackageHash")
-        .and_then(Value::as_str)
-    {
-        validate_hash_string(expected_hash_from_request, "expectedSetupPackageHash")?;
-        if expected_hash_from_request != setup_package_hash {
-            return Ok(Some(setup_refusals(
-                Vec::new(),
-                vec![Refusal::new(
-                    "expectedSetupPackageHashMismatch",
-                    "setup package hash does not match expectedSetupPackageHash",
-                    "expectedSetupPackageHash".to_string(),
-                )],
-            )));
-        }
     }
 
     Ok(None)
@@ -554,15 +625,12 @@ pub(in crate::bgv) fn derive_collective_setup_package_hash(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash_omitting_field_paths(
         setup_package,
-        &[
-            &[CanonicalJsonPathSegment::ObjectField("setupPackageHash")],
-            &[
-                CanonicalJsonPathSegment::ObjectField("privateVssEnvelopeCommitments"),
-                CanonicalJsonPathSegment::ObjectField("envelopeReferences"),
-                CanonicalJsonPathSegment::ArrayElement,
-                CanonicalJsonPathSegment::ObjectField("encryptedEnvelope"),
-            ],
-        ],
+        &[&[
+            CanonicalJsonPathSegment::ObjectField("privateVssEnvelopeCommitments"),
+            CanonicalJsonPathSegment::ObjectField("envelopeReferences"),
+            CanonicalJsonPathSegment::ArrayElement,
+            CanonicalJsonPathSegment::ObjectField("encryptedEnvelope"),
+        ]],
     )
 }
 
@@ -577,6 +645,7 @@ fn outside_accepted_parameters(
     SetupPackageVerification::Refused(setup_refusals(
         Vec::new(),
         vec![Refusal::new(
+            crate::foundation::RefusalReason::OutsideSupportedProfile,
             "outsideCollectiveBgvSetupParameters",
             message,
             object_path.into(),
@@ -590,6 +659,7 @@ pub(super) fn setup_refusals(
 ) -> Refusals {
     refused_objects.extend(missing_objects.into_iter().map(|missing_object| {
         Refusal::new(
+            crate::foundation::RefusalReason::MissingPrerequisite,
             "setupObjectMissing",
             "A required setup object is missing.",
             format!("setupPackage.{missing_object}"),
@@ -606,7 +676,7 @@ fn verification_response(refused_objects: Refusals) -> Value {
         }),
         Some(refusal) => json!({
             "isValid": false,
-            "refusalReason": super::setup_refusal_reason(refusal.reason_code).name(),
+            "refusalReason": refusal.refusal_reason.name(),
         }),
     }
 }
@@ -625,10 +695,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn collective_setup_package_hash_matches_clone_and_remove_reference() {
+    fn collective_setup_package_hash_omits_only_transported_private_envelopes() {
         let setup_package = json!({
             "objectType": "CollectiveBgvSetupPackage",
-            "setupPackageHash": "excluded-self-hash",
             "privateVssEnvelopeCommitments": {
                 "encryptedEnvelope": "bound-at-the-parent-object",
                 "envelopeReferences": [
@@ -647,14 +716,9 @@ mod tests {
             },
             "nested": {
                 "encryptedEnvelope": "bound-at-an-unrelated-path",
-                "setupPackageHash": "bound-because-it-is-not-the-root-field",
             },
         });
         let mut reference_hash_input = setup_package.clone();
-        reference_hash_input
-            .as_object_mut()
-            .expect("setup package object")
-            .remove("setupPackageHash");
         for envelope_reference in
             reference_hash_input["privateVssEnvelopeCommitments"]["envelopeReferences"]
                 .as_array_mut()
@@ -674,7 +738,6 @@ mod tests {
         );
 
         let mut changed_excluded_fields = setup_package.clone();
-        changed_excluded_fields["setupPackageHash"] = json!("changed-excluded-self-hash");
         changed_excluded_fields["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
             ["ciphertext"] = json!("changed-excluded-private-envelope");
         assert_eq!(
@@ -683,19 +746,11 @@ mod tests {
             expected_hash
         );
 
-        let mut changed_unrelated_field = setup_package.clone();
-        changed_unrelated_field["nested"]["encryptedEnvelope"] = json!("changed-bound-value");
+        let mut changed_bound_field = setup_package.clone();
+        changed_bound_field["nested"]["encryptedEnvelope"] = json!("changed-bound-value");
         assert_ne!(
-            derive_collective_setup_package_hash(&changed_unrelated_field)
+            derive_collective_setup_package_hash(&changed_bound_field)
                 .expect("changed filtered hash"),
-            expected_hash
-        );
-
-        let mut changed_nested_self_hash = setup_package.clone();
-        changed_nested_self_hash["nested"]["setupPackageHash"] = json!("changed-bound-value");
-        assert_ne!(
-            derive_collective_setup_package_hash(&changed_nested_self_hash)
-                .expect("hash with changed nested self-hash field"),
             expected_hash
         );
 
@@ -704,13 +759,8 @@ mod tests {
             "encryptedEnvelope": "still-bound-inside-a-nested-array",
             "encryptedEnvelopeHash": "nested-envelope-hash",
         }]]);
-        let mut malformed_nested_array_reference_input = malformed_nested_array.clone();
-        malformed_nested_array_reference_input
-            .as_object_mut()
-            .expect("malformed setup package object")
-            .remove("setupPackageHash");
         let malformed_nested_array_reference =
-            derive_canonical_object_hash(&malformed_nested_array_reference_input)
+            derive_canonical_object_hash(&malformed_nested_array)
                 .expect("malformed reference hash");
         assert_eq!(
             derive_collective_setup_package_hash(&malformed_nested_array)
@@ -733,19 +783,38 @@ mod tests {
             let mut malformed_container = setup_package.clone();
             malformed_container["privateVssEnvelopeCommitments"] =
                 malformed_private_vss_envelope_commitments;
-            let mut malformed_container_reference_input = malformed_container.clone();
-            malformed_container_reference_input
-                .as_object_mut()
-                .expect("malformed setup package object")
-                .remove("setupPackageHash");
-            let malformed_container_reference =
-                derive_canonical_object_hash(&malformed_container_reference_input)
-                    .expect("malformed container reference hash");
+            let malformed_container_reference = derive_canonical_object_hash(&malformed_container)
+                .expect("malformed container reference hash");
             assert_eq!(
                 derive_collective_setup_package_hash(&malformed_container)
                     .expect("filtered malformed container hash"),
                 malformed_container_reference
             );
         }
+    }
+
+    #[test]
+    fn expected_setup_package_hash_authenticates_canonical_package_bytes() {
+        let setup_package = json!({
+            "objectType": "SetupPackage",
+            "payload": "package bytes",
+        });
+        let setup_package_hash =
+            derive_collective_setup_package_hash(&setup_package).expect("setup package hash");
+        let matching_request = json!({ "expectedSetupPackageHash": setup_package_hash });
+        assert!(
+            verify_expected_setup_package_hash(&setup_package, &matching_request)
+                .expect("matching expected setup package hash")
+                .is_none()
+        );
+
+        let mismatching_request = json!({ "expectedSetupPackageHash": "0".repeat(128) });
+        let refusals = verify_expected_setup_package_hash(&setup_package, &mismatching_request)
+            .expect("mismatching expected setup package hash")
+            .expect("hash mismatch refusal");
+        assert_eq!(
+            refusals[0].refusal_reason,
+            crate::foundation::RefusalReason::WrongHashOrRoot
+        );
     }
 }

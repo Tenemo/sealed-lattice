@@ -163,7 +163,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
         "proofFamily": public_key_statement.family_shape().proof_family(),
         "statementHash": crate::hashing::to_hex(&public_key_statement.statement_hash()),
     });
-    let private_vss =
+    let (_private_vss, private_vss_statement_hash) =
         crate::bgv::setup::private_vss::generate_private_vss_share_proof_from_request(
             &private_vss_statement_hash_vector_request(),
         )
@@ -189,9 +189,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
         public_key["statementHash"]
             .as_str()
             .expect("public-key hash"),
-        private_vss["privateVssShareProof"]["statementHash"]
-            .as_str()
-            .expect("private VSS hash"),
+        private_vss_statement_hash,
         trustee_evaluation_key["statementHash"]
             .as_str()
             .expect("trustee evaluation-key hash"),
@@ -208,7 +206,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
         expected_statement_hashes["publicKeyShare"]
     );
     assert_eq!(
-        private_vss["privateVssShareProof"]["statementHash"],
+        private_vss_statement_hash,
         expected_statement_hashes["privateVssShare"]
     );
     assert_eq!(

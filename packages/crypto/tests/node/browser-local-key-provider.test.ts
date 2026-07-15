@@ -10,8 +10,13 @@ import {
     encapsulateFreshMailbox,
     openBrowserLocalExternalKeyProvider,
     signFreshMailboxEnvelope,
-    signStateWitnessVoteMessage,
 } from '../../src/browser-local-key-provider.js';
+
+import {
+    createBrowserLocalKeyOperations,
+    createBrowserLocalMailboxOperations,
+    createBrowserLocalSigningOperations,
+} from '#packages/crypto/tests/support/browser-local-key-operations';
 
 const textEncoder = new TextEncoder();
 const mailboxSignatureContext = textEncoder.encode(
@@ -58,14 +63,7 @@ describe('browser-local external key provider', () => {
     it('opens distinct opaque capabilities only after both roster key pairs pass self-tests', () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: signing.publicKey,
-                secretKey: signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: mailbox.publicKey,
-                decapsulationKey: mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations({ signing, mailbox }),
             entropy: deterministicEntropy(),
         });
 
@@ -123,12 +121,21 @@ describe('browser-local external key provider', () => {
             () =>
                 openBrowserLocalExternalKeyProvider({
                     signing: {
-                        expectedVerificationKey: secondSigning.publicKey,
-                        secretKey: first.signing.secretKey,
+                        ...createBrowserLocalSigningOperations(first.signing),
+                        verificationKey: secondSigning.publicKey,
                     },
+                    mailbox: createBrowserLocalMailboxOperations(first.mailbox),
+                    entropy: deterministicEntropy(),
+                }),
+            'KeyMismatch',
+        );
+        expectProviderError(
+            () =>
+                openBrowserLocalExternalKeyProvider({
+                    signing: createBrowserLocalSigningOperations(first.signing),
                     mailbox: {
-                        expectedEncapsulationKey: first.mailbox.publicKey,
-                        decapsulationKey: first.mailbox.secretKey,
+                        ...createBrowserLocalMailboxOperations(first.mailbox),
+                        encapsulationKey: secondMailbox.publicKey,
                     },
                     entropy: deterministicEntropy(),
                 }),
@@ -138,29 +145,10 @@ describe('browser-local external key provider', () => {
             () =>
                 openBrowserLocalExternalKeyProvider({
                     signing: {
-                        expectedVerificationKey: first.signing.publicKey,
-                        secretKey: first.signing.secretKey,
+                        ...createBrowserLocalSigningOperations(first.signing),
+                        verificationKey: first.signing.publicKey.subarray(1),
                     },
-                    mailbox: {
-                        expectedEncapsulationKey: secondMailbox.publicKey,
-                        decapsulationKey: first.mailbox.secretKey,
-                    },
-                    entropy: deterministicEntropy(),
-                }),
-            'KeyMismatch',
-        );
-        expectProviderError(
-            () =>
-                openBrowserLocalExternalKeyProvider({
-                    signing: {
-                        expectedVerificationKey:
-                            first.signing.publicKey.subarray(1),
-                        secretKey: first.signing.secretKey,
-                    },
-                    mailbox: {
-                        expectedEncapsulationKey: first.mailbox.publicKey,
-                        decapsulationKey: first.mailbox.secretKey,
-                    },
+                    mailbox: createBrowserLocalMailboxOperations(first.mailbox),
                     entropy: deterministicEntropy(),
                 }),
             'MalformedKey',
@@ -170,14 +158,7 @@ describe('browser-local external key provider', () => {
     it('fails closed when entropy is unavailable or returns the wrong length', () => {
         const { signing, mailbox } = createKeyMaterial();
         const input = {
-            signing: {
-                expectedVerificationKey: signing.publicKey,
-                secretKey: signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: mailbox.publicKey,
-                decapsulationKey: mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations({ signing, mailbox }),
         } as const;
 
         expectProviderError(
@@ -224,14 +205,7 @@ describe('browser-local external key provider', () => {
     it('keeps revocation scoped to the named capability and closes both capabilities', () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: signing.publicKey,
-                secretKey: signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: mailbox.publicKey,
-                decapsulationKey: mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations({ signing, mailbox }),
             entropy: deterministicEntropy(),
         });
         const encapsulation = ml_kem768.encapsulate(
@@ -242,9 +216,9 @@ describe('browser-local external key provider', () => {
         provider.revokeSigningCapability();
         expectProviderError(
             () =>
-                signStateWitnessVoteMessage({
-                    capability: provider.signingCapability,
-                    signatureMessage: new Uint8Array(64),
+                encapsulateFreshMailbox({
+                    signingCapability: provider.signingCapability,
+                    recipientEncapsulationKey: mailbox.publicKey,
                 }),
             'CapabilityUnavailable',
         );
@@ -269,14 +243,7 @@ describe('browser-local external key provider', () => {
     it('rejects capability-kind substitution at runtime', () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({
-            signing: {
-                expectedVerificationKey: signing.publicKey,
-                secretKey: signing.secretKey,
-            },
-            mailbox: {
-                expectedEncapsulationKey: mailbox.publicKey,
-                decapsulationKey: mailbox.secretKey,
-            },
+            ...createBrowserLocalKeyOperations({ signing, mailbox }),
             entropy: deterministicEntropy(),
         });
 

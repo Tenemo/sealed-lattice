@@ -72,19 +72,6 @@ export const assertJsonRecord = (
     return value as JsonRecord;
 };
 
-export const assertJsonRecordArray = (
-    value: unknown,
-    fieldName: string,
-): readonly JsonRecord[] => {
-    if (!Array.isArray(value)) {
-        throw new TypeError(`${fieldName} must be an array.`);
-    }
-
-    return value.map((entry, entryIndex) =>
-        assertJsonRecord(entry, `${fieldName}.${String(entryIndex)}`),
-    );
-};
-
 const lowercaseHexBytesPattern = /^(?:[0-9a-f]{2})*$/u;
 
 const assertLowercaseHexBytes = (value: string, fieldName: string): void => {

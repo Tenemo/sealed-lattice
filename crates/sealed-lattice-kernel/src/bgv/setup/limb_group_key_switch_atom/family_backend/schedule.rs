@@ -20,6 +20,7 @@ use super::super::proof_field::{ProofFieldParameters, sixteen_limb_group_field_p
 use super::key_proof::{
     KeyFriProofParameters, LinkageStatement, LinkageWitness, prove_key_fri, verify_key_fri,
 };
+use super::private_randomness::PrivateProofRandomness;
 use super::proof_codec::{decode_key_proof, encode_key_proof};
 use super::statement_bridge::{
     BridgeKeyMaterialInput, BridgeKeyPublicInput, BridgedKeyKind, bridge_key_material,
@@ -32,10 +33,10 @@ use crate::bgv::setup::trustee_evaluation_key_proof::{
     TrusteeEvaluationKeyWitness, public_key_switch_sample,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
-use crate::hashing::hash_framed_parts_512 as hash512;
 
 const SCHEDULE_MAGIC: &[u8; 8] = b"SLKSATS2";
-const SCHEDULE_SALT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/schedule-salt";
+const SCHEDULE_RANDOMNESS_DOMAIN: &str =
+    "sealed-lattice/setup/key-switch-atom/schedule-private-randomness/v1";
 pub(crate) const SCHEDULE_QUERY_COUNT: usize = 80;
 // Keys prove independently; bounding the concurrent set keeps the peak
 // working set at a few streamed provers rather than the whole schedule.
@@ -106,14 +107,21 @@ pub(crate) fn statement_is_key_bearing(statement: &TrusteeEvaluationKeyStatement
         .any(|key| key.kind.has_diagonal_source())
 }
 
-// The deterministic per-key salt stream seed, bound to the statement and the
-// key's schedule position.
-fn key_salt_seed(statement_hash: &[u8; 64], key_index: usize) -> u64 {
-    let digest = hash512(
-        SCHEDULE_SALT_DOMAIN,
-        &[statement_hash, &(key_index as u64).to_le_bytes()],
-    );
-    u64::from_le_bytes(digest[..8].try_into().expect("eight bytes"))
+// Each scheduled proof gets a distinct private mask/salt stream. The caller's
+// fresh seed is already bound to the statement, trustee, and setup context.
+fn key_private_randomness(
+    statement_hash: &[u8; 64],
+    proof_randomness_seed_hex: &str,
+    key_index: usize,
+) -> PrivateProofRandomness {
+    PrivateProofRandomness::new(
+        SCHEDULE_RANDOMNESS_DOMAIN,
+        &[
+            proof_randomness_seed_hex.as_bytes(),
+            statement_hash,
+            &(key_index as u64).to_le_bytes(),
+        ],
+    )
 }
 
 // One scheduled atom proof: a key and one of its consecutive limb groups.
@@ -218,6 +226,7 @@ fn bridged_kind<'a>(key: &'a EvaluationKeyShareDescriptor) -> CanonicalResult<Br
 pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
+    proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<Vec<u8>> {
     let linkage_statement = linkage_statement(statement)?;
     if witness.error_coefficients_by_key().len() != statement.keys().len() {
@@ -255,6 +264,7 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
             prove_one_key(ProveOneKey {
                 parameters: &parameters,
                 statement_hash: &statement_hash,
+                proof_randomness_seed_hex,
                 ring_degree,
                 key: &statement.keys()[scheduled_proof.key_index],
                 scheduled: scheduled_proof,
@@ -299,6 +309,7 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
 struct ProveOneKey<'a, const LIMB_COUNT: usize> {
     parameters: &'a ProofFieldParameters<LIMB_COUNT>,
     statement_hash: &'a [u8; 64],
+    proof_randomness_seed_hex: &'a str,
     ring_degree: usize,
     key: &'a EvaluationKeyShareDescriptor,
     scheduled: &'a ScheduledProof,
@@ -334,7 +345,11 @@ fn prove_one_key<const LIMB_COUNT: usize>(
             group_start_limb: input.scheduled.group_start_limb,
         },
     )?;
-    let mut salt_seed = key_salt_seed(input.statement_hash, input.proof_index);
+    let mut private_randomness = key_private_randomness(
+        input.statement_hash,
+        input.proof_randomness_seed_hex,
+        input.proof_index,
+    );
     let proof = prove_key_fri(
         input.parameters,
         input.ring_degree,
@@ -346,7 +361,7 @@ fn prove_one_key<const LIMB_COUNT: usize>(
         input.statement_hash,
         input.proof_index as u64,
         input.proof_parameters,
-        &mut salt_seed,
+        &mut private_randomness,
     )?;
     encode_key_proof(&proof)
 }
