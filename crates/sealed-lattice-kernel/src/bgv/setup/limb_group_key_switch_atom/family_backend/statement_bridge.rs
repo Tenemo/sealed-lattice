@@ -93,153 +93,92 @@ pub(super) fn bridge_key_material<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     input: BridgeKeyMaterialInput<'_, LIMB_COUNT>,
 ) -> CanonicalResult<BridgedKey<LIMB_COUNT>> {
-    let ring_degree = input.domain.size;
-    let digit_count = input.component_b_by_digit.len();
-    if digit_count == 0 || input.public_sample_by_digit.len() != digit_count {
-        return Err(invalid_bridge(
-            "bridged key digit counts must match and be non-empty",
-        ));
-    }
-    if input.error_coefficients_by_digit.len() != digit_count {
+    let BridgeKeyMaterialInput {
+        group,
+        domain,
+        component_b_by_digit,
+        public_sample_by_digit,
+        secret_coefficients,
+        error_coefficients_by_digit,
+        kind,
+        plaintext_modulus,
+        group_start_limb,
+    } = input;
+    if error_coefficients_by_digit.len() != component_b_by_digit.len() {
         return Err(invalid_bridge(
             "bridged key error vectors must cover every digit",
         ));
     }
-    let group_limb_count = input.group.group_primes.len();
-    if input
-        .component_b_by_digit
-        .iter()
-        .chain(input.public_sample_by_digit.iter())
-        .any(|limb_vectors| limb_vectors.len() != group_limb_count)
-    {
-        return Err(invalid_bridge(
-            "bridged key limb vectors must match the limb group size",
-        ));
-    }
-    input
-        .group
-        .validate_exactness_bound(parameters, ring_degree)?;
-    validate_signed_support(input.secret_coefficients, ring_degree, 1, "secret")?;
-    for error in input.error_coefficients_by_digit {
-        validate_signed_support(error, ring_degree, 2, "error")?;
+    validate_signed_support(secret_coefficients, domain.size, 1, "secret")?;
+    for error in error_coefficients_by_digit {
+        validate_signed_support(error, domain.size, 2, "error")?;
     }
 
-    let secret_field: Vec<[u64; LIMB_COUNT]> = input
-        .secret_coefficients
+    let (public, source) = bridge_key_public(
+        parameters,
+        BridgeKeyPublicInput {
+            group,
+            domain,
+            component_b_by_digit,
+            public_sample_by_digit,
+            kind,
+            plaintext_modulus,
+            group_start_limb,
+        },
+    )?;
+
+    let secret_field: Vec<[u64; LIMB_COUNT]> = secret_coefficients
         .iter()
         .map(|value| parameters.signed_word_to_element(*value))
         .collect();
-    let plaintext_modulus_signed = i64::try_from(input.plaintext_modulus)
+    let plaintext_modulus_signed = i64::try_from(plaintext_modulus)
         .map_err(|_| invalid_bridge("plaintext modulus must fit a signed word"))?;
-
-    // The family source and, per digit, the diagonal term the carry extraction
-    // subtracts (matching the reduction's semantics exactly: `G * source` for
-    // round one and Galois, and the centered diagonal aggregate `(*) s` for
-    // round two).
-    let mut aggregate_by_digit: Vec<Vec<[u64; LIMB_COUNT]>> = Vec::new();
     let galois_image;
-    let source_signed: Option<&[i64]> = match &input.kind {
-        BridgedKeyKind::RelinearizationRoundOne => Some(input.secret_coefficients),
-        BridgedKeyKind::Galois { galois_element } => {
-            galois_image = galois_signed_image(input.secret_coefficients, *galois_element);
-            validate_signed_support(&galois_image, ring_degree, 1, "diagonal source")?;
+    let source_signed: Option<&[i64]> = match &source {
+        KeySource::RoundOne => Some(secret_coefficients),
+        KeySource::Galois { galois_element } => {
+            galois_image = galois_signed_image(secret_coefficients, *galois_element);
+            validate_signed_support(&galois_image, domain.size, 1, "diagonal source")?;
             Some(&galois_image)
         }
-        BridgedKeyKind::RelinearizationRoundTwo {
-            aggregate_residues_by_digit,
-        } => {
-            if aggregate_residues_by_digit.len() != digit_count {
-                return Err(invalid_bridge(
-                    "round-two aggregates must cover every digit",
-                ));
-            }
-            for (digit_index, aggregate_residues) in aggregate_residues_by_digit.iter().enumerate()
-            {
-                // The centered diagonal term: the aggregate at the diagonal
-                // limb, zero at every other limb, CRT-recombined and centered.
-                // A digit whose diagonal limb lies outside this group carries
-                // no diagonal here.
-                let local_diagonal =
-                    diagonal_local_index(digit_index, input.group_start_limb, group_limb_count);
-                let padded_by_limb = (0..group_limb_count)
-                    .map(|limb_index| {
-                        if Some(limb_index) == local_diagonal {
-                            aggregate_residues.clone()
-                        } else {
-                            vec![0_u64; ring_degree]
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                aggregate_by_digit.push(input.group.recombine_centered(
-                    parameters,
-                    &padded_by_limb,
-                    ring_degree,
-                )?);
-            }
-            None
-        }
+        KeySource::RoundTwo { .. } => None,
     };
+    let group_modulus_inverse = *group.group_modulus_inverse();
+    let carry_bound = domain.size as u64 + 1;
+    let mut digit_witnesses = Vec::with_capacity(public.digits.len());
 
-    let group_modulus_element = input.group.group_modulus_element(parameters);
-    let group_modulus_inverse = *input.group.group_modulus_inverse();
-    let plaintext_modulus_element = parameters.unsigned_word_to_element(input.plaintext_modulus);
-    let carry_bound = ring_degree as u64 + 1;
-
-    let mut public_digits = Vec::with_capacity(digit_count);
-    let mut digit_witnesses = Vec::with_capacity(digit_count);
-    for (digit_index, (component_b_by_limb, public_sample_by_limb)) in input
-        .component_b_by_digit
+    for (digit_index, (public_digit, error)) in public
+        .digits
         .iter()
-        .zip(input.public_sample_by_digit.iter())
+        .zip(error_coefficients_by_digit)
         .enumerate()
     {
-        let recombined_component_b =
-            input
-                .group
-                .recombine_centered(parameters, component_b_by_limb, ring_degree)?;
-        let recombined_sample =
-            input
-                .group
-                .recombine_centered(parameters, public_sample_by_limb, ring_degree)?;
-        let gadget_idempotent =
-            match diagonal_local_index(digit_index, input.group_start_limb, group_limb_count) {
-                Some(local_index) => *input.group.gadget_idempotent(local_index)?,
-                None => parameters.zero(),
-            };
-
-        // The diagonal term of this digit's congruence.
-        let diagonal_term: Vec<[u64; LIMB_COUNT]> = match &input.kind {
-            BridgedKeyKind::RelinearizationRoundOne | BridgedKeyKind::Galois { .. } => {
-                let source = source_signed.expect("signed source is set for these kinds");
-                source
+        let diagonal_term: Vec<[u64; LIMB_COUNT]> = match &source {
+            KeySource::RoundOne | KeySource::Galois { .. } => {
+                let signed_source = source_signed.expect("signed source is present");
+                signed_source
                     .iter()
                     .map(|value| {
                         parameters.multiply(
-                            &gadget_idempotent,
+                            &public_digit.gadget_idempotent,
                             &parameters.signed_word_to_element(*value),
                         )
                     })
                     .collect()
             }
-            BridgedKeyKind::RelinearizationRoundTwo { .. } => {
-                let aggregate = aggregate_by_digit
+            KeySource::RoundTwo { aggregate_by_digit } => domain.negacyclic_product(
+                aggregate_by_digit
                     .get(digit_index)
-                    .expect("round-two aggregate is present for every digit");
-                input.domain.negacyclic_product(aggregate, &secret_field)
-            }
+                    .expect("round-two aggregate is present for every digit"),
+                &secret_field,
+            ),
         };
-
-        // Carry extraction: c = (B + A (*) s - t e - diagonal) / Q, exact over
-        // the integers under the validated exactness bound; a carry outside
-        // `|c| <= N + 1` means the material does not satisfy the relation.
-        let sample_secret_product = input
-            .domain
-            .negacyclic_product(&recombined_sample, &secret_field);
-        let error = &input.error_coefficients_by_digit[digit_index];
-        let mut carry = Vec::with_capacity(ring_degree);
-        for coefficient_index in 0..ring_degree {
+        let sample_secret_product =
+            domain.negacyclic_product(&public_digit.recombined_sample, &secret_field);
+        let mut carry = Vec::with_capacity(domain.size);
+        for coefficient_index in 0..domain.size {
             let mut difference = parameters.add(
-                &recombined_component_b[coefficient_index],
+                &public_digit.recombined_component_b[coefficient_index],
                 &sample_secret_product[coefficient_index],
             );
             let scaled_error = parameters
@@ -254,35 +193,21 @@ pub(super) fn bridge_key_material<const LIMB_COUNT: usize>(
                     "bridged key material does not satisfy the key-switch congruence: the carry lift exceeds its integer bound",
                 ));
             }
-            let signed = magnitude_word as i64;
-            carry.push(if is_negative { -signed } else { signed });
+            let signed_magnitude = magnitude_word as i64;
+            carry.push(if is_negative {
+                -signed_magnitude
+            } else {
+                signed_magnitude
+            });
         }
-
-        public_digits.push(DigitPublic {
-            recombined_sample,
-            recombined_component_b,
-            gadget_idempotent,
-        });
         digit_witnesses.push(DigitWitness {
             error: error.clone(),
             carry,
         });
     }
 
-    let source = match input.kind {
-        BridgedKeyKind::RelinearizationRoundOne => KeySource::RoundOne,
-        BridgedKeyKind::Galois { galois_element } => KeySource::Galois { galois_element },
-        BridgedKeyKind::RelinearizationRoundTwo { .. } => {
-            KeySource::RoundTwo { aggregate_by_digit }
-        }
-    };
-
     Ok(BridgedKey {
-        public: KeyPublic {
-            digits: public_digits,
-            group_modulus: group_modulus_element,
-            plaintext_modulus: plaintext_modulus_element,
-        },
+        public,
         source,
         digits: digit_witnesses,
     })
@@ -411,6 +336,7 @@ mod tests {
     use super::super::key_proof::{
         KeyFriProofParameters, ZERO_STATEMENT_BINDING, prove_key_fri, verify_key_fri,
     };
+    use super::super::private_randomness::PrivateProofRandomness;
     use super::*;
     use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS};
 
@@ -601,7 +527,7 @@ mod tests {
             query_count: 40,
             mask_degree: 0,
         };
-        let mut salt_seed = 0xb41d;
+        let mut private_randomness = PrivateProofRandomness::for_test(0xb41d);
         let proof = prove_key_fri(
             &parameters,
             ring_degree,
@@ -613,7 +539,7 @@ mod tests {
             &ZERO_STATEMENT_BINDING,
             0,
             &proof_parameters,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("bridged material proves");
         assert!(
@@ -700,7 +626,8 @@ mod tests {
                 query_count: 40,
                 mask_degree: 0,
             };
-            let mut salt_seed = 0x517 + group_start_limb as u64;
+            let mut private_randomness =
+                PrivateProofRandomness::for_test(0x517 + group_start_limb as u64);
             let proof = prove_key_fri(
                 &parameters,
                 ring_degree,
@@ -712,7 +639,7 @@ mod tests {
                 &ZERO_STATEMENT_BINDING,
                 group_start_limb as u64,
                 &proof_parameters,
-                &mut salt_seed,
+                &mut private_randomness,
             )
             .expect("split group proves");
             assert!(

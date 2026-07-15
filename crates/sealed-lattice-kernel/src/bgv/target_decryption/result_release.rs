@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::bgv::encoding::decode_plaintext_coefficients_to_logical_slots;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{Mutex, OnceLock},
@@ -10,15 +12,6 @@ const TARGET_RESULT_RELEASE_VERIFICATION_ID_MAX_BYTES: usize = 128;
 static TARGET_RESULT_RELEASE_SESSIONS: OnceLock<
     Mutex<BTreeMap<String, TargetResultReleaseSession>>,
 > = OnceLock::new();
-
-// A released target is consumed one-shot: once its verified-share quorum has been
-// recombined into a plaintext result, the same target binding can never be
-// released again, even under a fresh release verification id or a fresh quorum
-// with different smudging. This in-process registry holds the canonical
-// target-binding key of every target a finish has released and enforces that
-// bound. Persistent consumed-state across process restarts remains an open
-// obligation (see SEC-002).
-static TARGET_RESULT_RELEASE_CONSUMED_TARGETS: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
 
 pub(super) struct TargetDecryptionResultReleaseBeginInput<'a> {
     pub(super) release_verification_id: &'a str,
@@ -38,6 +31,7 @@ pub(super) struct TargetDecryptionResultReleaseFinishInput<'a> {
 }
 
 struct VerifiedTargetShareRelease {
+    roster_position: usize,
     interpolation_point: u64,
     target_id_partials: Vec<Vec<u64>>,
     target_order_partials: Vec<Vec<u64>>,
@@ -49,8 +43,7 @@ struct TargetResultReleaseSession {
     target_accepted: TargetAcceptedBinding,
     target_ciphertexts: TargetCiphertextPair,
     target_share_profile: TargetShareProfile,
-    seen_roster_positions: BTreeSet<u64>,
-    seen_interpolation_points: BTreeSet<u64>,
+    seen_roster_positions: BTreeSet<usize>,
     verified_shares: Vec<VerifiedTargetShareRelease>,
 }
 
@@ -60,30 +53,6 @@ pub(super) fn begin_target_decryption_result_release(
     let release_verification_id =
         target_result_release_verification_id(input.release_verification_id)?.to_string();
     validate_target_result_release_profile(input.target_share_profile)?;
-    let consumption_key = target_release_consumption_key(
-        input.setup_binding,
-        input.target_accepted,
-        input.target_ciphertexts,
-    )?;
-    // Reject a target that a prior release already consumed before opening a new
-    // session. This is an early check; finish holds the registry lock across the
-    // recombination and is the authoritative one-shot gate.
-    {
-        let consumed_targets = target_result_release_consumed_targets()
-            .lock()
-            .map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidProtocolObject,
-                    "target result release consumed-target registry is unavailable",
-                )
-            })?;
-        if consumed_targets.contains(&consumption_key) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "target has already been released one-shot and cannot be released again",
-            ));
-        }
-    }
     let sessions = target_result_release_sessions();
     let mut sessions = sessions.lock().map_err(|_| {
         CanonicalError::new(
@@ -105,18 +74,11 @@ pub(super) fn begin_target_decryption_result_release(
             target_ciphertexts: input.target_ciphertexts.clone(),
             target_share_profile: input.target_share_profile.clone(),
             seen_roster_positions: BTreeSet::new(),
-            seen_interpolation_points: BTreeSet::new(),
             verified_shares: Vec::with_capacity(input.target_share_profile.decryption_share_quorum),
         },
     );
 
     Ok(json!({
-        "operation": "beginBgvTargetDecryptionResultRelease",
-        "releaseVerificationId": release_verification_id,
-        "setupPackageHash": input.setup_binding.setup_package_hash,
-        "targetAcceptedRecordHash": input.target_accepted.target_accepted_record_hash,
-        "targetDecryptionCiphertextHash": input.target_ciphertexts.target_ciphertext_hash,
-        "targetShareProfileHash": input.target_share_profile.hash,
         "requiredShareCount": input.target_share_profile.decryption_share_quorum,
     }))
 }
@@ -124,6 +86,8 @@ pub(super) fn begin_target_decryption_result_release(
 pub(super) fn absorb_target_decryption_result_release_share(
     input: TargetDecryptionResultReleaseShareInput<'_>,
 ) -> CanonicalResult<Value> {
+    let _material_eviction_guard =
+        target_proof_material_eviction_guard_for_request(input.target_share_proof);
     let release_verification_id =
         target_result_release_verification_id(input.release_verification_id)?.to_string();
     let sessions = target_result_release_sessions();
@@ -143,7 +107,7 @@ pub(super) fn absorb_target_decryption_result_release_share(
         absorb_target_result_release_share(session, input.target_share_proof)
     };
     match absorb_result {
-        Ok(response) => Ok(response),
+        Ok(()) => Ok(Value::Null),
         Err(error) => {
             sessions.remove(&release_verification_id);
             Err(error)
@@ -175,48 +139,18 @@ pub(super) fn finish_target_decryption_result_release(
         session.verified_shares.len(),
     )?;
 
-    let consumption_key = target_release_consumption_key(
+    release_verified_target_shares(
         &session.setup_binding,
         &session.target_accepted,
         &session.target_ciphertexts,
-    )?;
-    // Hold the consumed-target registry across the check, the recombination, and
-    // the insert so the one-shot property is race-free: two finishes that both
-    // reached quorum for the same target serialize here, the first recombines and
-    // consumes the target, and the second is refused before a second plaintext is
-    // revealed. A recombination failure returns without consuming, so a failed
-    // release does not burn the target.
-    let mut consumed_targets = target_result_release_consumed_targets()
-        .lock()
-        .map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "target result release consumed-target registry is unavailable",
-            )
-        })?;
-    if consumed_targets.contains(&consumption_key) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "target has already been released one-shot and cannot be released again",
-        ));
-    }
-    let release = release_verified_target_shares(
-        &session.setup_binding,
-        &session.target_accepted,
-        &session.target_ciphertexts,
-        &session.target_share_profile,
         session.verified_shares,
-        "finishBgvTargetDecryptionResultRelease",
-    )?;
-    consumed_targets.insert(consumption_key);
-
-    Ok(release)
+    )
 }
 
 fn absorb_target_result_release_share(
     session: &mut TargetResultReleaseSession,
     target_share_proof: &Value,
-) -> CanonicalResult<Value> {
+) -> CanonicalResult<()> {
     if session.verified_shares.len() >= session.target_share_profile.decryption_share_quorum {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -227,39 +161,20 @@ fn absorb_target_result_release_share(
         &session.setup_binding,
         &session.target_accepted,
         &session.target_ciphertexts,
-        &session.target_share_profile,
         target_share_proof,
     )?;
-    let roster_position = unsigned_at_path(&verified_share.evidence, &["rosterPosition"])?;
-    if !session.seen_roster_positions.insert(roster_position) {
+    if !session
+        .seen_roster_positions
+        .insert(verified_share.roster_position)
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
             "target result release share quorum repeats a trustee",
         ));
     }
-    if !session
-        .seen_interpolation_points
-        .insert(verified_share.interpolation_point)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "target result release share quorum repeats an interpolation point",
-        ));
-    }
-    let proof_material_root =
-        hash_at_path(&verified_share.evidence, &["proofMaterialRoot"])?.to_string();
-    let target_decryption_share_hash =
-        hash_at_path(&verified_share.evidence, &["targetDecryptionShareHash"])?.to_string();
     session.verified_shares.push(verified_share);
 
-    Ok(json!({
-        "operation": "absorbBgvTargetDecryptionResultReleaseShare",
-        "absorbedShareCount": session.verified_shares.len(),
-        "requiredShareCount": session.target_share_profile.decryption_share_quorum,
-        "rosterPosition": roster_position,
-        "targetDecryptionShareHash": target_decryption_share_hash,
-        "proofMaterialRoot": proof_material_root,
-    }))
+    Ok(())
 }
 
 fn validate_target_result_release_quorum(
@@ -297,31 +212,6 @@ fn target_result_release_sessions() -> &'static Mutex<BTreeMap<String, TargetRes
     TARGET_RESULT_RELEASE_SESSIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn target_result_release_consumed_targets() -> &'static Mutex<BTreeSet<String>> {
-    TARGET_RESULT_RELEASE_CONSUMED_TARGETS.get_or_init(|| Mutex::new(BTreeSet::new()))
-}
-
-// The canonical one-shot consumption key for a target release. It binds the
-// accepted setup package, the accepted target record, and the exact target
-// ciphertext pair being decrypted, so every release of the same target under the
-// same setup collides on this key while genuinely different targets do not. The
-// target-share profile is deliberately excluded from the key: only the decryption
-// threshold is roster-pinned, so a second release under a different but still-valid
-// (minimum, quorum) profile must not mint a fresh key and escape the one-shot
-// bound.
-fn target_release_consumption_key(
-    setup_binding: &SetupBinding,
-    target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
-) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "BgvTargetDecryptionResultReleaseConsumptionKey",
-        "setupPackageHash": setup_binding.setup_package_hash,
-        "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
-    }))
-}
-
 fn target_result_release_verification_id(value: &str) -> CanonicalResult<&str> {
     if value.is_empty()
         || value.len() > TARGET_RESULT_RELEASE_VERIFICATION_ID_MAX_BYTES
@@ -342,9 +232,7 @@ fn release_verified_target_shares(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
     verified_shares: Vec<VerifiedTargetShareRelease>,
-    operation: &str,
 ) -> CanonicalResult<Value> {
     let interpolation_points = verified_shares
         .iter()
@@ -381,9 +269,6 @@ fn release_verified_target_shares(
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
-        "targetShareProfileHash": target_share_profile.hash,
-        "targetBasisHash": target_accepted.target_basis_hash,
         "topCount": target_ciphertexts.top_count,
         "targetIdByOption": target_id_by_option,
         "targetOrderByOption": target_order_by_option,
@@ -392,7 +277,6 @@ fn release_verified_target_shares(
     let target_result_hash = derive_canonical_object_hash(&result_preimage)?;
 
     Ok(json!({
-        "operation": operation,
         "targetResultHash": target_result_hash,
         "targetIdByOption": result_preimage["targetIdByOption"].clone(),
         "targetOrderByOption": result_preimage["targetOrderByOption"].clone(),
@@ -405,7 +289,6 @@ fn verify_target_share_release_entry(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
     share_proof: &Value,
 ) -> CanonicalResult<VerifiedTargetShareRelease> {
     let target_decryption_share = value_at_path(share_proof, &["targetDecryptionShare"])?;
@@ -427,7 +310,6 @@ fn verify_target_share_release_entry(
             setup_binding,
             target_accepted,
             target_ciphertexts,
-            target_share_profile,
             participant,
             target_decryption_share,
             proof_statement,
@@ -442,18 +324,19 @@ fn verify_target_share_release_entry(
         "targetOrder",
         target_ciphertexts.target_order.level,
     )?;
+    let interpolation_point = participant.interpolation_point()?;
 
     Ok(VerifiedTargetShareRelease {
-        interpolation_point: participant.interpolation_point,
+        roster_position: participant.roster_position,
+        interpolation_point,
         target_id_partials,
         target_order_partials,
         evidence: json!({
             "trusteeIdentity": participant.trustee_identity,
             "rosterPosition": participant.roster_position,
-            "interpolationPoint": participant.interpolation_point,
-            "targetDecryptionShareHash": hash_at_path(target_decryption_share, &["targetDecryptionShareHash"])?,
-            "proofStatementRoot": hash_at_path(proof_statement, &["proofStatementRoot"])?,
-            "proofMaterialRoot": hash_at_path(proof_material, &["proofMaterialRoot"])?,
+            "targetDecryptionShareHash": target_decryption_share_hash(target_decryption_share)?,
+            "proofStatementRoot": target_decryption_share_proof_statement_root(proof_statement)?,
+            "proofBytesHash": hash_at_path(proof_material, &["proofBytesHash"])?,
         }),
     })
 }
@@ -519,7 +402,7 @@ pub(super) fn release_target_role_slots(
     }
 
     let coefficients = decryption_accumulator_to_coefficients(ciphertext, &accumulator)?;
-    forward_negacyclic_ntt(&coefficients, PLAINTEXT_MODULUS)
+    decode_plaintext_coefficients_to_logical_slots(&coefficients)
 }
 
 fn lagrange_weights_at_zero(
@@ -569,15 +452,12 @@ pub(super) fn packed_target_option_values(
 
     (0..MAXIMUM_OPTION_COUNT)
         .map(|option_index| {
-            slots
-                .get(packed_score_slot(option_index))
-                .copied()
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "target result packed option slot is outside the selected ring",
-                    )
-                })
+            slots.get(option_index).copied().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "target result packed option slot is outside the selected ring",
+                )
+            })
         })
         .collect()
 }

@@ -15,15 +15,10 @@ mod root_parameters;
 
 pub(crate) use root_parameters::{
     BgvBasisKind, DATA_PRIMES, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIME,
-    data_basis_modulus_bits, data_prime_bit_length, extended_basis_modulus_bits,
     root_parameters_for_modulus,
 };
-// The single canonical identity for the fixed BGV parameter set, in the style of
-// a SEAL parms_id: one object that unions the full BGV configuration. It binds
-// the ring parameters, the ballot/score/layout data, the aggregate/comparison
-// flags, the ciphertext convention flags, and the evaluator operation policy.
-// Every part is a pure deterministic function of the fixed parameters, so one
-// hash over the whole set is the strongest identity.
+// The single canonical identity for the fixed BGV parameter set. It binds the
+// ring arithmetic and the fixed score and batch layout used by the protocol.
 pub(crate) fn bgv_parameters_value() -> Value {
     json!({
         "objectType": "BgvParameters",
@@ -31,9 +26,6 @@ pub(crate) fn bgv_parameters_value() -> Value {
         "plaintextModulus": PLAINTEXT_MODULUS,
         "dataPrimes": DATA_PRIMES,
         "specialPrime": SPECIAL_PRIME,
-        "dataPrimeBitLength": data_prime_bit_length(),
-        "dataLevels": DATA_PRIMES.len(),
-        "extendedLevels": DATA_PRIMES.len() + 1,
         "nttRootParameters": ROOT_PARAMETERS.iter().map(|parameters| json!({
             "modulus": parameters.modulus,
             "primitiveGenerator": parameters.primitive_generator,
@@ -49,8 +41,6 @@ pub(crate) fn bgv_parameters_value() -> Value {
         },
         "bucketCount": 10,
         "coordinatesPerOption": 11,
-        "slotCount": POLYNOMIAL_DEGREE,
-        "allowedOperations": ALLOWED_EVALUATOR_OPERATIONS,
     })
 }
 
@@ -58,31 +48,11 @@ pub(crate) fn bgv_parameters_hash() -> CanonicalResult<String> {
     derive_canonical_object_hash(&bgv_parameters_value())
 }
 
-const ALLOWED_EVALUATOR_OPERATIONS: &[&str] = &[
-    "encodeDirectEncryptedBallotAggregate",
-    "validateCoefficientDomainPlaintext",
-    "validateCoefficientDomainCiphertext",
-    "homomorphicEncryptedBallotAggregation",
-    "interpolationCoefficientScalarMultiplication",
-    "comparisonInputDerivationCircuitInputPreparation",
-    "encryptedRankAccumulationSupport",
-    "encryptedSparseTargetProjectionSupport",
-    "canonicalTargetCiphertextSelection",
-];
-
-// Operations-list data only. Used by validate_bgv_evaluator_operation.
-pub(crate) fn allowed_operation_registry_value() -> CanonicalResult<Value> {
-    Ok(json!({
-        "allowedOperations": ALLOWED_EVALUATOR_OPERATIONS,
-    }))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::root_parameters::moduli_bit_length_sum;
     use super::{
         BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
-        data_basis_modulus_bits, extended_basis_modulus_bits, root_parameters_for_modulus,
+        root_parameters_for_modulus,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
 
@@ -124,6 +94,10 @@ mod tests {
     fn selected_moduli_are_ntt_ready_primes() {
         assert_eq!(POLYNOMIAL_DEGREE, 32_768);
         assert_eq!(PLAINTEXT_MODULUS, 65_537);
+        assert!(
+            is_prime_for_tests(PLAINTEXT_MODULUS),
+            "the selected plaintext modulus must reproduce as prime"
+        );
         for modulus in DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]) {
             assert_eq!((modulus - 1) % (2 * POLYNOMIAL_DEGREE as u64), 0);
             assert!(is_prime_for_tests(modulus));
@@ -258,26 +232,5 @@ mod tests {
         );
         assert!(BgvBasisKind::Special.moduli_for_level(1).is_none());
         assert!(BgvBasisKind::Special.moduli_for_level(99).is_none());
-    }
-
-    #[test]
-    fn modulus_bit_accounting_sums_actual_modulus_widths() {
-        assert_eq!(moduli_bit_length_sum([0, 1, 255, 256]), 18);
-        assert_eq!(
-            data_basis_modulus_bits(),
-            DATA_PRIMES
-                .iter()
-                .map(
-                    |modulus| usize::try_from(u64::BITS - modulus.leading_zeros())
-                        .expect("bit length fits usize")
-                )
-                .sum::<usize>()
-        );
-        assert_eq!(
-            extended_basis_modulus_bits(),
-            data_basis_modulus_bits()
-                + usize::try_from(u64::BITS - SPECIAL_PRIME.leading_zeros())
-                    .expect("bit length fits usize")
-        );
     }
 }

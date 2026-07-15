@@ -3,9 +3,11 @@ use super::super::relation::{
     LimbColumnLayout, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
     claim_mask_digit_count_for_global_claim,
 };
-use super::super::*;
-use super::*;
+use super::super::{CLAIM_MASK_RADIX, column_mask_degree};
+use super::CLAIM_MASK_DOMAIN;
 use crate::bgv::evaluator::prg::DeterministicSampler;
+use crate::bgv::modular_arithmetic::{add_mod_fast, sub_mod_fast};
+use crate::encoding::CanonicalResult;
 use num_bigint::BigInt;
 
 // Global mask digits for one claim, identical across every limb where the claim
@@ -59,7 +61,7 @@ pub(in super::super) fn global_claim_id(
     }
     if layout.private_vss_active() || layout.vss_public_active() {
         debug_assert!(
-            statement.private_vss_share.is_some() || statement.vss_share_linkage.is_some()
+            statement.private_vss_share().is_some() || statement.vss_share_linkage().is_some()
         );
         return (vector_index * layout.consistency_repetitions + repetition) as u64;
     }
@@ -74,7 +76,7 @@ pub(in super::super) fn global_claim_id(
     let mut remaining = vector_index - 1;
     for (key_index, digit_count) in &layout.active_keys {
         if remaining < *digit_count {
-            let global_error_position: usize = statement.keys[..*key_index]
+            let global_error_position: usize = statement.keys()[..*key_index]
                 .iter()
                 .map(|key| key.digit_count())
                 .sum::<usize>()
@@ -88,13 +90,13 @@ pub(in super::super) fn global_claim_id(
     // digits, then the opening-randomness columns, indexed after every
     // statement-global error vector.
     let total_error_vectors: usize = statement
-        .keys
+        .keys()
         .iter()
         .map(|key| key.digit_count())
         .sum::<usize>();
     let linkage_position = remaining;
-    if let Some(bridge) = &statement.same_secret_bridge {
-        let bridge_digit_vector_count = bridge.target_rns_primes.len()
+    if let Some(bridge) = statement.same_secret_bridge() {
+        let bridge_digit_vector_count = bridge.bridge_rns_primes.len()
             * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
         debug_assert!(
             linkage_position < 1 + bridge_digit_vector_count + layout.linkage_randomness_columns
@@ -175,32 +177,21 @@ pub(super) fn masked_half_coefficients_with_mask_degree(
 fn vss_public_recipient_share_messages_by_item_for_claims(
     witness: &TrusteeEvaluationKeyWitness,
 ) -> Vec<&[i64]> {
-    if witness
-        .vss_public_recipient_share_messages_by_item
-        .is_empty()
-    {
-        vec![&witness.vss_public_recipient_share_messages]
-    } else {
-        witness
-            .vss_public_recipient_share_messages_by_item
-            .iter()
-            .map(Vec::as_slice)
-            .collect()
-    }
+    witness
+        .vss_public_recipient_share_messages_by_item()
+        .iter()
+        .map(Vec::as_slice)
+        .collect()
 }
 
 fn vss_public_carry_witnesses_by_item_for_claims(
     witness: &TrusteeEvaluationKeyWitness,
 ) -> Vec<&[i64]> {
-    if witness.vss_public_carry_witnesses_by_item.is_empty() {
-        vec![&witness.vss_public_carry_witnesses]
-    } else {
-        witness
-            .vss_public_carry_witnesses_by_item
-            .iter()
-            .map(Vec::as_slice)
-            .collect()
-    }
+    witness
+        .vss_public_carry_witnesses_by_item()
+        .iter()
+        .map(Vec::as_slice)
+        .collect()
 }
 
 fn append_vss_public_digit_vectors(digit_vectors: &mut Vec<Vec<i64>>, message_vector: &[i64]) {
@@ -273,12 +264,13 @@ fn append_vss_public_trit_vectors(
 pub(super) fn global_claim_integers(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
+    bound_message_coefficients: &[Vec<u64>],
     consistency_vectors: &[Vec<u64>],
     proof_randomness_seed_hex: &str,
 ) -> Vec<BigInt> {
     let mut owned_vss_public_claim_vectors: Vec<Vec<i64>> = Vec::new();
     let mut signed_vectors: Vec<&[i64]> = Vec::new();
-    if statement.private_vss_share.is_some() {
+    if statement.private_vss_share().is_some() {
         // The message (Shamir coefficient) columns carry no consistency claim:
         // their cross-field consistency is argued globally by carry consistency,
         // the public range-checked share, and enough honest recipient checks.
@@ -286,13 +278,13 @@ pub(super) fn global_claim_integers(
         // gain. Only the carry and the opening-randomness columns are claimed.
         // This order must match consistency_vector_count and the consistency
         // loop in relation.rs ([carry, opening-randomness...]).
-        signed_vectors.push(&witness.private_vss_carry_witnesses);
-        for randomness_columns in &witness.private_vss_opening_randomness_by_shamir_index {
+        signed_vectors.push(witness.private_vss_carry_witnesses());
+        for randomness_columns in witness.private_vss_opening_randomness_by_shamir_index() {
             for column in randomness_columns {
                 signed_vectors.push(column);
             }
         }
-    } else if let Some(vss_share_linkage) = &statement.vss_share_linkage {
+    } else if let Some(vss_share_linkage) = statement.vss_share_linkage() {
         // Share-linkage claims each lifted-carry vector followed by every message
         // trit vector (each digit split into its base-three trits). Opening
         // randomness stays committed, ternary row-checked, and consumed by the
@@ -363,7 +355,7 @@ pub(super) fn global_claim_integers(
 
         for coefficient_slot_index in 0..coefficient_message_count {
             let coefficient_messages =
-                &witness.vss_public_coefficient_messages_by_shamir_index[coefficient_slot_index];
+                &witness.vss_public_coefficient_messages_by_shamir_index()[coefficient_slot_index];
             validate_vss_public_vector(coefficient_messages);
             append_vss_public_trit_vectors(
                 &mut owned_vss_public_claim_vectors,
@@ -386,38 +378,31 @@ pub(super) fn global_claim_integers(
         for claim_vector in &owned_vss_public_claim_vectors {
             signed_vectors.push(claim_vector);
         }
-    } else if statement.target_decryption_share.is_some() {
+    } else if statement.target_decryption_share().is_some() {
         // Target-decryption masked consistency claims bind direct message
         // digits. Opening randomness stays committed, ternary row-checked, and
         // consumed by the opening equations on setup commitment fields.
-        for message_vector in &witness.target_decryption_message_vectors {
+        for message_vector in witness.target_decryption_message_vectors() {
             append_vss_public_digit_vectors(&mut owned_vss_public_claim_vectors, message_vector);
         }
         for claim_vector in &owned_vss_public_claim_vectors {
             signed_vectors.push(claim_vector);
         }
     } else {
-        signed_vectors.push(&witness.secret_coefficients);
-        for error_vectors in &witness.error_coefficients_by_key {
+        signed_vectors.push(witness.secret_coefficients());
+        for error_vectors in witness.error_coefficients_by_key() {
             for error_vector in error_vectors {
                 signed_vectors.push(error_vector);
             }
         }
-        if statement.same_secret_linkage.is_some() || statement.same_secret_bridge.is_some() {
-            signed_vectors.push(&witness.negative_indicator_coefficients);
-            if let Some(bridge) = &statement.same_secret_bridge {
-                for target_rns_prime in &bridge.target_rns_primes {
-                    let target_messages = witness
-                        .secret_coefficients
+        if statement.same_secret_linkage().is_some() || statement.same_secret_bridge().is_some() {
+            signed_vectors.push(witness.negative_indicator_coefficients());
+            if statement.same_secret_bridge().is_some() {
+                for target_messages in bound_message_coefficients {
+                    let target_messages = target_messages
                         .iter()
-                        .zip(witness.negative_indicator_coefficients.iter())
-                        .map(|(secret_coefficient, negative_indicator)| {
-                            let target_message = i128::from(*secret_coefficient)
-                                + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
-                            let unsigned_target_message = u64::try_from(target_message).expect(
-                                "same-secret bridge message is non-negative after validation",
-                            );
-                            i64::try_from(unsigned_target_message)
+                        .map(|target_message| {
+                            i64::try_from(*target_message)
                                 .expect("same-secret bridge message fits i64")
                         })
                         .collect::<Vec<_>>();
@@ -430,7 +415,7 @@ pub(super) fn global_claim_integers(
                     signed_vectors.push(digit_vector);
                 }
             }
-            for randomness_columns in &witness.opening_randomness_by_limb {
+            for randomness_columns in witness.opening_randomness_by_limb() {
                 for column in randomness_columns {
                     signed_vectors.push(column);
                 }

@@ -1,4 +1,4 @@
-import type { PollSpecInput } from '@sealed-lattice/types';
+import { foundationProfile, type PollSpecInput } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import { validatePollSpec } from '#packages/protocol/src/lifecycle/poll-spec';
@@ -28,25 +28,12 @@ const expectErrorCodes = (
 };
 
 describe('election foundation poll-spec validation', () => {
-    it('normalizes the supported score domain and policies', () => {
-        const validation = validatePollSpec(
-            createValidPollSpecInput({
-                scoreDomain: {
-                    min: 1,
-                    max: 10,
-                    skippedOptionScore: 1,
-                },
-            }),
-        );
+    it('normalizes roster bounds and policy', () => {
+        const validation = validatePollSpec(createValidPollSpecInput());
 
         expect(validation).toEqual({
             isValid: true,
             normalized: createValidPollSpecInput({
-                scoreDomain: {
-                    min: 1,
-                    max: 10,
-                    skippedOptionScore: 1,
-                },
                 maxRosterSize: 20,
                 minRosterSize: 10,
                 smallRosterPolicy: 'ForbidMicroRoster',
@@ -54,7 +41,7 @@ describe('election foundation poll-spec validation', () => {
         });
     });
 
-    it('applies default score and policy choices', () => {
+    it('applies default roster choices', () => {
         const validation = validatePollSpec(
             createValidPollSpecInput({
                 options: ['A', 'B', 'C'],
@@ -65,11 +52,6 @@ describe('election foundation poll-spec validation', () => {
         expect(validation).toMatchObject({
             isValid: true,
             normalized: {
-                scoreDomain: {
-                    min: 1,
-                    max: 10,
-                    skippedOptionScore: 1,
-                },
                 maxRosterSize: 20,
                 minRosterSize: 10,
                 smallRosterPolicy: 'ForbidMicroRoster',
@@ -82,7 +64,7 @@ describe('election foundation poll-spec validation', () => {
             createValidPollSpecInput({
                 maxRosterSize: 20,
                 minRosterSize: 11,
-                smallRosterPolicy: 'WarnMicroRoster',
+                smallRosterPolicy: 'AllowMicroRoster',
             }),
         );
 
@@ -91,30 +73,24 @@ describe('election foundation poll-spec validation', () => {
             normalized: {
                 maxRosterSize: 20,
                 minRosterSize: 11,
-                smallRosterPolicy: 'WarnMicroRoster',
+                smallRosterPolicy: 'AllowMicroRoster',
             },
         });
     });
 
-    it('rejects option count, question, topOptionCount, score, and policy errors', () => {
+    it('rejects option count, question, and topOptionCount errors', () => {
         expectErrorCodes(
             createValidPollSpecInput({
                 pollId: '',
                 question: '',
                 options: [],
                 topOptionCount: 0,
-                scoreDomain: {
-                    min: 1,
-                    max: 9,
-                    skippedOptionScore: 1,
-                } as unknown as PollSpecInput['scoreDomain'],
             }),
             [
                 'EmptyPollId',
                 'EmptyQuestion',
                 'InvalidOptionCount',
                 'InvalidTopOptionCount',
-                'UnsupportedScoreDomain',
             ],
         );
     });
@@ -135,18 +111,6 @@ describe('election foundation poll-spec validation', () => {
         ]);
 
         expectErrorCodes(decodedPollSpec, ['EmptyOptionLabel']);
-    });
-
-    it('returns structured errors for non-number top option counts', () => {
-        expectErrorCodes(
-            {
-                pollId: 'poll',
-                question: 'Question',
-                options: ['A', 'B'],
-                topOptionCount: 1n,
-            },
-            ['InvalidTopOptionCount'],
-        );
     });
 
     it('rejects unsupported roster policy and invalid roster bounds', () => {
@@ -174,7 +138,7 @@ describe('election foundation poll-spec validation', () => {
         );
     });
 
-    it('rejects empty and duplicate option labels after Unicode normalization', () => {
+    it('rejects empty, duplicate, and non-ASCII hash-critical text', () => {
         expectErrorCodes(
             createValidPollSpecInput({
                 options: [
@@ -190,19 +154,50 @@ describe('election foundation poll-spec validation', () => {
             [
                 'EmptyOptionLabel',
                 'DuplicateOptionLabel',
-                'DuplicateOptionLabel',
+                'UnsupportedHashCriticalText',
+                'UnsupportedHashCriticalText',
             ],
+        );
+
+        expectErrorCodes(
+            createValidPollSpecInput({
+                pollId: 'g\u0142osowanie',
+                question: 'Wyb\u00f3r',
+            }),
+            ['UnsupportedHashCriticalText', 'UnsupportedHashCriticalText'],
         );
     });
 
-    it('accepts labels that differ only by trailing whitespace after normalization', () => {
-        const validation = validatePollSpec(
+    it('enforces the identifier and aggregate display-text budgets', () => {
+        expectErrorCodes(
             createValidPollSpecInput({
-                options: ['Alpha', 'Alpha '],
+                pollId: 'p'.repeat(
+                    foundationProfile.maximumIdentifierByteLength + 1,
+                ),
+            }),
+            ['UnsupportedHashCriticalText'],
+        );
+
+        const exactBudgetValidation = validatePollSpec(
+            createValidPollSpecInput({
+                options: ['A'],
+                question: 'Q'.repeat(
+                    foundationProfile.maximumCopiedBufferByteLength - 1,
+                ),
                 topOptionCount: 1,
             }),
         );
+        expect(exactBudgetValidation.isValid).toBe(true);
 
-        expect(validation.isValid).toBe(true);
+        expectErrorCodes(
+            createValidPollSpecInput({
+                options: ['A'],
+                question: 'Q'.repeat(
+                    foundationProfile.maximumCopiedBufferByteLength,
+                ),
+                topOptionCount: 1,
+            }),
+            ['UnsupportedHashCriticalText'],
+        );
     });
 });

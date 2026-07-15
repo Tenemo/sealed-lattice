@@ -1,54 +1,42 @@
-mod ceremony_phases;
 mod evaluation_key_share_proofs;
-mod material_transport_fixtures;
 mod package_fixtures;
 mod proof_record_fixtures;
 mod public_key_share_proofs;
 mod record_rebinding;
+mod setup_intent;
 mod terminal_evaluation_key_proofs;
-mod transport_policy;
 mod vss_material;
 
-use self::material_transport_fixtures::vss_material_binary_total_byte_length;
 use self::package_fixtures::{
-    accepted_vss_coefficient_message_fixture, accepted_vss_randomness_fixture,
-    accepted_vss_secret_coefficient_fixture,
-    collective_public_key_bearing_collective_setup_package, collective_setup_phase_package,
-    minimal_collective_setup_package, minimal_collective_setup_package_for_participant_count,
-    public_key_share_succinct_proof_bearing_collective_setup_package,
+    CollectiveSetupVerificationFixture, accepted_vss_coefficient_message_fixture,
+    accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
+    collective_public_key_bearing_collective_setup_fixture, collective_setup_intent_package,
+    descriptor_backed_vss_collective_setup_fixture, minimal_collective_setup_package_fixture,
+    minimal_collective_setup_package_for_participant_count,
+    public_key_share_succinct_proof_bearing_collective_setup_fixture,
+    ten_participant_descriptor_backed_vss_collective_setup_fixture,
 };
 use self::proof_record_fixtures::{
-    collective_public_key_object, compact_aggregate_threshold_proof_fixture,
-    evaluation_key_aggregate_binding_object, finalize_collective_setup_package,
-    galois_key_share_batches_object, public_evaluation_key_set_object_with_aggregate_binding,
-    public_key_share_material_object, public_key_share_succinct_proofs_object,
+    CompactAggregateThresholdProofFixture, collective_public_key_object,
+    compact_aggregate_threshold_proof_fixture, galois_key_share_batches_object,
+    public_key_share_material_object, public_key_share_succinct_proofs_fixture,
     relinearization_key_share_rounds_fixture, replace_public_key_share_hashes_with_material_hashes,
-    source_constant_commitments_from_fixture_package, trustee_evaluation_key_proofs_object,
+    trustee_evaluation_key_proofs_object, vss_commitment_ring_degree_from_fixture_package,
 };
 use self::record_rebinding::{
-    private_vss_envelope_commitment_record_root_input,
-    private_vss_envelope_commitment_set_root_input, rebind_collective_evaluator_key_schedule_root,
-    rebind_collective_phase_roots, rebind_collective_private_vss_envelope_commitment_root,
-    rebind_collective_public_key_root, rebind_collective_public_key_share_proof_roots,
-    rebind_collective_public_key_share_roots, rebind_collective_public_key_succinct_proof_roots,
-    rebind_collective_setup_package_hash, rebind_collective_vss_acceptance_root,
-    rebind_first_private_vss_encrypted_envelope_hash,
-    rebind_first_private_vss_envelope_commitment_record_root,
+    private_vss_envelope_commitment_set_root_input, rebind_collective_setup_intent_registration,
+    rebind_collective_setup_intent_registration_with_signature_seed,
+    rebind_collective_setup_intent_signatures,
 };
 
 use super::super::accepted_setup::{
-    PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
-    PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
-    VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING,
-    accepted_setup_collective_public_key_from_package, public_key_share_coefficient_vector_hash,
-    verify_collective_bgv_setup_package, verify_full_ring_material,
-    verify_terminal_setup_transport_policy,
+    public_key_share_coefficient_vector_hash, verify_collective_bgv_setup_intent_for_test,
+    verify_collective_bgv_setup_package,
 };
-use super::super::evaluation_key_share_material::EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING;
 use super::super::sampling::{dense_public_residues, negacyclic_product_mod};
 use super::super::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-    setup_proof_material_transport_hashes,
+    authenticate_setup_proof_material_stream_for_test,
+    authenticate_setup_proof_material_stream_in_session_for_test,
 };
 use super::super::trustee_evaluation_key_proof::{
     EvaluationKeyShareKind, TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof,
@@ -56,13 +44,11 @@ use super::super::trustee_evaluation_key_proof::{
 };
 use super::*;
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
-use crate::encoding::{CanonicalErrorCode, append_varuint};
-use crate::hashing::canonical_json;
-use crate::hashing::{hash512_hex, to_hex};
+use crate::encoding::CanonicalErrorCode;
+use crate::hashing::to_hex;
 use crate::protocol_signatures::{
     create_ml_dsa_public_key_hash_fixture, create_protocol_signature_fixture,
 };
-use crate::transcript_core::decode_hex;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -80,11 +66,9 @@ impl Drop for AcceptedSetupTestTiming {
                 "sealed-lattice-rust-test-timing ",
                 "{{\"suite\":\"bgv::setup::tests::accepted_setup\",",
                 "\"test\":\"{}\",",
-                "\"durationMilliseconds\":{},",
                 "\"durationMicroseconds\":{}}}"
             ),
             self.test_name,
-            duration.as_millis(),
             duration.as_micros()
         );
     }
@@ -97,114 +81,47 @@ fn accepted_setup_test_timing(test_name: &'static str) -> AcceptedSetupTestTimin
     }
 }
 
-// Mirrors FIELD_RESIDUE_BYTE_WIDTH in the trustee proof codec: every data prime
-// is below 2^48, so each committed base-field residue occupies six bytes. The
-// fold-count offset self-check below guards against this drifting from the codec.
-const PROOF_CODEC_FIELD_RESIDUE_BYTES: usize = 6;
-
-fn set_first_masked_consistency_claim_to_noncanonical_modulus(proof_bytes: &mut [u8]) {
-    // Header (magic plus limb count) and the two commitment roots precede the
-    // first masked consistency claim, which is a six-byte base-field residue.
-    const FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET: usize = 8 + 8 + 64 + 64;
-    let end = FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET + PROOF_CODEC_FIELD_RESIDUE_BYTES;
-    assert!(
-        proof_bytes.len() >= end,
-        "proof bytes must include the first masked consistency claim"
-    );
-    // Limb zero's claims live mod DATA_PRIMES[0]; writing that modulus as the
-    // residue is noncanonical, since a residue must be strictly below it.
-    proof_bytes[FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET..end].copy_from_slice(
-        &crate::bgv::parameters::DATA_PRIMES[0].to_le_bytes()[..PROOF_CODEC_FIELD_RESIDUE_BYTES],
-    );
-}
-
-// Runs the collective BGV setup verifier over a setup package and returns the
-// verification response. Wraps the request envelope and the infallible-response
-// expectation that every accepted-setup rejection test repeats verbatim.
-fn verify_collective_setup_package(package: &serde_json::Value) -> serde_json::Value {
-    verify_collective_bgv_setup_package(package, &serde_json::json!({}))
-        .expect("verification response")
-}
-
-// Asserts that the verifier refuses a setup package with the expected first
-// refused-object reason code. The case label is carried into every assertion
-// message so a table-driven caller still pinpoints which mutation failed, and
-// the full response is printed on mismatch to keep failures diagnosable.
-fn assert_collective_setup_package_refused(
-    case_label: &str,
-    package: serde_json::Value,
-    expected_reason_code: &str,
-) {
-    let result = verify_collective_setup_package(&package);
-    assert_eq!(
-        result["isValid"], false,
-        "{case_label}: unexpected verifier result: {result}"
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"], expected_reason_code,
-        "{case_label}: unexpected refusal reason code: {result}"
-    );
-}
-
-// Like assert_collective_setup_package_refused, but also asserts that the
-// refusal carries no accepted setup handoff. Used by the rejection cases that
-// must additionally prove a refused package never produces a terminal handoff.
-fn assert_collective_setup_package_refused_without_handoff(
-    case_label: &str,
-    package: serde_json::Value,
-    expected_reason_code: &str,
-) {
-    let result = verify_collective_setup_package(&package);
-    assert_eq!(
-        result["isValid"], false,
-        "{case_label}: unexpected verifier result: {result}"
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"], expected_reason_code,
-        "{case_label}: unexpected refusal reason code: {result}"
-    );
-    assert!(
-        result["acceptedSetupHandoff"].is_null(),
-        "{case_label}: refused package must not return an accepted setup handoff: {result}"
-    );
-}
-
-// Builds the minimal collective setup package, applies a single labeled
-// mutation (which performs any record-level rebinds it needs), rebinds the
-// outer package hash, and asserts the verifier refuses with the expected reason
-// code. This captures the "mutate one field, expect a specific refusal" shape
-// shared by the fast accepted-setup rejection tests while keeping each case a
-// distinct, individually labeled mutation closure.
+// Runs the collective BGV setup verifier over a setup package and its
+// authenticated material references. Wraps the infallible-response expectation
+// that every accepted-setup rejection test repeats verbatim. The minimal helper
+// is for mutations reached during VSS verification; the collective-public-key
+// helper carries every prerequisite needed to reach evaluator-key checks.
 fn assert_minimal_collective_setup_package_refused(
     case_label: &str,
     mutate: impl FnOnce(&mut serde_json::Value),
-    expected_reason_code: &str,
+    expected_refusal_reason: &str,
 ) {
-    let mut package = minimal_collective_setup_package();
-    mutate(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-    assert_collective_setup_package_refused(case_label, package, expected_reason_code);
-}
-
-// Like assert_minimal_collective_setup_package_refused, but also asserts the
-// refusal carries no accepted setup handoff, for cases that must prove the
-// terminal handoff stays withheld on rejection.
-fn assert_minimal_collective_setup_package_refused_without_handoff(
-    case_label: &str,
-    mutate: impl FnOnce(&mut serde_json::Value),
-    expected_reason_code: &str,
-) {
-    let mut package = minimal_collective_setup_package();
-    mutate(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-    assert_collective_setup_package_refused_without_handoff(
-        case_label,
-        package,
-        expected_reason_code,
+    let mut fixture = descriptor_backed_vss_collective_setup_fixture();
+    mutate(&mut fixture.package);
+    let result = fixture.verify().expect("verification response");
+    assert_eq!(
+        result["isValid"], false,
+        "{case_label}: unexpected verifier result: {result}"
+    );
+    assert_eq!(
+        result["refusalReason"], expected_refusal_reason,
+        "{case_label}: unexpected refusal reason: {result}"
     );
 }
 
-// Shared elapsed-clock logger for final-package accepted-setup fixture phases.
+fn assert_collective_public_key_bearing_setup_package_refused(
+    case_label: &str,
+    mutate: impl FnOnce(&mut serde_json::Value),
+    expected_refusal_reason: &str,
+) {
+    let mut fixture = collective_public_key_bearing_collective_setup_fixture();
+    mutate(&mut fixture.package);
+    let result = fixture.verify().expect("verification response");
+    assert_eq!(
+        result["isValid"], false,
+        "{case_label}: unexpected verifier result: {result}"
+    );
+    assert_eq!(
+        result["refusalReason"], expected_refusal_reason,
+        "{case_label}: unexpected refusal reason: {result}"
+    );
+}
+
 pub(super) fn final_package_phase(message: &str) {
     static FINAL_PACKAGE_PHASE_CLOCK: std::sync::OnceLock<std::time::Instant> =
         std::sync::OnceLock::new();

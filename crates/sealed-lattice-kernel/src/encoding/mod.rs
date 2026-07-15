@@ -1,17 +1,14 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-
-use crate::{
-    fixtures::{TranscriptCoreFixture, verify_fixture},
-    hashing::{chunk_root, hash512_hex},
-    ring::{
-        MAXIMUM_SHAMIR_INTERPOLATION_POINTS, ShamirSharePoint, evaluate_plaintext_comparison,
-        interpolate_shamir_constant_term,
-    },
-    transcript_core::analyze_canonical_object_hex,
-};
+use std::io::{self, Write};
 
 mod command;
+mod foundation_command;
+mod json_ingress;
+mod mailbox_command;
+mod private_randomness_command;
+
+const MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH: usize = 256 * 1024 * 1024;
 
 #[cfg(test)]
 use command::run_transcript_core_command_inner;
@@ -20,7 +17,6 @@ use command::run_transcript_core_command_inner;
 #[serde(rename_all = "PascalCase")]
 pub enum CanonicalErrorCode {
     DuplicateField,
-    FieldOrder,
     FixtureMismatch,
     InvalidChunkSize,
     InvalidEnum,
@@ -31,47 +27,17 @@ pub enum CanonicalErrorCode {
     MalformedLength,
     MalformedMagic,
     MalformedVarUint,
-    MissingField,
     NonCanonicalVarUint,
     ComponentMismatch,
     TrailingBytes,
-    UnknownField,
-    UnsupportedCanonicalEnvelopeVersion,
     UnsupportedObjectType,
     UnsupportedObjectVersion,
 }
-
-/// All canonical error code variants in declaration order.
-///
-/// Adding a new variant to `CanonicalErrorCode` requires extending this slice.
-pub const ALL_CANONICAL_ERROR_CODES: &[CanonicalErrorCode] = &[
-    CanonicalErrorCode::DuplicateField,
-    CanonicalErrorCode::FieldOrder,
-    CanonicalErrorCode::FixtureMismatch,
-    CanonicalErrorCode::InvalidChunkSize,
-    CanonicalErrorCode::InvalidEnum,
-    CanonicalErrorCode::InvalidFixture,
-    CanonicalErrorCode::InvalidProtocolObject,
-    CanonicalErrorCode::InvalidHex,
-    CanonicalErrorCode::InvalidUtf8,
-    CanonicalErrorCode::MalformedLength,
-    CanonicalErrorCode::MalformedMagic,
-    CanonicalErrorCode::MalformedVarUint,
-    CanonicalErrorCode::MissingField,
-    CanonicalErrorCode::NonCanonicalVarUint,
-    CanonicalErrorCode::ComponentMismatch,
-    CanonicalErrorCode::TrailingBytes,
-    CanonicalErrorCode::UnknownField,
-    CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion,
-    CanonicalErrorCode::UnsupportedObjectType,
-    CanonicalErrorCode::UnsupportedObjectVersion,
-];
 
 impl CanonicalErrorCode {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::DuplicateField => "DuplicateField",
-            Self::FieldOrder => "FieldOrder",
             Self::FixtureMismatch => "FixtureMismatch",
             Self::InvalidChunkSize => "InvalidChunkSize",
             Self::InvalidEnum => "InvalidEnum",
@@ -82,12 +48,9 @@ impl CanonicalErrorCode {
             Self::MalformedLength => "MalformedLength",
             Self::MalformedMagic => "MalformedMagic",
             Self::MalformedVarUint => "MalformedVarUint",
-            Self::MissingField => "MissingField",
             Self::NonCanonicalVarUint => "NonCanonicalVarUint",
             Self::ComponentMismatch => "ComponentMismatch",
             Self::TrailingBytes => "TrailingBytes",
-            Self::UnknownField => "UnknownField",
-            Self::UnsupportedCanonicalEnvelopeVersion => "UnsupportedCanonicalEnvelopeVersion",
             Self::UnsupportedObjectType => "UnsupportedObjectType",
             Self::UnsupportedObjectVersion => "UnsupportedObjectVersion",
         }
@@ -126,10 +89,6 @@ impl std::error::Error for CanonicalError {}
 
 pub type CanonicalResult<T> = Result<T, CanonicalError>;
 
-pub fn roundtrip_bytes(input: &[u8]) -> Vec<u8> {
-    input.to_vec()
-}
-
 // LEB128: 7 payload bits per byte, high bit set marks a continuation byte.
 pub fn encode_varuint(mut value: u64) -> Vec<u8> {
     let mut output = Vec::new();
@@ -160,18 +119,16 @@ pub fn append_string(output: &mut Vec<u8>, value: &str) {
     append_bytes(output, value.as_bytes());
 }
 
+#[cfg(test)]
 pub struct CanonicalReader<'a> {
     bytes: &'a [u8],
     offset: usize,
 }
 
+#[cfg(test)]
 impl<'a> CanonicalReader<'a> {
     pub fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }
-    }
-
-    pub fn remaining_len(&self) -> usize {
-        self.bytes.len().saturating_sub(self.offset)
     }
 
     pub fn is_finished(&self) -> bool {
@@ -261,20 +218,93 @@ impl<'a> CanonicalReader<'a> {
     }
 }
 
+struct BoundedJsonWriter {
+    bytes: Vec<u8>,
+    maximum_byte_length: usize,
+    limit_exceeded: bool,
+}
+
+impl BoundedJsonWriter {
+    fn new(maximum_byte_length: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            maximum_byte_length,
+            limit_exceeded: false,
+        }
+    }
+}
+
+impl Write for BoundedJsonWriter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let required_byte_length = self
+            .bytes
+            .len()
+            .checked_add(buffer.len())
+            .ok_or_else(|| io::Error::other("command response byte length overflows usize"))?;
+        if required_byte_length > self.maximum_byte_length {
+            self.limit_exceeded = true;
+            return Err(io::Error::other(
+                "command response exceeds the accepted byte length",
+            ));
+        }
+        if required_byte_length > self.bytes.capacity() {
+            self.bytes
+                .try_reserve_exact(buffer.len())
+                .map_err(|_| io::Error::other("command response allocation failed"))?;
+        }
+        self.bytes.extend_from_slice(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn encode_json_response_with_limit(
+    response: &Value,
+    maximum_byte_length: usize,
+) -> CanonicalResult<Vec<u8>> {
+    let mut writer = BoundedJsonWriter::new(maximum_byte_length);
+    if let Err(error) = serde_json::to_writer(&mut writer, response) {
+        let (code, message) = if writer.limit_exceeded {
+            (
+                CanonicalErrorCode::MalformedLength,
+                "command response exceeds the accepted byte length".to_owned(),
+            )
+        } else {
+            (
+                CanonicalErrorCode::InvalidProtocolObject,
+                format!("command response serialization failed: {error}"),
+            )
+        };
+        return Err(CanonicalError::new(code, message));
+    }
+    Ok(writer.bytes)
+}
+
 pub fn encode_success(value: Value) -> Vec<u8> {
-    serde_json::to_vec(&json!({
+    let response = json!({
         "success": true,
         "value": value,
-    }))
-    .expect("serializing command success response should not fail")
+    });
+    encode_json_response_with_limit(
+        &response,
+        MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH,
+    )
+    .unwrap_or_else(encode_error)
 }
 
 pub fn encode_error(error: CanonicalError) -> Vec<u8> {
-    serde_json::to_vec(&json!({
+    let response = json!({
         "success": false,
         "error": error.to_json_value(),
-    }))
-    .expect("serializing command error response should not fail")
+    });
+    encode_json_response_with_limit(
+        &response,
+        MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH,
+    )
+    .expect("serializing a bounded command error response should not fail")
 }
 
 pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
@@ -286,10 +316,18 @@ pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
     }
 }
 
+pub(crate) fn run_accepted_setup_command(input: &[u8], session_handle: u32) -> Vec<u8> {
+    match command::run_accepted_setup_command_inner(input, session_handle) {
+        Ok(value) => encode_success(value),
+        Err(error) => encode_error(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        CanonicalErrorCode, CanonicalReader, append_varuint, encode_error, encode_varuint,
+        CanonicalErrorCode, CanonicalReader, append_varuint, encode_error,
+        encode_json_response_with_limit, encode_varuint,
     };
 
     #[test]
@@ -311,6 +349,23 @@ mod tests {
             .expect_err("redundant varuint should fail");
 
         assert_eq!(error.code, CanonicalErrorCode::NonCanonicalVarUint);
+    }
+
+    #[test]
+    fn response_serialization_accepts_the_exact_boundary_and_refuses_one_byte_over() {
+        let response = serde_json::json!({
+            "success": true,
+            "value": { "payload": "bounded response" },
+        });
+        let expected = serde_json::to_vec(&response).expect("test response serializes");
+        assert_eq!(
+            encode_json_response_with_limit(&response, expected.len())
+                .expect("the exact response boundary must serialize"),
+            expected
+        );
+        let error = encode_json_response_with_limit(&response, expected.len() - 1)
+            .expect_err("one byte over the response limit must refuse");
+        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
     }
 
     #[test]
@@ -370,39 +425,21 @@ mod tests {
     }
 
     #[test]
-    fn command_exposes_kernel_field_interpolation() {
-        let response = super::run_transcript_core_command_inner(
+    fn generic_command_refuses_setup_verification_without_an_opaque_session() {
+        let error = super::run_transcript_core_command_inner(
             serde_json::json!({
-                "command": "InterpolateShamirConstantTerm",
-                "sharePoints": [
-                    { "rosterPosition": 1, "value": 15 },
-                    { "rosterPosition": 2, "value": 25 }
-                ]
+                "command": "VerifyCollectiveBgvSetup",
+                "setupPackage": {},
             })
             .to_string()
             .as_bytes(),
         )
-        .expect("field interpolation command should succeed");
+        .expect_err("the generic command cannot own accepted-setup material roots");
 
-        assert_eq!(response["fieldElement"], 5);
-    }
-
-    #[test]
-    fn command_exposes_plaintext_comparison() {
-        let response = super::run_transcript_core_command_inner(
-            serde_json::json!({
-                "command": "EvaluatePlaintextComparison",
-                "leftTotalScore": 41,
-                "rightTotalScore": 40,
-                "rosterSize": 5
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("plaintext comparison command should succeed");
-
-        assert_eq!(response["greaterThan"], 1);
-        assert_eq!(response["equal"], 0);
-        assert_eq!(response["scoreDifference"], 1);
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+        assert_eq!(
+            error.message,
+            "accepted setup verification requires an opaque material-ownership session"
+        );
     }
 }

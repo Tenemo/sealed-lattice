@@ -1,16 +1,17 @@
+import path from 'node:path';
+
 import {
-    createFocusedRustTestMatchTracker,
+    createHeavyTestProgressReporter,
     resolveFocusedRustTestRunResult,
-} from './focused-rust-test-match.js';
-import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
+} from './heavy-test-progress.js';
+import { runWithLocalRunLog } from './local-run-log.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
+import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
 import {
     cargoTestArgumentsForRustKernelFast,
     heavyRustKernelTestNamePrefix,
     normalizeRustTestFilter,
 } from './rust-kernel-test-arguments.js';
-
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 export type ParsedRustKernelArguments = {
     readonly testFilter?: string;
@@ -72,6 +73,7 @@ export const buildRustKernelTestCommand = (
     env: {
         ...process.env,
         CARGO_INCREMENTAL: '0',
+        RUST_BACKTRACE: '1',
     },
     logFileSlug: 'cargo-test-rust-kernel-fast',
 });
@@ -79,53 +81,63 @@ export const buildRustKernelTestCommand = (
 export const runRustKernelTests = async (
     rawArguments: readonly string[] = process.argv.slice(2),
 ): Promise<void> => {
-    const parsedArguments = parseRustKernelArguments(rawArguments);
-    const runLog = await createLocalRunLog({
-        commandLineArguments: rawArguments,
-        lanes: ['Rust kernel fast'],
-        scriptName: 'test:rust:kernel',
-    });
-    let exitCode: number | undefined;
-    const focusedTestMatchTracker =
-        parsedArguments.testFilter === undefined
-            ? undefined
-            : createFocusedRustTestMatchTracker();
-
-    try {
-        exitCode = await runCommandsInSeries(
-            [buildRustKernelTestCommand(parsedArguments)],
-            {
-                observer: focusedTestMatchTracker?.observer,
-                outputMode: 'inherit',
-                runLog,
-            },
-        );
-        if (
-            focusedTestMatchTracker !== undefined &&
-            parsedArguments.testFilter !== undefined
-        ) {
-            const focusedRunResult = resolveFocusedRustTestRunResult({
-                commandExitCode: exitCode,
-                matchedTestCount: focusedTestMatchTracker.matchedTestCount(),
-                runnerName: 'Rust kernel fast',
-                testFilter: parsedArguments.testFilter,
-            });
-            exitCode = focusedRunResult.exitCode;
-            if (focusedRunResult.failureMessage !== undefined) {
-                console.error(focusedRunResult.failureMessage);
-                runLog.writeCombinedOutput(
-                    `${focusedRunResult.failureMessage}\n`,
-                );
+    await runWithLocalRunLog(
+        {
+            commandLineArguments: rawArguments,
+            lanes: ['Rust kernel fast'],
+            scriptName: 'test:rust:kernel',
+        },
+        async (runLog) => {
+            const parsedArguments = parseRustKernelArguments(rawArguments);
+            const command = buildRustKernelTestCommand(parsedArguments);
+            if (parsedArguments.testFilter !== undefined) {
+                await verifyFocusedRustLaneSelection({
+                    environment: command.env,
+                    lane: 'rust-kernel-fast',
+                    runLog,
+                    testFilter: parsedArguments.testFilter,
+                });
             }
-        }
-        process.exitCode = exitCode;
-    } finally {
-        await runLog?.finish({
-            exitCode: exitCode ?? currentProcessExitCode(),
-        });
-    }
+            const progressReporter = createHeavyTestProgressReporter({
+                eventFilePath: path.join(
+                    runLog.runDirectoryPath,
+                    'tests',
+                    'rust-kernel-fast.jsonl',
+                ),
+                label: 'rust-kernel-fast',
+                threadCount: 1,
+            });
+
+            try {
+                let exitCode = await runCommandsInSeries([command], {
+                    observer: progressReporter.observer,
+                    outputMode: 'inherit',
+                    runLog,
+                    terminalOutputFilter: progressReporter.terminalOutputFilter,
+                });
+                if (parsedArguments.testFilter !== undefined) {
+                    const focusedRunResult = resolveFocusedRustTestRunResult({
+                        commandExitCode: exitCode,
+                        executedTestCount: progressReporter.executedTestCount(),
+                        runnerName: 'Rust kernel fast',
+                        testFilter: parsedArguments.testFilter,
+                    });
+                    exitCode = focusedRunResult.exitCode;
+                    if (focusedRunResult.failureMessage !== undefined) {
+                        console.error(focusedRunResult.failureMessage);
+                        runLog.writeCombinedOutput(
+                            `${focusedRunResult.failureMessage}\n`,
+                        );
+                    }
+                }
+                process.exitCode = exitCode;
+            } finally {
+                progressReporter.stop();
+            }
+        },
+    );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void runRustKernelTests();
 }

@@ -1,11 +1,12 @@
 use super::*;
 
 use crate::bgv::setup::evaluation_key_share_material::{
-    EvaluationKeyShareProofFamily, evaluation_key_share_component_vector_hash,
+    EvaluationKeyShareDerivedMaterialBinding, EvaluationKeyShareProofFamily,
+    evaluation_key_share_component_material_reference_root,
     evaluation_key_share_component_vector_root,
 };
 use crate::bgv::setup::trustee_evaluation_key_proof::public_key_switch_sample;
-use crate::hashing::derive_canonical_object_hash;
+use crate::foundation::{CanonicalStreamDomain, CanonicalStreamWriter};
 
 // Deterministic public key-switch component material for one evaluation-key
 // share, built so the trustee evaluation-key relation holds: for digit j and
@@ -82,7 +83,7 @@ pub(in super::super) fn evaluation_key_share_fixture_material(
             .collect::<Vec<_>>();
         component_b_by_digit.push(component_b_by_limb);
     }
-    let (component_vector_entries, component_vector_root) = evaluation_key_component_vector_entries(
+    let component_vector_root = evaluation_key_component_vector_root(
         proof_family,
         &key_switch_domain,
         key_switch_seed_hex,
@@ -93,9 +94,125 @@ pub(in super::super) fn evaluation_key_share_fixture_material(
 
     EvaluationKeyShareFixtureMaterial {
         component_b_by_digit,
-        component_vector_entries,
         component_vector_root,
     }
+}
+
+// Moves one deterministic share's component vectors through the same canonical
+// stream verifier used by the browser bridge. The package retains only the
+// canonical material reference; statement construction and terminal
+// verification resolve the authenticated bytes from the verifier-owned store.
+pub(in super::super) fn authenticate_evaluation_key_share_component_material_fixture(
+    proof_family: EvaluationKeyShareProofFamily,
+    level: u64,
+    derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
+    ring_degree: usize,
+    fixture_material: &EvaluationKeyShareFixtureMaterial,
+    accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
+) -> String {
+    let material_root = evaluation_key_share_component_material_reference_root(
+        proof_family,
+        usize::try_from(level).expect("component material level fits usize"),
+        &fixture_material.component_vector_root,
+        derived_binding,
+        ring_degree,
+    )
+    .expect("evaluation-key component material reference root");
+    let material_bytes = encode_evaluation_key_share_component_material(
+        level,
+        ring_degree,
+        &fixture_material.component_b_by_digit,
+    );
+    let total_byte_length =
+        u64::try_from(material_bytes.len()).expect("component material byte length fits u64");
+    let chunk_size = crate::foundation::FOUNDATION_PROFILE.stream_chunk_byte_length;
+    let mut descriptor_writer =
+        CanonicalStreamWriter::new(CanonicalStreamDomain::EvaluatorKeyStore, total_byte_length)
+            .expect("component material canonical descriptor writer");
+    for (chunk_index, chunk) in material_bytes.chunks(chunk_size).enumerate() {
+        descriptor_writer
+            .absorb_chunk(chunk_index, chunk)
+            .expect("canonical component material descriptor chunk");
+    }
+    let descriptor = descriptor_writer
+        .finish()
+        .expect("canonical component material descriptor");
+    let descriptor_bytes = descriptor
+        .encode()
+        .expect("canonical component material descriptor bytes");
+
+    authenticate_evaluation_key_share_component_material_stream(
+        proof_family,
+        &material_root,
+        &descriptor_bytes,
+        &material_bytes,
+        chunk_size,
+        accepted_setup_session,
+    );
+
+    material_root
+}
+
+fn encode_evaluation_key_share_component_material(
+    level: u64,
+    ring_degree: usize,
+    component_b_by_digit: &[Vec<Vec<u64>>],
+) -> Vec<u8> {
+    const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV2";
+
+    let digit_count = level
+        .checked_add(1)
+        .expect("component material digit count");
+    let expected_digit_count =
+        usize::try_from(digit_count).expect("component material digit count fits usize");
+    assert_eq!(component_b_by_digit.len(), expected_digit_count);
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(COMPONENT_MATERIAL_MAGIC);
+    for component_b_by_limb in component_b_by_digit {
+        assert_eq!(component_b_by_limb.len(), expected_digit_count);
+        for coefficients in component_b_by_limb {
+            assert_eq!(coefficients.len(), ring_degree);
+            for coefficient in coefficients {
+                bytes.extend_from_slice(&coefficient.to_le_bytes());
+            }
+        }
+    }
+
+    bytes
+}
+
+fn authenticate_evaluation_key_share_component_material_stream(
+    proof_family: EvaluationKeyShareProofFamily,
+    material_root: &str,
+    descriptor_bytes: &[u8],
+    material_bytes: &[u8],
+    chunk_size: usize,
+    accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
+) {
+    let family_code = match proof_family {
+        EvaluationKeyShareProofFamily::Relinearization => crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT,
+        EvaluationKeyShareProofFamily::Galois => crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_GALOIS_COMPONENT,
+    };
+    let material_root_bytes =
+        crate::transcript_core::decode_hex(material_root).expect("component material root bytes");
+    let stream = crate::bgv::setup::begin_accepted_setup_canonical_stream(
+        family_code,
+        &material_root_bytes,
+        descriptor_bytes,
+        accepted_setup_session,
+    )
+    .expect("begin authenticated component material stream");
+    for (chunk_index, chunk) in material_bytes.chunks(chunk_size).enumerate() {
+        crate::bgv::setup::absorb_bgv_canonical_stream_chunk(
+            stream.handle,
+            u32::try_from(chunk_index).expect("component material chunk index fits u32"),
+            chunk,
+        )
+        .expect("authenticate component material chunk");
+    }
+    crate::bgv::setup::finish_bgv_canonical_stream(stream.handle)
+        .expect("finish authenticated component material stream");
 }
 
 pub(in super::super) fn evaluation_key_secret_coefficients_for_fixture(
@@ -160,24 +277,12 @@ pub(in super::super) fn evaluation_key_error_coefficients_for_fixture(
     digit_index: usize,
     ring_degree: usize,
 ) -> Vec<i64> {
-    // Roster positions below the n = 10 first-closure roster use a
-    // position-independent error (a multiplier of 5 vanishes mod 5), so that
-    // closure stays byte-identical. The base error aliases with period 5 in the
-    // roster position and the fixture secret aliases with period 3, so a trustee's
-    // key-switch component repeats every LCM(3, 5) = 15 roster positions. Within
-    // n = 10 no two positions are 15 apart, but across the 3..20 supported range
-    // positions (0, 15), (1, 16), ... would emit byte-identical component material
-    // and alias in the setup transport certificate's aggregate chunk hashes.
-    // Positions at or beyond the first closure use a position-dependent error
-    // (multiplier coprime to 5): a position-varying error can never equal a
-    // first-closure position-constant one, and within the higher positions the
-    // period-15 partners all fall outside the supported range, so every supported
-    // roster carries pairwise-distinct component material. The error stays in the
-    // centered {-2..2} range, so the key-switch noise bound is unchanged.
-    // FIRST_CLOSURE_ROSTER_SIZE mirrors package_fixtures' pinned first-closure
-    // participant count.
-    const FIRST_CLOSURE_ROSTER_SIZE: u64 = 10;
-    let position_multiplier = if trustee_roster_position < FIRST_CLOSURE_ROSTER_SIZE {
+    // The fixture secret and base error alias with periods three and five, so
+    // their combined material repeats every fifteen roster positions. Using a
+    // different position multiplier from position ten onward separates those
+    // aliases across the supported range while keeping errors in {-2..2}.
+    const FOUNDATION_ROSTER_SIZE: u64 = 10;
+    let position_multiplier = if trustee_roster_position < FOUNDATION_ROSTER_SIZE {
         5
     } else {
         1
@@ -207,86 +312,31 @@ pub(in super::super) fn evaluation_key_error_coefficients_for_fixture(
         .collect()
 }
 
-fn evaluation_key_component_vector_entries(
+fn evaluation_key_component_vector_root(
     proof_family: EvaluationKeyShareProofFamily,
     key_switch_domain: &str,
     key_switch_seed_hex: &str,
     level: usize,
     ring_degree: usize,
     component_b_by_digit: &[Vec<Vec<u64>>],
-) -> (Vec<serde_json::Value>, String) {
-    let entries = component_b_by_digit
+) -> String {
+    let component_vectors_little_endian_hex_by_digit_and_limb = component_b_by_digit
         .iter()
-        .enumerate()
-        .flat_map(|(digit_index, component_b_by_limb)| {
+        .flat_map(|component_b_by_limb| {
             component_b_by_limb
                 .iter()
-                .enumerate()
-                .map(move |(rns_limb_index, coefficients)| {
-                    serde_json::json!({
-                        "digitIndex": digit_index,
-                        "rnsLimbIndex": rns_limb_index,
-                        "rnsPrime": DATA_PRIMES[rns_limb_index],
-                        "component": "b",
-                        "coefficientByteLength": ring_degree * 8,
-                        "coefficientVectorHash512": evaluation_key_share_component_vector_hash(coefficients),
-                        "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
-                    })
-                })
+                .map(|coefficients| coefficient_vector_le_hex(coefficients))
         })
         .collect::<Vec<_>>();
-    let root = evaluation_key_share_component_vector_root(
+    evaluation_key_share_component_vector_root(
         proof_family,
         key_switch_domain,
         key_switch_seed_hex,
         level,
         ring_degree,
-        &entries,
+        &component_vectors_little_endian_hex_by_digit_and_limb,
     )
-    .expect("evaluation-key component vector root");
-
-    (entries, root)
-}
-
-// The shared relinearization key-switch sample seed, byte-identical to the
-// accepted-setup verifier's `expected_relinearization_key_switch_seed`: the
-// canonical hash of the schedule slot binds every trustee to the same sampler
-// and no profile-identifier fields enter the preimage.
-pub(in super::super) fn relinearization_key_switch_seed_for_test(
-    schedule: &serde_json::Value,
-    round: &str,
-    level: u64,
-) -> String {
-    derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "RelinearizationKeySwitchPublicSampleSeed",
-        "proofFamily": "relinearization-key-share",
-        "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
-        "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-        "relinearizationCrpRoot": schedule["relinearizationCrpRoot"],
-        "round": round,
-        "level": level,
-    }))
-    .expect("relinearization key-switch seed")
-}
-
-// The shared Galois key-switch sample seed, byte-identical to the
-// accepted-setup verifier's `expected_galois_key_switch_seed`.
-pub(in super::super) fn galois_key_switch_seed_for_test(
-    schedule: &serde_json::Value,
-    rotation: u64,
-    level: u64,
-) -> String {
-    derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "GaloisKeySwitchPublicSampleSeed",
-        "proofFamily": "galois-key-share",
-        "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
-        "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-        "galoisKeyCrpRoot": schedule["galoisKeyCrpRoot"],
-        "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],
-        "rotation": rotation,
-        "level": level,
-    }))
-    .expect("Galois key-switch seed")
+    .expect("evaluation-key component vector root")
 }
 
 pub(in super::super) struct KeySwitchComponentBFixtureInput<'a> {
@@ -391,6 +441,9 @@ fn signed_i128_residue_for_fixture(value: i128, modulus: u64) -> u64 {
 mod tests {
     use super::*;
 
+    use crate::bgv::setup::evaluation_key_share_material::component_b_vectors_from_root;
+    use crate::encoding::CanonicalErrorCode;
+
     // The exact per-digit, per-limb relation the accepted-setup verifier's
     // succinct argument enforces for one key share:
     //   b_{j,l} + a_{j,l} (*) s - p * e_j - [l == j] * source_j == 0 in R_{q_l}.
@@ -484,6 +537,131 @@ mod tests {
 
     fn repeated_test_seed(byte: u8) -> String {
         std::iter::repeat_n(format!("{byte:02x}"), 64).collect()
+    }
+
+    #[test]
+    fn authenticated_component_material_rejects_derived_binding_substitution() {
+        let proof_family = EvaluationKeyShareProofFamily::Relinearization;
+        let trustee_identity = "trustee-2";
+        let trustee_roster_position = 2_u64;
+        let level = 1_u64;
+        let ring_degree = 16_usize;
+        let key_switch_seed_hex = repeated_test_seed(0xa1);
+        let source = relinearization_round_one_source_by_digit_for_fixture(
+            trustee_roster_position,
+            ring_degree,
+            usize::try_from(level + 1).expect("digit count fits usize"),
+        );
+        let fixture_material = evaluation_key_share_fixture_material(
+            proof_family,
+            trustee_roster_position,
+            level,
+            None,
+            ring_degree,
+            &key_switch_seed_hex,
+            Some(&source),
+        );
+        let correct_binding = EvaluationKeyShareDerivedMaterialBinding {
+            trustee_identity,
+            trustee_roster_position,
+            key_switch_domain: "relinearization",
+            key_switch_seed_hex: &key_switch_seed_hex,
+        };
+        let accepted_setup_session =
+            crate::bgv::setup::AcceptedSetupProofBindingSession::begin_fresh()
+                .expect("accepted-setup session");
+        let authenticated_material_root =
+            authenticate_evaluation_key_share_component_material_fixture(
+                proof_family,
+                level,
+                correct_binding,
+                ring_degree,
+                &fixture_material,
+                accepted_setup_session,
+            );
+        let decoded_material = component_b_vectors_from_root(
+            proof_family,
+            &authenticated_material_root,
+            usize::try_from(level).expect("level fits usize"),
+            ring_degree,
+            correct_binding,
+            &accepted_setup_session,
+        )
+        .expect("correctly derived binding must decode authenticated material");
+        assert_eq!(decoded_material.ring_degree, ring_degree);
+        assert_eq!(
+            decoded_material.component_b_by_digit,
+            fixture_material.component_b_by_digit
+        );
+
+        let wrong_ring_degree_error = component_b_vectors_from_root(
+            proof_family,
+            &authenticated_material_root,
+            usize::try_from(level).expect("level fits usize"),
+            ring_degree + 1,
+            correct_binding,
+            &accepted_setup_session,
+        )
+        .err()
+        .expect("the authoritative ring degree must determine the exact sidecar length");
+        assert_eq!(
+            wrong_ring_degree_error.code,
+            CanonicalErrorCode::InvalidFixture
+        );
+
+        let wrong_key_switch_seed_hex = repeated_test_seed(0xb2);
+        let substituted_bindings = [
+            (
+                "trustee identity",
+                EvaluationKeyShareDerivedMaterialBinding {
+                    trustee_identity: "trustee-3",
+                    ..correct_binding
+                },
+            ),
+            (
+                "trustee roster position",
+                EvaluationKeyShareDerivedMaterialBinding {
+                    trustee_roster_position: trustee_roster_position + 1,
+                    ..correct_binding
+                },
+            ),
+            (
+                "key-switch domain",
+                EvaluationKeyShareDerivedMaterialBinding {
+                    key_switch_domain: "galois-3",
+                    ..correct_binding
+                },
+            ),
+            (
+                "key-switch seed",
+                EvaluationKeyShareDerivedMaterialBinding {
+                    key_switch_seed_hex: &wrong_key_switch_seed_hex,
+                    ..correct_binding
+                },
+            ),
+        ];
+        for (substituted_field, substituted_binding) in substituted_bindings {
+            let error = component_b_vectors_from_root(
+                proof_family,
+                &authenticated_material_root,
+                usize::try_from(level).expect("level fits usize"),
+                ring_degree,
+                substituted_binding,
+                &accepted_setup_session,
+            )
+            .err()
+            .unwrap_or_else(|| panic!("substituted {substituted_field} must be rejected"));
+            assert_eq!(
+                error.code,
+                CanonicalErrorCode::InvalidFixture,
+                "substituted {substituted_field} must fail the authenticated material binding"
+            );
+        }
+
+        crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+            accepted_setup_session.session_handle,
+        )
+        .expect("cancel accepted-setup session after hostile binding checks");
     }
 
     #[test]

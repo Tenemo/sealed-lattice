@@ -24,7 +24,6 @@ pub(in crate::bgv::direct_ballots) fn generate_direct_ballot_relation_proof(
         &score_linear_commitment,
         &support_commitment,
     )?;
-    let relation_commitment_bytes = encoded_commitments.len();
     let relation_commitment_hash =
         direct_ballot_relation_commitment_hash(&statement_hash, &encoded_commitments);
     let challenge = direct_ballot_relation_challenge(&statement_hash, &relation_commitment_hash)?;
@@ -36,17 +35,5 @@ pub(in crate::bgv::direct_ballots) fn generate_direct_ballot_relation_proof(
         &encoded_commitments,
         &response_vector,
     )?;
-    let proof_size_bytes = proof_bytes.len();
-    let proof_bytes_hash = direct_ballot_relation_proof_bytes_hash(&proof_bytes);
-
-    Ok(DirectBallotRelationProofGeneration {
-        proof_bytes,
-        proof_size_bytes,
-        proof_bytes_hash,
-        statement_hash_hex: to_hex(&statement_hash),
-        relation_commitment_hash_hex: to_hex(&relation_commitment_hash),
-        challenge: challenge.to_string(),
-        relation_commitment_bytes,
-        response_bytes: direct_ballot_relation_response_bytes(),
-    })
+    Ok(DirectBallotRelationProofGeneration { proof_bytes })
 }

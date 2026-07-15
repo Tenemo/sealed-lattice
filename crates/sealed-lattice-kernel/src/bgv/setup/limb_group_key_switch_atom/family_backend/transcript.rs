@@ -10,9 +10,8 @@
 
 use super::super::proof_field::ProofFieldParameters;
 use super::merkle::MerkleDigest;
-use crate::hashing::hash512;
-
-const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/transcript";
+use crate::bgv::proof_suite::CanonicalTranscriptEngine;
+use crate::bgv::setup::trustee_evaluation_key_proof::HashChainTranscriptCore;
 
 // Words drawn per field challenge. The proof fields are at most 13 limbs
 // (~770 bits); 15 words is ~960 bits, so Horner reduction leaves a bias below
@@ -21,24 +20,23 @@ const CHALLENGE_WORDS: usize = 15;
 
 #[derive(Clone)]
 pub(super) struct Transcript {
-    state: [u8; 64],
-    squeeze_counter: u64,
+    core: HashChainTranscriptCore,
 }
 
 impl Transcript {
     pub(super) fn new(protocol_label: &str) -> Self {
         Self {
-            state: hash512(TRANSCRIPT_DOMAIN, &[b"init", protocol_label.as_bytes()]),
-            squeeze_counter: 0,
+            core: HashChainTranscriptCore::new(
+                CanonicalTranscriptEngine::KeySwitchAtom,
+                0x1216,
+                "limb-group-key-switch-atom",
+                protocol_label,
+            ),
         }
     }
 
     pub(super) fn absorb(&mut self, label: &str, bytes: &[u8]) {
-        self.state = hash512(
-            TRANSCRIPT_DOMAIN,
-            &[b"absorb", &self.state, label.as_bytes(), bytes],
-        );
-        self.squeeze_counter = 0;
+        self.core.absorb(label, bytes);
     }
 
     pub(super) fn absorb_u64(&mut self, label: &str, value: u64) {
@@ -65,18 +63,9 @@ impl Transcript {
     }
 
     fn squeeze_block(&mut self, label: &str) -> [u8; 64] {
-        let block = hash512(
-            TRANSCRIPT_DOMAIN,
-            &[
-                b"squeeze",
-                &self.state,
-                label.as_bytes(),
-                &self.squeeze_counter.to_le_bytes(),
-            ],
-        );
-        self.squeeze_counter += 1;
-
-        block
+        self.core
+            .try_squeeze_block(label)
+            .expect("the key-switch atom transcript squeeze counter must not be exhausted")
     }
 
     fn squeeze_words(&mut self, label: &str, count: usize) -> Vec<u64> {

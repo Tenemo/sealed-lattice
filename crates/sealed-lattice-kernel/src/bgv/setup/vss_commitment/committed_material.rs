@@ -33,8 +33,8 @@ pub(crate) struct VssCommittedMaterialCommitmentInput<'a> {
 
 pub(crate) struct VssCommittedMaterialCommitmentComputation {
     pub(crate) commitment: Value,
+    #[cfg(test)]
     pub(crate) commitment_root: String,
-    pub(crate) commitment_context_hash: String,
     pub(crate) opening_root: String,
 }
 
@@ -100,7 +100,6 @@ pub(crate) fn compute_vss_committed_material_commitment(
         })
         .collect::<Vec<_>>();
 
-    let trace_size = input.ring_degree / super::super::trustee_evaluation_key_proof::TRACE_SPLIT;
     let commitment = json!({
         "objectType": "VssCommittedMaterialCommitment",
         "commitmentRole": input.commitment_role,
@@ -108,10 +107,9 @@ pub(crate) fn compute_vss_committed_material_commitment(
         "rnsLimbIndex": input.rns_limb_index,
         "rnsPrime": input.rns_prime,
         "ringDegree": input.ring_degree,
-        "materialColumnMaskDegree":
-            super::super::trustee_evaluation_key_proof::vss_committed_material_column_mask_degree(trace_size),
         "commitmentFields": commitment_fields,
     });
+    #[cfg(test)]
     let commitment_root = derive_canonical_object_hash(&commitment)?;
     let opening_root = derive_canonical_object_hash(&json!({
         "objectType": "VssCommittedMaterialCommitmentOpening",
@@ -129,8 +127,8 @@ pub(crate) fn compute_vss_committed_material_commitment(
 
     Ok(VssCommittedMaterialCommitmentComputation {
         commitment,
+        #[cfg(test)]
         commitment_root,
-        commitment_context_hash,
         opening_root,
     })
 }
@@ -186,10 +184,20 @@ pub(crate) fn compute_vss_committed_material_commitment_request(
     let commitment_role = string_at_path(request, &["commitmentRole"])?;
     let commitment_context = value_at_path(request, &["commitmentContext"])?;
     let rns_limb_index = usize_at_path(request, &["rnsLimbIndex"])?;
-    let rns_prime = unsigned_at_path(request, &["rnsPrime"])?;
+    let rns_prime = *DATA_PRIMES
+        .get(rns_limb_index)
+        .ok_or_else(|| invalid_vss_public_input("rnsLimbIndex is outside the Q_share basis"))?;
     let ring_degree = usize_at_path(request, &["ringDegree"])?;
-    let message_coefficient_bound =
-        read_optional_u64(request, "messageCoefficientBound")?.unwrap_or(rns_prime);
+    let message_coefficient_bound = if commitment_role == "target-decryption-flooding-noise" {
+        u64::try_from(
+            super::super::trustee_evaluation_key_proof::TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND
+                * 2
+                + 1,
+        )
+        .map_err(|_| invalid_vss_public_input("flooding-noise coefficient bound is invalid"))?
+    } else {
+        rns_prime
+    };
     let message_coefficients = read_vss_public_message_coefficients(
         request,
         "messageCoefficients",
@@ -211,12 +219,8 @@ pub(crate) fn compute_vss_committed_material_commitment_request(
         })?;
 
     Ok(json!({
-        "ok": true,
-        "operation": "computeVssCommittedMaterialCommitment",
         "commitment": computation.commitment,
-        "commitmentRoot": computation.commitment_root,
         "openingRoot": computation.opening_root,
-        "commitmentContextHash": computation.commitment_context_hash,
     }))
 }
 
@@ -261,7 +265,6 @@ mod tests {
                 "shamirCoefficientIndex": 1,
             },
             "rnsLimbIndex": 0,
-            "rnsPrime": DATA_PRIMES[0],
             "ringDegree": TEST_RING_DEGREE,
             "messageCoefficients": message_coefficients,
             "materialSeedHex": material_seed_hex,
@@ -295,10 +298,6 @@ mod tests {
             first, second,
             "the committed-material commitment must regenerate byte-identically from the same message and seed"
         );
-        assert_eq!(
-            first["operation"].as_str(),
-            Some("computeVssCommittedMaterialCommitment")
-        );
         let roots = material_root_hexes(&first);
         assert_eq!(
             roots.len(),
@@ -306,14 +305,10 @@ mod tests {
             "one material root per commitment field"
         );
         assert!(
-            roots.iter().all(|root| root.len() == 64),
-            "material roots are 32-byte digests in hex"
+            roots.iter().all(|root| root.len() == 128),
+            "material roots are 64-byte H_512 digests in hex"
         );
-        // The record hash is the canonical hash of the commitment object.
-        assert_eq!(
-            first["commitmentRoot"].as_str().expect("commitment root"),
-            derive_canonical_object_hash(&first["commitment"])?,
-        );
+        assert!(first.get("commitmentRoot").is_none());
 
         // A different private seed hides differently: same context hash, all
         // roots change, and the opening reference changes.
@@ -321,8 +316,8 @@ mod tests {
             &commitment_request(&message, &test_material_seed_hex(0xa5)),
         )?;
         assert_eq!(
-            first["commitmentContextHash"],
-            other_seed_response["commitmentContextHash"]
+            first["commitment"]["commitmentContextHash"],
+            other_seed_response["commitment"]["commitmentContextHash"]
         );
         let other_seed_roots = material_root_hexes(&other_seed_response);
         for (root, other_root) in roots.iter().zip(other_seed_roots.iter()) {
@@ -340,8 +335,8 @@ mod tests {
         role_request["commitmentRole"] = json!("recipient-share");
         let role_response = compute_vss_committed_material_commitment_request(&role_request)?;
         assert_ne!(
-            first["commitmentContextHash"],
-            role_response["commitmentContextHash"]
+            first["commitment"]["commitmentContextHash"],
+            role_response["commitment"]["commitmentContextHash"]
         );
         for (root, role_root) in roots.iter().zip(material_root_hexes(&role_response).iter()) {
             assert_ne!(
@@ -353,7 +348,7 @@ mod tests {
         Ok(())
     }
 
-    // SEC-012 binding regression: committed-material roots must separate every
+    // Committed-material roots must separate every
     // distinct canonical message, including single-position and
     // high-digit-only differences, under one fixed seed and context.
     #[test]
@@ -460,6 +455,19 @@ mod tests {
         assert!(
             compute_vss_committed_material_commitment_request(&tiny_degree_request).is_err(),
             "a ring degree below the minimum trace size must be rejected"
+        );
+
+        let flooding_noise_message = vec![32; TEST_RING_DEGREE];
+        let mut flooding_noise_request = commitment_request(&flooding_noise_message, &seed);
+        flooding_noise_request["commitmentRole"] = json!("target-decryption-flooding-noise");
+        assert!(
+            compute_vss_committed_material_commitment_request(&flooding_noise_request).is_ok(),
+            "the largest canonical encoded flooding-noise coefficient must be accepted"
+        );
+        flooding_noise_request["messageCoefficients"][0] = json!(33);
+        assert!(
+            compute_vss_committed_material_commitment_request(&flooding_noise_request).is_err(),
+            "the fixed flooding-noise range must be enforced by the kernel"
         );
     }
 }

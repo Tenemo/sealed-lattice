@@ -1,19 +1,48 @@
 use super::*;
 
 use crate::bgv::parameters::POLYNOMIAL_DEGREE;
+use crate::encoding::{CanonicalError, CanonicalErrorCode};
 use crate::hashing::derive_canonical_object_hash;
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
-const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
+
+fn validate_exact_randomness_hex(
+    value: &str,
+    expected_byte_length: usize,
+    field_name: &str,
+) -> CanonicalResult<()> {
+    if value.len() == expected_byte_length * 2
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(());
+    }
+
+    Err(CanonicalError::new(
+        CanonicalErrorCode::InvalidFixture,
+        format!("{field_name} must be {expected_byte_length} bytes of lowercase hex"),
+    ))
+}
+
+fn decimal_i128_value(value: &Value) -> Option<i128> {
+    if let Some(value) = value.as_i64() {
+        return Some(i128::from(value));
+    }
+    if let Some(value) = value.as_u64() {
+        return Some(i128::from(value));
+    }
+    value.as_str()?.parse::<i128>().ok()
+}
 
 pub(crate) fn generate_private_vss_share_proof_from_request(
     request: &Value,
-) -> CanonicalResult<Value> {
+) -> CanonicalResult<(Value, String)> {
     let setup_context = object_field(
         request,
         "setupContext",
         "setupContext",
-        "setupContextMissing",
+        PrivateVssRefusalCode::missing("setupContextMissing"),
         "setupContext must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
@@ -24,7 +53,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "publicMatrixSeedHash",
         "publicMatrixSeedHash",
-        "publicMatrixSeedHashMissing",
+        PrivateVssRefusalCode::missing("publicMatrixSeedHashMissing"),
         "publicMatrixSeedHash must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
@@ -33,7 +62,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "privateEnvelopeAadHash",
         "privateEnvelopeAadHash",
-        "privateEnvelopeAadHashMissing",
+        PrivateVssRefusalCode::missing("privateEnvelopeAadHashMissing"),
         "privateEnvelopeAadHash must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
@@ -43,28 +72,35 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "sourceTrusteeCoefficientCommitmentRecord",
         "sourceTrusteeCoefficientCommitmentRecord",
-        "sourceTrusteeCommitmentRecordMissing",
+        PrivateVssRefusalCode::missing("sourceTrusteeCommitmentRecordMissing"),
         "sourceTrusteeCoefficientCommitmentRecord must be provided for private VSS proof generation",
+    )
+    .map_err(private_vss_refusal_to_error)?;
+    let source_trustee_roster_position = u64_field(
+        request,
+        "sourceTrusteeRosterPosition",
+        "sourceTrusteeRosterPosition",
+        PrivateVssRefusalCode::missing("sourceTrusteeRosterPositionMissing"),
+        "sourceTrusteeRosterPosition must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
     let source_trustee_binding = verify_source_trustee_commitment_record(
         source_trustee_record,
         setup_context,
-        public_matrix_seed_hash,
+        source_trustee_roster_position,
     )?
     .map_err(private_vss_refusal_to_error)?;
     let material_records = array_field(
         request,
         "sourceTrusteeCoefficientCommitmentMaterialRecords",
         "sourceTrusteeCoefficientCommitmentMaterialRecords",
-        "sourceTrusteeCommitmentMaterialMissing",
+        PrivateVssRefusalCode::missing("sourceTrusteeCommitmentMaterialMissing"),
         "sourceTrusteeCoefficientCommitmentMaterialRecords must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
     let coefficient_commitments = verify_coefficient_commitment_material_records(
         material_records,
         setup_context,
-        public_matrix_seed_hash,
         &source_trustee_binding,
     )?
     .map_err(private_vss_refusal_to_error)?;
@@ -73,7 +109,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "recipientIdentity",
         "recipientIdentity",
-        "recipientIdentityMissing",
+        PrivateVssRefusalCode::missing("recipientIdentityMissing"),
         "recipientIdentity must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
@@ -81,11 +117,11 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "recipientRosterPosition",
         "recipientRosterPosition",
-        "recipientRosterPositionMissing",
+        PrivateVssRefusalCode::missing("recipientRosterPositionMissing"),
         "recipientRosterPosition must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     if recipient_roster_position >= roster.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -96,7 +132,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "rnsLimbIndex",
         "rnsLimbIndex",
-        "rnsLimbIndexMissing",
+        PrivateVssRefusalCode::missing("rnsLimbIndexMissing"),
         "rnsLimbIndex must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
@@ -104,7 +140,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "rnsPrime",
         "rnsPrime",
-        "rnsPrimeMissing",
+        PrivateVssRefusalCode::missing("rnsPrimeMissing"),
         "rnsPrime must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
@@ -118,7 +154,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "ringDegree",
         "ringDegree",
-        "ringDegreeMissing",
+        PrivateVssRefusalCode::missing("ringDegreeMissing"),
         "ringDegree must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
@@ -132,7 +168,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "shareValues",
         "shareValues",
-        "shareValuesMissing",
+        PrivateVssRefusalCode::missing("shareValuesMissing"),
         "shareValues must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
@@ -142,37 +178,20 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             "shareValues must be canonical Q_share residues with length ringDegree",
         ));
     }
-    let coefficient_commitment_roots = hash_vector_field(
-        request,
-        "coefficientCommitmentRoots",
-        "coefficientCommitmentRoots",
-        "coefficientCommitmentRootsMissing",
-        "coefficientCommitmentRoots must be provided for private VSS proof generation",
-    )
-    .map_err(private_vss_refusal_to_error)?;
-    if coefficient_commitment_roots.len() != roster.decryption_threshold as usize {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "coefficientCommitmentRoots must bind every setup Shamir coefficient",
-        ));
-    }
+    let mut coefficient_commitment_roots = Vec::with_capacity(roster.decryption_threshold as usize);
     let mut coefficient_commitment_values =
         Vec::with_capacity(roster.decryption_threshold as usize);
-    for (shamir_coefficient_index, commitment_root) in
-        coefficient_commitment_roots.iter().enumerate()
-    {
-        let shamir_coefficient_index = shamir_coefficient_index as u64;
-        if source_trustee_binding
+    for shamir_coefficient_index in 0..roster.decryption_threshold {
+        let Some(commitment_root) = source_trustee_binding
             .coefficient_commitment_roots
             .get(&(rns_limb_index, shamir_coefficient_index))
-            .map(String::as_str)
-            != Some(commitment_root.as_str())
-        {
+            .cloned()
+        else {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "coefficientCommitmentRoots must match the public source trustee commitment record",
+                "source trustee commitment record must include the requested proof limb",
             ));
-        }
+        };
         let Some(material_binding) =
             coefficient_commitments.get(&(rns_limb_index, shamir_coefficient_index))
         else {
@@ -181,12 +200,13 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
                 "sourceTrusteeCoefficientCommitmentMaterialRecords must include the requested proof limb",
             ));
         };
-        if material_binding.commitment_root != *commitment_root {
+        if material_binding.commitment_root != commitment_root {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "coefficient commitment material root must match coefficientCommitmentRoots",
+                "coefficient commitment material root must match the source trustee commitment record",
             ));
         }
+        coefficient_commitment_roots.push(commitment_root);
         coefficient_commitment_values.push(material_binding.commitment.clone());
     }
 
@@ -194,14 +214,14 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "coefficientMessagesByShamirIndex",
         "coefficientMessagesByShamirIndex",
-        "coefficientMessagesMissing",
+        PrivateVssRefusalCode::missing("coefficientMessagesMissing"),
         "coefficientMessagesByShamirIndex must be provided for private VSS proof generation",
     )?;
     let opening_randomness_by_shamir_index = i128_matrix3_field(
         request,
         "openingRandomnessByShamirIndex",
         "openingRandomnessByShamirIndex",
-        "openingRandomnessMissing",
+        PrivateVssRefusalCode::missing("openingRandomnessMissing"),
         "openingRandomnessByShamirIndex must be provided for private VSS proof generation",
     )?;
     let carry_witnesses = derive_private_vss_carry_witnesses(
@@ -216,24 +236,10 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         request,
         "proofRandomnessSeedHex",
         "proofRandomnessSeedHex",
-        "proofRandomnessSeedMissing",
+        PrivateVssRefusalCode::missing("proofRandomnessSeedMissing"),
         "proofRandomnessSeedHex must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    let proof_randomness_nonce_hex = string_field(
-        request,
-        "proofRandomnessNonceHex",
-        "proofRandomnessNonceHex",
-        "proofRandomnessNonceMissing",
-        "proofRandomnessNonceHex must be provided for private VSS proof generation",
-    )
-    .map_err(private_vss_refusal_to_error)?;
-    let share_values_hash = derive_canonical_object_hash(&json!({
-        "objectType": "PrivateVssShareValueVector",
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-        "shareValues": share_values,
-    }))?;
     let bound_proof_randomness_seed_hex = statement_bound_private_vss_proof_randomness_seed_hex(
         setup_context,
         public_matrix_seed_hash,
@@ -247,47 +253,48 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         rns_prime,
         ring_degree,
         &coefficient_commitment_roots,
-        &share_values_hash,
+        &share_values,
         proof_randomness_seed_hex,
-        proof_randomness_nonce_hex,
     )?;
-    let proof_record =
-        private_vss_share_succinct_proof_record(PrivateVssShareSuccinctProofGenerationInput {
-            setup_context,
-            public_matrix_seed_hash,
-            private_envelope_aad_hash,
-            source_trustee_identity: &source_trustee_binding.source_trustee_identity,
-            source_trustee_roster_position: source_trustee_binding.source_trustee_roster_position,
-            recipient_identity,
-            recipient_roster_position,
-            source_trustee_commitment_root: &source_trustee_binding.source_trustee_commitment_root,
-            rns_limb_index,
-            rns_prime,
-            ring_degree,
-            coefficient_commitment_roots: &coefficient_commitment_roots,
-            share_values: &share_values,
-            share_values_hash: &share_values_hash,
-            coefficient_commitments: &coefficient_commitment_values,
-            witness: &PrivateVssShareSuccinctProofWitness {
-                coefficient_messages_by_shamir_index,
-                opening_randomness_by_shamir_index,
-                carry_witnesses,
-            },
-            proof_randomness_seed_hex: &bound_proof_randomness_seed_hex,
-        })?;
+    let witness = PrivateVssShareSuccinctProofWitness {
+        coefficient_messages_by_shamir_index,
+        opening_randomness_by_shamir_index,
+        carry_witnesses,
+    };
+    let generation_input = PrivateVssShareSuccinctProofGenerationInput {
+        setup_context,
+        public_matrix_seed_hash,
+        private_envelope_aad_hash,
+        source_trustee_identity: &source_trustee_binding.source_trustee_identity,
+        source_trustee_roster_position: source_trustee_binding.source_trustee_roster_position,
+        recipient_identity,
+        recipient_roster_position,
+        source_trustee_commitment_root: &source_trustee_binding.source_trustee_commitment_root,
+        rns_limb_index,
+        rns_prime,
+        ring_degree,
+        coefficient_commitment_roots: &coefficient_commitment_roots,
+        share_values: &share_values,
+        coefficient_commitments: &coefficient_commitment_values,
+        witness: &witness,
+        proof_randomness_seed_hex: &bound_proof_randomness_seed_hex,
+    };
+    let statement_hash = private_vss_share_succinct_statement_hash(generation_input)?;
+    let proof_bytes_hash = private_vss_share_succinct_proof_bytes_hash_for_tests(generation_input)?;
 
-    Ok(json!({
-        "operation": "generatePrivateVssShareProof",
-        "sourceTrusteeIdentity": source_trustee_binding.source_trustee_identity,
-        "sourceTrusteeRosterPosition": source_trustee_binding.source_trustee_roster_position,
-        "recipientIdentity": recipient_identity,
-        "recipientRosterPosition": recipient_roster_position,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-        "ringDegree": ring_degree,
-        "shareValuesHash": share_values_hash,
-        "privateVssShareProof": proof_record,
-    }))
+    Ok((
+        json!({
+            "sourceTrusteeIdentity": source_trustee_binding.source_trustee_identity,
+            "sourceTrusteeRosterPosition": source_trustee_binding.source_trustee_roster_position,
+            "recipientIdentity": recipient_identity,
+            "recipientRosterPosition": recipient_roster_position,
+            "rnsLimbIndex": rns_limb_index,
+            "rnsPrime": rns_prime,
+            "ringDegree": ring_degree,
+            "privateVssShareProofBytesHash": proof_bytes_hash,
+        }),
+        statement_hash,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -304,24 +311,16 @@ fn statement_bound_private_vss_proof_randomness_seed_hex(
     rns_prime: u64,
     ring_degree: usize,
     coefficient_commitment_roots: &[String],
-    share_values_hash: &str,
+    share_values: &[u64],
     proof_randomness_seed_hex: &str,
-    proof_randomness_nonce_hex: &str,
 ) -> CanonicalResult<String> {
     validate_exact_randomness_hex(
         proof_randomness_seed_hex,
         PROOF_RANDOMNESS_SEED_BYTES,
         "proofRandomnessSeedHex",
     )?;
-    validate_exact_randomness_hex(
-        proof_randomness_nonce_hex,
-        PROOF_RANDOMNESS_NONCE_BYTES,
-        "proofRandomnessNonceHex",
-    )?;
-
     derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareProofRandomnessBinding",
-        "proofFamily": "vss-opening-carry",
         "setupContext": setup_context,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "privateEnvelopeAadHash": private_envelope_aad_hash,
@@ -333,9 +332,8 @@ fn statement_bound_private_vss_proof_randomness_seed_hex(
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "ringDegree": ring_degree,
-        "shareValuesHash": share_values_hash,
+        "shareValues": share_values,
         "coefficientCommitmentRoots": coefficient_commitment_roots,
-        "proofRandomnessNonceHex": proof_randomness_nonce_hex,
         "proofRandomnessSeedHex": proof_randomness_seed_hex,
     }))
 }
@@ -344,10 +342,10 @@ fn u64_matrix_field(
     value: &Value,
     field_name: &str,
     object_path: &str,
-    reason_code: &'static str,
+    code: PrivateVssRefusalCode,
     message: impl Into<String>,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
-    let rows = array_field(value, field_name, object_path, reason_code, message)
+    let rows = array_field(value, field_name, object_path, code, message)
         .map_err(private_vss_refusal_to_error)?;
     rows.iter()
         .enumerate()
@@ -380,10 +378,10 @@ fn i128_matrix3_field(
     value: &Value,
     field_name: &str,
     object_path: &str,
-    reason_code: &'static str,
+    code: PrivateVssRefusalCode,
     message: impl Into<String>,
 ) -> CanonicalResult<Vec<Vec<Vec<i128>>>> {
-    let outer_rows = array_field(value, field_name, object_path, reason_code, message)
+    let outer_rows = array_field(value, field_name, object_path, code, message)
         .map_err(private_vss_refusal_to_error)?;
     outer_rows
         .iter()

@@ -15,32 +15,21 @@ pub(in super::super::super) fn vss_public_coefficient_commitment_set_object(
         .map(|source_trustee_roster_position| {
             vss_public_source_coefficient_record(
                 setup_context,
-                public_matrix_seed_hash,
                 ring_degree,
                 threshold_degree,
                 source_trustee_roster_position,
             )
         })
         .collect::<Vec<_>>();
-    let mut set = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssPublicCoefficientCommitmentSet",
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": participant_count,
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "thresholdDegree": threshold_degree,
-        "ringDegree": ring_degree,
         "sourceTrusteeRecords": source_trustee_records,
-    });
-    set["coefficientCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&set).expect("VSS coefficient commitment root")
-    );
-
-    set
+    })
 }
 
 pub(super) fn vss_public_source_coefficient_record(
     setup_context: &serde_json::Value,
-    public_matrix_seed_hash: &str,
     ring_degree: usize,
     threshold_degree: u64,
     source_trustee_roster_position: u64,
@@ -55,7 +44,6 @@ pub(super) fn vss_public_source_coefficient_record(
             (0..threshold_degree).map(move |shamir_coefficient_index| {
                 vss_public_coefficient_commitment_record(
                     setup_context,
-                    public_matrix_seed_hash,
                     ring_degree,
                     &source_trustee_identity,
                     source_trustee_roster_position,
@@ -66,25 +54,14 @@ pub(super) fn vss_public_source_coefficient_record(
             })
         })
         .collect::<Vec<_>>();
-    let mut source_record = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssPublicSourceCoefficientCommitments",
-        "sourceTrusteeIdentity": source_trustee_identity,
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
         "coefficientCommitments": coefficient_commitments,
-    });
-    source_record["sourceCoefficientCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&source_record)
-            .expect("VSS source coefficient commitment root")
-    );
-
-    source_record
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn vss_public_coefficient_commitment_record(
     setup_context: &serde_json::Value,
-    public_matrix_seed_hash: &str,
     ring_degree: usize,
     source_trustee_identity: &str,
     source_trustee_roster_position: u64,
@@ -92,6 +69,8 @@ pub(super) fn vss_public_coefficient_commitment_record(
     rns_prime: u64,
     shamir_coefficient_index: u64,
 ) -> serde_json::Value {
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
     let coefficient_message = accepted_vss_coefficient_message_fixture(
         source_trustee_roster_position,
         rns_limb_index,
@@ -101,11 +80,7 @@ pub(super) fn vss_public_coefficient_commitment_record(
     );
     let commitment_context = serde_json::json!({
         "objectType": "VssPublicCoefficientCommitmentContext",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
+        "setupContextHash": setup_context_hash,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "rnsLimbIndex": rns_limb_index,
@@ -119,26 +94,13 @@ pub(super) fn vss_public_coefficient_commitment_record(
             "commitmentRole": "coefficient",
             "commitmentContext": commitment_context,
             "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
             "ringDegree": ring_degree,
             "messageCoefficients": coefficient_message,
-            "messageCoefficientBound": rns_prime,
             "materialSeedHex": material_seed_hex,
         }))
         .expect("VSS coefficient committed-material commitment");
 
-    serde_json::json!({
-        "objectType": "VssPublicCoefficientCommitment",
-        "sourceTrusteeIdentity": source_trustee_identity,
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-        "shamirCoefficientIndex": shamir_coefficient_index,
-        "coefficientCommitmentRoot": computation["commitmentRoot"],
-        "coefficientOpeningRoot": computation["openingRoot"],
-        "commitment": computation["commitment"],
-    })
+    computation["commitment"].clone()
 }
 
 pub(in super::super::super) fn vss_public_recipient_share_commitment_set_object(
@@ -148,37 +110,25 @@ pub(in super::super::super) fn vss_public_recipient_share_commitment_set_object(
         .as_str()
         .expect("public matrix seed hash");
     let participant_count = participant_count_from_package(package);
-    let ring_degree = package["vssPublicCoefficientCommitmentSet"]["ringDegree"]
-        .as_u64()
-        .expect("coefficient ring degree") as usize;
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     let source_trustee_records = (0..participant_count)
         .map(|source_trustee_roster_position| {
             vss_public_source_recipient_share_record(
                 package,
-                public_matrix_seed_hash,
                 ring_degree,
                 source_trustee_roster_position,
             )
         })
         .collect::<Vec<_>>();
-    let mut recipient_set = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssPublicRecipientShareCommitmentSet",
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": participant_count,
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "ringDegree": ring_degree,
         "sourceTrusteeRecords": source_trustee_records,
-    });
-    recipient_set["recipientShareCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&recipient_set).expect("VSS recipient-share commitment root")
-    );
-
-    recipient_set
+    })
 }
 
 pub(super) fn vss_public_source_recipient_share_record(
     package: &serde_json::Value,
-    public_matrix_seed_hash: &str,
     ring_degree: usize,
     source_trustee_roster_position: u64,
 ) -> serde_json::Value {
@@ -190,7 +140,6 @@ pub(super) fn vss_public_source_recipient_share_record(
             (0..DATA_PRIMES.len()).map(move |rns_limb_index| {
                 vss_public_recipient_share_commitment_record(
                     package,
-                    public_matrix_seed_hash,
                     ring_degree,
                     &source_trustee_identity,
                     source_trustee_roster_position,
@@ -200,24 +149,14 @@ pub(super) fn vss_public_source_recipient_share_record(
             })
         })
         .collect::<Vec<_>>();
-    let mut source_record = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssPublicSourceRecipientShareCommitments",
-        "sourceTrusteeIdentity": source_trustee_identity,
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientShareCommitments": recipient_share_commitments,
-    });
-    source_record["sourceRecipientShareCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&source_record)
-            .expect("VSS source recipient-share commitment root")
-    );
-
-    source_record
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn vss_public_recipient_share_commitment_record(
     package: &serde_json::Value,
-    _public_matrix_seed_hash: &str,
     ring_degree: usize,
     source_trustee_identity: &str,
     source_trustee_roster_position: u64,
@@ -225,10 +164,10 @@ pub(super) fn vss_public_recipient_share_commitment_record(
     rns_limb_index: usize,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
     let rns_prime = DATA_PRIMES[rns_limb_index];
-    let threshold_degree = package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"]
-        .as_u64()
-        .expect("coefficient threshold degree");
+    let threshold_degree = vss_fixture_threshold_degree(package);
     let (share_coefficients, _carry_witnesses) = vss_public_recipient_share_values_and_carries(
         source_trustee_roster_position,
         recipient_roster_position,
@@ -240,16 +179,11 @@ pub(super) fn vss_public_recipient_share_commitment_record(
     let recipient_identity = format!("trustee-{recipient_roster_position}");
     let commitment_context = serde_json::json!({
         "objectType": "VssPublicRecipientShareCommitmentContext",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
+        "setupContextHash": setup_context_hash,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
-        "recipientTrusteePoint": recipient_roster_position + 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
     });
@@ -261,32 +195,18 @@ pub(super) fn vss_public_recipient_share_commitment_record(
             "commitmentRole": "recipient-share",
             "commitmentContext": commitment_context,
             "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
             "ringDegree": ring_degree,
             "messageCoefficients": share_coefficients,
-            "messageCoefficientBound": rns_prime,
             "materialSeedHex": material_seed_hex,
         }))
         .expect("VSS recipient-share committed-material commitment");
 
-    serde_json::json!({
-        "objectType": "VssPublicRecipientShareCommitment",
-        "sourceTrusteeIdentity": source_trustee_identity,
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "recipientIdentity": recipient_identity,
-        "recipientRosterPosition": recipient_roster_position,
-        "recipientTrusteePoint": recipient_roster_position + 1,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-        "shareCommitmentRoot": computation["commitmentRoot"],
-        "shareOpeningRoot": computation["openingRoot"],
-        "commitment": computation["commitment"],
-    })
+    computation["commitment"].clone()
 }
 
 pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_object(
     package: &serde_json::Value,
-) -> serde_json::Value {
+) -> VssProofMaterialSetFixture {
     let participant_count = participant_count_from_package(package);
     let recipient_coordinates = (0..participant_count)
         .flat_map(|recipient_roster_position| {
@@ -299,14 +219,18 @@ pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_obj
             package,
             &recipient_coordinates,
         );
-    // The proven "T = sum" bindings are a sibling of the records, added after the
-    // set root so they are bound by their own statements (which reference the
-    // committed roots), not folded into the commitment set root.
-    aggregate_set["aggregateThresholdProofs"] = serde_json::json!(
-        super::aggregate_threshold::vss_aggregate_threshold_proofs(package, &aggregate_set)
+    let aggregate_threshold_proofs = super::aggregate_threshold::vss_aggregate_threshold_proofs(
+        package,
+        &aggregate_set,
+        &recipient_coordinates,
     );
+    aggregate_set["aggregateThresholdProofBytesHashes"] =
+        serde_json::json!(aggregate_threshold_proofs.proof_bytes_hashes);
 
-    aggregate_set
+    VssProofMaterialSetFixture {
+        value: aggregate_set,
+        proof_binding_leases: aggregate_threshold_proofs.proof_binding_leases,
+    }
 }
 
 pub(super) fn vss_public_aggregate_threshold_commitment_set_without_proofs_for_coordinates(
@@ -316,49 +240,34 @@ pub(super) fn vss_public_aggregate_threshold_commitment_set_without_proofs_for_c
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    let participant_count = participant_count_from_package(package);
-    let ring_degree = package["vssPublicRecipientShareCommitmentSet"]["ringDegree"]
-        .as_u64()
-        .expect("recipient-share ring degree") as usize;
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     let recipient_records = recipient_coordinates
         .iter()
         .map(|&(recipient_roster_position, rns_limb_index)| {
             vss_public_aggregate_threshold_commitment_record(
                 package,
-                public_matrix_seed_hash,
                 ring_degree,
                 recipient_roster_position,
                 rns_limb_index,
             )
         })
         .collect::<Vec<_>>();
-    let mut aggregate_set = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitmentSet",
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": participant_count,
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "ringDegree": ring_degree,
         "recipientRecords": recipient_records,
-    });
-    aggregate_set["aggregateThresholdCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&aggregate_set).expect("aggregate threshold commitment root")
-    );
-
-    aggregate_set
+    })
 }
 
 pub(super) fn vss_public_aggregate_threshold_commitment_record(
     package: &serde_json::Value,
-    _public_matrix_seed_hash: &str,
     ring_degree: usize,
     recipient_roster_position: u64,
     rns_limb_index: usize,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
     let participant_count = participant_count_from_package(package);
-    let threshold_degree = package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"]
-        .as_u64()
-        .expect("threshold degree");
+    let threshold_degree = vss_fixture_threshold_degree(package);
     let rns_prime = DATA_PRIMES[rns_limb_index];
     let recipient_identity = format!("trustee-{recipient_roster_position}");
     // The threshold share is the modular sum of every source's recipient share
@@ -384,14 +293,10 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
     }
     let commitment_context = serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitmentContext",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
+        "setupContextHash": crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+            .expect("setup context hash"),
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
-        "recipientTrusteePoint": recipient_roster_position + 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
     });
@@ -403,22 +308,14 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
             "commitmentRole": "aggregate-threshold-share",
             "commitmentContext": commitment_context,
             "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
             "ringDegree": ring_degree,
             "messageCoefficients": aggregate_message,
-            "messageCoefficientBound": rns_prime,
             "materialSeedHex": material_seed_hex,
         }))
         .expect("VSS aggregate committed-material commitment");
 
     serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
-        "recipientIdentity": recipient_identity,
-        "recipientRosterPosition": recipient_roster_position,
-        "recipientTrusteePoint": recipient_roster_position + 1,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-        "aggregateCommitmentRoot": computation["commitmentRoot"],
         "aggregateOpeningRoot": computation["openingRoot"],
         "commitment": computation["commitment"],
     })

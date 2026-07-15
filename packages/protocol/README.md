@@ -1,9 +1,9 @@
 # Protocol package
 
-This package owns deterministic election state, transcript rules, canonical selection, threshold parameters, lifecycle transitions, and public refusal predicates.
+This package contains deterministic protocol-development helpers for transcript rules, canonical selection, poll validation, structural threshold-count calculation, roster and manifest checks, recovery freshness, setup artifact construction, and target-bound decryption transport.
 
-The current package establishes the election foundation for the selected direct encrypted ballot path: canonical signed-root verification, board inclusion checks, roster and manifest validation, target finality, recovery-epoch checks, first-valid ordering, foundation transcript verification, lifecycle transitions, refusal predicates, and threshold-parameter derivation.
+These helpers validate their documented inputs and recompute local bindings, but they do not establish a complete ceremony or certify parameter security, supported-phone runtime behavior, or participant acceptance. The participant-facing verification components that exist cross the Rust/WASM kernel and the public SDK boundaries described in the root documentation.
 
-This is foundation coverage. Full voting workflow boundaries are documented in the root `README.md` and `SECURITY.md`.
+Complete workflow boundaries and current implementation status are documented in the root `README.md` and `SECURITY.md`.
 
-It does not expose raw BGV operations, bridge routes, or plaintext oracle helpers.
+It does not expose raw BGV operations or bridge routes.

@@ -12,11 +12,40 @@ export type ProcessMemoryGuard = Readonly<{
     buildVerificationCommand: () => CommandInvocation;
     guardCommand: (
         command: CommandInvocation,
-        memoryLimitBytes?: number,
+        options?: Readonly<{
+            diagnosticsPath?: string;
+            memoryLimitBytes?: number;
+        }>,
     ) => CommandInvocation;
     memoryLimitBytes: number;
     memoryLimitGigabytes: number;
 }>;
+
+export const buildProcessMemoryGuardVerificationCommand =
+    (): CommandInvocation => {
+        const environment = { ...process.env };
+        delete environment.CARGO_TARGET_DIR;
+        environment.RUST_BACKTRACE = '1';
+
+        return {
+            args: [
+                'test',
+                '--locked',
+                '-p',
+                'sealed-lattice-process-memory-guard',
+                '--target-dir',
+                path.resolve(process.cwd(), 'target', 'process-memory-guard'),
+                '--',
+                '--test-threads',
+                '1',
+                '--show-output',
+            ],
+            command: 'cargo',
+            description: 'verify process memory guard',
+            env: environment,
+            logFileSlug: 'cargo-test-process-memory-guard',
+        };
+    };
 
 // Thirty-two GiB is the workstation ceiling. Smaller hosts receive a lower
 // ceiling, and every host retains at least two GiB of currently free memory for
@@ -87,6 +116,7 @@ export const resolveProcessMemoryLimitGigabytes = (input: {
 export const createProcessMemoryGuard = (input: {
     readonly insufficientFreeMemoryRunDescription: string;
     readonly memoryLimitEnvironmentVariable?: string;
+    readonly virtualAddressSpaceAllowanceBytes?: number;
 }): ProcessMemoryGuard => {
     const automaticMemoryLimitGigabytes = deriveProcessMemoryLimitGigabytes({
         freeMemoryGigabytes: os.freemem() / bytesPerGigabyte,
@@ -99,6 +129,16 @@ export const createProcessMemoryGuard = (input: {
         memoryLimitEnvironmentVariable: input.memoryLimitEnvironmentVariable,
     });
     const memoryLimitBytes = memoryLimitGigabytes * bytesPerGigabyte;
+    const virtualAddressSpaceAllowanceBytes =
+        input.virtualAddressSpaceAllowanceBytes ?? 0;
+    if (
+        !Number.isSafeInteger(virtualAddressSpaceAllowanceBytes) ||
+        virtualAddressSpaceAllowanceBytes < 0
+    ) {
+        throw new Error(
+            'Virtual address-space allowance must be a non-negative safe integer.',
+        );
+    }
     const processMemoryGuardTargetDirectory = path.resolve(
         process.cwd(),
         'target',
@@ -113,39 +153,38 @@ export const createProcessMemoryGuard = (input: {
     );
 
     return {
-        buildVerificationCommand: (): CommandInvocation => {
-            const environment = { ...process.env };
-            delete environment.CARGO_TARGET_DIR;
+        buildVerificationCommand: buildProcessMemoryGuardVerificationCommand,
+        guardCommand: (command, options = {}): CommandInvocation => {
+            if (
+                options.diagnosticsPath !== undefined &&
+                !path.isAbsolute(options.diagnosticsPath)
+            ) {
+                throw new Error(
+                    'Process-memory guard diagnostics path must be absolute.',
+                );
+            }
 
             return {
+                ...command,
                 args: [
-                    'test',
-                    '--locked',
-                    '-p',
-                    'sealed-lattice-process-memory-guard',
-                    '--target-dir',
-                    processMemoryGuardTargetDirectory,
+                    '--memory-limit-bytes',
+                    String(options.memoryLimitBytes ?? memoryLimitBytes),
+                    ...(virtualAddressSpaceAllowanceBytes === 0
+                        ? []
+                        : [
+                              '--virtual-address-space-allowance-bytes',
+                              String(virtualAddressSpaceAllowanceBytes),
+                          ]),
+                    ...(options.diagnosticsPath === undefined
+                        ? []
+                        : ['--diagnostics-path', options.diagnosticsPath]),
+                    '--',
+                    command.command,
+                    ...command.args,
                 ],
-                command: 'cargo',
-                description: 'verify process memory guard',
-                env: environment,
-                logFileSlug: 'cargo-test-process-memory-guard',
+                command: processMemoryGuardExecutablePath,
             };
         },
-        guardCommand: (
-            command: CommandInvocation,
-            commandMemoryLimitBytes = memoryLimitBytes,
-        ): CommandInvocation => ({
-            ...command,
-            args: [
-                '--memory-limit-bytes',
-                String(commandMemoryLimitBytes),
-                '--',
-                command.command,
-                ...command.args,
-            ],
-            command: processMemoryGuardExecutablePath,
-        }),
         memoryLimitBytes,
         memoryLimitGigabytes,
     };

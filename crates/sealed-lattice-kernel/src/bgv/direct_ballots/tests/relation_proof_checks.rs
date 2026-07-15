@@ -11,15 +11,6 @@ fn direct_ballot_shared_rns_relation_proof_verifies() {
         &fixture.proof_generation.proof_bytes,
     )
     .expect("proof verification");
-
-    assert!(fixture.proof_generation.proof_size_bytes > 0);
-    assert!(
-        !fixture
-            .proof_generation
-            .relation_commitment_hash_hex
-            .is_empty()
-    );
-    assert!(!fixture.proof_generation.challenge.is_empty());
 }
 
 #[test]
@@ -113,12 +104,9 @@ fn direct_ballot_shared_rns_relation_proof_rejects_single_bit_proof_mutations() 
 #[test]
 fn direct_ballot_relation_proof_rejects_linear_consistent_non_boolean_one_hot_witness() {
     let setup_package = setup_package();
-    let evaluator_key =
-        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
-            .expect("evaluator key");
+    let evaluator_key = DevelopmentBgvKey::generate(TEST_SETUP_SEED).expect("evaluator key");
     let mut encrypted_ballot =
-        encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
-            .expect("encrypted ballot");
+        encrypt_direct_ballot(&evaluator_key, valid_ballot_input()).expect("encrypted ballot");
     let mut one_hot_witnesses = one_hot_witnesses_for_scores(&encrypted_ballot.input.scores);
     one_hot_witnesses[0] = vec![0, 0, 0, 0, 0, 0, 0, 65536, 2, 0];
     encrypted_ballot.input.one_hot_witnesses = Some(one_hot_witnesses);
@@ -152,11 +140,8 @@ fn direct_ballot_relation_proof_rejects_linear_consistent_non_boolean_one_hot_wi
 fn direct_ballot_shared_rns_relation_proof_rejects_wrong_public_key() {
     let fixture = direct_ballot_relation_proof_fixture();
     let wrong_setup_package = setup_package_with_seed("direct-encrypted-ballot-wrong-seed");
-    let wrong_evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &wrong_setup_package,
-        "direct-encrypted-ballot-wrong-seed",
-    )
-    .expect("wrong evaluator key");
+    let wrong_evaluator_key = DevelopmentBgvKey::generate("direct-encrypted-ballot-wrong-seed")
+        .expect("wrong evaluator key");
 
     let error = verify_direct_ballot_relation_proof(
         &wrong_setup_package,
@@ -172,13 +157,9 @@ fn direct_ballot_shared_rns_relation_proof_rejects_wrong_public_key() {
 
 #[test]
 fn direct_ballot_all_limb_relation_rejects_last_limb_mutation() {
-    let setup_package = setup_package();
-    let evaluator_key =
-        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
-            .expect("evaluator key");
+    let evaluator_key = DevelopmentBgvKey::generate(TEST_SETUP_SEED).expect("evaluator key");
     let mut encrypted_ballot =
-        encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
-            .expect("encrypted ballot");
+        encrypt_direct_ballot(&evaluator_key, valid_ballot_input()).expect("encrypted ballot");
     let last_limb_index = DATA_PRIMES.len() - 1;
     encrypted_ballot.ciphertext.components[0][last_limb_index][0] = add_mod(
         encrypted_ballot.ciphertext.components[0][last_limb_index][0],
@@ -196,13 +177,9 @@ fn direct_ballot_all_limb_relation_rejects_last_limb_mutation() {
 
 #[test]
 fn direct_ballot_all_limb_relation_rejects_different_plaintext_witness() {
-    let setup_package = setup_package();
-    let evaluator_key =
-        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
-            .expect("evaluator key");
+    let evaluator_key = DevelopmentBgvKey::generate(TEST_SETUP_SEED).expect("evaluator key");
     let mut encrypted_ballot =
-        encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
-            .expect("encrypted ballot");
+        encrypt_direct_ballot(&evaluator_key, valid_ballot_input()).expect("encrypted ballot");
     encrypted_ballot.plaintext_coefficients[0] += 1;
 
     let error = validate_all_limb_encryption_relation(&evaluator_key, &encrypted_ballot)
@@ -214,13 +191,9 @@ fn direct_ballot_all_limb_relation_rejects_different_plaintext_witness() {
 
 #[test]
 fn direct_ballot_support_rejects_out_of_range_randomizer() {
-    let setup_package = setup_package();
-    let evaluator_key =
-        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
-            .expect("evaluator key");
+    let evaluator_key = DevelopmentBgvKey::generate(TEST_SETUP_SEED).expect("evaluator key");
     let mut encrypted_ballot =
-        encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
-            .expect("encrypted ballot");
+        encrypt_direct_ballot(&evaluator_key, valid_ballot_input()).expect("encrypted ballot");
     encrypted_ballot.encryption_witness.randomizer_coefficients[0] = 2;
 
     let error = validate_encryption_witness_support(&encrypted_ballot.encryption_witness)
@@ -234,13 +207,9 @@ fn direct_ballot_support_rejects_out_of_range_randomizer() {
 
 #[test]
 fn direct_ballot_support_rejects_out_of_range_error_polynomials() {
-    let setup_package = setup_package();
-    let evaluator_key =
-        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
-            .expect("evaluator key");
+    let evaluator_key = DevelopmentBgvKey::generate(TEST_SETUP_SEED).expect("evaluator key");
     let encrypted_ballot =
-        encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
-            .expect("encrypted ballot");
+        encrypt_direct_ballot(&evaluator_key, valid_ballot_input()).expect("encrypted ballot");
 
     let mut first_error_ballot = encrypted_ballot.clone();
     first_error_ballot

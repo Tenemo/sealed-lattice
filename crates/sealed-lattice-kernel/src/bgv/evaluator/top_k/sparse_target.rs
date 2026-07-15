@@ -40,36 +40,3 @@ pub(crate) fn project_packed_sparse_target_from_rank_evaluation(
         target_order: plaintext_mul(&normalize_scaling(&order_values)?, &option_slot_mask)?,
     })
 }
-
-pub(crate) fn move_single_slot_value(
-    context: &EvaluatorContext,
-    ciphertext: &Ciphertext,
-    source_slot: usize,
-    target_slot: usize,
-    seed_hex: &str,
-) -> CanonicalResult<Ciphertext> {
-    if source_slot >= POLYNOMIAL_DEGREE || target_slot >= POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "single-slot move requires source and target slots inside the ring",
-        ));
-    }
-    let selected = plaintext_mul(
-        &normalize_scaling(ciphertext)?,
-        &slot_selector(source_slot)?,
-    )?;
-    if source_slot == target_slot {
-        return Ok(selected);
-    }
-    let galois_element = galois_element_moving_slot_to_target(source_slot, target_slot)?;
-
-    // Decompose the slot move through the compact generator basis so the
-    // evaluator only ever requests scheduled basis rotation keys.
-    rotate_with_compact_positive_generator_basis(
-        context,
-        &selected,
-        galois_element,
-        selected.level,
-        seed_hex,
-    )
-}

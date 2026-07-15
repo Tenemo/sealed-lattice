@@ -1,16 +1,14 @@
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { playwright } from '@vitest/browser-playwright';
-import type { PluginOption } from 'vite';
+import { devices } from 'playwright';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
-import {
-    browserTestLaneDefinitions,
-    nodeHookTimeoutMs,
-    nodeTestProjectDefinitions,
-} from './tools/ci/test-lanes.js';
+import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
+import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const resolveFromRepoRoot = (...segments: string[]): string =>
@@ -25,6 +23,75 @@ const browserServerHost = '127.0.0.1';
 // 49152+ ephemeral port range Windows reserves; strictPort: false still increments it
 // for concurrent browser lanes and clones.
 const browserServerBasePort = 41000;
+const nodeHookTimeoutMs = 240_000;
+const nodeTestTimeoutMs = 60_000;
+const nodeKernelTestTimeoutMs = 15 * 60_000;
+
+const protocolNodeTestGlobs = [
+    'packages/protocol/tests/node/**/*.test.ts',
+] as const;
+const kernelNodeTestGlobs = [
+    'packages/wasm/tests/node/**/*.kernel.test.ts',
+    'tests/node/**/*.kernel.test.ts',
+] as const;
+const nodeTestProjectDefinitions = [
+    {
+        exclude: [...protocolNodeTestGlobs, ...kernelNodeTestGlobs],
+        include: [
+            'packages/*/tests/node/**/*.test.ts',
+            'tests/node/**/*.test.ts',
+        ],
+        projectName: 'node',
+        testTimeout: nodeTestTimeoutMs,
+    },
+    {
+        include: protocolNodeTestGlobs,
+        projectName: 'node-protocol',
+        testTimeout: nodeKernelTestTimeoutMs,
+    },
+    {
+        fileParallelism: false,
+        include: kernelNodeTestGlobs,
+        projectName: 'node-kernel-fast',
+        testTimeout: nodeKernelTestTimeoutMs,
+    },
+] as const;
+
+const desktopBrowserTestGlobs = [
+    'packages/*/tests/browser/**/*.browser.test.ts',
+] as const;
+const mobileBrowserTestGlobs = [
+    'packages/wasm/tests/browser/accepted-setup-session-runtime.browser.test.ts',
+    'packages/wasm/tests/browser/canonical-stream-runtime.browser.test.ts',
+    'packages/wasm/tests/browser/local-storage-root-worker-kernel.browser.test.ts',
+    'packages/wasm/tests/browser/state-verifier-runtime.browser.test.ts',
+] as const;
+
+const testDiagnosticPaths = resolveTestDiagnosticPaths();
+const testAttachmentDirectoryPath = testDiagnosticPaths.attachmentDirectoryPath;
+const testResultFilePath = testDiagnosticPaths.resultFilePath;
+const nodeDiagnosticReportArguments =
+    testDiagnosticPaths.diagnosticReportDirectoryPath === undefined
+        ? []
+        : [
+              '--report-on-fatalerror',
+              '--report-uncaught-exception',
+              '--report-exclude-env',
+              '--report-exclude-network',
+              `--report-directory=${testDiagnosticPaths.diagnosticReportDirectoryPath}`,
+              `--report-filename=node-report-${testDiagnosticPaths.projectLabel}-%p-%t.json`,
+          ];
+for (const diagnosticDirectoryPath of [
+    testAttachmentDirectoryPath,
+    testDiagnosticPaths.diagnosticReportDirectoryPath,
+    testResultFilePath === undefined
+        ? undefined
+        : path.dirname(testResultFilePath),
+]) {
+    if (diagnosticDirectoryPath !== undefined) {
+        mkdirSync(diagnosticDirectoryPath, { recursive: true });
+    }
+}
 
 const browserOptimizedDependencies = [
     '@noble/hashes/hkdf.js',
@@ -33,19 +100,11 @@ const browserOptimizedDependencies = [
     '@noble/post-quantum/ml-kem.js',
 ] as const;
 
-const publicPackageEntryPoint = resolveFromRepoRoot(
-    'packages',
-    'sdk',
-    'dist',
-    'index.js',
-);
-
-const publicPackageAlias = {
-    find: 'sealed-lattice',
-    replacement: publicPackageEntryPoint,
-} as const;
-
 const rootPrivateAliases = [
+    {
+        find: '#packages',
+        replacement: resolveFromRepoRoot('packages'),
+    },
     {
         find: '#tests',
         replacement: resolveFromRepoRoot('tests'),
@@ -56,55 +115,17 @@ const rootPrivateAliases = [
     },
 ] as const;
 
-const publicPackageTestResolve = {
-    alias: [publicPackageAlias, ...rootPrivateAliases],
+const testResolve = {
+    alias: rootPrivateAliases,
     tsconfigPaths: true,
 } as const;
 
-const createPublicPackageResolutionPlugin = (): PluginOption => ({
-    name: 'sealed-lattice-public-package-resolution',
-    enforce: 'pre' as const,
-    resolveId(source: string): string | null {
-        return source === publicPackageAlias.find
-            ? publicPackageEntryPoint
-            : null;
-    },
-});
-
-const copyGlobs = (globs: readonly string[]): string[] => [...globs];
-
-const mobileContextOptions = {
-    'Pixel 5': {
-        userAgent:
-            'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.15 Mobile Safari/537.36',
-        viewport: {
-            width: 393,
-            height: 727,
-        },
-        screen: {
-            width: 393,
-            height: 851,
-        },
-        deviceScaleFactor: 2.75,
-        isMobile: true,
-        hasTouch: true,
-    },
-    'iPhone 12': {
-        userAgent:
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 14_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Mobile/15E148 Safari/604.1',
-        viewport: {
-            width: 390,
-            height: 664,
-        },
-        screen: {
-            width: 390,
-            height: 844,
-        },
-        deviceScaleFactor: 3,
-        isMobile: true,
-        hasTouch: true,
-    },
-} as const;
+const { defaultBrowserType: _pixelDefaultBrowserType, ...pixelContextOptions } =
+    devices['Pixel 5'];
+const {
+    defaultBrowserType: _iphoneDefaultBrowserType,
+    ...iphoneContextOptions
+} = devices['iPhone 12'];
 
 const desktopBrowserInstances: BrowserInstanceOption[] = [
     { browser: 'chromium', name: 'chromium-desktop' },
@@ -115,22 +136,21 @@ const desktopBrowserInstances: BrowserInstanceOption[] = [
 const mobileBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
-        name: 'chromium-mobile',
+        name: 'pixel-5-chromium',
         provider: playwright({
-            contextOptions: mobileContextOptions['Pixel 5'],
+            contextOptions: pixelContextOptions,
         }),
     },
     {
         browser: 'webkit',
-        name: 'webkit-mobile',
+        name: 'iphone-12-webkit',
         provider: playwright({
-            contextOptions: mobileContextOptions['iPhone 12'],
+            contextOptions: iphoneContextOptions,
         }),
     },
 ];
 
 type NodeProjectInput = {
-    readonly disableConsoleIntercept?: boolean;
     readonly exclude?: readonly string[];
     readonly fileParallelism?: boolean;
     readonly include: readonly string[];
@@ -139,24 +159,22 @@ type NodeProjectInput = {
 };
 
 const makeNodeProject = ({
-    disableConsoleIntercept,
     exclude,
     fileParallelism,
     include,
     projectName,
     testTimeout,
 }: NodeProjectInput): UserWorkspaceConfig => ({
-    plugins: [createPublicPackageResolutionPlugin()],
-    resolve: publicPackageTestResolve,
+    resolve: testResolve,
     test: {
         name: projectName,
-        include: copyGlobs(include),
-        ...(exclude === undefined ? {} : { exclude: copyGlobs(exclude) }),
+        include: [...include],
+        ...(exclude === undefined ? {} : { exclude: [...exclude] }),
         environment: 'node',
-        ...(fileParallelism === undefined ? {} : { fileParallelism }),
-        ...(disableConsoleIntercept === undefined
+        ...(nodeDiagnosticReportArguments.length === 0
             ? {}
-            : { disableConsoleIntercept }),
+            : { execArgv: nodeDiagnosticReportArguments }),
+        ...(fileParallelism === undefined ? {} : { fileParallelism }),
         testTimeout,
         hookTimeout: nodeHookTimeoutMs,
     },
@@ -166,20 +184,25 @@ type BrowserProjectInput = {
     readonly include: readonly string[];
     readonly instances: BrowserInstanceOption[];
     readonly projectName: string;
-    readonly provider?: ReturnType<typeof playwright>;
 };
 
 const makeBrowserProject = ({
     include,
     instances,
     projectName,
-    provider = playwright(),
 }: BrowserProjectInput): UserWorkspaceConfig => ({
-    plugins: [createPublicPackageResolutionPlugin()],
-    resolve: publicPackageTestResolve,
+    resolve: testResolve,
     test: {
         name: projectName,
-        include: copyGlobs(include),
+        include: [...include],
+        // Each real-WASM browser file can instantiate a large kernel and
+        // create workers. Running every file concurrently has exhausted the
+        // Firefox WebAssembly compiler and left its test process unable to
+        // shut down under otherwise valid multi-browser runs.
+        fileParallelism: false,
+        ...(nodeDiagnosticReportArguments.length === 0
+            ? {}
+            : { execArgv: nodeDiagnosticReportArguments }),
         browser: {
             enabled: true,
             api: {
@@ -187,32 +210,69 @@ const makeBrowserProject = ({
                 port: browserServerBasePort,
                 strictPort: false,
             },
-            provider,
+            provider: playwright(),
             headless: true,
             instances,
+            ...(testAttachmentDirectoryPath === undefined
+                ? {}
+                : {
+                      screenshotDirectory: path.join(
+                          testAttachmentDirectoryPath,
+                          'screenshots',
+                      ),
+                      screenshotFailures: true,
+                      trace: {
+                          mode: 'retain-on-failure' as const,
+                          tracesDir: path.join(
+                              testAttachmentDirectoryPath,
+                              'traces',
+                          ),
+                      },
+                  }),
         },
     },
 });
 
 export default defineConfig({
-    plugins: [createPublicPackageResolutionPlugin()],
     optimizeDeps: {
         include: [...browserOptimizedDependencies],
     },
-    resolve: publicPackageTestResolve,
+    resolve: testResolve,
     test: {
-        alias: [publicPackageAlias, ...rootPrivateAliases],
+        ...(testResultFilePath === undefined
+            ? {
+                  reporters: [
+                      'default' as const,
+                      ...(process.env.GITHUB_ACTIONS === 'true'
+                          ? (['github-actions'] as const)
+                          : []),
+                      new VitestDiagnosticReporter(),
+                  ],
+              }
+            : {
+                  outputFile: { json: testResultFilePath },
+                  reporters: [
+                      'default' as const,
+                      ...(process.env.GITHUB_ACTIONS === 'true'
+                          ? (['github-actions'] as const)
+                          : []),
+                      'json' as const,
+                      new VitestDiagnosticReporter(),
+                  ],
+              }),
         projects: [
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
             makeBrowserProject({
-                ...browserTestLaneDefinitions.desktop,
+                include: desktopBrowserTestGlobs,
                 instances: desktopBrowserInstances,
+                projectName: 'browser-desktop',
             }),
             makeBrowserProject({
-                ...browserTestLaneDefinitions.mobile,
+                include: mobileBrowserTestGlobs,
                 instances: mobileBrowserInstances,
+                projectName: 'browser-mobile',
             }),
         ],
     },

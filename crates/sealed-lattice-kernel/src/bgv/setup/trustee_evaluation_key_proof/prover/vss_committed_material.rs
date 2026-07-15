@@ -1,38 +1,24 @@
 //! Deterministic committed-material trees for the VSS commitment family.
 //!
 //! One tree per commitment field commits a VSS message's canonical digit
-//! columns in exactly the layout the succinct setup proofs open: TRACE_SPLIT
-//! half-columns over the field's trace domain, each masked by a Z_H multiple,
-//! evaluated over the DOMAIN_BLOWUP extension coset, and committed as salted
-//! phase-pair leaves. Binding is SHAKE256 collision resistance of the salted
-//! Merkle root; hiding is the per-pair leaf salt plus the column mask. No
-//! lattice assumption is involved.
+//! columns as masked `TRACE_SPLIT` half-columns over the `DOMAIN_BLOWUP` coset.
+//! Salted phase-pair Merkle leaves bind the extension values; leaf salts and
+//! `Z_H`-multiple column masks hide unopened values.
 //!
-//! Persistence: the mask and salt streams derive deterministically from the
-//! holder's private material seed and the commitment-context hash, so the
-//! holder regenerates byte-identical trees in any later phase (share-linkage
-//! proving, threshold-aggregate opening, same-secret bridging, target
-//! decryption) while nobody else can rebuild or unmask them.
+//! Mask and salt streams derive from the holder's private material seed and the
+//! commitment-context hash, so later phases regenerate byte-identical trees.
 //!
-//! Zero-knowledge budget: every proof that opens one of these trees reveals at
-//! most `2 * LOW_DEGREE_QUERY_COUNT` opened evaluations plus the DEEP points
-//! per column, 339 at the selected parameters. Unlike per-proof witness
-//! columns, a persistent tree is opened by every proof over its lifetime, so
-//! its mask degree carries a dedicated budget instead of the
-//! `column_mask_degree` cap: the accounted lifetime openings are the batched
-//! share-linkage proof, the mu-batched threshold-aggregate opening, and (for
-//! constant-coefficient and threshold-share roles) one downstream opening
-//! (same-secret bridge or target-decryption share), at most three, 1017
-//! opened evaluations. The material columns appear only in linear rows (the
-//! lincheck rows and the Z_H-divisibility binding row), never in the cubic
-//! row-check composition, so the larger mask stays inside the committed
-//! degree bound `COMMITMENT_BOUND_FACTOR * trace` as long as the mask degree
-//! does not exceed the trace size. Development ring sizes whose trace falls
-//! below the budget are not zero-knowledge evidence, matching the existing
-//! witness-mask policy.
+//! A persistent tree is opened by at most three proof flows, each exposing at
+//! most `2 * LOW_DEGREE_QUERY_COUNT` evaluations plus the DEEP points: 1017
+//! evaluations total. At the full trace, the mask cap covers that total; at
+//! every trace it remains at most the trace size. These columns enter only
+//! linear rows, preserving the committed degree bound
+//! `COMMITMENT_BOUND_FACTOR * trace`.
 
 use super::super::evaluation_domain::EvaluationDomainPlan;
-use super::super::merkle_commitment::MerkleDigest;
+use super::super::merkle_commitment::{
+    MerkleContext, MerkleDigest, VSS_COMMITTED_MATERIAL_TREE_ORDINAL_BASE,
+};
 use super::super::relation::{TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness};
 use super::super::{TRACE_SPLIT, invalid_succinct_setup_proof};
 use super::claim_masking::masked_half_coefficients_with_mask_degree;
@@ -48,11 +34,9 @@ const VSS_COMMITTED_MATERIAL_COLUMN_MASK_DOMAIN: &str =
 const VSS_COMMITTED_MATERIAL_LEAF_SALT_DOMAIN: &str =
     "sealed-lattice/setup/vss-committed-material/leaf-salt";
 
-// The dedicated committed-material mask budget: covers the accounted three
-// lifetime openings (3 * 339 = 1017) with a margin of two further openings,
-// and stays under the trace size so the masked column keeps its committed
-// degree bound (see the module documentation).
-pub(crate) const VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP: usize = 2048;
+// Covers three 339-evaluation opening sets plus two additional sets. The
+// trace-size minimum below preserves the committed degree bound.
+const VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP: usize = 2048;
 
 pub(crate) fn vss_committed_material_column_mask_degree(trace_size: usize) -> usize {
     VSS_COMMITTED_MATERIAL_COLUMN_MASK_DEGREE_CAP.min(trace_size)
@@ -152,6 +136,8 @@ pub(super) fn vss_committed_material_trees_by_commitment_field(
             ],
         );
         let salted = commit_salted_extension_row_pairs(
+            MerkleContext::new(0x2110, VSS_COMMITTED_MATERIAL_TREE_ORDINAL_BASE)
+                .with_tree_ordinal_offset(commitment_field_position)?,
             &extension_columns,
             plan.extension_size,
             &mut salt_sampler,
@@ -181,6 +167,7 @@ pub(crate) fn vss_committed_material_roots_by_commitment_field(
 // by every commitment-field limb proof.
 pub(super) struct BoundCommittedMaterial {
     pub(super) trees_by_bound_message: Vec<Vec<VssCommittedMaterialFieldTrees>>,
+    pub(super) message_coefficients: Vec<Vec<u64>>,
 }
 
 impl BoundCommittedMaterial {
@@ -193,6 +180,31 @@ impl BoundCommittedMaterial {
 // statement's bound-commitment order, assembled from the witness the same way
 // the witness columns are built (so the binding rows hold exactly when the
 // commitment matches the proven witness).
+pub(super) fn same_secret_bridge_target_message_coefficients(
+    bridge_rns_primes: &[u64],
+    secret_coefficients: &[i64],
+    negative_indicator_coefficients: &[i64],
+) -> CanonicalResult<Vec<Vec<u64>>> {
+    bridge_rns_primes
+        .iter()
+        .map(|target_rns_prime| {
+            secret_coefficients
+                .iter()
+                .zip(negative_indicator_coefficients)
+                .map(|(secret_coefficient, negative_indicator)| {
+                    let target_message = i128::from(*secret_coefficient)
+                        + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
+                    u64::try_from(target_message).map_err(|_| {
+                        invalid_succinct_setup_proof(
+                            "same-secret bridge target message coefficient is negative",
+                        )
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
 fn bound_message_coefficients(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
@@ -210,10 +222,10 @@ fn bound_message_coefficients(
             .collect()
     };
 
-    if let Some(share_linkage) = &statement.vss_share_linkage {
+    if let Some(share_linkage) = statement.vss_share_linkage() {
         let slot_count = share_linkage.unique_coefficient_witness_slot_count();
         if witness
-            .vss_public_coefficient_messages_by_shamir_index
+            .vss_public_coefficient_messages_by_shamir_index()
             .len()
             != slot_count
         {
@@ -222,24 +234,17 @@ fn bound_message_coefficients(
             ));
         }
         let mut messages = Vec::with_capacity(slot_count + share_linkage.item_count());
-        for coefficient_messages in &witness.vss_public_coefficient_messages_by_shamir_index {
+        for coefficient_messages in witness.vss_public_coefficient_messages_by_shamir_index() {
             messages.push(to_unsigned(
                 coefficient_messages,
                 "VSS coefficient message coefficient",
             )?);
         }
-        let recipient_messages_by_item: Vec<&[i64]> = if witness
-            .vss_public_recipient_share_messages_by_item
-            .is_empty()
-        {
-            vec![witness.vss_public_recipient_share_messages.as_slice()]
-        } else {
-            witness
-                .vss_public_recipient_share_messages_by_item
-                .iter()
-                .map(Vec::as_slice)
-                .collect()
-        };
+        let recipient_messages_by_item: Vec<&[i64]> = witness
+            .vss_public_recipient_share_messages_by_item()
+            .iter()
+            .map(Vec::as_slice)
+            .collect();
         if recipient_messages_by_item.len() != share_linkage.item_count() {
             return Err(invalid_succinct_setup_proof(
                 "VSS recipient share witness count does not match the bound commitments",
@@ -254,31 +259,16 @@ fn bound_message_coefficients(
 
         return Ok(messages);
     }
-    if let Some(bridge) = &statement.same_secret_bridge {
-        let mut messages = Vec::with_capacity(bridge.target_rns_primes.len());
-        for target_rns_prime in &bridge.target_rns_primes {
-            let target_message_coefficients = witness
-                .secret_coefficients
-                .iter()
-                .zip(witness.negative_indicator_coefficients.iter())
-                .map(|(secret_coefficient, negative_indicator)| {
-                    let target_message = i128::from(*secret_coefficient)
-                        + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
-                    u64::try_from(target_message).map_err(|_| {
-                        invalid_succinct_setup_proof(
-                            "same-secret bridge target message coefficient is negative",
-                        )
-                    })
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-            messages.push(target_message_coefficients);
-        }
-
-        return Ok(messages);
+    if let Some(bridge) = statement.same_secret_bridge() {
+        return same_secret_bridge_target_message_coefficients(
+            &bridge.bridge_rns_primes,
+            witness.secret_coefficients(),
+            witness.negative_indicator_coefficients(),
+        );
     }
-    if statement.target_decryption_share.is_some() {
+    if statement.target_decryption_share().is_some() {
         return witness
-            .target_decryption_message_vectors
+            .target_decryption_message_vectors()
             .iter()
             .map(|message_vector| {
                 to_unsigned(message_vector, "target-decryption message coefficient")
@@ -301,16 +291,16 @@ pub(super) fn regenerate_bound_committed_material(
     if bound_commitments.is_empty() {
         return Ok(BoundCommittedMaterial {
             trees_by_bound_message: Vec::new(),
+            message_coefficients: Vec::new(),
         });
     }
-    if witness.vss_committed_material_seeds_by_bound_message.len() != bound_commitments.len()
-        || witness
-            .vss_committed_material_context_hashes_by_bound_message
-            .len()
-            != bound_commitments.len()
+    if witness
+        .vss_committed_material_seeds_by_bound_message()
+        .len()
+        != bound_commitments.len()
     {
         return Err(invalid_succinct_setup_proof(
-            "committed-material witness must carry one seed and one context hash per bound commitment",
+            "committed-material witness must carry one seed per bound commitment",
         ));
     }
     let messages = bound_message_coefficients(statement, witness)?;
@@ -332,10 +322,9 @@ pub(super) fn regenerate_bound_committed_material(
             vss_committed_material_trees_by_commitment_field(&VssCommittedMaterialTreeInput {
                 message_digit_columns: &message_digit_columns,
                 ring_degree: statement.ring_degree,
-                material_seed_hex: &witness.vss_committed_material_seeds_by_bound_message
+                material_seed_hex: &witness.vss_committed_material_seeds_by_bound_message()
                     [bound_message_index],
-                commitment_context_hash: &witness
-                    .vss_committed_material_context_hashes_by_bound_message[bound_message_index],
+                commitment_context_hash: &bound_commitment.commitment_context_hash,
             })?;
         for (commitment_field_position, field_tree) in field_trees.iter().enumerate() {
             let expected_root = bound_commitment
@@ -357,6 +346,7 @@ pub(super) fn regenerate_bound_committed_material(
 
     Ok(BoundCommittedMaterial {
         trees_by_bound_message,
+        message_coefficients: messages,
     })
 }
 
@@ -370,6 +360,12 @@ mod tests {
     use crate::bgv::setup::vss_commitment::vss_public_canonical_message_digit_columns;
 
     const TEST_RING_DEGREE: usize = 128;
+
+    fn material_merkle_context(field_position: usize) -> MerkleContext {
+        MerkleContext::new(0x2110, VSS_COMMITTED_MATERIAL_TREE_ORDINAL_BASE)
+            .with_tree_ordinal_offset(field_position)
+            .expect("the test field position fits the Merkle ordinal range")
+    }
 
     fn test_digit_columns() -> Vec<Vec<u64>> {
         let message: Vec<u64> = (0..TEST_RING_DEGREE)
@@ -474,6 +470,7 @@ mod tests {
                     (
                         pair_index,
                         phase_pair_leaf_hash(
+                            material_merkle_context(field_position),
                             pair_index,
                             field_trees.salted.pair_salt(pair_index),
                             &first_row,
@@ -485,7 +482,13 @@ mod tests {
             let sorted_leaves =
                 consistent_sorted_leaves(opened_leaves.clone()).expect("consistent leaves");
             assert!(
-                verify_merkle_batch(&root, depth, &sorted_leaves, &batched_opening),
+                verify_merkle_batch(
+                    material_merkle_context(field_position),
+                    &root,
+                    depth,
+                    &sorted_leaves,
+                    &batched_opening,
+                ),
                 "an honest batched opening must verify against the committed root"
             );
 
@@ -506,6 +509,7 @@ mod tests {
             tampered_leaves[2] = (
                 tampered_pair,
                 phase_pair_leaf_hash(
+                    material_merkle_context(field_position),
                     tampered_pair,
                     field_trees.salted.pair_salt(tampered_pair),
                     &tampered_first_row,
@@ -515,7 +519,13 @@ mod tests {
             let tampered_sorted =
                 consistent_sorted_leaves(tampered_leaves).expect("consistent leaves");
             assert!(
-                !verify_merkle_batch(&root, depth, &tampered_sorted, &batched_opening),
+                !verify_merkle_batch(
+                    material_merkle_context(field_position),
+                    &root,
+                    depth,
+                    &tampered_sorted,
+                    &batched_opening,
+                ),
                 "a tampered opened row must be rejected"
             );
         }
@@ -543,6 +553,7 @@ mod tests {
                 (
                     pair_index,
                     phase_pair_leaf_hash(
+                        material_merkle_context(0),
                         pair_index,
                         first_field.salted.pair_salt(pair_index),
                         &first_row,
@@ -553,7 +564,13 @@ mod tests {
             .collect::<Vec<_>>();
         let sorted_leaves = consistent_sorted_leaves(opened_leaves).expect("consistent leaves");
         assert!(
-            !verify_merkle_batch(&other_root, depth, &sorted_leaves, &batched_opening),
+            !verify_merkle_batch(
+                material_merkle_context(1),
+                &other_root,
+                depth,
+                &sorted_leaves,
+                &batched_opening,
+            ),
             "another field's root must not authenticate these openings"
         );
     }

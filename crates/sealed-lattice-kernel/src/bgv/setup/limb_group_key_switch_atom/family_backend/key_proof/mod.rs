@@ -15,8 +15,8 @@
 //! contribution to the secret linear form differs; the aggregation, support,
 //! commitment, FRI, and masking are shared. The source is absorbed into the
 //! transcript, so a proof for one source (or one automorphism element) cannot
-//! be replayed as another. The construction, soundness, and masking are the
-//! family's single construction (a one-digit key is the smallest case).
+//! be replayed as another. A one-digit key uses the same layout as the general
+//! case.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -33,6 +33,7 @@ use super::low_degree::{
 };
 use super::merkle::{MerkleDigest, sorted_unique_indices};
 use super::polynomial;
+use super::private_randomness::PrivateProofRandomness;
 use super::transcript::Transcript;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
@@ -136,16 +137,6 @@ fn invalid_key(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
-// The carry range `|c| <= N+1` is proven by a log-derivative (logUp) range
-// lookup over the shifted carry `c + (N+1) in [0, 2N+2]`, split into
-// `carry_range_lookup::table_count` size-`N` table chunks so every column stays
-// in the single trace domain (coset `8N`, FRI rate 1/4 unchanged). The 16-per-
-// digit range-bit columns and their binary-reconstruction constraints are gone;
-// see `carry_range_lookup` for the identity, the padding-collision defense, and
-// the isolated soundness tests. A coarser base decomposition was tried and
-// reverted as unsound (a carry could overshoot the field no-wrap bound); the
-// lookup certifies membership in the exact range with no overshoot.
-
 // Round-1 base columns: the witness (shared secret plus per-digit blocks) then
 // one carry-range multiplicity column per table chunk.
 const COLUMN_SECRET: usize = 0;
@@ -167,12 +158,10 @@ const DIGIT_ERROR_SQUARE: usize = 2;
 const DIGIT_ERROR_SUPPORT: usize = 3;
 const DIGIT_BLOCK_SIZE: usize = 4;
 
-// Index of the first multiplicity column (after all per-digit blocks).
 fn base_multiplicity_start(digit_count: usize) -> usize {
     SHARED_COLUMN_COUNT + digit_count * DIGIT_BLOCK_SIZE
 }
 
-// Index of the first linkage base column (after the multiplicity columns).
 fn base_linkage_start(ring_degree: usize, digit_count: usize) -> usize {
     base_multiplicity_start(digit_count) + carry_range_lookup::table_count(ring_degree)
 }
@@ -216,7 +205,6 @@ fn aux_table_fraction_column(digit_count: usize, table_index: usize) -> usize {
     digit_count + table_index
 }
 
-// Index of the first linkage aux fraction column.
 fn aux_linkage_start(ring_degree: usize, digit_count: usize) -> usize {
     digit_count + carry_range_lookup::table_count(ring_degree)
 }
@@ -240,16 +228,10 @@ const QUOTIENT_G: usize = 1;
 const QUOTIENT_SUPPORT: usize = 2;
 const QUOTIENT_COLUMN_COUNT: usize = 3;
 
-// Degree-adjustment shift for the univariate-sumcheck helper `g`. The sumcheck
-// identity is `f(x) = target/m + x g(x) + Z_H(x) q_sc(x)`; its soundness
-// (`sum_H f = target`) requires `deg(g) <= |H| - 2 = trace_size - 2`, otherwise
-// the spare coefficient `g_{trace_size-1}` lets `sum_H x g(x)` be nonzero and a
-// prover can certify a false sum. The combined FRI only bounds every column to
-// `< 2 * trace_size`, which does not pin `g` tightly. So `g` re-enters the
-// combination shifted by `x^{trace_size + 1}`: an honest `g` (degree
-// `<= trace_size - 2`) reaches at most degree `2 * trace_size - 1`, still under
-// the bound, while a degree-`(trace_size - 1)` `g` reaches `2 * trace_size` and
-// FRI rejects. Derived from `(2 * trace_size - 1) - (trace_size - 2)`.
+// The sumcheck identity requires `deg(g) <= trace_size - 2`, while combined
+// FRI permits degree below `2 * trace_size`. Shifting `g` by
+// `x^(trace_size + 1)` keeps an honest `g` below that bound but pushes the first
+// forbidden coefficient to degree `2 * trace_size`, where FRI rejects it.
 pub(super) fn g_degree_adjustment_shift(trace_size: usize) -> usize {
     trace_size + 1
 }
@@ -263,10 +245,10 @@ fn layout(ring_degree: usize) -> CanonicalResult<Layout> {
     if !ring_degree.is_power_of_two() || ring_degree < 2 {
         return Err(invalid_key("ring degree must be a power of two >= 2"));
     }
-    // Committed degree bound `2m` covers the masked columns and the support
-    // quotient (bit range products are degree 2); the coset is `FRI_RATE_BLOWUP`
-    // times that, giving FRI rate 1/4. With the two-adic ceiling at 2^20 the
-    // first profile N = 32768 runs unsplit.
+    // Committed degree bound `2m` covers the masked columns and the quadratic
+    // support and fraction constraints. The coset is `FRI_RATE_BLOWUP` times
+    // that bound, giving FRI rate 1/4; N = 32768 therefore runs unsplit below
+    // the 2^20 domain ceiling.
     let coset_size = FRI_RATE_BLOWUP * 2 * ring_degree;
     if coset_size > super::domain::MAX_TWO_ADIC_ORDER {
         return Err(invalid_key(
@@ -285,30 +267,13 @@ mod linkage;
 mod prove;
 mod verify;
 
-#[cfg(test)]
-pub(super) use linkage::LinkageLayout;
 pub(super) use linkage::{LinkageStatement, LinkageWitness};
 pub(super) use prove::prove_key_fri;
-// The single-source material-commitment regeneration the aggregate binding
-// reuses to open exactly the atom proof's committed material.
-#[cfg(test)]
-pub(super) use prove::regenerate_material_commitment_inputs;
 #[cfg(test)]
 pub(super) use prove::{prove_key_fri_with_component_b, prove_round_one_key_fri};
 pub(super) use verify::verify_key_fri;
 #[cfg(test)]
 pub(super) use verify::verify_round_one_key_fri;
-
-// The key-switch atom linkage layout for a ring degree. Key-bearing statements
-// always carry the linkage block, so the aggregate binding uses this to compute
-// the same `base_column_count` the atom prover's column plan uses. Kept as a thin
-// re-export so the layout construction has one home in `linkage`.
-#[cfg(test)]
-pub(super) fn key_switch_linkage_layout(
-    ring_degree: usize,
-) -> crate::encoding::CanonicalResult<LinkageLayout> {
-    linkage::linkage_layout(ring_degree)
-}
 
 #[cfg(test)]
 mod tests;

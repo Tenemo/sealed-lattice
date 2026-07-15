@@ -1,14 +1,15 @@
-use super::commitment_sets::*;
-use super::share_linkage::*;
 use super::*;
+
+struct SameSecretBridgeProofMaterialReference {
+    proof_bytes_hash: String,
+    proof_binding_lease: crate::bgv::setup::CanonicalSetupProofBindingLease,
+}
 
 pub(in super::super::super) fn same_secret_bridge_statement_set_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
     let coefficient_set = &package["vssPublicCoefficientCommitmentSet"];
-    let target_basis_hash =
-        crate::bgv::evaluator::top_k::canonical_target_basis_hash().expect("target basis hash");
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -17,230 +18,167 @@ pub(in super::super::super) fn same_secret_bridge_statement_set_object(
         .expect("source coefficient records")
         .iter()
         .enumerate()
-        .map(|(source_trustee_roster_position, source_record)| {
-            same_secret_bridge_statement_record(
-                package,
-                source_record,
-                &target_basis_hash,
-                source_trustee_roster_position,
-            )
+        .map(|(source_trustee_roster_position, _source_record)| {
+            same_secret_bridge_statement_record(package, source_trustee_roster_position)
         })
         .collect::<Vec<_>>();
-    let mut statement_set = serde_json::json!({
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
+    serde_json::json!({
         "objectType": "VssSameSecretBridgeStatementSet",
-        "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
-        "targetBasisHash": target_basis_hash,
+        "setupContextHash": setup_context_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "ringDegree": coefficient_set["ringDegree"],
-        "participantCount": coefficient_set["participantCount"],
-        "targetRnsLimbCount": coefficient_set["rnsLimbCount"],
-        "thresholdDegree": coefficient_set["thresholdDegree"],
-        "coefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"],
-        "vssCoefficientCommitmentRoot": package["vssCoefficientCommitments"]["vssCoefficientCommitmentRoot"],
-        "integerSupport": SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
-        "signedRepresentativeConvention": SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
-        "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "targetBasisLimbOrder": SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
+        "ringDegree": vss_commitment_ring_degree_from_fixture_package(package),
         "statementRecords": statement_records,
-    });
-    statement_set["sameSecretBridgeStatementSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&statement_set)
-            .expect("same-secret bridge statement set root")
-    );
-
-    statement_set
+    })
 }
 
 pub(super) fn same_secret_bridge_statement_record(
     package: &serde_json::Value,
-    source_coefficient_record: &serde_json::Value,
-    target_basis_hash: &str,
     source_trustee_roster_position: usize,
 ) -> serde_json::Value {
-    let setup_context = &package["setupContext"];
-    let source_trustee_identity = source_coefficient_record["sourceTrusteeIdentity"]
-        .as_str()
-        .expect("source trustee identity");
-    let coefficient_commitments = source_coefficient_record["coefficientCommitments"]
-        .as_array()
-        .expect("coefficient commitments");
-    let threshold_degree = package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"]
-        .as_u64()
-        .expect("threshold degree") as usize;
     let source_constant_commitments =
         super::super::source_constant_commitments_from_fixture_package(
             package,
             source_trustee_roster_position as u64,
         )
         .iter()
-        .enumerate()
-        .map(|(rns_limb_index, commitment)| {
-            serde_json::json!({
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": DATA_PRIMES[rns_limb_index],
-                "shamirCoefficientIndex": 0,
-                "commitment": crate::bgv::setup::commitment::setup_commitment_full_value(commitment),
-            })
-        })
+        .map(crate::bgv::setup::commitment::setup_commitment_full_value)
         .collect::<Vec<_>>();
-    let target_constant_records = (0..DATA_PRIMES.len())
-        .map(|rns_limb_index| {
-            let coefficient_record_index = rns_limb_index
-                .checked_mul(threshold_degree)
-                .expect("coefficient record index");
-            let coefficient_record = &coefficient_commitments[coefficient_record_index];
-            (
-                serde_json::json!({
-                    "rnsLimbIndex": coefficient_record["rnsLimbIndex"],
-                    "rnsPrime": coefficient_record["rnsPrime"],
-                    "shamirCoefficientIndex": coefficient_record["shamirCoefficientIndex"],
-                    "coefficientCommitmentRoot": coefficient_record["coefficientCommitmentRoot"],
-                }),
-                serde_json::json!({
-                    "rnsLimbIndex": coefficient_record["rnsLimbIndex"],
-                    "rnsPrime": coefficient_record["rnsPrime"],
-                    "shamirCoefficientIndex": coefficient_record["shamirCoefficientIndex"],
-                    "commitment": coefficient_record["commitment"],
-                }),
-            )
-        })
-        .collect::<Vec<_>>();
-    let (target_constant_roots, target_constant_commitments): (Vec<_>, Vec<_>) =
-        target_constant_records.into_iter().unzip();
-    let mut statement_record = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssSameSecretBridgeStatement",
-        "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
-        "targetBasisHash": target_basis_hash,
-        "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
-        "ringDegree": package["vssPublicCoefficientCommitmentSet"]["ringDegree"],
-        "trusteeIdentity": source_trustee_identity,
-        "trusteeRosterPosition": source_trustee_roster_position,
-        "dataBasisRelation": SAME_SECRET_RELATION,
-        "integerSupport": SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
-        "signedRepresentativeConvention": SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
-        "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "targetBasisLimbOrder": SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
         "sourceConstantCoefficientCommitments": source_constant_commitments,
-        "targetConstantCoefficientCommitmentRoots": target_constant_roots,
-        "targetConstantCoefficientCommitments": target_constant_commitments,
-        "relation": SAME_SECRET_BRIDGE_RELATION,
-    });
-    statement_record["sameSecretBridgeStatementRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&statement_record).expect("same-secret bridge statement root")
-    );
-
-    statement_record
+    })
 }
 
 pub(in super::super::super) fn same_secret_bridge_proof_material_set_object(
     package: &serde_json::Value,
-) -> serde_json::Value {
+) -> VssProofMaterialSetFixture {
     let statement_set = &package["sameSecretBridgeStatementSet"];
-    let proof_records = statement_set["statementRecords"]
+    let proof_material_references = statement_set["statementRecords"]
         .as_array()
         .expect("same-secret bridge statement records")
         .iter()
         .enumerate()
         .map(|(trustee_roster_position, statement_record)| {
-            same_secret_bridge_proof_record(package, statement_record, trustee_roster_position)
+            same_secret_bridge_proof_material_reference(
+                package,
+                statement_record,
+                trustee_roster_position,
+            )
         })
         .collect::<Vec<_>>();
-    let mut proof_material_set = serde_json::json!({
-        "objectType": "VssSameSecretBridgeProofMaterialSet",
-        "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
-        "ceremonyId": statement_set["ceremonyId"],
-        "manifestHash": statement_set["manifestHash"],
-        "rosterHash": statement_set["rosterHash"],
-        "setupParametersHash": statement_set["setupParametersHash"],
-        "setupEpoch": statement_set["setupEpoch"],
-        "targetBasisHash": statement_set["targetBasisHash"],
-        "publicMatrixSeedHash": statement_set["publicMatrixSeedHash"],
-        "ringDegree": statement_set["ringDegree"],
-        "participantCount": statement_set["participantCount"],
-        "targetRnsLimbCount": statement_set["targetRnsLimbCount"],
-        "thresholdDegree": statement_set["thresholdDegree"],
-        "coefficientCommitmentRoot": statement_set["coefficientCommitmentRoot"],
-        "vssCoefficientCommitmentRoot": statement_set["vssCoefficientCommitmentRoot"],
-        "sameSecretBridgeStatementSetRoot": statement_set["sameSecretBridgeStatementSetRoot"],
-        "proofRecords": proof_records,
-    });
-    proof_material_set["proofMaterialSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&proof_material_set)
-            .expect("same-secret bridge proof material set root")
-    );
-
-    proof_material_set
+    VssProofMaterialSetFixture {
+        value: serde_json::json!({
+            "objectType": "VssSameSecretBridgeProofMaterialSet",
+            "proofBytesHashes": proof_material_references
+                .iter()
+                .map(|reference| reference.proof_bytes_hash.clone())
+                .collect::<Vec<_>>(),
+        }),
+        proof_binding_leases: proof_material_references
+            .into_iter()
+            .map(|reference| reference.proof_binding_lease)
+            .collect(),
+    }
 }
 
-pub(super) fn same_secret_bridge_proof_record(
+fn same_secret_bridge_proof_material_reference(
     package: &serde_json::Value,
     statement_record: &serde_json::Value,
     trustee_roster_position: usize,
-) -> serde_json::Value {
-    let proof_bytes_hex =
-        same_secret_bridge_proof_bytes_hex(package, statement_record, trustee_roster_position);
-    let proof_bytes = crate::transcript_core::decode_hex(&proof_bytes_hex)
-        .expect("same-secret bridge proof bytes");
-    let mut proof_record = serde_json::json!({
-        "objectType": "VssSameSecretBridgeProofRecord",
-        "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
-        "sameSecretBridgeStatementRoot": statement_record["sameSecretBridgeStatementRoot"],
-        "proofBytesHash": hash512_hex(
-            SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
-            &[&proof_bytes],
-        ),
-        "proofBytesBase64": crate::transcript_core::encode_standard_base64(&proof_bytes),
-    });
-    proof_record["sameSecretBridgeProofRecordRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&proof_record).expect("same-secret bridge proof record root")
-    );
-
-    proof_record
-}
-
-pub(super) fn same_secret_bridge_proof_bytes_hex(
-    package: &serde_json::Value,
-    statement_record: &serde_json::Value,
-    trustee_roster_position: usize,
-) -> String {
+) -> SameSecretBridgeProofMaterialReference {
     let request = same_secret_bridge_proof_generation_request(
         package,
         statement_record,
         trustee_roster_position,
     );
+    let statement_root =
+        derive_canonical_object_hash(statement_record).expect("same-secret bridge statement root");
     let checkpoint_key = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssSameSecretBridgeProofCheckpointKey",
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
-        "statementRoot": statement_record["sameSecretBridgeStatementRoot"],
+        "statementRoot": statement_root,
         "proverRevision": "full-source-linkage-2",
     }))
     .expect("same-secret bridge checkpoint key");
     let proof_bytes = checkpointed_proof_bytes(
         SAME_SECRET_BRIDGE_PROOF_CHECKPOINT_DIRECTORY,
         &checkpoint_key,
+        |proof_bytes| {
+            verify_same_secret_bridge_proof_source_from_request(&request, proof_bytes).map(|_| ())
+        },
         || {
             let generated = generate_same_secret_bridge_proof_from_request(&request)
                 .expect("same-secret bridge proof");
-            crate::transcript_core::decode_hex(
-                generated["proofBytesHex"]
-                    .as_str()
-                    .expect("same-secret bridge proof bytes hex"),
+            let proof_bytes_hash = generated["proofBytesHash"]
+                .as_str()
+                .expect("same-secret bridge proof bytes hash");
+            let proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+                SAME_SECRET_BRIDGE_PROOF_FAMILY,
+                proof_bytes_hash,
             )
-            .expect("same-secret bridge proof bytes")
+            .expect("same-secret bridge generated proof material lookup")
+            .expect("same-secret bridge generated proof material");
+            assert_eq!(
+                proof_material
+                    .hash512_hex(SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN)
+                    .expect("same-secret bridge streamed proof bytes hash"),
+                proof_bytes_hash,
+                "generated same-secret bridge metadata must bind its retained bytes",
+            );
+            match std::sync::Arc::try_unwrap(proof_material) {
+                Ok(proof_material) => proof_material.into_contiguous(),
+                Err(_) => panic!(
+                    "generated same-secret bridge proof bytes must have one store owner before checkpoint persistence"
+                ),
+            }
         },
     );
+    let proof_bytes_hash = hash512_hex(SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
+    let proof_verification_request =
+        crate::bgv::setup::same_secret_bridge_proof_verification_request_from_public_records(
+            &package["sameSecretBridgeStatementSet"],
+            statement_record,
+            &package["vssPublicCoefficientCommitmentSet"],
+            &package["vssCoefficientCommitments"],
+            trustee_roster_position,
+        )
+        .expect("same-secret bridge proof verification request");
+    if crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+        SAME_SECRET_BRIDGE_PROOF_FAMILY,
+        &proof_bytes_hash,
+    )
+    .expect("same-secret bridge proof material lookup")
+    .is_none()
+    {
+        authenticate_setup_proof_material_stream_for_test(
+            SAME_SECRET_BRIDGE_PROOF_FAMILY,
+            &proof_bytes_hash,
+            &proof_bytes,
+        )
+        .expect("authenticate same-secret bridge proof material stream");
+    }
+    let proof_binding_session =
+        crate::bgv::setup::begin_accepted_setup_fixture_proof_binding_session()
+            .expect("begin same-secret bridge proof binding session");
+    crate::bgv::setup::verify_and_retain_same_secret_bridge_proof_binding(
+        &proof_binding_session,
+        &proof_bytes_hash,
+        &proof_verification_request,
+    )
+    .expect("verify same-secret bridge proof before releasing its bytes");
+    let proof_binding_lease =
+        crate::bgv::setup::finish_accepted_setup_fixture_proof_binding_session(
+            proof_binding_session,
+            &proof_bytes_hash,
+        )
+        .expect("retain same-secret bridge verifier-owned binding lease");
 
-    to_hex(&proof_bytes)
+    SameSecretBridgeProofMaterialReference {
+        proof_bytes_hash,
+        proof_binding_lease,
+    }
 }
 
 pub(super) fn same_secret_bridge_proof_generation_request(
@@ -249,45 +187,26 @@ pub(super) fn same_secret_bridge_proof_generation_request(
     trustee_roster_position: usize,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
-    let target_roots = statement_record["targetConstantCoefficientCommitmentRoots"]
-        .as_array()
-        .expect("bridge target roots");
-    let target_commitments = statement_record["targetConstantCoefficientCommitments"]
-        .as_array()
-        .expect("bridge target commitments");
-    let target_rns_primes = target_roots
+    let source_trustee_identity = format!("trustee-{trustee_roster_position}");
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
+    let target_records = super::same_secret_bridge_target_constant_records_from_fixture_package(
+        package,
+        trustee_roster_position as u64,
+    );
+    let target_constant_commitments = target_records
         .iter()
-        .map(|root_record| root_record["rnsPrime"].clone())
+        .map(|record| record["commitment"].clone())
         .collect::<Vec<_>>();
-    let target_constant_commitment_roots = target_roots
-        .iter()
-        .map(|root_record| root_record["coefficientCommitmentRoot"].clone())
-        .collect::<Vec<_>>();
-    let target_constant_commitments = target_commitments
-        .iter()
-        .map(|commitment_record| commitment_record["commitment"].clone())
-        .collect::<Vec<_>>();
-    let ring_degree = statement_record["ringDegree"]
+    let statement_set = &package["sameSecretBridgeStatementSet"];
+    let ring_degree = statement_set["ringDegree"]
         .as_u64()
         .expect("bridge ring degree") as usize;
-    // Committed-material regeneration inputs in bound-commitment order: the
-    // bridge binds its target-constant commitments in target order. Context
-    // hashes are read off the published commitments; the private seeds derive
-    // from them. The committed-material targets carry no algebraic opening
-    // randomness.
-    let bound_material_context_hashes = target_commitments
-        .iter()
-        .map(|commitment_record| {
-            commitment_record["commitment"]["commitmentContextHash"]
-                .as_str()
-                .expect("bridge target commitment context hash")
-                .to_string()
-        })
-        .collect::<Vec<_>>();
-    let bound_material_seeds = bound_material_context_hashes
-        .iter()
-        .map(|context_hash| super::accepted_vss_material_seed(context_hash))
-        .collect::<Vec<_>>();
+    let bound_material_seeds =
+        super::same_secret_bridge_committed_material_seeds_from_fixture_package(
+            package,
+            trustee_roster_position as u64,
+        );
     let secret_coefficients = (0..ring_degree)
         .map(|coefficient_position| {
             accepted_vss_secret_coefficient_fixture(
@@ -296,16 +215,10 @@ pub(super) fn same_secret_bridge_proof_generation_request(
             )
         })
         .collect::<Vec<_>>();
-    let negative_indicator_coefficients = secret_coefficients
-        .iter()
-        .map(|coefficient| i64::from(*coefficient < 0))
-        .collect::<Vec<_>>();
     let source_constant_commitments = statement_record["sourceConstantCoefficientCommitments"]
         .as_array()
         .expect("bridge source constant commitments")
-        .iter()
-        .map(|record| record["commitment"].clone())
-        .collect::<Vec<_>>();
+        .clone();
     let source_opening_randomness_by_limb = DATA_PRIMES
         .iter()
         .enumerate()
@@ -324,42 +237,24 @@ pub(super) fn same_secret_bridge_proof_generation_request(
         "trusteeRosterPosition": trustee_roster_position,
     }))
     .expect("same-secret bridge proof randomness seed");
-    let proof_randomness_nonce_hex = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "VssPublicMaterialFixtureRandomness",
-        "fixture": "same-secret-bridge-proof-randomness-nonce",
-        "trusteeRosterPosition": trustee_roster_position,
-    }))
-    .expect("same-secret bridge proof randomness nonce");
     serde_json::json!({
         "context": {
-            "ceremonyId": setup_context["ceremonyId"],
-            "manifestHash": setup_context["manifestHash"],
-            "rosterHash": setup_context["rosterHash"],
-            "trusteeIdentity": statement_record["trusteeIdentity"],
-            "trusteeRosterPosition": statement_record["trusteeRosterPosition"],
-            "setupEpoch": setup_context["setupEpoch"],
+            "setupContextHash": setup_context_hash,
+            "trusteeIdentity": &source_trustee_identity,
+            "trusteeRosterPosition": trustee_roster_position,
         },
         "ringDegree": ring_degree,
         "sameSecretLinkage": {
-            "publicMatrixSeedHash": statement_record["publicMatrixSeedHash"],
+            "publicMatrixSeedHash": statement_set["publicMatrixSeedHash"],
             "commitments": source_constant_commitments,
         },
         "sameSecretBridge": {
-            "publicMatrixSeedHash": statement_record["publicMatrixSeedHash"],
-            "sourceTrusteeIdentity": statement_record["trusteeIdentity"],
-            "sourceTrusteeRosterPosition": statement_record["trusteeRosterPosition"],
-            "targetBasisHash": statement_record["targetBasisHash"],
-            "targetRnsPrimes": target_rns_primes,
-            "targetConstantCommitmentRoots": target_constant_commitment_roots,
             "targetConstantCommitments": target_constant_commitments,
         },
         "secretCoefficients": secret_coefficients,
-        "negativeIndicatorCoefficients": negative_indicator_coefficients,
         "openingRandomnessByLimb": source_opening_randomness_by_limb,
         "vssCommittedMaterialSeedsByBoundMessage": bound_material_seeds,
-        "vssCommittedMaterialContextHashesByBoundMessage": bound_material_context_hashes,
         "proofRandomnessSeedHex": proof_randomness_seed_hex,
-        "proofRandomnessNonceHex": proof_randomness_nonce_hex,
     })
 }
 
@@ -390,30 +285,20 @@ fn vss_public_coefficient_randomness_i64_fixture(
         .collect()
 }
 
-fn rebind_same_secret_bridge_object_root(object: &mut serde_json::Value, root_field_name: &str) {
-    object
-        .as_object_mut()
-        .expect("same-secret bridge object")
-        .remove(root_field_name);
-    let rebound_root =
-        derive_canonical_object_hash(object).expect("rebound same-secret bridge object root");
-    object[root_field_name] = serde_json::json!(rebound_root);
-}
-
 #[test]
 fn vss_public_material_fixture_verifies_generated_fields() {
-    let mut package = minimal_collective_setup_package_for_participant_count(3);
-    package["vssPublicCoefficientCommitmentSet"] =
-        vss_public_coefficient_commitment_set_object(&package, 128);
-    package["vssPublicRecipientShareCommitmentSet"] =
-        vss_public_recipient_share_commitment_set_object(&package);
-    package["vssPublicAggregateThresholdCommitmentSet"] =
-        vss_public_aggregate_threshold_commitment_set_object(&package);
-    package["vssShareLinkageStatement"] = vss_share_linkage_statement_object(&package);
-    package["vssShareLinkageProofMaterialSet"] =
-        vss_share_linkage_proof_material_set_object(&package);
+    let mut finalized_fixture = minimal_collective_setup_package_fixture();
+    let proof_material_fixture = super::transport::descriptor_backed_vss_proof_material_fixture(
+        &mut finalized_fixture.package,
+        &finalized_fixture.proof_binding_leases,
+    );
+    let package = finalized_fixture.package;
+    let trustee_identities = (0..participant_count_from_package(&package))
+        .map(|roster_position| format!("trustee-{roster_position}"))
+        .collect::<Vec<_>>();
 
-    let verification = crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
+    let proof_binding_session = proof_material_fixture.begin_proof_binding_session();
+    crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
         &serde_json::json!({
             "statement": package["vssShareLinkageStatement"],
             "coefficientCommitmentSet": package["vssPublicCoefficientCommitmentSet"],
@@ -421,110 +306,35 @@ fn vss_public_material_fixture_verifies_generated_fields() {
             "aggregateThresholdCommitmentSet": package["vssPublicAggregateThresholdCommitmentSet"],
             "proofMaterialSet": package["vssShareLinkageProofMaterialSet"],
         }),
+        &trustee_identities,
+        Some(&proof_binding_session),
     )
     .expect("generated VSS public material verifies");
 
-    assert_eq!(verification["ok"], serde_json::json!(true));
-    assert!(
-        verification["proofMaterialSetRoot"].is_string(),
-        "generated VSS proof material set must bind a root"
-    );
-
     // The same-secret bridge proves the canonical full source VSS commitment
     // set and the target-basis committed material share one signed ternary
-    // secret. Exercise both public bridge objects through the same kernel
+    // secret. Verify both public bridge objects through the same kernel
     // verifier used by accepted setup.
-    package["sameSecretBridgeStatementSet"] = same_secret_bridge_statement_set_object(&package);
-    package["sameSecretBridgeProofMaterialSet"] =
-        same_secret_bridge_proof_material_set_object(&package);
     let bridge_request = serde_json::json!({
         "statementSet": package["sameSecretBridgeStatementSet"],
         "coefficientCommitmentSet": package["vssPublicCoefficientCommitmentSet"],
         "vssCoefficientCommitments": package["vssCoefficientCommitments"],
         "proofMaterialSet": package["sameSecretBridgeProofMaterialSet"],
     });
-    let bridge_statement_verification =
-        crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(&bridge_request)
-            .expect("generated same-secret bridge statement set verifies");
-    assert_eq!(bridge_statement_verification["ok"], serde_json::json!(true));
-    let bridge_proof_verification =
-        crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
-            &bridge_request,
-        )
-        .expect("generated same-secret bridge proof material set verifies");
-    assert_eq!(bridge_proof_verification["ok"], serde_json::json!(true));
-
-    // Replacing a target body and all of its dependent roots creates a
-    // self-consistent alternate bridge package. It must still refuse while
-    // the authoritative public coefficient set remains unchanged.
-    let mut alternate_target_request = bridge_request.clone();
-    let alternate_target_body = &mut alternate_target_request["statementSet"]["statementRecords"]
-        [0]["targetConstantCoefficientCommitments"][0]["commitment"];
-    let original_material_root = alternate_target_body["commitmentFields"][0]["materialRootHex"]
-        .as_str()
-        .expect("target commitment material root");
-    let alternate_material_root = if original_material_root == "0".repeat(64) {
-        "f".repeat(64)
-    } else {
-        "0".repeat(64)
-    };
-    alternate_target_body["commitmentFields"][0]["materialRootHex"] =
-        serde_json::json!(alternate_material_root);
-    let alternate_target_root = derive_canonical_object_hash(alternate_target_body)
-        .expect("alternate target commitment root");
-    alternate_target_request["statementSet"]["statementRecords"][0]["targetConstantCoefficientCommitmentRoots"]
-        [0]["coefficientCommitmentRoot"] = serde_json::json!(alternate_target_root);
-    rebind_same_secret_bridge_object_root(
-        &mut alternate_target_request["statementSet"]["statementRecords"][0],
-        "sameSecretBridgeStatementRoot",
-    );
-    let alternate_statement_root = alternate_target_request["statementSet"]["statementRecords"][0]
-        ["sameSecretBridgeStatementRoot"]
-        .clone();
-    rebind_same_secret_bridge_object_root(
-        &mut alternate_target_request["statementSet"],
-        "sameSecretBridgeStatementSetRoot",
-    );
-    let alternate_statement_set_root =
-        alternate_target_request["statementSet"]["sameSecretBridgeStatementSetRoot"].clone();
-    alternate_target_request["proofMaterialSet"]["sameSecretBridgeStatementSetRoot"] =
-        alternate_statement_set_root;
-    alternate_target_request["proofMaterialSet"]["proofRecords"][0]["sameSecretBridgeStatementRoot"] =
-        alternate_statement_root;
-    rebind_same_secret_bridge_object_root(
-        &mut alternate_target_request["proofMaterialSet"]["proofRecords"][0],
-        "sameSecretBridgeProofRecordRoot",
-    );
-    rebind_same_secret_bridge_object_root(
-        &mut alternate_target_request["proofMaterialSet"],
-        "proofMaterialSetRoot",
-    );
-
-    let alternate_statement_error =
-        crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(
-            &alternate_target_request,
-        )
-        .expect_err("alternate target statement must not replace the authoritative commitment");
-    assert_eq!(
-        alternate_statement_error.code,
-        CanonicalErrorCode::ComponentMismatch
-    );
-    assert!(alternate_statement_error.message.contains("authoritative"));
-    let alternate_proof_error =
-        crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
-            &alternate_target_request,
-        )
-        .expect_err("alternate target proof package must not replace the authoritative commitment");
-    assert_eq!(
-        alternate_proof_error.code,
-        CanonicalErrorCode::ComponentMismatch
-    );
-    assert!(alternate_proof_error.message.contains("authoritative"));
-
+    crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(&bridge_request)
+        .expect("generated same-secret bridge statement set verifies");
+    crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
+        &bridge_request,
+        Some(&proof_binding_session),
+    )
+    .expect("generated same-secret bridge proof material set verifies");
+    crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+        proof_binding_session.session_handle,
+    )
+    .expect("cancel generated VSS public material proof binding session");
     let mut wrong_source_body_request = bridge_request.clone();
     let source_coefficient = &mut wrong_source_body_request["statementSet"]["statementRecords"][0]
-        ["sourceConstantCoefficientCommitments"][0]["commitment"]["commitmentLimbs"][0]["rows"][0]
-        [0];
+        ["sourceConstantCoefficientCommitments"][0]["commitmentLimbs"][0]["rows"][0][0];
     let original_source_coefficient = source_coefficient
         .as_u64()
         .expect("source commitment coefficient");
@@ -534,6 +344,7 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     assert!(
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &wrong_source_body_request,
+            None,
         )
         .is_err(),
         "accepted reconstruction must recompute and reject a wrong source commitment body"
@@ -541,7 +352,7 @@ fn vss_public_material_fixture_verifies_generated_fields() {
 
     let mut wrong_source_coordinate_request = bridge_request.clone();
     wrong_source_coordinate_request["statementSet"]["statementRecords"][0]["sourceConstantCoefficientCommitments"]
-        [0]["rnsLimbIndex"] = serde_json::json!(1);
+        [0]["sourceRnsLimbIndex"] = serde_json::json!(1);
     assert!(
         crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(
             &wrong_source_coordinate_request,
@@ -565,11 +376,12 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     );
 
     let mut wrong_source_root_request = bridge_request;
-    wrong_source_root_request["vssCoefficientCommitments"]["sourceTrusteeRecords"][0]["coefficientCommitments"]
-        [0]["commitmentRoot"] = serde_json::json!("0".repeat(128));
+    wrong_source_root_request["vssCoefficientCommitments"]["sourceTrusteeRecords"][0]["coefficientCommitmentRoots"]
+        [0] = serde_json::json!("0".repeat(128));
     assert!(
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &wrong_source_root_request,
+            None,
         )
         .is_err(),
         "accepted reconstruction must reject a source root that no longer matches its body"

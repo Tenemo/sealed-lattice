@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(super) fn read_target_ciphertext_pair(
     ciphertexts: &Value,
     binding: &Value,
@@ -19,13 +20,14 @@ pub(super) fn read_target_ciphertext_pair(
             "target id and target order ciphertexts must use the same BGV level",
         ));
     }
-    compare_hash_field(
-        binding,
-        "targetLayoutHash",
-        &target_accepted.target_layout_hash,
-        "target ciphertext layout hash",
-    )?;
+    if target_id.ciphertext.level != CANONICAL_TARGET_CIPHERTEXT_LEVEL {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "target ciphertexts must use the canonical target BGV level",
+        ));
+    }
     let aggregate_ciphertext_root = hash_at_path(binding, &["aggregateCiphertextRoot"])?;
+    let target_layout_hash = hash_at_path(binding, &["targetLayoutHash"])?;
     let top_count = usize_field(binding, "topCount")?;
     if top_count == 0 || top_count > MAXIMUM_OPTION_COUNT {
         return Err(CanonicalError::new(
@@ -36,7 +38,7 @@ pub(super) fn read_target_ciphertext_pair(
     let target_ciphertext_hash = direct_target_ciphertext_hash(
         aggregate_ciphertext_root,
         top_count,
-        &target_accepted.target_layout_hash,
+        target_layout_hash,
         &target_id.root,
         &target_order.root,
     )?;
@@ -46,16 +48,6 @@ pub(super) fn read_target_ciphertext_pair(
             "target ciphertext pair does not match the accepted target ciphertext hash",
         ));
     }
-    let target_ciphertext_binding_hash = derive_canonical_object_hash(&json!({
-        "objectType": "TargetDecryptionCiphertextBinding",
-        "aggregateCiphertextRoot": aggregate_ciphertext_root,
-        "topCount": top_count,
-        "targetLayoutHash": target_accepted.target_layout_hash,
-        "targetIdRoot": target_id.root,
-        "targetOrderRoot": target_order.root,
-        "targetCiphertextHash": target_ciphertext_hash,
-    }))?;
-
     Ok(TargetCiphertextPair {
         target_id: target_id.ciphertext,
         target_order: target_order.ciphertext,
@@ -63,15 +55,16 @@ pub(super) fn read_target_ciphertext_pair(
         target_id_root: target_id.root,
         target_order_root: target_order.root,
         target_ciphertext_hash,
-        target_ciphertext_binding_hash,
     })
 }
 
+#[cfg(test)]
 pub(super) struct ParsedTargetCiphertext {
     ciphertext: Ciphertext,
     root: String,
 }
 
+#[cfg(test)]
 pub(super) fn parse_target_ciphertext(
     canonical_bytes_hex_value: &str,
     label: &str,
@@ -119,10 +112,8 @@ pub(crate) fn direct_target_ciphertext_hash(
         "objectType": "EncryptedSparseTargetCiphertext",
         "aggregateCiphertextRoot": aggregate_ciphertext_root,
         "topCount": top_count,
-        "tiePolicy": TIE_POLICY,
         "targetLayoutHash": target_layout_hash,
         "targetIdRoot": target_id_root,
         "targetOrderRoot": target_order_root,
-        "openedIntermediates": [],
     }))
 }

@@ -1,5 +1,17 @@
-use super::super::*;
-use super::*;
+use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
+use super::super::{
+    LINCHECK_REPETITIONS, TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+    TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT, TRACE_SPLIT,
+    VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+    VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT, invalid_succinct_setup_proof,
+};
+use super::family_shape_and_validation::SuccinctSetupProofFamilyShape;
+use super::statement_types::{TargetDecryptionMessageClaimKind, TrusteeEvaluationKeyStatement};
+use crate::bgv::setup::commitment::{
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+    SETUP_COMMITMENT_ROW_COUNT,
+};
+use crate::encoding::CanonicalResult;
 
 type VssPublicMessageEncodingLayout =
     crate::bgv::setup::vss_commitment::VssPublicMessageEncodingLayout;
@@ -15,7 +27,7 @@ fn vss_public_message_encoding_layouts_for_bounds(
         .collect()
 }
 
-fn vss_public_message_encoding_offsets_for_layouts(
+pub(crate) fn vss_public_message_encoding_offsets(
     layouts: &[VssPublicMessageEncodingLayout],
 ) -> CanonicalResult<Vec<usize>> {
     let mut offsets = Vec::with_capacity(layouts.len() + 1);
@@ -24,15 +36,38 @@ fn vss_public_message_encoding_offsets_for_layouts(
     for layout in layouts {
         offset = offset
             .checked_add(layout.encoding_column_count())
-            .ok_or_else(|| invalid_succinct_setup_proof("VSS column layout overflowed"))?;
+            .ok_or_else(|| invalid_succinct_setup_proof("VSS message vector layout overflowed"))?;
         offsets.push(offset);
     }
 
     Ok(offsets)
 }
 
-fn vss_public_message_encoding_total(offsets: &[usize]) -> usize {
+pub(crate) fn vss_public_message_encoding_total(offsets: &[usize]) -> usize {
     offsets.last().copied().unwrap_or(0)
+}
+
+pub(crate) fn vss_public_message_vector_index(
+    offsets: &[usize],
+    message_index: usize,
+    encoding_column: usize,
+) -> CanonicalResult<usize> {
+    let start = offsets.get(message_index).copied().ok_or_else(|| {
+        invalid_succinct_setup_proof("VSS message index is outside the vector layout")
+    })?;
+    let end = offsets.get(message_index + 1).copied().ok_or_else(|| {
+        invalid_succinct_setup_proof("VSS message index is outside the vector layout")
+    })?;
+    let vector_index = start
+        .checked_add(encoding_column)
+        .ok_or_else(|| invalid_succinct_setup_proof("VSS message vector index overflowed"))?;
+    if vector_index >= end {
+        return Err(invalid_succinct_setup_proof(
+            "VSS message encoding column is outside the vector layout",
+        ));
+    }
+
+    Ok(vector_index)
 }
 
 fn vss_public_message_position_for_encoding_column(
@@ -44,6 +79,18 @@ fn vss_public_message_position_for_encoding_column(
         .enumerate()
         .find(|(_, window)| vector_index >= window[0] && vector_index < window[1])
         .map(|(message_position, window)| (message_position, vector_index - window[0]))
+}
+
+pub(crate) fn add_scaled_extension_basis_vector(
+    target: &mut [ChallengeExtensionElement],
+    source: &[ChallengeExtensionElement],
+    coefficient: u64,
+    tower: &ChallengeExtensionTower,
+) {
+    debug_assert_eq!(target.len(), source.len());
+    for (target_value, source_value) in target.iter_mut().zip(source) {
+        *target_value = tower.add(target_value, &tower.scale_base(source_value, coefficient));
+    }
 }
 
 // The total number of VSS-public message trit consistency claims for a set of
@@ -109,15 +156,14 @@ impl LimbColumnLayout {
         statement: &TrusteeEvaluationKeyStatement,
         limb_index: usize,
     ) -> CanonicalResult<Self> {
-        let family_shape = statement.family_shape()?;
+        let family_shape = statement.family_shape();
         let active_keys = statement
             .active_key_indices(limb_index)
             .into_iter()
-            .map(|key_index| (key_index, statement.keys[key_index].digit_count()))
+            .map(|key_index| (key_index, statement.keys()[key_index].digit_count()))
             .collect::<Vec<_>>();
         let private_vss_coefficient_columns = statement
-            .private_vss_share
-            .as_ref()
+            .private_vss_share()
             .filter(|_| limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
             .map(|statement| statement.coefficient_commitments.len())
             .unwrap_or(0);
@@ -139,8 +185,7 @@ impl LimbColumnLayout {
         // optimization and drops the source decoder claims that otherwise
         // dominate the aggregate proof.
         let vss_public_is_threshold_aggregate = statement
-            .vss_share_linkage
-            .as_ref()
+            .vss_share_linkage()
             .is_some_and(|share_linkage| share_linkage.is_threshold_aggregate);
         let vss_public_message_bounds = statement.vss_public_message_bounds(limb_index);
         let vss_public_message_encoding_layouts = vss_public_message_bounds
@@ -162,16 +207,14 @@ impl LimbColumnLayout {
                 "VSS statement bounds do not match the active message columns",
             ));
         }
-        let vss_public_message_encoding_offsets =
-            vss_public_message_encoding_offsets_for_layouts(&vss_public_message_encoding_layouts)?;
+        let vss_public_encoding_offsets =
+            vss_public_message_encoding_offsets(&vss_public_message_encoding_layouts)?;
         let same_secret_bridge_message_encoding_layouts =
             vss_public_message_encoding_layouts_for_bounds(
                 statement.same_secret_bridge_message_bounds(limb_index),
             )?;
         let same_secret_bridge_message_encoding_offsets =
-            vss_public_message_encoding_offsets_for_layouts(
-                &same_secret_bridge_message_encoding_layouts,
-            )?;
+            vss_public_message_encoding_offsets(&same_secret_bridge_message_encoding_layouts)?;
         let target_decryption_message_encoding_layouts =
             statement.target_decryption_message_encoding_layouts(limb_index)?;
         if target_decryption_message_encoding_layouts.len() != target_decryption_message_columns {
@@ -180,9 +223,7 @@ impl LimbColumnLayout {
             ));
         }
         let target_decryption_message_encoding_offsets =
-            vss_public_message_encoding_offsets_for_layouts(
-                &target_decryption_message_encoding_layouts,
-            )?;
+            vss_public_message_encoding_offsets(&target_decryption_message_encoding_layouts)?;
         if active_keys.is_empty()
             && statement.linkage_randomness_count(limb_index) == 0
             && same_secret_bridge_message_encoding_layouts.is_empty()
@@ -259,7 +300,7 @@ impl LimbColumnLayout {
                             TargetDecryptionMessageClaimKind::AggregateOpening => {
                                 TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT
                             }
-                            TargetDecryptionMessageClaimKind::SmudgingOpening => {
+                            TargetDecryptionMessageClaimKind::FloodingNoiseOpening => {
                                 TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT
                             }
                         }
@@ -329,7 +370,7 @@ impl LimbColumnLayout {
             target_decryption_message_columns,
             target_decryption_relation_count,
             vss_public_message_encoding_layouts,
-            vss_public_message_encoding_offsets,
+            vss_public_message_encoding_offsets: vss_public_encoding_offsets,
             same_secret_bridge_message_encoding_layouts,
             same_secret_bridge_message_encoding_offsets,
             target_decryption_message_encoding_layouts,
@@ -454,7 +495,7 @@ impl LimbColumnLayout {
             // and >= t honest recipients at distinct points force the degree
             // (t-1) sharing polynomial to be consistent. This requires
             // q_setup_complete - c_priv >= t honest verifying recipients
-            // (7 >= 4 in the first roster). Dropping the carry from this set, or
+            // (7 >= 4 in the foundation roster). Dropping the carry from this set, or
             // weakening the carry/share range checks, breaks the argument.
             // private_vss_logical_columns() still counts the message columns
             // because they remain witnesses for the opening and share linchecks.

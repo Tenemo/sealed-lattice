@@ -1,7 +1,7 @@
 //! Radix-2 FRI proximity argument over one atom proof field.
 //!
-//! Proves a committed codeword over the coset `offset * K` (|K| a power of two)
-//! is close to the evaluations of a polynomial of degree below the rate bound.
+//! Implements folding for a committed codeword over the coset `offset * K`
+//! (`|K|` a power of two) with a claimed polynomial degree below the rate bound.
 //! Each round folds the codeword with a Fiat-Shamir challenge, halving the
 //! domain (a coset of a 2-adic subgroup stays a coset under squaring), commits
 //! the layer in a salted Merkle tree, and after enough rounds sends the small
@@ -9,10 +9,8 @@
 //! verifier authenticates both leaves against the layer root, rechecks every
 //! fold, and rechecks the final layer's low degree.
 //!
-//! Binding is the salted Merkle commitment; per-query soundness at rate
-//! `1/blowup` follows the standard FRI analysis. The opened salts are revealed
-//! per query (salts only hide unopened leaves), so the verifier recomputes the
-//! exact committed leaf.
+//! Salted Merkle roots bind each layer. Opened salts are revealed with their
+//! query leaves, which lets the verifier recompute each authenticated leaf.
 
 use super::super::proof_field::ProofFieldParameters;
 use super::domain::{CyclicDomain, evaluate_polynomial_at};
@@ -20,6 +18,7 @@ use super::merkle::{
     BatchedMerkleOpening, MerkleDigest, MerkleTree, consistent_sorted_leaves, leaf_hash,
     sorted_unique_indices, verify_merkle_batch,
 };
+use super::private_randomness::PrivateProofRandomness;
 use super::transcript::Transcript;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
@@ -67,15 +66,12 @@ fn leaf_words<const LIMB_COUNT: usize>(value: &[u64; LIMB_COUNT]) -> Vec<u64> {
 
 fn commit_layer<const LIMB_COUNT: usize>(
     codeword: &[[u64; LIMB_COUNT]],
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<ProverLayer<LIMB_COUNT>> {
     let mut salts = Vec::with_capacity(codeword.len());
     let mut leaves = Vec::with_capacity(codeword.len());
     for (index, value) in codeword.iter().enumerate() {
-        *salt_seed = salt_seed
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        let salt = salt_seed.to_le_bytes().to_vec();
+        let salt = private_randomness.next_salt().to_vec();
         leaves.push(leaf_hash(index, &salt, &leaf_words(value)));
         salts.push(salt);
     }
@@ -147,7 +143,7 @@ pub(super) fn fri_commit<const LIMB_COUNT: usize>(
     transcript: &mut Transcript,
     codeword: &[[u64; LIMB_COUNT]],
     initial_offset: &[u64; LIMB_COUNT],
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<FriCommitment<LIMB_COUNT>> {
     if !codeword.len().is_power_of_two() || codeword.len() < 2 {
         return Err(invalid_fri(
@@ -169,7 +165,7 @@ pub(super) fn fri_commit<const LIMB_COUNT: usize>(
             transcript.absorb_field_elements("fri-final", &coefficients);
             break coefficients;
         }
-        let layer = commit_layer(&current, salt_seed)?;
+        let layer = commit_layer(&current, private_randomness)?;
         transcript.absorb_digest("fri-layer-root", &layer.tree.root());
         layer_roots.push(layer.tree.root());
         let beta = transcript.challenge_field_element(parameters, "fri-fold");
@@ -423,10 +419,16 @@ pub(super) fn prove_low_degree<const LIMB_COUNT: usize>(
     codeword: &[[u64; LIMB_COUNT]],
     initial_offset: &[u64; LIMB_COUNT],
     query_count: usize,
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<FriProof<LIMB_COUNT>> {
     let top_size = codeword.len();
-    let commitment = fri_commit(parameters, transcript, codeword, initial_offset, salt_seed)?;
+    let commitment = fri_commit(
+        parameters,
+        transcript,
+        codeword,
+        initial_offset,
+        private_randomness,
+    )?;
     let positions = transcript.challenge_positions("fri-query", top_size, query_count);
     Ok(fri_answer(&commitment, &positions))
 }
@@ -518,14 +520,14 @@ mod tests {
         let fri_parameters = FriParameters { blowup };
 
         let mut prover_transcript = Transcript::new("fri-test");
-        let mut salt_seed = 0x1234;
+        let mut private_randomness = PrivateProofRandomness::for_test(0x1234);
         let proof = prove_low_degree(
             &parameters,
             &mut prover_transcript,
             &codeword,
             &offset,
             query_count,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("prove");
 
@@ -557,14 +559,14 @@ mod tests {
         let query_count = 24;
         let fri_parameters = FriParameters { blowup };
         let mut prover_transcript = Transcript::new("fri-test");
-        let mut salt_seed = 0x99;
+        let mut private_randomness = PrivateProofRandomness::for_test(0x99);
         let proof = prove_low_degree(
             &parameters,
             &mut prover_transcript,
             &codeword,
             &offset,
             query_count,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("prove");
         let mut verifier_transcript = Transcript::new("fri-test");
@@ -596,14 +598,14 @@ mod tests {
         let query_count = 20;
         let fri_parameters = FriParameters { blowup };
         let mut prover_transcript = Transcript::new("fri-test");
-        let mut salt_seed = 0x55;
+        let mut private_randomness = PrivateProofRandomness::for_test(0x55);
         let mut proof = prove_low_degree(
             &parameters,
             &mut prover_transcript,
             &codeword,
             &offset,
             query_count,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("prove");
         // Corrupt one opened value: the Merkle authentication must fail.
@@ -636,14 +638,14 @@ mod tests {
         let query_count = 16;
         let fri_parameters = FriParameters { blowup };
         let mut prover_transcript = Transcript::new("fri-test");
-        let mut salt_seed = 0x2;
+        let mut private_randomness = PrivateProofRandomness::for_test(0x2);
         let proof = prove_low_degree(
             &parameters,
             &mut prover_transcript,
             &codeword,
             &offset,
             query_count,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("prove");
         let mut verifier_transcript = Transcript::new("fri-test");

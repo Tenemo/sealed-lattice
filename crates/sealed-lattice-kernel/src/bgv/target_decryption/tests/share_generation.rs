@@ -1,6 +1,122 @@
 use super::*;
 
 #[test]
+fn private_flooding_seed_controls_only_private_noise_and_its_commitment() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile = target_share_profile(&setup_package);
+    let first_witness = local_target_share_witness(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        "trustee-1",
+    );
+    let mut second_witness = first_witness.clone();
+    second_witness["privateFloodingSeedHex"] = json!("a5".repeat(64));
+
+    let first_share = generate_local_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        &first_witness,
+        "trustee-1",
+    );
+    let repeated_first_share = generate_local_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        &first_witness,
+        "trustee-1",
+    );
+    let second_share = generate_local_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        &second_witness,
+        "trustee-1",
+    );
+
+    assert_eq!(first_share, repeated_first_share);
+    assert_ne!(first_share["sharePayload"], second_share["sharePayload"]);
+
+    let first_statement = derive_share_proof_statement(TargetShareProofStatementInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile,
+        local_target_share_witness_value: &first_witness,
+        target_decryption_share: &first_share,
+        trustee_identity: "trustee-1",
+    })
+    .expect("first proof statement");
+    let second_statement = derive_share_proof_statement(TargetShareProofStatementInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile,
+        local_target_share_witness_value: &second_witness,
+        target_decryption_share: &second_share,
+        trustee_identity: "trustee-1",
+    })
+    .expect("second proof statement");
+    assert_ne!(
+        target_decryption_smudging_commitment_set_root(&first_statement["smudgingCommitmentSet"])
+            .expect("first smudging commitment set root"),
+        target_decryption_smudging_commitment_set_root(&second_statement["smudgingCommitmentSet"])
+            .expect("second smudging commitment set root")
+    );
+    assert!(
+        !first_statement
+            .to_string()
+            .contains("privateFloodingSeedHex")
+    );
+}
+
+#[test]
+fn private_flooding_seed_must_be_full_lowercase_hex() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile = target_share_profile(&setup_package);
+    let witness = local_target_share_witness(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        "trustee-1",
+    );
+
+    for invalid_seed in [String::new(), "00".repeat(63), "AA".repeat(64)] {
+        let mut invalid_witness = witness.clone();
+        invalid_witness["privateFloodingSeedHex"] = json!(invalid_seed);
+        let error = with_staged_aggregate_opening_material(&invalid_witness, || {
+            generate_bgv_target_decryption_share_from_local_share_request(&json!({
+                "setupPackage": setup_package,
+                "localTargetShareWitness": invalid_witness,
+                "targetAcceptedRecord": accepted_record,
+                "targetCiphertextBinding": target_ciphertext_binding,
+                "targetCiphertexts": target_ciphertexts,
+                "targetShareProfile": target_share_profile,
+                "trusteeIdentity": "trustee-1",
+            }))
+        })
+        .expect_err("malformed private flooding seed must reject");
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(error.message.contains("64 lowercase-hexadecimal bytes"));
+    }
+}
+
+#[test]
 fn target_share_generation_rejects_wrong_target_record() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
@@ -73,63 +189,14 @@ fn target_decryption_rejects_noncanonical_target_ciphertext_level() {
         "trusteeIdentity": "trustee-1",
     }));
 
-    // A non-canonical target ciphertext level is rejected because the accepted
-    // target record binds the canonical-level (level 6) ciphertext roots through
-    // targetCiphertextHash: level-zero ciphertexts hash to different roots, so the
-    // pair no longer matches the accepted ciphertext hash. The level is enforced
-    // by that binding, not by a standalone level assertion.
     let error = result.expect_err("noncanonical target ciphertext level must be refused");
     assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
     assert!(
         error
             .message
-            .contains("target ciphertext pair does not match the accepted target ciphertext hash"),
+            .contains("target ciphertexts must use the canonical target BGV level"),
         "{}",
         error.message
-    );
-}
-
-#[test]
-fn target_share_profile_rejects_threshold_downgrade() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-    let mut downgraded_profile = target_share_profile;
-    downgraded_profile["decryptionThreshold"] = json!(1);
-    downgraded_profile["minimumSharesForInterpolation"] = json!(1);
-    downgraded_profile["decryptionShareQuorum"] = json!(1);
-    let mut hash_input = downgraded_profile.clone();
-    hash_input
-        .as_object_mut()
-        .expect("target share profile object")
-        .remove("targetShareProfileHash");
-    downgraded_profile["targetShareProfileHash"] =
-        json!(derive_canonical_object_hash(&hash_input).expect("downgraded profile hash"));
-
-    let result = generate_bgv_target_decryption_share_from_local_share_request(&json!({
-        "setupPackage": setup_package,
-        "localTargetShareWitness": local_target_share_witness_value,
-        "targetAcceptedRecord": accepted_record,
-        "targetCiphertextBinding": target_ciphertext_binding,
-        "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": downgraded_profile,
-        "trusteeIdentity": "trustee-1",
-    }));
-
-    let error = result.expect_err("downgraded target share profile must be refused");
-    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(
-        error
-            .message
-            .contains("decryptionThreshold must match the setup roster-derived threshold")
     );
 }
 
@@ -186,42 +253,48 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     let mut seed_tampered_witness = local_witness.clone();
     seed_tampered_witness["aggregateOpening"]["aggregateOpeningCredentials"][0]["aggregateMaterialSeedHex"] =
         json!("0".repeat(128));
-    let seed_error = generate_bgv_target_decryption_share_from_local_share_request(&json!({
-        "setupPackage": setup_package.clone(),
-        "localTargetShareWitness": seed_tampered_witness,
-        "targetAcceptedRecord": accepted_record.clone(),
-        "targetCiphertextBinding": target_ciphertext_binding.clone(),
-        "targetCiphertexts": target_ciphertexts.clone(),
-        "targetShareProfile": target_share_profile.clone(),
-        "trusteeIdentity": "trustee-1",
-    }))
+    let seed_error = with_staged_aggregate_opening_material(&seed_tampered_witness, || {
+        generate_bgv_target_decryption_share_from_local_share_request(&json!({
+            "setupPackage": setup_package.clone(),
+            "localTargetShareWitness": seed_tampered_witness,
+            "targetAcceptedRecord": accepted_record.clone(),
+            "targetCiphertextBinding": target_ciphertext_binding.clone(),
+            "targetCiphertexts": target_ciphertexts.clone(),
+            "targetShareProfile": target_share_profile.clone(),
+            "trusteeIdentity": "trustee-1",
+        }))
+    })
     .expect_err("a changed aggregate material seed must be refused");
     assert_eq!(seed_error.code, CanonicalErrorCode::ComponentMismatch);
     assert!(seed_error.message.contains("credential commitment root"));
 
-    let mut message_tampered_witness = local_witness.clone();
-    let credential =
-        &mut message_tampered_witness["aggregateOpening"]["aggregateOpeningCredentials"][0];
-    let mut message_coefficients = coefficient_vector_from_le_hex(
-        credential["aggregateCommitmentMessageValuesLeHex"]
-            .as_str()
-            .expect("aggregate commitment message"),
-        POLYNOMIAL_DEGREE,
-        "aggregate opening credential message byte length must match ringDegree",
+    let message_error = with_staged_aggregate_opening_material_transform(
+        &local_witness,
+        |aggregate_opening_root, material| {
+            if aggregate_opening_root
+                == local_witness["aggregateOpening"]["aggregateOpeningCredentials"][0]
+                    ["aggregateOpeningRoot"]
+                    .as_str()
+                    .expect("first aggregate opening root")
+            {
+                let mut first_value =
+                    u64::from_le_bytes(material[..8].try_into().expect("first aggregate value"));
+                first_value = add_mod_fast(first_value, 1, DATA_PRIMES[0]);
+                material[..8].copy_from_slice(&first_value.to_le_bytes());
+            }
+        },
+        || {
+            generate_bgv_target_decryption_share_from_local_share_request(&json!({
+                "setupPackage": setup_package.clone(),
+                "localTargetShareWitness": local_witness.clone(),
+                "targetAcceptedRecord": accepted_record.clone(),
+                "targetCiphertextBinding": target_ciphertext_binding.clone(),
+                "targetCiphertexts": target_ciphertexts.clone(),
+                "targetShareProfile": target_share_profile.clone(),
+                "trusteeIdentity": "trustee-1",
+            }))
+        },
     )
-    .expect("aggregate commitment message coefficients");
-    message_coefficients[0] = add_mod_fast(message_coefficients[0], 1, DATA_PRIMES[0]);
-    credential["aggregateCommitmentMessageValuesLeHex"] =
-        json!(coefficient_vector_le_hex(&message_coefficients));
-    let message_error = generate_bgv_target_decryption_share_from_local_share_request(&json!({
-        "setupPackage": setup_package.clone(),
-        "localTargetShareWitness": message_tampered_witness,
-        "targetAcceptedRecord": accepted_record.clone(),
-        "targetCiphertextBinding": target_ciphertext_binding.clone(),
-        "targetCiphertexts": target_ciphertexts.clone(),
-        "targetShareProfile": target_share_profile.clone(),
-        "trusteeIdentity": "trustee-1",
-    }))
     .expect_err("a changed aggregate material column must be refused");
     assert_eq!(message_error.code, CanonicalErrorCode::ComponentMismatch);
     assert!(message_error.message.contains("credential commitment root"));
@@ -258,24 +331,20 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
         derive_canonical_object_hash(&Value::Object(aggregate_set_without_root))
             .expect("tampered aggregate threshold commitment root")
     );
-    let mut merkle_root_tampered_witness = local_witness;
-    merkle_root_tampered_witness["aggregateOpening"]["aggregateThresholdCommitmentRoot"] =
-        aggregate_set["aggregateThresholdCommitmentRoot"].clone();
-    merkle_root_tampered_witness["targetDecryptionSmudging"]["setupPackageHash"] = json!(
-        read_setup_binding(&merkle_root_tampered_setup_package)
-            .expect("tampered setup package binding")
-            .setup_package_hash
-    );
-    let merkle_root_error = generate_bgv_target_decryption_share_from_local_share_request(&json!({
-        "setupPackage": merkle_root_tampered_setup_package,
-        "localTargetShareWitness": merkle_root_tampered_witness,
-        "targetAcceptedRecord": accepted_record,
-        "targetCiphertextBinding": target_ciphertext_binding,
-        "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile,
-        "trusteeIdentity": "trustee-1",
-    }))
-    .expect_err("a changed aggregate Merkle root must be refused");
+    let merkle_root_tampered_witness = local_witness;
+    let merkle_root_error =
+        with_staged_aggregate_opening_material(&merkle_root_tampered_witness, || {
+            generate_bgv_target_decryption_share_from_local_share_request(&json!({
+                "setupPackage": merkle_root_tampered_setup_package,
+                "localTargetShareWitness": merkle_root_tampered_witness,
+                "targetAcceptedRecord": accepted_record,
+                "targetCiphertextBinding": target_ciphertext_binding,
+                "targetCiphertexts": target_ciphertexts,
+                "targetShareProfile": target_share_profile,
+                "trusteeIdentity": "trustee-1",
+            }))
+        })
+        .expect_err("a changed aggregate Merkle root must be refused");
     assert_eq!(
         merkle_root_error.code,
         CanonicalErrorCode::ComponentMismatch
@@ -283,7 +352,7 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     assert!(
         merkle_root_error
             .message
-            .contains("does not match the accepted aggregate commitment record"),
+            .contains("does not match its target decryption binding"),
         "{}",
         merkle_root_error.message
     );

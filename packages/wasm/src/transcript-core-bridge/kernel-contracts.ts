@@ -1,4 +1,3 @@
-export { canonicalErrorCodes } from './kernel-errors.js';
 export {
     bytesToHex,
     concatenateByteChunks,

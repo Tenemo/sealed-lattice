@@ -2,11 +2,13 @@ use super::*;
 
 // Canonical binary key-switch component vector material: the same format the
 // chunked component-material transport carries.
-const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
+const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV2";
 
 pub(super) fn decode_component_material_bytes(
     material_bytes: &[u8],
     expected_level: usize,
+    expected_digit_count: usize,
+    expected_ring_degree: usize,
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     let read_word = |cursor: &mut usize| -> CanonicalResult<u64> {
         let end = cursor
@@ -29,22 +31,12 @@ pub(super) fn decode_component_material_bytes(
         ));
     }
     let mut cursor = 8_usize;
-    let level = usize::try_from(read_word(&mut cursor)?)
-        .map_err(|_| invalid_succinct_setup_proof("component material level does not fit usize"))?;
-    let ring_degree = usize::try_from(read_word(&mut cursor)?).map_err(|_| {
-        invalid_succinct_setup_proof("component material ring degree does not fit usize")
-    })?;
-    let digit_count = usize::try_from(read_word(&mut cursor)?).map_err(|_| {
-        invalid_succinct_setup_proof("component material digit count does not fit usize")
-    })?;
-    let limb_count = usize::try_from(read_word(&mut cursor)?).map_err(|_| {
-        invalid_succinct_setup_proof("component material limb count does not fit usize")
-    })?;
-    if level != expected_level
-        || digit_count != level + 1
-        || limb_count != level + 1
-        || limb_count > DATA_PRIMES.len()
-    {
+    let limb_count = expected_level
+        .checked_add(1)
+        .ok_or_else(|| invalid_succinct_setup_proof("component material limb count overflowed"))?;
+    let digit_count = expected_digit_count;
+    let ring_degree = expected_ring_degree;
+    if digit_count != limb_count || limb_count > DATA_PRIMES.len() || ring_degree == 0 {
         return Err(invalid_succinct_setup_proof(
             "component material shape does not match the key descriptor level",
         ));
@@ -90,6 +82,23 @@ pub(super) fn read_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> 
         .ok_or_else(|| {
             invalid_succinct_setup_proof(format!("{field_name} must be a non-negative integer"))
         })
+}
+
+#[cfg(test)]
+pub(super) fn read_u64_array(value: &Value, field_name: &str) -> CanonicalResult<Vec<u64>> {
+    value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_succinct_setup_proof(format!("{field_name} must be an array")))?
+        .iter()
+        .map(|entry| {
+            entry.as_u64().ok_or_else(|| {
+                invalid_succinct_setup_proof(format!(
+                    "{field_name} entries must be non-negative integers"
+                ))
+            })
+        })
+        .collect()
 }
 
 pub(super) fn read_hex_bytes(value: &Value, field_name: &str) -> CanonicalResult<Vec<u8>> {
@@ -152,15 +161,6 @@ pub(super) fn read_i64_array(value: &Value, field_name: &str) -> CanonicalResult
         .collect()
 }
 
-pub(super) fn read_i64(value: &Value, field_name: &str) -> CanonicalResult<i64> {
-    value
-        .get(field_name)
-        .and_then(Value::as_i64)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof(format!("{field_name} must be a signed integer"))
-        })
-}
-
 pub(super) fn read_string_array(value: &Value, field_name: &str) -> CanonicalResult<Vec<String>> {
     value
         .get(field_name)
@@ -170,22 +170,6 @@ pub(super) fn read_string_array(value: &Value, field_name: &str) -> CanonicalRes
         .map(|entry| {
             entry.as_str().map(str::to_string).ok_or_else(|| {
                 invalid_succinct_setup_proof(format!("{field_name} entries must be strings"))
-            })
-        })
-        .collect()
-}
-
-pub(super) fn read_u64_array(value: &Value, field_name: &str) -> CanonicalResult<Vec<u64>> {
-    value
-        .get(field_name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid_succinct_setup_proof(format!("{field_name} must be an array")))?
-        .iter()
-        .map(|entry| {
-            entry.as_u64().ok_or_else(|| {
-                invalid_succinct_setup_proof(format!(
-                    "{field_name} entries must be non-negative integers"
-                ))
             })
         })
         .collect()
@@ -213,17 +197,6 @@ pub(super) fn read_i64_matrix2(value: &Value, field_name: &str) -> CanonicalResu
                 .collect()
         })
         .collect()
-}
-
-pub(super) fn read_optional_i64_matrix2(
-    value: &Value,
-    field_name: &str,
-) -> CanonicalResult<Vec<Vec<i64>>> {
-    if value.get(field_name).is_some() {
-        read_i64_matrix2(value, field_name)
-    } else {
-        Ok(Vec::new())
-    }
 }
 
 pub(super) fn read_i64_matrix(
@@ -265,17 +238,6 @@ pub(super) fn read_i64_matrix(
                 .collect()
         })
         .collect()
-}
-
-pub(super) fn read_optional_i64_matrix(
-    value: &Value,
-    field_name: &str,
-) -> CanonicalResult<Vec<Vec<Vec<i64>>>> {
-    if value.get(field_name).is_some() {
-        read_i64_matrix(value, field_name)
-    } else {
-        Ok(Vec::new())
-    }
 }
 
 pub(super) fn read_u64_matrix(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<u64>>> {

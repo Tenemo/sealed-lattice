@@ -5,9 +5,8 @@
 //! little-endian `u64` limbs; digests and salts are byte runs). Decoding is
 //! strict: it bounds-checks every read, rejects a truncated or trailing-byte
 //! stream, rejects field limbs that are not a reduced residue below the
-//! modulus, and rejects salts or digests of the wrong width. This is the byte
-//! form the trustee evaluation-key transport will carry once the backend is
-//! wired into the command path.
+//! modulus, and rejects salts or digests of the wrong width. Trustee
+//! evaluation-key transport carries this byte form.
 
 use super::super::proof_field::ProofFieldParameters;
 use super::super::wide_unsigned::is_less_than;
@@ -15,10 +14,11 @@ use super::column_commitment::{ColumnOpening, ColumnRow};
 use super::key_proof::KeyFriProof;
 use super::low_degree::{FriLayerOpening, FriProof, FriQueryAnswer};
 use super::merkle::{BatchedMerkleOpening, MERKLE_DIGEST_BYTES, MerkleDigest};
+use super::private_randomness::PROOF_SALT_BYTE_LENGTH;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-const CODEC_MAGIC: &[u8; 8] = b"SLKSATM1";
-const SALT_BYTES: usize = 8;
+const CODEC_MAGIC: &[u8; 8] = b"SLKSATM2";
+const SALT_BYTES: usize = PROOF_SALT_BYTE_LENGTH;
 
 fn invalid_codec(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::MalformedLength, message)
@@ -117,7 +117,7 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
 
     // Upper bound on how many more elements can possibly remain: every element
     // consumes at least one byte, so a count-prefix larger than this is a
-    // malformed stream. Used to cap `Vec::with_capacity` against the byte budget
+    // malformed stream. This caps `Vec::with_capacity` against the byte budget
     // so an attacker-controlled length prefix cannot force a huge speculative
     // allocation before the elements themselves are read.
     fn remaining_element_bound(&self) -> usize {
@@ -317,8 +317,10 @@ pub(super) fn decode_key_proof<const LIMB_COUNT: usize>(
 mod tests {
     use super::super::super::proof_field::sixteen_limb_group_field_parameters;
     use super::super::key_proof::{
-        KeyFriProofParameters, prove_round_one_key_fri, verify_round_one_key_fri,
+        KeyFriProofParameters, KeySource, prove_round_one_key_fri, verify_round_one_key_fri,
     };
+    use super::super::private_randomness::PrivateProofRandomness;
+    use super::super::test_support::build_synthetic_key_fixture;
     use super::*;
 
     fn sample_proof() -> (
@@ -327,74 +329,16 @@ mod tests {
         KeyFriProofParameters,
         KeyFriProof<13>,
     ) {
-        use super::super::super::negacyclic_transform::NegacyclicDomain;
-        use super::super::key_proof::{DigitPublic, DigitWitness, KeyPublic};
         let parameters = sixteen_limb_group_field_parameters();
         let ring_degree = 64;
         let digit_count = 3;
-        let domain = NegacyclicDomain::new(&parameters, ring_degree).expect("domain");
-        let secret: Vec<i64> = (0..ring_degree).map(|i| ((i * 7) % 3) as i64 - 1).collect();
-        let secret_field: Vec<[u64; 13]> = secret
-            .iter()
-            .map(|v| parameters.signed_word_to_element(*v))
-            .collect();
-        let group_modulus = parameters.unsigned_word_to_element(1_000_003);
-        let plaintext_modulus = parameters.unsigned_word_to_element(65_537);
-        let mut digits = Vec::new();
-        let mut public_digits = Vec::new();
-        for digit_index in 0..digit_count {
-            let error: Vec<i64> = (0..ring_degree)
-                .map(|i| (((i + digit_index) * 5) % 5) as i64 - 2)
-                .collect();
-            let carry: Vec<i64> = (0..ring_degree)
-                .map(|i| ((i + digit_index) % 3) as i64 - 1)
-                .collect();
-            let error_field: Vec<[u64; 13]> = error
-                .iter()
-                .map(|v| parameters.signed_word_to_element(*v))
-                .collect();
-            let carry_field: Vec<[u64; 13]> = carry
-                .iter()
-                .map(|v| parameters.signed_word_to_element(*v))
-                .collect();
-            let mut sample = Vec::with_capacity(ring_degree);
-            let mut state = 0xa5_u64.wrapping_add(digit_index as u64 * 0x1000);
-            for _ in 0..ring_degree {
-                state = state
-                    .wrapping_mul(6_364_136_223_846_793_005)
-                    .wrapping_add(1);
-                sample.push(parameters.unsigned_word_to_element(state));
-            }
-            let gadget_idempotent =
-                parameters.unsigned_word_to_element(0x9e37 + digit_index as u64);
-            let a_times_s = domain.negacyclic_product(&sample, &secret_field);
-            let mut component_b = vec![parameters.zero(); ring_degree];
-            for index in 0..ring_degree {
-                let t_e = parameters.multiply(&plaintext_modulus, &error_field[index]);
-                let g_s = parameters.multiply(&gadget_idempotent, &secret_field[index]);
-                let q_c = parameters.multiply(&group_modulus, &carry_field[index]);
-                let mut value = parameters.add(&t_e, &g_s);
-                value = parameters.add(&value, &q_c);
-                value = parameters.subtract(&value, &a_times_s[index]);
-                component_b[index] = value;
-            }
-            digits.push(DigitWitness { error, carry });
-            public_digits.push(DigitPublic {
-                recombined_sample: sample,
-                recombined_component_b: component_b,
-                gadget_idempotent,
-            });
-        }
-        let public = KeyPublic {
-            digits: public_digits,
-            group_modulus,
-            plaintext_modulus,
-        };
+        let (secret, digits, public) =
+            build_synthetic_key_fixture(ring_degree, digit_count, &KeySource::RoundOne);
         let proof_parameters = KeyFriProofParameters {
             query_count: 40,
             mask_degree: 0,
         };
-        let mut salt_seed = 0x2024;
+        let mut private_randomness = PrivateProofRandomness::for_test(0x2024);
         let proof = prove_round_one_key_fri(
             &parameters,
             ring_degree,
@@ -402,7 +346,7 @@ mod tests {
             &secret,
             &digits,
             &proof_parameters,
-            &mut salt_seed,
+            &mut private_randomness,
         )
         .expect("prove");
         (public, ring_degree, proof_parameters, proof)
@@ -431,42 +375,32 @@ mod tests {
     }
 
     #[test]
-    fn trailing_bytes_are_rejected() {
-        let parameters = sixteen_limb_group_field_parameters();
-        let (_public, _ring_degree, _proof_parameters, proof) = sample_proof();
-        let mut bytes = encode_key_proof(&proof).expect("encode");
-        bytes.push(0);
-        assert!(decode_key_proof(&parameters, &bytes).is_err());
-    }
-
-    #[test]
-    fn truncation_is_rejected() {
+    fn malformed_proof_encodings_are_rejected() {
         let parameters = sixteen_limb_group_field_parameters();
         let (_public, _ring_degree, _proof_parameters, proof) = sample_proof();
         let bytes = encode_key_proof(&proof).expect("encode");
-        assert!(decode_key_proof(&parameters, &bytes[..bytes.len() - 1]).is_err());
-        assert!(decode_key_proof(&parameters, &bytes[..4]).is_err());
-    }
 
-    #[test]
-    fn wrong_magic_is_rejected() {
-        let parameters = sixteen_limb_group_field_parameters();
-        let (_public, _ring_degree, _proof_parameters, proof) = sample_proof();
-        let mut bytes = encode_key_proof(&proof).expect("encode");
-        bytes[0] ^= 0xff;
-        assert!(decode_key_proof(&parameters, &bytes).is_err());
-    }
-
-    #[test]
-    fn a_corrupted_length_prefix_is_rejected() {
-        let parameters = sixteen_limb_group_field_parameters();
-        let (_public, _ring_degree, _proof_parameters, proof) = sample_proof();
-        let mut bytes = encode_key_proof(&proof).expect("encode");
-        // Corrupt the first length prefix after the four roots (base, material,
-        // aux, and quotient), i.e. the FRI layer root count, to an enormous
-        // value: decode must fail bounds checks.
+        let mut trailing = bytes.clone();
+        trailing.push(0);
+        let truncated = bytes[..bytes.len() - 1].to_vec();
+        let truncated_header = bytes[..4].to_vec();
+        let mut wrong_magic = bytes.clone();
+        wrong_magic[0] ^= 0xff;
+        let mut corrupted_length = bytes;
         let offset = CODEC_MAGIC.len() + 4 * MERKLE_DIGEST_BYTES;
-        bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert!(decode_key_proof(&parameters, &bytes).is_err());
+        corrupted_length[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        for (case_name, malformed) in [
+            ("trailing bytes", trailing),
+            ("truncation", truncated),
+            ("truncated header", truncated_header),
+            ("wrong magic", wrong_magic),
+            ("corrupted length", corrupted_length),
+        ] {
+            assert!(
+                decode_key_proof(&parameters, &malformed).is_err(),
+                "{case_name} must be rejected"
+            );
+        }
     }
 }

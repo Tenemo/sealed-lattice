@@ -3,14 +3,12 @@ use crate::bgv::modular_arithmetic::{
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-// Challenge extension field for the succinct trustee evaluation-key argument.
+// Challenge extension field for the shared per-limb setup-proof engine.
 //
 // The committed columns stay in the base limb field, but every
 // post-commitment verifier challenge (consistency, lincheck, batching,
 // out-of-domain points, fold challenges) is drawn from the degree-four
-// extension of that limb field, so each challenge round's soundness error is
-// governed by the extension size (around 188 bits for the 47-bit data
-// primes) instead of the base field size. The tower is
+// extension of that limb field. The tower is
 // F_{p^2} = F_p[s] / (s^2 - quadratic_non_residue) and
 // F_{p^4} = F_{p^2}[t] / (t^2 - quartic_seed), with both non-residues found
 // deterministically per prime, so prover and verifier always agree.

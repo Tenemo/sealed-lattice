@@ -13,7 +13,9 @@
         }
     },
     "scripts": {
-        "check": "tsc --project tsconfig.json --pretty false --noEmit",
-        "build": "del-cli dist tsconfig.tsbuildinfo && tsc --project tsconfig.json"
+        "build": "del-cli dist && tsc --build tsconfig.json --force"
+    },
+    "devDependencies": {
+        "vitest": "^4.1.4"
     }
 }

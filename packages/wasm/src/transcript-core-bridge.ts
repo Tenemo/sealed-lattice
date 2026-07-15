@@ -1,18 +1,18 @@
-export { canonicalErrorCodes } from './transcript-core-bridge/kernel-contracts.js';
+/** @alias Generated SDK runtime bridge contract. */
 export type {
-    BgvAcceptedSetupHandoff,
-    TranscriptCoreKernelSharePoint,
-    TranscriptCorePlaintextComparison,
-    BgvBaseConversionFixture,
-    BgvCiphertextConventionFixture,
+    AcceptedSetupSession,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
-    BgvLocalTrusteeSetupStateVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
-    BgvTargetDecryptionReleaseSetupContext,
-    BgvTargetDecryptionResultReleaseShareEvidence,
-    BgvTargetDecryptionResultReleaseCompletion,
+    ActionContextInput,
+    CanonicalFoundationValueValidation,
+    CanonicalFoundationValueValidationInput,
+    CeremonyContextInput,
+    DecodedPrivateRandomCursor,
+    EncodedPrivateRandomCursor,
+    PrivateRandomCursor,
+    SetupMailboxSlot,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export {

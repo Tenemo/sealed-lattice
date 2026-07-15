@@ -9,16 +9,14 @@ const VSS_PUBLIC_AGGREGATE_COMMITMENT_ROLE: &str = "aggregate-threshold-share";
 pub(super) struct AggregateOpeningCheckInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) participant: &'a ParticipantBinding,
-    pub(super) setup_epoch: &'a str,
     pub(super) rns_limb_index: usize,
     pub(super) rns_prime: u64,
     pub(super) credential: &'a Value,
 }
 
 pub(super) struct AggregateOpeningRootsInput<'a> {
-    pub(super) setup_binding: &'a SetupBinding,
+    pub(super) setup_context_hash: &'a str,
     pub(super) participant: &'a ParticipantBinding,
-    pub(super) setup_epoch: &'a str,
     pub(super) rns_limb_index: usize,
     pub(super) rns_prime: u64,
     pub(super) aggregate_commitment_message_values: &'a [u64],
@@ -33,13 +31,11 @@ pub(super) struct AggregateOpeningComputation {
     #[cfg(test)]
     pub(super) commitment: Value,
     pub(super) commitment_root: String,
-    pub(super) commitment_context_hash: String,
     pub(super) opening_root: String,
 }
 
 pub(super) struct VerifiedAggregateOpeningCredential {
     pub(super) commitment_root: String,
-    pub(super) commitment_context_hash: String,
     pub(super) opening_root: String,
     pub(super) aggregate_share_values: Vec<u64>,
     pub(super) aggregate_commitment_message_values: Vec<u64>,
@@ -51,17 +47,14 @@ pub(super) fn verify_aggregate_opening_credential(
 ) -> CanonicalResult<VerifiedAggregateOpeningCredential> {
     let aggregate_material_seed_hex =
         string_at_path(input.credential, &["aggregateMaterialSeedHex"])?.to_string();
-    let aggregate_commitment_message_values = read_aggregate_u64_vector_le_hex(
-        input.credential,
-        "aggregateCommitmentMessageValuesLeHex",
-        "aggregate opening credential message byte length must match ringDegree",
-    )?;
+    let aggregate_opening_root = string_at_path(input.credential, &["aggregateOpeningRoot"])?;
+    let aggregate_commitment_message_values =
+        take_aggregate_opening_message_values(aggregate_opening_root)?;
     let aggregate_share_values =
         derive_aggregate_share_values(&aggregate_commitment_message_values, input.rns_prime)?;
     let computation = compute_aggregate_opening(AggregateOpeningRootsInput {
-        setup_binding: input.setup_binding,
+        setup_context_hash: &input.setup_binding.setup_context_hash,
         participant: input.participant,
-        setup_epoch: input.setup_epoch,
         rns_limb_index: input.rns_limb_index,
         rns_prime: input.rns_prime,
         aggregate_commitment_message_values: &aggregate_commitment_message_values,
@@ -83,7 +76,6 @@ pub(super) fn verify_aggregate_opening_credential(
 
     Ok(VerifiedAggregateOpeningCredential {
         commitment_root: computation.commitment_root,
-        commitment_context_hash: computation.commitment_context_hash,
         opening_root: computation.opening_root,
         aggregate_share_values,
         aggregate_commitment_message_values,
@@ -94,13 +86,14 @@ pub(super) fn verify_aggregate_opening_credential(
 pub(super) fn compute_aggregate_opening(
     input: AggregateOpeningRootsInput<'_>,
 ) -> CanonicalResult<AggregateOpeningComputation> {
-    let commitment_context = aggregate_commitment_context(
-        input.setup_binding,
-        input.participant,
-        input.setup_epoch,
-        input.rns_limb_index,
-        input.rns_prime,
-    );
+    let commitment_context = json!({
+        "objectType": "VssPublicAggregateThresholdCommitmentContext",
+        "setupContextHash": input.setup_context_hash,
+        "recipientIdentity": input.participant.trustee_identity.as_str(),
+        "recipientRosterPosition": input.participant.roster_position,
+        "rnsLimbIndex": input.rns_limb_index,
+        "rnsPrime": input.rns_prime,
+    });
     let computation =
         compute_vss_committed_material_commitment(VssCommittedMaterialCommitmentInput {
             commitment_role: VSS_PUBLIC_AGGREGATE_COMMITMENT_ROLE,
@@ -117,21 +110,57 @@ pub(super) fn compute_aggregate_opening(
         #[cfg(test)]
         commitment: computation.commitment,
         commitment_root: computation.commitment_root,
-        commitment_context_hash: computation.commitment_context_hash,
         opening_root: computation.opening_root,
     })
 }
 
-pub(super) fn read_aggregate_u64_vector_le_hex(
-    credential: &Value,
-    field_name: &str,
-    length_error_message: &'static str,
+fn take_aggregate_opening_message_values(
+    aggregate_opening_root: &str,
 ) -> CanonicalResult<Vec<u64>> {
-    coefficient_vector_from_le_hex(
-        string_at_path(credential, &[field_name])?,
-        POLYNOMIAL_DEGREE,
-        length_error_message,
-    )
+    let material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        crate::bgv::setup::TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY,
+        aggregate_opening_root,
+    )?
+    .ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "aggregate opening credential is missing canonical stream-authenticated message material",
+        )
+    })?;
+    let expected_byte_length = POLYNOMIAL_DEGREE
+        .checked_mul(std::mem::size_of::<u64>())
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "aggregate opening message byte length overflowed usize",
+            )
+        })?;
+    if material.len() != expected_byte_length {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "aggregate opening message byte length must match ringDegree",
+        ));
+    }
+
+    let mut values = Vec::new();
+    values.try_reserve_exact(POLYNOMIAL_DEGREE).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "aggregate opening message allocation failed within the fixed ring bound",
+        )
+    })?;
+    let mut encoded_value = [0_u8; std::mem::size_of::<u64>()];
+    for coefficient_index in 0..POLYNOMIAL_DEGREE {
+        let byte_offset = coefficient_index * encoded_value.len();
+        if !material.copy_range(byte_offset, &mut encoded_value) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "aggregate opening message ended before ringDegree values",
+            ));
+        }
+        values.push(u64::from_le_bytes(encoded_value));
+    }
+    Ok(values)
 }
 
 fn derive_aggregate_share_values(
@@ -153,26 +182,4 @@ fn derive_aggregate_share_values(
     }
 
     Ok(aggregate_share_values)
-}
-
-fn aggregate_commitment_context(
-    setup_binding: &SetupBinding,
-    participant: &ParticipantBinding,
-    setup_epoch: &str,
-    rns_limb_index: usize,
-    rns_prime: u64,
-) -> Value {
-    json!({
-        "objectType": "VssPublicAggregateThresholdCommitmentContext",
-        "ceremonyId": setup_binding.ceremony_id.as_str(),
-        "manifestHash": setup_binding.election_manifest_hash.as_str(),
-        "rosterHash": setup_binding.roster_hash.as_str(),
-        "setupParametersHash": setup_binding.setup_parameters_hash.as_str(),
-        "setupEpoch": setup_epoch,
-        "recipientIdentity": participant.trustee_identity.as_str(),
-        "recipientRosterPosition": participant.roster_position,
-        "recipientTrusteePoint": participant.interpolation_point,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-    })
 }

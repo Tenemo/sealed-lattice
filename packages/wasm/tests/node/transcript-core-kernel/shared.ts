@@ -1,4 +1,3 @@
-// Shared transcript-core kernel fixtures.
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,19 +8,6 @@ import {
     createTranscriptCoreKernelLoader,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/transcript-core-bridge';
-import {
-    createFoundationTranscriptCoreFixture,
-    createFoundationTranscriptFixture,
-} from '#tests/support/foundation-transcript-fixture';
-
-const cloneJsonValue = <JsonValue>(value: JsonValue): JsonValue =>
-    JSON.parse(JSON.stringify(value)) as JsonValue;
-
-const foundationTranscriptFixture = createFoundationTranscriptFixture();
-
-const foundationTranscriptCoreFixture = createFoundationTranscriptCoreFixture(
-    foundationTranscriptFixture.expectedHashes,
-);
 
 const singleZeroByteSha256Hex =
     '6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d';
@@ -38,7 +24,6 @@ const createMockKernelExports = ({
     commandResponse = {
         success: true,
         value: {
-            chunkRoot: 'abc123',
             hash512: 'feedface',
         },
     },
@@ -46,7 +31,6 @@ const createMockKernelExports = ({
     expectedKernelSha256Hex = singleZeroByteSha256Hex,
     onCommand,
     outputLengthAllocationPointer = 512,
-    roundTripPointer = allocationPointer,
 }: {
     readonly allowUnpinnedKernel?: boolean;
     readonly allocationPointer?: number;
@@ -55,7 +39,6 @@ const createMockKernelExports = ({
     readonly expectedKernelSha256Hex?: string;
     readonly onCommand?: (command: unknown) => void;
     readonly outputLengthAllocationPointer?: number;
-    readonly roundTripPointer?: number;
 } = {}): {
     readonly deallocate: ReturnType<typeof vi.fn>;
     readonly encodedCommandResponseLength: number;
@@ -83,6 +66,38 @@ const createMockKernelExports = ({
         instance: {
             exports: {
                 memory,
+                sealed_lattice_accepted_setup_canonical_stream_begin: vi.fn(
+                    () => 1,
+                ),
+                sealed_lattice_accepted_setup_command_with_length: vi.fn(
+                    (
+                        pointer: number,
+                        length: number,
+                        _sessionHandle: number,
+                        outputLengthPointer: number,
+                    ) => {
+                        const encodedCommand = new Uint8Array(
+                            memory.buffer,
+                            pointer,
+                            length,
+                        );
+                        onCommand?.(
+                            JSON.parse(textDecoder.decode(encodedCommand)),
+                        );
+                        new Uint8Array(memory.buffer).set(
+                            encodedCommandResponse,
+                            commandPointer,
+                        );
+                        new DataView(memory.buffer).setUint32(
+                            outputLengthPointer,
+                            encodedCommandResponse.length,
+                            true,
+                        );
+                        return commandPointer;
+                    },
+                ),
+                sealed_lattice_accepted_setup_session_begin: vi.fn(() => 1),
+                sealed_lattice_accepted_setup_session_cancel: vi.fn(() => 0),
                 sealed_lattice_allocate: vi.fn(
                     () => allocationPointers.shift() ?? allocationPointer,
                 ),
@@ -114,7 +129,6 @@ const createMockKernelExports = ({
                         return commandPointer;
                     },
                 ),
-                sealed_lattice_roundtrip: vi.fn(() => roundTripPointer),
             },
         },
         module: fakeModule,
@@ -126,13 +140,28 @@ const createMockKernelExports = ({
         .mockResolvedValue(instantiatedSource);
     vi.spyOn(WebAssembly.Module, 'exports').mockReturnValue([
         { kind: 'memory', name: 'memory' },
+        {
+            kind: 'function',
+            name: 'sealed_lattice_accepted_setup_canonical_stream_begin',
+        },
+        {
+            kind: 'function',
+            name: 'sealed_lattice_accepted_setup_command_with_length',
+        },
+        {
+            kind: 'function',
+            name: 'sealed_lattice_accepted_setup_session_begin',
+        },
+        {
+            kind: 'function',
+            name: 'sealed_lattice_accepted_setup_session_cancel',
+        },
         { kind: 'function', name: 'sealed_lattice_allocate' },
         { kind: 'function', name: 'sealed_lattice_deallocate' },
         {
             kind: 'function',
             name: 'sealed_lattice_transcript_core_command_with_length',
         },
-        { kind: 'function', name: 'sealed_lattice_roundtrip' },
     ]);
 
     return {
@@ -164,11 +193,4 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
-export {
-    cloneJsonValue,
-    foundationTranscriptCoreFixture,
-    textEncoder,
-    textDecoder,
-    wasmHeader,
-    createMockKernelExports,
-};
+export { textEncoder, textDecoder, wasmHeader, createMockKernelExports };

@@ -4,13 +4,7 @@ import type {
     VssOpeningRandomByteSource,
 } from '#packages/protocol/src/index';
 
-// Collective BGV setup test suites derive every fixture value from a per-suite
-// namespace so the deterministic fixture hashes stay isolated between suites.
-// These shared factories keep a single definition of that derivation instead of
-// repeating the same fixture-hash, deterministic-randomness, and setup-context
-// boilerplate in every suite. Each factory is parameterized by the suite's
-// fixture namespace, so distinct suites still produce distinct, deterministic
-// values.
+// Per-suite namespaces keep deterministic fixture hashes isolated.
 
 export type SetupFixtureHash = (label: string) => string;
 
@@ -66,16 +60,14 @@ export const makeVssOpeningRandomBytes =
         };
     };
 
-// The collective BGV setup context shared by the setup test suites. The setup
-// parameters hash is derived from the suite's own fixture hash, so distinct
-// suites still produce distinct contexts while sharing one structural
-// definition.
 export const makeSetupContext = (
     fixtureHash: SetupFixtureHash,
+    participantCount: number,
 ): CollectiveBgvSetupContext => ({
     ceremonyId: 'ceremony-1',
     manifestHash: fixtureHash('manifest'),
     rosterHash: fixtureHash('roster'),
     setupParametersHash: fixtureHash('setup-parameters'),
     setupEpoch: 'setup-epoch-1',
+    participantCount,
 });

@@ -1,131 +1,83 @@
 use crate::hashing::derive_canonical_object_hash;
+use crate::protocol_signatures::{
+    create_ml_dsa_public_key_hash_fixture, create_protocol_signature_fixture,
+};
 
-pub(super) fn rebind_collective_setup_package_hash(package: &mut serde_json::Value) {
-    package
-        .as_object_mut()
-        .expect("setup package object")
-        .remove("setupPackageHash");
-    // Compute the canonical hash input in place instead of cloning the whole
-    // package. The embedded proof and key-switch material can be multiple
-    // gigabytes, so a clone would dominate each heavy test's peak memory.
-    // Detaching the large private VSS envelopes (which the hash input excludes),
-    // hashing by reference, and restoring them yields the identical hash without
-    // the copy. Key order is irrelevant because the protocol hash canonicalizes.
-    let detached_envelopes = detach_private_vss_encrypted_envelopes(package);
-    let setup_package_hash = derive_canonical_object_hash(package).expect("setup package hash");
-    restore_private_vss_encrypted_envelopes(package, detached_envelopes);
-    package["setupPackageHash"] = serde_json::json!(setup_package_hash);
+fn package_setup_context_hash(package: &serde_json::Value) -> String {
+    crate::bgv::setup::accepted_setup::setup_context_hash(&package["setupContext"])
+        .expect("setup context hash")
 }
 
-fn detach_private_vss_encrypted_envelopes(
+pub(super) fn rebind_collective_setup_intent_registration(
     package: &mut serde_json::Value,
-) -> Vec<(usize, serde_json::Value)> {
-    let mut detached_envelopes = Vec::new();
-    if let Some(envelope_references) = package
-        .get_mut("privateVssEnvelopeCommitments")
-        .and_then(serde_json::Value::as_object_mut)
-        .and_then(|private_vss_envelope_commitments| {
-            private_vss_envelope_commitments.get_mut("envelopeReferences")
-        })
-        .and_then(serde_json::Value::as_array_mut)
-    {
-        for (reference_index, envelope_reference) in envelope_references.iter_mut().enumerate() {
-            if let Some(envelope_reference_object) = envelope_reference.as_object_mut()
-                && let Some(encrypted_envelope) =
-                    envelope_reference_object.remove("encryptedEnvelope")
-            {
-                detached_envelopes.push((reference_index, encrypted_envelope));
-            }
-        }
-    }
-    detached_envelopes
-}
-
-fn restore_private_vss_encrypted_envelopes(
-    package: &mut serde_json::Value,
-    detached_envelopes: Vec<(usize, serde_json::Value)>,
+    registration_index: usize,
 ) {
-    if detached_envelopes.is_empty() {
-        return;
-    }
-    if let Some(envelope_references) = package
-        .get_mut("privateVssEnvelopeCommitments")
-        .and_then(serde_json::Value::as_object_mut)
-        .and_then(|private_vss_envelope_commitments| {
-            private_vss_envelope_commitments.get_mut("envelopeReferences")
-        })
-        .and_then(serde_json::Value::as_array_mut)
-    {
-        for (reference_index, encrypted_envelope) in detached_envelopes {
-            if let Some(envelope_reference_object) = envelope_references
-                .get_mut(reference_index)
-                .and_then(serde_json::Value::as_object_mut)
-            {
-                envelope_reference_object
-                    .insert("encryptedEnvelope".to_string(), encrypted_envelope);
-            }
-        }
-    }
+    let trustee_identity =
+        package["setupIntent"]["trusteeRegistrations"][registration_index]["trusteeIdentity"]
+            .as_str()
+            .expect("setup-intent trustee identity")
+            .to_string();
+    rebind_collective_setup_intent_registration_with_signature_seed(
+        package,
+        registration_index,
+        &format!("{trustee_identity}-setup-signing"),
+    );
 }
 
-pub(super) fn rebind_collective_phase_roots(package: &mut serde_json::Value) {
-    let phases = package["phaseTranscript"]
-        .as_array_mut()
-        .expect("phase transcript");
-    let mut previous_phase_root = serde_json::Value::Null;
-    for phase in phases {
-        phase["previousPhaseRoot"] = previous_phase_root.clone();
-        phase
-            .as_object_mut()
-            .expect("phase record")
-            .remove("phaseRoot");
-        let phase_root = derive_canonical_object_hash(phase).expect("phase root");
-        phase["phaseRoot"] = serde_json::json!(phase_root.clone());
-        previous_phase_root = serde_json::json!(phase_root);
-    }
-}
-
-pub(super) fn rebind_collective_private_vss_envelope_commitment_root(
+pub(super) fn rebind_collective_setup_intent_registration_with_signature_seed(
     package: &mut serde_json::Value,
+    registration_index: usize,
+    signature_seed_label: &str,
 ) {
-    package["privateVssEnvelopeCommitments"]
-        .as_object_mut()
-        .expect("private VSS envelope commitment set")
-        .remove("privateVssEnvelopeCommitmentRoot");
-    let private_vss_envelope_commitment_root = derive_canonical_object_hash(
-        &private_vss_envelope_commitment_set_root_input(&package["privateVssEnvelopeCommitments"]),
+    let mut registration =
+        package["setupIntent"]["trusteeRegistrations"][registration_index].clone();
+    let trustee_identity = registration["trusteeIdentity"]
+        .as_str()
+        .expect("setup-intent trustee identity")
+        .to_string();
+    let recovery_epoch = registration["recoveryEpoch"]
+        .as_u64()
+        .expect("setup-intent recovery epoch");
+    let device_epoch = registration["deviceEpoch"]
+        .as_u64()
+        .expect("setup-intent device epoch");
+    let roster_position =
+        u64::try_from(registration_index).expect("setup-intent registration index must fit u64");
+    let signing_public_key_hash = create_ml_dsa_public_key_hash_fixture(signature_seed_label)
+        .expect("setup-intent signing public-key hash");
+    let setup_context_hash = package_setup_context_hash(package);
+    let registration_payload = serde_json::json!({
+        "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
+        "setupContextHash": setup_context_hash,
+        "trusteeIdentity": trustee_identity,
+        "rosterPosition": roster_position,
+        "recoveryEpoch": recovery_epoch,
+        "deviceEpoch": device_epoch,
+        "signingPublicKeyHash": signing_public_key_hash,
+        "privateVssMailboxPublicKeyHash": registration["privateVssMailboxPublicKeyHash"],
+    });
+    let registration_root = derive_canonical_object_hash(&registration_payload)
+        .expect("setup-intent registration root");
+    registration["signatureEnvelope"] = create_protocol_signature_fixture(
+        signature_seed_label,
+        serde_json::json!({
+            "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
+            "objectRoot": registration_root,
+        }),
     )
-    .expect("private VSS envelope commitment root");
-    package["privateVssEnvelopeCommitments"]["privateVssEnvelopeCommitmentRoot"] =
-        serde_json::json!(private_vss_envelope_commitment_root.clone());
-    package["privateVssEnvelopeCommitmentRoot"] =
-        serde_json::json!(private_vss_envelope_commitment_root);
+    .expect("setup-intent signature fixture")
+    .envelope;
+    package["setupIntent"]["trusteeRegistrations"][registration_index] = registration;
 }
 
-pub(super) fn private_vss_envelope_commitment_record_root_input(
-    envelope_reference: &serde_json::Value,
-) -> serde_json::Value {
-    let mut root_input = envelope_reference.clone();
-    root_input
-        .as_object_mut()
-        .expect("private VSS envelope commitment reference")
-        .remove("encryptedEnvelope");
-    root_input
-}
-
-pub(super) fn rebind_first_private_vss_envelope_commitment_record_root(
-    package: &mut serde_json::Value,
-) {
-    let envelope_reference = &mut package["privateVssEnvelopeCommitments"]["envelopeReferences"][0];
-    envelope_reference
-        .as_object_mut()
-        .expect("private VSS envelope commitment reference")
-        .remove("privateEnvelopeCommitmentRoot");
-    let record_root = derive_canonical_object_hash(
-        &private_vss_envelope_commitment_record_root_input(envelope_reference),
-    )
-    .expect("private VSS envelope commitment record root");
-    envelope_reference["privateEnvelopeCommitmentRoot"] = serde_json::json!(record_root);
+pub(super) fn rebind_collective_setup_intent_signatures(package: &mut serde_json::Value) {
+    let registration_count = package["setupIntent"]["trusteeRegistrations"]
+        .as_array()
+        .expect("setup-intent trustee registrations")
+        .len();
+    for registration_index in 0..registration_count {
+        rebind_collective_setup_intent_registration(package, registration_index);
+    }
 }
 
 pub(super) fn private_vss_envelope_commitment_set_root_input(
@@ -143,123 +95,4 @@ pub(super) fn private_vss_envelope_commitment_set_root_input(
         }
     }
     root_input
-}
-
-pub(super) fn rebind_first_private_vss_encrypted_envelope_hash(package: &mut serde_json::Value) {
-    let encrypted_envelope =
-        &mut package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"];
-    encrypted_envelope
-        .as_object_mut()
-        .expect("encrypted envelope")
-        .remove("encryptedEnvelopeHash");
-    let encrypted_envelope_hash =
-        derive_canonical_object_hash(encrypted_envelope).expect("encrypted envelope hash");
-    encrypted_envelope["encryptedEnvelopeHash"] =
-        serde_json::json!(encrypted_envelope_hash.clone());
-    package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelopeHash"] =
-        serde_json::json!(encrypted_envelope_hash);
-}
-
-pub(super) fn rebind_collective_vss_acceptance_root(package: &mut serde_json::Value) {
-    package["vssShareAcceptances"]
-        .as_object_mut()
-        .expect("VSS share acceptance set")
-        .remove("vssShareAcceptanceRoot");
-    package["vssShareAcceptances"]["vssShareAcceptanceRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["vssShareAcceptances"])
-            .expect("VSS share acceptance set root")
-    );
-}
-
-pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut serde_json::Value) {
-    let proof_records = package["publicKeyShareSuccinctProofs"]["proofRecords"]
-        .as_array_mut()
-        .expect("public-key succinct proof records");
-    for proof_record in proof_records {
-        proof_record
-            .as_object_mut()
-            .expect("public-key succinct proof record")
-            .remove("publicKeyShareSuccinctProofRoot");
-        proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
-            derive_canonical_object_hash(proof_record).expect("public-key succinct proof root")
-        );
-    }
-    package["publicKeyShareSuccinctProofs"]
-        .as_object_mut()
-        .expect("public-key succinct proof set")
-        .remove("publicKeyShareSuccinctProofSetRoot");
-    package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["publicKeyShareSuccinctProofs"])
-            .expect("public-key succinct proof set root")
-    );
-}
-
-pub(super) fn rebind_collective_public_key_root(package: &mut serde_json::Value) {
-    package["collectivePublicKey"]
-        .as_object_mut()
-        .expect("collective public key")
-        .remove("collectivePublicKeyRoot");
-    package["collectivePublicKey"]["collectivePublicKeyRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["collectivePublicKey"])
-            .expect("collective public-key root")
-    );
-    package["collectivePublicKeyRoot"] =
-        package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
-}
-
-pub(super) fn rebind_collective_public_key_share_roots(package: &mut serde_json::Value) {
-    let share_records = package["publicKeyShares"]["shareRecords"]
-        .as_array_mut()
-        .expect("public-key share records");
-    for share_record in share_records {
-        share_record
-            .as_object_mut()
-            .expect("public-key share record")
-            .remove("publicKeyShareRoot");
-        share_record["publicKeyShareRoot"] = serde_json::json!(
-            derive_canonical_object_hash(share_record).expect("public-key share root")
-        );
-    }
-    package["publicKeyShares"]
-        .as_object_mut()
-        .expect("public-key share set")
-        .remove("publicKeyShareSetRoot");
-    package["publicKeyShares"]["publicKeyShareSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["publicKeyShares"])
-            .expect("public-key share set root")
-    );
-}
-
-pub(super) fn rebind_collective_public_key_share_proof_roots(package: &mut serde_json::Value) {
-    let proof_records = package["publicKeyShareProofs"]["proofRecords"]
-        .as_array_mut()
-        .expect("public-key share proof records");
-    for proof_record in proof_records {
-        proof_record
-            .as_object_mut()
-            .expect("public-key share proof record")
-            .remove("publicKeyShareProofRoot");
-        proof_record["publicKeyShareProofRoot"] = serde_json::json!(
-            derive_canonical_object_hash(proof_record).expect("public-key share proof root")
-        );
-    }
-    package["publicKeyShareProofs"]
-        .as_object_mut()
-        .expect("public-key share proof set")
-        .remove("publicKeyShareProofSetRoot");
-    package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["publicKeyShareProofs"])
-            .expect("public-key share proof set root")
-    );
-}
-
-pub(super) fn rebind_collective_evaluator_key_schedule_root(package: &mut serde_json::Value) {
-    package["evaluatorKeySchedule"]
-        .as_object_mut()
-        .expect("evaluator key schedule")
-        .remove("evaluatorKeyScheduleRoot");
-    package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["evaluatorKeySchedule"])
-            .expect("evaluator key schedule root")
-    );
 }

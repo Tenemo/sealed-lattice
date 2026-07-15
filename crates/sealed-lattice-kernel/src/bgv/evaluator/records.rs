@@ -18,11 +18,9 @@ pub(crate) fn target_layout_hash(option_count: usize) -> CanonicalResult<String>
     }
 
     derive_canonical_object_hash(&json!({
-    "objectType": "DirectEncryptedBallotTargetLayout",
-    "layoutId": DIRECT_TARGET_PROJECTION_ID,
+        "objectType": "DirectEncryptedBallotTargetLayout",
+        "layoutId": DIRECT_TARGET_PROJECTION_ID,
         "optionCount": option_count,
-        "targetIdSlotRule": "(option + 1) * [rank < topCount]",
-        "targetOrderSlotRule": "(rank + 1) * [rank < topCount]",
         "slotCount": POLYNOMIAL_DEGREE,
     }))
 }

@@ -27,41 +27,36 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
                 "VSS source trustee commitment records were required for the source linkage",
             )
         })?;
-    let matching_source_records = source_trustee_records
-        .iter()
-        .filter(|record| {
-            record
-                .get("sourceTrusteeRosterPosition")
-                .and_then(Value::as_u64)
-                == Some(trustee_roster_position)
-        })
-        .collect::<Vec<_>>();
-    if matching_source_records.len() != 1 {
-        return Err(CanonicalError::new(
+    let source_trustee_index = usize::try_from(trustee_roster_position).map_err(|_| {
+        CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "accepted VSS commitments must contain exactly one source trustee record",
+            "source trustee roster position does not fit usize",
+        )
+    })?;
+    let source_trustee_record = source_trustee_records
+        .get(source_trustee_index)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "accepted VSS commitments are missing the source trustee record",
+            )
+        })?;
+    if vss_coefficient_commitments
+        .get("publicMatrixSeedHash")
+        .and_then(Value::as_str)
+        != Some(public_matrix_seed_hash)
+        || source_trustee_record
+            .get("sourceTrusteeIdentity")
+            .and_then(Value::as_str)
+            != Some(trustee_identity)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "VSS commitment set does not match the accepted source context",
         ));
     }
-    let source_trustee_record = matching_source_records[0];
-    for (field_name, expected_value) in [
-        ("sourceTrusteeIdentity", trustee_identity),
-        ("publicMatrixSeedHash", public_matrix_seed_hash),
-    ] {
-        if source_trustee_record
-            .get(field_name)
-            .and_then(Value::as_str)
-            != Some(expected_value)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!(
-                    "source trustee commitment {field_name} does not match its accepted context"
-                ),
-            ));
-        }
-    }
-    let public_commitment_records = source_trustee_record
-        .get("coefficientCommitments")
+    let public_commitment_roots = source_trustee_record
+        .get("coefficientCommitmentRoots")
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
@@ -69,7 +64,7 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
                 "source trustee coefficient commitments were required for the source linkage",
             )
         })?;
-    let material_records = vss_coefficient_commitment_material
+    let coefficient_commitments = vss_coefficient_commitment_material
         .get("coefficientCommitments")
         .and_then(Value::as_array)
         .ok_or_else(|| {
@@ -78,87 +73,49 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
                 "VSS coefficient commitment material records were required for the source linkage",
             )
         })?;
+    let threshold_degree = vss_coefficient_commitment_material
+        .get("thresholdDegree")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "VSS coefficient commitment material threshold degree was required",
+            )
+        })?;
 
     let mut commitment_values = Vec::with_capacity(DATA_PRIMES.len());
     let mut commitments = Vec::with_capacity(DATA_PRIMES.len());
-    for (source_rns_limb_index, source_message_modulus) in DATA_PRIMES.iter().copied().enumerate() {
-        let matching_public_records = public_commitment_records
-            .iter()
-            .filter(|record| {
-                record.get("rnsLimbIndex").and_then(Value::as_u64)
-                    == Some(source_rns_limb_index as u64)
-                    && record.get("shamirCoefficientIndex").and_then(Value::as_u64) == Some(0)
-            })
-            .collect::<Vec<_>>();
-        if matching_public_records.len() != 1 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "accepted VSS commitments must contain exactly one public constant root per Q_share limb",
-            ));
-        }
-        let public_record = matching_public_records[0];
-        if public_record.get("rnsPrime").and_then(Value::as_u64) != Some(source_message_modulus) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "public source constant commitment prime does not match its canonical Q_share limb",
-            ));
-        }
-        let expected_commitment_root = public_record
-            .get("commitmentRoot")
-            .and_then(Value::as_str)
+    for source_rns_limb_index in 0..DATA_PRIMES.len() {
+        let expected_commitment_root = public_commitment_roots
+            .get(source_rns_limb_index * threshold_degree)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "accepted VSS commitments must contain one canonical public constant root per Q_share limb",
+                )
+            })?
+            .as_str()
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     "public source constant commitment root was missing",
                 )
             })?;
-        let matching_records = material_records
-            .iter()
-            .filter(|record| {
-                record
-                    .get("sourceTrusteeRosterPosition")
-                    .and_then(Value::as_u64)
-                    == Some(trustee_roster_position)
-                    && record.get("rnsLimbIndex").and_then(Value::as_u64)
-                        == Some(source_rns_limb_index as u64)
-                    && record.get("shamirCoefficientIndex").and_then(Value::as_u64) == Some(0)
-            })
-            .collect::<Vec<_>>();
-        if matching_records.len() != 1 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "accepted VSS material must contain exactly one source constant commitment per Q_share limb",
-            ));
-        }
-        let material_record = matching_records[0];
-        for (field_name, expected_value) in [
-            ("sourceTrusteeIdentity", trustee_identity),
-            ("publicMatrixSeedHash", public_matrix_seed_hash),
-        ] {
-            if material_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    format!(
-                        "source constant commitment {field_name} does not match its accepted context"
-                    ),
-                ));
-            }
-        }
-        if material_record.get("rnsPrime").and_then(Value::as_u64) != Some(source_message_modulus) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "source constant commitment prime does not match its canonical Q_share limb",
-            ));
-        }
-        let commitment_value = material_record.get("commitment").ok_or_else(|| {
+        let material_record_index = (trustee_roster_position as usize * DATA_PRIMES.len()
+            + source_rns_limb_index)
+            * threshold_degree;
+        let commitment_value = coefficient_commitments
+            .get(material_record_index)
+            .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "source constant commitment body was missing from accepted VSS material",
+                "accepted VSS material must contain one canonical source constant commitment per Q_share limb",
             )
         })?;
         let commitment = parse_setup_commitment_full_value(commitment_value)?;
         if commitment.source_rns_limb_index != source_rns_limb_index
-            || commitment.source_message_modulus != source_message_modulus
             || commitment.shamir_coefficient_index != 0
             || commitment.ring_degree != ring_degree
         {
@@ -168,12 +125,7 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
             ));
         }
         let commitment_root = setup_commitment_root(&commitment)?;
-        if material_record
-            .get("commitmentRoot")
-            .and_then(Value::as_str)
-            != Some(commitment_root.as_str())
-            || expected_commitment_root != commitment_root
-        {
+        if expected_commitment_root != commitment_root {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
                 "source constant commitment body does not reproduce its accepted root",
@@ -190,11 +142,9 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
     })
 }
 
-// Reconstruct the public full-source linkage from the minimal commitment
-// bodies retained in one bridge statement. Each body is parsed under the
-// canonical SetupCommitment encoding, then its recomputed root is matched to
-// the accepted VSS root record. The statement copy never supplies authority
-// for its own root.
+// Reconstruct the public full-source linkage from the commitment bodies in
+// canonical Q_share order, matching each recomputed root to the accepted VSS
+// record.
 pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_statement(
     vss_coefficient_commitments: &Value,
     bridge_statement_record: &Value,
@@ -212,41 +162,36 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_s
                 "VSS source trustee commitment records were required for the source linkage",
             )
         })?;
-    let matching_source_records = source_trustee_records
-        .iter()
-        .filter(|record| {
-            record
-                .get("sourceTrusteeRosterPosition")
-                .and_then(Value::as_u64)
-                == Some(trustee_roster_position)
-        })
-        .collect::<Vec<_>>();
-    if matching_source_records.len() != 1 {
-        return Err(CanonicalError::new(
+    let source_trustee_index = usize::try_from(trustee_roster_position).map_err(|_| {
+        CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "accepted VSS commitments must contain exactly one source trustee record",
+            "source trustee roster position does not fit usize",
+        )
+    })?;
+    let source_trustee_record = source_trustee_records
+        .get(source_trustee_index)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "accepted VSS commitments are missing the source trustee record",
+            )
+        })?;
+    if vss_coefficient_commitments
+        .get("publicMatrixSeedHash")
+        .and_then(Value::as_str)
+        != Some(public_matrix_seed_hash)
+        || source_trustee_record
+            .get("sourceTrusteeIdentity")
+            .and_then(Value::as_str)
+            != Some(trustee_identity)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "VSS commitment set does not match the accepted source context",
         ));
     }
-    let source_trustee_record = matching_source_records[0];
-    for (field_name, expected_value) in [
-        ("sourceTrusteeIdentity", trustee_identity),
-        ("publicMatrixSeedHash", public_matrix_seed_hash),
-    ] {
-        if source_trustee_record
-            .get(field_name)
-            .and_then(Value::as_str)
-            != Some(expected_value)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!(
-                    "source trustee commitment {field_name} does not match its accepted context"
-                ),
-            ));
-        }
-    }
-    let public_commitment_records = source_trustee_record
-        .get("coefficientCommitments")
+    let public_commitment_roots = source_trustee_record
+        .get("coefficientCommitmentRoots")
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
@@ -269,34 +214,40 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_s
             "same-secret bridge statement must retain one source constant commitment per Q_share limb",
         ));
     }
+    if public_commitment_roots.len() % DATA_PRIMES.len() != 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "accepted VSS commitment roots must use canonical limb/coefficient order",
+        ));
+    }
+    let threshold_degree = public_commitment_roots.len() / DATA_PRIMES.len();
+    if threshold_degree == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "accepted VSS commitment roots must include every Shamir coefficient",
+        ));
+    }
 
     let mut commitment_values = Vec::with_capacity(DATA_PRIMES.len());
     let mut commitments = Vec::with_capacity(DATA_PRIMES.len());
-    for (source_rns_limb_index, source_message_modulus) in DATA_PRIMES.iter().copied().enumerate() {
-        let public_records = public_commitment_records
-            .iter()
-            .filter(|record| {
-                record.get("rnsLimbIndex").and_then(Value::as_u64)
-                    == Some(source_rns_limb_index as u64)
-                    && record.get("shamirCoefficientIndex").and_then(Value::as_u64) == Some(0)
-            })
-            .collect::<Vec<_>>();
-        if public_records.len() != 1 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "accepted VSS commitments must contain exactly one public constant root per Q_share limb",
-            ));
-        }
-        let public_record = public_records[0];
-        if public_record.get("rnsPrime").and_then(Value::as_u64) != Some(source_message_modulus) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "public source constant commitment prime does not match its canonical Q_share limb",
-            ));
-        }
-        let expected_commitment_root = public_record
-            .get("commitmentRoot")
-            .and_then(Value::as_str)
+    for source_rns_limb_index in 0..DATA_PRIMES.len() {
+        let source_commitment_record = source_commitment_records
+            .get(source_rns_limb_index)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "same-secret bridge is missing a source constant commitment",
+                )
+            })?;
+        let expected_commitment_root = public_commitment_roots
+            .get(source_rns_limb_index * threshold_degree)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "accepted VSS commitments must contain one canonical public constant root per Q_share limb",
+                )
+            })?
+            .as_str()
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
@@ -304,29 +255,8 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_s
                 )
             })?;
 
-        let source_record = &source_commitment_records[source_rns_limb_index];
-        if source_record.get("rnsLimbIndex").and_then(Value::as_u64)
-            != Some(source_rns_limb_index as u64)
-            || source_record.get("rnsPrime").and_then(Value::as_u64) != Some(source_message_modulus)
-            || source_record
-                .get("shamirCoefficientIndex")
-                .and_then(Value::as_u64)
-                != Some(0)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "same-secret bridge source commitments must use canonical limb order and coordinates",
-            ));
-        }
-        let commitment_value = source_record.get("commitment").ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "same-secret bridge source constant commitment body was missing",
-            )
-        })?;
-        let commitment = parse_setup_commitment_full_value(commitment_value)?;
+        let commitment = parse_setup_commitment_full_value(source_commitment_record)?;
         if commitment.source_rns_limb_index != source_rns_limb_index
-            || commitment.source_message_modulus != source_message_modulus
             || commitment.shamir_coefficient_index != 0
             || commitment.ring_degree != ring_degree
         {

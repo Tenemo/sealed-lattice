@@ -13,7 +13,7 @@ use crate::{
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{derive_canonical_object_hash, hash512},
+    hashing::{derive_canonical_object_hash, hash_framed_parts_512 as hash512},
 };
 
 use super::sampling::reduce_unbiased_u64;
@@ -29,7 +29,20 @@ mod validation;
 
 #[cfg(test)]
 pub(super) use algebra::*;
-pub(super) use commitment_parameters::*;
+#[cfg(test)]
+pub(super) use commitment_parameters::setup_coefficient_fits_commitment_modulus_product;
+use commitment_parameters::setup_coefficients_fit_commitment_modulus_product;
+pub(crate) use commitment_parameters::{
+    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+};
+pub(super) use commitment_parameters::{
+    SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+};
+#[cfg(test)]
+use commitment_parameters::{
+    setup_big_signed_coefficient_fits_centered_commitment_modulus_product,
+    setup_signed_coefficient_fits_centered_commitment_modulus_product,
+};
 pub(super) use matrix::*;
 #[cfg(test)]
 pub(super) use opening::*;
@@ -61,7 +74,6 @@ pub(super) struct SetupCommitmentLimb {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SetupCommitmentValue {
     pub(super) source_rns_limb_index: usize,
-    pub(super) source_message_modulus: u64,
     pub(super) shamir_coefficient_index: u64,
     pub(super) ring_degree: usize,
     pub(super) limbs: Vec<SetupCommitmentLimb>,
@@ -73,8 +85,6 @@ pub(super) struct SetupCommitmentOpeningVerification {
     pub(super) commitment_root: String,
     pub(super) randomness_infinity_bound: i128,
     pub(super) message_coefficient_bound: u128,
-    pub(super) commitment_modulus_product_decimal: String,
-    pub(super) commitment_modulus_product_ceil_bits: u32,
 }
 
 fn invalid_commitment_input(message: impl Into<String>) -> CanonicalError {
@@ -83,17 +93,15 @@ fn invalid_commitment_input(message: impl Into<String>) -> CanonicalError {
 
 #[cfg(test)]
 mod tests {
-    use num_bigint::BigUint;
     use serde_json::json;
 
     use super::{
-        SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_degree,
         compute_setup_commitment_from_opening_request,
         compute_setup_signed_lifted_commitment_for_degree,
-        setup_coefficient_fits_commitment_modulus_product, setup_commitment_parameters_value,
-        setup_commitment_root, verify_setup_commitment_opening,
-        verify_setup_lifted_commitment_opening, verify_setup_signed_lifted_commitment_opening,
+        setup_coefficient_fits_commitment_modulus_product, setup_commitment_root,
+        verify_setup_commitment_opening, verify_setup_lifted_commitment_opening,
+        verify_setup_signed_lifted_commitment_opening,
     };
     use crate::{
         bgv::{
@@ -104,39 +112,16 @@ mod tests {
     };
 
     const TEST_RING_DEGREE: usize = 8;
-
-    #[test]
-    fn commitment_parameters_bind_crt_lifted_message_space() {
-        let commitment_parameters = setup_commitment_parameters_value().expect("parameters");
-
-        assert_eq!(commitment_parameters["objectType"], "BdlopCommitment");
-        assert_eq!(
-            commitment_parameters["messageEncoding"]["integerEncoding"],
-            "crt-lifted-integer-coefficients"
-        );
-        assert_eq!(
-            commitment_parameters["matrixShape"]["moduleRank"],
-            SETUP_COMMITMENT_MODULE_RANK
-        );
-        assert!(
-            commitment_parameters["messageEncoding"]["commitmentModulusProductDecimal"]
-                .as_str()
-                .expect("product decimal")
-                .parse::<BigUint>()
-                .expect("product should parse")
-                > BigUint::from(DATA_PRIMES[0]) * BigUint::from(1000_u16)
-        );
-    }
+    const TEST_RANDOMNESS_INFINITY_BOUND: i128 = 1;
 
     #[test]
     fn commitment_opening_verifies_and_rejects_tampering() -> CanonicalResult<()> {
         let public_matrix_seed_hash = valid_hash('a');
         let message = message_coefficients();
-        let randomness = randomness_columns(SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND);
+        let randomness = randomness_columns(TEST_RANDOMNESS_INFINITY_BOUND);
         let commitment = compute_setup_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
-            DATA_PRIMES[0],
             2,
             &message,
             &randomness,
@@ -148,7 +133,7 @@ mod tests {
             &commitment,
             &message,
             &randomness,
-            SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+            TEST_RANDOMNESS_INFINITY_BOUND,
         )?;
 
         assert_eq!(
@@ -166,7 +151,7 @@ mod tests {
                 &tampered_commitment,
                 &message,
                 &randomness,
-                SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+                TEST_RANDOMNESS_INFINITY_BOUND,
             )
             .is_err()
         );
@@ -179,7 +164,7 @@ mod tests {
                 &commitment,
                 &out_of_range_message,
                 &randomness,
-                SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+                TEST_RANDOMNESS_INFINITY_BOUND,
             )
             .is_err()
         );
@@ -188,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn commitment_command_computes_canonical_roots() -> CanonicalResult<()> {
+    fn commitment_command_derives_source_domain_from_limb_index() -> CanonicalResult<()> {
         let public_matrix_seed_hash = valid_hash('e');
         let message = message_coefficients();
         let randomness = randomness_columns(1);
@@ -196,40 +181,33 @@ mod tests {
             "command": "ComputeSetupCommitmentFromOpening",
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "sourceRnsLimbIndex": 0,
-            "sourceMessageModulus": DATA_PRIMES[0],
             "shamirCoefficientIndex": 1,
             "messageCoefficients": message,
             "randomnessByColumn": randomness,
             "ringDegree": TEST_RING_DEGREE,
         }))?;
 
-        assert_eq!(response["operation"], "computeSetupCommitmentFromOpening");
-        assert_eq!(
-            response["commitmentRoot"]
-                .as_str()
-                .expect("commitment root")
-                .len(),
-            128
-        );
+        let commitment = super::parse_setup_commitment_full_value(&response["commitment"])?;
+        assert_eq!(commitment.source_rns_limb_index, 0);
+        assert_eq!(commitment.shamir_coefficient_index, 1);
+        assert!(response.get("commitmentRoot").is_none());
 
         Ok(())
     }
 
     #[test]
-    fn commitment_command_rejects_wrong_source_prime() {
+    fn commitment_command_rejects_an_out_of_range_source_limb() {
         let public_matrix_seed_hash = valid_hash('f');
-        let mut wrong_prime_request = json!({
+        let request = json!({
             "command": "ComputeSetupCommitmentFromOpening",
             "publicMatrixSeedHash": public_matrix_seed_hash,
-            "sourceRnsLimbIndex": 0,
-            "sourceMessageModulus": DATA_PRIMES[0],
+            "sourceRnsLimbIndex": DATA_PRIMES.len(),
             "shamirCoefficientIndex": 1,
             "messageCoefficients": message_coefficients(),
             "randomnessByColumn": randomness_columns(1),
             "ringDegree": TEST_RING_DEGREE,
         });
-        wrong_prime_request["sourceMessageModulus"] = json!(DATA_PRIMES[1]);
-        assert!(compute_setup_commitment_from_opening_request(&wrong_prime_request).is_err());
+        assert!(compute_setup_commitment_from_opening_request(&request).is_err());
     }
 
     #[test]
@@ -240,7 +218,6 @@ mod tests {
         let commitment = compute_setup_signed_lifted_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
-            DATA_PRIMES[0],
             4,
             &signed_message,
             &randomness,
@@ -290,7 +267,6 @@ mod tests {
         let first_commitment = compute_setup_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
-            DATA_PRIMES[0],
             1,
             &first_message,
             &first_randomness,
@@ -299,7 +275,6 @@ mod tests {
         let second_commitment = compute_setup_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
-            DATA_PRIMES[0],
             1,
             &second_message,
             &second_randomness,
@@ -325,7 +300,6 @@ mod tests {
         let direct_combined_commitment = compute_setup_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
-            DATA_PRIMES[0],
             1,
             &combined_message,
             &combined_randomness,

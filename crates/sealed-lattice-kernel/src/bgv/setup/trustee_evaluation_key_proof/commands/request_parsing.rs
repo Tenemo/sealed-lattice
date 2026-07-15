@@ -1,23 +1,29 @@
-use super::decoding::*;
-use super::target_decryption_parsing::*;
-use super::*;
+use super::super::invalid_succinct_setup_proof;
+use super::super::relation::{
+    EvaluationKeyShareDescriptor, SameSecretBridgeStatement, SameSecretLinkageStatement,
+    SameSecretLinkageWitness, SetupProofStatement, SuccinctSetupProofContext,
+    SuccinctSetupProofFamilyShape, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
+    VssCommittedMaterialWitness, VssShareLinkageItem, VssShareLinkageStatement,
+};
+use super::VssPublicCommandCommitmentExpectation;
+use super::decoding::{
+    read_i64_array, read_i64_matrix, read_i64_matrix2, read_string, read_string_array, read_u64,
+};
+use super::target_decryption_parsing::{
+    key_descriptor_from_value, vss_share_linkage_commitment_from_value,
+};
+use crate::bgv::parameters::DATA_PRIMES;
+use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
+use crate::encoding::CanonicalResult;
+use crate::hashing::derive_canonical_object_hash;
+use serde_json::Value;
 
-// The same-secret bridge target statement fields shared by the bridge proof
-// parser and the optional key-bearing linkage. Every commitment body is
-// validated against its expected canonical root, and every parsed field enters
-// the statement hash, so the target material cannot be swapped after proving.
 fn same_secret_bridge_fields_from_value(
     statement_value: &Value,
+    context: &SuccinctSetupProofContext,
+    public_matrix_seed_hash: &str,
     ring_degree: usize,
 ) -> CanonicalResult<SameSecretBridgeStatement> {
-    let source_trustee_identity =
-        read_string(statement_value, "sourceTrusteeIdentity")?.to_string();
-    let source_trustee_roster_position = read_u64(statement_value, "sourceTrusteeRosterPosition")?;
-    let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
-    let target_basis_hash = read_string(statement_value, "targetBasisHash")?.to_string();
-    let target_rns_primes = read_u64_array(statement_value, "targetRnsPrimes")?;
-    let target_constant_commitment_roots =
-        read_string_array(statement_value, "targetConstantCommitmentRoots")?;
     let target_constant_commitment_values = statement_value
         .get("targetConstantCommitments")
         .and_then(Value::as_array)
@@ -26,17 +32,19 @@ fn same_secret_bridge_fields_from_value(
                 "sameSecretBridge.targetConstantCommitments must be an array",
             )
         })?;
-    if target_constant_commitment_roots.len() != target_rns_primes.len()
-        || target_constant_commitment_values.len() != target_rns_primes.len()
-    {
+    if target_constant_commitment_values.len() != DATA_PRIMES.len() {
         return Err(invalid_succinct_setup_proof(
-            "sameSecretBridge target primes, roots, and commitments must be aligned",
+            "sameSecretBridge must contain one target commitment for every Q_share limb",
         ));
     }
+    let target_constant_commitment_roots = target_constant_commitment_values
+        .iter()
+        .map(derive_canonical_object_hash)
+        .collect::<CanonicalResult<Vec<_>>>()?;
     let target_constant_commitments = target_constant_commitment_values
         .iter()
         .zip(target_constant_commitment_roots.iter())
-        .zip(target_rns_primes.iter())
+        .zip(DATA_PRIMES.iter())
         .enumerate()
         .map(
             |(target_rns_limb_index, ((value, expected_commitment_root), target_rns_prime))| {
@@ -55,55 +63,54 @@ fn same_secret_bridge_fields_from_value(
         )
         .collect::<CanonicalResult<Vec<_>>>()?;
     Ok(SameSecretBridgeStatement {
-        public_matrix_seed_hash,
-        source_trustee_identity,
-        source_trustee_roster_position,
-        target_basis_hash,
-        target_rns_primes,
+        public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
+        source_trustee_identity: context.trustee_identity.clone(),
+        source_trustee_roster_position: context.trustee_roster_position,
+        bridge_rns_primes: DATA_PRIMES.to_vec(),
         target_constant_commitment_roots,
         target_constant_commitments,
     })
 }
 
-// The optional same-secret bridge targets on a key-bearing statement request:
-// the committed material the atom schedule's linkage connects. Development statements may
-// omit it; the schedule backend refuses to prove or verify without it.
-fn optional_same_secret_bridge_from_statement_request(
+// The same-secret bridge targets on a public-key share statement request: the
+// committed material the atom schedule's linkage connects.
+fn same_secret_bridge_from_statement_request(
     request: &Value,
+    context: &SuccinctSetupProofContext,
     ring_degree: usize,
-) -> CanonicalResult<Option<SameSecretBridgeStatement>> {
-    match request.get("sameSecretBridge") {
-        None | Some(Value::Null) => Ok(None),
-        Some(statement_value) => Ok(Some(same_secret_bridge_fields_from_value(
-            statement_value,
-            ring_degree,
-        )?)),
-    }
+) -> CanonicalResult<SameSecretBridgeStatement> {
+    let statement_value = request
+        .get("sameSecretBridge")
+        .ok_or_else(|| invalid_succinct_setup_proof("sameSecretBridge must be present"))?;
+    let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?;
+    same_secret_bridge_fields_from_value(
+        statement_value,
+        context,
+        public_matrix_seed_hash,
+        ring_degree,
+    )
 }
 
-fn optional_same_secret_linkage_from_statement_request(
+fn same_secret_linkage_from_statement_request(
     request: &Value,
-) -> CanonicalResult<Option<SameSecretLinkageStatement>> {
-    match request.get("sameSecretLinkage") {
-        None | Some(Value::Null) => Ok(None),
-        Some(linkage_value) => {
-            let commitment_values = linkage_value
-                .get("commitments")
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof("sameSecretLinkage.commitments must be an array")
-                })?;
-            let commitments = commitment_values
-                .iter()
-                .map(parse_setup_commitment_full_value)
-                .collect::<CanonicalResult<Vec<_>>>()?;
-            Ok(Some(SameSecretLinkageStatement {
-                public_matrix_seed_hash: read_string(linkage_value, "publicMatrixSeedHash")?
-                    .to_string(),
-                commitments,
-            }))
-        }
-    }
+) -> CanonicalResult<SameSecretLinkageStatement> {
+    let linkage_value = request
+        .get("sameSecretLinkage")
+        .ok_or_else(|| invalid_succinct_setup_proof("sameSecretLinkage must be present"))?;
+    let commitment_values = linkage_value
+        .get("commitments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("sameSecretLinkage.commitments must be an array")
+        })?;
+    let commitments = commitment_values
+        .iter()
+        .map(parse_setup_commitment_full_value)
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    Ok(SameSecretLinkageStatement {
+        public_matrix_seed_hash: read_string(linkage_value, "publicMatrixSeedHash")?.to_string(),
+        commitments,
+    })
 }
 
 pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn statement_from_request(
@@ -120,7 +127,7 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn statement_from_reques
         .ok_or_else(|| invalid_succinct_setup_proof("keys must be an array"))?;
     let keys = key_values
         .iter()
-        .map(key_descriptor_from_value)
+        .map(|key_value| key_descriptor_from_value(key_value, request))
         .collect::<CanonicalResult<Vec<_>>>()?;
     // The key kinds decide the family, and the family decides which labeled
     // binding roots the context must carry.
@@ -128,18 +135,41 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn statement_from_reques
         &keys.iter().map(|key| key.kind).collect::<Vec<_>>(),
     )?;
     let context = proof_context_from_value(context_value, shape)?;
-    let same_secret_linkage = optional_same_secret_linkage_from_statement_request(request)?;
-    let same_secret_bridge =
-        optional_same_secret_bridge_from_statement_request(request, ring_degree)?;
+    let proof = match shape {
+        SuccinctSetupProofFamilyShape::PublicKeyShare => {
+            let [key] = <Vec<EvaluationKeyShareDescriptor> as TryInto<
+                [EvaluationKeyShareDescriptor; 1],
+            >>::try_into(keys)
+            .map_err(|_| {
+                invalid_succinct_setup_proof(
+                    "the public-key share statement requires exactly one key descriptor",
+                )
+            })?;
+            SetupProofStatement::PublicKeyShare {
+                key,
+                same_secret_bridge: same_secret_bridge_from_statement_request(
+                    request,
+                    &context,
+                    ring_degree,
+                )?,
+            }
+        }
+        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
+            SetupProofStatement::TrusteeEvaluationKey {
+                keys,
+                same_secret_linkage: same_secret_linkage_from_statement_request(request)?,
+            }
+        }
+        _ => {
+            return Err(invalid_succinct_setup_proof(
+                "key descriptors selected a non-key-bearing proof family",
+            ));
+        }
+    };
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree,
-        keys,
-        same_secret_linkage,
-        private_vss_share: None,
-        vss_share_linkage: None,
-        same_secret_bridge,
-        target_decryption_share: None,
+        proof,
     };
     statement.validate_shape()?;
 
@@ -151,22 +181,13 @@ pub(super) fn proof_context_from_value(
     shape: SuccinctSetupProofFamilyShape,
 ) -> CanonicalResult<SuccinctSetupProofContext> {
     Ok(SuccinctSetupProofContext {
-        proof_family: shape.proof_family().to_string(),
-        ceremony_id: read_string(context_value, "ceremonyId")?.to_string(),
-        manifest_hash: read_string(context_value, "manifestHash")?.to_string(),
-        roster_hash: read_string(context_value, "rosterHash")?.to_string(),
+        setup_context_hash: read_string(context_value, "setupContextHash")?.to_string(),
         trustee_identity: read_string(context_value, "trusteeIdentity")?.to_string(),
         trustee_roster_position: read_u64(context_value, "trusteeRosterPosition")?,
-        setup_epoch: read_string(context_value, "setupEpoch")?.to_string(),
         binding_roots: shape
             .binding_labels()
             .iter()
-            .map(|label| {
-                Ok((
-                    (*label).to_string(),
-                    read_string(context_value, label)?.to_string(),
-                ))
-            })
+            .map(|label| Ok(read_string(context_value, label)?.to_string()))
             .collect::<CanonicalResult<Vec<_>>>()?,
     })
 }
@@ -186,12 +207,6 @@ pub(super) fn vss_share_linkage_statement_from_request(
         context_value,
         SuccinctSetupProofFamilyShape::VssShareLinkage,
     )?;
-    let share_linkage_statement_root = read_string(statement_value, "shareLinkageStatementRoot")?;
-    if context.binding_roots[0].1 != share_linkage_statement_root {
-        return Err(invalid_succinct_setup_proof(
-            "share-linkage context root must match the share-linkage statement root",
-        ));
-    }
     let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
     let is_threshold_aggregate = match statement_value.get("isThresholdAggregate") {
         None | Some(Value::Null) => false,
@@ -232,10 +247,7 @@ pub(super) fn vss_share_linkage_statement_from_request(
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree,
-        keys: Vec::new(),
-        same_secret_linkage: None,
-        private_vss_share: None,
-        vss_share_linkage: Some(VssShareLinkageStatement {
+        proof: SetupProofStatement::VssShareLinkage(VssShareLinkageStatement {
             public_matrix_seed_hash,
             source_trustee_identity: primary_item.source_trustee_identity,
             source_trustee_roster_position: primary_item.source_trustee_roster_position,
@@ -245,18 +257,13 @@ pub(super) fn vss_share_linkage_statement_from_request(
             source_recipient_share_commitment_root: primary_item
                 .source_recipient_share_commitment_root,
             source_rns_limb_index: primary_item.source_rns_limb_index,
-            source_message_modulus: primary_item.source_message_modulus,
             coefficient_commitment_roots: primary_item.coefficient_commitment_roots,
-            coefficient_opening_roots: primary_item.coefficient_opening_roots,
             coefficient_commitments: primary_item.coefficient_commitments,
             recipient_share_commitment_root: primary_item.recipient_share_commitment_root,
-            recipient_share_opening_root: primary_item.recipient_share_opening_root,
             recipient_share_commitment: primary_item.recipient_share_commitment,
             additional_linkage_items,
             is_threshold_aggregate,
         }),
-        same_secret_bridge: None,
-        target_decryption_share: None,
     };
     statement.validate_shape()?;
 
@@ -266,50 +273,22 @@ pub(super) fn vss_share_linkage_statement_from_request(
 pub(super) fn vss_share_linkage_witness_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyWitness> {
-    Ok(TrusteeEvaluationKeyWitness {
-        secret_coefficients: Vec::new(),
-        error_coefficients_by_key: Vec::new(),
-        negative_indicator_coefficients: Vec::new(),
-        opening_randomness_by_limb: Vec::new(),
-        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        private_vss_opening_randomness_by_shamir_index: Vec::new(),
-        private_vss_carry_witnesses: Vec::new(),
-        vss_public_coefficient_messages_by_shamir_index: read_i64_matrix2(
+    Ok(TrusteeEvaluationKeyWitness::VssShareLinkage {
+        coefficient_messages_by_shamir_index: read_i64_matrix2(
             request,
             "coefficientMessagesByShamirIndex",
         )?,
-        vss_public_recipient_share_messages: read_i64_array(request, "recipientShareMessages")?,
-        vss_public_coefficient_opening_randomness_by_shamir_index: read_i64_matrix(
-            request,
-            "coefficientOpeningRandomnessByShamirIndex",
-        )?,
-        vss_public_recipient_share_opening_randomness: read_i64_matrix2(
-            request,
-            "recipientShareOpeningRandomness",
-        )?,
-        vss_public_carry_witnesses: read_i64_array(request, "carryWitnesses")?,
-        vss_public_recipient_share_messages_by_item: read_optional_i64_matrix2(
+        recipient_share_messages_by_item: read_i64_matrix2(
             request,
             "recipientShareMessagesByItem",
         )?,
-        vss_public_recipient_share_opening_randomness_by_item: read_optional_i64_matrix(
-            request,
-            "recipientShareOpeningRandomnessByItem",
-        )?,
-        vss_public_carry_witnesses_by_item: read_optional_i64_matrix2(
-            request,
-            "carryWitnessesByItem",
-        )?,
-        target_decryption_message_vectors: Vec::new(),
-        target_decryption_opening_randomness_by_commitment: Vec::new(),
-        vss_committed_material_seeds_by_bound_message: read_string_array(
-            request,
-            "vssCommittedMaterialSeedsByBoundMessage",
-        )?,
-        vss_committed_material_context_hashes_by_bound_message: read_string_array(
-            request,
-            "vssCommittedMaterialContextHashesByBoundMessage",
-        )?,
+        carry_witnesses_by_item: read_i64_matrix2(request, "carryWitnessesByItem")?,
+        committed_material: VssCommittedMaterialWitness {
+            vss_committed_material_seeds_by_bound_message: read_string_array(
+                request,
+                "vssCommittedMaterialSeedsByBoundMessage",
+            )?,
+        },
     })
 }
 
@@ -328,27 +307,21 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn same_secret_bridge_st
         context_value,
         SuccinctSetupProofFamilyShape::SameSecretBridge,
     )?;
-    let source_trustee_identity =
-        read_string(statement_value, "sourceTrusteeIdentity")?.to_string();
-    let source_trustee_roster_position = read_u64(statement_value, "sourceTrusteeRosterPosition")?;
-    if context.trustee_identity != source_trustee_identity
-        || context.trustee_roster_position != source_trustee_roster_position
-    {
-        return Err(invalid_succinct_setup_proof(
-            "same-secret bridge context trustee must match the source trustee",
-        ));
-    }
-    let bridge_fields = same_secret_bridge_fields_from_value(statement_value, ring_degree)?;
+    let same_secret_linkage = same_secret_linkage_from_statement_request(request)?;
+    let bridge_fields = same_secret_bridge_fields_from_value(
+        statement_value,
+        &context,
+        &same_secret_linkage.public_matrix_seed_hash,
+        ring_degree,
+    )?;
 
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree,
-        keys: Vec::new(),
-        same_secret_linkage: optional_same_secret_linkage_from_statement_request(request)?,
-        private_vss_share: None,
-        vss_share_linkage: None,
-        same_secret_bridge: Some(bridge_fields),
-        target_decryption_share: None,
+        proof: SetupProofStatement::SameSecretBridge {
+            same_secret_linkage,
+            same_secret_bridge: bridge_fields,
+        },
     };
     statement.validate_shape()?;
 
@@ -358,32 +331,21 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn same_secret_bridge_st
 pub(super) fn same_secret_bridge_witness_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyWitness> {
-    Ok(TrusteeEvaluationKeyWitness {
-        secret_coefficients: read_i64_array(request, "secretCoefficients")?,
-        error_coefficients_by_key: Vec::new(),
-        negative_indicator_coefficients: read_i64_array(request, "negativeIndicatorCoefficients")?,
-        opening_randomness_by_limb: read_i64_matrix(request, "openingRandomnessByLimb")?,
-        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        private_vss_opening_randomness_by_shamir_index: Vec::new(),
-        private_vss_carry_witnesses: Vec::new(),
-        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_messages: Vec::new(),
-        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_opening_randomness: Vec::new(),
-        vss_public_carry_witnesses: Vec::new(),
-        vss_public_recipient_share_messages_by_item: Vec::new(),
-        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
-        vss_public_carry_witnesses_by_item: Vec::new(),
-        target_decryption_message_vectors: Vec::new(),
-        target_decryption_opening_randomness_by_commitment: Vec::new(),
-        vss_committed_material_seeds_by_bound_message: read_string_array(
-            request,
-            "vssCommittedMaterialSeedsByBoundMessage",
-        )?,
-        vss_committed_material_context_hashes_by_bound_message: read_string_array(
-            request,
-            "vssCommittedMaterialContextHashesByBoundMessage",
-        )?,
+    let secret_coefficients = read_i64_array(request, "secretCoefficients")?;
+    let negative_indicator_coefficients =
+        super::negative_indicator_coefficients_from_ternary_secret(&secret_coefficients)?;
+    Ok(TrusteeEvaluationKeyWitness::SameSecretBridge {
+        secret_coefficients,
+        linkage: SameSecretLinkageWitness {
+            negative_indicator_coefficients,
+            opening_randomness_by_limb: read_i64_matrix(request, "openingRandomnessByLimb")?,
+        },
+        committed_material: VssCommittedMaterialWitness {
+            vss_committed_material_seeds_by_bound_message: read_string_array(
+                request,
+                "vssCommittedMaterialSeedsByBoundMessage",
+            )?,
+        },
     })
 }
 
@@ -418,9 +380,16 @@ pub(super) fn vss_share_linkage_item_from_value(
                 "{field_name}.sourceRnsLimbIndex does not fit usize"
             ))
         })?;
-    let source_message_modulus = read_u64(value, "sourceMessageModulus")?;
+    let source_message_modulus =
+        DATA_PRIMES
+            .get(source_rns_limb_index)
+            .copied()
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(format!(
+                    "{field_name}.sourceRnsLimbIndex is outside the canonical modulus schedule"
+                ))
+            })?;
     let coefficient_commitment_roots = read_string_array(value, "coefficientCommitmentRoots")?;
-    let coefficient_opening_roots = read_string_array(value, "coefficientOpeningRoots")?;
     let coefficient_commitment_values = value
         .get("coefficientCommitments")
         .and_then(Value::as_array)
@@ -432,11 +401,6 @@ pub(super) fn vss_share_linkage_item_from_value(
     if coefficient_commitment_values.len() != coefficient_commitment_roots.len() {
         return Err(invalid_succinct_setup_proof(format!(
             "{field_name} coefficient commitments and roots must be aligned"
-        )));
-    }
-    if coefficient_commitment_values.len() != coefficient_opening_roots.len() {
-        return Err(invalid_succinct_setup_proof(format!(
-            "{field_name} coefficient commitments and opening roots must be aligned"
         )));
     }
     let coefficient_commitments = coefficient_commitment_values
@@ -463,7 +427,6 @@ pub(super) fn vss_share_linkage_item_from_value(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let recipient_share_commitment_root =
         read_string(value, "recipientShareCommitmentRoot")?.to_string();
-    let recipient_share_opening_root = read_string(value, "recipientShareOpeningRoot")?.to_string();
     let recipient_share_commitment = vss_share_linkage_commitment_from_value(
         value.get("recipientShareCommitment").ok_or_else(|| {
             invalid_succinct_setup_proof(format!(
@@ -493,12 +456,46 @@ pub(super) fn vss_share_linkage_item_from_value(
         recipient_identity: read_string(value, "recipientIdentity")?.to_string(),
         recipient_roster_position: read_u64(value, "recipientRosterPosition")?,
         source_rns_limb_index,
-        source_message_modulus,
         coefficient_commitment_roots,
-        coefficient_opening_roots,
         coefficient_commitments,
         recipient_share_commitment_root,
-        recipient_share_opening_root,
         recipient_share_commitment,
     })
+}
+
+#[cfg(test)]
+mod same_secret_bridge_witness_tests {
+    use super::*;
+
+    #[test]
+    fn derives_negative_indicators_from_the_ternary_secret() {
+        let mut request = serde_json::json!({
+            "secretCoefficients": [-1, 0, 1],
+            "openingRandomnessByLimb": [],
+            "vssCommittedMaterialSeedsByBoundMessage": [],
+        });
+        let witness = same_secret_bridge_witness_from_request(&request)
+            .expect("a ternary same-secret witness must parse");
+        let TrusteeEvaluationKeyWitness::SameSecretBridge {
+            secret_coefficients,
+            linkage,
+            ..
+        } = witness
+        else {
+            panic!("the same-secret parser must return a same-secret witness");
+        };
+        assert_eq!(secret_coefficients, [-1, 0, 1]);
+        assert_eq!(linkage.negative_indicator_coefficients, [1, 0, 0]);
+
+        request["secretCoefficients"][1] = serde_json::json!(2);
+        let Err(error) = same_secret_bridge_witness_from_request(&request) else {
+            panic!("a non-ternary same-secret witness must reject");
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("secretCoefficients must contain only ternary coefficients"),
+            "unexpected non-ternary secret error: {error}"
+        );
+    }
 }

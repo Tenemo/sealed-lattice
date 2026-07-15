@@ -1,59 +1,35 @@
 use super::*;
 
+use super::json_ingress::parse_transcript_core_request;
+
 use crate::hashing::derive_canonical_object_hash;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(tag = "command")]
 enum TranscriptCoreCommand {
-    ListCanonicalErrorCodes,
-    AnalyzeCanonicalObject,
-    ComputeChunkRoot,
-    HashRaw,
     DeriveCanonicalObjectHash,
-    InterpolateShamirConstantTerm,
-    EvaluatePlaintextComparison,
-    VerifyFixture,
+    ValidateCanonicalFoundationValue,
+    DeriveCeremonyContextHash,
+    DeriveActionContextHash,
+    EncodeMailboxKeyScheduleInput,
+    DecodeMailboxKeyScheduleInput,
+    EncodeMailboxAssociatedData,
+    DecodeMailboxAssociatedData,
+    EncodeStreamDescriptor,
+    DecodeStreamDescriptor,
+    EncodeSignedMailboxEnvelope,
+    DecodeSignedMailboxEnvelope,
+    DeriveMailboxKemCiphertextHash,
+    DeriveMailboxEnvelopeHash,
+    DeriveSetupMailboxSlotHash,
+    EncodePrivateRandomCursor,
+    DecodePrivateRandomCursor,
     DescribeBgvRnsParameters,
-    DescribeBgvOperationRegistry,
-    ValidateBgvEvaluatorOperation,
     DescribeCollectiveBgvSetupParameters,
-    DeriveCollectiveBgvSetupPublicDerivations,
-    GenerateBgvPassiveSetup,
-    VerifyBgvPassiveSetup,
     VerifyCollectiveBgvSetup,
     VerifyPrivateVssShareEnvelope,
-    GeneratePrivateVssShareProof,
     GenerateTrusteeEvaluationKeyProof,
-    DescribeTrusteeEvaluationKeyStatement,
     ComputeSetupCommitmentFromOpening,
-    BeginSetupProofMaterialTransportStream,
-    AbsorbSetupProofMaterialTransportStreamChunk,
-    FinishSetupProofMaterialTransportStream,
-    BeginEvaluationKeyShareComponentMaterialTransportStream,
-    AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk,
-    FinishEvaluationKeyShareComponentMaterialTransportStream,
-    VerifyLocalTrusteeSetupState,
-    GenerateBgvEvaluationKeyMaterial,
-    EncodeBgvBatchPlaintext,
-    ValidateBgvPlaintextObject,
-    ValidateBgvCiphertextObject,
-    GenerateBgvCiphertextConventionFixture,
-    GenerateBgvBaseConversionFixture,
-    AnalyzeBgvCanonicalObject,
-    RunDirectEncryptedBallot,
-    // Participant-side target-share and proof generation consume local witness
-    // material inside the caller's own browser. The staged result-release path
-    // still verifies every proof before recombination; exposing local generation
-    // does not make an unproved share acceptable.
-    GenerateBgvTargetDecryptionShareFromLocalShare,
-    DeriveBgvTargetDecryptionShareProofStatement,
-    GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness,
-    VerifyBgvTargetDecryptionShareProofMaterial,
-    VerifyBgvTargetDecryptionShareProofStatementBinding,
-    DeriveBgvTargetDecryptionResultReleaseSetupContext,
-    BeginBgvTargetDecryptionResultRelease,
-    AbsorbBgvTargetDecryptionResultReleaseShare,
-    FinishBgvTargetDecryptionResultRelease,
     ComputeVssCommittedMaterialCommitment,
     GenerateVssShareLinkageProof,
     GenerateSameSecretBridgeProof,
@@ -69,12 +45,7 @@ fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<Transcri
 }
 
 pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult<Value> {
-    let request: Value = serde_json::from_slice(input).map_err(|error| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("command JSON is invalid: {error}"),
-        )
-    })?;
+    let request = parse_transcript_core_request(input)?;
     let command = request
         .get("command")
         .and_then(Value::as_str)
@@ -87,79 +58,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
     let command = parse_transcript_core_command(command)?;
 
     match command {
-        TranscriptCoreCommand::ListCanonicalErrorCodes => Ok(Value::Array(
-            ALL_CANONICAL_ERROR_CODES
-                .iter()
-                .map(|code| Value::String(code.as_str().to_string()))
-                .collect(),
-        )),
-        TranscriptCoreCommand::AnalyzeCanonicalObject => {
-            let canonical_bytes_hex = request
-                .get("canonicalBytesHex")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "canonicalBytesHex must be a string",
-                    )
-                })?;
-            let chunk_size = request
-                .get("chunkSize")
-                .and_then(Value::as_u64)
-                .unwrap_or(16);
-
-            analyze_canonical_object_hex(canonical_bytes_hex, chunk_size)
-        }
-        TranscriptCoreCommand::ComputeChunkRoot => {
-            let input_hex = request
-                .get("inputHex")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "inputHex must be a string",
-                    )
-                })?;
-            let chunk_size = request
-                .get("chunkSize")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "chunkSize must be an integer",
-                    )
-                })?;
-            let bytes = crate::transcript_core::decode_hex(input_hex)?;
-            let root = chunk_root(
-                &bytes,
-                usize::try_from(chunk_size).map_err(|_| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidChunkSize,
-                        "chunkSize does not fit usize",
-                    )
-                })?,
-            )?;
-
-            Ok(json!({
-                "chunkRoot": root,
-            }))
-        }
-        TranscriptCoreCommand::HashRaw => {
-            let input_hex = request
-                .get("inputHex")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "inputHex must be a string",
-                    )
-                })?;
-            let bytes = crate::transcript_core::decode_hex(input_hex)?;
-
-            Ok(json!({
-                "hash512": hash512_hex("transcript-core/raw", &[&bytes]),
-            }))
-        }
         TranscriptCoreCommand::DeriveCanonicalObjectHash => {
             let value = request.get("value").ok_or_else(|| {
                 CanonicalError::new(
@@ -172,85 +70,95 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
                 "canonicalObjectHash": derive_canonical_object_hash(value)?,
             }))
         }
-        TranscriptCoreCommand::InterpolateShamirConstantTerm => {
-            let share_points = read_share_points(&request)?;
-
-            Ok(json!({
-                "fieldElement": interpolate_shamir_constant_term(&share_points)?,
-            }))
+        TranscriptCoreCommand::ValidateCanonicalFoundationValue => {
+            super::foundation_command::validate_canonical_foundation_value(&request)
         }
-        TranscriptCoreCommand::EvaluatePlaintextComparison => {
-            let left_total_score = read_u64_field(&request, "leftTotalScore")?;
-            let right_total_score = read_u64_field(&request, "rightTotalScore")?;
-            let roster_size = read_u64_field(&request, "rosterSize")?;
-            let comparison =
-                evaluate_plaintext_comparison(left_total_score, right_total_score, roster_size)?;
-
-            Ok(json!({
-                "greaterThan": comparison.greater_than,
-                "equal": comparison.equal,
-                "scoreDifference": comparison.score_difference,
-            }))
+        TranscriptCoreCommand::DeriveCeremonyContextHash => {
+            super::foundation_command::derive_ceremony_context_hash(&request)
         }
-        TranscriptCoreCommand::VerifyFixture => {
-            let fixture_value = request.get("fixture").ok_or_else(|| {
-                CanonicalError::new(CanonicalErrorCode::InvalidFixture, "fixture is required")
-            })?;
-            let fixture: TranscriptCoreFixture = serde_json::from_value(fixture_value.clone())
-                .map_err(|error| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        format!("fixture shape is invalid: {error}"),
-                    )
-                })?;
-
-            verify_fixture(&fixture)
+        TranscriptCoreCommand::DeriveActionContextHash => {
+            super::foundation_command::derive_action_context_hash(&request)
         }
+        TranscriptCoreCommand::EncodeMailboxKeyScheduleInput => {
+            super::mailbox_command::encode_mailbox_key_schedule_input(&request)
+        }
+        TranscriptCoreCommand::DecodeMailboxKeyScheduleInput => {
+            super::mailbox_command::decode_mailbox_key_schedule_input(&request)
+        }
+        TranscriptCoreCommand::EncodeMailboxAssociatedData => {
+            super::mailbox_command::encode_mailbox_associated_data(&request)
+        }
+        TranscriptCoreCommand::DecodeMailboxAssociatedData => {
+            super::mailbox_command::decode_mailbox_associated_data(&request)
+        }
+        TranscriptCoreCommand::EncodeStreamDescriptor => {
+            super::mailbox_command::encode_stream_descriptor(&request)
+        }
+        TranscriptCoreCommand::DecodeStreamDescriptor => {
+            super::mailbox_command::decode_stream_descriptor(&request)
+        }
+        TranscriptCoreCommand::EncodeSignedMailboxEnvelope => {
+            super::mailbox_command::encode_signed_mailbox_envelope(&request)
+        }
+        TranscriptCoreCommand::DecodeSignedMailboxEnvelope => {
+            super::mailbox_command::decode_signed_mailbox_envelope(&request)
+        }
+        TranscriptCoreCommand::DeriveMailboxKemCiphertextHash => {
+            super::mailbox_command::derive_mailbox_kem_ciphertext_hash_command(&request)
+        }
+        TranscriptCoreCommand::DeriveMailboxEnvelopeHash => {
+            super::mailbox_command::derive_mailbox_envelope_hash_command(&request)
+        }
+        TranscriptCoreCommand::DeriveSetupMailboxSlotHash => {
+            super::mailbox_command::derive_setup_mailbox_slot_hash_command(&request)
+        }
+        TranscriptCoreCommand::EncodePrivateRandomCursor => {
+            super::private_randomness_command::encode_private_random_cursor(&request)
+        }
+        TranscriptCoreCommand::DecodePrivateRandomCursor => {
+            super::private_randomness_command::decode_private_random_cursor(&request)
+        }
+        TranscriptCoreCommand::VerifyCollectiveBgvSetup => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "accepted setup verification requires an opaque material-ownership session",
+        )),
         TranscriptCoreCommand::DescribeBgvRnsParameters
-        | TranscriptCoreCommand::DescribeBgvOperationRegistry
-        | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
         | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters
-        | TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations
-        | TranscriptCoreCommand::GenerateBgvPassiveSetup
-        | TranscriptCoreCommand::VerifyBgvPassiveSetup
-        | TranscriptCoreCommand::VerifyCollectiveBgvSetup
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
-        | TranscriptCoreCommand::GeneratePrivateVssShareProof
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
-        | TranscriptCoreCommand::BeginSetupProofMaterialTransportStream
-        | TranscriptCoreCommand::AbsorbSetupProofMaterialTransportStreamChunk
-        | TranscriptCoreCommand::FinishSetupProofMaterialTransportStream
-        | TranscriptCoreCommand::BeginEvaluationKeyShareComponentMaterialTransportStream
-        | TranscriptCoreCommand::AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk
-        | TranscriptCoreCommand::FinishEvaluationKeyShareComponentMaterialTransportStream
-        | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
-        | TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial
-        | TranscriptCoreCommand::EncodeBgvBatchPlaintext
-        | TranscriptCoreCommand::ValidateBgvPlaintextObject
-        | TranscriptCoreCommand::ValidateBgvCiphertextObject
-        | TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture
-        | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
-        | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
-        | TranscriptCoreCommand::RunDirectEncryptedBallot
-        | TranscriptCoreCommand::DeriveBgvTargetDecryptionResultReleaseSetupContext
-        | TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease
-        | TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare
-        | TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease
         | TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment
         | TranscriptCoreCommand::GenerateVssShareLinkageProof
-        | TranscriptCoreCommand::DescribeTrusteeEvaluationKeyStatement
         | TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
             run_bgv_command(command, &request)
         }
-        TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare
-        | TranscriptCoreCommand::DeriveBgvTargetDecryptionShareProofStatement
-        | TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness
-        | TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofMaterial
-        | TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofStatementBinding => {
-            run_bgv_command(command, &request)
-        }
     }
+}
+
+pub(super) fn run_accepted_setup_command_inner(
+    input: &[u8],
+    session_handle: u32,
+) -> CanonicalResult<Value> {
+    let request = parse_transcript_core_request(input)?;
+    let command = request
+        .get("command")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "command must be a string",
+            )
+        })?;
+    if parse_transcript_core_command(command)? != TranscriptCoreCommand::VerifyCollectiveBgvSetup {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "accepted-setup session can execute only VerifyCollectiveBgvSetup",
+        ));
+    }
+    crate::bgv::verify_collective_bgv_setup_package_with_session_from_request(
+        &request,
+        session_handle,
+    )
 }
 
 fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> CanonicalResult<Value> {
@@ -258,206 +166,27 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::DescribeBgvRnsParameters => {
             crate::bgv::commands::describe_bgv_rns_parameters()
         }
-        TranscriptCoreCommand::DescribeBgvOperationRegistry => {
-            crate::bgv::commands::describe_bgv_operation_registry()
-        }
-        TranscriptCoreCommand::ValidateBgvEvaluatorOperation => {
-            crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request)
-        }
         TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
             crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request(request)
         }
-        TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations => {
-            crate::bgv::commands::derive_collective_bgv_setup_public_derivations(request)
-        }
-        TranscriptCoreCommand::GenerateBgvPassiveSetup => {
-            crate::bgv::commands::generate_bgv_passive_setup_from_request(request)
-        }
-        TranscriptCoreCommand::VerifyBgvPassiveSetup => {
-            crate::bgv::commands::verify_bgv_passive_setup_from_request(request)
-        }
-        TranscriptCoreCommand::VerifyCollectiveBgvSetup => {
-            crate::bgv::commands::verify_collective_bgv_setup_from_request(request)
-        }
         TranscriptCoreCommand::VerifyPrivateVssShareEnvelope => {
-            crate::bgv::commands::verify_private_vss_share_envelope(request)
-        }
-        TranscriptCoreCommand::GeneratePrivateVssShareProof => {
-            crate::bgv::commands::generate_private_vss_share_proof(request)
+            crate::bgv::setup::verify_private_vss_share_envelope_from_request(request)
         }
         TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof => {
-            crate::bgv::commands::generate_trustee_evaluation_key_proof(request)
-        }
-        TranscriptCoreCommand::DescribeTrusteeEvaluationKeyStatement => {
-            crate::bgv::commands::describe_trustee_evaluation_key_statement(request)
+            crate::bgv::setup::generate_trustee_evaluation_key_proof_from_request(request)
         }
         TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
-            crate::bgv::commands::compute_setup_commitment_from_opening(request)
-        }
-        TranscriptCoreCommand::BeginSetupProofMaterialTransportStream => {
-            crate::bgv::commands::begin_setup_proof_material_transport_stream(request)
-        }
-        TranscriptCoreCommand::AbsorbSetupProofMaterialTransportStreamChunk => {
-            crate::bgv::commands::absorb_setup_proof_material_transport_stream_chunk(request)
-        }
-        TranscriptCoreCommand::FinishSetupProofMaterialTransportStream => {
-            crate::bgv::commands::finish_setup_proof_material_transport_stream(request)
-        }
-        TranscriptCoreCommand::BeginEvaluationKeyShareComponentMaterialTransportStream => {
-            crate::bgv::commands::begin_evaluation_key_share_component_material_transport_stream(
-                request,
-            )
-        }
-        TranscriptCoreCommand::AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk => {
-            crate::bgv::commands::absorb_evaluation_key_share_component_material_transport_stream_chunk(
-                request,
-            )
-        }
-        TranscriptCoreCommand::FinishEvaluationKeyShareComponentMaterialTransportStream => {
-            crate::bgv::commands::finish_evaluation_key_share_component_material_transport_stream(
-                request,
-            )
-        }
-        TranscriptCoreCommand::VerifyLocalTrusteeSetupState => {
-            crate::bgv::commands::verify_local_trustee_setup_state(request)
-        }
-        TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial => {
-            crate::bgv::commands::generate_bgv_evaluation_key_material_from_request(request)
-        }
-        TranscriptCoreCommand::EncodeBgvBatchPlaintext => {
-            crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request)
-        }
-        TranscriptCoreCommand::ValidateBgvPlaintextObject => {
-            crate::bgv::commands::validate_bgv_plaintext_from_request(request)
-        }
-        TranscriptCoreCommand::ValidateBgvCiphertextObject => {
-            crate::bgv::commands::validate_bgv_ciphertext_from_request(request)
-        }
-        TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture => {
-            crate::bgv::commands::generate_bgv_ciphertext_convention_fixture_from_request(request)
-        }
-        TranscriptCoreCommand::GenerateBgvBaseConversionFixture => {
-            crate::bgv::commands::generate_bgv_base_conversion_fixture_from_request(request)
-        }
-        TranscriptCoreCommand::AnalyzeBgvCanonicalObject => {
-            crate::bgv::commands::analyze_bgv_canonical_object_from_request(request)
-        }
-        TranscriptCoreCommand::RunDirectEncryptedBallot => {
-            crate::bgv::direct_ballots::run_direct_encrypted_ballot(request)
-        }
-        TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare => {
-            crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_local_share_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::DeriveBgvTargetDecryptionShareProofStatement => {
-            crate::bgv::target_decryption::derive_bgv_target_decryption_share_proof_statement_from_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness => {
-            crate::bgv::target_decryption::generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofMaterial => {
-            crate::bgv::target_decryption::verify_bgv_target_decryption_share_proof_material_from_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofStatementBinding => {
-            crate::bgv::target_decryption::verify_bgv_target_decryption_share_proof_statement_binding_from_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::DeriveBgvTargetDecryptionResultReleaseSetupContext => {
-            crate::bgv::target_decryption::derive_bgv_target_decryption_result_release_setup_context_from_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease => {
-            crate::bgv::target_decryption::begin_bgv_target_decryption_result_release_from_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare => {
-            crate::bgv::target_decryption::absorb_bgv_target_decryption_result_release_share_from_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease => {
-            crate::bgv::target_decryption::finish_bgv_target_decryption_result_release_from_request(
-                request,
-            )
+            crate::bgv::setup::compute_setup_commitment_from_opening_request(request)
         }
         TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment => {
-            crate::bgv::commands::compute_vss_committed_material_commitment(request)
+            crate::bgv::setup::compute_vss_committed_material_commitment_request(request)
         }
         TranscriptCoreCommand::GenerateVssShareLinkageProof => {
-            crate::bgv::commands::generate_vss_share_linkage_proof(request)
+            crate::bgv::setup::generate_vss_share_linkage_proof_from_request(request)
         }
         TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
-            crate::bgv::commands::generate_same_secret_bridge_proof(request)
+            crate::bgv::setup::generate_same_secret_bridge_proof_from_request(request)
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }
-}
-
-fn read_u64_field(request: &Value, field_name: &str) -> CanonicalResult<u64> {
-    request
-        .get(field_name)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("{field_name} must be a non-negative integer"),
-            )
-        })
-}
-
-fn read_share_points(request: &Value) -> CanonicalResult<Vec<ShamirSharePoint>> {
-    let share_points = request
-        .get("sharePoints")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "sharePoints must be an array",
-            )
-        })?;
-    if share_points.len() > MAXIMUM_SHAMIR_INTERPOLATION_POINTS {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "at most 50 Shamir shares are supported",
-        ));
-    }
-
-    share_points
-        .iter()
-        .map(|share_point| {
-            let roster_position = share_point
-                .get("rosterPosition")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "share point rosterPosition must be a non-negative integer",
-                    )
-                })?;
-            let value = share_point
-                .get("value")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "share point value must be a non-negative integer",
-                    )
-                })?;
-
-            Ok(ShamirSharePoint {
-                roster_position,
-                value,
-            })
-        })
-        .collect()
 }

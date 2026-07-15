@@ -1,4 +1,6 @@
-use super::super::merkle_commitment::{LEAF_SALT_BYTES, MerkleTree, phase_pair_leaf_hash};
+use super::super::merkle_commitment::{
+    LEAF_SALT_BYTES, MerkleContext, MerkleTree, phase_pair_leaf_hash,
+};
 use super::super::*;
 use crate::bgv::evaluator::prg::DeterministicSampler;
 
@@ -14,6 +16,7 @@ impl SaltedTree {
 }
 
 pub(super) fn commit_salted_extension_row_pairs(
+    merkle_context: MerkleContext,
     extension_columns: &[Vec<u64>],
     extension_size: usize,
     salt_sampler: &mut DeterministicSampler,
@@ -35,6 +38,7 @@ pub(super) fn commit_salted_extension_row_pairs(
             second_row[column_index] = column[second_position];
         }
         leaf_hashes.push(phase_pair_leaf_hash(
+            merkle_context,
             pair_index,
             &salts[pair_index * LEAF_SALT_BYTES..(pair_index + 1) * LEAF_SALT_BYTES],
             &first_row,
@@ -43,7 +47,7 @@ pub(super) fn commit_salted_extension_row_pairs(
     }
 
     Ok(SaltedTree {
-        tree: MerkleTree::from_leaf_hashes(leaf_hashes)?,
+        tree: MerkleTree::from_leaf_hashes(merkle_context, leaf_hashes)?,
         salts,
     })
 }

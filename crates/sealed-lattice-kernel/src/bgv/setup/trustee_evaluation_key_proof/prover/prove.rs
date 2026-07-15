@@ -6,13 +6,21 @@ use super::super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::super::low_degree_proof::{
     LowDegreeParameters, commit_low_degree, open_low_degree_at_positions,
 };
-use super::super::merkle_commitment::sorted_unique_indices;
+use super::super::merkle_commitment::{
+    MAIN_LOW_DEGREE_TREE_ORDINAL_BASE, QUOTIENT_TREE_ORDINAL_BASE,
+    RESIDUAL_LOW_DEGREE_TREE_ORDINAL_BASE, limb_tree_context, low_degree_tree_context,
+    sorted_unique_indices,
+};
 use super::super::relation::{
     BaseColumnDomain, PHASE_TWO_COLUMN_COUNT, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL,
     SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
     batched_row_check_value, batched_sumcheck_value,
 };
-use super::super::*;
+use super::super::{
+    COMMITMENT_BOUND_FACTOR, DEEP_EVALUATION_POINT_COUNT, LOW_DEGREE_QUERY_COUNT,
+    MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE, MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE, invalid_succinct_setup_proof,
+};
 use super::challenges::{build_limb_public_vectors, draw_limb_challenges};
 use super::claim_masking::{global_claim_id, global_claim_integers};
 use super::polynomial::{
@@ -26,11 +34,15 @@ use super::vss_committed_material::{
 use super::witness::{
     LimbWitnessCommitment, build_limb_witness_commitment, validate_witness_support,
 };
-use super::*;
+use super::{
+    LEAF_SALT_DOMAIN, LimbProof, MaterialTreeQueryOpening, PhaseQueryOpening,
+    SuccinctEvaluationKeyProof,
+};
 use crate::bgv::evaluator::prg::DeterministicSampler;
-use crate::bgv::modular_arithmetic::inverse_mod;
+use crate::bgv::modular_arithmetic::{inverse_mod, mul_mod_fast, sub_mod_fast};
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
+use crate::encoding::CanonicalResult;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
@@ -89,7 +101,7 @@ fn prove_limb(
     let trace_size = plan.trace_size;
     let extension_size = plan.extension_size;
     let mut transcript = global_transcript.fork("limb", limb_index as u64);
-    let challenges = draw_limb_challenges(&mut transcript, layout, modulus);
+    let challenges = draw_limb_challenges(&mut transcript, layout, modulus)?;
 
     // The bound committed-material trees this limb opens: its commitment
     // field's tree of every bound message. The regenerated roots were already
@@ -323,6 +335,11 @@ fn prove_limb(
         ],
     );
     let phase_two_salted = commit_salted_extension_row_pairs(
+        limb_tree_context(
+            statement.application_statement_schema_identifier(),
+            QUOTIENT_TREE_ORDINAL_BASE,
+            limb_index,
+        )?,
         &phase_two_columns,
         extension_size,
         &mut phase_two_salt_sampler,
@@ -409,7 +426,7 @@ fn prove_limb(
         "lambda",
         modulus,
         total_column_count * DEEP_EVALUATION_POINT_COUNT,
-    );
+    )?;
     let mut extension_points = Vec::with_capacity(extension_size);
     let mut point = plan.coset_offset;
     for _ in 0..extension_size {
@@ -502,6 +519,11 @@ fn prove_limb(
     };
     transcript.absorb("low-degree-purpose", MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE);
     let low_degree_state = match commit_low_degree(
+        low_degree_tree_context(
+            statement.application_statement_schema_identifier(),
+            MAIN_LOW_DEGREE_TREE_ORDINAL_BASE,
+            limb_index,
+        )?,
         &mut transcript,
         &low_degree_parameters,
         &batch_codeword,
@@ -537,6 +559,11 @@ fn prove_limb(
         SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE,
     );
     let sumcheck_residual_low_degree_state = commit_low_degree(
+        low_degree_tree_context(
+            statement.application_statement_schema_identifier(),
+            RESIDUAL_LOW_DEGREE_TREE_ORDINAL_BASE,
+            limb_index,
+        )?,
         &mut transcript,
         &sumcheck_residual_low_degree_parameters,
         &sumcheck_residual_codeword,
@@ -545,7 +572,7 @@ fn prove_limb(
         "shared-query-position",
         extension_size / 2,
         LOW_DEGREE_QUERY_COUNT,
-    );
+    )?;
     let low_degree = open_low_degree_at_positions(low_degree_state, &query_positions)?;
     let sumcheck_residual_low_degree =
         open_low_degree_at_positions(sumcheck_residual_low_degree_state, &query_positions)?;
@@ -684,7 +711,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
 ) -> CanonicalResult<SuccinctEvaluationKeyProof> {
     statement.validate_shape()?;
     if statement
-        .keys
+        .keys()
         .iter()
         .any(|key| key.kind.has_diagonal_source())
     {
@@ -701,7 +728,11 @@ fn prove_evaluation_key_share_with_limb_batch_size(
     let proof_limb_indices = statement.proof_limb_indices();
     let limb_batch_size =
         normalize_limb_batch_size(requested_limb_batch_size, proof_limb_indices.len());
-    let mut transcript = FiatShamirTranscript::new("trustee-evaluation-key-share");
+    let mut transcript = FiatShamirTranscript::new_for_schema(
+        "trustee-evaluation-key-share",
+        statement.application_statement_schema_identifier(),
+        MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    )?;
     transcript.absorb("statement", &statement.statement_hash());
 
     let mut witness_tree_roots = Vec::with_capacity(proof_limb_indices.len());
@@ -715,6 +746,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
+                    &bound_material.message_coefficients,
                     *limb_index,
                     modulus,
                     proof_randomness_seed_hex,
@@ -732,6 +764,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
+                    &bound_material.message_coefficients,
                     *limb_index,
                     modulus,
                     proof_randomness_seed_hex,
@@ -747,10 +780,9 @@ fn prove_evaluation_key_share_with_limb_batch_size(
     for witness_tree_root in &witness_tree_roots {
         transcript.absorb("witness-tree-root", witness_tree_root);
     }
-    let family_shape = statement.family_shape()?;
+    let family_shape = statement.family_shape();
     let consistency_vector_length = statement
-        .vss_share_linkage
-        .as_ref()
+        .vss_share_linkage()
         .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
         .transpose()?
         .unwrap_or(statement.ring_degree);
@@ -762,10 +794,11 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                 consistency_vector_length,
             )
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     let claim_integers = global_claim_integers(
         statement,
         witness,
+        &bound_material.message_coefficients,
         &consistency_vectors,
         proof_randomness_seed_hex,
     );
@@ -785,6 +818,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
+                    &bound_material.message_coefficients,
                     *limb_index,
                     modulus,
                     proof_randomness_seed_hex,
@@ -820,6 +854,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
+                    &bound_material.message_coefficients,
                     *limb_index,
                     modulus,
                     proof_randomness_seed_hex,

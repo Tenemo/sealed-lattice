@@ -5,61 +5,34 @@ import { createTerminalLineFilter } from '#tools/ci/terminal-line-filter';
 const keepUnlessMarkedDrop = (line: string): boolean => !line.includes('DROP');
 
 describe('createTerminalLineFilter', () => {
-    it('passes kept lines and removes dropped lines within one chunk', () => {
+    it('filters complete lines while preserving line endings', () => {
         const filter = createTerminalLineFilter(keepUnlessMarkedDrop);
 
-        expect(filter.push('keep one\nDROP this\nkeep two\n')).toBe(
-            'keep one\nkeep two\n',
+        expect(filter.push('keep one\nDROP this\nkeep two\r\n')).toBe(
+            'keep one\nkeep two\r\n',
         );
         expect(filter.flush()).toBe('');
     });
 
-    it('reassembles a kept line split across chunks before emitting it', () => {
+    it('reassembles split lines before deciding whether to keep them', () => {
         const filter = createTerminalLineFilter(keepUnlessMarkedDrop);
 
         expect(filter.push('kept li')).toBe('');
-        expect(filter.push('ne here\n')).toBe('kept line here\n');
-    });
-
-    it('drops a filtered line even when its marker is split across chunks', () => {
-        const filter = createTerminalLineFilter(keepUnlessMarkedDrop);
-
-        expect(filter.push('partial DR')).toBe('');
+        expect(filter.push('ne\npartial DR')).toBe('kept line\n');
         expect(filter.push('OP rest\nkeep\n')).toBe('keep\n');
     });
 
-    it('holds an unterminated remainder until flush', () => {
-        const filter = createTerminalLineFilter(keepUnlessMarkedDrop);
+    it.each([
+        { expected: 'trailing', remainder: 'trailing' },
+        { expected: '', remainder: 'DROP trailing' },
+    ])(
+        'applies the predicate to an unterminated remainder',
+        ({ expected, remainder }) => {
+            const filter = createTerminalLineFilter(keepUnlessMarkedDrop);
 
-        expect(filter.push('done\ntrailing without newline')).toBe('done\n');
-        expect(filter.flush()).toBe('trailing without newline');
-    });
-
-    it('applies the predicate to an unterminated remainder on flush', () => {
-        const filter = createTerminalLineFilter(keepUnlessMarkedDrop);
-
-        expect(filter.push('DROP trailing')).toBe('');
-        expect(filter.flush()).toBe('');
-    });
-
-    it('preserves carriage returns in kept output but ignores them when filtering', () => {
-        const filter = createTerminalLineFilter(keepUnlessMarkedDrop);
-
-        expect(filter.push('DROP me\r\n')).toBe('');
-        expect(filter.push('keep me\r\n')).toBe('keep me\r\n');
-    });
-
-    it('emits nothing for a chunk that contains no line break', () => {
-        const filter = createTerminalLineFilter(keepUnlessMarkedDrop);
-
-        expect(filter.push('no newline yet')).toBe('');
-        expect(filter.flush()).toBe('no newline yet');
-    });
-
-    it('handles several lines plus a trailing partial in one chunk', () => {
-        const filter = createTerminalLineFilter(keepUnlessMarkedDrop);
-
-        expect(filter.push('a\nDROP b\nc\npartial')).toBe('a\nc\n');
-        expect(filter.flush()).toBe('partial');
-    });
+            expect(filter.push(`complete\n${remainder}`)).toBe('complete\n');
+            expect(filter.flush()).toBe(expected);
+            expect(filter.flush()).toBe('');
+        },
+    );
 });

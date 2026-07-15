@@ -10,7 +10,7 @@ pub(in super::super) fn prove_round_one_key_fri<const LIMB_COUNT: usize>(
     secret: &[i64],
     digits: &[DigitWitness],
     proof_parameters: &KeyFriProofParameters,
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     prove_key_fri(
         parameters,
@@ -23,7 +23,7 @@ pub(in super::super) fn prove_round_one_key_fri<const LIMB_COUNT: usize>(
         &ZERO_STATEMENT_BINDING,
         0,
         proof_parameters,
-        salt_seed,
+        private_randomness,
     )
 }
 
@@ -44,7 +44,7 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
     statement_binding: &[u8; 64],
     schedule_index: u64,
     proof_parameters: &KeyFriProofParameters,
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     let component_b: Vec<&[[u64; LIMB_COUNT]]> = public
         .digits
@@ -63,7 +63,7 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
         statement_binding,
         schedule_index,
         proof_parameters,
-        salt_seed,
+        private_randomness,
     )
 }
 
@@ -86,7 +86,7 @@ pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
     statement_binding: &[u8; 64],
     schedule_index: u64,
     proof_parameters: &KeyFriProofParameters,
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     prove_key_fri_streamed(
         parameters,
@@ -100,112 +100,8 @@ pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
         statement_binding,
         schedule_index,
         proof_parameters,
-        salt_seed,
+        private_randomness,
     )
-}
-
-// Regenerate the material commitment the atom proof publishes as
-// `KeyFriProof.material_root` and the exact masked material columns it committed.
-// Both `prove_key_fri_streamed` and the aggregate binding route through this
-// helper, so the aggregate opens the atom commitment rather than a fresh
-// commitment with the same public values.
-//
-// The regeneration mirrors the salt discipline `prove_key_fri_streamed` runs, in
-// order: `KeyColumnPlan::new` snapshots the base then the material mask seeds
-// (advancing the salt `steps = mask_degree + 1` per column, matching
-// `KeyColumnPlan::new`), then the base column commitment's `begin` advances the
-// salt once per coset leaf (`coset_size` steps), leaving the salt at the value the
-// material commitment's `begin` consumes. The material columns are the trace
-// interpolation of each digit's recombined material `B_j` masked by the per-column
-// mask seed, byte-identical to `KeyColumnPlan::material_column_coefficients`.
-//
-// `recombined_component_b[digit]` is digit `digit`'s recombined material `B_j`
-// (the same `public.digits[digit].recombined_component_b` the atom prover commits).
-// `linkage_layout` is the key's linkage layout (always present for key-bearing
-// statements), so `base_column_count` matches the atom's `plan.base_column_count()`.
-// Returns the masked material columns (in digit order), the material-commit salt
-// seed, and the material root.
-#[allow(clippy::type_complexity)]
-pub(crate) fn regenerate_material_commitment_inputs<const LIMB_COUNT: usize>(
-    parameters: &ProofFieldParameters<LIMB_COUNT>,
-    ring_degree: usize,
-    mask_degree: usize,
-    recombined_component_b: &[Vec<[u64; LIMB_COUNT]>],
-    linkage_layout: Option<&linkage::LinkageLayout>,
-    initial_salt_seed: u64,
-) -> CanonicalResult<(Vec<Vec<[u64; LIMB_COUNT]>>, u64, MerkleDigest)> {
-    let digit_count = recombined_component_b.len();
-    if digit_count == 0 {
-        return Err(invalid_key(
-            "material commitment requires at least one digit",
-        ));
-    }
-    for column in recombined_component_b {
-        if column.len() != ring_degree {
-            return Err(invalid_key(
-                "recombined material column length must match the ring degree",
-            ));
-        }
-    }
-    let material_count = material_column_count(digit_count);
-    let base_count = base_column_count(ring_degree, digit_count, linkage_layout);
-    let layout = layout(ring_degree)?;
-    let trace_domain = CyclicDomain::new(parameters, layout.trace_size)?;
-    let coset_domain = CyclicDomain::new(parameters, layout.coset_size)?;
-    let offset = coset_offset(parameters);
-
-    // Replay the deterministic mask-seed snapshots exactly as `KeyColumnPlan::new`
-    // does: the base columns first, then the material columns, each advancing the
-    // salt by `steps`. Only the material-column mask-seed snapshots are retained;
-    // the base snapshots exist solely to advance the salt to the same point.
-    let steps = if mask_degree == 0 { 0 } else { mask_degree + 1 };
-    let mut salt_seed = initial_salt_seed;
-    for _ in 0..base_count {
-        advance_seed(&mut salt_seed, steps);
-    }
-    let mut material_mask_seed_starts = Vec::with_capacity(material_count);
-    for _ in 0..material_count {
-        material_mask_seed_starts.push(salt_seed);
-        advance_seed(&mut salt_seed, steps);
-    }
-    // The base column commitment's `begin` advances the salt once per coset leaf;
-    // `advance_seed(coset_size)` is the identical LCG advance, leaving the salt at
-    // the value the material commitment's `begin` consumes.
-    advance_seed(&mut salt_seed, layout.coset_size);
-    let material_commit_salt_seed = salt_seed;
-
-    // Build each masked material column, byte-identical to
-    // `KeyColumnPlan::material_column_coefficients` (same interpolation, same mask
-    // seed, same `masked_coefficients`).
-    let mut material_columns = Vec::with_capacity(material_count);
-    for digit in 0..material_count {
-        let coefficients = trace_domain.interpolate(&recombined_component_b[digit]);
-        let mut seed = material_mask_seed_starts[digit];
-        material_columns.push(masked_coefficients(
-            parameters,
-            &coefficients,
-            ring_degree,
-            mask_degree,
-            &mut seed,
-        ));
-    }
-
-    // Commit the material columns exactly as `prove_key_fri_streamed` does: one
-    // `StreamedColumnCommitmentBuilder` over the coset codewords, seeded with the
-    // material-commit salt seed. This reproduces `KeyFriProof.material_root`.
-    let mut commit_salt_seed = material_commit_salt_seed;
-    let mut material_builder = StreamedColumnCommitmentBuilder::begin(
-        layout.coset_size,
-        material_count,
-        &mut commit_salt_seed,
-    )?;
-    for coefficients in &material_columns {
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, coefficients);
-        material_builder.absorb_column(&codeword)?;
-    }
-    let material_root = material_builder.finalize()?.root();
-
-    Ok((material_columns, material_commit_salt_seed, material_root))
 }
 
 // The streamed prover: commit, sumcheck/support, combination, and opening
@@ -229,7 +125,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     statement_binding: &[u8; 64],
     schedule_index: u64,
     proof_parameters: &KeyFriProofParameters,
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     if public.digits.len() != digits.len() || digits.is_empty() {
         return Err(invalid_key("digit public and witness counts must match"));
@@ -242,19 +138,6 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let negacyclic = NegacyclicDomain::new(parameters, ring_degree)?;
     let table_count = carry_range_lookup::table_count(ring_degree);
 
-    // The atom's initial salt seed, captured before `KeyColumnPlan::new` advances
-    // it, so the material commitment can be reproduced from public data alone
-    // through `regenerate_material_commitment_inputs`.
-    let initial_salt_seed = *salt_seed;
-    // The recombined material `B_j` per digit, as owned vectors: exactly the
-    // material the plan commits, so the shared material-commitment helper's
-    // regenerated columns and root match the plan's committed material. In
-    // production this equals `public.digits[digit].recombined_component_b`; a
-    // test override may commit different material, and the helper must follow the
-    // committed material (not the public statement) so the two never diverge.
-    let recombined_component_b: Vec<Vec<[u64; LIMB_COUNT]>> =
-        component_b.iter().map(|column| column.to_vec()).collect();
-
     let mut plan = KeyColumnPlan::new(
         parameters,
         ring_degree,
@@ -263,7 +146,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         digits,
         component_b,
         linkage_inputs,
-        salt_seed,
+        private_randomness,
     )?;
     let base_count = plan.base_column_count();
     let material_count = material_column_count(digit_count);
@@ -271,7 +154,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     // Round 1 (streamed): witness columns plus the carry-range multiplicity
     // columns, committed one codeword at a time.
     let mut base_builder =
-        StreamedColumnCommitmentBuilder::begin(layout.coset_size, base_count, salt_seed)?;
+        StreamedColumnCommitmentBuilder::begin(layout.coset_size, base_count, private_randomness)?;
     for column in 0..base_count {
         let coefficients = plan.base_column_coefficients(parameters, &trace_domain, column);
         let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
@@ -279,52 +162,19 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     }
     let base_commitment = base_builder.finalize()?;
 
-    // The material commitment: one masked column per digit holding the recombined
-    // component material `B_j`. The masked columns and the material-commit salt
-    // seed come from `regenerate_material_commitment_inputs`, which the material
-    // aggregate binding also uses to open exactly this commitment. Committed before
-    // `gamma` is drawn, so the material is fixed prior to its reduction challenge.
-    //
-    // The helper derived the material-commit salt seed from `initial_salt_seed` on
-    // its own copy; it must equal the streamed prover's current `salt_seed`. The
-    // commitment is then built here (so the opening pass can open it) from the
-    // helper's columns and salt, and its root must equal the helper's
-    // `material_root`. The mutable `salt_seed` advances by the material commit's
-    // one coset-leaf pass, so the downstream aux, quotient, and FRI salt stream is
-    // unchanged.
-    let (material_columns, material_commit_salt_seed, expected_material_root) =
-        regenerate_material_commitment_inputs(
-            parameters,
-            ring_degree,
-            proof_parameters.mask_degree,
-            &recombined_component_b,
-            plan.linkage_layout(),
-            initial_salt_seed,
-        )?;
-    if material_commit_salt_seed != *salt_seed {
-        return Err(invalid_key(
-            "the regenerated material-commit salt seed diverged from the streamed prover's salt",
-        ));
-    }
-    debug_assert!(
-        (0..material_count).all(|digit| {
-            material_columns[digit]
-                == plan.material_column_coefficients(parameters, &trace_domain, digit)
-        }),
-        "the regenerated material columns must equal the plan's material columns"
-    );
-    let mut material_builder =
-        StreamedColumnCommitmentBuilder::begin(layout.coset_size, material_count, salt_seed)?;
-    for coefficients in &material_columns {
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, coefficients);
+    // Commit each masked material column once. The same deterministic plan
+    // regenerates individual columns later when producing openings.
+    let mut material_builder = StreamedColumnCommitmentBuilder::begin(
+        layout.coset_size,
+        material_count,
+        private_randomness,
+    )?;
+    for digit in 0..material_count {
+        let coefficients = plan.material_column_coefficients(parameters, &trace_domain, digit);
+        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
         material_builder.absorb_column(&codeword)?;
     }
     let material_commitment = material_builder.finalize()?;
-    if material_commitment.root() != expected_material_root {
-        return Err(invalid_key(
-            "the streamed material commitment root diverged from the shared material-commitment helper",
-        ));
-    }
 
     let mut transcript = Transcript::new(PROTOCOL_LABEL);
     transcript.absorb("key-statement-binding", statement_binding);
@@ -354,11 +204,11 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     // Round 2 (streamed): the logUp fraction columns, which depend on `mu`. The
     // lookup and table terminals are computed from the on-domain values and
     // bound into the transcript.
-    plan.set_lookup_challenge(mu, salt_seed);
+    plan.set_lookup_challenge(mu, private_randomness);
     let aux_count = plan.aux_column_count();
     let (lookup_terminal, table_terminals) = plan.lookup_terminals(parameters)?;
     let mut aux_builder =
-        StreamedColumnCommitmentBuilder::begin(layout.coset_size, aux_count, salt_seed)?;
+        StreamedColumnCommitmentBuilder::begin(layout.coset_size, aux_count, private_randomness)?;
     for column in 0..aux_count {
         let coefficients = plan.aux_column_coefficients(parameters, &trace_domain, column)?;
         let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
@@ -426,10 +276,8 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
                 &f,
                 &polynomial::multiply_via_ntt(parameters, &carry_linear, &carry_column),
             );
-            // Material form: fold the committed `B_col_j` on the left-hand side
-            // with `delta_j * gamma`, exactly like the error and carry columns.
-            // This carries the atom's component term that the target used to
-            // hold, now against the committed material column.
+            // Fold the committed `B_col_j` into the left-hand side with
+            // `delta_j * gamma`, like the error and carry columns.
             let material_linear = trace_domain.interpolate(&forms.material_form);
             let material_column =
                 plan.material_column_coefficients(parameters, &trace_domain, digit);
@@ -792,7 +640,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let mut quotient_builder = StreamedColumnCommitmentBuilder::begin(
         layout.coset_size,
         QUOTIENT_COLUMN_COUNT,
-        salt_seed,
+        private_randomness,
     )?;
     for coefficients in &quotient_coefficients {
         let codeword = coset_evaluate_coefficients(&coset_domain, &offset, coefficients);
@@ -864,7 +712,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         &mut transcript,
         &combination,
         &offset,
-        salt_seed,
+        private_randomness,
     )?;
     drop(combination);
     let query_positions = transcript.challenge_positions(

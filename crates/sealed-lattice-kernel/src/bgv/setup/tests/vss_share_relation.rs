@@ -193,7 +193,6 @@ fn carry_aware_vss_commitment_opening_matches_lifted_share_relation() {
             compute_setup_commitment_for_tests(
                 &public_matrix_seed_hash,
                 0,
-                modulus,
                 coefficient_index as u64,
                 &message_coefficients,
                 randomness,
@@ -228,7 +227,7 @@ fn carry_aware_vss_commitment_opening_matches_lifted_share_relation() {
             share_values: &share_values,
             carry_witnesses: &carry_witnesses,
             modulus,
-            fresh_randomness_bound: SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+            fresh_randomness_bound: TEST_SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         })
         .expect("VSS commitment opening verification");
 
@@ -252,7 +251,7 @@ fn carry_aware_vss_commitment_opening_matches_lifted_share_relation() {
             share_values: &share_values,
             carry_witnesses: &wrong_carry_witnesses,
             modulus,
-            fresh_randomness_bound: SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+            fresh_randomness_bound: TEST_SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         },)
         .is_err()
     );
@@ -269,7 +268,7 @@ fn carry_aware_vss_commitment_opening_matches_lifted_share_relation() {
             share_values: &share_values,
             carry_witnesses: &carry_witnesses,
             modulus,
-            fresh_randomness_bound: SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+            fresh_randomness_bound: TEST_SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
         },)
         .is_err()
     );

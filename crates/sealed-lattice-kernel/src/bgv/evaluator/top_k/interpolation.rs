@@ -7,7 +7,6 @@ pub(crate) fn interpolate_coefficients(values: &[u64]) -> CanonicalResult<Vec<u6
     let point_count = values.len();
     let mut coefficients = vec![0_u64; point_count];
     for (point, value) in values.iter().enumerate() {
-        // Build the Lagrange basis numerator polynomial and its denominator.
         let mut numerator = vec![1_u64];
         let mut denominator = 1_u64;
         for other in 0..point_count {

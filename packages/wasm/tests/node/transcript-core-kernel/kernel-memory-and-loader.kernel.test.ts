@@ -1,4 +1,3 @@
-// This file is one targeted part of the split test suite.
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -17,12 +16,7 @@ describe('transcript-core kernel in Node', () => {
             createMockKernelExports();
         const kernel = await loadMockKernel();
 
-        expect(
-            kernel.computeChunkRoot({
-                inputHex: '00ff',
-                chunkSize: 2,
-            }),
-        ).toBe('abc123');
+        kernel.describeBgvRnsParameters();
         expect(deallocate).toHaveBeenCalledWith(
             128,
             encodedCommandResponseLength,
@@ -37,7 +31,7 @@ describe('transcript-core kernel in Node', () => {
         });
         const kernel = await loadMockKernel();
 
-        expect(() => kernel.roundTripBytes(Uint8Array.from([1]))).toThrow(
+        expect(() => kernel.describeBgvRnsParameters()).toThrow(
             'The transcript-core kernel returned a null pointer for a non-empty allocation.',
         );
     });
@@ -48,13 +42,8 @@ describe('transcript-core kernel in Node', () => {
         });
         const kernel = await loadMockKernel();
 
-        expect(() =>
-            kernel.computeChunkRoot({
-                inputHex: '00ff',
-                chunkSize: 2,
-            }),
-        ).toThrow(
-            'The transcript-core kernel returned a null pointer for a non-empty transcript-core command result.',
+        expect(() => kernel.describeBgvRnsParameters()).toThrow(
+            'The transcript-core kernel returned an out-of-bounds transcript-core command memory range.',
         );
     });
 
@@ -64,12 +53,7 @@ describe('transcript-core kernel in Node', () => {
         });
         const kernel = await loadMockKernel();
 
-        expect(() =>
-            kernel.computeChunkRoot({
-                inputHex: '00ff',
-                chunkSize: 2,
-            }),
-        ).toThrow(
+        expect(() => kernel.describeBgvRnsParameters()).toThrow(
             'The transcript-core kernel returned a null pointer for the output-length allocation.',
         );
     });
@@ -78,86 +62,16 @@ describe('transcript-core kernel in Node', () => {
         const loadedKernelReference: { current?: TranscriptCoreKernel } = {};
         const { loadMockKernel } = createMockKernelExports({
             onCommand: () => {
-                loadedKernelReference.current?.hashRaw('00');
+                loadedKernelReference.current?.describeBgvRnsParameters();
             },
         });
         loadedKernelReference.current = await loadMockKernel();
 
         expect(() =>
-            loadedKernelReference.current?.computeChunkRoot({
-                inputHex: '00ff',
-                chunkSize: 2,
-            }),
+            loadedKernelReference.current?.describeBgvRnsParameters(),
         ).toThrow(
             'The transcript-core kernel cannot run overlapping command operations on one instance.',
         );
-    });
-
-    it('forwards setup proof material stream commands to the kernel', async () => {
-        const decodedCommands: unknown[] = [];
-        const hashOne = '1'.repeat(128);
-        const commandResponse = {
-            success: true,
-            value: {
-                operation: 'beginSetupProofMaterialTransportStream',
-                verificationId: 'public-key-share-proof-0',
-                proofFamily: 'public-key-share',
-                proofMaterialRoot: hashOne,
-                proofBytesEncoding: 'binary-chunked-proof-bytes',
-                transport: {},
-            },
-        };
-        const { loadMockKernel } = createMockKernelExports({
-            commandPointer: 4096,
-            commandResponse,
-            onCommand: (command) => {
-                decodedCommands.push(command);
-            },
-            outputLengthAllocationPointer: 2048,
-        });
-        const kernel = await loadMockKernel();
-        const transportedSetupProofMaterial = {
-            objectType: 'SetupTransportedPublicKeyShareProofMaterial',
-            proofFamily: 'public-key-share',
-            proofMaterialRoot: hashOne,
-            chunkSizeBytes: 1_048_576,
-            chunkCount: 1,
-            totalByteLength: 1,
-            fullObjectHash: hashOne,
-            chunkRoot: hashOne,
-            chunkHashes: [hashOne],
-        } as const;
-
-        kernel.beginSetupProofMaterialTransportStream({
-            verificationId: 'public-key-share-proof-0',
-            transportedSetupProofMaterial,
-        });
-        kernel.absorbSetupProofMaterialTransportStreamChunk({
-            verificationId: 'public-key-share-proof-0',
-            chunkIndex: 0,
-            bytesHex: '00',
-        });
-        kernel.finishSetupProofMaterialTransportStream({
-            verificationId: 'public-key-share-proof-0',
-        });
-
-        expect(decodedCommands).toEqual([
-            {
-                command: 'BeginSetupProofMaterialTransportStream',
-                verificationId: 'public-key-share-proof-0',
-                transportedSetupProofMaterial,
-            },
-            {
-                command: 'AbsorbSetupProofMaterialTransportStreamChunk',
-                verificationId: 'public-key-share-proof-0',
-                chunkIndex: 0,
-                bytesHex: '00',
-            },
-            {
-                command: 'FinishSetupProofMaterialTransportStream',
-                verificationId: 'public-key-share-proof-0',
-            },
-        ]);
     });
 
     it('rejects a transcript-core kernel with the wrong integrity hash', async () => {
@@ -201,9 +115,8 @@ describe('transcript-core kernel in Node', () => {
                 allowUnpinnedKernel: true,
             });
 
-        const kernel = await loadMockKernel();
+        await loadMockKernel();
 
-        expect(kernel.exportedFunctionNames).toContain('memory');
         expect(getInstantiateCallCount()).toBe(1);
     });
 
@@ -215,12 +128,7 @@ describe('transcript-core kernel in Node', () => {
         });
         const kernel = await loadMockKernel();
 
-        expect(() =>
-            kernel.computeChunkRoot({
-                inputHex: '00ff',
-                chunkSize: 2,
-            }),
-        ).toThrow(
+        expect(() => kernel.describeBgvRnsParameters()).toThrow(
             'The transcript-core kernel returned an invalid command response.',
         );
     });
@@ -246,9 +154,8 @@ describe('transcript-core kernel in Node', () => {
         rejectNextInstantiation(new Error('first load failed'));
 
         await expect(loadMockKernel()).rejects.toThrow('first load failed');
-        const kernel = await loadMockKernel();
+        await loadMockKernel();
 
-        expect(kernel.exportedFunctionNames).toContain('memory');
         expect(getInstantiateCallCount()).toBe(2);
     });
 });

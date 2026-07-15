@@ -25,7 +25,7 @@ const CARRY_SHIFT_MULTIPLIER: usize = 8;
 const CARRY_EXCLUSIVE_BOUND_MULTIPLIER: usize = 16;
 
 pub(in super::super) struct LinkageStatement<'a> {
-    pub(in super::super) same_secret_linkage: &'a SameSecretLinkageStatement,
+    pub(in super::super) linkage: &'a SameSecretLinkageStatement,
 }
 
 pub(in super::super) struct LinkageWitness<'a> {
@@ -128,7 +128,7 @@ pub(in super::super) struct LinkageWitnessValues {
 }
 
 fn validate_statement(statement: &LinkageStatement<'_>, ring_degree: usize) -> CanonicalResult<()> {
-    let linkage = statement.same_secret_linkage;
+    let linkage = statement.linkage;
     if linkage.commitments.len() != 1 {
         return Err(invalid_linkage(
             "the key-bearing BDLOP linkage requires exactly one source constant commitment",
@@ -252,7 +252,7 @@ pub(in super::super) fn draw_linkage_challenges(
     ring_degree: usize,
 ) -> CanonicalResult<LinkageChallenges> {
     validate_statement(statement, ring_degree)?;
-    let fields = statement.same_secret_linkage.commitments[0]
+    let fields = statement.linkage.commitments[0]
         .limbs
         .iter()
         .map(|limb| LinkageFieldChallenges {
@@ -299,7 +299,7 @@ pub(in super::super) fn build_linkage_public_forms(
     for (commitment_field, field_challenges) in challenges.fields.iter().enumerate() {
         let field_forms: SameSecretLinkageAtomFieldForms =
             build_same_secret_linkage_atom_field_forms(
-                statement.same_secret_linkage,
+                statement.linkage,
                 commitment_field,
                 &field_challenges.lincheck_challenges,
                 &field_challenges.linkage_alpha,
@@ -609,7 +609,7 @@ pub(in super::super) fn absorb_linkage_statement(
     transcript: &mut Transcript,
     statement: &LinkageStatement<'_>,
 ) -> CanonicalResult<()> {
-    let linkage = statement.same_secret_linkage;
+    let linkage = statement.linkage;
     let commitment = linkage
         .commitments
         .first()
@@ -622,7 +622,6 @@ pub(in super::super) fn absorb_linkage_statement(
         "linkage-source-limb",
         commitment.source_rns_limb_index as u64,
     );
-    transcript.absorb_u64("linkage-source-modulus", commitment.source_message_modulus);
     transcript.absorb(
         "linkage-commitment-root",
         setup_commitment_root(commitment)?.as_bytes(),

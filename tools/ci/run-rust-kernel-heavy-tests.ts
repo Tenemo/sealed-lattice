@@ -1,26 +1,37 @@
+import path from 'node:path';
+
+import { withLocalHeavyLaneLease } from './heavy-lane-lease.js';
 import {
-    createFocusedRustTestMatchTracker,
+    createHeavyTestProgressReporter,
     resolveFocusedRustTestRunResult,
-} from './focused-rust-test-match.js';
-import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
-import { createProcessMemoryGuard } from './process-memory-guard.js';
+} from './heavy-test-progress.js';
+import { runWithLocalRunLog } from './local-run-log.js';
+import {
+    createProcessMemoryGuard,
+    type ProcessMemoryGuard,
+} from './process-memory-guard.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
+import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
 import {
     cargoTestArgumentsForRustKernelHeavy,
     heavyRustKernelTestNamePrefix,
     normalizeRustTestFilter,
 } from './rust-kernel-test-arguments.js';
 
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
-
 export type ParsedRustKernelHeavyArguments = Readonly<{
     testFilter: string;
 }>;
 
 const usage = 'Usage: run-rust-kernel-heavy-tests.ts [<heavy Rust test name>].';
-const rustKernelHeavyProcessMemoryGuard = createProcessMemoryGuard({
-    insufficientFreeMemoryRunDescription: 'Rust kernel heavy tests',
-});
+let rustKernelHeavyProcessMemoryGuard: ProcessMemoryGuard | undefined;
+
+const getRustKernelHeavyProcessMemoryGuard = (): ProcessMemoryGuard => {
+    rustKernelHeavyProcessMemoryGuard ??= createProcessMemoryGuard({
+        insufficientFreeMemoryRunDescription: 'Rust kernel heavy tests',
+    });
+
+    return rustKernelHeavyProcessMemoryGuard;
+};
 
 export const parseRustKernelHeavyArguments = (
     commandArguments: readonly string[],
@@ -45,89 +56,120 @@ export const parseRustKernelHeavyArguments = (
         positionalFilter === undefined
             ? heavyRustKernelTestNamePrefix
             : normalizeRustTestFilter(positionalFilter);
-    if (!testFilter.startsWith(heavyRustKernelTestNamePrefix)) {
-        throw new Error(
-            `Heavy Rust kernel filters must start with "${heavyRustKernelTestNamePrefix}". ${usage}`,
-        );
-    }
-
     return { testFilter };
 };
 
 export const buildRustKernelHeavyTestCommand = (
     parsedArguments: ParsedRustKernelHeavyArguments,
+    diagnosticsPath?: string,
 ): CommandInvocation =>
-    rustKernelHeavyProcessMemoryGuard.guardCommand({
-        args: cargoTestArgumentsForRustKernelHeavy(parsedArguments.testFilter),
-        command: 'cargo',
-        description: `cargo test Rust kernel heavy (${parsedArguments.testFilter})`,
-        env: {
-            ...process.env,
-            CARGO_BUILD_JOBS: '1',
-            CARGO_INCREMENTAL: '0',
-            RAYON_NUM_THREADS: '1',
-            SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE: '1',
-            SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
+    getRustKernelHeavyProcessMemoryGuard().guardCommand(
+        {
+            args: cargoTestArgumentsForRustKernelHeavy(
+                parsedArguments.testFilter,
+            ),
+            command: 'cargo',
+            description: `cargo test Rust kernel heavy (${parsedArguments.testFilter})`,
+            env: {
+                ...process.env,
+                CARGO_BUILD_JOBS: '1',
+                CARGO_INCREMENTAL: '0',
+                RAYON_NUM_THREADS: '1',
+                RUST_BACKTRACE: 'full',
+                SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
+            },
+            logFileSlug: 'cargo-test-rust-kernel-heavy',
         },
-        logFileSlug: 'cargo-test-rust-kernel-heavy',
-    });
+        { diagnosticsPath },
+    );
 
 export const buildRustKernelHeavyProcessMemoryGuardVerificationCommand =
     (): CommandInvocation =>
-        rustKernelHeavyProcessMemoryGuard.buildVerificationCommand();
+        getRustKernelHeavyProcessMemoryGuard().buildVerificationCommand();
 
 export const runRustKernelHeavyTests = async (
     rawArguments: readonly string[] = process.argv.slice(2),
 ): Promise<void> => {
-    const parsedArguments = parseRustKernelHeavyArguments(rawArguments);
-    const runLog = await createLocalRunLog({
-        commandLineArguments: rawArguments,
-        lanes: ['Rust kernel heavy'],
-        scriptName: 'test:rust:kernel:heavy',
-    });
-    const testMatchTracker = createFocusedRustTestMatchTracker();
-    let exitCode: number | undefined;
+    await runWithLocalRunLog(
+        {
+            commandLineArguments: rawArguments,
+            lanes: ['Rust kernel heavy'],
+            scriptName: 'test:rust:kernel:heavy',
+        },
+        async (runLog) => {
+            const parsedArguments = parseRustKernelHeavyArguments(rawArguments);
+            const command = buildRustKernelHeavyTestCommand(
+                parsedArguments,
+                path.join(
+                    runLog.runDirectoryPath,
+                    'resources',
+                    'process-memory-guard-rust-kernel-heavy.jsonl',
+                ),
+            );
+            if (rawArguments.some((argument) => argument !== '--')) {
+                await verifyFocusedRustLaneSelection({
+                    environment: command.env,
+                    lane: 'rust-kernel-heavy',
+                    runLog,
+                    testFilter: parsedArguments.testFilter,
+                });
+            }
+            const progressReporter = createHeavyTestProgressReporter({
+                eventFilePath: path.join(
+                    runLog.runDirectoryPath,
+                    'tests',
+                    'rust-kernel-heavy.jsonl',
+                ),
+                label: 'rust-kernel-heavy',
+                threadCount: 1,
+            });
 
-    try {
-        exitCode = await runCommandsInSeries(
-            [buildRustKernelHeavyProcessMemoryGuardVerificationCommand()],
-            {
-                outputMode: 'inherit',
-                runLog,
-            },
-        );
-        if (exitCode !== 0) {
-            process.exitCode = exitCode;
-            return;
-        }
+            try {
+                process.exitCode = await withLocalHeavyLaneLease({
+                    action: async () => {
+                        let exitCode = await runCommandsInSeries(
+                            [
+                                buildRustKernelHeavyProcessMemoryGuardVerificationCommand(),
+                            ],
+                            {
+                                outputMode: 'inherit',
+                                runLog,
+                            },
+                        );
+                        if (exitCode !== 0) return exitCode;
 
-        exitCode = await runCommandsInSeries(
-            [buildRustKernelHeavyTestCommand(parsedArguments)],
-            {
-                observer: testMatchTracker.observer,
-                outputMode: 'inherit',
-                runLog,
-            },
-        );
-        const runResult = resolveFocusedRustTestRunResult({
-            commandExitCode: exitCode,
-            matchedTestCount: testMatchTracker.matchedTestCount(),
-            runnerName: 'Rust kernel heavy',
-            testFilter: parsedArguments.testFilter,
-        });
-        exitCode = runResult.exitCode;
-        if (runResult.failureMessage !== undefined) {
-            console.error(runResult.failureMessage);
-            runLog.writeCombinedOutput(`${runResult.failureMessage}\n`);
-        }
-        process.exitCode = exitCode;
-    } finally {
-        await runLog.finish({
-            exitCode: exitCode ?? currentProcessExitCode(),
-        });
-    }
+                        exitCode = await runCommandsInSeries([command], {
+                            observer: progressReporter.observer,
+                            outputMode: 'inherit',
+                            runLog,
+                            terminalOutputFilter:
+                                progressReporter.terminalOutputFilter,
+                        });
+                        const runResult = resolveFocusedRustTestRunResult({
+                            commandExitCode: exitCode,
+                            executedTestCount:
+                                progressReporter.executedTestCount(),
+                            runnerName: 'Rust kernel heavy',
+                            testFilter: parsedArguments.testFilter,
+                        });
+                        if (runResult.failureMessage !== undefined) {
+                            console.error(runResult.failureMessage);
+                            runLog.writeCombinedOutput(
+                                `${runResult.failureMessage}\n`,
+                            );
+                        }
+                        return runResult.exitCode;
+                    },
+                    laneLabel: 'Rust kernel heavy',
+                    runLog,
+                });
+            } finally {
+                progressReporter.stop();
+            }
+        },
+    );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void runRustKernelHeavyTests();
 }

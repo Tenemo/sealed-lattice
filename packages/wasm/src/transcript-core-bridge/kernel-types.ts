@@ -1,35 +1,16 @@
-import type {
-    CanonicalError,
-    FieldElement,
-    ProtocolHash,
-    TranscriptCoreAnalysis,
-    TranscriptCoreFixture,
-    TranscriptCoreFixtureVerification,
-} from '@sealed-lattice/types';
+import type { CanonicalError, ProtocolHash } from '@sealed-lattice/types';
 
 import type {
-    BgvBaseConversionFixture,
-    BgvBatchPlaintextEncoding,
-    BgvCanonicalObjectAnalysis,
-    BgvCiphertextConventionFixture,
-    BgvCollectiveSetupTransportCompanions,
     BgvCollectiveSetupParametersDescription,
-    BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
+    BgvPublicKeyShareStatementContext,
+    BgvSameSecretBridgeTargets,
     BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeyStatementDescription,
     BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
-    BgvEvaluatorOperationValidation,
-    BgvLocalTrusteeSetupStateVerification,
-    BgvObjectValidation,
-    BgvPassiveSetupPackage,
-    BgvPassiveSetupParticipantInput,
     BgvPrivateVssShareEnvelopeVerification,
-    BgvPrivateVssShareProofGeneration,
-    BgvOperationRejection,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofContext,
     BgvSameSecretBridgeProofGeneration,
@@ -37,251 +18,299 @@ import type {
     BgvVssShareLinkageProofContext,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
-    BgvSetupProofMaterialTransportStreamBegin,
-    BgvSetupProofMaterialTransportStreamChunkAbsorption,
-    BgvSetupProofMaterialTransportStreamVerification,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamBegin,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
-    BgvTargetDecryptionReleaseSetupContext,
-    BgvTargetDecryptionShare,
-    BgvTargetDecryptionShareProofMaterial,
-    BgvTargetDecryptionShareProofMaterialVerification,
-    BgvTargetDecryptionShareProofStatement,
-    BgvTargetDecryptionShareProofStatementBinding,
-    BgvTargetDecryptionResultReleaseBegin,
-    BgvTargetDecryptionResultReleaseShareAbsorption,
-    BgvTargetDecryptionResultReleaseCompletion,
 } from './kernel-types/bgv.js';
 
 export type {
-    BgvAcceptedSetupHandoff,
-    BgvBaseConversionFixture,
-    BgvBatchPlaintextEncoding,
-    BgvCanonicalObjectAnalysis,
-    BgvCiphertextConventionFixture,
     BgvCollectiveSetupParametersDescription,
-    BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeyStatementDescription,
-    BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
-    BgvTrusteeEvaluationKeyStatementContext,
-    BgvTrusteeEvaluationKeyStatementKey,
-    BgvEvaluatorOperationValidation,
-    BgvLocalTrusteeSetupStateVerification,
-    BgvObjectValidation,
-    BgvPassiveSetupPackage,
-    BgvPassiveSetupParticipantInput,
     BgvPrivateVssShareEnvelopeVerification,
-    BgvPrivateVssShareProofGeneration,
-    BgvOperationRejection,
     BgvRnsParametersDescription,
+    BgvSameSecretBridgeTargets,
     BgvSameSecretBridgeProofContext,
     BgvSameSecretBridgeProofGeneration,
     BgvVssCommittedMaterialCommitmentComputation,
     BgvVssShareLinkageProofContext,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
-    BgvSetupProofMaterialTransportStreamBegin,
-    BgvSetupProofMaterialTransportStreamChunkAbsorption,
-    BgvSetupProofMaterialTransportStreamVerification,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamBegin,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
-    BgvTargetDecryptionReleaseSetupContext,
-    BgvTargetDecryptionShare,
-    BgvTargetDecryptionShareProofMaterial,
-    BgvTargetDecryptionShareProofMaterialVerification,
-    BgvTargetDecryptionShareProofStatement,
-    BgvTargetDecryptionShareProofStatementBinding,
-    BgvTargetDecryptionResultReleaseBegin,
-    BgvTargetDecryptionResultReleaseShareAbsorption,
-    BgvTargetDecryptionResultReleaseShareEvidence,
-    BgvTargetDecryptionResultReleaseCompletion,
 } from './kernel-types/bgv.js';
-export type TranscriptCoreKernelSharePoint = {
-    readonly rosterPosition: number;
-    readonly value: FieldElement;
-};
 
-export type TranscriptCorePlaintextComparison = {
-    readonly greaterThan: FieldElement;
-    readonly equal: FieldElement;
-    readonly scoreDifference: number;
-};
-
-type BgvTargetDecryptionLocalCommandContext = Readonly<{
+export type BgvCollectiveSetupVerificationInput = Readonly<{
     readonly setupPackage: unknown;
-    readonly targetAcceptedRecord: unknown;
-    readonly targetCiphertexts: unknown;
-    readonly targetCiphertextBinding: unknown;
-    readonly targetShareProfile: unknown;
+    readonly expectedSetupPackageHash?: ProtocolHash;
+    readonly expectedManifestHash?: ProtocolHash;
+    readonly expectedRosterHash?: ProtocolHash;
 }>;
 
+export type MailboxPayloadType = 1 | 2;
+
+export type CanonicalFoundationValueValidation = Readonly<{
+    readonly schemaIdentifier: number;
+    readonly canonicalBytesHex: string;
+    readonly bindingHash?: ProtocolHash;
+}>;
+
+export type CanonicalFoundationValueValidationInput =
+    | Readonly<{
+          readonly schemaIdentifier: number;
+          readonly canonicalBytesHex: string;
+      }>
+    | Readonly<{
+          readonly schemaIdentifier: number;
+          readonly canonicalByteLength: number;
+          readonly canonicalByteChunksHex: readonly string[];
+      }>;
+
+export type CeremonyContextInput = Readonly<{
+    readonly suiteId: ProtocolHash;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly ceremonyIdentifier: string;
+}>;
+
+export type ActionContextInput = Readonly<{
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly actionIdentifier: string;
+    readonly actionDefinitionHash: ProtocolHash;
+    readonly boardPolicyHash: ProtocolHash;
+}>;
+
+export type MailboxKeyScheduleInput = Readonly<{
+    readonly suiteId: ProtocolHash;
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly actionContextHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly sourceParticipantId: string;
+    readonly recipientParticipantId: string;
+    readonly producerSequence: string;
+    readonly envelopeAttemptIdentifierHex: string;
+    readonly payloadType: MailboxPayloadType;
+    readonly statementHash: ProtocolHash;
+    readonly orderedMaterialRoots: readonly ProtocolHash[];
+    readonly kemCiphertextHash: ProtocolHash;
+}>;
+
+export type MailboxAssociatedData = Readonly<
+    MailboxKeyScheduleInput & {
+        readonly plaintextByteLength: string;
+    }
+>;
+
+export type SetupMailboxSlot = Omit<
+    MailboxKeyScheduleInput,
+    'envelopeAttemptIdentifierHex' | 'kemCiphertextHash'
+>;
+
+export type MailboxCiphertextDescriptor = Readonly<{
+    readonly totalByteLength: string;
+    readonly orderedChunkDigests: readonly ProtocolHash[];
+}>;
+
+export type UnsignedMailboxEnvelope = Readonly<{
+    readonly associatedData: MailboxAssociatedData;
+    readonly kemCiphertextHex: string;
+    readonly ciphertextDescriptor: MailboxCiphertextDescriptor;
+    readonly gcmTagHex: string;
+}>;
+
+export type SignedMailboxEnvelope = Readonly<
+    UnsignedMailboxEnvelope & {
+        readonly sourceSignatureHex: string;
+    }
+>;
+
+export type EncodedMailboxKeyScheduleInput = Readonly<{
+    readonly canonicalBytesHex: string;
+    readonly hkdfExtractSaltHex: string;
+}>;
+
+export type DecodedMailboxKeyScheduleInput = Readonly<{
+    readonly value: MailboxKeyScheduleInput;
+    readonly hkdfExtractSaltHex: string;
+}>;
+
+export type EncodedMailboxAssociatedData = Readonly<{
+    readonly canonicalBytesHex: string;
+    readonly hkdfExtractSaltHex: string;
+}>;
+
+export type DecodedMailboxAssociatedData = Readonly<{
+    readonly value: MailboxAssociatedData;
+    readonly hkdfExtractSaltHex: string;
+}>;
+
+export type EncodedStreamDescriptor = Readonly<{
+    readonly canonicalBytesHex: string;
+}>;
+
+export type DecodedStreamDescriptor = Readonly<{
+    readonly value: MailboxCiphertextDescriptor;
+}>;
+
+export type PrivateRandomCursor = Readonly<{
+    readonly family: number;
+    readonly purpose: number;
+    readonly derivationContextHash: ProtocolHash;
+    readonly streamAttemptIdentifierHex: string;
+    readonly nextCounter: string;
+    readonly nextUnreadBitOffsetInBufferedBlock?: number;
+}>;
+
+export type EncodedPrivateRandomCursor = Readonly<{
+    readonly canonicalBytesHex: string;
+}>;
+
+export type DecodedPrivateRandomCursor = Readonly<{
+    readonly value: PrivateRandomCursor;
+}>;
+
+export type EncodedSignedMailboxEnvelope = Readonly<{
+    readonly canonicalBytesHex: string;
+    readonly envelopeHash: ProtocolHash;
+}>;
+
+export type DecodedSignedMailboxEnvelope = Readonly<{
+    readonly value: SignedMailboxEnvelope;
+    readonly envelopeHash: ProtocolHash;
+}>;
+
+export type AcceptedSetupSession = Readonly<{
+    cancel(): void;
+    verifyCollectiveBgvSetup(
+        input: BgvCollectiveSetupVerificationInput,
+    ): BgvCollectiveSetupVerification;
+}>;
+
+type BgvTrusteeEvaluationKeyContext = BgvTrusteeEvaluationKeyStatementContext;
+
+type BgvEvaluationKeyStatementKey = Exclude<
+    BgvTrusteeEvaluationKeyStatementKey,
+    { readonly proofFamily: 'public-key-share' }
+>;
+
+type BgvPublicKeyShareStatementKey = Extract<
+    BgvTrusteeEvaluationKeyStatementKey,
+    { readonly proofFamily: 'public-key-share' }
+>;
+
+type BgvTrusteeEvaluationKeyStatementCommonInput<Context, Key> = Readonly<{
+    readonly context: Context;
+    readonly ringDegree: number;
+    readonly keys: readonly Key[];
+}>;
+
+type BgvTrusteeEvaluationKeyStatementInput =
+    | Readonly<
+          BgvTrusteeEvaluationKeyStatementCommonInput<
+              BgvTrusteeEvaluationKeyContext,
+              BgvEvaluationKeyStatementKey
+          > & {
+              readonly statementFamily: 'trustee-evaluation-key';
+              readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
+          }
+      >
+    | Readonly<
+          Omit<
+              BgvTrusteeEvaluationKeyStatementCommonInput<
+                  BgvPublicKeyShareStatementContext,
+                  BgvPublicKeyShareStatementKey
+              >,
+              'keys'
+          > & {
+              readonly statementFamily: 'public-key-share';
+              readonly keys: readonly [BgvPublicKeyShareStatementKey];
+              readonly sameSecretBridge: BgvTrusteeEvaluationKeySameSecretBridge;
+          }
+      >;
+
+type BgvTrusteeEvaluationKeyProofCommonInput = Readonly<{
+    readonly secretCoefficients: readonly number[];
+    readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
+    readonly proofRandomnessSeedHex: string;
+}>;
+
+type BgvTrusteeEvaluationKeyProofInput =
+    | Readonly<
+          Extract<
+              BgvTrusteeEvaluationKeyStatementInput,
+              { readonly statementFamily: 'trustee-evaluation-key' }
+          > &
+              BgvTrusteeEvaluationKeyProofCommonInput & {
+                  readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+              }
+      >
+    | Readonly<
+          Extract<
+              BgvTrusteeEvaluationKeyStatementInput,
+              { readonly statementFamily: 'public-key-share' }
+          > &
+              BgvTrusteeEvaluationKeyProofCommonInput & {
+                  readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
+              }
+      >;
+
 export type TranscriptCoreKernel = {
-    readonly exportedFunctionNames: readonly string[];
-    analyzeCanonicalObject(input: {
-        readonly canonicalBytesHex: string;
-        readonly chunkSize: number;
-    }): TranscriptCoreAnalysis;
-    computeChunkRoot(input: {
-        readonly inputHex: string;
-        readonly chunkSize: number;
-    }): string;
+    beginAcceptedSetupSession(): AcceptedSetupSession;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
-    evaluatePlaintextComparison(input: {
-        readonly leftTotalScore: number;
-        readonly rightTotalScore: number;
-        readonly rosterSize: number;
-    }): TranscriptCorePlaintextComparison;
-    hashRaw(inputHex: string): string;
-    interpolateShamirConstantTerm(input: {
-        readonly sharePoints: readonly TranscriptCoreKernelSharePoint[];
-    }): FieldElement;
-    listCanonicalErrorCodes(): readonly string[];
-    roundTripBytes(input: Uint8Array): Uint8Array;
-    verifyFixture(
-        fixture: TranscriptCoreFixture,
-    ): TranscriptCoreFixtureVerification;
-    generateBgvTargetDecryptionShareFromLocalShare(
-        input: BgvTargetDecryptionLocalCommandContext & {
-            readonly trusteeIdentity: string;
-            readonly localTargetShareWitness: unknown;
-        },
-    ): BgvTargetDecryptionShare;
-    deriveBgvTargetDecryptionShareProofStatement(
-        input: BgvTargetDecryptionLocalCommandContext & {
-            readonly trusteeIdentity: string;
-            readonly localTargetShareWitness: unknown;
-            readonly targetDecryptionShare: unknown;
-        },
-    ): BgvTargetDecryptionShareProofStatement;
-    generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(
-        input: BgvTargetDecryptionLocalCommandContext & {
-            readonly trusteeIdentity: string;
-            readonly localTargetShareWitness: unknown;
-            readonly targetDecryptionShare: unknown;
-            readonly proofStatement: unknown;
-            readonly proofRandomnessSeedHex: string;
-            readonly proofRandomnessNonceHex: string;
-        },
-    ): BgvTargetDecryptionShareProofMaterial;
-    verifyBgvTargetDecryptionShareProofMaterial(
-        input: BgvTargetDecryptionLocalCommandContext & {
-            readonly targetDecryptionShare: unknown;
-            readonly proofStatement: unknown;
-            readonly proofMaterial: unknown;
-        },
-    ): BgvTargetDecryptionShareProofMaterialVerification;
-    verifyBgvTargetDecryptionShareProofStatementBinding(
-        input: BgvTargetDecryptionLocalCommandContext & {
-            readonly targetDecryptionShare: unknown;
-            readonly proofStatement: unknown;
-        },
-    ): BgvTargetDecryptionShareProofStatementBinding;
+    validateCanonicalFoundationValue(
+        input: CanonicalFoundationValueValidationInput,
+    ): CanonicalFoundationValueValidation;
+    deriveCeremonyContextHash(value: CeremonyContextInput): ProtocolHash;
+    deriveActionContextHash(value: ActionContextInput): ProtocolHash;
+    encodeMailboxKeyScheduleInput(
+        value: MailboxKeyScheduleInput,
+    ): EncodedMailboxKeyScheduleInput;
+    decodeMailboxKeyScheduleInput(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedMailboxKeyScheduleInput;
+    encodeMailboxAssociatedData(
+        value: MailboxAssociatedData,
+    ): EncodedMailboxAssociatedData;
+    decodeMailboxAssociatedData(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedMailboxAssociatedData;
+    encodeStreamDescriptor(
+        value: MailboxCiphertextDescriptor,
+    ): EncodedStreamDescriptor;
+    decodeStreamDescriptor(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedStreamDescriptor;
+    deriveSetupMailboxSlotHash(value: SetupMailboxSlot): ProtocolHash;
+    encodePrivateRandomCursor(
+        value: PrivateRandomCursor,
+    ): EncodedPrivateRandomCursor;
+    decodePrivateRandomCursor(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedPrivateRandomCursor;
+    encodeSignedMailboxEnvelope(
+        value: SignedMailboxEnvelope,
+    ): EncodedSignedMailboxEnvelope;
+    decodeSignedMailboxEnvelope(input: {
+        readonly canonicalBytesHex: string;
+    }): DecodedSignedMailboxEnvelope;
+    deriveMailboxKemCiphertextHash(input: {
+        readonly kemCiphertextHex: string;
+    }): ProtocolHash;
+    deriveMailboxEnvelopeHash(value: UnsignedMailboxEnvelope): ProtocolHash;
     describeBgvRnsParameters(): BgvRnsParametersDescription;
-    describeBgvOperationRegistry(): unknown;
     describeCollectiveBgvSetupParameters(input?: {
         readonly participantCount?: number;
     }): BgvCollectiveSetupParametersDescription;
-    deriveCollectiveBgvSetupPublicDerivations(input: {
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly decryptionThreshold?: number;
-    }): BgvCollectiveSetupPublicDerivations;
-    generateBgvPassiveSetup(input: {
-        readonly ceremonyId: string;
-        readonly manifestHash: ProtocolHash;
-        readonly rosterHash: ProtocolHash;
-        readonly thresholdParametersHash: ProtocolHash;
-        readonly participants: readonly BgvPassiveSetupParticipantInput[];
-        readonly setupSeed?: string;
-    }): BgvPassiveSetupPackage;
-    generateBgvEvaluationKeyMaterial(input: {
-        readonly setupPackage: BgvPassiveSetupPackage;
-        readonly setupPrivateWitness: {
-            readonly setupSeed: string;
-        };
-        readonly workingLevel?: number;
-        readonly rotationKeys?: readonly {
-            readonly rotation: number;
-            readonly level: number;
-        }[];
-    }): Record<string, unknown>;
-    verifyBgvPassiveSetup(input: {
-        readonly setupPackage: BgvPassiveSetupPackage;
-        readonly expectedSetupPackageHash?: ProtocolHash;
-        readonly expectedManifestHash?: ProtocolHash;
-        readonly expectedRosterHash?: ProtocolHash;
-        readonly expectedCollectivePublicKeyRoot?: ProtocolHash;
-        readonly expectedRotSetHash?: ProtocolHash;
-        readonly expectedEvaluationKeyRoot?: ProtocolHash;
-    }): void;
-    verifyCollectiveBgvSetup(
-        input: Readonly<
-            {
-                readonly setupPackage: unknown;
-                readonly expectedSetupPackageHash?: ProtocolHash;
-                readonly expectedManifestHash?: ProtocolHash;
-                readonly expectedRosterHash?: ProtocolHash;
-            } & BgvCollectiveSetupTransportCompanions
-        >,
-    ): BgvCollectiveSetupVerification;
     verifyPrivateVssShareEnvelope(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
         readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
         readonly privateEnvelope: unknown;
-        readonly transportedPrivateVssShareProofMaterial?: unknown;
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
-        readonly expectedLocalVerificationRoot?: ProtocolHash;
     }): BgvPrivateVssShareEnvelopeVerification;
-    generatePrivateVssShareProof(input: {
-        readonly setupContext: unknown;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly privateEnvelopeAadHash: ProtocolHash;
-        readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
-        readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
-        readonly recipientIdentity: string;
-        readonly recipientRosterPosition: number;
-        readonly rnsLimbIndex: number;
-        readonly rnsPrime: number;
-        readonly ringDegree: number;
-        readonly shareValues: readonly number[];
-        readonly coefficientCommitmentRoots: readonly ProtocolHash[];
-        readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-        readonly openingRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-        readonly proofRandomnessSeedHex: string;
-        readonly proofRandomnessNonceHex: string;
-    }): BgvPrivateVssShareProofGeneration;
-    generateTrusteeEvaluationKeyProof(input: {
-        readonly context: BgvTrusteeEvaluationKeyStatementContext;
-        readonly ringDegree: number;
-        readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
-        readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
-        readonly sameSecretBridge?: BgvTrusteeEvaluationKeySameSecretBridge;
-        readonly secretCoefficients: readonly number[];
-        readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
-        readonly negativeIndicatorCoefficients?: readonly number[];
-        readonly openingRandomnessByLimb?: readonly (readonly (readonly number[])[])[];
-        readonly vssCommittedMaterialSeedsByBoundMessage?: readonly string[];
-        readonly vssCommittedMaterialContextHashesByBoundMessage?: readonly string[];
-        readonly proofRandomnessSeedHex: string;
-        readonly proofRandomnessNonceHex: string;
-    }): BgvTrusteeEvaluationKeyProofGeneration;
-    describeTrusteeEvaluationKeyStatement(input: {
-        readonly context: BgvTrusteeEvaluationKeyStatementContext;
-        readonly ringDegree: number;
-        readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
-        readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
-        readonly sameSecretBridge?: BgvTrusteeEvaluationKeySameSecretBridge;
-    }): BgvTrusteeEvaluationKeyStatementDescription;
+    generateTrusteeEvaluationKeyProof(
+        input: BgvTrusteeEvaluationKeyProofInput,
+    ): BgvTrusteeEvaluationKeyProofGeneration;
     computeSetupCommitmentFromOpening(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceRnsLimbIndex: number;
-        readonly sourceMessageModulus: number;
         readonly shamirCoefficientIndex: number;
         readonly messageCoefficients: readonly number[];
         readonly randomnessByColumn: readonly (readonly number[])[];
@@ -291,9 +320,7 @@ export type TranscriptCoreKernel = {
         readonly commitmentRole: string;
         readonly commitmentContext: Record<string, unknown>;
         readonly rnsLimbIndex: number;
-        readonly rnsPrime: number;
         readonly ringDegree: number;
-        readonly messageCoefficientBound?: number;
         readonly messageCoefficients: readonly number[];
         readonly materialSeedHex: string;
     }): BgvVssCommittedMaterialCommitmentComputation;
@@ -302,110 +329,38 @@ export type TranscriptCoreKernel = {
         readonly ringDegree: number;
         readonly vssShareLinkage: Record<string, unknown>;
         readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-        readonly recipientShareMessages: readonly number[];
-        readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-        readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
-        readonly carryWitnesses: readonly number[];
-        readonly recipientShareMessagesByItem?: readonly (readonly number[])[];
-        readonly recipientShareOpeningRandomnessByItem?: readonly (readonly (readonly number[])[])[];
-        readonly carryWitnessesByItem?: readonly (readonly number[])[];
+        readonly recipientShareMessagesByItem: readonly (readonly number[])[];
+        readonly carryWitnessesByItem: readonly (readonly number[])[];
         readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-        readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
         readonly proofRandomnessSeedHex: string;
-        readonly proofRandomnessNonceHex: string;
     }): BgvVssShareLinkageProofGeneration;
     generateSameSecretBridgeProof(input: {
         readonly context: BgvSameSecretBridgeProofContext;
         readonly ringDegree: number;
         readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
-        readonly sameSecretBridge: Record<string, unknown>;
+        readonly sameSecretBridge: BgvSameSecretBridgeTargets;
         readonly secretCoefficients: readonly number[];
-        readonly negativeIndicatorCoefficients: readonly number[];
         readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
         readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-        readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
         readonly proofRandomnessSeedHex: string;
-        readonly proofRandomnessNonceHex: string;
     }): BgvSameSecretBridgeProofGeneration;
-    beginSetupProofMaterialTransportStream(input: {
-        readonly verificationId: string;
-        readonly transportedSetupProofMaterial: unknown;
-    }): BgvSetupProofMaterialTransportStreamBegin;
-    absorbSetupProofMaterialTransportStreamChunk(input: {
-        readonly verificationId: string;
-        readonly chunkIndex: number;
-        readonly bytesHex: string;
-    }): BgvSetupProofMaterialTransportStreamChunkAbsorption;
-    finishSetupProofMaterialTransportStream(input: {
-        readonly verificationId: string;
-    }): BgvSetupProofMaterialTransportStreamVerification;
-    beginEvaluationKeyShareComponentMaterialTransportStream(input: {
-        readonly verificationId: string;
-        readonly transportedEvaluationKeyShareComponentMaterial: unknown;
-    }): BgvEvaluationKeyShareComponentMaterialTransportStreamBegin;
-    absorbEvaluationKeyShareComponentMaterialTransportStreamChunk(input: {
-        readonly verificationId: string;
-        readonly chunkIndex: number;
-        readonly bytesHex: string;
-    }): BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption;
-    finishEvaluationKeyShareComponentMaterialTransportStream(input: {
-        readonly verificationId: string;
-    }): BgvEvaluationKeyShareComponentMaterialTransportStreamVerification;
-    deriveBgvTargetDecryptionResultReleaseSetupContext(input: {
-        readonly setupPackage: unknown;
-    }): BgvTargetDecryptionReleaseSetupContext;
-    beginBgvTargetDecryptionResultRelease(input: {
-        readonly releaseVerificationId: string;
-        readonly releaseSetupContext: unknown;
-        readonly targetAcceptedRecord: unknown;
-        readonly targetCiphertexts: unknown;
-        readonly targetCiphertextBinding: unknown;
-        readonly targetShareProfile: unknown;
-    }): BgvTargetDecryptionResultReleaseBegin;
-    absorbBgvTargetDecryptionResultReleaseShare(input: {
-        readonly releaseVerificationId: string;
-        readonly targetShareProof: unknown;
-    }): BgvTargetDecryptionResultReleaseShareAbsorption;
-    finishBgvTargetDecryptionResultRelease(input: {
-        readonly releaseVerificationId: string;
-    }): BgvTargetDecryptionResultReleaseCompletion;
-    verifyLocalTrusteeSetupState(input: {
-        readonly setupContext: unknown;
-        readonly localStateCommitment: unknown;
-    }): BgvLocalTrusteeSetupStateVerification;
-    encodeBgvBatchPlaintext(input: {
-        readonly slots: readonly number[];
-        readonly level?: number;
-        readonly includeCanonicalBytesHex?: boolean;
-    }): BgvBatchPlaintextEncoding | BgvOperationRejection;
-    validateBgvPlaintextObject(input: {
-        readonly canonicalBytesHex: string;
-        readonly expectedPlaintextRoot?: string;
-    }): BgvObjectValidation | BgvOperationRejection;
-    validateBgvCiphertextObject(input: {
-        readonly canonicalBytesHex: string;
-        readonly expectedCiphertextRoot?: string;
-    }): BgvObjectValidation | BgvOperationRejection;
-    generateBgvCiphertextConventionFixture(input: {
-        readonly leftSlots: readonly number[];
-        readonly rightSlots: readonly number[];
-        readonly includeCanonicalBytesHex?: boolean;
-    }): BgvCiphertextConventionFixture | BgvOperationRejection;
-    generateBgvBaseConversionFixture(input: {
-        readonly slots: readonly number[];
-    }): BgvBaseConversionFixture | BgvOperationRejection;
-    analyzeBgvCanonicalObject(input: {
-        readonly canonicalBytesHex: string;
-    }): BgvCanonicalObjectAnalysis | BgvOperationRejection;
-    validateBgvEvaluatorOperation(input: {
-        readonly operation: string;
-    }): BgvEvaluatorOperationValidation;
 };
+
+export type TranscriptCoreKernelContextOwner = object;
+
+export type PublishedSdkKernel = Pick<
+    TranscriptCoreKernel,
+    'beginAcceptedSetupSession' | 'verifyPrivateVssShareEnvelope'
+>;
 
 type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
     TranscriptCoreKernel[MethodName] extends (input: infer Input) => unknown
         ? NonNullable<Input>
         : never;
+
+type KernelWireInput<Input> = Input extends unknown
+    ? Omit<Input, 'statementFamily'>
+    : never;
 
 type KernelCommandFromMethod<
     CommandName extends string,
@@ -413,104 +368,97 @@ type KernelCommandFromMethod<
 > = Readonly<
     {
         readonly command: CommandName;
-    } & KernelMethodInput<MethodName>
+    } & KernelWireInput<KernelMethodInput<MethodName>>
 >;
 
 type TranscriptCoreKernelCommand =
-    | KernelCommandFromMethod<
-          'AnalyzeCanonicalObject',
-          'analyzeCanonicalObject'
-      >
-    | KernelCommandFromMethod<'ComputeChunkRoot', 'computeChunkRoot'>
     | KernelCommandFromMethod<
           'DeriveCanonicalObjectHash',
           'deriveCanonicalObjectHash'
       >
     | KernelCommandFromMethod<
-          'EvaluatePlaintextComparison',
-          'evaluatePlaintextComparison'
+          'ValidateCanonicalFoundationValue',
+          'validateCanonicalFoundationValue'
       >
-    | {
-          readonly command: 'HashRaw';
-          readonly inputHex: string;
-      }
+    | Readonly<{
+          readonly command: 'DeriveCeremonyContextHash';
+          readonly value: CeremonyContextInput;
+      }>
+    | Readonly<{
+          readonly command: 'DeriveActionContextHash';
+          readonly value: ActionContextInput;
+      }>
+    | Readonly<{
+          readonly command: 'EncodeMailboxKeyScheduleInput';
+          readonly value: MailboxKeyScheduleInput;
+      }>
     | KernelCommandFromMethod<
-          'InterpolateShamirConstantTerm',
-          'interpolateShamirConstantTerm'
+          'DecodeMailboxKeyScheduleInput',
+          'decodeMailboxKeyScheduleInput'
       >
-    | {
-          readonly command: 'ListCanonicalErrorCodes';
-      }
-    | {
-          readonly command: 'VerifyFixture';
-          readonly fixture: TranscriptCoreFixture;
-      }
+    | Readonly<{
+          readonly command: 'EncodeMailboxAssociatedData';
+          readonly value: MailboxAssociatedData;
+      }>
     | KernelCommandFromMethod<
-          'GenerateBgvTargetDecryptionShareFromLocalShare',
-          'generateBgvTargetDecryptionShareFromLocalShare'
+          'DecodeMailboxAssociatedData',
+          'decodeMailboxAssociatedData'
+      >
+    | Readonly<{
+          readonly command: 'EncodeStreamDescriptor';
+          readonly value: MailboxCiphertextDescriptor;
+      }>
+    | KernelCommandFromMethod<
+          'DecodeStreamDescriptor',
+          'decodeStreamDescriptor'
+      >
+    | Readonly<{
+          readonly command: 'DeriveSetupMailboxSlotHash';
+          readonly value: SetupMailboxSlot;
+      }>
+    | Readonly<{
+          readonly command: 'EncodePrivateRandomCursor';
+          readonly value: PrivateRandomCursor;
+      }>
+    | KernelCommandFromMethod<
+          'DecodePrivateRandomCursor',
+          'decodePrivateRandomCursor'
+      >
+    | Readonly<{
+          readonly command: 'EncodeSignedMailboxEnvelope';
+          readonly value: SignedMailboxEnvelope;
+      }>
+    | KernelCommandFromMethod<
+          'DecodeSignedMailboxEnvelope',
+          'decodeSignedMailboxEnvelope'
       >
     | KernelCommandFromMethod<
-          'DeriveBgvTargetDecryptionShareProofStatement',
-          'deriveBgvTargetDecryptionShareProofStatement'
+          'DeriveMailboxKemCiphertextHash',
+          'deriveMailboxKemCiphertextHash'
       >
-    | KernelCommandFromMethod<
-          'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
-          'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness'
-      >
-    | KernelCommandFromMethod<
-          'VerifyBgvTargetDecryptionShareProofMaterial',
-          'verifyBgvTargetDecryptionShareProofMaterial'
-      >
-    | KernelCommandFromMethod<
-          'VerifyBgvTargetDecryptionShareProofStatementBinding',
-          'verifyBgvTargetDecryptionShareProofStatementBinding'
-      >
+    | Readonly<{
+          readonly command: 'DeriveMailboxEnvelopeHash';
+          readonly value: UnsignedMailboxEnvelope;
+      }>
     | {
           readonly command: 'DescribeBgvRnsParameters';
       }
-    | {
-          readonly command: 'DescribeBgvOperationRegistry';
-      }
-    | KernelCommandFromMethod<
-          'ValidateBgvEvaluatorOperation',
-          'validateBgvEvaluatorOperation'
-      >
     | KernelCommandFromMethod<
           'DescribeCollectiveBgvSetupParameters',
           'describeCollectiveBgvSetupParameters'
       >
-    | KernelCommandFromMethod<
-          'DeriveCollectiveBgvSetupPublicDerivations',
-          'deriveCollectiveBgvSetupPublicDerivations'
-      >
-    | KernelCommandFromMethod<
-          'GenerateBgvPassiveSetup',
-          'generateBgvPassiveSetup'
-      >
-    | KernelCommandFromMethod<
-          'GenerateBgvEvaluationKeyMaterial',
-          'generateBgvEvaluationKeyMaterial'
-      >
-    | KernelCommandFromMethod<'VerifyBgvPassiveSetup', 'verifyBgvPassiveSetup'>
-    | KernelCommandFromMethod<
-          'VerifyCollectiveBgvSetup',
-          'verifyCollectiveBgvSetup'
+    | Readonly<
+          {
+              readonly command: 'VerifyCollectiveBgvSetup';
+          } & BgvCollectiveSetupVerificationInput
       >
     | KernelCommandFromMethod<
           'VerifyPrivateVssShareEnvelope',
           'verifyPrivateVssShareEnvelope'
       >
     | KernelCommandFromMethod<
-          'GeneratePrivateVssShareProof',
-          'generatePrivateVssShareProof'
-      >
-    | KernelCommandFromMethod<
           'GenerateTrusteeEvaluationKeyProof',
           'generateTrusteeEvaluationKeyProof'
-      >
-    | KernelCommandFromMethod<
-          'DescribeTrusteeEvaluationKeyStatement',
-          'describeTrusteeEvaluationKeyStatement'
       >
     | KernelCommandFromMethod<
           'ComputeSetupCommitmentFromOpening',
@@ -527,115 +475,285 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'GenerateSameSecretBridgeProof',
           'generateSameSecretBridgeProof'
-      >
-    | KernelCommandFromMethod<
-          'BeginSetupProofMaterialTransportStream',
-          'beginSetupProofMaterialTransportStream'
-      >
-    | KernelCommandFromMethod<
-          'AbsorbSetupProofMaterialTransportStreamChunk',
-          'absorbSetupProofMaterialTransportStreamChunk'
-      >
-    | KernelCommandFromMethod<
-          'FinishSetupProofMaterialTransportStream',
-          'finishSetupProofMaterialTransportStream'
-      >
-    | KernelCommandFromMethod<
-          'BeginEvaluationKeyShareComponentMaterialTransportStream',
-          'beginEvaluationKeyShareComponentMaterialTransportStream'
-      >
-    | KernelCommandFromMethod<
-          'AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk',
-          'absorbEvaluationKeyShareComponentMaterialTransportStreamChunk'
-      >
-    | KernelCommandFromMethod<
-          'FinishEvaluationKeyShareComponentMaterialTransportStream',
-          'finishEvaluationKeyShareComponentMaterialTransportStream'
-      >
-    | KernelCommandFromMethod<
-          'DeriveBgvTargetDecryptionResultReleaseSetupContext',
-          'deriveBgvTargetDecryptionResultReleaseSetupContext'
-      >
-    | KernelCommandFromMethod<
-          'BeginBgvTargetDecryptionResultRelease',
-          'beginBgvTargetDecryptionResultRelease'
-      >
-    | KernelCommandFromMethod<
-          'AbsorbBgvTargetDecryptionResultReleaseShare',
-          'absorbBgvTargetDecryptionResultReleaseShare'
-      >
-    | KernelCommandFromMethod<
-          'FinishBgvTargetDecryptionResultRelease',
-          'finishBgvTargetDecryptionResultRelease'
-      >
-    | KernelCommandFromMethod<
-          'VerifyLocalTrusteeSetupState',
-          'verifyLocalTrusteeSetupState'
-      >
-    | KernelCommandFromMethod<
-          'EncodeBgvBatchPlaintext',
-          'encodeBgvBatchPlaintext'
-      >
-    | KernelCommandFromMethod<
-          'ValidateBgvPlaintextObject',
-          'validateBgvPlaintextObject'
-      >
-    | KernelCommandFromMethod<
-          'ValidateBgvCiphertextObject',
-          'validateBgvCiphertextObject'
-      >
-    | KernelCommandFromMethod<
-          'GenerateBgvCiphertextConventionFixture',
-          'generateBgvCiphertextConventionFixture'
-      >
-    | KernelCommandFromMethod<
-          'GenerateBgvBaseConversionFixture',
-          'generateBgvBaseConversionFixture'
-      >
-    | KernelCommandFromMethod<
-          'AnalyzeBgvCanonicalObject',
-          'analyzeBgvCanonicalObject'
-      >
-    | {
-          readonly command: 'RunDirectEncryptedBallot';
-          readonly setupPackage: BgvPassiveSetupPackage;
-          readonly setupPrivateWitness: {
-              readonly setupSeed: string;
-          };
-          readonly ballotEncryptionRandomness: {
-              readonly source:
-                  | 'fresh-csprng'
-                  | 'development-deterministic-fixture';
-              readonly encryptionSeedHexes: readonly string[];
-          };
-          readonly proofMaskRandomness: {
-              readonly source:
-                  | 'fresh-csprng'
-                  | 'development-deterministic-fixture';
-              readonly ballotProofRandomnessHexes: readonly string[];
-          };
-          readonly ballots: readonly {
-              readonly voterIdentity: string;
-              readonly actionContextHash: string;
-              readonly scores: readonly number[];
-              readonly oneHotWitnesses?: readonly (readonly number[])[];
-          }[];
-          readonly topCount?: number;
-          readonly topCounts?: readonly number[];
-          readonly publicEvaluationKeyMaterial?: unknown;
-          readonly targetFinalityPolicyHash?: string;
-      };
+      >;
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
     sealed_lattice_allocate?: (length: number) => number;
+    sealed_lattice_accepted_setup_canonical_stream_begin?: (
+        setupSessionHandle: number,
+        familyCode: number,
+        materialRootPointer: number,
+        materialRootLength: number,
+        descriptorPointer: number,
+        descriptorLength: number,
+        statusPointer: number,
+        totalByteLengthPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_command_with_length?: (
+        pointer: number,
+        length: number,
+        sessionHandle: number,
+        outputLengthPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_session_begin?: (
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_session_cancel?: (
+        sessionHandle: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_stream_absorb_chunk?: (
+        handle: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_stream_begin?: (
+        familyCode: number,
+        materialRootPointer: number,
+        materialRootLength: number,
+        descriptorPointer: number,
+        descriptorLength: number,
+        statusPointer: number,
+        totalByteLengthPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_stream_cancel?: (handle: number) => number;
+    sealed_lattice_bgv_canonical_stream_finish?: (handle: number) => number;
+    sealed_lattice_bgv_canonical_material_reader_begin?: (
+        familyCode: number,
+        materialRootPointer: number,
+        materialRootLength: number,
+        statusPointer: number,
+        totalByteLengthPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_material_reader_cancel?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_material_reader_finish?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_material_reader_read_chunk?: (
+        handle: number,
+        chunkIndex: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_canonical_stream_absorb_chunk?: (
+        handle: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_canonical_stream_begin_verifier?: (
+        streamDomain: number,
+        descriptorPointer: number,
+        descriptorLength: number,
+        statusPointer: number,
+        totalByteLengthPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    sealed_lattice_canonical_stream_begin_writer?: (
+        streamDomain: number,
+        totalByteLength: number,
+        statusPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    sealed_lattice_canonical_stream_cancel?: (handle: number) => number;
+    sealed_lattice_canonical_stream_finish_verifier?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_canonical_stream_finish_writer?: (
+        handle: number,
+        statusPointer: number,
+        outputLengthPointer: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_authenticate_chunk?: (
+        handle: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_begin_encryptor?: (
+        keyPointer: number,
+        keyLength: number,
+        noncePointer: number,
+        nonceLength: number,
+        associatedDataPointer: number,
+        associatedDataLength: number,
+        totalByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_begin_verifier?: (
+        keyPointer: number,
+        keyLength: number,
+        noncePointer: number,
+        nonceLength: number,
+        associatedDataPointer: number,
+        associatedDataLength: number,
+        totalByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_cancel?: (handle: number) => number;
+    sealed_lattice_mailbox_gcm_decrypt_chunk?: (
+        handle: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_encrypt_chunk?: (
+        handle: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_finish_authentication?: (
+        handle: number,
+        tagPointer: number,
+        tagLength: number,
+    ) => number;
+    sealed_lattice_mailbox_gcm_finish_decryptor?: (handle: number) => number;
+    sealed_lattice_mailbox_gcm_finish_encryptor?: (
+        handle: number,
+        tagPointer: number,
+        tagLength: number,
+    ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
+    sealed_lattice_local_storage_root_command?: (
+        command: number,
+        inputPointer: number,
+        inputLength: number,
+        statusPointer: number,
+        outputLengthPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_begin?: (
+        configurationPointer: number,
+        configurationLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_cancel?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_state_verifier_certify_intent?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedIntentHandle: number,
+        canonicalStateCertificatePointer: number,
+        canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_certify_unordered_votes?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedIntentHandle: number,
+        framedCanonicalVoteCarriersPointer: number,
+        framedCanonicalVoteCarriersLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_describe?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_state_verifier_release?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+    ) => number;
+    sealed_lattice_state_verifier_finish_output?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        streamHandle: number,
+        verifiedReservationHandle: number,
+        canonicalOutputIntentCarrierPointer: number,
+        canonicalOutputIntentCarrierLength: number,
+        canonicalStateCertificatePointer: number,
+        canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_prepare_output?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        streamHandle: number,
+        verifiedReservationHandle: number,
+        canonicalOutputIntentCarrierPointer: number,
+        canonicalOutputIntentCarrierLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_prepare_recovery?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        subjectParticipantIdentityPointer: number,
+        subjectParticipantIdentityLength: number,
+        capabilityKindCode: number,
+        predecessorRecoveryHandle: number,
+        preservedIntentHandle: number,
+        canonicalRecoveryTransitionCarrierPointer: number,
+        canonicalRecoveryTransitionCarrierLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_prepare_reservation?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        subjectParticipantIdentityPointer: number,
+        subjectParticipantIdentityLength: number,
+        capabilityKindCode: number,
+        predecessorRecoveryHandle: number,
+        expectedAuthorizationHashPointer: number,
+        expectedAuthorizationHashLength: number,
+        canonicalReservationIntentCarrierPointer: number,
+        canonicalReservationIntentCarrierLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_verify_recovery?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        subjectParticipantIdentityPointer: number,
+        subjectParticipantIdentityLength: number,
+        capabilityKindCode: number,
+        predecessorRecoveryHandle: number,
+        preservedIntentHandle: number,
+        canonicalRecoveryTransitionCarrierPointer: number,
+        canonicalRecoveryTransitionCarrierLength: number,
+        canonicalStateCertificatePointer: number,
+        canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_verify_reservation?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        subjectParticipantIdentityPointer: number,
+        subjectParticipantIdentityLength: number,
+        capabilityKindCode: number,
+        predecessorRecoveryHandle: number,
+        expectedAuthorizationHashPointer: number,
+        expectedAuthorizationHashLength: number,
+        canonicalReservationIntentCarrierPointer: number,
+        canonicalReservationIntentCarrierLength: number,
+        canonicalStateCertificatePointer: number,
+        canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ) => number;
     sealed_lattice_transcript_core_command_with_length?: (
         pointer: number,
         length: number,
         outputLengthPointer: number,
     ) => number;
-    sealed_lattice_roundtrip?: (pointer: number, length: number) => number;
 };
 
 type KernelSuccessResponse<T> = {

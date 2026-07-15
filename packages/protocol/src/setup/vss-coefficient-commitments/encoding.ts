@@ -1,35 +1,18 @@
-// Stateless encoding, assertion, hashing, and sampling primitives shared across
-// the VSS coefficient-commitment builders: integer guards, centered ternary and
-// uniform residue sampling, varuint helpers, the setup-context field
-// projection, and the binary material byte-length accounting.
-
 export {
+    assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
-    contextFields,
-    setupContextFieldNames,
+    assertProtocolHash,
+    deriveCollectiveBgvSetupContextHash,
 } from '../common-fields.js';
 
-import { appendVaruint } from '../varuint-encoding.js';
-
 import {
-    setupCommitmentModulusLimbIndices,
     setupCommitmentRandomnessWidth,
-    setupCommitmentRowCount,
-    vssCoefficientCommitmentMaterialBinaryMagic,
     type VssOpeningRandomByteSource,
 } from './constants-and-types.js';
 
 const twoToTheSixtyFourth = 1n << 64n;
-
-export const assertNonEmptyString = (
-    value: string,
-    fieldName: string,
-): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
+export const maximumPrivateSamplerCandidateDrawsPerOutput = 64;
 
 export const defaultRandomBytes: VssOpeningRandomByteSource = (byteLength) => {
     const cryptoProvider = globalThis.crypto;
@@ -54,34 +37,49 @@ export class RandomByteSampler {
     ) {}
 
     public take(byteLength: number): Uint8Array {
-        if (this.buffer.byteLength - this.offset < byteLength) {
-            const requestedByteLength = Math.max(byteLength, 4096);
-            const nextBuffer = this.randomBytes(requestedByteLength);
-            if (nextBuffer.byteLength !== requestedByteLength) {
-                throw new Error(
-                    'randomBytes must return exactly the requested byte length.',
-                );
-            }
-            this.buffer = Uint8Array.from(nextBuffer);
-            this.offset = 0;
+        if (!Number.isSafeInteger(byteLength) || byteLength <= 0) {
+            throw new TypeError(
+                'sample byte length must be a positive integer.',
+            );
         }
-        const bytes = this.buffer.subarray(
-            this.offset,
-            this.offset + byteLength,
-        );
-        this.offset += byteLength;
+        const bytes = new Uint8Array(byteLength);
+        let writtenByteLength = 0;
+        while (writtenByteLength < byteLength) {
+            if (this.offset === this.buffer.byteLength) {
+                const requestedByteLength = Math.max(
+                    byteLength - writtenByteLength,
+                    4096,
+                );
+                const nextBuffer = this.randomBytes(requestedByteLength);
+                if (
+                    !(nextBuffer instanceof Uint8Array) ||
+                    nextBuffer.byteLength !== requestedByteLength
+                ) {
+                    throw new Error(
+                        'randomBytes must return exactly the requested byte length.',
+                    );
+                }
+                this.buffer = Uint8Array.from(nextBuffer);
+                this.offset = 0;
+            }
+            const copiedByteLength = Math.min(
+                byteLength - writtenByteLength,
+                this.buffer.byteLength - this.offset,
+            );
+            bytes.set(
+                this.buffer.subarray(
+                    this.offset,
+                    this.offset + copiedByteLength,
+                ),
+                writtenByteLength,
+            );
+            writtenByteLength += copiedByteLength;
+            this.offset += copiedByteLength;
+        }
 
         return bytes;
     }
 }
-
-export const assertHashLike = (value: string, fieldName: string): void => {
-    if (!/^[0-9a-f]{128}$/u.test(value)) {
-        throw new TypeError(
-            `${fieldName} must be a 512-bit lowercase hex hash.`,
-        );
-    }
-};
 
 export const assertResidueVector = (
     coefficients: readonly number[],
@@ -174,7 +172,11 @@ const sampleUniformResidue = (
     sampler: RandomByteSampler,
     modulus: number,
 ): number => {
-    while (true) {
+    for (
+        let candidateDraw = 0;
+        candidateDraw < maximumPrivateSamplerCandidateDrawsPerOutput;
+        candidateDraw += 1
+    ) {
         const residue = reduceUnbiasedU64(
             randomLittleEndianU64(sampler),
             modulus,
@@ -183,10 +185,16 @@ const sampleUniformResidue = (
             return residue;
         }
     }
+
+    throw new Error('private sampler exhausted its candidate-draw ceiling.');
 };
 
 const sampleCenteredTernary = (sampler: RandomByteSampler): -1 | 0 | 1 => {
-    while (true) {
+    for (
+        let candidateDraw = 0;
+        candidateDraw < maximumPrivateSamplerCandidateDrawsPerOutput;
+        candidateDraw += 1
+    ) {
         const candidateByte = sampler.take(1)[0];
         if (candidateByte === undefined) {
             throw new Error('random byte sampler returned an empty byte.');
@@ -197,6 +205,8 @@ const sampleCenteredTernary = (sampler: RandomByteSampler): -1 | 0 | 1 => {
             return residue === 0 ? -1 : residue === 1 ? 0 : 1;
         }
     }
+
+    throw new Error('private sampler exhausted its candidate-draw ceiling.');
 };
 
 export const sampleCenteredTernaryVector = (
@@ -221,51 +231,3 @@ export const sampleCommitmentOpeningRandomness = (
     Array.from({ length: setupCommitmentRandomnessWidth }, () =>
         sampleCenteredTernaryVector(sampler, ringDegree),
     );
-
-const varuintBytes = (value: number): Uint8Array => {
-    const outputBytes: number[] = [];
-    appendVaruint(outputBytes, value);
-
-    return Uint8Array.from(outputBytes);
-};
-
-const varuintByteLength = (value: number): number =>
-    varuintBytes(value).byteLength;
-
-const setupCommitmentBinaryRecordByteLength = (ringDegree: number): number => {
-    if (
-        !Number.isSafeInteger(ringDegree) ||
-        ringDegree <= 0 ||
-        ringDegree > Number.MAX_SAFE_INTEGER
-    ) {
-        throw new TypeError('ringDegree must be a positive safe integer.');
-    }
-    const rowCoefficientBytes = setupCommitmentRowCount * ringDegree * 8;
-    const commitmentLimbBytes = 1 + 8 + rowCoefficientBytes;
-
-    return 3 + setupCommitmentModulusLimbIndices.length * commitmentLimbBytes;
-};
-
-export const binaryVssCoefficientCommitmentMaterialByteLength = (input: {
-    readonly participantCount: number;
-    readonly thresholdDegree: number;
-    readonly rnsLimbCount: number;
-    readonly ringDegree: number;
-}): number => {
-    const headerByteLength =
-        vssCoefficientCommitmentMaterialBinaryMagic.byteLength +
-        varuintByteLength(1) +
-        varuintByteLength(input.participantCount) +
-        varuintByteLength(input.thresholdDegree) +
-        varuintByteLength(input.rnsLimbCount) +
-        varuintByteLength(input.ringDegree) +
-        varuintByteLength(setupCommitmentModulusLimbIndices.length) +
-        varuintByteLength(setupCommitmentRowCount);
-    const materialRecordCount =
-        input.participantCount * input.rnsLimbCount * input.thresholdDegree;
-    const recordByteLength = setupCommitmentBinaryRecordByteLength(
-        input.ringDegree,
-    );
-
-    return headerByteLength + materialRecordCount * recordByteLength;
-};

@@ -1,435 +1,585 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
-import type { verifySetupPackage } from '#packages/sdk/src/index.js';
+import type {
+    verifyPrivateVssShare,
+    verifySetupPackage,
+} from '#packages/sdk/src/index.js';
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 
 type JsonRecord = Record<string, unknown>;
+type ChunkPullRequest = Readonly<{
+    readonly chunkIndex: number;
+    readonly expectedByteLength: number;
+}>;
+type TestProofMaterialSource = Readonly<{
+    readonly pullChunk: Mock<
+        (input: ChunkPullRequest) => Promise<ArrayBuffer | undefined>
+    >;
+}>;
+type ProofMaterialTransportCase = Readonly<{
+    readonly fieldName:
+        | 'transportedPublicKeyShareProofMaterial'
+        | 'transportedVssShareLinkageProofMaterial'
+        | 'transportedSameSecretBridgeProofMaterial'
+        | 'transportedEvaluationKeyShareProofMaterial';
+    readonly proofFamily: string;
+    readonly runtimeFamily: number;
+}>;
 
-const proofHash =
-    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-const alternateProofHash =
-    'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
-const expectedManifestHash = '1'.repeat(128);
-type SetupProofMaterialTransportFieldName =
-    | 'transportedPublicKeyShareProofMaterial'
-    | 'transportedVssShareLinkageProofMaterial'
-    | 'transportedSameSecretBridgeProofMaterial'
-    | 'transportedEvaluationKeyShareProofMaterial';
+const proofBytesHash = '1'.repeat(128);
+const alternateProofBytesHash = '2'.repeat(128);
+const expectedManifestHash = '3'.repeat(128);
+const expectedRosterHash = '4'.repeat(128);
+const publicKeyShareMaterialRoot = '5'.repeat(128);
 
-type SetupProofMaterialTransportCase = Readonly<{
-    readonly fieldName: SetupProofMaterialTransportFieldName;
-    readonly materialSetObjectType:
-        | 'SetupTransportedPublicKeyShareProofMaterialSet'
-        | 'SetupTransportedVssShareLinkageProofMaterialSet'
-        | 'SetupTransportedSameSecretBridgeProofMaterialSet'
-        | 'SetupTransportedEvaluationKeyShareProofMaterialSet';
-    readonly materialObjectType:
-        | 'SetupTransportedPublicKeyShareProofMaterial'
-        | 'SetupTransportedVssShareLinkageProofMaterial'
-        | 'SetupTransportedSameSecretBridgeProofMaterial'
-        | 'SetupTransportedEvaluationKeyShareProofMaterial';
-    readonly proofFamily:
-        | 'public-key-share'
-        | 'vss-share-linkage'
-        | 'same-secret-bridge'
-        | 'trustee-evaluation-key';
+const readMaterial = vi.hoisted(() => vi.fn());
+const openCanonicalRuntime = vi.hoisted(() => vi.fn());
+
+vi.mock('@sealed-lattice/wasm/published-sdk', async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    openBgvCanonicalStreamRuntime: openCanonicalRuntime,
+}));
+
+type MockAcceptedSetupSession = Readonly<{
+    cancel: ReturnType<typeof vi.fn>;
+    verifyCollectiveBgvSetup: ReturnType<typeof vi.fn>;
+}>;
+
+type MockKernel = Readonly<{
+    acceptedSetupSession: MockAcceptedSetupSession;
+    beginAcceptedSetupSession: ReturnType<typeof vi.fn>;
+    verifyCollectiveBgvSetup: ReturnType<typeof vi.fn>;
+    verifyPrivateVssShareEnvelope: ReturnType<typeof vi.fn>;
+}>;
+
+let createFreshMockKernel: () => MockKernel;
+let loadedFreshMockKernels: MockKernel[];
+let lifecycleEvents: string[];
+let mockKernel: MockKernel;
+
+vi.mock('../../src/kernel.js', () => ({
+    loadFreshTranscriptCoreKernel: () =>
+        Promise.resolve(createFreshMockKernel()),
+}));
+
+const publicPackage = (await import('../../src/index.js')) as Readonly<{
+    readonly verifyPrivateVssShare: typeof verifyPrivateVssShare;
+    readonly verifySetupPackage: typeof verifySetupPackage;
 }>;
 
 const setupProofMaterialTransportCases = [
     {
         fieldName: 'transportedPublicKeyShareProofMaterial',
-        materialSetObjectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
-        materialObjectType: 'SetupTransportedPublicKeyShareProofMaterial',
         proofFamily: 'public-key-share',
+        runtimeFamily: 4,
     },
     {
         fieldName: 'transportedVssShareLinkageProofMaterial',
-        materialSetObjectType:
-            'SetupTransportedVssShareLinkageProofMaterialSet',
-        materialObjectType: 'SetupTransportedVssShareLinkageProofMaterial',
         proofFamily: 'vss-share-linkage',
+        runtimeFamily: 2,
     },
     {
         fieldName: 'transportedSameSecretBridgeProofMaterial',
-        materialSetObjectType:
-            'SetupTransportedSameSecretBridgeProofMaterialSet',
-        materialObjectType: 'SetupTransportedSameSecretBridgeProofMaterial',
         proofFamily: 'same-secret-bridge',
+        runtimeFamily: 3,
     },
     {
         fieldName: 'transportedEvaluationKeyShareProofMaterial',
-        materialSetObjectType:
-            'SetupTransportedEvaluationKeyShareProofMaterialSet',
-        materialObjectType: 'SetupTransportedEvaluationKeyShareProofMaterial',
         proofFamily: 'trustee-evaluation-key',
+        runtimeFamily: 5,
     },
-] as const satisfies readonly SetupProofMaterialTransportCase[];
+] as const;
 
-let mockKernel: {
-    readonly beginSetupProofMaterialTransportStream: ReturnType<typeof vi.fn>;
-    readonly absorbSetupProofMaterialTransportStreamChunk: ReturnType<
-        typeof vi.fn
-    >;
-    readonly finishSetupProofMaterialTransportStream: ReturnType<typeof vi.fn>;
-    readonly verifyCollectiveBgvSetup: ReturnType<typeof vi.fn>;
+const transportedProofMaterialSet = (
+    transportCase: ProofMaterialTransportCase,
+    source: TestProofMaterialSource,
+): Readonly<{
+    readonly proofMaterialStreams: readonly [
+        Readonly<{
+            readonly descriptorBytes: Uint8Array;
+            readonly pullChunk: TestProofMaterialSource['pullChunk'];
+        }>,
+    ];
+}> => ({
+    proofMaterialStreams: [
+        {
+            descriptorBytes: canonicalStreamDescriptorFixture(
+                3,
+                transportCase.runtimeFamily,
+            ),
+            pullChunk: source.pullChunk,
+        },
+    ],
+});
+
+const proofMaterialSource = (firstByte: number): TestProofMaterialSource => {
+    const chunk = Uint8Array.of(firstByte, firstByte + 1, firstByte + 2).buffer;
+
+    return {
+        pullChunk: vi.fn(({ chunkIndex, expectedByteLength }) => {
+            if (chunkIndex === 0) {
+                expect(expectedByteLength).toBe(chunk.byteLength);
+                return Promise.resolve(chunk.slice(0));
+            }
+            expect(expectedByteLength).toBe(0);
+            return Promise.resolve(undefined);
+        }),
+    };
 };
 
-vi.mock('../../dist/kernel.js', () => ({
-    loadTranscriptCoreKernel: () => Promise.resolve(mockKernel),
-}));
-
-const publicPackage = (await import('../../dist/index.js')) as Readonly<{
-    readonly verifySetupPackage: typeof verifySetupPackage;
-}>;
-const expectedRosterHash = '2'.repeat(128);
+const requiredPublicKeyShareMaterialSource = proofMaterialSource(7);
 const setupVerificationBindings = {
     expectedManifestHash,
     expectedRosterHash,
+    publicKeyShareMaterialStream: {
+        descriptorBytes: canonicalStreamDescriptorFixture(3, 8),
+        pullChunk: requiredPublicKeyShareMaterialSource.pullChunk,
+    },
+    transportedPublicKeyShareProofMaterial: {
+        proofMaterialStreams: [],
+    },
+    transportedVssShareLinkageProofMaterial: {
+        proofMaterialStreams: [],
+    },
+    transportedSameSecretBridgeProofMaterial: {
+        proofMaterialStreams: [],
+    },
+    transportedEvaluationKeyShareProofMaterial: {
+        proofMaterialStreams: [],
+    },
+    evaluationKeyShareComponentMaterialStreams: [],
 } as const;
 
-let streamedProofMaterialReferences: Map<string, JsonRecord>;
+const setupPackageWithoutEvaluationKeyComponentReferences = {
+    objectType: 'SetupPackage',
+    publicKeyShareMaterial: {
+        objectType: 'PublicKeyShareMaterialSet',
+        publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
+    },
+    publicKeyShareSuccinctProofs: {
+        objectType: 'PublicKeyShareSuccinctProofSet',
+        proofBytesHashes: [],
+    },
+    vssShareLinkageProofMaterialSet: {
+        objectType: 'VssShareLinkageProofMaterialSet',
+        proofRecords: [],
+    },
+    sameSecretBridgeProofMaterialSet: {
+        objectType: 'VssSameSecretBridgeProofMaterialSet',
+        proofBytesHashes: [],
+    },
+    trusteeEvaluationKeyProofs: {
+        objectType: 'TrusteeEvaluationKeyProofSet',
+        proofBytesHashes: [],
+    },
+    relinearizationKeyShareRounds: {
+        objectType: 'RelinearizationKeyShareRounds',
+        roundOneKeySwitchComponentMaterialRoots: [],
+        roundTwoKeySwitchComponentMaterialRoots: [],
+    },
+    galoisKeyShareBatches: [],
+} as const;
 
-type VerifySetupPackageInput = Parameters<
-    typeof publicPackage.verifySetupPackage
->[0];
+const setupPackageWithProofBytesHashes = (
+    transportCase: ProofMaterialTransportCase,
+    proofBytesHashes: readonly string[],
+): JsonRecord => {
+    if (transportCase.fieldName === 'transportedPublicKeyShareProofMaterial') {
+        return {
+            ...setupPackageWithoutEvaluationKeyComponentReferences,
+            publicKeyShareSuccinctProofs: {
+                objectType: 'PublicKeyShareSuccinctProofSet',
+                proofBytesHashes,
+            },
+        };
+    }
+    if (transportCase.fieldName === 'transportedVssShareLinkageProofMaterial') {
+        return {
+            ...setupPackageWithoutEvaluationKeyComponentReferences,
+            vssShareLinkageProofMaterialSet: {
+                objectType: 'VssShareLinkageProofMaterialSet',
+                proofRecords: proofBytesHashes.map((currentProofBytesHash) => ({
+                    objectType: 'VssShareLinkageProofRecord',
+                    proofBytesHash: currentProofBytesHash,
+                })),
+            },
+        };
+    }
+    if (
+        transportCase.fieldName === 'transportedSameSecretBridgeProofMaterial'
+    ) {
+        return {
+            ...setupPackageWithoutEvaluationKeyComponentReferences,
+            sameSecretBridgeProofMaterialSet: {
+                objectType: 'VssSameSecretBridgeProofMaterialSet',
+                proofBytesHashes,
+            },
+        };
+    }
 
-const transportedSetupProofMaterialSet = (
-    transportCase: SetupProofMaterialTransportCase,
-) =>
-    ({
-        objectType: transportCase.materialSetObjectType,
-        proofFamily: transportCase.proofFamily,
-        proofMaterials: [
+    return {
+        ...setupPackageWithoutEvaluationKeyComponentReferences,
+        trusteeEvaluationKeyProofs: {
+            objectType: 'TrusteeEvaluationKeyProofSet',
+            proofBytesHashes,
+        },
+    };
+};
+
+describe('canonical setup material streaming in the public package', () => {
+    beforeEach(() => {
+        lifecycleEvents = [];
+        readMaterial.mockReset();
+        readMaterial.mockImplementation(
+            async (
+                input: Readonly<{
+                    pullChunk: TestProofMaterialSource['pullChunk'];
+                }>,
+            ) => {
+                lifecycleEvents.push('source-pull');
+                await input.pullChunk({ chunkIndex: 0, expectedByteLength: 3 });
+                await input.pullChunk({ chunkIndex: 1, expectedByteLength: 0 });
+            },
+        );
+        openCanonicalRuntime.mockReset();
+        openCanonicalRuntime.mockImplementation(() => {
+            lifecycleEvents.push('runtime-open');
+            return { readMaterial };
+        });
+
+        const newMockKernel = (): MockKernel => {
+            const acceptedSetupSession: MockAcceptedSetupSession = {
+                cancel: vi.fn(() => lifecycleEvents.push('cancel')),
+                verifyCollectiveBgvSetup: vi.fn((_input: JsonRecord) => {
+                    lifecycleEvents.push('terminal');
+                    return {
+                        isValid: false,
+                        refusalReason: 'invalidProof',
+                    };
+                }),
+            };
+
+            return {
+                acceptedSetupSession,
+                beginAcceptedSetupSession: vi.fn(() => {
+                    lifecycleEvents.push('begin');
+                    return acceptedSetupSession;
+                }),
+                verifyCollectiveBgvSetup: vi.fn(),
+                verifyPrivateVssShareEnvelope: vi.fn((_input: JsonRecord) => ({
+                    isValid: false,
+                    refusalReason: 'invalidProof',
+                })),
+            };
+        };
+
+        loadedFreshMockKernels = [];
+        createFreshMockKernel = () => {
+            mockKernel = newMockKernel();
+            loadedFreshMockKernels.push(mockKernel);
+            return mockKernel;
+        };
+        mockKernel = newMockKernel();
+    });
+
+    it.each(setupProofMaterialTransportCases)(
+        'authenticates $proofFamily bytes before terminal verification',
+        async (transportCase) => {
+            const source = proofMaterialSource(17);
+
+            const verification = await publicPackage.verifySetupPackage({
+                setupPackage: setupPackageWithProofBytesHashes(transportCase, [
+                    proofBytesHash,
+                ]),
+                ...setupVerificationBindings,
+                [transportCase.fieldName]: transportedProofMaterialSet(
+                    transportCase,
+                    source,
+                ),
+            });
+
+            expect(verification).toEqual({
+                isValid: false,
+                refusalReason: 'invalidProof',
+            });
+
+            expect(readMaterial).toHaveBeenNthCalledWith(2, {
+                descriptorBytes: canonicalStreamDescriptorFixture(
+                    3,
+                    transportCase.runtimeFamily,
+                ),
+                family: transportCase.runtimeFamily,
+                materialRoot: proofBytesHash,
+                pullChunk: source.pullChunk,
+            });
+            expect(lifecycleEvents).toEqual([
+                'begin',
+                'runtime-open',
+                'source-pull',
+                'source-pull',
+                'terminal',
+            ]);
+            expect(mockKernel.verifyCollectiveBgvSetup).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(setupProofMaterialTransportCases)(
+        'requires one $proofFamily stream per authoritative proof hash',
+        async (transportCase) => {
+            await expect(
+                publicPackage.verifySetupPackage({
+                    setupPackage: setupPackageWithProofBytesHashes(
+                        transportCase,
+                        [proofBytesHash],
+                    ),
+                    ...setupVerificationBindings,
+                    [transportCase.fieldName]: {
+                        proofMaterialStreams: [],
+                    },
+                }),
+            ).rejects.toThrow(
+                /one stream per authoritative setup-package proof hash/u,
+            );
+        },
+    );
+
+    it.each(setupProofMaterialTransportCases)(
+        'rejects duplicate authoritative $proofFamily proof hashes',
+        async (transportCase) => {
+            const source = proofMaterialSource(23);
+            const stream = transportedProofMaterialSet(transportCase, source)
+                .proofMaterialStreams[0];
+
+            await expect(
+                publicPackage.verifySetupPackage({
+                    setupPackage: setupPackageWithProofBytesHashes(
+                        transportCase,
+                        [proofBytesHash, proofBytesHash],
+                    ),
+                    ...setupVerificationBindings,
+                    [transportCase.fieldName]: {
+                        proofMaterialStreams: [stream, stream],
+                    },
+                }),
+            ).rejects.toThrow(/must not contain duplicate hashes/u);
+        },
+    );
+
+    it('returns a genuine verification result without a process-local capability', async () => {
+        const kernel = createFreshMockKernel();
+        kernel.acceptedSetupSession.verifyCollectiveBgvSetup.mockReturnValueOnce(
             {
-                objectType: transportCase.materialObjectType,
-                proofFamily: transportCase.proofFamily,
-                proofMaterialRoot: proofHash,
-                chunkSizeBytes: 1_048_576,
-                chunkCount: 1,
-                totalByteLength: 2,
-                fullObjectHash: proofHash,
-                chunkHashes: [proofHash],
-                chunkRoot: proofHash,
-                chunks: [
+                isValid: true,
+                value: undefined,
+            },
+        );
+        createFreshMockKernel = () => kernel;
+
+        const verification = await publicPackage.verifySetupPackage({
+            setupPackage: setupPackageWithoutEvaluationKeyComponentReferences,
+            ...setupVerificationBindings,
+            expectedSetupPackageHash: proofBytesHash,
+        });
+
+        expect(verification).toEqual({ isValid: true, value: undefined });
+        expect(
+            kernel.acceptedSetupSession.verifyCollectiveBgvSetup,
+        ).toHaveBeenCalledWith(
+            expect.objectContaining({
+                expectedSetupPackageHash: proofBytesHash,
+            }),
+        );
+    });
+
+    it('authenticates public-key share material before terminal verification', async () => {
+        const source = proofMaterialSource(19);
+
+        await publicPackage.verifySetupPackage({
+            setupPackage: setupPackageWithoutEvaluationKeyComponentReferences,
+            ...setupVerificationBindings,
+            publicKeyShareMaterialStream: {
+                descriptorBytes: canonicalStreamDescriptorFixture(3, 8),
+                pullChunk: source.pullChunk,
+            },
+        });
+
+        expect(readMaterial).toHaveBeenCalledExactlyOnceWith({
+            descriptorBytes: canonicalStreamDescriptorFixture(3, 8),
+            family: 9,
+            materialRoot: publicKeyShareMaterialRoot,
+            pullChunk: source.pullChunk,
+        });
+    });
+
+    it('authenticates private VSS proof bytes before verification', async () => {
+        const privateVssTransportCase = {
+            fieldName: 'transportedVssShareLinkageProofMaterial',
+            proofFamily: 'vss-opening-carry',
+            runtimeFamily: 1,
+        } as const;
+        const source = proofMaterialSource(29);
+
+        const verification = await publicPackage.verifyPrivateVssShare({
+            setupContext: {
+                ceremonyId: 'ceremony',
+                manifestHash: expectedManifestHash,
+                rosterHash: expectedRosterHash,
+                setupEpoch: 'epoch',
+                setupParametersHash: proofBytesHash,
+                participantCount: 1,
+            },
+            publicMatrixSeedHash: proofBytesHash,
+            sourceTrusteeCoefficientCommitmentMaterialRecords: [],
+            sourceTrusteeCoefficientCommitmentRecord: {},
+            privateEnvelope: {
+                objectType: 'PrivateVssShareEnvelope',
+                rnsShareOpenings: [
                     {
-                        chunkIndex: 0,
-                        bytesHex: 'abcd',
+                        objectType: 'PrivateVssShareLimbOpening',
+                        privateVssShareProofBytesHash: alternateProofBytesHash,
                     },
                 ],
             },
-        ],
-    }) as const;
+            transportedPrivateVssShareProofMaterial:
+                transportedProofMaterialSet(privateVssTransportCase, source),
+        });
 
-const verifiedSetupProofMaterials = (
-    transportCase: SetupProofMaterialTransportCase,
-    proofFullObjectHash = proofHash,
-) =>
-    ({
-        objectType: 'VerifiedSetupProofMaterialSet',
-        proofMaterials: [
-            {
-                objectType: 'VerifiedSetupProofMaterial',
-                verificationId: 'caller-supplied-handle',
-                proofFamily: transportCase.proofFamily,
-                proofMaterialRoot: proofHash,
-                proofBytesEncoding: 'binary-chunked-proof-bytes',
-                proofChunkSizeBytes: 1_048_576,
-                proofChunkCount: 1,
-                proofTotalByteLength: 2,
-                proofFullObjectHash,
-                proofChunkRoot: proofHash,
-                proofChunkHashes: [proofHash],
-            },
-        ],
-    }) as const;
+        expect(verification).toEqual({
+            isValid: false,
+            refusalReason: 'invalidProof',
+        });
 
-describe('setup proof material streaming in the public package', () => {
-    beforeEach(() => {
-        streamedProofMaterialReferences = new Map();
-        mockKernel = {
-            beginSetupProofMaterialTransportStream: vi.fn(
-                (input: {
-                    readonly verificationId: string;
-                    readonly transportedSetupProofMaterial: JsonRecord;
-                }) => {
-                    streamedProofMaterialReferences.set(
-                        input.verificationId,
-                        input.transportedSetupProofMaterial,
-                    );
-
-                    return {
-                        operation: 'beginSetupProofMaterialTransportStream',
-                    };
-                },
-            ),
-            absorbSetupProofMaterialTransportStreamChunk: vi.fn(() => ({
-                operation: 'absorbSetupProofMaterialTransportStreamChunk',
-            })),
-            finishSetupProofMaterialTransportStream: vi.fn(
-                (input: { readonly verificationId: string }) => ({
-                    ...(() => {
-                        const proofMaterial =
-                            streamedProofMaterialReferences.get(
-                                input.verificationId,
-                            );
-
-                        return {
-                            operation:
-                                'finishSetupProofMaterialTransportStream',
-                            verifiedSetupProofMaterial: {
-                                objectType: 'VerifiedSetupProofMaterial',
-                                verificationId: input.verificationId,
-                                proofFamily: proofMaterial?.proofFamily,
-                                proofMaterialRoot:
-                                    proofMaterial?.proofMaterialRoot,
-                                proofBytesEncoding:
-                                    'binary-chunked-proof-bytes',
-                                proofChunkSizeBytes:
-                                    proofMaterial?.chunkSizeBytes,
-                                proofChunkCount: proofMaterial?.chunkCount,
-                                proofTotalByteLength:
-                                    proofMaterial?.totalByteLength,
-                                proofFullObjectHash:
-                                    proofMaterial?.fullObjectHash,
-                                proofChunkRoot: proofMaterial?.chunkRoot,
-                                proofChunkHashes: proofMaterial?.chunkHashes,
-                            },
-                        };
-                    })(),
-                }),
-            ),
-            verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
-                isValid: false,
-                operation: 'verifyCollectiveBgvSetupPackage',
-                observedInput: input,
-            })),
-        };
+        expect(readMaterial).toHaveBeenCalledExactlyOnceWith({
+            descriptorBytes: canonicalStreamDescriptorFixture(3, 1),
+            family: 1,
+            materialRoot: alternateProofBytesHash,
+            pullChunk: source.pullChunk,
+        });
+        expect(mockKernel.verifyPrivateVssShareEnvelope).toHaveBeenCalledOnce();
     });
 
-    it('preserves accepted setup handoff returned by the kernel verifier', async () => {
-        const acceptedSetupHandoffRoot = 'a'.repeat(128);
-        const acceptedSetupHandoff = {
-            objectType: 'CollectiveBgvAcceptedSetupHandoff',
-            acceptedSetupHandoffRoot,
-            directBallotEncryption: {
-                collectivePublicKeyRoot: proofHash,
-            },
-            publicAggregation: {
-                aggregateCiphertextParametersRoot: proofHash,
-            },
-            boundedEvaluatorReplay: {
-                evaluatorParametersRoot: proofHash,
-            },
-            futureTargetDecryptionBoundary: {
-                qTargetState: 'downstream-null',
-            },
-            certificateRoots: {
-                setupTransportCertificateHash: proofHash,
-            },
-        };
-        mockKernel = {
-            ...mockKernel,
-            verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
-                isValid: true,
-                operation: 'verifyCollectiveBgvSetupPackage',
-                currentPhase: 'setupPackageVerification',
-                missingObjects: [],
-                refusedObjects: [],
-                acceptedSetupHandoff,
-                observedInput: input,
-            })),
-        };
-
-        const result = await publicPackage.verifySetupPackage({
-            setupPackage: {
-                objectType: 'SetupPackage',
-            },
-            ...setupVerificationBindings,
-        });
-
-        expect(result).toMatchObject({
-            isValid: true,
-            operation: 'verifyCollectiveBgvSetupPackage',
-            acceptedSetupHandoff,
-        });
-        expect(result.acceptedSetupHandoff?.acceptedSetupHandoffRoot).toBe(
-            acceptedSetupHandoffRoot,
-        );
-        expect(mockKernel.verifyCollectiveBgvSetup).toHaveBeenCalledWith({
-            setupPackage: {
-                objectType: 'SetupPackage',
-            },
-            ...setupVerificationBindings,
-        });
-    });
-
-    it('requires external manifest and roster hashes before calling the kernel verifier', async () => {
-        const inputWithoutExternalBindings = {
-            setupPackage: {
-                objectType: 'SetupPackage',
-            },
-        } as unknown as VerifySetupPackageInput;
-
+    it('requires one private VSS stream per envelope proof hash', async () => {
         await expect(
-            publicPackage.verifySetupPackage(inputWithoutExternalBindings),
-        ).rejects.toThrow(/expectedManifestHash/u);
-        expect(mockKernel.verifyCollectiveBgvSetup).not.toHaveBeenCalled();
-    });
-
-    it.each(setupProofMaterialTransportCases)(
-        'streams $proofFamily proof chunks and verifies with streamed handles',
-        async (transportCase) => {
-            await publicPackage.verifySetupPackage({
-                setupPackage: {
-                    objectType: 'SetupPackage',
+            publicPackage.verifyPrivateVssShare({
+                setupContext: {
+                    ceremonyId: 'ceremony',
+                    manifestHash: expectedManifestHash,
+                    rosterHash: expectedRosterHash,
+                    setupEpoch: 'epoch',
+                    setupParametersHash: proofBytesHash,
+                    participantCount: 1,
                 },
-                ...setupVerificationBindings,
-                [transportCase.fieldName]:
-                    transportedSetupProofMaterialSet(transportCase),
-            });
-
-            expect(
-                mockKernel.beginSetupProofMaterialTransportStream,
-            ).toHaveBeenCalledOnce();
-            const beginInput = mockKernel.beginSetupProofMaterialTransportStream
-                .mock.calls[0]?.[0] as JsonRecord | undefined;
-            expect(beginInput?.transportedSetupProofMaterial).toMatchObject({
-                objectType: transportCase.materialObjectType,
-                proofFamily: transportCase.proofFamily,
-                proofMaterialRoot: proofHash,
-            });
-            expect(
-                mockKernel.absorbSetupProofMaterialTransportStreamChunk,
-            ).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    chunkIndex: 0,
-                    bytesHex: 'abcd',
-                }),
-            );
-
-            const finalVerifyInput = mockKernel.verifyCollectiveBgvSetup.mock
-                .calls[0]?.[0] as JsonRecord | undefined;
-            const finalMaterialSet = finalVerifyInput?.[
-                transportCase.fieldName
-            ] as
-                | Readonly<{ readonly proofMaterials: readonly JsonRecord[] }>
-                | undefined;
-            expect(finalMaterialSet?.proofMaterials[0]).toMatchObject({
-                objectType: transportCase.materialObjectType,
-                proofFamily: transportCase.proofFamily,
-                proofMaterialRoot: proofHash,
-            });
-            expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject(
-                {
-                    objectType: 'VerifiedSetupProofMaterialSet',
-                    proofMaterials: [
-                        expect.objectContaining({
-                            objectType: 'VerifiedSetupProofMaterial',
-                            proofFamily: transportCase.proofFamily,
-                            proofMaterialRoot: proofHash,
-                        }),
+                publicMatrixSeedHash: proofBytesHash,
+                sourceTrusteeCoefficientCommitmentMaterialRecords: [],
+                sourceTrusteeCoefficientCommitmentRecord: {},
+                privateEnvelope: {
+                    objectType: 'PrivateVssShareEnvelope',
+                    rnsShareOpenings: [
+                        {
+                            objectType: 'PrivateVssShareLimbOpening',
+                            privateVssShareProofBytesHash:
+                                alternateProofBytesHash,
+                        },
                     ],
                 },
-            );
-        },
-    );
-
-    it('streams all setup proof material fields before final verification', async () => {
-        await publicPackage.verifySetupPackage({
-            setupPackage: {
-                objectType: 'SetupPackage',
-            },
-            ...setupVerificationBindings,
-            ...Object.fromEntries(
-                setupProofMaterialTransportCases.map((transportCase) => [
-                    transportCase.fieldName,
-                    transportedSetupProofMaterialSet(transportCase),
-                ]),
-            ),
-        });
-
-        expect(
-            mockKernel.beginSetupProofMaterialTransportStream,
-        ).toHaveBeenCalledTimes(setupProofMaterialTransportCases.length);
-        expect(
-            mockKernel.absorbSetupProofMaterialTransportStreamChunk,
-        ).toHaveBeenCalledTimes(setupProofMaterialTransportCases.length);
-
-        const finalVerifyInput = mockKernel.verifyCollectiveBgvSetup.mock
-            .calls[0]?.[0] as JsonRecord | undefined;
-        for (const transportCase of setupProofMaterialTransportCases) {
-            const finalMaterialSet = finalVerifyInput?.[
-                transportCase.fieldName
-            ] as
-                | Readonly<{
-                      readonly proofMaterials: readonly JsonRecord[];
-                  }>
-                | undefined;
-            expect(finalMaterialSet?.proofMaterials[0]).toMatchObject({
-                objectType: transportCase.materialObjectType,
-                proofFamily: transportCase.proofFamily,
-                proofMaterialRoot: proofHash,
-            });
-        }
-        const expectedVerifiedProofMaterials =
-            setupProofMaterialTransportCases.map((transportCase): unknown => {
-                const expectedVerifiedProofMaterial: unknown =
-                    expect.objectContaining({
-                        objectType: 'VerifiedSetupProofMaterial',
-                        proofFamily: transportCase.proofFamily,
-                        proofMaterialRoot: proofHash,
-                    });
-
-                return expectedVerifiedProofMaterial;
-            });
-        expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject({
-            objectType: 'VerifiedSetupProofMaterialSet',
-            proofMaterials: expectedVerifiedProofMaterials,
-        });
+                transportedPrivateVssShareProofMaterial: {
+                    proofMaterialStreams: [],
+                },
+            }),
+        ).rejects.toThrow(/one stream per private-envelope proof hash/u);
     });
 
-    it.each(setupProofMaterialTransportCases)(
-        'forwards caller-supplied $proofFamily proof handles without re-streaming chunks',
-        async (transportCase) => {
-            const suppliedHandles = verifiedSetupProofMaterials(
-                transportCase,
-                alternateProofHash,
-            );
-
-            await publicPackage.verifySetupPackage({
+    it('refuses a component root claimed by conflicting package record families', async () => {
+        await expect(
+            publicPackage.verifySetupPackage({
                 setupPackage: {
-                    objectType: 'SetupPackage',
+                    ...setupPackageWithoutEvaluationKeyComponentReferences,
+                    relinearizationKeyShareRounds: {
+                        objectType: 'RelinearizationKeyShareRounds',
+                        roundOneKeySwitchComponentMaterialRoots: [
+                            proofBytesHash,
+                        ],
+                        roundTwoKeySwitchComponentMaterialRoots: [],
+                    },
+                    galoisKeyShareBatches: [
+                        {
+                            objectType: 'GaloisKeyShareBatch',
+                            keySwitchComponentMaterialRoots: [proofBytesHash],
+                        },
+                    ],
                 },
                 ...setupVerificationBindings,
-                [transportCase.fieldName]:
-                    transportedSetupProofMaterialSet(transportCase),
-                verifiedSetupProofMaterials: suppliedHandles,
-            });
+                evaluationKeyShareComponentMaterialStreams: [
+                    {
+                        descriptorBytes: canonicalStreamDescriptorFixture(3, 6),
+                        pullChunk: proofMaterialSource(47).pullChunk,
+                    },
+                ],
+            }),
+        ).rejects.toThrow(/duplicate material root/u);
+        expect(readMaterial).toHaveBeenCalledOnce();
+    });
 
-            expect(
-                mockKernel.beginSetupProofMaterialTransportStream,
-            ).not.toHaveBeenCalled();
-            expect(
-                mockKernel.absorbSetupProofMaterialTransportStreamChunk,
-            ).not.toHaveBeenCalled();
-            expect(
-                mockKernel.finishSetupProofMaterialTransportStream,
-            ).not.toHaveBeenCalled();
+    it('rejects an oversized descriptor before copying or loading a kernel', async () => {
+        const oversizedDescriptor = new Uint8Array(131_177);
+        const callerSlice = vi.fn(() => new Uint8Array());
+        Object.defineProperty(oversizedDescriptor, 'slice', {
+            value: callerSlice,
+        });
 
-            const finalVerifyInput = mockKernel.verifyCollectiveBgvSetup.mock
-                .calls[0]?.[0] as JsonRecord | undefined;
-            const finalMaterialSet = finalVerifyInput?.[
-                transportCase.fieldName
-            ] as
-                | Readonly<{ readonly proofMaterials: readonly JsonRecord[] }>
-                | undefined;
-            expect(finalMaterialSet?.proofMaterials[0]).toMatchObject({
-                objectType: transportCase.materialObjectType,
-                proofFamily: transportCase.proofFamily,
-                proofMaterialRoot: proofHash,
-            });
-            expect(finalVerifyInput?.verifiedSetupProofMaterials).toBe(
-                suppliedHandles,
-            );
-        },
-    );
+        await expect(
+            publicPackage.verifySetupPackage({
+                setupPackage: setupPackageWithProofBytesHashes(
+                    setupProofMaterialTransportCases[0],
+                    [proofBytesHash],
+                ),
+                ...setupVerificationBindings,
+                transportedPublicKeyShareProofMaterial: {
+                    proofMaterialStreams: [
+                        {
+                            descriptorBytes: oversizedDescriptor,
+                            pullChunk: proofMaterialSource(41).pullChunk,
+                        },
+                    ],
+                },
+            }),
+        ).rejects.toThrow(/canonical stream descriptor bound/u);
+        expect(callerSlice).not.toHaveBeenCalled();
+        expect(loadedFreshMockKernels).toHaveLength(0);
+    });
+
+    it('cancels a setup session after material staging fails and permits a retry', async () => {
+        const transportCase = setupProofMaterialTransportCases[0];
+        const source = proofMaterialSource(53);
+        const verificationInput = {
+            setupPackage: setupPackageWithProofBytesHashes(transportCase, [
+                proofBytesHash,
+            ]),
+            ...setupVerificationBindings,
+            transportedPublicKeyShareProofMaterial: transportedProofMaterialSet(
+                transportCase,
+                source,
+            ),
+        } satisfies Parameters<typeof publicPackage.verifySetupPackage>[0];
+        readMaterial.mockRejectedValueOnce(
+            new Error('simulated material source failure'),
+        );
+
+        await expect(
+            publicPackage.verifySetupPackage(verificationInput),
+        ).rejects.toThrow('simulated material source failure');
+        expect(
+            loadedFreshMockKernels[0]?.acceptedSetupSession.cancel,
+        ).toHaveBeenCalledOnce();
+        expect(
+            loadedFreshMockKernels[0]?.acceptedSetupSession
+                .verifyCollectiveBgvSetup,
+        ).not.toHaveBeenCalled();
+
+        await publicPackage.verifySetupPackage(verificationInput);
+        expect(
+            loadedFreshMockKernels[1]?.acceptedSetupSession
+                .verifyCollectiveBgvSetup,
+        ).toHaveBeenCalledOnce();
+    });
 });

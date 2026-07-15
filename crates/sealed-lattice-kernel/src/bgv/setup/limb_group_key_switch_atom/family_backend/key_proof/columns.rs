@@ -15,17 +15,14 @@ pub(super) fn masked_coefficients<const LIMB_COUNT: usize>(
     coefficients: &[[u64; LIMB_COUNT]],
     trace_size: usize,
     mask_degree: usize,
-    salt_seed: &mut u64,
+    private_randomness: &mut PrivateProofRandomness,
 ) -> Vec<[u64; LIMB_COUNT]> {
     if mask_degree == 0 {
         return coefficients.to_vec();
     }
     let mut mask = Vec::with_capacity(mask_degree + 1);
     for _ in 0..=mask_degree {
-        *salt_seed = salt_seed
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        mask.push(parameters.unsigned_word_to_element(*salt_seed));
+        mask.push(private_randomness.next_field_element(parameters));
     }
     let mask_multiple = polynomial::multiply_via_ntt(
         parameters,
@@ -35,25 +32,14 @@ pub(super) fn masked_coefficients<const LIMB_COUNT: usize>(
     polynomial::add(parameters, coefficients, &mask_multiple)
 }
 
-// Advance the deterministic mask/salt seed by `steps` draws without producing
-// values, mirroring the per-draw LCG in `masked_coefficients`.
-pub(super) fn advance_seed(seed: &mut u64, steps: usize) {
-    for _ in 0..steps {
-        *seed = seed
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-    }
-}
-
 // A deterministic regeneration plan for every committed column. The streamed
 // prover never holds all column coefficient vectors or codewords at once: each
 // column is a pure function of the witness, the logUp challenge, and a
-// per-column mask-seed snapshot, so the commit, sumcheck/support, combination,
+// per-column private-randomness snapshot, so commit, sumcheck/support, combination,
 // and opening passes each rebuild exactly the columns they are consuming, and a
 // regenerated column is bit-identical every time. Constructing the plan (and
-// later setting the logUp challenge) advances the caller's seed by exactly the
-// draws the one-shot builders used, so the overall deterministic salt/mask
-// stream is unchanged.
+// later setting the logUp challenge) advances the caller's stream by exactly the
+// mask draws reserved for each column.
 pub(super) struct KeyColumnPlan<'a, const LIMB_COUNT: usize> {
     ring_degree: usize,
     mask_degree: usize,
@@ -67,10 +53,10 @@ pub(super) struct KeyColumnPlan<'a, const LIMB_COUNT: usize> {
     // relation binding in isolation.
     component_b: Vec<&'a [[u64; LIMB_COUNT]]>,
     multiplicity_values: Vec<Vec<[u64; LIMB_COUNT]>>,
-    base_mask_seed_starts: Vec<u64>,
-    material_mask_seed_starts: Vec<u64>,
+    base_mask_randomness: Vec<PrivateProofRandomness>,
+    material_mask_randomness: Vec<PrivateProofRandomness>,
     lookup_challenge: Option<[u64; LIMB_COUNT]>,
-    aux_mask_seed_starts: Vec<u64>,
+    aux_mask_randomness: Vec<PrivateProofRandomness>,
     linkage: Option<LinkagePlanData>,
 }
 
@@ -90,7 +76,7 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
         digits: &'a [DigitWitness],
         component_b: Vec<&'a [[u64; LIMB_COUNT]]>,
         linkage_inputs: Option<(&linkage::LinkageStatement<'_>, &linkage::LinkageWitness<'_>)>,
-        salt_seed: &mut u64,
+        private_randomness: &mut PrivateProofRandomness,
     ) -> CanonicalResult<Self> {
         if secret.len() != ring_degree {
             return Err(invalid_key("secret length does not match ring degree"));
@@ -135,20 +121,20 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
             digits.len(),
             linkage_data.as_ref().map(|data| &data.layout),
         );
-        let mut base_mask_seed_starts = Vec::with_capacity(base_count);
+        let mut base_mask_randomness = Vec::with_capacity(base_count);
         for _ in 0..base_count {
-            base_mask_seed_starts.push(*salt_seed);
-            advance_seed(salt_seed, steps);
+            base_mask_randomness.push(private_randomness.clone());
+            private_randomness.discard_field_elements(steps);
         }
         // The material columns' mask seeds are drawn right after the base seeds,
         // one per digit, so the deterministic salt/mask stream advances in a
         // fixed order that the commit, sumcheck, combination, and opening passes
         // all reproduce.
         let material_count = material_column_count(digits.len());
-        let mut material_mask_seed_starts = Vec::with_capacity(material_count);
+        let mut material_mask_randomness = Vec::with_capacity(material_count);
         for _ in 0..material_count {
-            material_mask_seed_starts.push(*salt_seed);
-            advance_seed(salt_seed, steps);
+            material_mask_randomness.push(private_randomness.clone());
+            private_randomness.discard_field_elements(steps);
         }
         Ok(Self {
             ring_degree,
@@ -157,10 +143,10 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
             digits,
             component_b,
             multiplicity_values,
-            base_mask_seed_starts,
-            material_mask_seed_starts,
+            base_mask_randomness,
+            material_mask_randomness,
             lookup_challenge: None,
-            aux_mask_seed_starts: Vec::new(),
+            aux_mask_randomness: Vec::new(),
             linkage: linkage_data,
         })
     }
@@ -194,12 +180,12 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
         )
     }
 
-    // Record the logUp challenge and snapshot the aux columns' mask seeds,
-    // advancing the caller's seed by the aux mask draws.
+    // Record the logUp challenge and snapshot each auxiliary column's private
+    // mask stream.
     pub(super) fn set_lookup_challenge(
         &mut self,
         challenge: [u64; LIMB_COUNT],
-        salt_seed: &mut u64,
+        private_randomness: &mut PrivateProofRandomness,
     ) {
         let steps = if self.mask_degree == 0 {
             0
@@ -207,10 +193,10 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
             self.mask_degree + 1
         };
         let aux_count = self.aux_column_count();
-        self.aux_mask_seed_starts = Vec::with_capacity(aux_count);
+        self.aux_mask_randomness = Vec::with_capacity(aux_count);
         for _ in 0..aux_count {
-            self.aux_mask_seed_starts.push(*salt_seed);
-            advance_seed(salt_seed, steps);
+            self.aux_mask_randomness.push(private_randomness.clone());
+            private_randomness.discard_field_elements(steps);
         }
         self.lookup_challenge = Some(challenge);
     }
@@ -298,13 +284,13 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
     ) -> Vec<[u64; LIMB_COUNT]> {
         let values = self.base_value_column(parameters, column);
         let coefficients = trace_domain.interpolate(&values);
-        let mut seed = self.base_mask_seed_starts[column];
+        let mut private_randomness = self.base_mask_randomness[column].clone();
         masked_coefficients(
             parameters,
             &coefficients,
             self.ring_degree,
             self.mask_degree,
-            &mut seed,
+            &mut private_randomness,
         )
     }
 
@@ -319,13 +305,13 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
         digit: usize,
     ) -> Vec<[u64; LIMB_COUNT]> {
         let coefficients = trace_domain.interpolate(self.component_b[digit]);
-        let mut seed = self.material_mask_seed_starts[digit];
+        let mut private_randomness = self.material_mask_randomness[digit].clone();
         masked_coefficients(
             parameters,
             &coefficients,
             self.ring_degree,
             self.mask_degree,
-            &mut seed,
+            &mut private_randomness,
         )
     }
 
@@ -377,7 +363,6 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
         linkage::linkage_aux_value_column(parameters, &data.layout, &data.values, linkage_offset)
     }
 
-    // The masked coefficient vector for aux column `column`.
     pub(super) fn aux_column_coefficients(
         &self,
         parameters: &ProofFieldParameters<LIMB_COUNT>,
@@ -386,13 +371,13 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
     ) -> CanonicalResult<Vec<[u64; LIMB_COUNT]>> {
         let values = self.aux_value_column(parameters, column)?;
         let coefficients = trace_domain.interpolate(&values);
-        let mut seed = self.aux_mask_seed_starts[column];
+        let mut private_randomness = self.aux_mask_randomness[column].clone();
         Ok(masked_coefficients(
             parameters,
             &coefficients,
             self.ring_degree,
             self.mask_degree,
-            &mut seed,
+            &mut private_randomness,
         ))
     }
 

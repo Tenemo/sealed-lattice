@@ -11,10 +11,10 @@ debug.log
 # Build
 dist/
 target/
-.turbo/
 *.tsbuildinfo
 .vitest-attachments/
 **/__screenshots__/
+**/__traces__/
 .lighthouseci/
 
 # Miscellaneous

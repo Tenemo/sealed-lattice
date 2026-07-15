@@ -1,42 +1,38 @@
-import { BinaryChunkWriter } from '../binary-chunk-writer.js';
-import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
+import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
+
+import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js';
+import type { CanonicalProofMaterialChunkPull } from '../setup-proof-material-transport.js';
 
 import {
     type BinaryChunkedEvaluationKeyShareMaterialTransport,
-    type EvaluationKeyShareComponentMaterialChunkStream,
-    type EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
-    type EvaluationKeyShareMaterial,
+    type EvaluationKeyShareComponentMaterialStream,
     type EvaluationKeyShareMaterialTransportInput,
     type EvaluationKeyShareProofFamily,
     type EvaluationKeyTrusteeReference,
-    type JsonRecord,
-    evaluationKeyShareComponentMaterialEncoding,
     evaluationKeyShareComponentMaterialMagic,
-    evaluationKeyShareComponentMaterialTransportObjectType,
-    evaluationKeyShareComponentMaterialTransportSetObjectType,
 } from './constants-and-types.js';
 import {
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
-    assertJsonRecord,
-    bytesToHex,
+    assertPositiveSafeInteger,
+    bytesFromHex,
     coefficientVectorFromLittleEndianHex,
     evaluationKeyShareComponentMaterialReferenceRoot,
-    evaluationKeyShareComponentMaterialTransportHashes,
-    evaluationKeyShareComponentVectorHash,
     evaluationKeyShareComponentVectorRoot,
-    nonNegativeIntegerRecordField,
-    stringRecordField,
 } from './encoding.js';
-import { assertEmbeddedComponentMaterial } from './share-records.js';
+import {
+    galoisKeySwitchSeed,
+    relinearizationKeySwitchSeed,
+} from './share-records.js';
 
 type EvaluationKeyShareTransportWorkItem = Readonly<{
     readonly proofFamily: EvaluationKeyShareProofFamily;
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly level: number;
-    readonly shareMaterial: EvaluationKeyShareMaterial &
-        EvaluationKeyShareEmbeddedKeySwitchComponentMaterial;
+    readonly keySwitchDomain: string;
+    readonly keySwitchSeedHex: string;
+    readonly keySwitchComponentVectorsLittleEndianHexByDigitAndLimb: readonly string[];
 }>;
 
 const trusteeIdentityByRosterPosition = (
@@ -81,87 +77,63 @@ const trusteeIdentityForContribution = (
     return trusteeIdentity;
 };
 
-const encodeEvaluationKeyShareComponentMaterial = (
+type ValidatedComponentMaterial = Readonly<{
+    readonly componentVectorsLittleEndianHexByDigitAndLimb: readonly string[];
+    readonly componentVectorRoot: ProtocolHash;
+    readonly totalByteLength: number;
+}>;
+
+const validatedEvaluationKeyShareComponentMaterial = (
     proofFamily: EvaluationKeyShareProofFamily,
-    shareMaterial: EvaluationKeyShareMaterial &
-        EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
+    keySwitchDomain: string,
+    keySwitchSeedHex: string,
+    keySwitchComponentVectorsLittleEndianHexByDigitAndLimb: readonly string[],
     level: number,
-): readonly Uint8Array[] => {
+    ringDegree: number,
+    qSharePrimes: readonly number[],
+): ValidatedComponentMaterial => {
+    assertNonNegativeSafeInteger(level, 'level');
+    assertPositiveSafeInteger(ringDegree, 'ringDegree');
     const digitCount = level + 1;
-    if (shareMaterial.keySwitchComponentVectors.length !== digitCount ** 2) {
+    if (digitCount > qSharePrimes.length) {
+        throw new Error(
+            'evaluation-key component material level is outside the Q_share basis.',
+        );
+    }
+    const componentVectorValues: unknown =
+        keySwitchComponentVectorsLittleEndianHexByDigitAndLimb;
+    if (!Array.isArray(componentVectorValues)) {
+        throw new TypeError(
+            'evaluation-key component material must supply component vectors before transport.',
+        );
+    }
+    if (componentVectorValues.length !== digitCount ** 2) {
         throw new Error(
             'evaluation-key component material must contain one vector per scheduled digit and RNS limb.',
         );
     }
-    const writer = new BinaryChunkWriter({
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
-        emptyErrorMessage:
-            'evaluation-key component material transport requires bytes.',
-    });
-    writer.writeBytes(evaluationKeyShareComponentMaterialMagic);
-    writer.writeU64LittleEndian(level, 'evaluation-key level');
-    writer.writeU64LittleEndian(
-        shareMaterial.ringDegree,
-        'evaluation-key ringDegree',
-    );
-    writer.writeU64LittleEndian(digitCount, 'evaluation-key digitCount');
-    writer.writeU64LittleEndian(digitCount, 'evaluation-key rnsLimbCount');
-    const canonicalComponentVectors: JsonRecord[] = [];
+    const canonicalComponentVectorsLittleEndianHexByDigitAndLimb: string[] = [];
     for (let digitIndex = 0; digitIndex < digitCount; digitIndex += 1) {
         for (
             let rnsLimbIndex = 0;
             rnsLimbIndex < digitCount;
             rnsLimbIndex += 1
         ) {
-            const componentVector = assertJsonRecord(
-                shareMaterial.keySwitchComponentVectors[
-                    digitIndex * digitCount + rnsLimbIndex
-                ],
-                'keySwitchComponentVectors',
-            );
-            const vectorPath = `keySwitchComponentVectors.${String(
+            const vectorPath = `keySwitchComponentVectorsLittleEndianHexByDigitAndLimb.${String(
                 digitIndex,
             )}.${String(rnsLimbIndex)}`;
+            const rnsPrime = qSharePrimes[rnsLimbIndex];
+            const coefficientsLeHex: unknown =
+                componentVectorValues[digitIndex * digitCount + rnsLimbIndex];
             if (
-                nonNegativeIntegerRecordField(
-                    componentVector,
-                    'digitIndex',
-                    vectorPath,
-                ) !== digitIndex ||
-                nonNegativeIntegerRecordField(
-                    componentVector,
-                    'rnsLimbIndex',
-                    vectorPath,
-                ) !== rnsLimbIndex ||
-                componentVector.component !== 'b'
+                typeof coefficientsLeHex !== 'string' ||
+                coefficientsLeHex.length === 0
             ) {
-                throw new Error(
-                    'evaluation-key component material vectors must be ordered by digit and RNS limb.',
-                );
+                throw new TypeError(`${vectorPath} must be non-empty.`);
             }
-            const rnsPrime = nonNegativeIntegerRecordField(
-                componentVector,
-                'rnsPrime',
-                vectorPath,
-            );
-            const coefficientByteLength = nonNegativeIntegerRecordField(
-                componentVector,
-                'coefficientByteLength',
-                vectorPath,
-            );
-            if (coefficientByteLength !== shareMaterial.ringDegree * 8) {
-                throw new Error(
-                    'evaluation-key component material coefficientByteLength must match ringDegree.',
-                );
-            }
-            const coefficientsLeHex = stringRecordField(
-                componentVector,
-                'coefficientsLeHex',
-                vectorPath,
-            );
             const coefficients = coefficientVectorFromLittleEndianHex(
                 coefficientsLeHex,
-                shareMaterial.ringDegree,
+                ringDegree,
                 `${vectorPath}.coefficientsLeHex`,
             );
             if (coefficients.some((coefficient) => coefficient >= rnsPrime)) {
@@ -169,266 +141,496 @@ const encodeEvaluationKeyShareComponentMaterial = (
                     'evaluation-key component material coefficients must be canonical residues.',
                 );
             }
-            const coefficientVectorHash =
-                evaluationKeyShareComponentVectorHash(coefficients);
-            if (
-                stringRecordField(
-                    componentVector,
-                    'coefficientVectorHash512',
-                    vectorPath,
-                ) !== coefficientVectorHash
-            ) {
-                throw new Error(
-                    'evaluation-key component material coefficient hash must match coefficientsLeHex.',
-                );
-            }
-            canonicalComponentVectors.push({
-                digitIndex,
-                rnsLimbIndex,
-                rnsPrime,
-                component: 'b',
-                coefficientByteLength,
-                coefficientVectorHash512: coefficientVectorHash,
+            canonicalComponentVectorsLittleEndianHexByDigitAndLimb.push(
                 coefficientsLeHex,
-            });
-            writer.writeU64LittleEndian(
-                digitIndex,
-                'evaluation-key component digitIndex',
-            );
-            writer.writeU64LittleEndian(
-                rnsLimbIndex,
-                'evaluation-key component rnsLimbIndex',
-            );
-            writer.writeU64LittleEndian(
-                rnsPrime,
-                'evaluation-key component rnsPrime',
-            );
-            writer.writeU64LittleEndian(
-                shareMaterial.ringDegree,
-                'evaluation-key component coefficientCount',
-            );
-            coefficients.forEach((coefficient) =>
-                writer.writeU64LittleEndian(
-                    coefficient,
-                    'evaluation-key component coefficient',
-                ),
             );
         }
     }
     const componentVectorRoot = evaluationKeyShareComponentVectorRoot(
         proofFamily,
-        shareMaterial.keySwitchDomain,
-        shareMaterial.keySwitchSeedHex,
+        keySwitchDomain,
+        keySwitchSeedHex,
         level,
-        shareMaterial.ringDegree,
-        canonicalComponentVectors,
+        ringDegree,
+        canonicalComponentVectorsLittleEndianHexByDigitAndLimb,
     );
-    if (componentVectorRoot !== shareMaterial.keySwitchComponentVectorRoot) {
+    const totalByteLength =
+        evaluationKeyShareComponentMaterialMagic.byteLength +
+        canonicalComponentVectorsLittleEndianHexByDigitAndLimb.length *
+            ringDegree *
+            8;
+    if (!Number.isSafeInteger(totalByteLength) || totalByteLength <= 0) {
         throw new Error(
-            'evaluation-key component material root must match keySwitchComponentVectorRoot before transport.',
+            'evaluation-key component material byte length is outside the JavaScript safe integer range.',
         );
     }
 
-    return writer.finish();
+    return {
+        componentVectorsLittleEndianHexByDigitAndLimb:
+            canonicalComponentVectorsLittleEndianHexByDigitAndLimb,
+        componentVectorRoot,
+        totalByteLength,
+    };
 };
 
-const transportEvaluationKeyShareComponentMaterial = (
+const evaluationKeyShareComponentMaterialSegments = function* (
+    ringDegree: number,
+    validatedMaterial: ValidatedComponentMaterial,
+): Generator<Uint8Array> {
+    const header = new Uint8Array(evaluationKeyShareComponentMaterialMagic);
+    header.set(evaluationKeyShareComponentMaterialMagic);
+    yield header;
+
+    for (const coefficientsLeHex of validatedMaterial.componentVectorsLittleEndianHexByDigitAndLimb) {
+        const coefficientBytes = bytesFromHex(
+            coefficientsLeHex,
+            'evaluation-key component coefficientsLeHex',
+        );
+        if (coefficientBytes.byteLength !== ringDegree * 8) {
+            throw new Error(
+                'evaluation-key component coefficient bytes must match ringDegree.',
+            );
+        }
+        yield coefficientBytes;
+    }
+};
+
+const sequentialChunkPull = (
+    segments: Generator<Uint8Array>,
+    totalByteLength: number,
+): CanonicalProofMaterialChunkPull => {
+    let currentSegment: Uint8Array | undefined;
+    let currentSegmentOffset = 0;
+    let nextChunkIndex = 0;
+    let emittedByteLength = 0;
+
+    return ({ chunkIndex, expectedByteLength }) =>
+        Promise.resolve().then(() => {
+            if (chunkIndex !== nextChunkIndex) {
+                throw new Error(
+                    'evaluation-key component material chunks must be pulled in ascending order.',
+                );
+            }
+            if (emittedByteLength === totalByteLength) {
+                if (expectedByteLength !== 0) {
+                    throw new Error(
+                        'evaluation-key component material source was pulled past its declared length.',
+                    );
+                }
+                nextChunkIndex += 1;
+                return undefined;
+            }
+            const remainingByteLength = totalByteLength - emittedByteLength;
+            const requiredByteLength = Math.min(
+                foundationProfile.streamChunkByteLength,
+                remainingByteLength,
+            );
+            if (expectedByteLength !== requiredByteLength) {
+                throw new Error(
+                    'evaluation-key component material pull length does not match the canonical chunk boundary.',
+                );
+            }
+            const chunk = new Uint8Array(requiredByteLength);
+            let writeOffset = 0;
+            while (writeOffset < chunk.length) {
+                if (
+                    currentSegment === undefined ||
+                    currentSegmentOffset === currentSegment.length
+                ) {
+                    currentSegment?.fill(0);
+                    const nextSegment = segments.next();
+                    if (nextSegment.done) {
+                        throw new Error(
+                            'evaluation-key component material encoder ended before its declared length.',
+                        );
+                    }
+                    currentSegment = nextSegment.value;
+                    currentSegmentOffset = 0;
+                }
+                const copyByteLength = Math.min(
+                    currentSegment.length - currentSegmentOffset,
+                    chunk.length - writeOffset,
+                );
+                chunk.set(
+                    currentSegment.subarray(
+                        currentSegmentOffset,
+                        currentSegmentOffset + copyByteLength,
+                    ),
+                    writeOffset,
+                );
+                currentSegmentOffset += copyByteLength;
+                writeOffset += copyByteLength;
+            }
+            emittedByteLength += chunk.length;
+            nextChunkIndex += 1;
+
+            return chunk.buffer;
+        });
+};
+
+const transportEvaluationKeyShareComponentMaterial = async (
     workItem: EvaluationKeyShareTransportWorkItem,
-): Readonly<{
-    readonly shareMaterial: EvaluationKeyShareMaterial;
-    readonly componentMaterial: JsonRecord;
-    readonly componentMaterialChunkStream: EvaluationKeyShareComponentMaterialChunkStream;
-}> => {
-    const chunks = encodeEvaluationKeyShareComponentMaterial(
+    writeComponentMaterial: EvaluationKeyShareMaterialTransportInput['writeEvaluationKeyShareComponentMaterial'],
+    ringDegree: number,
+    qSharePrimes: readonly number[],
+): Promise<
+    Readonly<{
+        readonly keySwitchComponentMaterialRoot: ProtocolHash;
+        readonly componentMaterialStream: EvaluationKeyShareComponentMaterialStream;
+    }>
+> => {
+    const validatedMaterial = validatedEvaluationKeyShareComponentMaterial(
         workItem.proofFamily,
-        workItem.shareMaterial,
+        workItem.keySwitchDomain,
+        workItem.keySwitchSeedHex,
+        workItem.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
         workItem.level,
-    );
-    const transportHashes = evaluationKeyShareComponentMaterialTransportHashes(
-        workItem.proofFamily,
-        chunks,
+        ringDegree,
+        qSharePrimes,
     );
     const keySwitchComponentMaterialRoot =
         evaluationKeyShareComponentMaterialReferenceRoot(
             workItem.proofFamily,
-            workItem.shareMaterial,
+            ringDegree,
+            validatedMaterial.componentVectorRoot,
+            workItem.keySwitchDomain,
+            workItem.keySwitchSeedHex,
             workItem.trusteeIdentity,
             workItem.trusteeRosterPosition,
             workItem.level,
-            transportHashes,
         );
-    const shareMaterial: EvaluationKeyShareMaterial = {
-        keySwitchDomain: workItem.shareMaterial.keySwitchDomain,
-        keySwitchSeedHex: workItem.shareMaterial.keySwitchSeedHex,
-        ringDegree: workItem.shareMaterial.ringDegree,
-        keySwitchComponentVectorRoot:
-            workItem.shareMaterial.keySwitchComponentVectorRoot,
-        keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
+    const writtenMaterial = await writeComponentMaterial({
         keySwitchComponentMaterialRoot,
-        keySwitchComponentChunkSizeBytes: setupProofTransportChunkSizeBytes,
-        keySwitchComponentChunkCount: transportHashes.chunkHashes.length,
-        keySwitchComponentTotalByteLength: transportHashes.totalByteLength,
-        keySwitchComponentFullObjectHash: transportHashes.fullObjectHash,
-        keySwitchComponentChunkRoot: transportHashes.chunkRoot,
-        keySwitchComponentChunkHashes: transportHashes.chunkHashes,
-    };
-
-    const componentMaterialChunks = chunks.map((chunk, chunkIndex) => ({
-        chunkIndex,
-        bytesHex: bytesToHex(chunk),
-    }));
+        proofFamily: workItem.proofFamily,
+        pullChunk: sequentialChunkPull(
+            evaluationKeyShareComponentMaterialSegments(
+                ringDegree,
+                validatedMaterial,
+            ),
+            validatedMaterial.totalByteLength,
+        ),
+        totalByteLength: validatedMaterial.totalByteLength,
+    });
+    if (typeof writtenMaterial.pullChunk !== 'function') {
+        throw new TypeError(
+            'writeEvaluationKeyShareComponentMaterial pullChunk must be a function.',
+        );
+    }
+    const descriptorBytes = copyCanonicalStreamDescriptor(
+        writtenMaterial.descriptorBytes,
+        'writeEvaluationKeyShareComponentMaterial descriptorBytes',
+    );
 
     return {
-        shareMaterial,
-        // The transported component material is a chunkless manifest reference:
-        // the terminal accepted-setup verifier refuses inline chunks and instead
-        // reads the material from the file-backed component material transport
-        // stream, so the raw bytes are carried out of band in the chunk stream
-        // below rather than embedded here.
-        componentMaterial: {
-            objectType: evaluationKeyShareComponentMaterialTransportObjectType,
-            proofFamily: workItem.proofFamily,
-            keySwitchMaterialEncoding:
-                evaluationKeyShareComponentMaterialEncoding,
-            trusteeIdentity: workItem.trusteeIdentity,
-            trusteeRosterPosition: workItem.trusteeRosterPosition,
-            keySwitchDomain: workItem.shareMaterial.keySwitchDomain,
-            keySwitchSeedHex: workItem.shareMaterial.keySwitchSeedHex,
-            level: workItem.level,
-            ringDegree: workItem.shareMaterial.ringDegree,
-            digitCount: workItem.level + 1,
-            rnsLimbCount: workItem.level + 1,
-            keySwitchComponentVectorRoot:
-                workItem.shareMaterial.keySwitchComponentVectorRoot,
-            keySwitchComponentMaterialRoot,
-            chunkCount: transportHashes.chunkHashes.length,
-            totalByteLength: transportHashes.totalByteLength,
-            fullObjectHash: transportHashes.fullObjectHash,
-            chunkRoot: transportHashes.chunkRoot,
-            chunkHashes: transportHashes.chunkHashes,
-        },
-        componentMaterialChunkStream: {
-            keySwitchComponentMaterialRoot,
-            proofFamily: workItem.proofFamily,
-            chunks: componentMaterialChunks,
+        keySwitchComponentMaterialRoot,
+        componentMaterialStream: {
+            descriptorBytes,
+            pullChunk: writtenMaterial.pullChunk,
         },
     };
 };
 
-export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
+type RelinearizationMaterialContribution = Readonly<{
+    readonly trusteeRosterPosition: number;
+    readonly level: number;
+    readonly keySwitchComponentVectorsLittleEndianHexByDigitAndLimb: readonly string[];
+}>;
+
+const contributionKey = (
+    level: number,
+    trusteeRosterPosition: number,
+): string => `${String(level)}:${String(trusteeRosterPosition)}`;
+
+const relinearizationContributionsByKey = (
+    contributions: readonly RelinearizationMaterialContribution[],
+    fieldName: string,
+    trusteeIdentities: ReadonlyMap<number, string>,
+): ReadonlyMap<string, RelinearizationMaterialContribution> => {
+    const contributionsByKey = new Map<
+        string,
+        RelinearizationMaterialContribution
+    >();
+    contributions.forEach((contribution) => {
+        assertNonNegativeSafeInteger(
+            contribution.trusteeRosterPosition,
+            `${fieldName}.trusteeRosterPosition`,
+        );
+        trusteeIdentityForContribution(
+            trusteeIdentities,
+            contribution.trusteeRosterPosition,
+            fieldName,
+        );
+        assertNonNegativeSafeInteger(contribution.level, `${fieldName}.level`);
+        const key = contributionKey(
+            contribution.level,
+            contribution.trusteeRosterPosition,
+        );
+        if (contributionsByKey.has(key)) {
+            throw new Error(
+                `${fieldName} must not repeat a trustee and level.`,
+            );
+        }
+        contributionsByKey.set(key, contribution);
+    });
+
+    return contributionsByKey;
+};
+
+export const createBinaryChunkedEvaluationKeyShareMaterialTransport = async (
     input: EvaluationKeyShareMaterialTransportInput,
-): BinaryChunkedEvaluationKeyShareMaterialTransport => {
+): Promise<BinaryChunkedEvaluationKeyShareMaterialTransport> => {
+    if (!Array.isArray(input.qSharePrimes) || input.qSharePrimes.length === 0) {
+        throw new Error('qSharePrimes must contain at least one RNS prime.');
+    }
+    input.qSharePrimes.forEach((qSharePrime, rnsLimbIndex) => {
+        assertPositiveSafeInteger(
+            qSharePrime,
+            `qSharePrimes.${String(rnsLimbIndex)}`,
+        );
+    });
+    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
     const identities = trusteeIdentityByRosterPosition(input.trusteeReferences);
-    const componentMaterials: JsonRecord[] = [];
-    const componentMaterialChunkStreams: EvaluationKeyShareComponentMaterialChunkStream[] =
+    const canonicalTrusteeRosterPositions = [...identities.keys()].sort(
+        (left, right) => left - right,
+    );
+    canonicalTrusteeRosterPositions.forEach(
+        (trusteeRosterPosition, expectedRosterPosition) => {
+            if (trusteeRosterPosition !== expectedRosterPosition) {
+                throw new Error(
+                    'trusteeReferences roster positions must be contiguous from zero.',
+                );
+            }
+        },
+    );
+    const evaluationKeyShareComponentMaterialStreams: EvaluationKeyShareComponentMaterialStream[] =
         [];
     const componentRoots = new Set<string>();
-    const transportShareMaterial = (
+    const transportComponentMaterial = async (
         workItem: EvaluationKeyShareTransportWorkItem,
-    ): EvaluationKeyShareMaterial => {
+    ): Promise<ProtocolHash> => {
         const componentTransport =
-            transportEvaluationKeyShareComponentMaterial(workItem);
-        const componentMaterialRoot = stringRecordField(
-            componentTransport.componentMaterial,
-            'keySwitchComponentMaterialRoot',
-            'componentMaterial',
-        );
+            await transportEvaluationKeyShareComponentMaterial(
+                workItem,
+                input.writeEvaluationKeyShareComponentMaterial,
+                input.ringDegree,
+                input.qSharePrimes,
+            );
+        const componentMaterialRoot =
+            componentTransport.keySwitchComponentMaterialRoot;
         if (componentRoots.has(componentMaterialRoot)) {
             throw new Error(
                 'transported evaluation-key component material contains duplicate roots.',
             );
         }
         componentRoots.add(componentMaterialRoot);
-        componentMaterials.push(componentTransport.componentMaterial);
-        componentMaterialChunkStreams.push(
-            componentTransport.componentMaterialChunkStream,
+        evaluationKeyShareComponentMaterialStreams.push(
+            componentTransport.componentMaterialStream,
         );
 
-        return componentTransport.shareMaterial;
+        return componentMaterialRoot;
     };
 
-    const relinearizationRoundOneContributions =
-        input.relinearizationRoundOneContributions.map((contribution) => ({
-            trusteeRosterPosition: contribution.trusteeRosterPosition,
-            level: contribution.level,
-            roundOneShareRoot: contribution.roundOneShareRoot,
-            shareMaterial: transportShareMaterial({
-                proofFamily: 'relinearization-key-share',
-                trusteeIdentity: trusteeIdentityForContribution(
-                    identities,
-                    contribution.trusteeRosterPosition,
-                    'relinearizationRoundOneContributions',
-                ),
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                level: contribution.level,
-                shareMaterial: assertEmbeddedComponentMaterial(
-                    contribution.shareMaterial,
-                    'relinearizationRoundOneContributions.shareMaterial',
-                ),
-            }),
-        }));
-    const relinearizationRoundTwoContributions =
-        input.relinearizationRoundTwoContributions.map((contribution) => ({
-            trusteeRosterPosition: contribution.trusteeRosterPosition,
-            level: contribution.level,
-            roundTwoShareRoot: contribution.roundTwoShareRoot,
-            shareMaterial: transportShareMaterial({
-                proofFamily: 'relinearization-key-share',
-                trusteeIdentity: trusteeIdentityForContribution(
-                    identities,
-                    contribution.trusteeRosterPosition,
-                    'relinearizationRoundTwoContributions',
-                ),
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                level: contribution.level,
-                shareMaterial: assertEmbeddedComponentMaterial(
-                    contribution.shareMaterial,
-                    'relinearizationRoundTwoContributions.shareMaterial',
-                ),
-            }),
-        }));
-    const galoisKeyShareBatchContributions =
-        input.galoisKeyShareBatchContributions.map((batchContribution) => {
-            const trusteeIdentity = trusteeIdentityForContribution(
-                identities,
-                batchContribution.trusteeRosterPosition,
-                'galoisKeyShareBatchContributions',
+    const scheduledLevels =
+        input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
+            ({ level }) => level,
+        );
+    const roundOneContributionsByKey = relinearizationContributionsByKey(
+        input.relinearizationRoundOneContributions,
+        'relinearizationRoundOneContributions',
+        identities,
+    );
+    const roundTwoContributionsByKey = relinearizationContributionsByKey(
+        input.relinearizationRoundTwoContributions,
+        'relinearizationRoundTwoContributions',
+        identities,
+    );
+    const expectedRelinearizationContributionCount =
+        scheduledLevels.length * canonicalTrusteeRosterPositions.length;
+    if (
+        roundOneContributionsByKey.size !==
+            expectedRelinearizationContributionCount ||
+        roundTwoContributionsByKey.size !==
+            expectedRelinearizationContributionCount
+    ) {
+        throw new Error(
+            'relinearization contributions must contain exactly one material per scheduled trustee and level.',
+        );
+    }
+    const relinearizationRoundOneContributions: BinaryChunkedEvaluationKeyShareMaterialTransport['relinearizationRoundOneContributions'][number][] =
+        [];
+    for (const level of scheduledLevels) {
+        for (const trusteeRosterPosition of canonicalTrusteeRosterPositions) {
+            const contribution = roundOneContributionsByKey.get(
+                contributionKey(level, trusteeRosterPosition),
             );
-
-            return {
-                trusteeRosterPosition: batchContribution.trusteeRosterPosition,
-                galoisKeyShares: batchContribution.galoisKeyShares.map(
-                    (shareContribution) => ({
-                        rotation: shareContribution.rotation,
-                        level: shareContribution.level,
-                        galoisKeyShareRoot:
-                            shareContribution.galoisKeyShareRoot,
-                        shareMaterial: transportShareMaterial({
-                            proofFamily: 'galois-key-share',
-                            trusteeIdentity,
-                            trusteeRosterPosition:
-                                batchContribution.trusteeRosterPosition,
-                            level: shareContribution.level,
-                            shareMaterial: assertEmbeddedComponentMaterial(
-                                shareContribution.shareMaterial,
-                                'galoisKeyShares.shareMaterial',
-                            ),
-                        }),
+            if (contribution === undefined) {
+                throw new Error(
+                    'relinearizationRoundOneContributions is missing a scheduled trustee and level.',
+                );
+            }
+            relinearizationRoundOneContributions.push({
+                trusteeRosterPosition,
+                level,
+                keySwitchComponentMaterialRoot:
+                    await transportComponentMaterial({
+                        proofFamily: 'relinearization-key-share',
+                        trusteeIdentity: trusteeIdentityForContribution(
+                            identities,
+                            trusteeRosterPosition,
+                            'relinearizationRoundOneContributions',
+                        ),
+                        trusteeRosterPosition,
+                        level,
+                        keySwitchDomain: 'relinearization',
+                        keySwitchSeedHex: relinearizationKeySwitchSeed(
+                            input.evaluatorKeySchedule,
+                            'round-one',
+                            level,
+                        ),
+                        keySwitchComponentVectorsLittleEndianHexByDigitAndLimb:
+                            contribution.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
                     }),
-                ),
-            };
+            });
+        }
+    }
+    const relinearizationRoundTwoContributions: BinaryChunkedEvaluationKeyShareMaterialTransport['relinearizationRoundTwoContributions'][number][] =
+        [];
+    for (const level of scheduledLevels) {
+        for (const trusteeRosterPosition of canonicalTrusteeRosterPositions) {
+            const contribution = roundTwoContributionsByKey.get(
+                contributionKey(level, trusteeRosterPosition),
+            );
+            if (contribution === undefined) {
+                throw new Error(
+                    'relinearizationRoundTwoContributions is missing a scheduled trustee and level.',
+                );
+            }
+            relinearizationRoundTwoContributions.push({
+                trusteeRosterPosition,
+                level,
+                keySwitchComponentMaterialRoot:
+                    await transportComponentMaterial({
+                        proofFamily: 'relinearization-key-share',
+                        trusteeIdentity: trusteeIdentityForContribution(
+                            identities,
+                            trusteeRosterPosition,
+                            'relinearizationRoundTwoContributions',
+                        ),
+                        trusteeRosterPosition,
+                        level,
+                        keySwitchDomain: 'relinearization',
+                        keySwitchSeedHex: relinearizationKeySwitchSeed(
+                            input.evaluatorKeySchedule,
+                            'round-two',
+                            level,
+                        ),
+                        keySwitchComponentVectorsLittleEndianHexByDigitAndLimb:
+                            contribution.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
+                    }),
+            });
+        }
+    }
+    const galoisBatchContributionsByRosterPosition = new Map(
+        input.galoisKeyShareBatchContributions.map((batchContribution) => {
+            assertNonNegativeSafeInteger(
+                batchContribution.trusteeRosterPosition,
+                'galoisKeyShareBatchContributions.trusteeRosterPosition',
+            );
+            return [
+                batchContribution.trusteeRosterPosition,
+                batchContribution,
+            ] as const;
+        }),
+    );
+    if (
+        galoisBatchContributionsByRosterPosition.size !==
+        input.galoisKeyShareBatchContributions.length
+    ) {
+        throw new Error(
+            'galoisKeyShareBatchContributions must not repeat a trustee roster position.',
+        );
+    }
+    if (
+        galoisBatchContributionsByRosterPosition.size !==
+        canonicalTrusteeRosterPositions.length
+    ) {
+        throw new Error(
+            'galoisKeyShareBatchContributions must contain one batch per trustee.',
+        );
+    }
+    const galoisKeyShareBatchContributions: BinaryChunkedEvaluationKeyShareMaterialTransport['galoisKeyShareBatchContributions'][number][] =
+        [];
+    for (const trusteeRosterPosition of canonicalTrusteeRosterPositions) {
+        const batchContribution = galoisBatchContributionsByRosterPosition.get(
+            trusteeRosterPosition,
+        );
+        if (batchContribution === undefined) {
+            throw new Error(
+                'galoisKeyShareBatchContributions is missing a trustee batch.',
+            );
+        }
+        const trusteeIdentity = trusteeIdentityForContribution(
+            identities,
+            trusteeRosterPosition,
+            'galoisKeyShareBatchContributions',
+        );
+        if (
+            batchContribution.galoisKeyShares.length !==
+            input.evaluatorKeySchedule.requiredGaloisKeySchedule.length
+        ) {
+            throw new Error(
+                'galoisKeyShares must contain one share per required Galois key.',
+            );
+        }
+        const galoisKeyShares: BinaryChunkedEvaluationKeyShareMaterialTransport['galoisKeyShareBatchContributions'][number]['galoisKeyShares'][number][] =
+            [];
+        for (const [
+            scheduleIndex,
+            scheduleEntry,
+        ] of input.evaluatorKeySchedule.requiredGaloisKeySchedule.entries()) {
+            const shareContribution =
+                batchContribution.galoisKeyShares[scheduleIndex];
+            if (
+                shareContribution === undefined ||
+                shareContribution.rotation !== scheduleEntry.rotation ||
+                shareContribution.level !== scheduleEntry.level
+            ) {
+                throw new Error(
+                    'galoisKeyShares must follow the frozen Galois key schedule.',
+                );
+            }
+            galoisKeyShares.push({
+                rotation: shareContribution.rotation,
+                level: shareContribution.level,
+                keySwitchComponentMaterialRoot:
+                    await transportComponentMaterial({
+                        proofFamily: 'galois-key-share',
+                        trusteeIdentity,
+                        trusteeRosterPosition,
+                        level: shareContribution.level,
+                        keySwitchDomain: `galois-${String(
+                            shareContribution.rotation,
+                        )}`,
+                        keySwitchSeedHex: galoisKeySwitchSeed(
+                            input.evaluatorKeySchedule,
+                            shareContribution.rotation,
+                            shareContribution.level,
+                        ),
+                        keySwitchComponentVectorsLittleEndianHexByDigitAndLimb:
+                            shareContribution.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
+                    }),
+            });
+        }
+        galoisKeyShareBatchContributions.push({
+            trusteeRosterPosition,
+            galoisKeyShares,
         });
+    }
 
     return {
         relinearizationRoundOneContributions,
         relinearizationRoundTwoContributions,
         galoisKeyShareBatchContributions,
-        transportedEvaluationKeyShareComponentMaterial: {
-            objectType:
-                evaluationKeyShareComponentMaterialTransportSetObjectType,
-            componentMaterials,
-        },
-        evaluationKeyShareComponentMaterialChunkStreams:
-            componentMaterialChunkStreams,
+        evaluationKeyShareComponentMaterialStreams,
     };
 };

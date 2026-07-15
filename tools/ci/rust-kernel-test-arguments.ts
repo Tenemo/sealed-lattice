@@ -18,20 +18,15 @@ export const cargoTestArgumentsForRustKernelFast = (
     testFilter?: string,
 ): readonly string[] => [
     'test',
+    '--locked',
     '-p',
     'sealed-lattice-kernel',
     ...(testFilter === undefined ? [] : [testFilter]),
     '--',
     '--skip',
     acceptedSetupTestModulePattern,
-    // Kernel proof and evaluator tests already parallelize their polynomial
-    // work through Rayon. Letting libtest start one such test per logical
-    // processor creates nested CPU and memory oversubscription: individually
-    // short setup tests remain active for more than a minute and the fast lane
-    // stretches past sixteen minutes. Serial libtest scheduling keeps every
-    // fast test deterministic while Rayon still uses the machine inside each
-    // test. These protections also apply to focused runs so an accepted-setup
-    // test-name filter cannot bypass the guarded accepted-setup runner.
+    // Proof and evaluator tests use Rayon internally. Serial libtest scheduling
+    // prevents nested CPU and memory oversubscription.
     '--test-threads',
     '1',
     '--show-output',
@@ -41,6 +36,7 @@ export const cargoTestArgumentsForRustKernelHeavy = (
     testFilter = heavyRustKernelTestNamePrefix,
 ): readonly string[] => [
     'test',
+    '--locked',
     '-p',
     'sealed-lattice-kernel',
     testFilter,

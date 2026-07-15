@@ -1,7 +1,5 @@
 use super::*;
 
-use crate::hashing::derive_canonical_object_hash;
-
 #[allow(clippy::too_many_arguments)]
 pub(super) fn vss_coefficient_commitments_object(
     ceremony_id: &str,
@@ -13,13 +11,23 @@ pub(super) fn vss_coefficient_commitments_object(
     ring_degree: usize,
     participant_count: u64,
 ) -> (serde_json::Value, serde_json::Value) {
+    let setup_context_hash =
+        crate::bgv::setup::accepted_setup::setup_context_hash(&serde_json::json!({
+            "ceremonyId": ceremony_id,
+            "manifestHash": manifest_hash,
+            "rosterHash": roster_hash,
+            "setupParametersHash": setup_parameters_hash,
+            "setupEpoch": setup_epoch,
+            "participantCount": participant_count,
+        }))
+        .expect("setup context hash");
     let decryption_threshold = participant_count / 3 + 1;
     let mut source_trustee_records = Vec::new();
     let mut coefficient_commitment_material = Vec::new();
 
     for source_trustee_roster_position in 0..participant_count {
         let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
-        let mut coefficient_commitments = Vec::new();
+        let mut coefficient_commitment_roots = Vec::new();
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
             for shamir_coefficient_index in 0..decryption_threshold {
                 let coefficient_message = accepted_vss_coefficient_message_fixture(
@@ -42,7 +50,6 @@ pub(super) fn vss_coefficient_commitments_object(
                 let commitment = compute_setup_commitment_for_tests(
                     public_matrix_seed_hash,
                     rns_limb_index,
-                    rns_prime,
                     shamir_coefficient_index,
                     &coefficient_message_wide,
                     &randomness_by_column,
@@ -50,95 +57,35 @@ pub(super) fn vss_coefficient_commitments_object(
                 )
                 .expect("setup commitment");
                 let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
-                coefficient_commitments.push(serde_json::json!({
-                    "objectType": "VssCoefficientCommitment",
-                    "ceremonyId": ceremony_id,
-                    "manifestHash": manifest_hash,
-                    "rosterHash": roster_hash,
-                    "setupParametersHash": setup_parameters_hash,
-                    "setupEpoch": setup_epoch,
-                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
-                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                    "publicMatrixSeedHash": public_matrix_seed_hash,
-                    "rnsLimbIndex": rns_limb_index,
-                    "rnsPrime": rns_prime,
-                    "shamirCoefficientIndex": shamir_coefficient_index,
-                    "commitmentRoot": commitment_root,
-                }));
-                coefficient_commitment_material.push(serde_json::json!({
-                    "objectType": "VssCoefficientCommitmentMaterial",
-                    "ceremonyId": ceremony_id,
-                    "manifestHash": manifest_hash,
-                    "rosterHash": roster_hash,
-                    "setupParametersHash": setup_parameters_hash,
-                    "setupEpoch": setup_epoch,
-                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
-                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                    "publicMatrixSeedHash": public_matrix_seed_hash,
-                    "rnsLimbIndex": rns_limb_index,
-                    "rnsPrime": rns_prime,
-                    "shamirCoefficientIndex": shamir_coefficient_index,
-                    "commitmentRoot": commitment_root,
-                    "commitment": setup_commitment_full_value(&commitment),
-                }));
+                coefficient_commitment_roots.push(commitment_root);
+                coefficient_commitment_material.push(setup_commitment_full_value(&commitment));
             }
         }
 
-        let mut source_trustee_record = serde_json::json!({
+        let source_trustee_record = serde_json::json!({
             "objectType": "VssSourceTrusteeCoefficientCommitments",
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupParametersHash": setup_parameters_hash,
-            "setupEpoch": setup_epoch,
             "sourceTrusteeIdentity": source_trustee_identity,
-            "sourceTrusteeRosterPosition": source_trustee_roster_position,
-            "publicMatrixSeedHash": public_matrix_seed_hash,
-            "coefficientCommitments": coefficient_commitments,
+            "coefficientCommitmentRoots": coefficient_commitment_roots,
         });
-        source_trustee_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(
-            derive_canonical_object_hash(&source_trustee_record)
-                .expect("source trustee commitment root")
-        );
         source_trustee_records.push(source_trustee_record);
     }
 
-    let mut commitment_set = serde_json::json!({
+    let commitment_set = serde_json::json!({
         "objectType": "VssCoefficientCommitmentSet",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
+        "setupContextHash": setup_context_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "sourceTrusteeRecords": source_trustee_records,
     });
-    commitment_set["vssCoefficientCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&commitment_set).expect("VSS commitment set root")
-    );
-
-    let mut material_set = serde_json::json!({
+    let material_set = serde_json::json!({
         "objectType": "VssCoefficientCommitmentMaterialSet",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
+        "setupContextHash": setup_context_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "vssCoefficientCommitmentRoot": commitment_set["vssCoefficientCommitmentRoot"].clone(),
-        "materialEncoding": "full-public-setup-commitment-values",
         "participantCount": participant_count,
         "thresholdDegree": decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
-        "materialRecordCount": coefficient_commitment_material.len(),
         "coefficientCommitments": coefficient_commitment_material,
     });
-    material_set["vssCoefficientCommitmentMaterialRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&material_set)
-            .expect("VSS coefficient commitment material root")
-    );
-
     (commitment_set, material_set)
 }
 

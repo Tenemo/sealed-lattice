@@ -3,7 +3,6 @@ use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
 const VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE: &str = "VssSourceTrusteeCoefficientCommitments";
-const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE: &str = "VssCoefficientCommitmentMaterial";
 
 pub(super) struct SourceTrusteeCommitmentBinding {
     pub(super) source_trustee_identity: String,
@@ -30,24 +29,13 @@ pub(super) struct PrivateEnvelopeBinding {
     pub(super) recipient_roster_position: u64,
 }
 
-pub(super) struct LimbVerification {
-    pub(super) rns_limb_index: usize,
-    pub(super) rns_prime: u64,
-    pub(super) ring_degree: usize,
-    pub(super) coefficient_commitment_roots: Vec<String>,
-    pub(super) share_values_hash: String,
-    pub(super) private_vss_share_proof_hash: String,
-    pub(super) proof_statement_root: String,
-    pub(super) limb_verification_root: String,
-}
-
 pub(super) fn verify_setup_context(
     setup_context: &Value,
 ) -> CanonicalResult<Result<(), PrivateVssRefusal>> {
-    for field_name in setup_context_field_names() {
+    for field_name in authoritative_setup_context_field_names() {
         if setup_context.get(field_name).is_none() {
             return Ok(Err(PrivateVssRefusal::new(
-                "setupContextFieldMissing",
+                PrivateVssRefusalCode::missing("setupContextFieldMissing"),
                 format!("setupContext.{field_name} is required"),
                 format!("setupContext.{field_name}"),
             )));
@@ -58,7 +46,7 @@ pub(super) fn verify_setup_context(
             setup_context,
             field_name,
             &format!("setupContext.{field_name}"),
-            "setupContextHashMalformed",
+            PrivateVssRefusalCode::malformed("setupContextHashMalformed"),
             format!("setupContext.{field_name} must be a protocol hash"),
         ) {
             Ok(hash) => hash,
@@ -70,13 +58,13 @@ pub(super) fn verify_setup_context(
         setup_context,
         "ceremonyId",
         "setupContext.ceremonyId",
-        "setupContextCeremonyMissing",
+        PrivateVssRefusalCode::missing("setupContextCeremonyMissing"),
         "setupContext.ceremonyId must be a non-empty string",
     )
     .is_err()
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "setupContextCeremonyMissing",
+            PrivateVssRefusalCode::missing("setupContextCeremonyMissing"),
             "setupContext.ceremonyId must be a non-empty string",
             "setupContext.ceremonyId",
         )));
@@ -85,23 +73,23 @@ pub(super) fn verify_setup_context(
         setup_context,
         "setupEpoch",
         "setupContext.setupEpoch",
-        "setupContextEpochMissing",
+        PrivateVssRefusalCode::missing("setupContextEpochMissing"),
         "setupContext.setupEpoch must be a non-empty string",
     )
     .is_err()
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "setupContextEpochMissing",
+            PrivateVssRefusalCode::missing("setupContextEpochMissing"),
             "setupContext.setupEpoch must be a non-empty string",
             "setupContext.setupEpoch",
         )));
     }
 
     // The setup parameters hash is a roster family, so it must match the hash
-    // derived from this setup context's roster. It binds Q_share, the
-    // carry-aware VSS relation, commitment, and BGV parameters.
+    // derived from this setup context's roster. It binds the thresholds,
+    // Q_share, evaluator key schedule, and BGV parameters.
     let setup_parameters_roster =
-        super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+        super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     if setup_context
         .get("setupParametersHash")
         .and_then(Value::as_str)
@@ -111,7 +99,7 @@ pub(super) fn verify_setup_context(
         )
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "setupParametersHashMismatch",
+            PrivateVssRefusalCode::wrong_hash("setupParametersHashMismatch"),
             "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
             "setupContext.setupParametersHash",
         )));
@@ -123,7 +111,7 @@ pub(super) fn verify_setup_context(
 pub(super) fn verify_source_trustee_commitment_record(
     source_trustee_record: &Value,
     setup_context: &Value,
-    public_matrix_seed_hash: &str,
+    source_trustee_roster_position: u64,
 ) -> CanonicalResult<Result<SourceTrusteeCommitmentBinding, PrivateVssRefusal>> {
     if source_trustee_record
         .get("objectType")
@@ -131,160 +119,76 @@ pub(super) fn verify_source_trustee_commitment_record(
         != Some(VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE)
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentRecordTypeMismatch",
+            PrivateVssRefusalCode::wrong_type("sourceTrusteeCommitmentRecordTypeMismatch"),
             "sourceTrusteeCoefficientCommitmentRecord.objectType must be VssSourceTrusteeCoefficientCommitments",
             "sourceTrusteeCoefficientCommitmentRecord.objectType",
-        )));
-    }
-    if let Err(refusal) = compare_context_fields(
-        source_trustee_record,
-        setup_context,
-        "sourceTrusteeCoefficientCommitmentRecord",
-    ) {
-        return Ok(Err(refusal));
-    }
-    if source_trustee_record
-        .get("publicMatrixSeedHash")
-        .and_then(Value::as_str)
-        != Some(public_matrix_seed_hash)
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentPublicMatrixSeedMismatch",
-            "sourceTrusteeCoefficientCommitmentRecord.publicMatrixSeedHash must match publicMatrixSeedHash",
-            "sourceTrusteeCoefficientCommitmentRecord.publicMatrixSeedHash",
         )));
     }
     let source_trustee_identity = match string_field(
         source_trustee_record,
         "sourceTrusteeIdentity",
         "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeIdentity",
-        "sourceTrusteeIdentityMissing",
+        PrivateVssRefusalCode::missing("sourceTrusteeIdentityMissing"),
         "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeIdentity is required",
     ) {
         Ok(source_trustee_identity) => source_trustee_identity.to_string(),
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let source_trustee_roster_position = match u64_field(
+    let coefficient_commitment_root_values = match array_field(
         source_trustee_record,
-        "sourceTrusteeRosterPosition",
-        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeRosterPosition",
-        "sourceTrusteeRosterPositionMissing",
-        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeRosterPosition is required",
+        "coefficientCommitmentRoots",
+        "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots",
+        PrivateVssRefusalCode::missing("sourceTrusteeCoefficientCommitmentsMissing"),
+        "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots is required",
     ) {
-        Ok(source_trustee_roster_position) => source_trustee_roster_position,
+        Ok(coefficient_commitment_root_values) => coefficient_commitment_root_values,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let coefficient_commitments = match array_field(
-        source_trustee_record,
-        "coefficientCommitments",
-        "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments",
-        "sourceTrusteeCoefficientCommitmentsMissing",
-        "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments is required",
-    ) {
-        Ok(coefficient_commitments) => coefficient_commitments,
-        Err(refusal) => return Ok(Err(refusal)),
-    };
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     let expected_coefficient_count = DATA_PRIMES.len() * roster.decryption_threshold as usize;
-    if coefficient_commitments.len() != expected_coefficient_count {
+    if coefficient_commitment_root_values.len() != expected_coefficient_count {
         return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCoefficientCommitmentCountMismatch",
-            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments must contain every Q_share limb and Shamir coefficient",
-            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments",
+            PrivateVssRefusalCode::wrong_type("sourceTrusteeCoefficientCommitmentCountMismatch"),
+            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots must contain every Q_share limb and Shamir coefficient",
+            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots",
         )));
     }
 
-    let mut seen_coordinates = BTreeSet::new();
     let mut coefficient_commitment_roots = BTreeMap::new();
-    for coefficient_record in coefficient_commitments {
-        let rns_limb_index = match usize_field(
-            coefficient_record,
-            "rnsLimbIndex",
-            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.rnsLimbIndex",
-            "sourceTrusteeCoefficientRnsLimbMissing",
-            "source trustee coefficient commitment must bind rnsLimbIndex",
-        ) {
-            Ok(rns_limb_index) => rns_limb_index,
-            Err(refusal) => return Ok(Err(refusal)),
-        };
-        let rns_prime = match u64_field(
-            coefficient_record,
-            "rnsPrime",
-            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.rnsPrime",
-            "sourceTrusteeCoefficientRnsPrimeMissing",
-            "source trustee coefficient commitment must bind rnsPrime",
-        ) {
-            Ok(rns_prime) => rns_prime,
-            Err(refusal) => return Ok(Err(refusal)),
-        };
-        if DATA_PRIMES.get(rns_limb_index) != Some(&rns_prime) {
+    let mut canonical_coefficient_commitment_roots =
+        Vec::with_capacity(coefficient_commitment_root_values.len());
+    let decryption_threshold = roster.decryption_threshold as usize;
+    for (record_index, coefficient_root_value) in
+        coefficient_commitment_root_values.iter().enumerate()
+    {
+        let rns_limb_index = record_index / decryption_threshold;
+        let shamir_coefficient_index = (record_index % decryption_threshold) as u64;
+        let Some(commitment_root) = coefficient_root_value.as_str() else {
             return Ok(Err(PrivateVssRefusal::new(
-                "sourceTrusteeCoefficientRnsPrimeMismatch",
-                "source trustee coefficient commitment rnsPrime must match Q_share at rnsLimbIndex",
-                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.rnsPrime",
+                PrivateVssRefusalCode::wrong_type(
+                    "sourceTrusteeCoefficientCommitmentRootMalformed",
+                ),
+                "source trustee coefficient commitment roots must be protocol hashes",
+                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots",
             )));
-        }
-        let shamir_coefficient_index = match u64_field(
-            coefficient_record,
-            "shamirCoefficientIndex",
-            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.shamirCoefficientIndex",
-            "sourceTrusteeCoefficientShamirIndexMissing",
-            "source trustee coefficient commitment must bind shamirCoefficientIndex",
-        ) {
-            Ok(shamir_coefficient_index) => shamir_coefficient_index,
-            Err(refusal) => return Ok(Err(refusal)),
         };
-        if shamir_coefficient_index >= roster.decryption_threshold {
-            return Ok(Err(PrivateVssRefusal::new(
-                "sourceTrusteeCoefficientShamirIndexInvalid",
-                "source trustee coefficient commitment shamirCoefficientIndex is outside the accepted threshold degree",
-                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.shamirCoefficientIndex",
-            )));
-        }
-        if !seen_coordinates.insert((rns_limb_index, shamir_coefficient_index)) {
-            return Ok(Err(PrivateVssRefusal::new(
-                "sourceTrusteeCoefficientCommitmentDuplicate",
-                "source trustee coefficient commitments must have distinct limb/coefficient coordinates",
-                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments",
-            )));
-        }
-        let commitment_root = match hash_string_field(
-            coefficient_record,
-            "commitmentRoot",
-            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments.commitmentRoot",
-            "sourceTrusteeCoefficientCommitmentRootMissing",
-            "source trustee coefficient commitment must bind commitmentRoot",
-        ) {
-            Ok(commitment_root) => commitment_root.to_string(),
-            Err(refusal) => return Ok(Err(refusal)),
-        };
-        coefficient_commitment_roots
-            .insert((rns_limb_index, shamir_coefficient_index), commitment_root);
+        validate_hash_string(
+            commitment_root,
+            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots",
+        )?;
+        coefficient_commitment_roots.insert(
+            (rns_limb_index, shamir_coefficient_index),
+            commitment_root.to_string(),
+        );
+        canonical_coefficient_commitment_roots.push(commitment_root);
     }
 
-    let source_trustee_commitment_root = match hash_string_field(
-        source_trustee_record,
-        "sourceTrusteeCommitmentRoot",
-        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeCommitmentRoot",
-        "sourceTrusteeCommitmentRootMissing",
-        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeCommitmentRoot is required",
-    ) {
-        Ok(source_trustee_commitment_root) => source_trustee_commitment_root.to_string(),
-        Err(refusal) => return Ok(Err(refusal)),
-    };
-    let mut root_input = source_trustee_record.clone();
-    root_input
-        .as_object_mut()
-        .expect("source trustee commitment record object was checked")
-        .remove("sourceTrusteeCommitmentRoot");
-    let expected_source_trustee_commitment_root = derive_canonical_object_hash(&root_input)?;
-    if source_trustee_commitment_root != expected_source_trustee_commitment_root {
-        return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentRootMismatch",
-            "sourceTrusteeCommitmentRoot does not match the canonical source trustee coefficient commitment record",
-            "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeCommitmentRoot",
-        )));
-    }
+    let source_trustee_commitment_root = derive_canonical_object_hash(&json!({
+        "objectType": VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE,
+        "sourceTrusteeIdentity": &source_trustee_identity,
+        "sourceTrusteeRosterPosition": source_trustee_roster_position,
+        "coefficientCommitmentRoots": canonical_coefficient_commitment_roots,
+    }))?;
 
     Ok(Ok(SourceTrusteeCommitmentBinding {
         source_trustee_identity,
@@ -297,162 +201,64 @@ pub(super) fn verify_source_trustee_commitment_record(
 pub(super) fn verify_coefficient_commitment_material_records(
     material_records: &[Value],
     setup_context: &Value,
-    public_matrix_seed_hash: &str,
     source_trustee_binding: &SourceTrusteeCommitmentBinding,
 ) -> CanonicalResult<CoefficientCommitmentMaterialRecordsVerification> {
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     let expected_coefficient_count = DATA_PRIMES.len() * roster.decryption_threshold as usize;
     if material_records.len() != expected_coefficient_count {
         return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentMaterialCountMismatch",
+            PrivateVssRefusalCode::wrong_type("sourceTrusteeCommitmentMaterialCountMismatch"),
             "sourceTrusteeCoefficientCommitmentMaterialRecords must contain full public commitment material for every Q_share limb and Shamir coefficient",
             "sourceTrusteeCoefficientCommitmentMaterialRecords",
         )));
     }
 
     let mut bindings = BTreeMap::new();
-    for material_record in material_records {
+    let decryption_threshold = roster.decryption_threshold as usize;
+    for (record_index, material_record) in material_records.iter().enumerate() {
+        let rns_limb_index = record_index / decryption_threshold;
+        let shamir_coefficient_index = (record_index % decryption_threshold) as u64;
         let binding = match verify_coefficient_commitment_material_record(
             material_record,
-            setup_context,
-            public_matrix_seed_hash,
+            rns_limb_index,
+            shamir_coefficient_index,
             source_trustee_binding,
         )? {
             Ok(binding) => binding,
             Err(refusal) => return Ok(Err(refusal)),
         };
-        let coordinate = (
-            binding.commitment.source_rns_limb_index,
-            binding.commitment.shamir_coefficient_index,
-        );
-        if bindings.insert(coordinate, binding).is_some() {
-            return Ok(Err(PrivateVssRefusal::new(
-                "sourceTrusteeCommitmentMaterialDuplicate",
-                "sourceTrusteeCoefficientCommitmentMaterialRecords must have distinct limb/coefficient coordinates",
-                "sourceTrusteeCoefficientCommitmentMaterialRecords",
-            )));
-        }
-    }
-
-    for rns_limb_index in 0..DATA_PRIMES.len() {
-        for shamir_coefficient_index in 0..roster.decryption_threshold {
-            if !bindings.contains_key(&(rns_limb_index, shamir_coefficient_index)) {
-                return Ok(Err(PrivateVssRefusal::new(
-                    "sourceTrusteeCommitmentMaterialCoverageMismatch",
-                    "sourceTrusteeCoefficientCommitmentMaterialRecords must cover every Q_share limb and Shamir coefficient",
-                    "sourceTrusteeCoefficientCommitmentMaterialRecords",
-                )));
-            }
-        }
+        bindings.insert((rns_limb_index, shamir_coefficient_index), binding);
     }
 
     Ok(Ok(bindings))
 }
 
 fn verify_coefficient_commitment_material_record(
-    material_record: &Value,
-    setup_context: &Value,
-    public_matrix_seed_hash: &str,
+    commitment_value: &Value,
+    rns_limb_index: usize,
+    shamir_coefficient_index: u64,
     source_trustee_binding: &SourceTrusteeCommitmentBinding,
 ) -> CanonicalResult<Result<CoefficientCommitmentBinding, PrivateVssRefusal>> {
-    if material_record.get("objectType").and_then(Value::as_str)
-        != Some(VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE)
+    let commitment = match parse_setup_commitment_full_value(commitment_value) {
+        Ok(commitment) => commitment,
+        Err(error) => {
+            return Ok(Err(PrivateVssRefusal::new(
+                PrivateVssRefusalCode::wrong_type("sourceTrusteeCommitmentMaterialInvalid"),
+                error.message,
+                "sourceTrusteeCoefficientCommitmentMaterialRecords",
+            )));
+        }
+    };
+    if commitment.source_rns_limb_index != rns_limb_index
+        || commitment.shamir_coefficient_index != shamir_coefficient_index
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentMaterialTypeMismatch",
-            "coefficient commitment material objectType must be VssCoefficientCommitmentMaterial",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords.objectType",
+            PrivateVssRefusalCode::wrong_type("sourceTrusteeCommitmentMaterialDomainMismatch"),
+            "full setup commitment domain must match its canonical material position",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords",
         )));
     }
-    if let Err(refusal) = compare_context_fields(
-        material_record,
-        setup_context,
-        "sourceTrusteeCoefficientCommitmentMaterialRecords",
-    ) {
-        return Ok(Err(refusal));
-    }
-    if material_record
-        .get("publicMatrixSeedHash")
-        .and_then(Value::as_str)
-        != Some(public_matrix_seed_hash)
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentMaterialPublicMatrixSeedMismatch",
-            "coefficient commitment material publicMatrixSeedHash must match publicMatrixSeedHash",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords.publicMatrixSeedHash",
-        )));
-    }
-    if material_record
-        .get("sourceTrusteeIdentity")
-        .and_then(Value::as_str)
-        != Some(source_trustee_binding.source_trustee_identity.as_str())
-        || material_record
-            .get("sourceTrusteeRosterPosition")
-            .and_then(Value::as_u64)
-            != Some(source_trustee_binding.source_trustee_roster_position)
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentMaterialSourceTrusteeMismatch",
-            "coefficient commitment material source trustee binding must match sourceTrusteeCoefficientCommitmentRecord",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords.sourceTrusteeIdentity",
-        )));
-    }
-
-    let rns_limb_index = match usize_field(
-        material_record,
-        "rnsLimbIndex",
-        "sourceTrusteeCoefficientCommitmentMaterialRecords.rnsLimbIndex",
-        "sourceTrusteeCommitmentMaterialRnsLimbMissing",
-        "coefficient commitment material must bind rnsLimbIndex",
-    ) {
-        Ok(rns_limb_index) => rns_limb_index,
-        Err(refusal) => return Ok(Err(refusal)),
-    };
-    let rns_prime = match u64_field(
-        material_record,
-        "rnsPrime",
-        "sourceTrusteeCoefficientCommitmentMaterialRecords.rnsPrime",
-        "sourceTrusteeCommitmentMaterialRnsPrimeMissing",
-        "coefficient commitment material must bind rnsPrime",
-    ) {
-        Ok(rns_prime) => rns_prime,
-        Err(refusal) => return Ok(Err(refusal)),
-    };
-    if DATA_PRIMES.get(rns_limb_index) != Some(&rns_prime) {
-        return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentMaterialRnsPrimeMismatch",
-            "coefficient commitment material rnsPrime must match Q_share at rnsLimbIndex",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords.rnsPrime",
-        )));
-    }
-    let shamir_coefficient_index = match u64_field(
-        material_record,
-        "shamirCoefficientIndex",
-        "sourceTrusteeCoefficientCommitmentMaterialRecords.shamirCoefficientIndex",
-        "sourceTrusteeCommitmentMaterialShamirIndexMissing",
-        "coefficient commitment material must bind shamirCoefficientIndex",
-    ) {
-        Ok(shamir_coefficient_index) => shamir_coefficient_index,
-        Err(refusal) => return Ok(Err(refusal)),
-    };
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
-    if shamir_coefficient_index >= roster.decryption_threshold {
-        return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentMaterialShamirIndexInvalid",
-            "coefficient commitment material shamirCoefficientIndex is outside the accepted threshold degree",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords.shamirCoefficientIndex",
-        )));
-    }
-    let commitment_root = match hash_string_field(
-        material_record,
-        "commitmentRoot",
-        "sourceTrusteeCoefficientCommitmentMaterialRecords.commitmentRoot",
-        "sourceTrusteeCommitmentMaterialRootMissing",
-        "coefficient commitment material must bind commitmentRoot",
-    ) {
-        Ok(commitment_root) => commitment_root.to_string(),
-        Err(refusal) => return Ok(Err(refusal)),
-    };
+    let commitment_root = setup_commitment_root(&commitment)?;
     if source_trustee_binding
         .coefficient_commitment_roots
         .get(&(rns_limb_index, shamir_coefficient_index))
@@ -460,47 +266,9 @@ fn verify_coefficient_commitment_material_record(
         != Some(commitment_root.as_str())
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentMaterialRootMismatch",
-            "coefficient commitment material root must match the source trustee coefficient commitment record",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords.commitmentRoot",
-        )));
-    }
-    let commitment_value = match object_field(
-        material_record,
-        "commitment",
-        "sourceTrusteeCoefficientCommitmentMaterialRecords.commitment",
-        "sourceTrusteeCommitmentMaterialCommitmentMissing",
-        "coefficient commitment material must include the full public commitment",
-    ) {
-        Ok(commitment_value) => commitment_value,
-        Err(refusal) => return Ok(Err(refusal)),
-    };
-    let commitment = match parse_setup_commitment_full_value(commitment_value) {
-        Ok(commitment) => commitment,
-        Err(error) => {
-            return Ok(Err(PrivateVssRefusal::new(
-                "sourceTrusteeCommitmentMaterialInvalid",
-                error.message,
-                "sourceTrusteeCoefficientCommitmentMaterialRecords.commitment",
-            )));
-        }
-    };
-    if commitment.source_rns_limb_index != rns_limb_index
-        || commitment.source_message_modulus != rns_prime
-        || commitment.shamir_coefficient_index != shamir_coefficient_index
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentMaterialDomainMismatch",
-            "full setup commitment domain must match its material wrapper",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords.commitment",
-        )));
-    }
-    let computed_commitment_root = setup_commitment_root(&commitment)?;
-    if commitment_root != computed_commitment_root {
-        return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentMaterialRootMismatch",
-            "full setup commitment material does not match commitmentRoot",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords.commitment",
+            PrivateVssRefusalCode::wrong_hash("sourceTrusteeCommitmentMaterialRootMismatch"),
+            "full setup commitment material must match the source trustee coefficient commitment record",
+            "sourceTrusteeCoefficientCommitmentMaterialRecords",
         )));
     }
 

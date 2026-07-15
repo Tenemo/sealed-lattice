@@ -1,20 +1,22 @@
 use super::super::relation::{
-    TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
-    TargetDecryptionShareStatement, VssShareLinkageCommitment,
+    SetupProofStatement, TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
+    TargetDecryptionShareStatement, VssCommittedMaterialWitness, VssShareLinkageCommitment,
     masked_claim_bounds_for_global_claim,
 };
 use super::super::{
     CLAIM_MASK_RADIX, CONSISTENCY_COEFFICIENT_BITS, LINCHECK_REPETITIONS,
     TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
-    TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+    TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND,
     TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+    target_decryption_interpolation_denominator_clearing_factor,
 };
 use super::*;
 use crate::bgv::evaluator::engine::negacyclic_mul;
 use crate::bgv::modular_arithmetic::{add_mod_fast, mul_mod_fast};
 use crate::bgv::parameters::PLAINTEXT_MODULUS;
 use crate::bgv::setup::vss_commitment::{
-    VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT, vss_public_message_encoding_layout,
+    VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT, VSS_PUBLIC_MESSAGE_DIGIT_COUNT,
+    vss_public_message_encoding_layout,
 };
 use serde_json::{Value, json};
 
@@ -28,14 +30,15 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
 
     let (mut tampered_partial_statement, _unused_witness) = target_decryption_share_instance();
     let target_decryption_share = tampered_partial_statement
-        .target_decryption_share
-        .as_mut()
+        .target_decryption_share_mut()
         .expect("target statement");
+    let target_rns_prime =
+        DATA_PRIMES[target_decryption_share.limb_statements[0].target_rns_limb_index];
     target_decryption_share.limb_statements[0].role_statements[0].released_partial_decryption[0] =
         (target_decryption_share.limb_statements[0].role_statements[0].released_partial_decryption
             [0]
             + 1)
-            % target_decryption_share.limb_statements[0].target_rns_prime;
+            % target_rns_prime;
     assert!(
         verify_evaluation_key_share(&tampered_partial_statement, &proof).is_err(),
         "tampering with the released partial must reject"
@@ -43,8 +46,7 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
 
     let (mut tampered_commitment_statement, _unused_witness) = target_decryption_share_instance();
     tampered_commitment_statement
-        .target_decryption_share
-        .as_mut()
+        .target_decryption_share_mut()
         .expect("target statement")
         .limb_statements[0]
         .aggregate_commitment
@@ -56,15 +58,15 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
 
     let (invalid_aggregate_statement, mut invalid_aggregate_witness) =
         target_decryption_share_instance();
-    let target_prime = invalid_aggregate_statement
-        .target_decryption_share
-        .as_ref()
+    let target_rns_limb_index = invalid_aggregate_statement
+        .target_decryption_share()
         .expect("target statement")
         .limb_statements[0]
-        .target_rns_prime;
-    invalid_aggregate_witness.target_decryption_message_vectors[0][5] =
-        (invalid_aggregate_witness.target_decryption_message_vectors[0][5] + 1)
-            % i64::try_from(target_prime).expect("target prime fits i64");
+        .target_rns_limb_index;
+    let target_prime = DATA_PRIMES[target_rns_limb_index];
+    let target_messages = invalid_aggregate_witness.target_decryption_message_vectors_mut();
+    target_messages[0][5] =
+        (target_messages[0][5] + 1) % i64::try_from(target_prime).expect("target prime fits i64");
     assert!(
         prove_evaluation_key_share(
             &invalid_aggregate_statement,
@@ -77,11 +79,11 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
 
     let (invalid_bound_statement, mut invalid_bound_witness) = target_decryption_share_instance();
     let aggregate_message_coefficient_bound = invalid_bound_statement
-        .target_decryption_share
-        .as_ref()
+        .target_decryption_share()
         .expect("target statement")
-        .aggregate_message_coefficient_bound;
-    invalid_bound_witness.target_decryption_message_vectors[0][0] =
+        .aggregate_message_coefficient_bound()
+        .expect("aggregate message bound");
+    invalid_bound_witness.target_decryption_message_vectors_mut()[0][0] =
         i64::try_from(aggregate_message_coefficient_bound).expect("aggregate bound fits i64");
     assert!(
         prove_evaluation_key_share(
@@ -95,7 +97,7 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
 
     let (invalid_smudging_statement, mut invalid_smudging_witness) =
         target_decryption_share_instance();
-    invalid_smudging_witness.target_decryption_message_vectors[2][7] += 1;
+    invalid_smudging_witness.target_decryption_message_vectors_mut()[2][7] += 1;
     assert!(
         prove_evaluation_key_share(
             &invalid_smudging_statement,
@@ -111,7 +113,7 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
     // prover refuses fail-closed.
     let (mismatched_material_statement, mut mismatched_material_witness) =
         target_decryption_share_instance();
-    mismatched_material_witness.target_decryption_message_vectors[1][3] += 1;
+    mismatched_material_witness.target_decryption_message_vectors_mut()[1][3] += 1;
     assert!(
         prove_evaluation_key_share(
             &mismatched_material_statement,
@@ -121,50 +123,44 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
         .is_err(),
         "proving must reject a target-decryption message that does not open its committed material"
     );
+}
 
-    let (mut wrong_target_basis_statement, _unused_witness) = target_decryption_share_instance();
-    wrong_target_basis_statement
-        .target_decryption_share
-        .as_mut()
-        .expect("target statement")
-        .target_basis_hash = repeated_hash("df");
+#[test]
+fn target_decryption_share_proof_rejects_cross_limb_inconsistent_flooding_noise() {
+    let instance = target_decryption_share_instance_parts_with_noise_consistency(5, false);
     assert!(
-        wrong_target_basis_statement.validate_shape().is_err(),
-        "target-decryption share statements must bind the canonical target basis hash"
+        prove_evaluation_key_share(
+            &instance.statement,
+            &instance.witness,
+            PROOF_RANDOMNESS_SEED,
+        )
+        .is_err(),
+        "a separately valid noise opening in each limb must not replace one shared integer mask"
     );
 }
 
 #[test]
 fn target_decryption_share_proof_bytes_round_trips_and_rejects_tampering() {
     let generate_request = target_decryption_share_command_request();
-    let generated =
+    let proof_bytes =
         super::generate_target_decryption_share_proof_bytes_from_request(&generate_request)
             .expect("generate target-decryption share proof bytes");
-    assert_eq!(generated.target_roles, vec!["targetId", "targetOrder"]);
-    assert_eq!(generated.target_rns_limb_indices, vec![0, 1, 2, 3, 4]);
-    assert!(!generated.proof_bytes.is_empty());
+    assert!(!proof_bytes.is_empty());
 
     let verify_request = target_decryption_share_verification_request(&generate_request);
-    let verified = super::verify_target_decryption_share_proof_bytes_from_request(
-        &verify_request,
-        &generated.proof_bytes,
-    )
-    .expect("verify target-decryption share proof bytes");
-    assert_eq!(verified["ok"], true);
-    assert_eq!(
-        verified["operation"],
-        json!("verifyTargetDecryptionProofBytes")
+    super::verify_target_decryption_share_proof_bytes_from_request(&verify_request, &proof_bytes)
+        .expect("verify target-decryption share proof bytes");
+    let mut wrong_participant_count_request = verify_request.clone();
+    wrong_participant_count_request["targetDecryptionShare"]["participantCount"] = json!(9);
+    assert!(
+        super::verify_target_decryption_share_proof_bytes_from_request(
+            &wrong_participant_count_request,
+            &proof_bytes,
+        )
+        .is_err(),
+        "the roster-derived denominator factor must be bound into the proof statement"
     );
-    assert_eq!(verified["proofFamily"], json!("target-decryption-share"));
-    assert_eq!(verified["limbCount"], json!(5));
-    assert_eq!(
-        verified["statementHash"]
-            .as_str()
-            .expect("statement hash")
-            .len(),
-        128
-    );
-    let mut tampered_proof_bytes = generated.proof_bytes.clone();
+    let mut tampered_proof_bytes = proof_bytes.clone();
     let flip_position = tampered_proof_bytes.len() / 2;
     tampered_proof_bytes[flip_position] ^= 1;
     assert!(
@@ -176,23 +172,8 @@ fn target_decryption_share_proof_bytes_round_trips_and_rejects_tampering() {
         "tampered target-decryption proof bytes must reject"
     );
 
-    let mut tampered_aggregate_commitment_request = verify_request.clone();
-    tampered_aggregate_commitment_request["targetDecryptionShare"]["targetRnsLimbStatements"][0]
-        ["aggregateCommitment"]["commitmentFields"][0]["materialRootHex"] = json!("00".repeat(32));
-    assert!(
-        super::verify_target_decryption_share_proof_bytes_from_request(
-            &tampered_aggregate_commitment_request,
-            &generated.proof_bytes
-        )
-        .is_err(),
-        "tampering with the aggregate commitment material root must reject before proof verification"
-    );
-
-    let mut tampered_partial_request = verify_request.clone();
-    let target_prime = tampered_partial_request["targetDecryptionShare"]["targetRnsLimbStatements"]
-        [0]["targetRnsPrime"]
-        .as_u64()
-        .expect("target prime");
+    let mut tampered_partial_request = verify_request;
+    let target_prime = DATA_PRIMES[0];
     let first_partial = tampered_partial_request["targetDecryptionShare"]
         ["targetRnsLimbStatements"][0]["targetRoleStatements"][0]["releasedPartialDecryption"][0]
         .as_u64()
@@ -202,71 +183,10 @@ fn target_decryption_share_proof_bytes_round_trips_and_rejects_tampering() {
     assert!(
         super::verify_target_decryption_share_proof_bytes_from_request(
             &tampered_partial_request,
-            &generated.proof_bytes
+            &proof_bytes
         )
         .is_err(),
         "tampering with the released partial must reject proof verification"
-    );
-
-    let mut tampered_smudging_set_request = verify_request;
-    tampered_smudging_set_request["targetDecryptionShare"]["smudgingCommitmentSet"]["smudgingCoefficientBound"] =
-        json!(15);
-    assert!(
-        super::verify_target_decryption_share_proof_bytes_from_request(
-            &tampered_smudging_set_request,
-            &generated.proof_bytes
-        )
-        .is_err(),
-        "tampering with the smudging commitment set payload must reject its root"
-    );
-
-    let mut missing_limb_request = generate_request.clone();
-    missing_limb_request["targetDecryptionShare"]
-        .as_object_mut()
-        .expect("target-decryption share")
-        .remove("targetRnsLimbStatements");
-    let error =
-        super::generate_target_decryption_share_proof_bytes_from_request(&missing_limb_request)
-            .expect_err("missing target limb statements must reject before proving");
-    assert!(
-        error
-            .message
-            .contains("targetRnsLimbStatements must be present"),
-        "unexpected missing target limb statement error: {}",
-        error.message
-    );
-
-    let mut missing_role_request = generate_request.clone();
-    missing_role_request["targetDecryptionShare"]["targetRnsLimbStatements"][0]
-        .as_object_mut()
-        .expect("target limb statement")
-        .remove("targetRoleStatements");
-    let error =
-        super::generate_target_decryption_share_proof_bytes_from_request(&missing_role_request)
-            .expect_err("missing target role statements must reject before proving");
-    assert!(
-        error
-            .message
-            .contains("targetRoleStatements must be present"),
-        "unexpected missing target role statement error: {}",
-        error.message
-    );
-
-    let mut reordered_role_request = generate_request;
-    reordered_role_request["targetDecryptionShare"]["targetRnsLimbStatements"][0]
-        ["targetRoleStatements"]
-        .as_array_mut()
-        .expect("target role statements")
-        .reverse();
-    let error =
-        super::generate_target_decryption_share_proof_bytes_from_request(&reordered_role_request)
-            .expect_err("noncanonical target role order must reject before proving");
-    assert!(
-        error
-            .message
-            .contains("targetRoleStatements must be in canonical target-role order"),
-        "unexpected target role order error: {}",
-        error.message
     );
 }
 
@@ -278,16 +198,16 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
         LimbColumnLayout::new(&instance.statement, 0).expect("commitment-field layout");
     assert_eq!(
         commitment_field_layout.target_decryption_message_columns,
-        35
+        15
     );
     assert_eq!(
         commitment_field_layout.vss_committed_material_bound_message_count(),
-        35,
+        15,
         "commitment fields open a committed-material tree for every bound message"
     );
     let target_field_layout =
         LimbColumnLayout::new(&instance.statement, 4).expect("target-field layout");
-    assert_eq!(target_field_layout.target_decryption_message_columns, 11);
+    assert_eq!(target_field_layout.target_decryption_message_columns, 7);
     assert_eq!(
         target_field_layout.vss_committed_material_bound_message_count(),
         0,
@@ -308,12 +228,49 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
     );
     let target_statement = instance
         .statement
-        .target_decryption_share
-        .as_ref()
+        .target_decryption_share()
         .expect("target statement");
-    let aggregate_layout =
-        vss_public_message_encoding_layout(target_statement.aggregate_message_coefficient_bound)
-            .expect("aggregate message layout");
+    let smudging_equality_relation_count = (target_statement.limb_statements.len() - 1)
+        * target_statement.limb_statements[0].role_statements.len()
+        * LINCHECK_REPETITIONS;
+    assert_eq!(
+        instance
+            .statement
+            .target_decryption_smudging_equality_count(0)
+            * LINCHECK_REPETITIONS,
+        smudging_equality_relation_count,
+        "field zero must compare every later-limb role message with its reference message"
+    );
+    let target_equation_relation_count =
+        target_statement.limb_statements[0].role_statements.len() * LINCHECK_REPETITIONS;
+    let decoder_relation_count = instance
+        .statement
+        .target_decryption_message_encoding_layouts(0)
+        .expect("field-zero message layouts")
+        .iter()
+        .map(|layout| {
+            (0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT)
+                .filter(|digit_index| {
+                    layout
+                        .digit_trit_count(*digit_index)
+                        .expect("message digit layout")
+                        > 0
+                })
+                .count()
+        })
+        .sum::<usize>()
+        * LINCHECK_REPETITIONS;
+    assert_eq!(
+        commitment_field_layout.target_decryption_relation_count,
+        target_equation_relation_count + smudging_equality_relation_count + decoder_relation_count,
+        "field-zero relation layout must reserve the cryptographic smudging-equality rows"
+    );
+    let aggregate_layout = vss_public_message_encoding_layout(
+        target_statement
+            .aggregate_message_coefficient_bound()
+            .expect("aggregate message bound"),
+    )
+    .expect("aggregate message layout");
     assert_eq!(
         aggregate_layout
             .digit_trit_count(0)
@@ -321,9 +278,11 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
         VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT,
         "large aggregate-message digits still need the full base-digit trit decoder"
     );
-    let smudging_layout =
-        vss_public_message_encoding_layout(target_statement.smudging_message_coefficient_bound)
-            .expect("smudging message layout");
+    let flooding_noise_message_bound =
+        u64::try_from(TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND * 2 + 1)
+            .expect("flooding-noise message bound");
+    let smudging_layout = vss_public_message_encoding_layout(flooding_noise_message_bound)
+        .expect("smudging message layout");
     assert_eq!(
         smudging_layout
             .digit_trit_count(0)
@@ -345,8 +304,7 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
     );
     let target_only_relation_count = instance
         .statement
-        .target_decryption_share
-        .as_ref()
+        .target_decryption_share()
         .and_then(|target_statement| {
             target_statement
                 .limb_statements
@@ -360,179 +318,20 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
         "target-decryption relation challenges must include decoder rows"
     );
 
-    let mut sparse_request = instance.command_request;
-    let sparse_limb_statement =
-        sparse_request["targetDecryptionShare"]["targetRnsLimbStatements"][4].clone();
-    sparse_request["targetDecryptionShare"]["targetRnsLimbStatements"] =
-        json!([sparse_limb_statement]);
-    let error = super::generate_target_decryption_share_proof_bytes_from_request(&sparse_request)
-        .expect_err("sparse target-decryption proof must reject before proving");
+    let mut noncanonical_request = instance.command_request;
+    noncanonical_request["targetDecryptionShare"]["targetRnsLimbStatements"]
+        .as_array_mut()
+        .expect("target RNS limb statements")
+        .swap(3, 4);
+    let error =
+        super::generate_target_decryption_share_proof_bytes_from_request(&noncanonical_request)
+            .expect_err("noncanonical target-decryption limb order must reject before proving");
     assert!(
         error.message.contains(
             "target-decryption proof must cover every active target limb in canonical order"
         ),
         "unexpected sparse target proof error: {}",
         error.message
-    );
-}
-
-#[test]
-fn target_decryption_share_proof_layout_description_matches_relation_layout() {
-    let instance = target_decryption_share_instance_parts();
-    let description = super::describe_target_decryption_share_proof_layout_from_request(
-        &instance.command_request,
-    )
-    .expect("describe target proof layout");
-    assert_eq!(
-        description["objectType"],
-        json!("BgvTargetDecryptionShareProofLayoutDescription")
-    );
-    assert_eq!(
-        description["ringDegree"],
-        json!(SMALL_RING_DEGREE),
-        "the layout description must use the proof statement ring degree"
-    );
-    assert_eq!(description["proofLimbIndices"], json!([0, 1, 2, 3, 4]));
-    assert_eq!(
-        description["totalMessageCount"],
-        json!(35),
-        "five active limbs each carry one aggregate message and six smudging messages"
-    );
-
-    let limbs = description["limbs"].as_array().expect("layout limbs");
-    assert_eq!(limbs.len(), 5);
-    let first_commitment_limb = &limbs[0];
-    assert_eq!(
-        first_commitment_limb["targetDecryptionMessageColumns"],
-        json!(35)
-    );
-    assert_eq!(
-        first_commitment_limb["vssCommittedMaterialBoundMessageCount"],
-        json!(35)
-    );
-    assert_eq!(
-        first_commitment_limb["claimCount"],
-        json!(
-            35 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
-                * CONSISTENCY_REPETITIONS
-        )
-    );
-    assert_eq!(
-        first_commitment_limb["phaseOnePhysicalColumnCount"],
-        json!(
-            LimbColumnLayout::new(&instance.statement, 0)
-                .expect("first limb layout")
-                .phase_one_physical_count()
-        )
-    );
-
-    let final_target_limb = &limbs[4];
-    assert_eq!(
-        final_target_limb["targetDecryptionMessageColumns"],
-        json!(11)
-    );
-    assert_eq!(
-        final_target_limb["vssCommittedMaterialBoundMessageCount"],
-        json!(0)
-    );
-    assert_eq!(
-        final_target_limb["claimCount"],
-        json!(
-            11 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
-                * CONSISTENCY_REPETITIONS
-        )
-    );
-    let final_limb_messages = final_target_limb["messages"]
-        .as_array()
-        .expect("final limb messages");
-    assert_eq!(final_limb_messages.len(), 11);
-    assert_eq!(
-        final_limb_messages[0]["claimKind"],
-        json!("aggregateOpening")
-    );
-    assert_eq!(
-        final_limb_messages[1]["claimKind"],
-        json!("aggregateOpening"),
-        "aggregate lifted messages stay present on the final active proof field"
-    );
-    assert_eq!(
-        final_limb_messages[5]["claimKind"],
-        json!("smudgingOpening"),
-        "only the final target limb's smudging messages are needed on the final proof field"
-    );
-    assert_eq!(
-        final_limb_messages[5]["lowDigitTritCount"],
-        json!(4),
-        "small smudging messages must keep the decoder width"
-    );
-    assert_eq!(final_limb_messages[5]["highDigitTritCount"], json!(0));
-    assert_eq!(
-        final_limb_messages[0]["encodingColumnCount"],
-        json!(crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT),
-        "non-decoder lifted messages carry only digit columns"
-    );
-    assert_eq!(final_limb_messages[0]["lowDigitTritCount"], json!(0));
-    assert_eq!(
-        final_limb_messages[4]["lowDigitTritCount"],
-        json!(VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT),
-        "the final limb's own aggregate message keeps the full decoder"
-    );
-}
-
-#[test]
-fn target_decryption_share_layout_omits_unneeded_lift_columns() {
-    let instance = target_decryption_share_instance_parts_for_active_limb_count(7);
-    assert_eq!(
-        instance.statement.proof_limb_indices(),
-        vec![0, 1, 2, 3, 4, 5, 6]
-    );
-
-    let commitment_field_layout =
-        LimbColumnLayout::new(&instance.statement, 0).expect("commitment-field layout");
-    assert_eq!(
-        commitment_field_layout.target_decryption_message_columns,
-        49
-    );
-    assert_eq!(
-        commitment_field_layout.vss_committed_material_bound_message_count(),
-        49
-    );
-
-    let first_lift_target_field_layout =
-        LimbColumnLayout::new(&instance.statement, 3).expect("first target-field layout");
-    assert_eq!(
-        first_lift_target_field_layout.target_decryption_message_columns,
-        31
-    );
-    assert_eq!(
-        first_lift_target_field_layout.vss_committed_material_bound_message_count(),
-        0
-    );
-
-    let second_lift_target_field_layout =
-        LimbColumnLayout::new(&instance.statement, 4).expect("second target-field layout");
-    assert_eq!(
-        second_lift_target_field_layout.target_decryption_message_columns,
-        11
-    );
-    assert_eq!(
-        second_lift_target_field_layout.vss_committed_material_bound_message_count(),
-        0
-    );
-
-    let later_target_field_layout =
-        LimbColumnLayout::new(&instance.statement, 5).expect("later target-field layout");
-    assert_eq!(
-        later_target_field_layout.target_decryption_message_columns,
-        7
-    );
-    assert_eq!(
-        later_target_field_layout.vss_committed_material_bound_message_count(),
-        0
-    );
-    assert_eq!(
-        later_target_field_layout.target_decryption_logical_columns(),
-        target_decryption_message_encoding_columns_for_limb(&instance.statement, 5)
     );
 }
 
@@ -549,25 +348,24 @@ fn target_decryption_message_encoding_columns_for_limb(
 }
 
 #[test]
-fn target_decryption_share_mask_bound_uses_lifted_aggregate_bound() {
+fn target_decryption_share_mask_bound_uses_canonical_aggregate_bound() {
     let instance = target_decryption_share_instance_parts();
     let target_statement = instance
         .statement
-        .target_decryption_share
-        .as_ref()
+        .target_decryption_share()
         .expect("target statement");
-    let aggregate_message_coefficient_bound =
-        i128::from(target_statement.aggregate_message_coefficient_bound);
+    let aggregate_message_coefficient_bound = i128::from(
+        target_statement
+            .aggregate_message_coefficient_bound()
+            .expect("aggregate message bound"),
+    );
     let largest_target_prime = target_statement
         .limb_statements
         .iter()
-        .map(|limb_statement| i128::from(limb_statement.target_rns_prime))
+        .map(|limb_statement| i128::from(DATA_PRIMES[limb_statement.target_rns_limb_index]))
         .max()
         .expect("target limb");
-    assert!(
-        aggregate_message_coefficient_bound > largest_target_prime,
-        "fixture must exercise the lifted aggregate-message range"
-    );
+    assert_eq!(aggregate_message_coefficient_bound, largest_target_prime);
 
     let (claim_lower_bound, claim_upper_bound) =
         masked_claim_bounds_for_global_claim(&instance.statement, 0).expect("target mask bounds");
@@ -604,7 +402,8 @@ fn target_decryption_share_mask_bound_uses_lifted_aggregate_bound() {
             .expect("target smudging message mask bounds");
     let expected_smudging_clear_claim_bound = i128::from(
         crate::bgv::setup::vss_commitment::vss_public_message_digit_bound(
-            target_statement.smudging_message_coefficient_bound,
+            u64::try_from(TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND * 2 + 1)
+                .expect("flooding-noise message bound"),
             0,
         )
         .expect("smudging message digit bound")
@@ -655,15 +454,7 @@ fn target_decryption_share_verification_request(generate_request: &Value) -> Val
     verify_request
         .as_object_mut()
         .expect("target proof command request")
-        .remove("vssCommittedMaterialContextHashesByBoundMessage");
-    verify_request
-        .as_object_mut()
-        .expect("target proof command request")
         .remove("proofRandomnessSeedHex");
-    verify_request
-        .as_object_mut()
-        .expect("target proof command request")
-        .remove("proofRandomnessNonceHex");
 
     verify_request
 }
@@ -675,30 +466,34 @@ fn target_decryption_share_instance_parts() -> TargetDecryptionShareInstancePart
 fn target_decryption_share_instance_parts_for_active_limb_count(
     active_limb_count: usize,
 ) -> TargetDecryptionShareInstanceParts {
+    target_decryption_share_instance_parts_with_noise_consistency(active_limb_count, true)
+}
+
+fn target_decryption_share_instance_parts_with_noise_consistency(
+    active_limb_count: usize,
+    reuse_noise_across_limbs: bool,
+) -> TargetDecryptionShareInstanceParts {
     let ring_degree = SMALL_RING_DEGREE;
+    let participant_count = 10_u64;
+    let denominator_clearing_factor =
+        target_decryption_interpolation_denominator_clearing_factor(participant_count)
+            .expect("supported target-decryption participant count");
     let public_matrix_seed_hash = repeated_hash("de");
-    let target_basis_hash =
-        crate::bgv::evaluator::top_k::canonical_target_basis_hash().expect("target basis hash");
     let largest_target_prime = DATA_PRIMES[..active_limb_count]
         .iter()
         .copied()
         .max()
         .expect("active target prime");
-    let interpolation_point = 5_u64;
-    let smudging_polynomial_degree = 3_usize;
-    let smudging_coefficient_bound = 16_i64;
-    let smudging_signed_coefficient_offset = smudging_coefficient_bound;
-    let smudging_message_coefficient_bound =
-        u64::try_from(smudging_coefficient_bound * 2 + 1).expect("message bound fits u64");
-    let aggregate_message_coefficient_bound = largest_target_prime
-        .checked_mul(2)
-        .expect("aggregate message bound");
+    let flooding_noise_coefficient_bound = TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND;
+    let flooding_noise_signed_coefficient_offset = flooding_noise_coefficient_bound;
+    let flooding_noise_message_coefficient_bound =
+        u64::try_from(flooding_noise_coefficient_bound * 2 + 1).expect("message bound fits u64");
+    let aggregate_message_coefficient_bound = largest_target_prime;
     let active_credential_binding_root = repeated_hash("70");
     let target_decryption_roles = ["targetId", "targetOrder"];
     let mut limb_statements = Vec::with_capacity(active_limb_count);
     let mut command_limb_statements = Vec::with_capacity(active_limb_count);
-    let target_message_count_per_limb =
-        1 + target_decryption_roles.len() * smudging_polynomial_degree;
+    let target_message_count_per_limb = 1 + target_decryption_roles.len();
     let mut target_decryption_message_vectors =
         Vec::with_capacity(active_limb_count * target_message_count_per_limb);
     // Committed-material regeneration inputs, one per bound commitment in the
@@ -706,11 +501,8 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
     // per limb and role).
     let mut material_seeds_by_bound_message =
         Vec::with_capacity(active_limb_count * target_message_count_per_limb);
-    let mut material_context_hashes_by_bound_message =
-        Vec::with_capacity(active_limb_count * target_message_count_per_limb);
-    let mut smudging_commitment_records = Vec::with_capacity(
-        active_limb_count * target_decryption_roles.len() * smudging_polynomial_degree,
-    );
+    let mut smudging_commitment_records_by_position =
+        Vec::with_capacity(active_limb_count * target_decryption_roles.len());
 
     for (target_rns_limb_index, target_rns_prime) in DATA_PRIMES
         .iter()
@@ -728,14 +520,7 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
                 }
             })
             .collect::<Vec<_>>();
-        let mut aggregate_commitment_messages = aggregate_share_residues.clone();
-        aggregate_commitment_messages[0] = aggregate_commitment_messages[0]
-            .checked_add(target_rns_prime)
-            .expect("lifted aggregate commitment message");
-        assert!(
-            aggregate_commitment_messages[0] < aggregate_message_coefficient_bound,
-            "target proof fixture must exercise a lifted aggregate commitment message"
-        );
+        let aggregate_commitment_messages = aggregate_share_residues.clone();
         let aggregate_commitment = commitment_for_target_decryption_test(
             "aggregate-threshold-share",
             json!({
@@ -755,7 +540,6 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         let mut role_statements = Vec::with_capacity(target_decryption_roles.len());
 
         material_seeds_by_bound_message.push(aggregate_commitment.material_seed_hex.clone());
-        material_context_hashes_by_bound_message.push(aggregate_commitment.context_hash.clone());
         target_decryption_message_vectors.push(
             aggregate_commitment_messages
                 .iter()
@@ -778,122 +562,82 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
                     }
                 })
                 .collect::<Vec<_>>();
-            let smudging_signed_coefficients = (1..=smudging_polynomial_degree)
-                .map(|polynomial_degree| {
-                    smudging_signed_coefficients_for_degree(
-                        ring_degree,
-                        smudging_coefficient_bound,
-                        polynomial_degree
-                            + target_rns_limb_index
-                            + target_role_index * smudging_polynomial_degree,
-                    )
-                })
-                .collect::<Vec<_>>();
-            let smudging_encoded_coefficients = smudging_signed_coefficients
+            let flooding_noise_signed_coefficients = flooding_noise_signed_coefficients(
+                ring_degree,
+                flooding_noise_coefficient_bound,
+                if reuse_noise_across_limbs {
+                    target_role_index
+                } else {
+                    target_rns_limb_index + target_role_index * active_limb_count
+                },
+            );
+            let flooding_noise_encoded_coefficients = flooding_noise_signed_coefficients
                 .iter()
-                .map(|coefficients| {
-                    coefficients
-                        .iter()
-                        .map(|coefficient| {
-                            u64::try_from(*coefficient + smudging_signed_coefficient_offset)
-                                .expect("encoded smudging coefficient")
-                        })
-                        .collect::<Vec<_>>()
+                .map(|coefficient| {
+                    u64::try_from(*coefficient + flooding_noise_signed_coefficient_offset)
+                        .expect("encoded flooding-noise coefficient")
                 })
                 .collect::<Vec<_>>();
             let released_partial_decryption = target_decryption_released_partial(
                 &target_ciphertext_component_one,
                 &aggregate_share_residues,
-                &smudging_signed_coefficients,
-                interpolation_point,
-                PLAINTEXT_MODULUS,
+                &flooding_noise_signed_coefficients,
+                PLAINTEXT_MODULUS
+                    .checked_mul(denominator_clearing_factor)
+                    .expect("target-decryption noise scale fits u64"),
                 target_rns_prime,
             );
-            let smudging_commitments = smudging_encoded_coefficients
-                .iter()
-                .enumerate()
-                .map(|(polynomial_index, message_coefficients)| {
-                    commitment_for_target_decryption_test(
-                        "target-decryption-smudging-polynomial-coefficient",
-                        json!({
-                            "testPurpose": "target-decryption-share-proof",
-                            "targetRnsLimbIndex": target_rns_limb_index,
-                            "targetRole": target_role,
-                            "polynomialDegree": polynomial_index + 1,
-                        }),
-                        target_rns_limb_index,
-                        target_rns_prime,
-                        ring_degree,
-                        message_coefficients,
-                        smudging_message_coefficient_bound,
-                    )
-                })
-                .collect::<Vec<_>>();
-            let smudging_commitment_roots = smudging_commitments
-                .iter()
-                .map(|commitment| commitment.commitment_root.clone())
-                .collect::<Vec<_>>();
-            smudging_commitment_records.extend(smudging_commitments.iter().enumerate().map(
-                |(polynomial_index, commitment)| {
-                    json!({
-                        "objectType": "TargetDecryptionSmudgingCommitment",
-                        "role": target_role,
-                        "rnsLimbIndex": target_rns_limb_index,
-                        "rnsPrime": target_rns_prime,
-                        "polynomialDegree": polynomial_index + 1,
-                        "commitmentRoot": commitment.commitment_root.clone(),
-                        "commitment": commitment.commitment_value.clone(),
-                    })
-                },
+            let flooding_noise_commitment = commitment_for_target_decryption_test(
+                "target-decryption-flooding-noise",
+                json!({
+                    "testPurpose": "target-decryption-share-proof",
+                    "targetRnsLimbIndex": target_rns_limb_index,
+                    "targetRole": target_role,
+                }),
+                target_rns_limb_index,
+                target_rns_prime,
+                ring_degree,
+                &flooding_noise_encoded_coefficients,
+                flooding_noise_message_coefficient_bound,
+            );
+            smudging_commitment_records_by_position.push((
+                target_role_index,
+                target_rns_limb_index,
+                json!({
+                    "objectType": "TargetDecryptionSmudgingCommitment",
+                    "commitment": flooding_noise_commitment.commitment_value.clone(),
+                }),
             ));
             command_role_statements.push(json!({
-                "targetRole": target_role,
                 "targetCiphertextComponentOne": target_ciphertext_component_one.clone(),
                 "releasedPartialDecryption": released_partial_decryption.clone(),
             }));
             role_statements.push(TargetDecryptionShareRoleStatement {
-                target_role: target_role.to_string(),
                 target_ciphertext_component_one: target_ciphertext_component_one.clone(),
                 released_partial_decryption: released_partial_decryption.clone(),
-                smudging_commitment_roots,
-                smudging_commitments: smudging_commitments
-                    .iter()
-                    .map(|commitment| commitment.commitment.clone())
-                    .collect(),
+                flooding_noise_commitment_root: flooding_noise_commitment.commitment_root.clone(),
+                flooding_noise_commitment: flooding_noise_commitment.commitment.clone(),
             });
-            material_seeds_by_bound_message.extend(
-                smudging_commitments
+            material_seeds_by_bound_message
+                .push(flooding_noise_commitment.material_seed_hex.clone());
+            target_decryption_message_vectors.push(
+                flooding_noise_encoded_coefficients
                     .iter()
-                    .map(|commitment| commitment.material_seed_hex.clone()),
+                    .map(|coefficients| {
+                        i64::try_from(*coefficients)
+                            .expect("encoded flooding-noise coefficient fits i64")
+                    })
+                    .collect(),
             );
-            material_context_hashes_by_bound_message.extend(
-                smudging_commitments
-                    .iter()
-                    .map(|commitment| commitment.context_hash.clone()),
-            );
-            target_decryption_message_vectors.extend(smudging_encoded_coefficients.iter().map(
-                |coefficients| {
-                    coefficients
-                        .iter()
-                        .map(|coefficient| {
-                            i64::try_from(*coefficient)
-                                .expect("encoded smudging coefficient fits i64")
-                        })
-                        .collect()
-                },
-            ));
         }
         command_limb_statements.push(json!({
             "targetRnsLimbIndex": target_rns_limb_index,
-            "targetRnsPrime": target_rns_prime,
             "targetRoleStatements": command_role_statements,
-            "aggregateCommitmentRoot": aggregate_commitment.commitment_root.clone(),
             "aggregateOpeningRoot": aggregate_opening_root.clone(),
             "aggregateCommitment": aggregate_commitment.commitment_value.clone(),
         }));
         limb_statements.push(TargetDecryptionShareLimbStatement {
             target_rns_limb_index,
-            target_rns_prime,
             aggregate_commitment_root: aggregate_commitment.commitment_root.clone(),
             aggregate_opening_root,
             aggregate_commitment: aggregate_commitment.commitment.clone(),
@@ -901,130 +645,73 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         });
     }
 
-    let mut smudging_commitment_set = json!({
+    smudging_commitment_records_by_position.sort_by_key(
+        |(target_role_index, target_rns_limb_index, _)| {
+            (*target_role_index, *target_rns_limb_index)
+        },
+    );
+    let smudging_commitment_records = smudging_commitment_records_by_position
+        .into_iter()
+        .map(|(_, _, record)| record)
+        .collect::<Vec<_>>();
+    let smudging_commitment_set = json!({
         "objectType": "TargetDecryptionSmudgingCommitmentSet",
-        "targetBasisHash": target_basis_hash.clone(),
-        "publicMatrixSeedHash": public_matrix_seed_hash.clone(),
-        "activeRnsLimbCount": active_limb_count,
-        "ringDegree": ring_degree,
-        "smudgingCoefficientBound": smudging_coefficient_bound,
-        "signedCoefficientOffset": smudging_signed_coefficient_offset,
-        "messageCoefficientBound": smudging_message_coefficient_bound,
-        "smudgingPolynomialDegree": smudging_polynomial_degree,
-        "commitmentRole": "target-decryption-smudging-polynomial-coefficient",
         "commitmentRecords": smudging_commitment_records,
     });
     let smudging_commitment_set_root = derive_canonical_object_hash(&smudging_commitment_set)
         .expect("smudging commitment set root");
-    smudging_commitment_set["smudgingCommitmentSetRoot"] =
-        json!(smudging_commitment_set_root.clone());
     let target_share_proof_statement_root = repeated_hash("71");
 
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
-            proof_family: TARGET_DECRYPTION_SHARE_PROOF_FAMILY.to_string(),
-            ceremony_id: "target-decryption-share-proof-test".to_string(),
-            manifest_hash: repeated_hash("11"),
-            roster_hash: repeated_hash("22"),
+            setup_context_hash: repeated_hash("11"),
             trustee_identity: "trustee-0".to_string(),
             trustee_roster_position: 0,
-            setup_epoch: "setup-epoch-1".to_string(),
-            binding_roots: vec![
-                (
-                    "targetShareProofStatementRoot".to_string(),
-                    target_share_proof_statement_root.clone(),
-                ),
-                (
-                    "activeCredentialBindingRoot".to_string(),
-                    active_credential_binding_root.clone(),
-                ),
-                (
-                    "smudgingCommitmentSetRoot".to_string(),
-                    smudging_commitment_set_root.clone(),
-                ),
-            ],
+            binding_roots: vec![target_share_proof_statement_root.clone()],
         },
         ring_degree,
-        keys: Vec::new(),
-        same_secret_linkage: None,
-        private_vss_share: None,
-        vss_share_linkage: None,
-        same_secret_bridge: None,
-        target_decryption_share: Some(TargetDecryptionShareStatement {
+        proof: SetupProofStatement::TargetDecryptionShare(TargetDecryptionShareStatement {
             public_matrix_seed_hash: public_matrix_seed_hash.clone(),
-            target_basis_hash: target_basis_hash.clone(),
+            participant_count,
             trustee_identity: "trustee-0".to_string(),
             trustee_roster_position: 0,
             active_credential_binding_root: active_credential_binding_root.clone(),
-            interpolation_point,
-            aggregate_message_coefficient_bound,
-            smudging_commitment_set_root,
+            smudging_commitment_set_root: smudging_commitment_set_root.clone(),
             limb_statements,
-            smudging_polynomial_degree,
-            smudging_coefficient_bound,
-            smudging_signed_coefficient_offset,
-            smudging_message_coefficient_bound,
-            plaintext_multiple: PLAINTEXT_MODULUS,
         }),
     };
     statement
         .validate_shape()
         .expect("target-decryption share statement");
 
-    let witness = super::super::relation::TrusteeEvaluationKeyWitness {
-        secret_coefficients: Vec::new(),
-        error_coefficients_by_key: Vec::new(),
-        negative_indicator_coefficients: Vec::new(),
-        opening_randomness_by_limb: Vec::new(),
-        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        private_vss_opening_randomness_by_shamir_index: Vec::new(),
-        private_vss_carry_witnesses: Vec::new(),
-        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_messages: Vec::new(),
-        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_opening_randomness: Vec::new(),
-        vss_public_carry_witnesses: Vec::new(),
-        vss_public_recipient_share_messages_by_item: Vec::new(),
-        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
-        vss_public_carry_witnesses_by_item: Vec::new(),
-        target_decryption_message_vectors,
-        target_decryption_opening_randomness_by_commitment: Vec::new(),
-        vss_committed_material_seeds_by_bound_message: material_seeds_by_bound_message,
-        vss_committed_material_context_hashes_by_bound_message:
-            material_context_hashes_by_bound_message,
+    let witness = super::super::relation::TrusteeEvaluationKeyWitness::TargetDecryptionShare {
+        message_vectors: target_decryption_message_vectors,
+        committed_material: VssCommittedMaterialWitness {
+            vss_committed_material_seeds_by_bound_message: material_seeds_by_bound_message,
+        },
     };
 
     let command_request = json!({
         "context": {
-            "ceremonyId": "target-decryption-share-proof-test",
-            "manifestHash": repeated_hash("11"),
-            "rosterHash": repeated_hash("22"),
+            "setupContextHash": repeated_hash("11"),
             "trusteeIdentity": "trustee-0",
             "trusteeRosterPosition": 0,
-            "setupEpoch": "setup-epoch-1",
             "targetShareProofStatementRoot": target_share_proof_statement_root.clone(),
-            "activeCredentialBindingRoot": active_credential_binding_root.clone(),
-            "smudgingCommitmentSetRoot": smudging_commitment_set["smudgingCommitmentSetRoot"].clone(),
         },
         "ringDegree": ring_degree,
         "targetDecryptionShare": {
             "targetShareProofStatementRoot": target_share_proof_statement_root,
             "publicMatrixSeedHash": public_matrix_seed_hash,
-            "targetBasisHash": target_basis_hash,
+            "participantCount": participant_count,
             "trusteeIdentity": "trustee-0",
             "trusteeRosterPosition": 0,
             "activeCredentialBindingRoot": active_credential_binding_root,
-            "interpolationPoint": interpolation_point,
-            "aggregateMessageCoefficientBound": aggregate_message_coefficient_bound,
             "targetRnsLimbStatements": command_limb_statements,
             "smudgingCommitmentSet": smudging_commitment_set,
-            "plaintextMultiple": PLAINTEXT_MODULUS,
         },
-        "targetDecryptionMessageVectors": witness.target_decryption_message_vectors.clone(),
-        "vssCommittedMaterialSeedsByBoundMessage": witness.vss_committed_material_seeds_by_bound_message.clone(),
-        "vssCommittedMaterialContextHashesByBoundMessage": witness.vss_committed_material_context_hashes_by_bound_message.clone(),
+        "targetDecryptionMessageVectors": witness.target_decryption_message_vectors(),
+        "vssCommittedMaterialSeedsByBoundMessage": witness.vss_committed_material_seeds_by_bound_message(),
         "proofRandomnessSeedHex": PROOF_RANDOMNESS_SEED,
-        "proofRandomnessNonceHex": PROOF_RANDOMNESS_NONCE,
     });
 
     TargetDecryptionShareInstanceParts {
@@ -1034,15 +721,15 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
     }
 }
 
-fn smudging_signed_coefficients_for_degree(
+fn flooding_noise_signed_coefficients(
     ring_degree: usize,
     coefficient_bound: i64,
-    polynomial_degree: usize,
+    variation_index: usize,
 ) -> Vec<i64> {
     let span = coefficient_bound * 2 + 1;
     (0..ring_degree)
         .map(|coefficient_index| {
-            ((coefficient_index as i64 * 7 + polynomial_degree as i64 * 11).rem_euclid(span))
+            ((coefficient_index as i64 * 7 + variation_index as i64 * 11).rem_euclid(span))
                 - coefficient_bound
         })
         .collect()
@@ -1051,8 +738,7 @@ fn smudging_signed_coefficients_for_degree(
 fn target_decryption_released_partial(
     target_ciphertext_component_one: &[u64],
     aggregate_share: &[u64],
-    smudging_signed_coefficients: &[Vec<i64>],
-    interpolation_point: u64,
+    flooding_noise_signed_coefficients: &[i64],
     plaintext_multiple: u64,
     target_rns_prime: u64,
 ) -> Vec<u64> {
@@ -1062,27 +748,19 @@ fn target_decryption_released_partial(
         target_rns_prime,
     )
     .expect("target aggregate multiplication");
-    let mut interpolation_power = interpolation_point % target_rns_prime;
-    for smudging_coefficients in smudging_signed_coefficients {
-        let smudging_scale = mul_mod_fast(
+    for (partial_coefficient, flooding_noise_coefficient) in released_partial
+        .iter_mut()
+        .zip(flooding_noise_signed_coefficients)
+    {
+        let flooding_noise_residue =
+            signed_residue_for_test(*flooding_noise_coefficient, target_rns_prime);
+        let flooding_noise_term = mul_mod_fast(
             plaintext_multiple % target_rns_prime,
-            interpolation_power,
+            flooding_noise_residue,
             target_rns_prime,
         );
-        for (partial_coefficient, smudging_coefficient) in released_partial
-            .iter_mut()
-            .zip(smudging_coefficients.iter())
-        {
-            let smudging_residue = signed_residue_for_test(*smudging_coefficient, target_rns_prime);
-            let smudging_term = mul_mod_fast(smudging_scale, smudging_residue, target_rns_prime);
-            *partial_coefficient =
-                add_mod_fast(*partial_coefficient, smudging_term, target_rns_prime);
-        }
-        interpolation_power = mul_mod_fast(
-            interpolation_power,
-            interpolation_point % target_rns_prime,
-            target_rns_prime,
-        );
+        *partial_coefficient =
+            add_mod_fast(*partial_coefficient, flooding_noise_term, target_rns_prime);
     }
 
     released_partial
@@ -1106,7 +784,6 @@ struct CommitmentForTargetDecryptionTest {
     commitment_value: Value,
     commitment: VssShareLinkageCommitment,
     material_seed_hex: String,
-    context_hash: String,
 }
 
 fn commitment_for_target_decryption_test(
@@ -1127,28 +804,10 @@ fn commitment_for_target_decryption_test(
         message_coefficients,
         message_coefficient_bound,
     );
-    // Rebuild the canonical commitment object (the transport/command records
-    // carry it) by re-running the request path and taking its commitment body.
-    let material_seed_hex = material.material_seed_hex.clone();
-    let commitment_value =
-        crate::bgv::setup::compute_vss_committed_material_commitment_request(&json!({
-            "commitmentRole": commitment_role,
-            "commitmentContext": commitment_context,
-            "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
-            "ringDegree": ring_degree,
-            "messageCoefficients": message_coefficients,
-            "messageCoefficientBound": message_coefficient_bound,
-            "materialSeedHex": material_seed_hex,
-        }))
-        .expect("committed-material commitment body")["commitment"]
-            .clone();
-
     CommitmentForTargetDecryptionTest {
         commitment_root: material.commitment_root,
-        commitment_value,
+        commitment_value: material.commitment_value,
         commitment: material.commitment,
         material_seed_hex: material.material_seed_hex,
-        context_hash: material.context_hash,
     }
 }

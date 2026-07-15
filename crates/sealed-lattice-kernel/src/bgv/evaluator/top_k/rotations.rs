@@ -1,13 +1,38 @@
 use super::*;
+use crate::bgv::encoding::LOGICAL_SLOT_GENERATOR;
+use std::sync::OnceLock;
 
-pub(crate) fn galois_power(exponent: usize) -> usize {
-    let modulus = 2 * POLYNOMIAL_DEGREE;
-    let mut value = 1_usize;
-    for _ in 0..(exponent % GENERATOR_SUBGROUP_ORDER) {
-        value = (value * PACKED_SCORE_GALOIS_GENERATOR) % modulus;
+static GALOIS_ELEMENT_POSITIONS: OnceLock<Vec<Option<(bool, usize)>>> = OnceLock::new();
+
+fn logical_slot_generator() -> usize {
+    LOGICAL_SLOT_GENERATOR
+}
+
+pub(crate) fn galois_power(exponent: usize) -> CanonicalResult<usize> {
+    Ok(modular_power(
+        logical_slot_generator(),
+        exponent % GENERATOR_SUBGROUP_ORDER,
+        2 * POLYNOMIAL_DEGREE,
+    ))
+}
+
+pub(crate) fn logical_slot_galois_element(logical_slot_index: usize) -> CanonicalResult<usize> {
+    if logical_slot_index >= POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "logical slot index is outside the selected ring",
+        ));
     }
-
-    value
+    let positive_element = modular_power(
+        logical_slot_generator(),
+        logical_slot_index % GENERATOR_SUBGROUP_ORDER,
+        2 * POLYNOMIAL_DEGREE,
+    );
+    if logical_slot_index < GENERATOR_SUBGROUP_ORDER {
+        Ok(positive_element)
+    } else {
+        Ok(2 * POLYNOMIAL_DEGREE - positive_element)
+    }
 }
 
 pub(crate) fn inverse_galois_element(galois_element: usize) -> CanonicalResult<usize> {
@@ -48,61 +73,65 @@ pub(crate) fn generator_exponent_or_conjugated(
             "Galois element must be an odd element modulo the ring order",
         ));
     }
-    let ring_order = 2 * POLYNOMIAL_DEGREE;
-    let mut current = 1_usize;
-    for exponent in 0..GENERATOR_SUBGROUP_ORDER {
-        if current == galois_element {
-            return Ok((false, exponent));
-        }
-        if (ring_order - current) % ring_order == galois_element {
-            return Ok((true, exponent));
-        }
-        current = (current * PACKED_SCORE_GALOIS_GENERATOR) % ring_order;
-    }
+    galois_element_positions()[galois_element].ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "Galois element is outside the selected compact generator basis",
+        )
+    })
+}
 
-    Err(CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
-        "Galois element is outside the selected compact generator basis",
-    ))
+fn galois_element_positions() -> &'static [Option<(bool, usize)>] {
+    GALOIS_ELEMENT_POSITIONS.get_or_init(|| {
+        let ring_order = 2 * POLYNOMIAL_DEGREE;
+        let mut positions = vec![None; ring_order];
+        let mut positive_element = 1_usize;
+        for exponent in 0..GENERATOR_SUBGROUP_ORDER {
+            positions[positive_element] = Some((false, exponent));
+            positions[ring_order - positive_element] = Some((true, exponent));
+            positive_element = positive_element * logical_slot_generator() % ring_order;
+        }
+        positions
+    })
+}
+
+fn modular_power(mut base: usize, mut exponent: usize, modulus: usize) -> usize {
+    let mut result = 1_usize;
+    while exponent > 0 {
+        if exponent & 1 == 1 {
+            result = result * base % modulus;
+        }
+        base = base * base % modulus;
+        exponent >>= 1;
+    }
+    result
 }
 
 // Decompose each rotation into power-of-two generator steps (and one
 // conjugation X -> X^-1 when needed) so the scheduled rotation-key set is
 // O(log N) keys instead of one per rotation.
-pub(crate) fn generator_power_basis_for_exponent(exponent: usize) -> Vec<usize> {
+pub(crate) fn generator_power_basis_for_exponent(exponent: usize) -> CanonicalResult<Vec<usize>> {
     let mut basis = Vec::new();
     let mut remaining = exponent % GENERATOR_SUBGROUP_ORDER;
     let mut bit = 0_usize;
     while remaining > 0 {
         if remaining & 1 == 1 {
-            basis.push(galois_power(1_usize << bit));
+            basis.push(galois_power(1_usize << bit)?);
         }
         remaining >>= 1;
         bit += 1;
     }
 
-    basis
+    Ok(basis)
 }
 
-pub(crate) fn compact_positive_generator_basis_for_rotations(
-    rotations: impl IntoIterator<Item = usize>,
+pub(crate) fn generator_inverse_power_basis_for_exponent(
+    exponent: usize,
 ) -> CanonicalResult<Vec<usize>> {
-    let ring_order = 2 * POLYNOMIAL_DEGREE;
-    let mut basis = BTreeSet::new();
-    for rotation in rotations {
-        if rotation == 1 {
-            continue;
-        }
-        let (requires_conjugation, exponent) = generator_exponent_or_conjugated(rotation)?;
-        if requires_conjugation {
-            basis.insert(ring_order - 1);
-        }
-        for basis_rotation in generator_power_basis_for_exponent(exponent) {
-            basis.insert(basis_rotation);
-        }
-    }
-
-    Ok(basis.into_iter().collect())
+    generator_power_basis_for_exponent(exponent)?
+        .into_iter()
+        .map(inverse_galois_element)
+        .collect()
 }
 
 pub(crate) fn packed_rank_shift_basis_exponents(
@@ -131,18 +160,28 @@ pub(crate) fn packed_rank_shift_basis_exponents(
 pub(crate) fn direct_score_packing_basis_galois_elements(
     option_count: usize,
 ) -> CanonicalResult<Vec<usize>> {
-    compact_positive_generator_basis_for_rotations(direct_score_packing_galois_elements(
-        option_count,
-    )?)
+    let exact_rotations = direct_score_packing_galois_elements(option_count)?;
+    let inverse_basis = generator_inverse_power_basis_for_exponent(option_count)?;
+    let composed_rotation = inverse_basis.iter().fold(1_usize, |accumulated, rotation| {
+        (accumulated * rotation) % (2 * POLYNOMIAL_DEGREE)
+    });
+    if exact_rotations.as_slice() != [composed_rotation] {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "direct score-packing rotation does not match the canonical logical-slot basis",
+        ));
+    }
+
+    Ok(inverse_basis)
 }
 
 pub(crate) fn packed_rank_forward_basis_galois_elements(
     option_count: usize,
 ) -> CanonicalResult<Vec<usize>> {
-    Ok(packed_rank_shift_basis_exponents(option_count)?
+    packed_rank_shift_basis_exponents(option_count)?
         .into_iter()
         .map(galois_power)
-        .collect())
+        .collect()
 }
 
 pub(crate) fn packed_rank_return_basis_galois_elements(
@@ -150,7 +189,7 @@ pub(crate) fn packed_rank_return_basis_galois_elements(
 ) -> CanonicalResult<Vec<usize>> {
     packed_rank_shift_basis_exponents(option_count)?
         .into_iter()
-        .map(|exponent| inverse_galois_element(galois_power(exponent)))
+        .map(|exponent| inverse_galois_element(galois_power(exponent)?))
         .collect()
 }
 
@@ -175,7 +214,7 @@ pub(crate) fn rotate_with_compact_positive_generator_basis(
             &format!("{seed_hex}-conjugation"),
         )?;
     }
-    for basis_rotation in generator_power_basis_for_exponent(exponent) {
+    for basis_rotation in generator_power_basis_for_exponent(exponent)? {
         rotated = context.rotate_ciphertext(
             &rotated,
             basis_rotation,
@@ -195,20 +234,13 @@ pub(crate) fn rotate_with_compact_inverse_generator_basis(
     seed_hex: &str,
 ) -> CanonicalResult<Ciphertext> {
     let mut rotated = ciphertext.clone();
-    let mut remaining = shift;
-    let mut bit = 0_usize;
-    while remaining > 0 {
-        if remaining & 1 == 1 {
-            let basis_rotation = inverse_galois_element(galois_power(1_usize << bit))?;
-            rotated = context.rotate_ciphertext(
-                &rotated,
-                basis_rotation,
-                level,
-                &format!("{seed_hex}-inverse-generator-basis-{basis_rotation}"),
-            )?;
-        }
-        remaining >>= 1;
-        bit += 1;
+    for basis_rotation in generator_inverse_power_basis_for_exponent(shift)? {
+        rotated = context.rotate_ciphertext(
+            &rotated,
+            basis_rotation,
+            level,
+            &format!("{seed_hex}-inverse-generator-basis-{basis_rotation}"),
+        )?;
     }
 
     Ok(rotated)

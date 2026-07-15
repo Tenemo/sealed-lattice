@@ -4,12 +4,17 @@ import {
     type ChildProcess,
     type SpawnOptions,
 } from 'node:child_process';
-import { createWriteStream, type WriteStream } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 
 import type { ActiveLocalRunLog, CommandLogFiles } from './local-run-log.js';
 import { resolvePackageManagerRunner } from './package-manager-runner.js';
 import type { PackageManagerRunner } from './package-manager-runner.js';
+import {
+    normalizeProcessStatus,
+    redactCommandLineArguments,
+    selectDiagnosticEnvironment,
+    serializeErrorDiagnostic,
+} from './run-log-diagnostics.js';
 import { createTerminalLineFilter } from './terminal-line-filter.js';
 
 export type CommandInvocation = {
@@ -18,15 +23,25 @@ export type CommandInvocation = {
     readonly description: string;
     readonly env?: NodeJS.ProcessEnv;
     readonly logFileSlug?: string;
+    readonly workingDirectoryPath?: string;
 };
 
 type CommandOutputMode = 'capture' | 'inherit';
+
+export type CapturedCommandResult = {
+    readonly exitCode: number;
+    readonly processStatus?: ReturnType<typeof normalizeProcessStatus>;
+    readonly stderr: string;
+    readonly stdout: string;
+    readonly terminationSignal: NodeJS.Signals | null;
+};
 
 export type CommandOutputStreamName = 'stderr' | 'stdout';
 
 export type CommandStartEvent = {
     readonly invocation: CommandInvocation;
     readonly logFiles?: CommandLogFiles;
+    readonly processIdentifier?: number;
     readonly startedAtMilliseconds: number;
 };
 
@@ -41,6 +56,7 @@ export type CommandExitEvent = {
     readonly error?: Error;
     readonly exitCode: number;
     readonly invocation: CommandInvocation;
+    readonly processStatus?: ReturnType<typeof normalizeProcessStatus>;
     readonly terminationSignal: NodeJS.Signals | null;
 };
 
@@ -172,11 +188,43 @@ type ProcessSignalEscalationScheduler = (
 
 const forceKillDelayMilliseconds = 5_000;
 
-export const createAbortableCommandSpawnOptions = (
+type CommandAbortReason = {
+    readonly classification: string;
+    readonly initiator?: string;
+};
+
+type ProcessTreeKillResult = {
+    readonly mechanism:
+        | 'direct-signal'
+        | 'none'
+        | 'process-group-signal'
+        | 'taskkill-tree-force';
+    readonly error?: ReturnType<typeof serializeErrorDiagnostic>;
+    readonly fallbackReason?: ReturnType<typeof serializeErrorDiagnostic>;
+    readonly processIdentifier?: number;
+    readonly status?: number | null;
+    readonly succeeded: boolean;
+    readonly terminationSignal?: NodeJS.Signals | null;
+};
+
+const isCommandAbortReason = (value: unknown): value is CommandAbortReason =>
+    typeof value === 'object' &&
+    value !== null &&
+    'classification' in value &&
+    typeof value.classification === 'string' &&
+    (!('initiator' in value) ||
+        value.initiator === undefined ||
+        typeof value.initiator === 'string');
+
+const createAbortableCommandSpawnOptions = (
     env: NodeJS.ProcessEnv,
     stdio: SpawnOptions['stdio'],
     platform: NodeJS.Platform = process.platform,
+    workingDirectoryPath?: string,
 ): SpawnOptions => ({
+    ...(workingDirectoryPath === undefined
+        ? {}
+        : { cwd: workingDirectoryPath }),
     detached: platform !== 'win32',
     env,
     stdio,
@@ -190,53 +238,139 @@ export const killProcessTree = (
         readonly signal?: NodeJS.Signals;
         readonly windowsTaskKiller?: WindowsTaskKiller;
     } = {},
-): void => {
+): ProcessTreeKillResult => {
+    const requestedSignal = input.signal ?? 'SIGTERM';
     const processId = childProcess.pid;
     if (processId === undefined) {
-        return;
+        return {
+            mechanism: 'none',
+            succeeded: false,
+        };
     }
     if ((input.platform ?? process.platform) === 'win32') {
         // child.kill() only ends the direct child on Windows; package-manager
         // and test-runner grandchildren survive. taskkill /t ends the whole
         // tree. spawnSync keeps the abort path free of dangling listeners.
-        (input.windowsTaskKiller ?? spawnSync)(
-            'taskkill',
-            ['/pid', String(processId), '/t', '/f'],
-            {
-                stdio: 'ignore',
-            },
-        );
-        return;
+        try {
+            const rawResult = (input.windowsTaskKiller ?? spawnSync)(
+                'taskkill',
+                ['/pid', String(processId), '/t', '/f'],
+                {
+                    stdio: 'ignore',
+                },
+            );
+            const result =
+                typeof rawResult === 'object' && rawResult !== null
+                    ? (rawResult as {
+                          readonly error?: unknown;
+                          readonly signal?: NodeJS.Signals | null;
+                          readonly status?: number | null;
+                      })
+                    : undefined;
+            const error =
+                result?.error === undefined
+                    ? undefined
+                    : serializeErrorDiagnostic(result.error);
+            const status = result?.status;
+
+            return {
+                mechanism: 'taskkill-tree-force',
+                ...(error === undefined ? {} : { error }),
+                processIdentifier: processId,
+                ...(status === undefined ? {} : { status }),
+                succeeded:
+                    error === undefined &&
+                    (status === undefined || status === 0),
+                ...(result?.signal === undefined
+                    ? {}
+                    : { terminationSignal: result.signal }),
+            };
+        } catch (error) {
+            return {
+                mechanism: 'taskkill-tree-force',
+                error: serializeErrorDiagnostic(error),
+                processIdentifier: processId,
+                succeeded: false,
+            };
+        }
     }
-    const signal = input.signal ?? 'SIGTERM';
     try {
-        (input.processGroupKiller ?? process.kill)(-processId, signal);
-    } catch {
-        childProcess.kill(signal);
+        (input.processGroupKiller ?? process.kill)(-processId, requestedSignal);
+
+        return {
+            mechanism: 'process-group-signal',
+            processIdentifier: processId,
+            succeeded: true,
+        };
+    } catch (processGroupError) {
+        try {
+            const succeeded = childProcess.kill(requestedSignal);
+
+            return {
+                mechanism: 'direct-signal',
+                fallbackReason: serializeErrorDiagnostic(processGroupError),
+                processIdentifier: processId,
+                succeeded,
+            };
+        } catch (directChildError) {
+            return {
+                mechanism: 'direct-signal',
+                error: serializeErrorDiagnostic(
+                    Object.assign(
+                        new Error(
+                            'Process-group and direct-child termination failed.',
+                        ),
+                        { cause: directChildError },
+                    ),
+                ),
+                processIdentifier: processId,
+                succeeded: false,
+            };
+        }
     }
 };
+
+const describeProcessTerminationAttempt = (input: {
+    readonly requestedSignal: NodeJS.Signals;
+    readonly requestedStage: 'forced' | 'requested';
+    readonly result: ProcessTreeKillResult;
+}): Readonly<Record<string, unknown>> => ({
+    ...input.result,
+    actualSignal:
+        input.result.mechanism === 'taskkill-tree-force'
+            ? null
+            : input.requestedSignal,
+    requestedSignal: input.requestedSignal,
+    stage: input.requestedStage,
+});
 
 export const installProcessSignalChildCleanup = (input: {
     readonly activeChildProcesses: ReadonlySet<KillableChildProcess>;
     readonly clearScheduledForceKill?: (timer: unknown) => void;
     readonly forceKillChildProcess?: (
         childProcess: KillableChildProcess,
-    ) => void;
-    readonly killChildProcess?: (childProcess: KillableChildProcess) => void;
+    ) => ProcessTreeKillResult;
+    readonly killChildProcess?: (
+        childProcess: KillableChildProcess,
+    ) => ProcessTreeKillResult;
+    readonly onTerminationAttempt?: (event: {
+        readonly childProcess: KillableChildProcess;
+        readonly processSignal: ProcessSignalName;
+        readonly result: ProcessTreeKillResult;
+        readonly stage: 'forced' | 'requested';
+    }) => void;
     readonly processEvents?: ProcessSignalEventSource;
     readonly scheduleForceKill?: ProcessSignalEscalationScheduler;
 }): (() => void) => {
     const processEvents = input.processEvents ?? process;
     const killChildProcess =
         input.killChildProcess ??
-        ((childProcess: KillableChildProcess): void => {
-            killProcessTree(childProcess);
-        });
+        ((childProcess: KillableChildProcess): ProcessTreeKillResult =>
+            killProcessTree(childProcess));
     const forceKillChildProcess =
         input.forceKillChildProcess ??
-        ((childProcess: KillableChildProcess): void => {
-            killProcessTree(childProcess, { signal: 'SIGKILL' });
-        });
+        ((childProcess: KillableChildProcess): ProcessTreeKillResult =>
+            killProcessTree(childProcess, { signal: 'SIGKILL' }));
     const scheduleForceKill =
         input.scheduleForceKill ??
         ((callback: () => void, delayMilliseconds: number) =>
@@ -264,12 +398,24 @@ export const installProcessSignalChildCleanup = (input: {
         const signalHandler = (): void => {
             process.exitCode = process.exitCode ?? 1;
             for (const childProcess of input.activeChildProcesses) {
-                killChildProcess(childProcess);
+                const result = killChildProcess(childProcess);
+                input.onTerminationAttempt?.({
+                    childProcess,
+                    processSignal: signal,
+                    result,
+                    stage: 'requested',
+                });
             }
             scheduledForceKill ??= scheduleForceKill(() => {
                 scheduledForceKill = undefined;
                 for (const childProcess of input.activeChildProcesses) {
-                    forceKillChildProcess(childProcess);
+                    const result = forceKillChildProcess(childProcess);
+                    input.onTerminationAttempt?.({
+                        childProcess,
+                        processSignal: signal,
+                        result,
+                        stage: 'forced',
+                    });
                 }
             }, forceKillDelayMilliseconds);
             removeSignalHandlers();
@@ -288,14 +434,42 @@ export const installProcessSignalChildCleanup = (input: {
 };
 
 const activeChildProcesses = new Set<KillableChildProcess>();
+const childProcessTerminationRecorders = new WeakMap<
+    KillableChildProcess,
+    (input: {
+        readonly processSignal: ProcessSignalName;
+        readonly result: ProcessTreeKillResult;
+        readonly stage: 'forced' | 'requested';
+    }) => void
+>();
 let uninstallProcessSignalChildCleanup: (() => void) | undefined;
 
 const trackChildProcessForSignalCleanup = (
     childProcess: KillableChildProcess,
+    terminationRecorder?: (input: {
+        readonly processSignal: ProcessSignalName;
+        readonly result: ProcessTreeKillResult;
+        readonly stage: 'forced' | 'requested';
+    }) => void,
 ): (() => void) => {
     activeChildProcesses.add(childProcess);
+    if (terminationRecorder !== undefined) {
+        childProcessTerminationRecorders.set(childProcess, terminationRecorder);
+    }
     uninstallProcessSignalChildCleanup ??= installProcessSignalChildCleanup({
         activeChildProcesses,
+        onTerminationAttempt: ({
+            childProcess: terminatedChildProcess,
+            processSignal,
+            result,
+            stage,
+        }) => {
+            childProcessTerminationRecorders.get(terminatedChildProcess)?.({
+                processSignal,
+                result,
+                stage,
+            });
+        },
     });
 
     let isTracked = true;
@@ -305,6 +479,7 @@ const trackChildProcessForSignalCleanup = (
         }
         isTracked = false;
         activeChildProcesses.delete(childProcess);
+        childProcessTerminationRecorders.delete(childProcess);
         if (activeChildProcesses.size === 0) {
             uninstallProcessSignalChildCleanup?.();
             uninstallProcessSignalChildCleanup = undefined;
@@ -312,126 +487,29 @@ const trackChildProcessForSignalCleanup = (
     };
 };
 
-const runCommandWithInheritedOutput = (
+const commandEnvironment = (
     invocation: CommandInvocation,
-    signal?: AbortSignal,
-    observer?: CommandRunObserver,
-): Promise<number> =>
-    new Promise((resolve, reject) => {
-        if (signal?.aborted === true) {
-            resolve(1);
-            return;
-        }
-        console.log(`\n${invocation.description}`);
-        const startedAtMilliseconds = performance.now();
-        observer?.onCommandStart?.({
-            invocation,
-            startedAtMilliseconds,
-        });
-        const childProcess = spawn(
-            invocation.command,
-            invocation.args,
-            createAbortableCommandSpawnOptions(
-                invocation.env ?? process.env,
-                'inherit',
-            ),
-        );
-        const untrackChildProcess =
-            trackChildProcessForSignalCleanup(childProcess);
-        const onAbort = (): void => {
-            killProcessTree(childProcess);
-        };
-        signal?.addEventListener('abort', onAbort, { once: true });
-        let settled = false;
-        childProcess.once('error', (error) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            untrackChildProcess();
-            signal?.removeEventListener('abort', onAbort);
-            observer?.onCommandExit?.({
-                durationMilliseconds: Math.round(
-                    performance.now() - startedAtMilliseconds,
-                ),
-                error,
-                exitCode: 1,
-                invocation,
-                terminationSignal: null,
-            });
-            reject(error);
-        });
-        childProcess.once('close', (exitCode, terminationSignal) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            untrackChildProcess();
-            signal?.removeEventListener('abort', onAbort);
-            const resolvedExitCode =
-                terminationSignal === null ? (exitCode ?? 1) : 1;
-            if (terminationSignal !== null) {
-                console.error(
-                    `${invocation.description} terminated by signal ${terminationSignal}.`,
-                );
-            }
-
-            observer?.onCommandExit?.({
-                durationMilliseconds: Math.round(
-                    performance.now() - startedAtMilliseconds,
-                ),
-                exitCode: resolvedExitCode,
-                invocation,
-                terminationSignal,
-            });
-            resolve(resolvedExitCode);
-        });
-    });
-
-const closeWritableStream = async (stream: WriteStream): Promise<void> =>
-    new Promise((resolve, reject) => {
-        stream.once('error', reject);
-        stream.end(resolve);
-    });
-
-const openCommandLogStreams = (
-    files: CommandLogFiles,
-): {
-    readonly combined: WriteStream;
-    readonly stderr: WriteStream;
-    readonly stdout: WriteStream;
-} => ({
-    combined: createWriteStream(files.combinedPath, { flags: 'a' }),
-    stderr: createWriteStream(files.stderrPath, { flags: 'a' }),
-    stdout: createWriteStream(files.stdoutPath, { flags: 'a' }),
+    runLog: ActiveLocalRunLog | undefined,
+): NodeJS.ProcessEnv => ({
+    ...(invocation.env ?? process.env),
+    ...(runLog === undefined
+        ? {}
+        : { SEALED_LATTICE_RUN_DIRECTORY: runLog.runDirectoryPath }),
 });
 
-const closeCommandLogStreams = async (streams: {
-    readonly combined: WriteStream;
-    readonly stderr: WriteStream;
-    readonly stdout: WriteStream;
-}): Promise<void> => {
-    await Promise.all([
-        closeWritableStream(streams.combined),
-        closeWritableStream(streams.stderr),
-        closeWritableStream(streams.stdout),
-    ]);
-};
-
-const closeOptionalCommandLogStreams = async (
-    streams:
-        | {
-              readonly combined: WriteStream;
-              readonly stderr: WriteStream;
-              readonly stdout: WriteStream;
-          }
-        | undefined,
-): Promise<void> => {
-    if (streams === undefined) {
-        return;
+const abortReasonDetails = (
+    signal: AbortSignal,
+): Pick<CommandAbortReason, 'classification' | 'initiator'> => {
+    if (isCommandAbortReason(signal.reason)) {
+        return {
+            classification: signal.reason.classification,
+            ...(signal.reason.initiator === undefined
+                ? {}
+                : { initiator: signal.reason.initiator }),
+        };
     }
 
-    await closeCommandLogStreams(streams);
+    return { classification: 'external-request' };
 };
 
 const runCommandWithOptionalLog = async (
@@ -445,17 +523,6 @@ const runCommandWithOptionalLog = async (
     } = {},
 ): Promise<number> => {
     const outputMode = input.outputMode ?? 'inherit';
-    if (
-        input.runLog === undefined &&
-        outputMode === 'inherit' &&
-        input.terminalOutputFilter === undefined
-    ) {
-        return runCommandWithInheritedOutput(
-            invocation,
-            input.signal,
-            input.observer,
-        );
-    }
     if (input.signal?.aborted === true) {
         return 1;
     }
@@ -464,57 +531,211 @@ const runCommandWithOptionalLog = async (
         description: invocation.description,
         preferredSlug: invocation.logFileSlug,
     });
-    const commandLogStreams =
-        commandLogFiles === undefined
-            ? undefined
-            : openCommandLogStreams(commandLogFiles);
+    const commandId = commandLogFiles?.commandId;
+    const environment = commandEnvironment(invocation, input.runLog);
     const heading = `\n${invocation.description}\n`;
     if (outputMode === 'inherit') {
         process.stdout.write(heading);
     }
-    commandLogStreams?.combined.write(heading);
-    input.runLog?.writeCombinedOutput(heading);
+    if (commandId !== undefined) {
+        input.runLog?.writeCommandOutput({
+            chunk: heading,
+            commandId,
+            streamName: 'runner',
+        });
+        input.runLog?.writeEvent({
+            commandId,
+            details: {
+                arguments: redactCommandLineArguments(invocation.args),
+                command: invocation.command,
+                description: invocation.description,
+                diagnosticEnvironment: selectDiagnosticEnvironment(environment),
+                workingDirectoryPath:
+                    invocation.workingDirectoryPath ?? process.cwd(),
+            },
+            eventType: 'command-prepared',
+        });
+    }
     const startedAtMilliseconds = performance.now();
-    input.observer?.onCommandStart?.({
-        invocation,
-        logFiles: commandLogFiles,
-        startedAtMilliseconds,
-    });
 
     return new Promise((resolve, reject) => {
-        const childProcess = spawn(
-            invocation.command,
-            invocation.args,
-            createAbortableCommandSpawnOptions(invocation.env ?? process.env, [
-                'ignore',
-                'pipe',
-                'pipe',
-            ]),
+        let childProcess: ChildProcess;
+        try {
+            childProcess = spawn(
+                invocation.command,
+                invocation.args,
+                createAbortableCommandSpawnOptions(
+                    environment,
+                    ['ignore', 'pipe', 'pipe'],
+                    process.platform,
+                    invocation.workingDirectoryPath,
+                ),
+            );
+        } catch (error) {
+            const resolvedError =
+                error instanceof Error ? error : new Error(String(error));
+            if (commandId !== undefined) {
+                input.runLog?.writeEvent({
+                    commandId,
+                    details: {
+                        durationMilliseconds: Math.round(
+                            performance.now() - startedAtMilliseconds,
+                        ),
+                        error: serializeErrorDiagnostic(resolvedError),
+                    },
+                    eventType: 'command-spawn-failed',
+                });
+            }
+            input.observer?.onCommandExit?.({
+                durationMilliseconds: Math.round(
+                    performance.now() - startedAtMilliseconds,
+                ),
+                error: resolvedError,
+                exitCode: 1,
+                invocation,
+                processStatus: normalizeProcessStatus(null, null),
+                terminationSignal: null,
+            });
+            reject(resolvedError);
+
+            return;
+        }
+        if (commandId !== undefined) {
+            input.runLog?.writeEvent({
+                commandId,
+                details: {
+                    processIdentifier: childProcess.pid ?? null,
+                },
+                eventType: 'command-started',
+            });
+        }
+        input.observer?.onCommandStart?.({
+            invocation,
+            logFiles: commandLogFiles,
+            processIdentifier: childProcess.pid,
+            startedAtMilliseconds,
+        });
+        let requestedTermination:
+            | {
+                  readonly classification: string;
+                  readonly initiator?: string;
+                  readonly source: string;
+              }
+            | undefined;
+        let scheduledForceKill: NodeJS.Timeout | undefined;
+        const recordTerminationAttempt = (input_: {
+            readonly processSignal: NodeJS.Signals;
+            readonly result: ProcessTreeKillResult;
+            readonly source: string;
+            readonly stage: 'forced' | 'requested';
+        }): void => {
+            if (commandId === undefined) {
+                return;
+            }
+            input.runLog?.writeEvent({
+                commandId,
+                details: {
+                    ...describeProcessTerminationAttempt({
+                        requestedSignal: input_.processSignal,
+                        requestedStage: input_.stage,
+                        result: input_.result,
+                    }),
+                    source: input_.source,
+                },
+                eventType: 'command-termination-attempted',
+            });
+        };
+        const untrackChildProcess = trackChildProcessForSignalCleanup(
+            childProcess,
+            ({ processSignal, result, stage }) => {
+                requestedTermination = {
+                    classification: 'external-signal',
+                    initiator: processSignal,
+                    source: 'parent-process-signal',
+                };
+                if (commandId !== undefined && stage === 'requested') {
+                    input.runLog?.writeEvent({
+                        commandId,
+                        details: requestedTermination,
+                        eventType: 'command-termination-requested',
+                    });
+                }
+                recordTerminationAttempt({
+                    processSignal: stage === 'forced' ? 'SIGKILL' : 'SIGTERM',
+                    result,
+                    source: 'parent-process-signal',
+                    stage,
+                });
+            },
         );
-        const untrackChildProcess =
-            trackChildProcessForSignalCleanup(childProcess);
         const childStandardOutput = childProcess.stdout;
         const childStandardError = childProcess.stderr;
         if (childStandardOutput === null || childStandardError === null) {
-            killProcessTree(childProcess);
+            const killResult = killProcessTree(childProcess);
+            recordTerminationAttempt({
+                processSignal: 'SIGTERM',
+                result: killResult,
+                source: 'runner-invariant-failure',
+                stage: 'requested',
+            });
             untrackChildProcess();
-            void (async () => {
-                try {
-                    await closeOptionalCommandLogStreams(commandLogStreams);
-                } finally {
-                    reject(
-                        new Error(
-                            'Command log capture requires piped stdout and stderr.',
-                        ),
-                    );
-                }
-            })();
+            const error = new Error(
+                'Command log capture requires piped stdout and stderr.',
+            );
+            if (commandId !== undefined) {
+                input.runLog?.writeEvent({
+                    commandId,
+                    details: { error: serializeErrorDiagnostic(error) },
+                    eventType: 'command-spawn-failed',
+                });
+            }
+            reject(error);
+
             return;
         }
+        let abortHandled = false;
         const onAbort = (): void => {
-            killProcessTree(childProcess);
+            if (abortHandled) {
+                return;
+            }
+            abortHandled = true;
+            const reasonDetails = abortReasonDetails(input.signal!);
+            requestedTermination = {
+                ...reasonDetails,
+                source: 'abort-signal',
+            };
+            if (commandId !== undefined) {
+                input.runLog?.writeEvent({
+                    commandId,
+                    details: requestedTermination,
+                    eventType: 'command-termination-requested',
+                });
+            }
+            const killResult = killProcessTree(childProcess);
+            recordTerminationAttempt({
+                processSignal: 'SIGTERM',
+                result: killResult,
+                source: 'abort-signal',
+                stage: 'requested',
+            });
+            scheduledForceKill ??= setTimeout(() => {
+                scheduledForceKill = undefined;
+                const forceKillResult = killProcessTree(childProcess, {
+                    signal: 'SIGKILL',
+                });
+                recordTerminationAttempt({
+                    processSignal: 'SIGKILL',
+                    result: forceKillResult,
+                    source: 'abort-signal',
+                    stage: 'forced',
+                });
+            }, forceKillDelayMilliseconds);
+            scheduledForceKill.unref?.();
         };
         input.signal?.addEventListener('abort', onAbort, { once: true });
+        if (input.signal?.aborted === true) {
+            onAbort();
+        }
         // When a terminal output filter is supplied, the child's terminal echo
         // is reassembled into whole lines per stream so the filter can drop
         // specific noise lines (for example libtest's slow-test notices). Log
@@ -549,10 +770,6 @@ const runCommandWithOptionalLog = async (
         ): void => {
             const terminalStream =
                 streamName === 'stdout' ? process.stdout : process.stderr;
-            const childStream =
-                streamName === 'stdout'
-                    ? commandLogStreams?.stdout
-                    : commandLogStreams?.stderr;
             if (outputMode === 'inherit') {
                 terminalStream.write(
                     terminalLineFilters === undefined
@@ -560,9 +777,13 @@ const runCommandWithOptionalLog = async (
                         : terminalLineFilters[streamName].push(chunk),
                 );
             }
-            childStream?.write(chunk);
-            commandLogStreams?.combined.write(chunk);
-            input.runLog?.writeCombinedOutput(chunk);
+            if (commandId !== undefined) {
+                input.runLog?.writeCommandOutput({
+                    chunk,
+                    commandId,
+                    streamName,
+                });
+            }
             input.observer?.onCommandOutput?.({
                 chunk,
                 invocation,
@@ -583,92 +804,152 @@ const runCommandWithOptionalLog = async (
                 return;
             }
             settled = true;
+            if (scheduledForceKill !== undefined) {
+                clearTimeout(scheduledForceKill);
+            }
             untrackChildProcess();
             input.signal?.removeEventListener('abort', onAbort);
-            void (async () => {
-                try {
-                    flushTerminalLineFilters();
-                    input.observer?.onCommandExit?.({
-                        durationMilliseconds: Math.round(
-                            performance.now() - startedAtMilliseconds,
-                        ),
-                        error,
-                        exitCode: 1,
-                        invocation,
-                        terminationSignal: null,
-                    });
-                    await closeOptionalCommandLogStreams(commandLogStreams);
-                } catch {
-                    // Preserve the original process start failure.
-                }
-                reject(error);
-            })();
+            flushTerminalLineFilters();
+            const durationMilliseconds = Math.round(
+                performance.now() - startedAtMilliseconds,
+            );
+            if (commandId !== undefined) {
+                input.runLog?.writeEvent({
+                    commandId,
+                    details: {
+                        durationMilliseconds,
+                        error: serializeErrorDiagnostic(error),
+                    },
+                    eventType: 'command-spawn-failed',
+                });
+            }
+            input.observer?.onCommandExit?.({
+                durationMilliseconds,
+                error,
+                exitCode: 1,
+                invocation,
+                processStatus: normalizeProcessStatus(null, null),
+                terminationSignal: null,
+            });
+            reject(error);
         });
         childProcess.once('close', (exitCode, terminationSignal) => {
             if (settled) {
                 return;
             }
             settled = true;
+            if (scheduledForceKill !== undefined) {
+                clearTimeout(scheduledForceKill);
+            }
             untrackChildProcess();
             input.signal?.removeEventListener('abort', onAbort);
-            void (async () => {
-                try {
-                    flushTerminalLineFilters();
-                    const resolvedExitCode =
-                        terminationSignal === null ? (exitCode ?? 1) : 1;
-                    if (terminationSignal !== null) {
-                        const signalMessage = `${invocation.description} terminated by signal ${terminationSignal}.\n`;
-                        if (outputMode === 'inherit') {
-                            process.stderr.write(signalMessage);
-                        }
-                        commandLogStreams?.stderr.write(signalMessage);
-                        commandLogStreams?.combined.write(signalMessage);
-                        input.runLog?.writeCombinedOutput(signalMessage);
-                        input.observer?.onCommandOutput?.({
-                            chunk: signalMessage,
-                            invocation,
-                            streamName: 'stderr',
-                        });
-                    }
-                    input.observer?.onCommandExit?.({
-                        durationMilliseconds: Math.round(
-                            performance.now() - startedAtMilliseconds,
-                        ),
-                        exitCode: resolvedExitCode,
-                        invocation,
-                        terminationSignal,
-                    });
-                    await closeOptionalCommandLogStreams(commandLogStreams);
-                    resolve(resolvedExitCode);
-                } catch (error) {
-                    reject(
-                        error instanceof Error
-                            ? error
-                            : new Error(String(error)),
-                    );
+            flushTerminalLineFilters();
+            const resolvedExitCode =
+                terminationSignal === null ? (exitCode ?? 1) : 1;
+            if (terminationSignal !== null) {
+                const signalMessage = `${invocation.description} terminated by signal ${terminationSignal}.\n`;
+                if (outputMode === 'inherit') {
+                    process.stderr.write(signalMessage);
                 }
-            })();
+                if (commandId !== undefined) {
+                    input.runLog?.writeCommandOutput({
+                        chunk: signalMessage,
+                        commandId,
+                        streamName: 'stderr',
+                    });
+                }
+                input.observer?.onCommandOutput?.({
+                    chunk: signalMessage,
+                    invocation,
+                    streamName: 'stderr',
+                });
+            }
+            const durationMilliseconds = Math.round(
+                performance.now() - startedAtMilliseconds,
+            );
+            const processStatus = normalizeProcessStatus(
+                exitCode,
+                terminationSignal,
+            );
+            const resultClassification =
+                requestedTermination?.classification ??
+                (terminationSignal !== null
+                    ? 'external-signal'
+                    : exitCode === null
+                      ? 'unknown-abrupt-termination'
+                      : exitCode === 0
+                        ? 'completed'
+                        : 'test-failure');
+            if (commandId !== undefined) {
+                input.runLog?.writeEvent({
+                    commandId,
+                    details: {
+                        durationMilliseconds,
+                        processStatus,
+                        ...(requestedTermination === undefined
+                            ? {}
+                            : { requestedTermination }),
+                        resultClassification,
+                    },
+                    eventType: 'command-finished',
+                });
+            }
+            input.observer?.onCommandExit?.({
+                durationMilliseconds,
+                exitCode: resolvedExitCode,
+                invocation,
+                processStatus,
+                terminationSignal,
+            });
+            resolve(resolvedExitCode);
         });
     });
 };
 
-const runCommandsInParallel = async (
-    invocations: readonly CommandInvocation[],
+/**
+ * Runs a command through the normal asynchronous diagnostic path while
+ * retaining stdout and stderr for callers that must parse command output.
+ * Output is still written incrementally to the owning run log; terminal echo
+ * is opt-in so machine-readable stdout does not pollute routine output.
+ */
+export const runCommandAndCaptureOutput = async (
+    invocation: CommandInvocation,
     input: {
-        readonly observer?: CommandRunObserver;
-        readonly outputMode?: CommandOutputMode;
+        readonly echoOutput?: boolean;
         readonly runLog?: ActiveLocalRunLog;
         readonly signal?: AbortSignal;
-        readonly terminalOutputFilter?: (line: string) => boolean;
     } = {},
-): Promise<number> => {
-    const exitCodes = await Promise.all(
-        invocations.map((invocation) =>
-            runCommandWithOptionalLog(invocation, input),
-        ),
-    );
+): Promise<CapturedCommandResult> => {
+    let stdout = '';
+    let stderr = '';
+    let exitEvent: CommandExitEvent | undefined;
+    const exitCode = await runCommandWithOptionalLog(invocation, {
+        observer: {
+            onCommandExit: (event) => {
+                exitEvent = event;
+            },
+            onCommandOutput: (event) => {
+                if (event.streamName === 'stdout') {
+                    stdout += event.chunk;
+                } else {
+                    stderr += event.chunk;
+                }
+            },
+        },
+        outputMode: input.echoOutput === true ? 'inherit' : 'capture',
+        runLog: input.runLog,
+        signal: input.signal,
+    });
 
-    return exitCodes.find((exitCode) => exitCode !== 0) ?? 0;
+    return {
+        exitCode,
+        ...(exitEvent?.processStatus === undefined
+            ? {}
+            : { processStatus: exitEvent.processStatus }),
+        stderr,
+        stdout,
+        terminationSignal: exitEvent?.terminationSignal ?? null,
+    };
 };
 
 export const runCommandsInSeries = async (
@@ -692,25 +973,4 @@ export const runCommandsInSeries = async (
     }
 
     return 0;
-};
-
-export const runCommandsAfterSeriesGate = async (
-    input: {
-        readonly gateCommands: readonly CommandInvocation[];
-        readonly parallelCommands: readonly CommandInvocation[];
-    },
-    options: {
-        readonly observer?: CommandRunObserver;
-        readonly outputMode?: CommandOutputMode;
-        readonly runLog?: ActiveLocalRunLog;
-        readonly signal?: AbortSignal;
-        readonly terminalOutputFilter?: (line: string) => boolean;
-    } = {},
-): Promise<number> => {
-    const gateExitCode = await runCommandsInSeries(input.gateCommands, options);
-    if (gateExitCode !== 0) {
-        return gateExitCode;
-    }
-
-    return runCommandsInParallel(input.parallelCommands, options);
 };

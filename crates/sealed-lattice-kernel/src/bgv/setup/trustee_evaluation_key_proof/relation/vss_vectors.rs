@@ -1,5 +1,6 @@
 use super::super::*;
 use super::*;
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::vss_commitment::{
     VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VssPublicMessageEncodingLayout,
     vss_public_message_digit_weight, vss_public_message_encoding_layout,
@@ -16,6 +17,10 @@ use crate::bgv::setup::vss_commitment::{
 // rows.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct VssShareLinkageCommitment {
+    // The prover needs the context-bound seed domain that produced these
+    // roots. It comes from the canonical public commitment body rather than
+    // from a caller-supplied witness field.
+    pub(crate) commitment_context_hash: String,
     pub(crate) material_roots_by_commitment_field:
         Vec<super::super::merkle_commitment::MerkleDigest>,
 }
@@ -28,9 +33,9 @@ pub(crate) struct VssShareLinkagePublicVectorInput<'a> {
     pub(crate) coefficient_commitments: &'a [VssShareLinkageCommitment],
     pub(crate) relation_alpha: &'a [ChallengeExtensionElement],
     pub(crate) u_power_vectors: &'a [Vec<ChallengeExtensionElement>],
-    // Unit evaluation point (point = 1) instead of the recipient trustee point,
-    // turning the lifted evaluation into a plain sum for the threshold-aggregate
-    // relation.
+    // Selects the evaluation point through
+    // `vss_share_linkage_lincheck_roster_position`, the single home for the
+    // unit-point rule.
     pub(crate) is_threshold_aggregate: bool,
 }
 
@@ -39,46 +44,6 @@ struct VssShareLinkageItemView<'a> {
     recipient_roster_position: u64,
     coefficient_commitments: &'a [VssShareLinkageCommitment],
     coefficient_slot_indices: Vec<usize>,
-}
-
-fn vss_public_message_encoding_offsets(
-    layouts: &[VssPublicMessageEncodingLayout],
-) -> CanonicalResult<Vec<usize>> {
-    let mut offsets = Vec::with_capacity(layouts.len() + 1);
-    let mut offset = 0_usize;
-    offsets.push(offset);
-    for layout in layouts {
-        offset = offset
-            .checked_add(layout.encoding_column_count())
-            .ok_or_else(|| invalid_succinct_setup_proof("VSS vector layout overflowed"))?;
-        offsets.push(offset);
-    }
-
-    Ok(offsets)
-}
-
-fn vss_public_message_vector_index(
-    offsets: &[usize],
-    message_index: usize,
-    encoding_column: usize,
-) -> CanonicalResult<usize> {
-    let start = offsets.get(message_index).copied().ok_or_else(|| {
-        invalid_succinct_setup_proof("VSS message index is outside the vector layout")
-    })?;
-    let end = offsets.get(message_index + 1).copied().ok_or_else(|| {
-        invalid_succinct_setup_proof("VSS message index is outside the vector layout")
-    })?;
-    if start + encoding_column >= end {
-        return Err(invalid_succinct_setup_proof(
-            "VSS message encoding column is outside the vector layout",
-        ));
-    }
-
-    Ok(start + encoding_column)
-}
-
-fn vss_public_message_encoding_total(offsets: &[usize]) -> usize {
-    offsets.last().copied().unwrap_or(0)
 }
 
 fn vss_public_decoder_digit_count(layout: VssPublicMessageEncodingLayout) -> usize {
@@ -90,7 +55,7 @@ fn vss_public_decoder_digit_count(layout: VssPublicMessageEncodingLayout) -> usi
 pub(crate) struct SameSecretBridgePublicVectorInput<'a> {
     pub(crate) modulus: u64,
     pub(crate) ring_degree: usize,
-    pub(crate) target_rns_primes: &'a [u64],
+    pub(crate) bridge_rns_primes: &'a [u64],
     pub(crate) target_constant_commitments: &'a [VssShareLinkageCommitment],
     pub(crate) relation_alpha: &'a [ChallengeExtensionElement],
     pub(crate) u_power_vectors: &'a [Vec<ChallengeExtensionElement>],
@@ -182,16 +147,16 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
         vec![extension_zero_vector(); vss_public_message_encoding_total(&message_encoding_offsets)];
     let mut recipient_share_carry_vector = extension_zero_vector();
 
-    let trustee_point = if input.is_threshold_aggregate {
-        1
-    } else {
-        canonical_trustee_point(
-            usize::try_from(input.recipient_roster_position).map_err(|_| {
-                invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
-            })?,
-            input.source_message_modulus,
-        )?
-    };
+    let trustee_point = canonical_trustee_point(
+        usize::try_from(vss_share_linkage_lincheck_roster_position(
+            input.is_threshold_aggregate,
+            input.recipient_roster_position,
+        ))
+        .map_err(|_| {
+            invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
+        })?,
+        input.source_message_modulus,
+    )?;
     let source_modulus_residue = input.source_message_modulus % input.modulus;
     let negated_source_modulus = if source_modulus_residue == 0 {
         0
@@ -339,7 +304,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
     let coefficient_slot_indices_by_item = statement.coefficient_witness_slot_indices_by_item();
     let mut items = Vec::with_capacity(statement.item_count());
     items.push(VssShareLinkageItemView {
-        source_message_modulus: statement.source_message_modulus,
+        source_message_modulus: DATA_PRIMES[statement.source_rns_limb_index],
         recipient_roster_position: statement.recipient_roster_position,
         coefficient_commitments: &statement.coefficient_commitments,
         coefficient_slot_indices: coefficient_slot_indices_by_item
@@ -353,7 +318,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
         .zip(coefficient_slot_indices_by_item.iter().skip(1))
     {
         items.push(VssShareLinkageItemView {
-            source_message_modulus: item.source_message_modulus,
+            source_message_modulus: DATA_PRIMES[item.source_rns_limb_index],
             recipient_roster_position: item.recipient_roster_position,
             coefficient_commitments: &item.coefficient_commitments,
             coefficient_slot_indices: coefficient_slot_indices.clone(),
@@ -588,8 +553,8 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
             "same-secret bridge tower modulus does not match the commitment field",
         ));
     }
-    if input.target_rns_primes.is_empty()
-        || input.target_rns_primes.len() != input.target_constant_commitments.len()
+    if input.bridge_rns_primes.is_empty()
+        || input.bridge_rns_primes.len() != input.target_constant_commitments.len()
     {
         return Err(invalid_succinct_setup_proof(
             "same-secret bridge target primes and commitments must be aligned",
@@ -616,7 +581,7 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
     let mut secret_vector = extension_zero_vector();
     let mut negative_indicator_vector = extension_zero_vector();
     let message_encoding_layouts = input
-        .target_rns_primes
+        .bridge_rns_primes
         .iter()
         .map(|target_rns_prime| vss_public_message_encoding_layout(*target_rns_prime))
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -639,7 +604,7 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
     let mut message_encoding_vectors =
         vec![extension_zero_vector(); vss_public_message_encoding_total(&message_encoding_offsets)];
 
-    for (target_rns_limb_index, target_rns_prime) in input.target_rns_primes.iter().enumerate() {
+    for (target_rns_limb_index, target_rns_prime) in input.bridge_rns_primes.iter().enumerate() {
         let message_encoding_layout = message_encoding_layouts[target_rns_limb_index];
         let bridge_relation_offset = target_rns_limb_index * LINCHECK_REPETITIONS;
         let target_prime_residue = *target_rns_prime % input.modulus;
@@ -736,17 +701,6 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
     vectors.extend(message_encoding_vectors);
 
     Ok((relation_claim, vectors))
-}
-
-fn add_scaled_extension_basis_vector(
-    target: &mut [ChallengeExtensionElement],
-    source: &[ChallengeExtensionElement],
-    coefficient: u64,
-    tower: &ChallengeExtensionTower,
-) {
-    for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
-        *target_value = tower.add(target_value, &tower.scale_base(source_value, coefficient));
-    }
 }
 
 fn add_extension_vector(

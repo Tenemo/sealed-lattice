@@ -1,6 +1,5 @@
 use super::*;
 
-// A plaintext polynomial whose every slot holds the same constant value.
 pub(crate) fn broadcast_constant(value: u64) -> Vec<u64> {
     broadcast_constant_coefficients(value)
 }

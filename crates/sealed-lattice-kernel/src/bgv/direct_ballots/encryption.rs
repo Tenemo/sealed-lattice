@@ -1,7 +1,6 @@
 use super::*;
 
 pub(super) fn encrypt_direct_ballot(
-    setup_package: &Value,
     evaluator_key: &DevelopmentBgvKey,
     ballot: DirectBallotInput,
 ) -> CanonicalResult<DirectEncryptedBallot> {
@@ -11,23 +10,12 @@ pub(super) fn encrypt_direct_ballot(
     let (ciphertext, encryption_witness) = evaluator_key
         .encrypt_coefficients_with_witness(&plaintext_coefficients, &ballot.encryption_seed_hex)?;
     let ciphertext_root = ciphertext_object_root(&ciphertext)?;
-    let ciphertext_canonical_bytes_hex = ciphertext_canonical_bytes_hex(&ciphertext)?;
-    let encrypted_ballot_hash = direct_encrypted_ballot_hash(
-        setup_package,
-        &ballot,
-        &ciphertext_root,
-        ciphertext_canonical_bytes_hex.len() / 2,
-    )?;
-
     Ok(DirectEncryptedBallot {
         input: ballot,
-        slots,
         plaintext_coefficients,
         ciphertext,
         encryption_witness,
-        encrypted_ballot_hash,
         ciphertext_root,
-        ciphertext_canonical_byte_length: ciphertext_canonical_bytes_hex.len() / 2,
     })
 }
 
@@ -102,42 +90,6 @@ pub(super) fn validate_one_hot_witnesses(
     }
 
     Ok(())
-}
-
-pub(super) fn validate_direct_ballot_preflight(
-    evaluator_key: &DevelopmentBgvKey,
-    ballot: &DirectEncryptedBallot,
-) -> CanonicalResult<()> {
-    if ballot.slots.len() != POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "direct encrypted ballot slot vector must match the polynomial degree",
-        ));
-    }
-    if ballot.slots[OPTION_COUNT..].iter().any(|slot| *slot != 0) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "direct encrypted ballot reserved slots must be zero",
-        ));
-    }
-    let decrypted_slots = evaluator_key.decrypt_to_slots(&ballot.ciphertext)?;
-    if decrypted_slots[..OPTION_COUNT] != ballot.input.scores[..] {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "direct encrypted ballot does not decrypt to the submitted score slots",
-        ));
-    }
-    if decrypted_slots[OPTION_COUNT..]
-        .iter()
-        .any(|slot| *slot != 0)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "direct encrypted ballot decrypts to a non-zero reserved slot",
-        ));
-    }
-    validate_encryption_witness_support(&ballot.encryption_witness)?;
-    validate_all_limb_encryption_relation(evaluator_key, ballot)
 }
 
 // Support bounds: the randomizer is ternary {-1,0,1} and both errors are centered-binomial eta = 2 in [-2,2]; these are the bounds the relation proof certifies and they bound the decryption noise.

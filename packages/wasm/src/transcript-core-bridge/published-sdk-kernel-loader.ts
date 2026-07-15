@@ -1,0 +1,63 @@
+import { openAcceptedSetupSession } from '../accepted-setup-session-runtime.js';
+
+import type { PublishedSdkKernel } from './kernel-contracts.js';
+import type {
+    TranscriptCoreKernelCommandRuntime,
+    TranscriptCoreKernelLoaderOptions,
+} from './kernel-runtime.js';
+import { instantiateTranscriptCoreKernelCommandRuntime } from './kernel-runtime.js';
+import { registerKernelContexts } from './register-kernel-contexts.js';
+
+export const createCachedKernelLoader = <Kernel>(
+    loadKernel: () => Promise<Kernel>,
+): (() => Promise<Kernel>) => {
+    let kernelPromise: Promise<Kernel> | undefined;
+
+    return async (): Promise<Kernel> => {
+        kernelPromise ??= loadKernel().catch((error: unknown) => {
+            kernelPromise = undefined;
+            throw error;
+        });
+
+        return kernelPromise;
+    };
+};
+
+export const createPublishedSdkKernelBindings = (
+    runtime: TranscriptCoreKernelCommandRuntime,
+    getKernel: () => PublishedSdkKernel,
+): PublishedSdkKernel => {
+    return {
+        beginAcceptedSetupSession: () => openAcceptedSetupSession(getKernel()),
+        verifyPrivateVssShareEnvelope: (input) =>
+            runtime.executeCommand<
+                ReturnType<PublishedSdkKernel['verifyPrivateVssShareEnvelope']>
+            >({
+                command: 'VerifyPrivateVssShareEnvelope',
+                setupContext: input.setupContext,
+                publicMatrixSeedHash: input.publicMatrixSeedHash,
+                sourceTrusteeCoefficientCommitmentRecord:
+                    input.sourceTrusteeCoefficientCommitmentRecord,
+                sourceTrusteeCoefficientCommitmentMaterialRecords:
+                    input.sourceTrusteeCoefficientCommitmentMaterialRecords,
+                privateEnvelope: input.privateEnvelope,
+                expectedPrivateEnvelopeHash: input.expectedPrivateEnvelopeHash,
+            }),
+    };
+};
+
+export const createPublishedSdkKernelLoader = (
+    transcriptCoreKernelUrl: URL,
+    options: TranscriptCoreKernelLoaderOptions = {},
+): (() => Promise<PublishedSdkKernel>) => {
+    return createCachedKernelLoader(async () => {
+        const runtime = await instantiateTranscriptCoreKernelCommandRuntime(
+            transcriptCoreKernelUrl,
+            options,
+        );
+        const kernel = createPublishedSdkKernelBindings(runtime, () => kernel);
+        registerKernelContexts(kernel, runtime);
+
+        return kernel;
+    });
+};

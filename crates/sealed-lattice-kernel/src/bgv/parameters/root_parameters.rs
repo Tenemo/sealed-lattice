@@ -281,32 +281,3 @@ pub(crate) fn root_parameters_for_modulus(modulus: u64) -> Option<RootParameters
         .copied()
         .find(|parameters| parameters.modulus == modulus)
 }
-
-pub(crate) fn data_prime_bit_length() -> u32 {
-    DATA_PRIMES
-        .iter()
-        .map(|modulus| modulus_bit_length(*modulus))
-        .max()
-        .unwrap_or(0)
-}
-
-pub(crate) fn modulus_bit_length(modulus: u64) -> u32 {
-    u64::BITS - modulus.leading_zeros()
-}
-
-pub(crate) fn moduli_bit_length_sum(moduli: impl IntoIterator<Item = u64>) -> usize {
-    moduli
-        .into_iter()
-        .map(|modulus| {
-            usize::try_from(modulus_bit_length(modulus)).expect("modulus bit length fits usize")
-        })
-        .sum()
-}
-
-pub(crate) fn data_basis_modulus_bits() -> usize {
-    moduli_bit_length_sum(DATA_PRIMES)
-}
-
-pub(crate) fn extended_basis_modulus_bits() -> usize {
-    moduli_bit_length_sum(DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]))
-}

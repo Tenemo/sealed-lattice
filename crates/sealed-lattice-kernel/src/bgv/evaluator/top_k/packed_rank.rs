@@ -44,7 +44,7 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
         let shifted_scores = rotate_with_compact_positive_generator_basis(
             context,
             packed_scores,
-            galois_power(shift),
+            galois_power(shift)?,
             packed_scores.level,
             &format!("{seed_hex}-batched-pair-score-shift-{shift}"),
         )?;
@@ -76,16 +76,9 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
         comparison_input_sum,
         "batched packed-rank evaluation did not produce comparison inputs",
     )?;
-    // The packing construction above leaves the comparison input structurally
-    // noisy (about 87 bits, dominated by the score-packing stage and the
-    // per-window mask multiplications; measured, value-independent), and the
-    // deferred comparison evaluation decodes only when its input noise sits
-    // under a start-level-independent ceiling near 22 bits at the first-profile
-    // domain. One switch reaches about 40 bits; the second reaches the switch
-    // noise floor (about 8 bits). The single-ballot development path (working
-    // level below the selected multi-ballot level) keeps one switch: its
-    // shallow comparison tolerates the 40-bit input and a second switch would
-    // overdraw its smaller level budget.
+    // The selected multi-ballot path needs two cleanup switches before the
+    // deferred comparison. Lower-level single-ballot paths use one switch to
+    // preserve their smaller level budget.
     let comparison_input_switch_count =
         if context.working_level() >= SELECTED_EVALUATOR_WORKING_LEVEL {
             2
@@ -123,7 +116,7 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
             rotate_with_compact_positive_generator_basis(
                 context,
                 &windowed_lower_beats_higher,
-                galois_power(window_offset),
+                galois_power(window_offset)?,
                 windowed_lower_beats_higher.level,
                 &format!("{seed_hex}-batched-pair-window-return-{shift}"),
             )?

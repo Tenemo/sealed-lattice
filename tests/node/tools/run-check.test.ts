@@ -1,42 +1,84 @@
 import { describe, expect, it } from 'vitest';
 
+import type { PackageManagerRunner } from '#tools/ci/package-manager-runner';
 import {
-    parseCheckArguments,
-    redrawEnabledForProgressMode,
+    buildCheckGatingLanes,
+    buildCheckParallelLanes,
+    formatValidationSummary,
 } from '#tools/ci/run-check';
 
-describe('check runner arguments', () => {
-    it('uses automatic progress rendering by default', () => {
-        expect(parseCheckArguments([])).toEqual({
-            progressMode: 'auto',
-        });
-    });
+const packageManagerRunner: PackageManagerRunner = {
+    command: process.execPath,
+    commandArgumentsPrefix: ['pnpm.cjs'],
+    kind: 'pnpm',
+};
 
-    it('accepts explicit progress rendering modes', () => {
-        expect(parseCheckArguments(['--progress=always'])).toEqual({
-            progressMode: 'always',
-        });
-        expect(parseCheckArguments(['--progress', 'never'])).toEqual({
-            progressMode: 'never',
-        });
-        expect(parseCheckArguments(['--', '--progress=always'])).toEqual({
-            progressMode: 'always',
-        });
-    });
-
-    it('rejects unknown check arguments and progress modes', () => {
-        expect(() => parseCheckArguments(['--progress=sometimes'])).toThrow(
-            'Usage: run-check.ts [--progress=auto|always|never].',
+describe('check runner', () => {
+    it('builds once before prebuilt test lanes', () => {
+        const lanes = [
+            ...buildCheckGatingLanes(packageManagerRunner),
+            ...buildCheckParallelLanes(packageManagerRunner),
+        ];
+        const buildCommands = lanes.flatMap((lane) =>
+            lane.commands.filter(
+                (command) =>
+                    command.args.includes('build') ||
+                    command.args.includes('build:wasm'),
+            ),
         );
-        expect(() => parseCheckArguments(['--unknown'])).toThrow(
-            'Usage: run-check.ts [--progress=auto|always|never].',
+        expect(buildCommands).toHaveLength(1);
+
+        const nodeTestLanes = lanes.filter((lane) =>
+            lane.name.startsWith('Node tests'),
         );
+        expect(nodeTestLanes).toHaveLength(3);
+        for (const lane of nodeTestLanes) {
+            expect(lane.commands).toHaveLength(1);
+            expect(lane.commands[0]?.args).not.toContain('build');
+        }
     });
 
-    it('does not redraw forced progress on a non-terminal stream', () => {
-        expect(redrawEnabledForProgressMode('always', true)).toBe(true);
-        expect(redrawEnabledForProgressMode('always', false)).toBe(false);
-        expect(redrawEnabledForProgressMode('auto', false)).toBeUndefined();
-        expect(redrawEnabledForProgressMode('never', true)).toBe(false);
+    it('keeps failures actionable when sibling lanes stop early', () => {
+        const summary = formatValidationSummary(
+            [
+                {
+                    durationMilliseconds: 12_345,
+                    exitCode: 7,
+                    name: 'Rust kernel',
+                    status: 'failed',
+                },
+                {
+                    durationMilliseconds: 4_321,
+                    exitCode: 1,
+                    name: 'Node tests',
+                    status: 'stopped',
+                },
+            ],
+            {
+                failureDetails: [
+                    {
+                        commandDescription: 'cargo clippy',
+                        exitCode: 7,
+                        laneName: 'Rust kernel',
+                        logPath: 'logs/rust-kernel.log',
+                        recentOutputLines: ['error: readable failure context'],
+                    },
+                ],
+                runLogDirectoryPath: 'logs/check-run',
+            },
+        );
+
+        expect(summary.join('\n')).toContain(
+            'Failed: Rust kernel (1 other lane(s) stopped early).',
+        );
+        expect(summary).toEqual(
+            expect.arrayContaining([
+                'Per-lane logs: logs/check-run',
+                'Command: cargo clippy',
+                'Exit code: 7',
+                'Log: logs/rust-kernel.log',
+                '  error: readable failure context',
+            ]),
+        );
     });
 });

@@ -1,33 +1,38 @@
+#[cfg(test)]
 use num_bigint::BigInt;
+#[cfg(test)]
 use num_traits::{ToPrimitive, Zero};
 
 use crate::{
     bgv::{
+        encoding::encode_logical_slots_to_plaintext_coefficients,
         evaluator::prg::DeterministicSampler,
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
-        ntt::{
-            forward_negacyclic_ntt, forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt,
-            inverse_negacyclic_ntt_in_place,
-        },
-        parameters::{
-            BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash,
-        },
+        ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
+        parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         rns::RnsPolynomial,
-        serialization::{
-            BgvObjectKind, canonical_bytes_hex, ciphertext_root, serialize_bgv_object,
-        },
+        serialization::{BgvObjectKind, ciphertext_root, serialize_bgv_object},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
+
+#[cfg(test)]
+use crate::bgv::encoding::decode_plaintext_coefficients_to_logical_slots;
+#[cfg(test)]
+use crate::bgv::serialization::canonical_bytes_hex;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 mod ciphertext_records;
+#[cfg(test)]
 mod decryption;
 mod operations;
 
-pub(crate) use ciphertext_records::{ciphertext_canonical_bytes_hex, ciphertext_object_root};
+#[cfg(test)]
+pub(crate) use ciphertext_records::ciphertext_canonical_bytes_hex;
+pub(crate) use ciphertext_records::ciphertext_object_root;
+#[cfg(test)]
 pub(crate) use decryption::decryption_accumulator_to_coefficients;
 pub(crate) use operations::{
     add_plaintext_coefficients, ciphertext_add, ciphertext_negate, ciphertext_sub,
@@ -112,11 +117,13 @@ impl Ciphertext {
 }
 
 #[derive(Clone)]
+#[cfg(test)]
 pub(crate) struct BgvPublicKey {
     public_b: Vec<Vec<u64>>,
     public_a: Vec<Vec<u64>>,
 }
 
+#[cfg(test)]
 impl BgvPublicKey {
     pub(crate) fn from_components(
         public_b: Vec<Vec<u64>>,
@@ -178,27 +185,6 @@ pub(crate) struct DevelopmentBgvKey {
 }
 
 impl DevelopmentBgvKey {
-    pub(crate) fn from_collective_components(
-        secret: Vec<i64>,
-        public_b: Vec<Vec<u64>>,
-        public_a: Vec<Vec<u64>>,
-    ) -> CanonicalResult<Self> {
-        if secret.len() != POLYNOMIAL_DEGREE {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "BGV evaluator collective secret width must match the polynomial degree",
-            ));
-        }
-        let BgvPublicKey { public_b, public_a } =
-            BgvPublicKey::from_components(public_b, public_a)?;
-
-        Ok(Self {
-            secret,
-            public_b,
-            public_a,
-        })
-    }
-
     #[cfg(test)]
     pub(crate) fn generate(seed_hex: &str) -> CanonicalResult<Self> {
         let secret = DeterministicSampler::new(
@@ -307,6 +293,7 @@ impl DevelopmentBgvKey {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn decrypt_to_coefficients(
         &self,
         ciphertext: &Ciphertext,
@@ -347,10 +334,11 @@ impl DevelopmentBgvKey {
         decryption_accumulator_to_coefficients(ciphertext, &accumulator)
     }
 
+    #[cfg(test)]
     pub(crate) fn decrypt_to_slots(&self, ciphertext: &Ciphertext) -> CanonicalResult<Vec<u64>> {
         let coefficients = self.decrypt_to_coefficients(ciphertext)?;
 
-        forward_negacyclic_ntt(&coefficients, PLAINTEXT_MODULUS)
+        decode_plaintext_coefficients_to_logical_slots(&coefficients)
     }
 }
 
@@ -475,22 +463,7 @@ fn validate_public_key_component_shape(component: &[Vec<u64>], label: &str) -> C
 // coefficient representation via the inverse batch NTT, matching the BGV batch
 // encoder.
 pub(crate) fn encode_slots_to_coefficients(slots: &[u64]) -> CanonicalResult<Vec<u64>> {
-    if slots.len() > POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "BGV evaluator received more slots than the polynomial degree",
-        ));
-    }
-    if slots.iter().any(|slot| *slot >= PLAINTEXT_MODULUS) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "BGV evaluator slot value is outside the plaintext field",
-        ));
-    }
-    let mut padded = vec![0_u64; POLYNOMIAL_DEGREE];
-    padded[..slots.len()].copy_from_slice(slots);
-
-    inverse_negacyclic_ntt(&padded, PLAINTEXT_MODULUS)
+    encode_logical_slots_to_plaintext_coefficients(slots)
 }
 
 #[cfg(test)]
@@ -556,7 +529,7 @@ mod tests {
     }
 
     #[test]
-    fn homomorphic_addition_matches_slot_addition() {
+    fn homomorphic_addition_and_subtraction_match_slot_arithmetic() {
         let key = shared_key();
         let left = key
             .encrypt_slots(&[3, 100, 65_536], "aa02")
@@ -566,11 +539,7 @@ mod tests {
             .expect("encrypt right");
         let sum = ciphertext_add(&left, &right).expect("add");
         assert_eq!(decrypt_prefix(key, &sum, 3), vec![7, 300, 0]);
-    }
 
-    #[test]
-    fn homomorphic_subtraction_matches_slot_subtraction() {
-        let key = shared_key();
         let left = key.encrypt_slots(&[10, 5], "aa04").expect("encrypt left");
         let right = key.encrypt_slots(&[3, 9], "aa05").expect("encrypt right");
         let difference = ciphertext_sub(&left, &right).expect("sub");
@@ -578,16 +547,12 @@ mod tests {
     }
 
     #[test]
-    fn scalar_multiplication_scales_each_slot() {
+    fn scalar_multiplication_handles_positive_and_centered_negative_scalars() {
         let key = shared_key();
         let ciphertext = key.encrypt_slots(&[2, 3, 4], "aa06").expect("encrypt");
         let scaled = scalar_mul(&ciphertext, 5).expect("scalar mul");
         assert_eq!(decrypt_prefix(key, &scaled, 3), vec![10, 15, 20]);
-    }
 
-    #[test]
-    fn scalar_multiplication_uses_centered_lift_for_negative_plaintext_scalars() {
-        let key = shared_key();
         let ciphertext = key
             .encrypt_slots(&[2, 3, PLAINTEXT_MODULUS - 1], "aa06-negative")
             .expect("encrypt");
@@ -608,17 +573,13 @@ mod tests {
     }
 
     #[test]
-    fn plaintext_multiplication_is_slot_wise() {
+    fn plaintext_and_ciphertext_multiplication_are_slot_wise() {
         let key = shared_key();
         let ciphertext = key.encrypt_slots(&[2, 3, 4, 5], "aa07").expect("encrypt");
         let plaintext = super::encode_slots_to_coefficients(&[10, 0, 7, 1]).expect("encode");
         let product = plaintext_mul(&ciphertext, &plaintext).expect("plaintext mul");
         assert_eq!(decrypt_prefix(key, &product, 4), vec![20, 0, 28, 5]);
-    }
 
-    #[test]
-    fn ciphertext_multiplication_yields_slot_products() {
-        let key = shared_key();
         let left = key.encrypt_slots(&[2, 3, 4], "aa08").expect("encrypt left");
         let right = key
             .encrypt_slots(&[5, 6, 7], "aa09")
@@ -629,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn modulus_switch_preserves_slots_and_drops_a_level() {
+    fn modulus_switch_chain_preserves_slots_and_drops_levels() {
         let key = shared_key();
         let ciphertext = key
             .encrypt_slots(&[11, 22, 65_500], "aa10")
@@ -637,11 +598,7 @@ mod tests {
         let switched = modulus_switch(&ciphertext).expect("modulus switch");
         assert_eq!(switched.level, ciphertext.level - 1);
         assert_eq!(decrypt_prefix(key, &switched, 3), vec![11, 22, 65_500]);
-    }
 
-    #[test]
-    fn repeated_modulus_switch_chain_preserves_message() {
-        let key = shared_key();
         let mut ciphertext = key.encrypt_slots(&[42, 9, 100], "aa11").expect("encrypt");
         for _ in 0..4 {
             ciphertext = modulus_switch(&ciphertext).expect("modulus switch");

@@ -13,11 +13,10 @@
     }
   },
   "scripts": {
-    "check": "tsc --project tsconfig.json --pretty false --noEmit",
     "build": "del-cli dist && tsc --project tsconfig.json"
   },
   "dependencies": {
-    "@noble/hashes": "^2.2.0",
+    "@noble/hashes": "2.2.0",
     "@noble/post-quantum": "0.6.1",
     "@sealed-lattice/types": "workspace:*"
   },

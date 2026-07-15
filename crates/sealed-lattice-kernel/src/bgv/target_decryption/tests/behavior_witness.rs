@@ -1,51 +1,42 @@
 use super::*;
 
 #[test]
-fn local_target_share_witness_generates_smudged_share() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
+fn ten_participant_factor_clears_every_authorized_subset_denominator() {
+    let participant_count = 10_u64;
+    let minimum_shares_for_interpolation = participant_count / 3 + 1;
+    let denominator_clearing_factor =
+        target_decryption_interpolation_denominator_clearing_factor(participant_count)
+            .expect("ten-participant denominator-clearing factor");
 
-    let local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-
-    assert_eq!(
-        local_share["sharePayload"]["smudgingInputReport"]["objectType"],
-        json!("TargetDecryptionSmudgingInputReport")
-    );
-    assert_eq!(
-        local_share["sharePayload"]["smudgingInputReport"]["roleReports"]
-            .as_array()
-            .expect("role reports")
-            .len(),
-        2
-    );
-    assert_eq!(
-        local_share["sharePayload"]["smudgingInputReportHash"],
-        json!(
-            derive_canonical_object_hash(&local_share["sharePayload"]["smudgingInputReport"])
-                .expect("smudging input report hash")
-        )
-    );
+    for subset_bits in 0_u64..(1_u64 << participant_count) {
+        if u64::from(subset_bits.count_ones()) < minimum_shares_for_interpolation {
+            continue;
+        }
+        let interpolation_points = (1..=participant_count)
+            .filter(|point| subset_bits & (1_u64 << (point - 1)) != 0)
+            .map(i128::from)
+            .collect::<Vec<_>>();
+        for selected_point in &interpolation_points {
+            let mut numerator = 1_i128;
+            let mut denominator = 1_i128;
+            for other_point in &interpolation_points {
+                if other_point == selected_point {
+                    continue;
+                }
+                numerator *= -*other_point;
+                denominator *= selected_point - other_point;
+            }
+            assert_eq!(
+                i128::from(denominator_clearing_factor) * numerator % denominator,
+                0,
+                "the roster factor must clear every authorized Lagrange denominator"
+            );
+        }
+    }
 }
 
 #[test]
-fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
+fn private_flooding_noise_is_independent_across_trustees_and_consistent_across_rns_limbs() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
     let target_share_profile_value = target_share_profile(&setup_package);
@@ -64,6 +55,7 @@ fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
     let selected_participants = setup_binding
         .participants
         .iter()
+        .step_by(2)
         .take(target_share_profile_binding.minimum_shares_for_interpolation)
         .collect::<Vec<_>>();
     assert_eq!(
@@ -71,12 +63,22 @@ fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
         target_share_profile_binding.minimum_shares_for_interpolation,
         "fixture must include enough participants for interpolation"
     );
+    assert!(
+        selected_participants
+            .windows(2)
+            .any(|pair| pair[1].roster_position > pair[0].roster_position + 1),
+        "the noise test must exercise a quorum with non-integral raw Lagrange weights"
+    );
 
     let mut interpolation_points = Vec::with_capacity(selected_participants.len());
-    let mut target_id_smudging_by_participant = Vec::with_capacity(selected_participants.len());
-    let mut target_order_smudging_by_participant = Vec::with_capacity(selected_participants.len());
+    let mut target_id_noise_by_participant = Vec::with_capacity(selected_participants.len());
+    let mut target_order_noise_by_participant = Vec::with_capacity(selected_participants.len());
     for participant in selected_participants {
-        interpolation_points.push(participant.interpolation_point);
+        interpolation_points.push(
+            participant
+                .interpolation_point()
+                .expect("participant interpolation point"),
+        );
         let local_target_share_witness_value = local_target_share_witness(
             &setup_package,
             &accepted_record,
@@ -85,15 +87,17 @@ fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
             &target_share_profile_value,
             &participant.trustee_identity,
         );
-        let local_witness = read_local_target_decryption_share_witness(
-            &local_target_share_witness_value,
-            &setup_binding,
-            &target_accepted,
-            &target_ciphertext_pair,
-            &target_share_profile_binding,
-            participant,
-        )
-        .expect("local target-share witness");
+        let local_witness =
+            with_staged_aggregate_opening_material(&local_target_share_witness_value, || {
+                read_local_target_decryption_share_witness(
+                    &local_target_share_witness_value,
+                    &setup_binding,
+                    &target_accepted,
+                    &target_ciphertext_pair,
+                    participant,
+                )
+                .expect("local target-share witness")
+            });
         let local_share = generate_local_share(
             &setup_package,
             &accepted_record,
@@ -127,28 +131,28 @@ fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
         )
         .expect("unsmudged target-order partials");
 
-        target_id_smudging_by_participant.push(
+        target_id_noise_by_participant.push(
             limbwise_difference(&released_target_id_partials, &unsmudged_target_id_partials)
-                .expect("target-id smudging difference"),
+                .expect("target-id flooding-noise difference"),
         );
-        target_order_smudging_by_participant.push(
+        target_order_noise_by_participant.push(
             limbwise_difference(
                 &released_target_order_partials,
                 &unsmudged_target_order_partials,
             )
-            .expect("target-order smudging difference"),
+            .expect("target-order flooding-noise difference"),
         );
     }
 
-    assert_smudging_recombines_to_zero(
+    assert_flooding_noise_is_independent_and_rns_consistent(
         "target-id",
         &interpolation_points,
-        &target_id_smudging_by_participant,
+        &target_id_noise_by_participant,
     );
-    assert_smudging_recombines_to_zero(
+    assert_flooding_noise_is_independent_and_rns_consistent(
         "target-order",
         &interpolation_points,
-        &target_order_smudging_by_participant,
+        &target_order_noise_by_participant,
     );
 }
 
@@ -170,18 +174,34 @@ fn target_decryption_quorum_release_recovers_target_slots() {
     )
     .expect("target ciphertext pair");
 
-    let trustees = ["trustee-1", "trustee-2"];
-    let mut interpolation_points = Vec::with_capacity(trustees.len());
-    let mut target_id_partials_by_share = Vec::with_capacity(trustees.len());
-    let mut target_order_partials_by_share = Vec::with_capacity(trustees.len());
-    for trustee_identity in trustees {
+    let selected_participants = setup_binding
+        .participants
+        .iter()
+        .step_by(2)
+        .take(target_share_profile_binding.minimum_shares_for_interpolation)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        selected_participants.len(),
+        target_share_profile_binding.minimum_shares_for_interpolation,
+        "fixture must include enough participants for interpolation"
+    );
+    assert!(
+        selected_participants
+            .windows(2)
+            .any(|pair| pair[1].roster_position > pair[0].roster_position + 1),
+        "the release test must exercise a quorum with non-integral raw Lagrange weights"
+    );
+    let mut interpolation_points = Vec::with_capacity(selected_participants.len());
+    let mut target_id_partials_by_share = Vec::with_capacity(selected_participants.len());
+    let mut target_order_partials_by_share = Vec::with_capacity(selected_participants.len());
+    for participant in selected_participants {
         let local_target_share_witness_value = local_target_share_witness(
             &setup_package,
             &accepted_record,
             &target_ciphertext_binding,
             &target_ciphertexts,
             &target_share_profile_value,
-            trustee_identity,
+            &participant.trustee_identity,
         );
         let local_share = generate_local_share(
             &setup_package,
@@ -190,12 +210,12 @@ fn target_decryption_quorum_release_recovers_target_slots() {
             &target_ciphertexts,
             &target_share_profile_value,
             &local_target_share_witness_value,
-            trustee_identity,
+            &participant.trustee_identity,
         );
         interpolation_points.push(
-            local_share["interpolationPoint"]
-                .as_u64()
-                .expect("interpolation point"),
+            participant
+                .interpolation_point()
+                .expect("participant interpolation point"),
         );
         target_id_partials_by_share.push(
             read_partial_limb_set(

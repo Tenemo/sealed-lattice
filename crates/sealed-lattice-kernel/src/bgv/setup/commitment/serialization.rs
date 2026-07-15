@@ -12,7 +12,6 @@ pub(in super::super) fn setup_commitment_full_value(commitment: &SetupCommitment
     json!({
         "objectType": "SetupCommitment",
         "sourceRnsLimbIndex": commitment.source_rns_limb_index,
-        "sourceMessageModulus": commitment.source_message_modulus,
         "shamirCoefficientIndex": commitment.shamir_coefficient_index,
         "ringDegree": commitment.ring_degree,
         "commitmentLimbs": commitment.limbs.iter().map(|limb| {
@@ -34,8 +33,7 @@ pub(in super::super) fn parse_setup_commitment_full_value(
         ));
     }
     let source_rns_limb_index = read_usize(value, "sourceRnsLimbIndex")?;
-    let source_message_modulus = read_u64(value, "sourceMessageModulus")?;
-    validate_source_rns_limb(source_rns_limb_index, source_message_modulus)?;
+    validate_source_rns_limb(source_rns_limb_index)?;
     let shamir_coefficient_index = read_u64(value, "shamirCoefficientIndex")?;
     let ring_degree = read_usize(value, "ringDegree")?;
     validate_ring_degree(ring_degree)?;
@@ -93,7 +91,6 @@ pub(in super::super) fn parse_setup_commitment_full_value(
 
     Ok(SetupCommitmentValue {
         source_rns_limb_index,
-        source_message_modulus,
         shamir_coefficient_index,
         ring_degree,
         limbs,
@@ -104,7 +101,6 @@ fn setup_commitment_root_payload(commitment: &SetupCommitmentValue) -> Value {
     json!({
         "objectType": "SetupCommitment",
         "sourceRnsLimbIndex": commitment.source_rns_limb_index,
-        "sourceMessageModulus": commitment.source_message_modulus,
         "shamirCoefficientIndex": commitment.shamir_coefficient_index,
         "ringDegree": commitment.ring_degree,
         "commitmentLimbs": commitment.limbs.iter().map(|limb| {

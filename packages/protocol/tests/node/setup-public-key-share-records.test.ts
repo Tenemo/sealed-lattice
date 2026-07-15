@@ -3,18 +3,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
     createBinaryChunkedPublicKeyShareMaterialBundle,
-    createBinaryChunkedPublicKeyShareMaterialTransport,
-    createPublicKeyShareMaterialSet,
-    createPublicKeyShareProofSet,
     createPublicKeyShareSet,
     createPublicKeyShareSuccinctProofSet,
-    materialRecordsFromTransportedPublicKeyShareMaterial,
     publicKeyShareCoefficientVectorHashDomain,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareSet,
     type PublicKeyShareSuccinctProofSetInput,
 } from '#packages/protocol/src/index';
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -28,24 +25,21 @@ const participantCount = 2;
 
 const fixtureHash = makeSetupFixtureHash('setup-public-key-share-records');
 
-const setupContext = makeSetupContext(fixtureHash);
+const setupContext = makeSetupContext(fixtureHash, participantCount);
+const setupContextHash = deriveCanonicalObjectHash({
+    objectType: 'CollectiveBgvSetupContext',
+    ...setupContext,
+});
 
 const shareContribution = (
     trusteeRosterPosition: number,
 ): PublicKeyShareContributionInput => ({
-    trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
     trusteeRosterPosition,
-    shareCoefficientVectorHash512ByLimb: qSharePrimes.map(
-        (rnsPrime, rnsLimbIndex) => ({
-            rnsLimbIndex,
-            rnsPrime,
-            component: 'b_i',
-            coefficientVectorHash512: fixtureHash(
-                `share-coefficient-${String(trusteeRosterPosition)}-${String(
-                    rnsLimbIndex,
-                )}`,
+    shareCoefficientVectorHashesByLimb: qSharePrimes.map(
+        (_unusedRnsPrime, rnsLimbIndex) =>
+            fixtureHash(
+                `share-coefficient-${String(trusteeRosterPosition)}-${String(rnsLimbIndex)}`,
             ),
-        }),
     ),
 });
 
@@ -91,9 +85,8 @@ const shareMaterialCoefficients = (
 const shareMaterialContribution = (
     trusteeRosterPosition: number,
 ): PublicKeyShareMaterialContributionInput => ({
-    trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
     trusteeRosterPosition,
-    shareCoefficientVectorsByLimb: qSharePrimes.map(
+    shareCoefficientVectorsLittleEndianHexByLimb: qSharePrimes.map(
         (rnsPrime, rnsLimbIndex) => {
             const coefficients = shareMaterialCoefficients(
                 trusteeRosterPosition,
@@ -101,231 +94,142 @@ const shareMaterialContribution = (
                 rnsPrime,
             );
 
-            return {
-                rnsLimbIndex,
-                rnsPrime,
-                component: 'b_i',
-                coefficientByteLength: ringDegree * 8,
-                coefficientVectorHash512:
-                    publicKeyShareCoefficientVectorHash(coefficients),
-                coefficientsLeHex: coefficientVectorLeHex(coefficients),
-            };
+            return coefficientVectorLeHex(coefficients);
         },
     ),
+});
+
+const shareContributionFromMaterial = (
+    contribution: PublicKeyShareMaterialContributionInput,
+): PublicKeyShareContributionInput => ({
+    trusteeRosterPosition: contribution.trusteeRosterPosition,
+    shareCoefficientVectorHashesByLimb:
+        contribution.shareCoefficientVectorsLittleEndianHexByLimb.map(
+            (_unusedCoefficientVector, rnsLimbIndex) => {
+                const rnsPrime = qSharePrimes[rnsLimbIndex];
+                if (rnsPrime === undefined) {
+                    throw new Error('Expected the selected Q_share prime.');
+                }
+
+                return publicKeyShareCoefficientVectorHash(
+                    shareMaterialCoefficients(
+                        contribution.trusteeRosterPosition,
+                        rnsLimbIndex,
+                        rnsPrime,
+                    ),
+                );
+            },
+        ),
 });
 
 const createShareSet = (): PublicKeyShareSet =>
     createPublicKeyShareSet({
         setupContext,
         qSharePrimes,
-        participantCount,
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-        publicKeyCrpRoot: fixtureHash('public-key-crp'),
-        publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
         shareContributions: [shareContribution(1), shareContribution(0)],
     });
 
 const createSuccinctProofFixture = (): PublicKeyShareSuccinctProofSetInput => {
-    const materialContributions = [
-        shareMaterialContribution(0),
-        shareMaterialContribution(1),
-    ] as const;
-    const commonInput = {
-        setupContext,
-        qSharePrimes,
-        participantCount,
-        publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-        publicKeyCrpRoot: fixtureHash('public-key-crp'),
-        publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
-    } as const;
-    const publicKeyShares = createPublicKeyShareSet({
-        ...commonInput,
-        shareContributions: materialContributions.map((contribution) => ({
-            trusteeIdentity: contribution.trusteeIdentity,
-            trusteeRosterPosition: contribution.trusteeRosterPosition,
-            shareCoefficientVectorHash512ByLimb:
-                contribution.shareCoefficientVectorsByLimb.map(
-                    (coefficientVector) => ({
-                        rnsLimbIndex: coefficientVector.rnsLimbIndex,
-                        rnsPrime: coefficientVector.rnsPrime,
-                        component: coefficientVector.component,
-                        coefficientVectorHash512:
-                            coefficientVector.coefficientVectorHash512,
-                    }),
-                ),
-        })),
-    });
-    const publicKeyShareProofs = createPublicKeyShareProofSet({
-        ...commonInput,
-        publicKeyShares,
-    });
-    const publicKeyShareMaterial = createPublicKeyShareMaterialSet({
-        ...commonInput,
-        ringDegree,
-        publicKeyShares,
-        materialContributions,
-    });
-    const statementRecords = publicKeyShares.shareRecords.map(
-        (shareRecord) => ({
-            trusteeIdentity: shareRecord.trusteeIdentity,
-            trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-            sameSecretBridgeStatementRoot: fixtureHash(
-                `bridge-statement-${String(shareRecord.trusteeRosterPosition)}`,
-            ),
-        }),
-    );
-    const sameSecretBridgeStatementSet = {
-        objectType: 'VssSameSecretBridgeStatementSet',
-        proofFamily: 'same-secret-bridge',
-        ...setupContext,
-        participantCount,
-        publicMatrixSeedHash: commonInput.publicMatrixSeedHash,
-        statementRecords,
-        sameSecretBridgeStatementSetRoot: fixtureHash('bridge-statement-set'),
-    } as unknown as PublicKeyShareSuccinctProofSetInput['sameSecretBridgeStatementSet'];
-    const sameSecretBridgeProofMaterialSet = {
-        objectType: 'VssSameSecretBridgeProofMaterialSet',
-        proofFamily: 'same-secret-bridge',
-        ...setupContext,
-        participantCount,
-        publicMatrixSeedHash: commonInput.publicMatrixSeedHash,
-        sameSecretBridgeStatementSetRoot:
-            sameSecretBridgeStatementSet.sameSecretBridgeStatementSetRoot,
-        proofRecords: statementRecords.map((statementRecord) => ({
-            sameSecretBridgeStatementRoot:
-                statementRecord.sameSecretBridgeStatementRoot,
-            sameSecretBridgeProofRecordRoot: fixtureHash(
-                `bridge-proof-${String(statementRecord.trusteeRosterPosition)}`,
-            ),
-        })),
-    } as unknown as PublicKeyShareSuccinctProofSetInput['sameSecretBridgeProofMaterialSet'];
-
     return {
-        ...commonInput,
-        publicKeyShares,
-        publicKeyShareProofs,
-        publicKeyShareMaterial,
-        sameSecretBridgeStatementSet,
-        sameSecretBridgeProofMaterialSet,
-        proofMaterials: publicKeyShareProofs.proofRecords.map(
-            (proofRecord) => ({
-                proofFamily: 'public-key-share',
-                trusteeIdentity: proofRecord.trusteeIdentity,
-                trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-                statementHash: fixtureHash(
-                    `succinct-statement-${String(proofRecord.trusteeRosterPosition)}`,
-                ),
+        setupContext,
+        proofMaterials: Array.from(
+            { length: participantCount },
+            (_unused, trusteeRosterPosition) => ({
                 proofBytesHash: fixtureHash(
-                    `succinct-proof-bytes-${String(proofRecord.trusteeRosterPosition)}`,
+                    `succinct-proof-bytes-${String(trusteeRosterPosition)}`,
                 ),
-                proofBytesHex: proofRecord.trusteeRosterPosition
-                    .toString(16)
-                    .padStart(2, '0'),
             }),
         ),
     };
 };
 
-describe('public-key share statement builders', () => {
-    it('creates deterministic root-bound public-key share and proof statement sets', () => {
+describe('public-key share builders', () => {
+    it('creates public-key shares in canonical roster order', () => {
         const publicKeyShares = createShareSet();
-        const publicKeyShareProofs = createPublicKeyShareProofSet({
-            setupContext,
-            qSharePrimes,
-            participantCount,
-            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-            publicKeyCrpRoot: fixtureHash('public-key-crp'),
-            publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
-            publicKeyShares,
-        });
-        const { publicKeyShareSetRoot, ...shareSetWithoutRoot } =
-            publicKeyShares;
-        const { publicKeyShareProofSetRoot, ...proofSetWithoutRoot } =
-            publicKeyShareProofs;
         const firstShareRecord = publicKeyShares.shareRecords[0];
-        const firstProofRecord = publicKeyShareProofs.proofRecords[0];
-        if (firstShareRecord === undefined || firstProofRecord === undefined) {
+        if (firstShareRecord === undefined) {
             throw new Error('fixture public-key share record is missing');
         }
-        const { publicKeyShareRoot, ...shareRecordWithoutRoot } =
-            firstShareRecord;
-        const { publicKeyShareProofRoot, ...proofRecordWithoutRoot } =
-            firstProofRecord;
 
-        expect(
-            publicKeyShares.shareRecords.map(
-                (record) => record.trusteeRosterPosition,
-            ),
-        ).toEqual([0, 1]);
-        expect(publicKeyShareRoot).toBe(
-            deriveCanonicalObjectHash(shareRecordWithoutRoot),
-        );
-        expect(publicKeyShareSetRoot).toBe(
-            deriveCanonicalObjectHash(shareSetWithoutRoot),
-        );
-        expect(firstProofRecord.publicKeyShareRoot).toBe(publicKeyShareRoot);
-        expect(publicKeyShareProofRoot).toBe(
-            deriveCanonicalObjectHash(proofRecordWithoutRoot),
-        );
-        expect(publicKeyShareProofSetRoot).toBe(
-            deriveCanonicalObjectHash(proofSetWithoutRoot),
-        );
+        expect(firstShareRecord).toEqual({
+            objectType: 'PublicKeyShare',
+            shareCoefficientVectorHashesByLimb:
+                shareContribution(0).shareCoefficientVectorHashesByLimb,
+        });
     });
 
     it('rejects malformed public-key share statement inputs', () => {
-        const publicKeyShares = createShareSet();
-
         expect(() =>
             createPublicKeyShareSet({
                 setupContext,
                 qSharePrimes,
-                participantCount,
                 publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                publicKeyCrpRoot: fixtureHash('public-key-crp'),
-                publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
                 shareContributions: [
                     {
                         ...shareContribution(0),
-                        shareCoefficientVectorHash512ByLimb:
+                        shareCoefficientVectorHashesByLimb:
                             shareContribution(
                                 0,
-                            ).shareCoefficientVectorHash512ByLimb.slice(1),
+                            ).shareCoefficientVectorHashesByLimb.slice(1),
                     },
                     shareContribution(1),
                 ],
             }),
         ).toThrow(/one entry for every Q_share limb/u);
-        expect(() =>
-            createPublicKeyShareSet({
-                setupContext,
-                qSharePrimes,
-                participantCount,
-                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                publicKeyCrpRoot: fixtureHash('public-key-crp'),
-                publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
-                shareContributions: [
-                    {
-                        ...shareContribution(0),
-                        trusteeIdentity: '',
-                    },
-                    shareContribution(1),
-                ],
-            }),
-        ).toThrow(/trusteeIdentity/u);
-        expect(() =>
-            createPublicKeyShareProofSet({
-                setupContext,
-                qSharePrimes,
-                participantCount,
-                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                publicKeyCrpRoot: fixtureHash('wrong-public-key-crp'),
-                publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
-                publicKeyShares,
-            }),
-        ).toThrow(/same common randomness/u);
     });
 
-    it('builds direct binary-chunked public-key share material without an embedded material set', () => {
+    it('rejects material that does not match the accepted public-key share hashes', async () => {
+        const materialContributions = [
+            shareMaterialContribution(0),
+            shareMaterialContribution(1),
+        ] as const;
+        const publicKeyShares = createPublicKeyShareSet({
+            setupContext,
+            qSharePrimes,
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            shareContributions: materialContributions.map(
+                shareContributionFromMaterial,
+            ),
+        });
+        const [firstShareRecord, ...remainingShareRecords] =
+            publicKeyShares.shareRecords;
+        if (firstShareRecord === undefined) {
+            throw new Error('Expected the first public-key share record.');
+        }
+        const mismatchingShareRecords = [
+            {
+                ...firstShareRecord,
+                shareCoefficientVectorHashesByLimb:
+                    firstShareRecord.shareCoefficientVectorHashesByLimb.map(
+                        (coefficientHash, rnsLimbIndex) =>
+                            rnsLimbIndex === 0
+                                ? fixtureHash('mismatching-coefficient-vector')
+                                : coefficientHash,
+                    ),
+            },
+            ...remainingShareRecords,
+        ];
+        const mismatchingPublicKeyShares = {
+            ...publicKeyShares,
+            shareRecords: mismatchingShareRecords,
+        };
+
+        await expect(
+            createBinaryChunkedPublicKeyShareMaterialBundle({
+                setupContext,
+                qSharePrimes,
+                ringDegree,
+                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                publicKeyShares: mismatchingPublicKeyShares,
+                materialContributions,
+                writePublicKeyShareMaterial: () =>
+                    Promise.resolve(new Uint8Array()),
+            }),
+        ).rejects.toThrow(/coefficient hash must match/u);
+    });
+
+    it('builds repeatable canonical public-key share material sources', async () => {
         const materialContributions = [
             shareMaterialContribution(1),
             shareMaterialContribution(0),
@@ -333,128 +237,158 @@ describe('public-key share statement builders', () => {
         const publicKeyShares = createPublicKeyShareSet({
             setupContext,
             qSharePrimes,
-            participantCount,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-            publicKeyCrpRoot: fixtureHash('public-key-crp'),
-            publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
-            shareContributions: materialContributions.map((contribution) => ({
-                trusteeIdentity: contribution.trusteeIdentity,
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                shareCoefficientVectorHash512ByLimb:
-                    contribution.shareCoefficientVectorsByLimb.map(
-                        (coefficientVector) => ({
-                            rnsLimbIndex: coefficientVector.rnsLimbIndex,
-                            rnsPrime: coefficientVector.rnsPrime,
-                            component: coefficientVector.component,
-                            coefficientVectorHash512:
-                                coefficientVector.coefficientVectorHash512,
-                        }),
-                    ),
-            })),
+            shareContributions: materialContributions.map(
+                shareContributionFromMaterial,
+            ),
         });
         const materialSetInput = {
             setupContext,
             qSharePrimes,
-            participantCount,
             ringDegree,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-            publicKeyCrpRoot: fixtureHash('public-key-crp'),
-            publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
             publicKeyShares,
             materialContributions,
         } as const;
-        const embeddedMaterialSet =
-            createPublicKeyShareMaterialSet(materialSetInput);
-        const transportedEmbeddedMaterial =
-            createBinaryChunkedPublicKeyShareMaterialTransport(
-                embeddedMaterialSet,
+        let totalByteLength = 0;
+        const writePublicKeyShareMaterial = (input: {
+            readonly totalByteLength: number;
+        }): Promise<Uint8Array> => {
+            totalByteLength = input.totalByteLength;
+            return Promise.resolve(
+                canonicalStreamDescriptorFixture(input.totalByteLength),
             );
+        };
         const directMaterialBundle =
-            createBinaryChunkedPublicKeyShareMaterialBundle(materialSetInput);
-        const reconstructedMaterialRecords =
-            materialRecordsFromTransportedPublicKeyShareMaterial({
-                setupContext,
-                publicKeyShares,
-                materialSet: directMaterialBundle.materialSet,
-                transportedPublicKeyShareMaterial:
-                    directMaterialBundle.transportedPublicKeyShareMaterial,
+            await createBinaryChunkedPublicKeyShareMaterialBundle({
+                ...materialSetInput,
+                writePublicKeyShareMaterial,
+            });
+        const firstPull =
+            await directMaterialBundle.publicKeyShareMaterialStream.pullChunk({
+                chunkIndex: 0,
+                expectedByteLength: totalByteLength,
+            });
+        const repeatedPull =
+            await directMaterialBundle.publicKeyShareMaterialStream.pullChunk({
+                chunkIndex: 0,
+                expectedByteLength: totalByteLength,
             });
 
-        expect(directMaterialBundle.materialSet).toEqual(
-            transportedEmbeddedMaterial.materialSet,
+        const { publicKeyShareMaterialSetRoot, ...materialSetWithoutRoot } =
+            directMaterialBundle.materialSet;
+        const logicalMaterialRootReferences = publicKeyShares.shareRecords.map(
+            (shareRecord, trusteeRosterPosition) => {
+                const publicKeyShareRoot = deriveCanonicalObjectHash({
+                    objectType: shareRecord.objectType,
+                    setupContextHash,
+                    trusteeRosterPosition,
+                    publicMatrixSeedHash: materialSetInput.publicMatrixSeedHash,
+                    shareCoefficientVectorHashesByLimb:
+                        shareRecord.shareCoefficientVectorHashesByLimb,
+                });
+                const publicKeyShareMaterialRoot = deriveCanonicalObjectHash({
+                    objectType: 'PublicKeyShareMaterial',
+                    setupContextHash,
+                    trusteeRosterPosition,
+                    publicMatrixSeedHash: materialSetInput.publicMatrixSeedHash,
+                    publicKeyShareRoot,
+                    shareCoefficientVectorsLittleEndianHexByLimb:
+                        shareMaterialContribution(trusteeRosterPosition)
+                            .shareCoefficientVectorsLittleEndianHexByLimb,
+                });
+
+                return {
+                    trusteeRosterPosition,
+                    publicKeyShareMaterialRoot,
+                };
+            },
         );
-        expect(directMaterialBundle.transportedPublicKeyShareMaterial).toEqual(
-            transportedEmbeddedMaterial.transportedPublicKeyShareMaterial,
-        );
-        expect(
-            directMaterialBundle.transportedPublicKeyShareMaterial,
-        ).toMatchObject({
-            chunkCount: 1,
+        const publicKeyShareSetRoot = deriveCanonicalObjectHash({
+            objectType: publicKeyShares.objectType,
+            setupContextHash,
+            publicMatrixSeedHash: materialSetInput.publicMatrixSeedHash,
+            shareRecords: publicKeyShares.shareRecords,
         });
-        expect(reconstructedMaterialRecords).toEqual(
-            embeddedMaterialSet.shareMaterialRecords,
+
+        expect(publicKeyShareMaterialSetRoot).toBe(
+            deriveCanonicalObjectHash({
+                objectType: materialSetWithoutRoot.objectType,
+                setupContextHash,
+                ringDegree,
+                publicMatrixSeedHash: materialSetInput.publicMatrixSeedHash,
+                publicKeyShareSetRoot,
+                publicKeyShareMaterialRoots: logicalMaterialRootReferences,
+            }),
         );
+        expect(firstPull).toBeInstanceOf(ArrayBuffer);
+        expect(repeatedPull).toBeInstanceOf(ArrayBuffer);
+        const directBytes = new Uint8Array(firstPull ?? new ArrayBuffer(0));
+        expect(directBytes).toEqual(
+            new Uint8Array(repeatedPull ?? new ArrayBuffer(0)),
+        );
+        const expectedBytes = new Uint8Array(
+            8 +
+                participantCount *
+                    qSharePrimes.length *
+                    ringDegree *
+                    Uint32Array.BYTES_PER_ELEMENT *
+                    2,
+        );
+        expectedBytes.set(new TextEncoder().encode('SLPKSMV2'));
+        let expectedByteOffset = 8;
+        for (
+            let trusteeRosterPosition = 0;
+            trusteeRosterPosition < participantCount;
+            trusteeRosterPosition += 1
+        ) {
+            for (
+                let rnsLimbIndex = 0;
+                rnsLimbIndex < qSharePrimes.length;
+                rnsLimbIndex += 1
+            ) {
+                const rnsPrime = qSharePrimes[rnsLimbIndex];
+                if (rnsPrime === undefined) {
+                    throw new Error('Expected the public-key RNS prime.');
+                }
+                const coefficientBytes = coefficientVectorBytes(
+                    shareMaterialCoefficients(
+                        trusteeRosterPosition,
+                        rnsLimbIndex,
+                        rnsPrime,
+                    ),
+                );
+                expectedBytes.set(coefficientBytes, expectedByteOffset);
+                expectedByteOffset += coefficientBytes.byteLength;
+            }
+        }
+        expect(totalByteLength).toBe(expectedBytes.byteLength);
+        expect(
+            directMaterialBundle.publicKeyShareMaterialStream.descriptorBytes,
+        ).toEqual(canonicalStreamDescriptorFixture(totalByteLength));
+        expect(directBytes).toEqual(expectedBytes);
     });
 
-    it('binds every succinct public-key proof to its bridge statement and proof record', () => {
+    it('builds one succinct public-key proof hash per accepted trustee', () => {
         const input = createSuccinctProofFixture();
         const succinctProofs = createPublicKeyShareSuccinctProofSet(input);
-        const firstProofRecord = succinctProofs.proofRecords[0];
-        const firstBridgeStatement =
-            input.sameSecretBridgeStatementSet.statementRecords[0];
-        const firstBridgeProof =
-            input.sameSecretBridgeProofMaterialSet.proofRecords[0];
-        if (
-            firstProofRecord === undefined ||
-            firstBridgeStatement === undefined ||
-            firstBridgeProof === undefined
-        ) {
-            throw new Error('Expected the first succinct proof binding.');
+        const firstProofBytesHash = succinctProofs.proofBytesHashes[0];
+        if (firstProofBytesHash === undefined) {
+            throw new Error('Expected the first succinct proof hash.');
         }
-        const { publicKeyShareSuccinctProofRoot, ...recordWithoutRoot } =
-            firstProofRecord;
-
-        expect(firstProofRecord.sameSecretBridgeStatementRoot).toBe(
-            firstBridgeStatement.sameSecretBridgeStatementRoot,
-        );
-        expect(firstProofRecord.sameSecretBridgeProofRecordRoot).toBe(
-            firstBridgeProof.sameSecretBridgeProofRecordRoot,
-        );
-        expect(publicKeyShareSuccinctProofRoot).toBe(
-            deriveCanonicalObjectHash(recordWithoutRoot),
+        expect(succinctProofs.proofBytesHashes).toHaveLength(participantCount);
+        expect(firstProofBytesHash).toBe(
+            input.proofMaterials[0]?.proofBytesHash,
         );
     });
 
-    it('rejects bridge records that do not cover the accepted public-key trustees', () => {
+    it('rejects an incomplete proof set', () => {
         const input = createSuccinctProofFixture();
-        const firstBridgeProof =
-            input.sameSecretBridgeProofMaterialSet.proofRecords[0];
-        const secondBridgeProof =
-            input.sameSecretBridgeProofMaterialSet.proofRecords[1];
-        if (firstBridgeProof === undefined || secondBridgeProof === undefined) {
-            throw new Error('Expected two bridge proof records.');
-        }
-        const mismatchedBridgeProofMaterialSet = {
-            ...input.sameSecretBridgeProofMaterialSet,
-            proofRecords: [
-                {
-                    ...firstBridgeProof,
-                    sameSecretBridgeStatementRoot: fixtureHash(
-                        'unmatched-bridge-statement',
-                    ),
-                },
-                secondBridgeProof,
-            ],
-        };
-
         expect(() =>
             createPublicKeyShareSuccinctProofSet({
                 ...input,
-                sameSecretBridgeProofMaterialSet:
-                    mismatchedBridgeProofMaterialSet,
+                proofMaterials: input.proofMaterials.slice(1),
             }),
-        ).toThrow(
-            'sameSecretBridgeProofMaterialSet must contain one proof for every bridge statement',
-        );
+        ).toThrow('one proof per participant in roster order');
     });
 });

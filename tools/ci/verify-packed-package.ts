@@ -1,85 +1,65 @@
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { constants as fileSystemConstants } from 'node:fs';
 import {
+    appendFile,
     copyFile,
     mkdtemp,
     mkdir,
     readFile,
-    readdir,
     rm,
     writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path, { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
+import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
     resolvePackageManagerRunner,
     resolvePackageManagerRunnerForPackageManager,
     type PackageManager,
+    type PackageManagerRunner,
 } from './package-manager-runner.js';
-import { runPackageManagerAndCaptureOutput } from './run-command.js';
 import {
-    getRootPackageJsonPath,
-    getRootReadmePath,
-    stagePublicPackage,
-} from './stage-public-package.mjs';
+    runCommandAndCaptureOutput,
+    type CapturedCommandResult,
+    type CommandInvocation,
+} from './run-command.js';
+import { serializeErrorDiagnostic } from './run-log-diagnostics.js';
+import { stagePublicPackage } from './stage-public-package.mjs';
 
-import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
+import { extractModuleSpecifiers } from '#tools/internal/module-specifiers.js';
 
 type PackedFileMetadata = {
     readonly path: string;
 };
 
-type PackDryRunMetadataEntry = {
+type PackMetadataEntry = {
+    readonly filename: string;
     readonly files: readonly PackedFileMetadata[];
+    readonly integrity: string;
+    readonly name: string;
+    readonly version: string;
 };
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-const forbiddenPublishedRuntimePathFragments = [
-    'dist/internal/election-foundation/plaintext-oracle/',
-] as const;
-const forbiddenPublishedTypeSupportPathFragments = [
-    'dist/internal/plaintext-oracle.',
-] as const;
-const forbiddenPublishedOraclePathFragments = [
-    'tools/lattigo-oracle/',
-    'lattigo-oracle',
-    'oracle-vector',
-    'oracle-serializer',
-] as const;
-const forbiddenPublishedTestVectorPathFragments = ['test-vectors/'] as const;
-const requiredPublishedPackageFilePaths = [
+const expectedPublishedPackageFilePaths = [
     'LICENSE',
     'README.md',
-    'dist/kernel.js',
+    'dist/index.d.ts',
+    'dist/index.js',
+    'dist/index.js.map',
     'dist/sealed-lattice-kernel.wasm',
-    'dist/internal/board-target.d.ts',
-    'dist/internal/field.d.ts',
-    'dist/internal/lifecycle.d.ts',
-    'dist/internal/protocol-hash.d.ts',
-    'dist/internal/protocol-objects.d.ts',
-    'dist/internal/roster-recovery.d.ts',
-    'dist/internal/target-result.d.ts',
-    'dist/internal/transcript-core.d.ts',
+    'package.json',
 ] as const;
-const forbiddenPublishedOracleFileNames = new Set([
-    'Dockerfile',
-    'go.mod',
-    'go.sum',
-]);
-const publishedKernelHashPattern =
-    /const packagedTranscriptCoreKernelNormalizedSha256Hex\s*=\s*(?<hash>undefined|'[a-f0-9]{64}');/u;
-
-const createDryRunPackArguments = (): readonly string[] => [
-    'pack',
-    '--dry-run',
-    '--json',
-    '--ignore-scripts',
-];
+const unresolvedKernelHashToken =
+    '__SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__';
 
 const createPackArguments = (packDirectory: string): readonly string[] => [
     'pack',
+    '--json',
+    '--ignore-scripts',
     '--pack-destination',
     packDirectory,
 ];
@@ -126,176 +106,162 @@ const isPackedFileMetadata = (value: unknown): value is PackedFileMetadata => {
     return typeof (value as { readonly path?: unknown }).path === 'string';
 };
 
-const isPackDryRunMetadataEntry = (
-    value: unknown,
-): value is PackDryRunMetadataEntry => {
+const isPackMetadataEntry = (value: unknown): value is PackMetadataEntry => {
     if (typeof value !== 'object' || value === null) {
         return false;
     }
 
-    const metadataEntry = value as { readonly files?: unknown };
+    const metadataEntry = value as {
+        readonly filename?: unknown;
+        readonly files?: unknown;
+        readonly integrity?: unknown;
+        readonly name?: unknown;
+        readonly version?: unknown;
+    };
 
     return (
+        typeof metadataEntry.filename === 'string' &&
         Array.isArray(metadataEntry.files) &&
-        metadataEntry.files.every(isPackedFileMetadata)
+        metadataEntry.files.every(isPackedFileMetadata) &&
+        typeof metadataEntry.integrity === 'string' &&
+        typeof metadataEntry.name === 'string' &&
+        typeof metadataEntry.version === 'string'
     );
 };
 
-export const parsePackDryRunFilePaths = (
-    packDryRunOutput: string,
-): string[] => {
-    const parsedMetadata = JSON.parse(packDryRunOutput) as unknown;
+export const parsePackMetadata = (
+    packOutput: string,
+): {
+    readonly filename: string;
+    readonly filePaths: readonly string[];
+    readonly integrity: string;
+    readonly name: string;
+    readonly version: string;
+} => {
+    const parsedMetadata = JSON.parse(packOutput) as unknown;
 
-    if (!Array.isArray(parsedMetadata)) {
-        throw new Error(
-            'npm pack --dry-run --json returned an unexpected shape',
-        );
+    if (!Array.isArray(parsedMetadata) || parsedMetadata.length !== 1) {
+        throw new Error('npm pack --json returned an unexpected shape');
     }
 
     const metadataEntries: readonly unknown[] = parsedMetadata;
     const metadataEntry = metadataEntries[0];
-    if (!isPackDryRunMetadataEntry(metadataEntry)) {
-        throw new Error(
-            'npm pack --dry-run --json returned an unexpected shape',
-        );
+    if (!isPackMetadataEntry(metadataEntry)) {
+        throw new Error('npm pack --json returned an unexpected shape');
     }
 
-    return metadataEntry.files
-        .map((fileMetadata) => fileMetadata.path)
-        .sort((left, right) => left.localeCompare(right));
+    return {
+        filename: metadataEntry.filename,
+        filePaths: metadataEntry.files
+            .map((fileMetadata) => fileMetadata.path)
+            .sort((left, right) => left.localeCompare(right)),
+        integrity: metadataEntry.integrity,
+        name: metadataEntry.name,
+        version: metadataEntry.version,
+    };
 };
 
 export const validatePublishedPackageFilePaths = (
     publishedPackageFilePaths: readonly string[],
 ): string[] => {
+    const actualFilePaths = [...publishedPackageFilePaths].sort((left, right) =>
+        left.localeCompare(right),
+    );
+    const expectedFilePaths = [...expectedPublishedPackageFilePaths].sort(
+        (left, right) => left.localeCompare(right),
+    );
+    return JSON.stringify(actualFilePaths) === JSON.stringify(expectedFilePaths)
+        ? []
+        : [
+              `Published package file set mismatch. Expected ${expectedFilePaths.join(', ')}; received ${actualFilePaths.join(', ')}`,
+          ];
+};
+
+export const validatePublishedPackageBundle = (input: {
+    readonly declarationSourceText: string;
+    readonly runtimeSourceText: string;
+}): string[] => {
     const failures: string[] = [];
-
-    for (const requiredFilePath of requiredPublishedPackageFilePaths) {
-        if (!publishedPackageFilePaths.includes(requiredFilePath)) {
-            failures.push(
-                `Published package is missing required file: ${requiredFilePath}`,
-            );
+    for (const [outputLabel, sourceText] of [
+        ['runtime', input.runtimeSourceText],
+        ['declaration', input.declarationSourceText],
+    ] as const) {
+        for (const moduleSpecifier of extractModuleSpecifiers(sourceText)) {
+            if (moduleSpecifier.startsWith('@sealed-lattice/')) {
+                failures.push(
+                    `Published ${outputLabel} output must bundle internal workspace import "${moduleSpecifier}"`,
+                );
+            }
         }
     }
-
-    for (const publishedPackageFilePath of publishedPackageFilePaths) {
-        if (publishedPackageFilePath.endsWith('.tsbuildinfo')) {
-            failures.push(
-                `Published package must not include TypeScript build metadata: ${publishedPackageFilePath}`,
-            );
-        }
-        if (
-            forbiddenPublishedRuntimePathFragments.some((fragment) =>
-                publishedPackageFilePath.includes(fragment),
-            )
-        ) {
-            failures.push(
-                `Published package must not include internal protocol runtime: ${publishedPackageFilePath}`,
-            );
-        }
-        if (
-            forbiddenPublishedTypeSupportPathFragments.some((fragment) =>
-                publishedPackageFilePath.includes(fragment),
-            )
-        ) {
-            failures.push(
-                `Published package must not include test-only type support: ${publishedPackageFilePath}`,
-            );
-        }
-        if (
-            forbiddenPublishedTestVectorPathFragments.some((fragment) =>
-                publishedPackageFilePath.includes(fragment),
-            )
-        ) {
-            failures.push(
-                `Published package must not include repository test vectors: ${publishedPackageFilePath}`,
-            );
-        }
-
-        const publishedPackageBaseName = path.basename(
-            publishedPackageFilePath,
-        );
-        if (
-            forbiddenPublishedOraclePathFragments.some((fragment) =>
-                publishedPackageFilePath.includes(fragment),
-            ) ||
-            forbiddenPublishedOracleFileNames.has(publishedPackageBaseName) ||
-            publishedPackageFilePath.endsWith('.go')
-        ) {
-            failures.push(
-                `Published package must not include development oracle artifact: ${publishedPackageFilePath}`,
-            );
-        }
-    }
-
-    return failures;
-};
-
-export const validatePublishedPackageMetadata = (
-    publishedPackageJson: Record<string, unknown>,
-    expectedDescription: string,
-): string[] => {
-    const failures: string[] = [];
-
-    if (publishedPackageJson.description !== expectedDescription) {
+    if (input.runtimeSourceText.includes(unresolvedKernelHashToken)) {
         failures.push(
-            'Published package metadata description must match the root package description',
+            'Published runtime output contains the unresolved WASM integrity token',
         );
     }
-    if ('devDependencies' in publishedPackageJson) {
-        failures.push(
-            'Published package metadata must not include devDependencies',
-        );
-    }
-    if ('scripts' in publishedPackageJson) {
-        failures.push('Published package metadata must not include scripts');
-    }
-
-    return failures;
+    return failures.sort((left, right) => left.localeCompare(right));
 };
 
-export const hashPublishedKernelBytesSha256Hex = (bytes: Uint8Array): string =>
-    createHash('sha256')
-        .update(normalizeTranscriptCoreKernelBytesForHash(bytes))
-        .digest('hex');
+const formatCapturedCommandFailure = (
+    description: string,
+    result: CapturedCommandResult,
+): Error => {
+    const output = [result.stdout.trim(), result.stderr.trim()]
+        .filter((entry) => entry.length > 0)
+        .join('\n');
+    const termination =
+        result.terminationSignal === null
+            ? `exit code ${String(result.exitCode)}`
+            : `signal ${result.terminationSignal}`;
 
-export const extractPublishedKernelHash = (
-    kernelRuntimeText: string,
-): string | undefined => {
-    const match = publishedKernelHashPattern.exec(kernelRuntimeText);
-    const hash = match?.groups?.hash;
-    if (hash === undefined || hash === 'undefined') {
-        return undefined;
-    }
-
-    return hash.slice(1, -1);
+    return new Error(
+        `${description} failed with ${termination}${
+            output.length === 0 ? '.' : `:\n${output}`
+        }`,
+    );
 };
 
-export const validatePublishedKernelIntegrity = (
-    kernelRuntimeText: string,
-    kernelBytes: Uint8Array,
-): string[] => {
-    const expectedHash = extractPublishedKernelHash(kernelRuntimeText);
-    if (expectedHash === undefined) {
-        return [
-            'Published package kernel loader must pin the packaged transcript-core WASM hash',
-        ];
+const runCapturedCommand = async (
+    runLog: ActiveLocalRunLog,
+    invocation: CommandInvocation,
+): Promise<string> => {
+    const result = await runCommandAndCaptureOutput(invocation, { runLog });
+    if (result.exitCode !== 0 || result.terminationSignal !== null) {
+        throw formatCapturedCommandFailure(invocation.description, result);
     }
 
-    const actualHash = hashPublishedKernelBytesSha256Hex(kernelBytes);
-    if (actualHash !== expectedHash) {
-        return [
-            `Published package kernel hash mismatch: expected ${expectedHash}, received ${actualHash}`,
-        ];
-    }
-
-    return [];
+    return result.stdout;
 };
 
-const runPublint = (packageDirectory: string): void => {
-    runPackageManagerAndCaptureOutput(
-        resolvePackageManagerRunner(),
-        [
+const runCapturedPackageManagerCommand = async (
+    runLog: ActiveLocalRunLog,
+    input: {
+        readonly arguments: readonly string[];
+        readonly description: string;
+        readonly environment?: NodeJS.ProcessEnv;
+        readonly logFileSlug: string;
+        readonly packageManagerRunner: PackageManagerRunner;
+        readonly workingDirectoryPath: string;
+    },
+): Promise<string> =>
+    runCapturedCommand(runLog, {
+        args: [
+            ...input.packageManagerRunner.commandArgumentsPrefix,
+            ...input.arguments,
+        ],
+        command: input.packageManagerRunner.command,
+        description: input.description,
+        env: input.environment,
+        logFileSlug: input.logFileSlug,
+        workingDirectoryPath: input.workingDirectoryPath,
+    });
+
+const runPublint = async (
+    runLog: ActiveLocalRunLog,
+    packageDirectory: string,
+): Promise<void> => {
+    await runCapturedPackageManagerCommand(runLog, {
+        arguments: [
             'exec',
             'publint',
             'run',
@@ -304,39 +270,127 @@ const runPublint = (packageDirectory: string): void => {
             'false',
             '--strict',
         ],
-        repoRoot,
-    );
-};
-
-const runSmokeEntryPoint = (consumerDirectory: string): void => {
-    const commandArguments = ['smoke.mjs'];
-    const result = spawnSync(process.execPath, commandArguments, {
-        cwd: consumerDirectory,
-        env: process.env,
-        encoding: 'utf8',
-        maxBuffer: 100 * 1024 * 1024,
+        description: 'Run Publint against the staged package',
+        logFileSlug: 'publint',
+        packageManagerRunner: resolvePackageManagerRunner(),
+        workingDirectoryPath: repoRoot,
     });
+};
 
-    if (result.error !== undefined) {
-        throw new Error(
-            `Failed to start smoke entry point: ${result.error.message}`,
-        );
+const runSmokeEntryPoint = async (
+    runLog: ActiveLocalRunLog,
+    consumerDirectory: string,
+): Promise<void> => {
+    await runCapturedCommand(runLog, {
+        args: ['smoke.mjs'],
+        command: process.execPath,
+        description: 'Run the packed-package runtime smoke entry point',
+        logFileSlug: 'runtime-smoke',
+        workingDirectoryPath: consumerDirectory,
+    });
+};
+
+const runSmokeTypeEntryPoint = async (
+    runLog: ActiveLocalRunLog,
+    consumerDirectory: string,
+): Promise<void> => {
+    const typeScriptEntryPointPath = path.resolve(
+        repoRoot,
+        'node_modules',
+        'typescript',
+        'bin',
+        'tsc',
+    );
+    await runCapturedCommand(runLog, {
+        args: [
+            typeScriptEntryPointPath,
+            '--module',
+            'NodeNext',
+            '--moduleResolution',
+            'NodeNext',
+            '--noEmit',
+            '--strict',
+            '--target',
+            'ES2020',
+            'smoke.ts',
+        ],
+        command: process.execPath,
+        description: 'Type-check the packed-package consumer entry point',
+        logFileSlug: 'type-smoke',
+        workingDirectoryPath: consumerDirectory,
+    });
+};
+
+type PackedPackageSmokeOptions = {
+    readonly retainedTarballPath?: string;
+};
+
+export const parsePackedPackageSmokeArguments = (
+    commandArguments: readonly string[],
+): PackedPackageSmokeOptions => {
+    const argumentsWithoutSeparator =
+        commandArguments[0] === '--'
+            ? commandArguments.slice(1)
+            : commandArguments;
+    if (argumentsWithoutSeparator.length === 0) {
+        return {};
     }
-    if (result.signal !== null) {
-        throw new Error(
-            `Smoke entry point terminated by signal ${result.signal}`,
-        );
+    if (
+        argumentsWithoutSeparator.length === 2 &&
+        argumentsWithoutSeparator[0] === '--out' &&
+        argumentsWithoutSeparator[1] !== undefined &&
+        argumentsWithoutSeparator[1].length > 0
+    ) {
+        return {
+            retainedTarballPath: path.resolve(argumentsWithoutSeparator[1]),
+        };
     }
-    if (result.status !== 0) {
-        throw new Error(
-            `Smoke entry point failed:\n${[result.stdout, result.stderr]
-                .filter(Boolean)
-                .join('\n')}`,
-        );
+
+    throw new Error('Usage: verify-packed-package.ts [--out <tarball-path>].');
+};
+
+const runPackedPackagePhase = async <Result>(
+    runLog: ActiveLocalRunLog,
+    phase: string,
+    action: () => Result | Promise<Result>,
+): Promise<Result> => {
+    const startedAtMilliseconds = performance.now();
+    runLog.writeEvent({
+        details: { phase },
+        eventType: 'package-smoke-phase-started',
+    });
+    try {
+        const result = await action();
+        runLog.writeEvent({
+            details: {
+                durationMilliseconds: Math.round(
+                    performance.now() - startedAtMilliseconds,
+                ),
+                phase,
+            },
+            eventType: 'package-smoke-phase-finished',
+        });
+
+        return result;
+    } catch (error) {
+        runLog.writeEvent({
+            details: {
+                durationMilliseconds: Math.round(
+                    performance.now() - startedAtMilliseconds,
+                ),
+                error: serializeErrorDiagnostic(error),
+                phase,
+            },
+            eventType: 'package-smoke-phase-failed',
+        });
+        throw error;
     }
 };
 
-const main = async (): Promise<void> => {
+const runPackedPackageSmoke = async (
+    runLog: ActiveLocalRunLog,
+    retainedTarballPath?: string,
+): Promise<{ readonly integrity: string; readonly tarballPath?: string }> => {
     const packageManagerRunner =
         resolvePackageManagerRunnerForPackageManager('npm');
     const tempRoot = await mkdtemp(join(tmpdir(), 'sealed-lattice-packed-'));
@@ -348,124 +402,239 @@ const main = async (): Promise<void> => {
     );
 
     try {
-        await mkdir(packDirectory, { recursive: true });
-        await mkdir(consumerDirectory, { recursive: true });
-        const stagedPackage = await stagePublicPackage({
-            destinationPath: packageDirectory,
-        });
+        await runPackedPackagePhase(
+            runLog,
+            'stage public package',
+            async () => {
+                await mkdir(packDirectory, { recursive: true });
+                await mkdir(consumerDirectory, { recursive: true });
 
-        const [rootReadmeText, stagedReadmeText] = await Promise.all([
-            readFile(getRootReadmePath(repoRoot), 'utf8'),
-            readFile(stagedPackage.readmePath, 'utf8'),
-        ]);
-        if (stagedReadmeText !== rootReadmeText) {
-            throw new Error(
-                'Staged public package README must be copied from the repository root README',
-            );
-        }
+                await stagePublicPackage(packageDirectory);
+            },
+        );
 
         const publishedPackageJson = JSON.parse(
             await readFile(join(packageDirectory, 'package.json'), 'utf8'),
         ) as Record<string, unknown>;
-        const rootPackageJson = JSON.parse(
-            await readFile(getRootPackageJsonPath(repoRoot), 'utf8'),
-        ) as Record<string, unknown>;
         if (
-            typeof rootPackageJson.description !== 'string' ||
-            rootPackageJson.description.length === 0
+            'devDependencies' in publishedPackageJson ||
+            'scripts' in publishedPackageJson
         ) {
             throw new Error(
-                'Root package.json must define package description.',
+                'The staged public manifest contains workspace-only metadata.',
             );
         }
 
-        const metadataFailures = validatePublishedPackageMetadata(
-            publishedPackageJson,
-            rootPackageJson.description,
+        await runPackedPackagePhase(runLog, 'run Publint', () =>
+            runPublint(runLog, packageDirectory),
         );
-        if (metadataFailures.length > 0) {
-            throw new Error(metadataFailures.join('\n'));
-        }
 
-        runPublint(packageDirectory);
+        await runPackedPackagePhase(
+            runLog,
+            'validate bundled output',
+            async () => {
+                const [runtimeSourceText, declarationSourceText] =
+                    await Promise.all([
+                        readFile(
+                            join(packageDirectory, 'dist', 'index.js'),
+                            'utf8',
+                        ),
+                        readFile(
+                            join(packageDirectory, 'dist', 'index.d.ts'),
+                            'utf8',
+                        ),
+                    ]);
+                const bundleFailures = validatePublishedPackageBundle({
+                    declarationSourceText,
+                    runtimeSourceText,
+                });
+                if (bundleFailures.length > 0) {
+                    throw new Error(bundleFailures.join('\n'));
+                }
+            },
+        );
 
-        const publishedPackageFilePaths = parsePackDryRunFilePaths(
-            runPackageManagerAndCaptureOutput(
+        const packedPackage = await runPackedPackagePhase(
+            runLog,
+            'create and inspect package tarball',
+            async () => {
+                const packMetadata = parsePackMetadata(
+                    await runCapturedPackageManagerCommand(runLog, {
+                        arguments: createPackArguments(packDirectory),
+                        description: 'Create the packed-package tarball',
+                        environment: packageManagerEnvironment,
+                        logFileSlug: 'pack-tarball',
+                        packageManagerRunner,
+                        workingDirectoryPath: packageDirectory,
+                    }),
+                );
+                const pathFailures = validatePublishedPackageFilePaths(
+                    packMetadata.filePaths,
+                );
+                if (pathFailures.length > 0) {
+                    throw new Error(pathFailures.join('\n'));
+                }
+                const tarballPath = path.resolve(
+                    packDirectory,
+                    packMetadata.filename,
+                );
+                if (path.dirname(tarballPath) !== path.resolve(packDirectory)) {
+                    throw new Error(
+                        'npm pack returned a filename outside the package directory.',
+                    );
+                }
+                if (
+                    packMetadata.name !== publishedPackageJson.name ||
+                    packMetadata.version !== publishedPackageJson.version
+                ) {
+                    throw new Error(
+                        `npm pack produced ${packMetadata.name}@${packMetadata.version}; expected ${String(publishedPackageJson.name)}@${String(publishedPackageJson.version)}.`,
+                    );
+                }
+
+                return {
+                    filePaths: packMetadata.filePaths,
+                    integrity: packMetadata.integrity,
+                    tarballPath,
+                };
+            },
+        );
+
+        await runPackedPackagePhase(
+            runLog,
+            'prepare packed-package consumer',
+            async () => {
+                await writeFile(
+                    join(consumerDirectory, 'package.json'),
+                    `${JSON.stringify(
+                        {
+                            name: 'sealed-lattice-smoke-consumer',
+                            private: true,
+                            type: 'module',
+                        },
+                        null,
+                        2,
+                    )}\n`,
+                    'utf8',
+                );
+                await copyFile(
+                    path.join(
+                        repoRoot,
+                        'tools',
+                        'ci',
+                        'packed-package-smoke.mjs',
+                    ),
+                    join(consumerDirectory, 'smoke.mjs'),
+                );
+                await writeFile(
+                    join(consumerDirectory, 'smoke.ts'),
+                    [
+                        "import { verifyPrivateVssShare, type PrivateVssShareVerification, type VerifyPrivateVssShareInput } from 'sealed-lattice';",
+                        '',
+                        'declare const input: VerifyPrivateVssShareInput;',
+                        'const verification: Promise<PrivateVssShareVerification> = verifyPrivateVssShare(input);',
+                        'void verification;',
+                        '',
+                    ].join('\n'),
+                    'utf8',
+                );
+            },
+        );
+
+        await runPackedPackagePhase(runLog, 'install packed package', () =>
+            runCapturedPackageManagerCommand(runLog, {
+                arguments: createInstallArguments(
+                    packageManagerRunner.kind,
+                    packedPackage.tarballPath,
+                ),
+                description: 'Install the tarball into the smoke consumer',
+                environment: packageManagerEnvironment,
+                logFileSlug: 'install-tarball',
                 packageManagerRunner,
-                createDryRunPackArguments(),
-                packageDirectory,
-                { environment: packageManagerEnvironment },
-            ),
+                workingDirectoryPath: consumerDirectory,
+            }),
         );
-        const pathFailures = validatePublishedPackageFilePaths(
-            publishedPackageFilePaths,
+        await runPackedPackagePhase(runLog, 'run package runtime smoke', () =>
+            runSmokeEntryPoint(runLog, consumerDirectory),
         );
-        if (pathFailures.length > 0) {
-            throw new Error(pathFailures.join('\n'));
-        }
-
-        const kernelIntegrityFailures = validatePublishedKernelIntegrity(
-            await readFile(join(packageDirectory, 'dist', 'kernel.js'), 'utf8'),
-            await readFile(
-                join(packageDirectory, 'dist', 'sealed-lattice-kernel.wasm'),
-            ),
-        );
-        if (kernelIntegrityFailures.length > 0) {
-            throw new Error(kernelIntegrityFailures.join('\n'));
-        }
-
-        runPackageManagerAndCaptureOutput(
-            packageManagerRunner,
-            createPackArguments(packDirectory),
-            packageDirectory,
-            { environment: packageManagerEnvironment },
+        await runPackedPackagePhase(runLog, 'run package type smoke', () =>
+            runSmokeTypeEntryPoint(runLog, consumerDirectory),
         );
 
-        const tarballs = (await readdir(packDirectory)).filter((entry) =>
-            entry.endsWith('.tgz'),
-        );
-        if (tarballs.length !== 1) {
+        const tarballBytes = await readFile(packedPackage.tarballPath);
+        const actualPackageIntegrity = `sha512-${createHash('sha512')
+            .update(tarballBytes)
+            .digest('base64')}`;
+        if (actualPackageIntegrity !== packedPackage.integrity) {
             throw new Error(
-                `Expected exactly one packed tarball, received ${tarballs.length}`,
+                'The packed tarball bytes do not match the integrity reported by npm pack.',
             );
         }
+        const packageEvidence = {
+            packageName: publishedPackageJson.name,
+            packageVersion: publishedPackageJson.version,
+            npmIntegrity: actualPackageIntegrity,
+            tarballFileName: path.basename(packedPackage.tarballPath),
+            tarballPath: packedPackage.tarballPath,
+        };
+        runLog.writeEvent({
+            details: packageEvidence,
+            eventType: 'package-smoke-evidence-recorded',
+        });
 
-        const tarballPath = join(packDirectory, tarballs[0]);
-
-        await writeFile(
-            join(consumerDirectory, 'package.json'),
-            `${JSON.stringify(
-                {
-                    name: 'sealed-lattice-smoke-consumer',
-                    private: true,
-                    type: 'module',
-                },
-                null,
-                2,
-            )}\n`,
-            'utf8',
-        );
-        await copyFile(
-            path.join(repoRoot, 'tools', 'ci', 'packed-package-smoke.mjs'),
-            join(consumerDirectory, 'smoke.mjs'),
-        );
-
-        runPackageManagerAndCaptureOutput(
-            packageManagerRunner,
-            createInstallArguments(packageManagerRunner.kind, tarballPath),
-            consumerDirectory,
-            { environment: packageManagerEnvironment },
-        );
-        runSmokeEntryPoint(consumerDirectory);
+        if (retainedTarballPath !== undefined) {
+            await mkdir(path.dirname(retainedTarballPath), { recursive: true });
+            await copyFile(
+                packedPackage.tarballPath,
+                retainedTarballPath,
+                fileSystemConstants.COPYFILE_EXCL,
+            );
+        }
 
         console.log(
             `Packed package smoke test passed with ${packageManagerRunner.kind}.`,
         );
+        return {
+            integrity: actualPackageIntegrity,
+            tarballPath: retainedTarballPath,
+        };
     } finally {
         await rm(tempRoot, { recursive: true, force: true });
     }
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const main = async (): Promise<void> => {
+    const rawArguments = process.argv.slice(2);
+    await runWithLocalRunLog(
+        {
+            commandLineArguments: rawArguments,
+            lanes: ['Packed package smoke'],
+            scriptName: 'smoke:pack:npm',
+        },
+        async (runLog) => {
+            const options = parsePackedPackageSmokeArguments(rawArguments);
+            const result = await runPackedPackageSmoke(
+                runLog,
+                options.retainedTarballPath,
+            );
+            if (result.tarballPath !== undefined) {
+                const githubOutputPath = process.env.GITHUB_OUTPUT;
+                if (
+                    githubOutputPath !== undefined &&
+                    githubOutputPath.length > 0
+                ) {
+                    await appendFile(
+                        githubOutputPath,
+                        `tarball=${result.tarballPath}\nintegrity=${result.integrity}\n`,
+                        'utf8',
+                    );
+                }
+                console.log(`Retained verified tarball: ${result.tarballPath}`);
+            }
+        },
+    );
+};
+
+if (import.meta.main) {
     void main();
 }

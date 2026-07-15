@@ -1,5 +1,5 @@
-use serde_json::{Value, json};
-
+#[cfg(test)]
+use crate::bgv::parameters::DATA_PRIMES;
 #[cfg(test)]
 use crate::encoding::CanonicalResult;
 #[cfg(test)]
@@ -46,18 +46,6 @@ pub(super) struct CarryAwareVssCommitmentOpeningInput<'a> {
     pub(super) carry_witnesses: &'a [u128],
     pub(super) modulus: u64,
     pub(super) fresh_randomness_bound: i128,
-}
-
-pub(super) fn carry_aware_vss_share_relation_value() -> Value {
-    json!({
-        "objectType": "CarryAwareVssShareRelation",
-        "trusteePointRule": "roster-position-plus-one",
-        "coefficientOrder": "constant-first",
-        "relation": "sum(alpha_j^k * F_i,l,k) - sigma_i_to_j,l = q_l * z_i_to_j,l",
-        "carryWitnessDomain": "non-negative-bounded-integer",
-        "commitmentReductionRule": "prove-unreduced-lifted-share-with-hidden-carry-and-opening",
-        "recipientWitnessDisclosure": "share-values-only; aggregate openings and carry witnesses are zero-knowledge proof witnesses",
-    })
 }
 
 #[cfg(test)]
@@ -234,7 +222,9 @@ pub(super) fn verify_carry_aware_vss_commitment_opening(
     }
 
     for (coefficient_index, commitment) in coefficient_commitments.iter().enumerate() {
-        if commitment.source_message_modulus != modulus || commitment.ring_degree != ring_degree {
+        if DATA_PRIMES.get(commitment.source_rns_limb_index) != Some(&modulus)
+            || commitment.ring_degree != ring_degree
+        {
             return Err(invalid_vss_input(
                 "VSS coefficient commitment domain does not match the share opening",
             ));

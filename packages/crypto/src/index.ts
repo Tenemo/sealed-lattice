@@ -1,45 +1,46 @@
 export {
     canonicalJson,
     hash512Hex,
-    setupProofMaterialFullObjectHashHex,
+    openCanonicalJsonByteSource,
+} from './canonical-json.js';
+export type {
+    CanonicalJsonByteSource,
+    CanonicalJsonByteSourcePullInput,
 } from './canonical-json.js';
 export { deriveCanonicalObjectHash } from './hashes.js';
 export {
-    deriveMlDsaPublicKeyHash,
-    deriveProtocolSignatureHash,
-    verifySignedObjectSignature,
-} from './signatures.js';
-export type { SignatureExpectation } from './signatures.js';
-export {
-    createPrivateVssMailboxKeyPair,
-    decryptPrivateVssMailboxEnvelope,
-    encryptPrivateVssMailboxEnvelope,
-} from './private-vss-mailbox.js';
-export {
-    decryptLocalTrusteeSetupSealedMaterial,
-    decryptLocalTrusteeState,
-    encryptLocalTrusteeSetupSealedMaterial,
-    encryptLocalTrusteeState,
-} from './local-trustee-state-storage.js';
+    BrowserLocalKeyProviderError,
+    openBrowserLocalExternalKeyProvider,
+} from './browser-local-key-provider.js';
 export type {
-    PrivateVssEncryptedEnvelope,
-    PrivateVssMailboxDecryptionInput,
-    PrivateVssMailboxDecryptionResult,
-    PrivateVssMailboxEncryptionInput,
-    PrivateVssMailboxEncryptionResult,
-    PrivateVssMailboxKeyPair,
-} from './private-vss-mailbox.js';
+    BrowserLocalExternalKeyProvider,
+    BrowserLocalExternalKeyProviderInput,
+    BrowserLocalKeyProviderFailureCode,
+    BrowserLocalMailboxCapability,
+    BrowserLocalSigningCapability,
+} from './browser-local-key-provider.js';
+export {
+    AuthenticatedMailboxCleanupError,
+    openAuthenticatedMailbox,
+    sealAuthenticatedMailbox,
+} from './authenticated-mailbox.js';
 export type {
-    EncryptedLocalTrusteeSetupMaterial,
-    EncryptedLocalTrusteeSetupState,
-    LocalTrusteeSetupSealedMaterialDecryptionInput,
-    LocalTrusteeSetupSealedMaterialDecryptionResult,
-    LocalTrusteeSetupSealedMaterialEncryptionInput,
-    LocalTrusteeSetupSealedMaterialEncryptionResult,
-    LocalTrusteeSetupStateSealedMaterial,
-    LocalTrusteeSetupStateSealedPayload,
-    LocalTrusteeStateStorageDecryptionInput,
-    LocalTrusteeStateStorageDecryptionResult,
-    LocalTrusteeStateStorageEncryptionInput,
-    LocalTrusteeStateStorageEncryptionResult,
-} from './local-trustee-state-storage.js';
+    AuthenticatedMailboxCarrier,
+    AuthenticatedMailboxGcmRuntime,
+    AuthenticatedMailboxInboundSlotAuthority,
+    AuthenticatedMailboxKernel,
+    AuthenticatedMailboxOpenInput,
+    AuthenticatedMailboxOutboundCache,
+    AuthenticatedMailboxProducerSlot,
+    AuthenticatedMailboxSealInput,
+    AuthenticatedMailboxStagingBoundary,
+    AuthenticatedMailboxStreamBoundary,
+    MailboxAssociatedData,
+    MailboxAssociatedDataExpectation,
+    MailboxCiphertextDescriptor,
+    MailboxKeyScheduleInput,
+    MailboxPayloadType,
+    OpenedAuthenticatedMailbox,
+    SignedMailboxEnvelope,
+    UnsignedMailboxEnvelope,
+} from './authenticated-mailbox.js';

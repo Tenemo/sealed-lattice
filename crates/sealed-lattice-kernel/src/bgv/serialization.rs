@@ -1,25 +1,29 @@
+#[cfg(test)]
+use crate::bgv::rns::PolynomialDomain;
+#[cfg(test)]
+use crate::transcript_core::encode_hex;
+#[cfg(test)]
+use crate::{bgv::parameters::POLYNOMIAL_DEGREE, encoding::CanonicalReader};
 use crate::{
-    bgv::{
-        parameters::POLYNOMIAL_DEGREE,
-        rns::{PolynomialDomain, RnsPolynomial},
-    },
+    bgv::rns::RnsPolynomial,
     encoding::{
-        CanonicalError, CanonicalErrorCode, CanonicalReader, CanonicalResult, append_string,
-        append_varuint,
+        CanonicalError, CanonicalErrorCode, CanonicalResult, append_string, append_varuint,
     },
     hashing::namespace_root,
-    transcript_core::{decode_hex, encode_hex},
 };
 
 const CANONICAL_MAGIC: &str = "sealed-lattice-bgv-rns-canonical-object";
 const CANONICAL_OBJECT_VERSION: u64 = 1;
 // Max polynomial components in a BGV object: a degree-2 ciphertext has 3.
+#[cfg(test)]
 const MAXIMUM_COMPONENT_COUNT: usize = 3;
 // Max RNS limbs: 17 data primes + 1 special prime (the extended basis).
+#[cfg(test)]
 const MAXIMUM_MODULUS_COUNT: usize = 18;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BgvObjectKind {
+    #[cfg(test)]
     Plaintext,
     Ciphertext,
 }
@@ -27,11 +31,13 @@ pub(crate) enum BgvObjectKind {
 impl BgvObjectKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            #[cfg(test)]
             Self::Plaintext => "plaintext",
             Self::Ciphertext => "ciphertext",
         }
     }
 
+    #[cfg(test)]
     fn from_str(value: &str) -> CanonicalResult<Self> {
         match value {
             "plaintext" => Ok(Self::Plaintext),
@@ -44,6 +50,7 @@ impl BgvObjectKind {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 pub(crate) struct CanonicalBgvObject {
     pub(crate) object_kind: BgvObjectKind,
@@ -70,6 +77,7 @@ pub(crate) fn serialize_bgv_object(
     Ok(output)
 }
 
+#[cfg(test)]
 pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObject> {
     let mut reader = CanonicalReader::new(bytes);
     let magic = reader.read_string()?;
@@ -118,18 +126,12 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
     Ok(object)
 }
 
+#[cfg(test)]
 pub(crate) fn canonical_bytes_hex(bytes: &[u8]) -> String {
     encode_hex(bytes)
 }
 
-pub(crate) fn parse_bgv_object_hex(
-    canonical_bytes_hex: &str,
-) -> CanonicalResult<CanonicalBgvObject> {
-    let bytes = decode_hex(canonical_bytes_hex)?;
-
-    parse_bgv_object(&bytes)
-}
-
+#[cfg(test)]
 pub(crate) fn plaintext_root(canonical_bytes: &[u8]) -> String {
     namespace_root("sealed-lattice-root/plaintext-root", canonical_bytes)
 }
@@ -157,6 +159,7 @@ fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {
     }
 }
 
+#[cfg(test)]
 fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolynomial> {
     let bgv_parameters_hash = reader.read_string()?;
     let basis_id = reader.read_string()?;
@@ -228,6 +231,7 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
     })
 }
 
+#[cfg(test)]
 fn read_bounded_count(
     reader: &mut CanonicalReader<'_>,
     maximum_count: usize,
@@ -254,8 +258,10 @@ fn validate_component_count(
     component_count: usize,
 ) -> CanonicalResult<()> {
     match object_kind {
+        #[cfg(test)]
         BgvObjectKind::Plaintext if component_count == 1 => Ok(()),
         BgvObjectKind::Ciphertext if (2..=3).contains(&component_count) => Ok(()),
+        #[cfg(test)]
         BgvObjectKind::Plaintext => Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "BGV plaintext canonical object must contain exactly one polynomial component",

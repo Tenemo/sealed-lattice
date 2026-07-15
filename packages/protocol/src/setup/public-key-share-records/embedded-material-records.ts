@@ -1,55 +1,72 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+import { foundationProfile } from '@sealed-lattice/types';
 
-import { BinaryChunkWriter } from '../binary-chunk-writer.js';
-import { setupTransportChunkSizeBytes } from '../vss-coefficient-commitments.js';
+import type { CanonicalProofMaterialChunkPull } from '../setup-proof-material-transport.js';
 
 import {
-    publicKeyShareMaterialEncoding,
-    publicKeyShareProofFamily,
-    type PublicKeyShareCoefficientVectorMaterial,
     type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareMaterialRecord,
-    type PublicKeyShareMaterialRootReference,
-    type PublicKeyShareMaterialSet,
     type PublicKeyShareMaterialSetInput,
     type PublicKeyShareRecord,
 } from './constants-and-types.js';
 import {
-    assertContextMatches,
-    assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
-    assertProtocolHash,
     coefficientVectorFromLittleEndianHex,
     coefficientVectorHash512,
-    contextFields,
+    deriveCollectiveBgvSetupContextHash,
     publicKeyShareMaterialBinaryMagic,
     sortedByRosterPosition,
     validateCommonInput,
 } from './encoding.js';
-import { publicKeyShareRecordsByRosterPosition } from './share-statement-records.js';
+import {
+    derivePublicKeyShareRoot,
+    publicKeyShareRecordsByRosterPosition,
+} from './share-statement-records.js';
+
+export const derivePublicKeyShareMaterialRoot = (
+    input: Pick<
+        PublicKeyShareMaterialSetInput,
+        'setupContext' | 'publicMatrixSeedHash'
+    >,
+    trusteeRosterPosition: number,
+    shareRecord: PublicKeyShareRecord,
+    materialRecord: PublicKeyShareMaterialRecord,
+) =>
+    deriveCanonicalObjectHash({
+        objectType: 'PublicKeyShareMaterial',
+        setupContextHash: deriveCollectiveBgvSetupContextHash(
+            input.setupContext,
+        ),
+        trusteeRosterPosition,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        publicKeyShareRoot: derivePublicKeyShareRoot(
+            input.setupContext,
+            input.publicMatrixSeedHash,
+            trusteeRosterPosition,
+            shareRecord,
+        ),
+        shareCoefficientVectorsLittleEndianHexByLimb:
+            materialRecord.shareCoefficientVectorsLittleEndianHexByLimb,
+    });
 
 const validatePublicKeyShareMaterialContribution = (
     contribution: PublicKeyShareMaterialContributionInput,
     expectedRosterPosition: number,
     input: PublicKeyShareMaterialSetInput,
     shareRecord: PublicKeyShareRecord,
-): readonly PublicKeyShareCoefficientVectorMaterial[] => {
-    assertNonEmptyString(contribution.trusteeIdentity, 'trusteeIdentity');
+): readonly string[] => {
     assertNonNegativeSafeInteger(
         contribution.trusteeRosterPosition,
         'trusteeRosterPosition',
     );
-    if (
-        contribution.trusteeRosterPosition !== expectedRosterPosition ||
-        contribution.trusteeIdentity !== shareRecord.trusteeIdentity
-    ) {
+    if (contribution.trusteeRosterPosition !== expectedRosterPosition) {
         throw new Error(
             'publicKeyShareMaterialContributions must match accepted public-key share records.',
         );
     }
     if (
-        contribution.shareCoefficientVectorsByLimb.length !==
+        contribution.shareCoefficientVectorsLittleEndianHexByLimb.length !==
         input.qSharePrimes.length
     ) {
         throw new Error(
@@ -57,35 +74,18 @@ const validatePublicKeyShareMaterialContribution = (
         );
     }
 
-    return contribution.shareCoefficientVectorsByLimb.map(
-        (coefficientVector, rnsLimbIndex) => {
+    return contribution.shareCoefficientVectorsLittleEndianHexByLimb.map(
+        (coefficientVectorLittleEndianHex, rnsLimbIndex) => {
             const rnsPrime = input.qSharePrimes[rnsLimbIndex];
-            if (
-                rnsPrime === undefined ||
-                coefficientVector.rnsLimbIndex !== rnsLimbIndex ||
-                coefficientVector.rnsPrime !== rnsPrime ||
-                coefficientVector.component !== 'b_i'
-            ) {
+            if (rnsPrime === undefined) {
                 throw new Error(
-                    'publicKeyShareMaterialContributions limb metadata must follow Q_share order.',
+                    'publicKeyShareMaterialContributions must follow Q_share order.',
                 );
             }
-            if (
-                coefficientVector.coefficientByteLength !==
-                input.ringDegree * 8
-            ) {
-                throw new Error(
-                    'publicKeyShareMaterialContributions coefficient byte length must match ringDegree.',
-                );
-            }
-            assertProtocolHash(
-                coefficientVector.coefficientVectorHash512,
-                'publicKeyShareMaterialContributions.coefficientVectorHash512',
-            );
             const coefficients = coefficientVectorFromLittleEndianHex(
-                coefficientVector.coefficientsLeHex,
+                coefficientVectorLittleEndianHex,
                 input.ringDegree,
-                'publicKeyShareMaterialContributions.coefficientsLeHex',
+                'publicKeyShareMaterialContributions.shareCoefficientVectorsLittleEndianHexByLimb',
             );
             if (coefficients.some((coefficient) => coefficient >= rnsPrime)) {
                 throw new Error(
@@ -95,29 +95,14 @@ const validatePublicKeyShareMaterialContribution = (
             const coefficientVectorHash =
                 coefficientVectorHash512(coefficients);
             const shareCoefficientHash =
-                shareRecord.shareCoefficientVectorHash512ByLimb[rnsLimbIndex];
-            if (
-                coefficientVector.coefficientVectorHash512 !==
-                    coefficientVectorHash ||
-                shareCoefficientHash?.coefficientVectorHash512 !==
-                    coefficientVectorHash ||
-                shareCoefficientHash.rnsLimbIndex !== rnsLimbIndex ||
-                shareCoefficientHash.rnsPrime !== rnsPrime ||
-                shareCoefficientHash.component !== 'b_i'
-            ) {
+                shareRecord.shareCoefficientVectorHashesByLimb[rnsLimbIndex];
+            if (shareCoefficientHash !== coefficientVectorHash) {
                 throw new Error(
                     'publicKeyShareMaterialContributions coefficient hash must match the accepted share record.',
                 );
             }
 
-            return {
-                rnsLimbIndex,
-                rnsPrime,
-                component: 'b_i',
-                coefficientByteLength: coefficientVector.coefficientByteLength,
-                coefficientVectorHash512: coefficientVectorHash,
-                coefficientsLeHex: coefficientVector.coefficientsLeHex,
-            };
+            return coefficientVectorLittleEndianHex;
         },
     );
 };
@@ -129,7 +114,7 @@ export const publicKeyShareMaterialRecordsFromContributions = (
     const materialContributions = sortedByRosterPosition(
         input.materialContributions,
     );
-    if (materialContributions.length !== input.participantCount) {
+    if (materialContributions.length !== input.setupContext.participantCount) {
         throw new Error(
             'publicKeyShareMaterialContributions must contain one contribution per participant.',
         );
@@ -142,37 +127,16 @@ export const publicKeyShareMaterialRecordsFromContributions = (
                     'publicKeyShareMaterialContributions must reference accepted public-key share records.',
                 );
             }
-            const shareCoefficientVectorsByLimb =
+            const shareCoefficientVectorsLittleEndianHexByLimb =
                 validatePublicKeyShareMaterialContribution(
                     contribution,
                     expectedRosterPosition,
                     input,
                     shareRecord,
                 );
-            const materialRecordWithoutRoot = {
-                objectType: 'PublicKeyShareMaterial',
-                proofFamily: publicKeyShareProofFamily,
-                materialEncoding: publicKeyShareMaterialEncoding,
-                ...contextFields(input.setupContext),
-                trusteeIdentity: shareRecord.trusteeIdentity,
-                trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-                rnsLimbCount: input.qSharePrimes.length,
-                ringDegree: input.ringDegree,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                publicKeyCrpRoot: input.publicKeyCrpRoot,
-                publicAPolynomialRoot: input.publicAPolynomialRoot,
-                publicKeyShareRoot: shareRecord.publicKeyShareRoot,
-                shareCoefficientVectorsByLimb,
-            } as const satisfies Omit<
-                PublicKeyShareMaterialRecord,
-                'publicKeyShareMaterialRoot'
-            >;
-
             return {
-                ...materialRecordWithoutRoot,
-                publicKeyShareMaterialRoot: deriveCanonicalObjectHash(
-                    materialRecordWithoutRoot,
-                ),
+                objectType: 'PublicKeyShareMaterial',
+                shareCoefficientVectorsLittleEndianHexByLimb,
             } satisfies PublicKeyShareMaterialRecord;
         },
     );
@@ -185,155 +149,199 @@ export const assertPublicKeyShareMaterialInput = (
 ): void => {
     validateCommonInput(input);
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
-    assertContextMatches(
-        input.setupContext,
-        input.publicKeyShares,
-        'publicKeyShares',
-    );
-    if (
-        input.publicKeyShares.participantCount !== input.participantCount ||
-        input.publicKeyShares.rnsLimbCount !== input.qSharePrimes.length ||
-        input.publicKeyShares.publicMatrixSeedHash !==
-            input.publicMatrixSeedHash ||
-        input.publicKeyShares.publicKeyCrpRoot !== input.publicKeyCrpRoot ||
-        input.publicKeyShares.publicAPolynomialRoot !==
-            input.publicAPolynomialRoot
-    ) {
-        throw new Error(
-            'publicKeyShares must bind the same public-key material input.',
-        );
-    }
 };
 
-export const publicKeyShareMaterialRootReferences = (
-    shareMaterialRecords: readonly PublicKeyShareMaterialRecord[],
-): readonly PublicKeyShareMaterialRootReference[] =>
-    shareMaterialRecords.map((materialRecord) => ({
-        trusteeIdentity: materialRecord.trusteeIdentity,
-        trusteeRosterPosition: materialRecord.trusteeRosterPosition,
-        publicKeyShareMaterialRoot: materialRecord.publicKeyShareMaterialRoot,
-    }));
+type PublicKeyShareMaterialBinarySegment = Readonly<
+    | {
+          readonly byteLength: number;
+          readonly byteOffset: number;
+          readonly bytes: Uint8Array;
+      }
+    | {
+          readonly byteLength: number;
+          readonly byteOffset: number;
+          readonly bytesHex: string;
+      }
+>;
 
-export const createPublicKeyShareMaterialSet = (
-    input: PublicKeyShareMaterialSetInput,
-): PublicKeyShareMaterialSet => {
-    assertPublicKeyShareMaterialInput(input);
-    const shareMaterialRecords =
-        publicKeyShareMaterialRecordsFromContributions(input);
-    const materialSetWithoutRoot = {
-        objectType: 'PublicKeyShareMaterialSet',
-        proofFamily: publicKeyShareProofFamily,
-        materialEncoding: publicKeyShareMaterialEncoding,
-        ...contextFields(input.setupContext),
-        participantCount: input.participantCount,
-        rnsLimbCount: input.qSharePrimes.length,
-        ringDegree: input.ringDegree,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        publicKeyCrpRoot: input.publicKeyCrpRoot,
-        publicAPolynomialRoot: input.publicAPolynomialRoot,
-        publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
-        publicKeyShareMaterialRoots:
-            publicKeyShareMaterialRootReferences(shareMaterialRecords),
-        shareMaterialRecords,
-    } as const satisfies Omit<
-        PublicKeyShareMaterialSet,
-        'publicKeyShareMaterialSetRoot'
-    >;
+type PublicKeyShareMaterialEncodingSource = Readonly<{
+    readonly pullChunk: CanonicalProofMaterialChunkPull;
+    readonly totalByteLength: number;
+}>;
 
-    return {
-        ...materialSetWithoutRoot,
-        publicKeyShareMaterialSetRoot: deriveCanonicalObjectHash(
-            materialSetWithoutRoot,
-        ),
-    } satisfies PublicKeyShareMaterialSet;
-};
-
-const sortedPublicKeyShareMaterialRecords = (input: {
-    readonly participantCount: number;
-    readonly shareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
-}): readonly PublicKeyShareMaterialRecord[] => {
-    const materialRecords = sortedByRosterPosition(input.shareMaterialRecords);
-    if (materialRecords.length !== input.participantCount) {
-        throw new Error(
-            'publicKeyShareMaterial.shareMaterialRecords must contain one record per participant.',
-        );
-    }
-    materialRecords.forEach((materialRecord, expectedRosterPosition) => {
-        if (materialRecord.trusteeRosterPosition !== expectedRosterPosition) {
-            throw new Error(
-                'publicKeyShareMaterial.shareMaterialRecords roster positions must be contiguous from zero.',
-            );
-        }
-    });
-
-    return materialRecords;
-};
-
-export const encodePublicKeyShareMaterialRecords = (
+const publicKeyShareMaterialBinarySegments = (
     input: Readonly<{
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
+        readonly qSharePrimes: readonly number[];
         readonly ringDegree: number;
         readonly shareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
     }>,
-): readonly Uint8Array[] => {
-    const writer = new BinaryChunkWriter({
-        chunkSizeBytes: setupTransportChunkSizeBytes,
-        emptyErrorMessage:
-            'public-key share material transport requires bytes.',
-    });
-    writer.writeBytes(publicKeyShareMaterialBinaryMagic);
-    writer.writeVaruint(1);
-    writer.writeVaruint(input.participantCount);
-    writer.writeVaruint(input.rnsLimbCount);
-    writer.writeVaruint(input.ringDegree);
-    sortedPublicKeyShareMaterialRecords(input).forEach((materialRecord) => {
-        writer.writeVaruint(materialRecord.trusteeRosterPosition);
-        materialRecord.shareCoefficientVectorsByLimb.forEach(
-            (coefficientVector, expectedRnsLimbIndex) => {
-                if (
-                    coefficientVector.rnsLimbIndex !== expectedRnsLimbIndex ||
-                    coefficientVector.component !== 'b_i'
-                ) {
-                    throw new Error(
-                        'publicKeyShareMaterial coefficient vector limbs must follow Q_share order.',
-                    );
-                }
-                writer.writeVaruint(expectedRnsLimbIndex);
-                writer.writeU64LittleEndian(
-                    coefficientVector.rnsPrime,
-                    'publicKeyShareMaterial.rnsPrime',
-                );
-                const coefficients = coefficientVectorFromLittleEndianHex(
-                    coefficientVector.coefficientsLeHex,
-                    input.ringDegree,
-                    'publicKeyShareMaterial.coefficientsLeHex',
-                );
-                if (
-                    coefficients.some(
-                        (coefficient) =>
-                            coefficient >= coefficientVector.rnsPrime,
-                    ) ||
-                    coefficientVector.coefficientVectorHash512 !==
-                        coefficientVectorHash512(coefficients)
-                ) {
-                    throw new Error(
-                        'publicKeyShareMaterial coefficient vectors must be canonical and hash-bound before transport encoding.',
-                    );
-                }
-                coefficients.forEach((coefficient) =>
-                    writer.writeU64LittleEndian(
-                        coefficient,
-                        'publicKeyShareMaterial.coefficient',
-                    ),
-                );
-            },
+): readonly PublicKeyShareMaterialBinarySegment[] => {
+    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
+    if (input.shareMaterialRecords.length === 0) {
+        throw new Error(
+            'publicKeyShareMaterial.shareMaterialRecords must contain at least one record.',
+        );
+    }
+    if (input.qSharePrimes.length === 0) {
+        throw new Error('qSharePrimes must contain at least one RNS prime.');
+    }
+    input.qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {
+        assertPositiveSafeInteger(
+            rnsPrime,
+            `qSharePrimes.${String(rnsLimbIndex)}`,
         );
     });
+    const segments: PublicKeyShareMaterialBinarySegment[] = [];
+    let byteOffset = 0;
+    const appendBytes = (bytes: Uint8Array): void => {
+        segments.push({ byteLength: bytes.byteLength, byteOffset, bytes });
+        byteOffset += bytes.byteLength;
+    };
+    const appendHex = (bytesHex: string): void => {
+        const byteLength = bytesHex.length / 2;
+        segments.push({ byteLength, byteOffset, bytesHex });
+        byteOffset += byteLength;
+    };
 
-    return writer.finish();
+    appendBytes(publicKeyShareMaterialBinaryMagic.slice());
+    for (const materialRecord of input.shareMaterialRecords) {
+        if (
+            materialRecord.shareCoefficientVectorsLittleEndianHexByLimb
+                .length !== input.qSharePrimes.length
+        ) {
+            throw new Error(
+                'publicKeyShareMaterial must contain one coefficient vector per Q_share limb.',
+            );
+        }
+        for (const [
+            expectedRnsLimbIndex,
+            coefficientVectorLittleEndianHex,
+        ] of materialRecord.shareCoefficientVectorsLittleEndianHexByLimb.entries()) {
+            const rnsPrime = input.qSharePrimes[expectedRnsLimbIndex];
+            if (rnsPrime === undefined) {
+                throw new Error(
+                    'publicKeyShareMaterial coefficient vector limbs must follow Q_share order.',
+                );
+            }
+            const coefficients = coefficientVectorFromLittleEndianHex(
+                coefficientVectorLittleEndianHex,
+                input.ringDegree,
+                'publicKeyShareMaterial.shareCoefficientVectorsLittleEndianHexByLimb',
+            );
+            if (coefficients.some((coefficient) => coefficient >= rnsPrime)) {
+                throw new Error(
+                    'publicKeyShareMaterial coefficient vectors must contain canonical residues before transport encoding.',
+                );
+            }
+            appendHex(coefficientVectorLittleEndianHex);
+        }
+    }
+
+    return segments;
 };
 
-export const encodePublicKeyShareMaterial = (
-    materialSet: PublicKeyShareMaterialSet,
-): readonly Uint8Array[] => encodePublicKeyShareMaterialRecords(materialSet);
+const copyHexBytes = (
+    bytesHex: string,
+    sourceByteOffset: number,
+    destination: Uint8Array,
+    destinationByteOffset: number,
+    byteLength: number,
+): void => {
+    for (let byteIndex = 0; byteIndex < byteLength; byteIndex += 1) {
+        const hexByteOffset = (sourceByteOffset + byteIndex) * 2;
+        const byte = Number.parseInt(
+            bytesHex.slice(hexByteOffset, hexByteOffset + 2),
+            16,
+        );
+        if (!Number.isInteger(byte)) {
+            throw new Error(
+                'public-key share material contains malformed coefficient hex.',
+            );
+        }
+        destination[destinationByteOffset + byteIndex] = byte;
+    }
+};
+
+export const createPublicKeyShareMaterialEncodingSource = (
+    input: Readonly<{
+        readonly qSharePrimes: readonly number[];
+        readonly ringDegree: number;
+        readonly shareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
+    }>,
+): PublicKeyShareMaterialEncodingSource => {
+    const segments = publicKeyShareMaterialBinarySegments(input);
+    const finalSegment = segments[segments.length - 1];
+    if (finalSegment === undefined) {
+        throw new Error('public-key share material transport requires bytes.');
+    }
+    const totalByteLength = finalSegment.byteOffset + finalSegment.byteLength;
+    if (!Number.isSafeInteger(totalByteLength) || totalByteLength <= 0) {
+        throw new Error(
+            'public-key share material byte length is outside the JavaScript safe integer range.',
+        );
+    }
+
+    const pullChunk: CanonicalProofMaterialChunkPull = ({
+        chunkIndex,
+        expectedByteLength,
+    }) => {
+        if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0) {
+            throw new TypeError(
+                'public-key share material chunk index must be a non-negative safe integer.',
+            );
+        }
+        const chunkByteOffset =
+            chunkIndex * foundationProfile.streamChunkByteLength;
+        if (chunkByteOffset >= totalByteLength) {
+            if (expectedByteLength !== 0) {
+                throw new Error(
+                    'public-key share material source was pulled past its canonical end.',
+                );
+            }
+            return Promise.resolve(undefined);
+        }
+        const canonicalByteLength = Math.min(
+            foundationProfile.streamChunkByteLength,
+            totalByteLength - chunkByteOffset,
+        );
+        if (expectedByteLength !== canonicalByteLength) {
+            throw new Error(
+                'public-key share material pull length must match the canonical chunk boundary.',
+            );
+        }
+        const chunk = new Uint8Array(canonicalByteLength);
+        const chunkEndOffset = chunkByteOffset + canonicalByteLength;
+        for (const segment of segments) {
+            const segmentEndOffset = segment.byteOffset + segment.byteLength;
+            const overlapStart = Math.max(chunkByteOffset, segment.byteOffset);
+            const overlapEnd = Math.min(chunkEndOffset, segmentEndOffset);
+            if (overlapStart >= overlapEnd) {
+                continue;
+            }
+            const sourceByteOffset = overlapStart - segment.byteOffset;
+            const destinationByteOffset = overlapStart - chunkByteOffset;
+            const overlapByteLength = overlapEnd - overlapStart;
+            if ('bytes' in segment) {
+                chunk.set(
+                    segment.bytes.subarray(
+                        sourceByteOffset,
+                        sourceByteOffset + overlapByteLength,
+                    ),
+                    destinationByteOffset,
+                );
+            } else {
+                copyHexBytes(
+                    segment.bytesHex,
+                    sourceByteOffset,
+                    chunk,
+                    destinationByteOffset,
+                    overlapByteLength,
+                );
+            }
+        }
+
+        return Promise.resolve(chunk.buffer);
+    };
+
+    return { pullChunk, totalByteLength };
+};

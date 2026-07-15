@@ -6,6 +6,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PolynomialDomain {
     Coefficient,
+    #[cfg(test)]
     Ntt,
 }
 
@@ -13,10 +14,12 @@ impl PolynomialDomain {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Coefficient => "coefficient",
+            #[cfg(test)]
             Self::Ntt => "ntt",
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn from_str(value: &str) -> Option<Self> {
         match value {
             "coefficient" => Some(Self::Coefficient),
@@ -95,6 +98,7 @@ impl RnsPolynomial {
                 "BGV-RNS object coefficient count must match the selected polynomial degree",
             ));
         }
+        #[cfg(test)]
         if self.domain != PolynomialDomain::Coefficient {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,

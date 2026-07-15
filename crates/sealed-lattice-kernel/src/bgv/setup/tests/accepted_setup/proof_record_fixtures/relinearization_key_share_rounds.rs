@@ -1,46 +1,43 @@
 use super::*;
 use rayon::prelude::*;
 
-use crate::bgv::setup::evaluation_key_share_material::EvaluationKeyShareProofFamily;
-use crate::hashing::derive_canonical_object_hash;
+use crate::bgv::setup::accepted_setup::{
+    evaluation_key_proof_common_binding, expected_relinearization_key_switch_seed,
+    scheduled_relinearization_levels,
+};
+use crate::bgv::setup::evaluation_key_share_material::{
+    EvaluationKeyShareDerivedMaterialBinding, EvaluationKeyShareProofFamily,
+};
 
 // Builds the relinearization key-share rounds container the accepted-setup
-// verifier's `verify_relinearization_key_share_rounds` recomputes: two-round
-// collective relinearization with round-one shares of the trustee secret, the
-// public round-one aggregate diagonals, and round-two shares against that
-// aggregate. Component vectors are embedded (the accepted-setup verifier accepts
-// the `embedded-full-key-switch-component-vectors` encoding directly), and every
-// record and aggregate root is a canonical object hash with no profile-identifier
-// fields, matching the verifier's recompute exactly.
+// verifier consumes: two-round collective relinearization with round-one
+// shares of the trustee secret, the public round-one aggregate diagonals, and
+// round-two shares against that aggregate. Component vectors cross the
+// canonical authenticated stream and the records retain only their material
+// roots.
 pub(in super::super) fn relinearization_key_share_rounds_fixture(
     package: &serde_json::Value,
+    accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> RelinearizationKeyShareRoundsFixture {
-    let setup_context = &package["setupContext"];
-    let schedule = &package["evaluatorKeySchedule"];
+    let evaluation_key_binding =
+        evaluation_key_proof_common_binding(package).expect("evaluation-key proof binding");
     let participant_count = participant_count_from_package(package);
     let trustee_roster_positions = (0..participant_count).collect::<Vec<_>>();
-    let level_schedule = schedule["relinearizationLevelSchedule"]
-        .as_array()
-        .expect("relinearization level schedule");
-    let scheduled_levels = level_schedule
-        .iter()
-        .map(|level_entry| level_entry["level"].as_u64().expect("level"))
-        .collect::<Vec<_>>();
+    let scheduled_levels =
+        scheduled_relinearization_levels().expect("relinearization level schedule");
 
-    let mut round_one_records = Vec::new();
-    let mut round_one_roots_by_level = BTreeMap::<u64, Vec<serde_json::Value>>::new();
-    let mut round_one_share_roots = BTreeMap::<(u64, u64), String>::new();
-    let mut round_one_record_roots = BTreeMap::<(u64, u64), String>::new();
+    let mut round_one_key_switch_component_material_roots = Vec::new();
     let mut round_one_aggregate_diagonals_by_level = BTreeMap::<u64, Vec<Vec<u64>>>::new();
-    let ring_degree = source_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     for level in &scheduled_levels {
         let level = *level;
         let key_switch_seed_hex =
-            relinearization_key_switch_seed_for_test(schedule, "round-one", level);
+            expected_relinearization_key_switch_seed(&evaluation_key_binding, "round-one", level)
+                .expect("round-one relinearization key-switch seed");
         // Generate every trustee's key-switch component material for this level
         // in parallel; the deterministic material is then consumed in roster
         // order by the sequential aggregate-accumulation and record-building
-        // pass below, so the emitted records and roots are byte-identical.
+        // pass below, so the emitted records are byte-identical.
         let level_materials: Vec<EvaluationKeyShareFixtureMaterial> = trustee_roster_positions
             .par_iter()
             .map(|trustee_roster_position| {
@@ -84,77 +81,30 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                         .expect("round-one aggregate accumulation");
                 }
             }
-            let round_one_share_root = fixture_material.component_vector_root.clone();
-            let mut record = serde_json::json!({
-                "objectType": "RelinearizationKeyShareRoundOne",
-                "proofFamily": "relinearization-key-share",
-                "ceremonyId": setup_context["ceremonyId"],
-                "manifestHash": setup_context["manifestHash"],
-                "rosterHash": setup_context["rosterHash"],
-                "setupParametersHash": setup_context["setupParametersHash"],
-                "setupEpoch": setup_context["setupEpoch"],
-                "trusteeIdentity": trustee_identity.as_str(),
-                "trusteeRosterPosition": trustee_roster_position,
-                "level": level,
-                "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-                "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-                "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
-                "roundOneShareRoot": round_one_share_root,
-                "keySwitchMaterialEncoding": "embedded-full-key-switch-component-vectors",
-                "keySwitchDomain": "relinearization",
-                "keySwitchSeedHex": key_switch_seed_hex,
-                "ringDegree": ring_degree,
-                "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
-                "keySwitchComponentVectors": serde_json::Value::Array(
-                    fixture_material.component_vector_entries.clone(),
-                ),
-            });
-            record["roundOneRecordRoot"] = serde_json::json!(
-                derive_canonical_object_hash(&record).expect("round-one record root")
-            );
-            let record_root = record["roundOneRecordRoot"]
-                .as_str()
-                .expect("round-one record root")
-                .to_string();
-            round_one_roots_by_level
-                .entry(level)
-                .or_default()
-                .push(serde_json::json!({
-                    "trusteeIdentity": trustee_identity.as_str(),
-                    "trusteeRosterPosition": trustee_roster_position,
-                    "roundOneRecordRoot": record_root,
-                }));
-            round_one_share_roots.insert((level, trustee_roster_position), round_one_share_root);
-            round_one_record_roots.insert((level, trustee_roster_position), record_root);
-            round_one_records.push(record);
+            let authenticated_material_root =
+                authenticate_evaluation_key_share_component_material_fixture(
+                    EvaluationKeyShareProofFamily::Relinearization,
+                    level,
+                    EvaluationKeyShareDerivedMaterialBinding {
+                        trustee_identity: &trustee_identity,
+                        trustee_roster_position,
+                        key_switch_domain: "relinearization",
+                        key_switch_seed_hex: &key_switch_seed_hex,
+                    },
+                    ring_degree,
+                    &fixture_material,
+                    accepted_setup_session,
+                );
+            round_one_key_switch_component_material_roots.push(authenticated_material_root);
         }
     }
-    let mut round_one_aggregate_roots = Vec::new();
-    let mut round_one_aggregate_root_by_level = BTreeMap::new();
-    for level in &scheduled_levels {
-        let level = *level;
-        let aggregate_root = derive_canonical_object_hash(&serde_json::json!({
-            "objectType": "RelinearizationRoundOneAggregate",
-            "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-            "level": level,
-            "roundOneRecordRoots": round_one_roots_by_level
-                .get(&level)
-                .expect("round-one roots by level"),
-        }))
-        .expect("round-one aggregate root");
-        round_one_aggregate_roots.push(serde_json::json!({
-            "level": level,
-            "roundOneAggregateRoot": aggregate_root,
-        }));
-        round_one_aggregate_root_by_level.insert(level, aggregate_root);
-    }
 
-    let mut round_two_records = Vec::new();
-    let mut round_two_roots_by_level = BTreeMap::<u64, Vec<serde_json::Value>>::new();
+    let mut round_two_key_switch_component_material_roots = Vec::new();
     for level in &scheduled_levels {
         let level = *level;
         let key_switch_seed_hex =
-            relinearization_key_switch_seed_for_test(schedule, "round-two", level);
+            expected_relinearization_key_switch_seed(&evaluation_key_binding, "round-two", level)
+                .expect("round-two relinearization key-switch seed");
         let round_one_aggregate_diagonals = round_one_aggregate_diagonals_by_level
             .get(&level)
             .expect("round-one aggregate diagonals");
@@ -184,103 +134,29 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
             .zip(level_materials)
         {
             let trustee_identity = format!("trustee-{trustee_roster_position}");
-            let round_two_share_root = fixture_material.component_vector_root.clone();
-            let mut record = serde_json::json!({
-                "objectType": "RelinearizationKeyShareRoundTwo",
-                "proofFamily": "relinearization-key-share",
-                "ceremonyId": setup_context["ceremonyId"],
-                "manifestHash": setup_context["manifestHash"],
-                "rosterHash": setup_context["rosterHash"],
-                "setupParametersHash": setup_context["setupParametersHash"],
-                "setupEpoch": setup_context["setupEpoch"],
-                "trusteeIdentity": trustee_identity.as_str(),
-                "trusteeRosterPosition": trustee_roster_position,
-                "level": level,
-                "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-                "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-                "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
-                "roundOneShareRoot": round_one_share_roots
-                    .get(&(level, trustee_roster_position))
-                    .expect("round-one share root"),
-                "roundOneRecordRoot": round_one_record_roots
-                    .get(&(level, trustee_roster_position))
-                    .expect("round-one record root"),
-                "roundOneAggregateRoot": round_one_aggregate_root_by_level
-                    .get(&level)
-                    .expect("round-one aggregate root"),
-                "roundTwoShareRoot": round_two_share_root,
-                "keySwitchMaterialEncoding": "embedded-full-key-switch-component-vectors",
-                "keySwitchDomain": "relinearization",
-                "keySwitchSeedHex": key_switch_seed_hex,
-                "ringDegree": ring_degree,
-                "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
-                "keySwitchComponentVectors": serde_json::Value::Array(
-                    fixture_material.component_vector_entries.clone(),
-                ),
-            });
-            record["roundTwoRecordRoot"] = serde_json::json!(
-                derive_canonical_object_hash(&record).expect("round-two record root")
-            );
-            let record_root = record["roundTwoRecordRoot"]
-                .as_str()
-                .expect("round-two record root")
-                .to_string();
-            round_two_roots_by_level
-                .entry(level)
-                .or_default()
-                .push(serde_json::json!({
-                    "trusteeIdentity": trustee_identity.as_str(),
-                    "trusteeRosterPosition": trustee_roster_position,
-                    "roundTwoRecordRoot": record_root,
-                }));
-            round_two_records.push(record);
+            let authenticated_material_root =
+                authenticate_evaluation_key_share_component_material_fixture(
+                    EvaluationKeyShareProofFamily::Relinearization,
+                    level,
+                    EvaluationKeyShareDerivedMaterialBinding {
+                        trustee_identity: &trustee_identity,
+                        trustee_roster_position,
+                        key_switch_domain: "relinearization",
+                        key_switch_seed_hex: &key_switch_seed_hex,
+                    },
+                    ring_degree,
+                    &fixture_material,
+                    accepted_setup_session,
+                );
+            round_two_key_switch_component_material_roots.push(authenticated_material_root);
         }
     }
-    let round_two_aggregate_roots = scheduled_levels
-        .iter()
-        .map(|level| {
-            let aggregate_root = derive_canonical_object_hash(&serde_json::json!({
-                "objectType": "RelinearizationRoundTwoAggregate",
-                "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-                "level": level,
-                "roundOneAggregateRoot": round_one_aggregate_root_by_level
-                    .get(level)
-                    .expect("round-one aggregate root"),
-                "roundTwoRecordRoots": round_two_roots_by_level
-                    .get(level)
-                    .expect("round-two roots by level"),
-            }))
-            .expect("round-two aggregate root");
-            serde_json::json!({
-                "level": level,
-                "roundTwoAggregateRoot": aggregate_root,
-            })
-        })
-        .collect::<Vec<_>>();
 
-    let mut rounds = serde_json::json!({
+    let rounds = serde_json::json!({
         "objectType": "RelinearizationKeyShareRounds",
-        "proofFamily": "relinearization-key-share",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": participant_count_from_package(package),
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-        "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
-        "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-        "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
-        "relinearizationLevelSchedule": schedule["relinearizationLevelSchedule"],
-        "roundOneAggregateRoots": round_one_aggregate_roots,
-        "roundOneRecords": round_one_records,
-        "roundTwoAggregateRoots": round_two_aggregate_roots,
-        "roundTwoRecords": round_two_records,
+        "roundOneKeySwitchComponentMaterialRoots": round_one_key_switch_component_material_roots,
+        "roundTwoKeySwitchComponentMaterialRoots": round_two_key_switch_component_material_roots,
     });
-    rounds["relinearizationKeyShareRoundsRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&rounds).expect("relinearization rounds root")
-    );
 
     RelinearizationKeyShareRoundsFixture {
         rounds,

@@ -1,21 +1,5 @@
 use super::*;
 
-// The plaintext selector polynomial placing a broadcast value into a single
-// target slot.
-pub(crate) fn slot_selector(slot: usize) -> CanonicalResult<Vec<u64>> {
-    let mut slots = vec![0_u64; POLYNOMIAL_DEGREE];
-    slots[slot] = 1;
-
-    encode_slots_to_coefficients(&slots)
-}
-
-// Logical option i lives in the batch slot whose odd CRT point is g^i mod 2N
-// (generator g = 3); slot k corresponds to point 2k+1, so the inverse map is
-// (g^i - 1)/2. This fixes the canonical packed-score and target slot ordering.
-pub(crate) fn packed_score_slot(logical_index: usize) -> usize {
-    (galois_power(logical_index) - 1) / 2
-}
-
 pub(crate) fn galois_element_moving_slot_to_target(
     source_slot: usize,
     target_slot: usize,
@@ -27,11 +11,11 @@ pub(crate) fn galois_element_moving_slot_to_target(
         ));
     }
     let ring_order = 2 * POLYNOMIAL_DEGREE;
-    let source_odd = 2 * source_slot + 1;
-    let target_odd = 2 * target_slot + 1;
-    let inverse_target_odd = inverse_galois_element(target_odd)?;
+    let source_exponent = logical_slot_galois_element(source_slot)?;
+    let target_exponent = logical_slot_galois_element(target_slot)?;
+    let inverse_target_exponent = inverse_galois_element(target_exponent)?;
 
-    Ok((source_odd * inverse_target_odd) % ring_order)
+    Ok((source_exponent * inverse_target_exponent) % ring_order)
 }
 
 pub(crate) fn direct_score_packing_galois_elements(
@@ -43,19 +27,7 @@ pub(crate) fn direct_score_packing_galois_elements(
             "direct score packing requires at least two options and a valid packed window",
         ));
     }
-    let mut elements = BTreeSet::new();
-    for option_index in 0..option_count {
-        let source_slot = option_index;
-        for target_logical_index in [option_index, option_index + option_count] {
-            let target_slot = packed_score_slot(target_logical_index);
-            let galois_element = galois_element_moving_slot_to_target(source_slot, target_slot)?;
-            if galois_element != 1 {
-                elements.insert(galois_element);
-            }
-        }
-    }
-
-    Ok(elements.into_iter().collect())
+    Ok(vec![galois_element_moving_slot_to_target(0, option_count)?])
 }
 
 pub(crate) fn pack_direct_score_slots(
@@ -70,22 +42,20 @@ pub(crate) fn pack_direct_score_slots(
             "direct score-slot packing requires at least two options and a valid packed window",
         ));
     }
-    let normalized_scores = normalize_scaling(direct_scores)?;
-    let mut packed_terms = Vec::with_capacity(option_count * 2);
-    let rotation_seed = format!("{seed_hex}-direct-score-pack-rotation");
-    for option in 0..option_count {
-        for logical_index in [option, option + option_count] {
-            packed_terms.push(move_single_slot_value(
-                context,
-                &normalized_scores,
-                option,
-                packed_score_slot(logical_index),
-                &rotation_seed,
-            )?);
-        }
-    }
+    let option_indices = (0..option_count).collect::<Vec<_>>();
+    let selected_scores = plaintext_mul(
+        &normalize_scaling(direct_scores)?,
+        &packed_score_slot_selector(&option_indices)?,
+    )?;
+    let duplicated_scores = rotate_with_compact_inverse_generator_basis(
+        context,
+        &selected_scores,
+        option_count,
+        selected_scores.level,
+        &format!("{seed_hex}-direct-score-pack-rotation"),
+    )?;
 
-    sum_aligned(&packed_terms)
+    sum_aligned(&[selected_scores, duplicated_scores])
 }
 
 pub(crate) fn packed_score_slot_selector(logical_indices: &[usize]) -> CanonicalResult<Vec<u64>> {
@@ -102,7 +72,7 @@ pub(crate) fn packed_score_weighted_selector(
 ) -> CanonicalResult<Vec<u64>> {
     let mut slots = vec![0_u64; POLYNOMIAL_DEGREE];
     for (logical_index, weight) in weights {
-        slots[packed_score_slot(*logical_index)] = weight % PLAINTEXT_MODULUS;
+        slots[*logical_index] = weight % PLAINTEXT_MODULUS;
     }
 
     encode_slots_to_coefficients(&slots)

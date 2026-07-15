@@ -1,12 +1,34 @@
 use super::*;
 
-use crate::bgv::setup::setup_proof::SetupProofMaterialTransportHashes;
+use crate::bgv::setup::same_secret_bridge::SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
+    verify_same_secret_bridge_proof_source_from_request,
+    verify_vss_share_linkage_proof_source_from_request,
 };
+use crate::bgv::setup::vss_commitment::VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN;
 use crate::hashing::{derive_canonical_object_hash, hash512_hex};
 
 const VSS_MATERIAL_SEED_DOMAIN: &str = "sealed-lattice/accepted-setup/vss-material-seed";
+
+struct VssProofRecordFixture {
+    record: serde_json::Value,
+    proof_binding_lease: crate::bgv::setup::CanonicalSetupProofBindingLease,
+}
+
+struct VssProofRecordSetFixture {
+    proof_bytes_hashes: Vec<String>,
+    proof_binding_leases: Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
+}
+
+struct VssProofMaterialSetFixture {
+    value: serde_json::Value,
+    proof_binding_leases: Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
+}
+
+pub(super) fn vss_fixture_threshold_degree(package: &serde_json::Value) -> u64 {
+    participant_count_from_package(package) / 3 + 1
+}
 
 // The canonical committed-material commitment-context hash for a role and
 // context, identical to the hash `compute_vss_committed_material_commitment`
@@ -36,19 +58,50 @@ pub(super) fn accepted_vss_material_seed(commitment_context_hash: &str) -> Strin
     )
 }
 
-const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str = "sealed-lattice-vss-public-commitment-binary";
+pub(super) fn same_secret_bridge_target_constant_records_from_fixture_package(
+    package: &serde_json::Value,
+    trustee_roster_position: u64,
+) -> Vec<&serde_json::Value> {
+    let coefficient_set = &package["vssPublicCoefficientCommitmentSet"];
+    let threshold_degree = vss_fixture_threshold_degree(package) as usize;
+    let q_share_rns_limb_count = DATA_PRIMES.len();
+    let source_record = &coefficient_set["sourceTrusteeRecords"]
+        .as_array()
+        .expect("target coefficient source records")[trustee_roster_position as usize];
+    let coefficient_records = source_record["coefficientCommitments"]
+        .as_array()
+        .expect("target coefficient records");
+
+    (0..q_share_rns_limb_count)
+        .map(|rns_limb_index| &coefficient_records[rns_limb_index * threshold_degree])
+        .collect()
+}
+
+pub(super) fn same_secret_bridge_committed_material_seeds_from_fixture_package(
+    package: &serde_json::Value,
+    trustee_roster_position: u64,
+) -> Vec<String> {
+    let context_hashes_by_bound_message =
+        same_secret_bridge_target_constant_records_from_fixture_package(
+            package,
+            trustee_roster_position,
+        )
+        .iter()
+        .map(|coefficient_record| {
+            coefficient_record["commitment"]["commitmentContextHash"]
+                .as_str()
+                .expect("bridge target commitment context hash")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    context_hashes_by_bound_message
+        .iter()
+        .map(|context_hash| accepted_vss_material_seed(context_hash))
+        .collect()
+}
+
 const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
-const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/vss-share-linkage/proof-bytes";
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
-const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/same-secret-bridge/proof-bytes";
-const SAME_SECRET_RELATION: &str =
-    "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";
-const SAME_SECRET_BRIDGE_RELATION: &str = "target-basis constant coefficient commitments bind to the same signed ternary trustee secret as the source data-basis VSS constant commitments";
-const SAME_SECRET_BRIDGE_INTEGER_SUPPORT: &str = "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb";
-const SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION: &str = "coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime";
-const SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER: &str = "target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime";
 pub(in super::super) const VSS_SHARE_LINKAGE_PROOF_CHECKPOINT_DIRECTORY: &str =
     "vss-share-linkage-proof-material";
 
@@ -62,14 +115,16 @@ mod transport;
 // Builds only the two aggregate coordinates needed by the direct-verifier
 // mutation test. The aggregate proofs still use the content-addressed proof
 // checkpoint store; unrelated accepted-setup proof families are not generated.
-pub(in super::super) fn compact_aggregate_threshold_proof_fixture() -> serde_json::Value {
+pub(in super::super) struct CompactAggregateThresholdProofFixture {
+    pub(in super::super) package: serde_json::Value,
+    pub(in super::super) proof_binding_leases:
+        Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
+}
+
+pub(in super::super) fn compact_aggregate_threshold_proof_fixture()
+-> CompactAggregateThresholdProofFixture {
     let mut package = minimal_collective_setup_package_for_participant_count(3);
-    let ring_degree = usize::try_from(
-        package["vssCoefficientCommitmentMaterial"]["ringDegree"]
-            .as_u64()
-            .expect("VSS coefficient commitment material ring degree"),
-    )
-    .expect("VSS coefficient commitment material ring degree fits usize");
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(&package);
     package["vssPublicCoefficientCommitmentSet"] =
         commitment_sets::vss_public_coefficient_commitment_set_object(&package, ring_degree);
     package["vssPublicRecipientShareCommitmentSet"] =
@@ -77,16 +132,24 @@ pub(in super::super) fn compact_aggregate_threshold_proof_fixture() -> serde_jso
     let mut aggregate_threshold_commitment_set =
         commitment_sets::vss_public_aggregate_threshold_commitment_set_without_proofs_for_coordinates(
             &package,
-            &[(0, 0), (1, 0)],
+            &[(0, 0), (0, 1)],
         );
-    aggregate_threshold_commitment_set["aggregateThresholdProofs"] =
-        serde_json::json!(aggregate_threshold::vss_aggregate_threshold_proofs(
-            &package,
-            &aggregate_threshold_commitment_set,
-        ));
+    let aggregate_threshold_proofs = aggregate_threshold::vss_aggregate_threshold_proofs(
+        &package,
+        &aggregate_threshold_commitment_set,
+        &[(0, 0), (0, 1)],
+    );
+    aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"] =
+        serde_json::json!(aggregate_threshold_proofs.proof_bytes_hashes);
     package["vssPublicAggregateThresholdCommitmentSet"] = aggregate_threshold_commitment_set;
 
-    package
+    CompactAggregateThresholdProofFixture {
+        package,
+        proof_binding_leases: aggregate_threshold_proofs.proof_binding_leases,
+    }
 }
 
-pub(in super::super) use finalized_package::finalize_collective_setup_package;
+pub(in super::super) use finalized_package::{
+    FinalizedCollectiveSetupPackageFixture, finalize_collective_setup_package,
+};
+pub(in super::super) use transport::descriptor_backed_vss_proof_material_fixture;

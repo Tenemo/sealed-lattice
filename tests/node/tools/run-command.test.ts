@@ -1,115 +1,65 @@
-import path from 'node:path';
-
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-    buildPackageManagerEntryPointCandidates,
-    resolvePackageManagerRunnerForPackageManager,
-} from '#tools/ci/package-manager-runner';
-import {
-    createAbortableCommandSpawnOptions,
     installProcessSignalChildCleanup,
     killProcessTree,
+    runCommandAndCaptureOutput,
 } from '#tools/ci/run-command';
+import { normalizeProcessStatus } from '#tools/ci/run-log-diagnostics';
 
-describe('package manager runner resolution', () => {
-    it('resolves a requested package manager through the shared runner helper', () => {
-        const nodeExecutablePath = path.resolve(
-            'toolchains',
-            'node',
-            'bin',
-            'node',
-        );
-        const npmEntryPointCandidates = buildPackageManagerEntryPointCandidates(
-            'npm',
-            '',
-            nodeExecutablePath,
-        );
-        const expectedNpmEntryPoint = npmEntryPointCandidates[1];
-        if (expectedNpmEntryPoint === undefined) {
-            throw new Error(
-                'Expected the npm candidate list to include fallback entries.',
-            );
-        }
+describe('command execution', () => {
+    it('captures asynchronous output and a nonzero process status', async () => {
+        const result = await runCommandAndCaptureOutput({
+            args: [
+                '--input-type=module',
+                '--eval',
+                [
+                    "process.stdout.write('first-out\\n');",
+                    "process.stderr.write('first-error\\n');",
+                    "setTimeout(() => { process.stdout.write('last-out\\n'); process.exitCode = 7; }, 20);",
+                ].join(' '),
+            ],
+            command: process.execPath,
+            description: 'Exercise captured output',
+        });
 
-        const runner = resolvePackageManagerRunnerForPackageManager(
-            'npm',
-            path.resolve('toolchains', 'pnpm', 'bin', 'pnpm.cjs'),
-            '',
-            nodeExecutablePath,
-            (candidatePath) => candidatePath === expectedNpmEntryPoint,
-        );
-
-        expect(runner).toEqual({
-            command: nodeExecutablePath,
-            commandArgumentsPrefix: [expectedNpmEntryPoint],
-            kind: 'npm',
+        expect(result).toMatchObject({
+            exitCode: 7,
+            stderr: 'first-error\n',
+            stdout: 'first-out\nlast-out\n',
+            terminationSignal: null,
         });
     });
 });
 
-describe('abortable command process cleanup', () => {
-    it('starts non-Windows commands in a process group', () => {
-        const environment = { PATH: '/usr/bin' };
-
-        expect(
-            createAbortableCommandSpawnOptions(environment, 'inherit', 'linux'),
-        ).toEqual({
-            detached: true,
-            env: environment,
-            stdio: 'inherit',
-        });
-    });
-
-    it('keeps Windows commands in the existing process tree', () => {
-        const environment = { PATH: 'C:\\Windows\\System32' };
-
-        expect(
-            createAbortableCommandSpawnOptions(
-                environment,
-                ['ignore', 'pipe', 'pipe'],
-                'win32',
-            ),
-        ).toEqual({
-            detached: false,
-            env: environment,
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
-    });
-
-    it('signals the non-Windows process group before falling back to the direct child', () => {
+describe('command process cleanup', () => {
+    it('signals the complete non-Windows process group', () => {
         const childProcess = {
             kill: vi.fn(() => true),
             pid: 32_100,
         };
-        const processGroupSignals: {
-            readonly processIdentifier: number;
-            readonly signal: NodeJS.Signals;
-        }[] = [];
+        const processGroupKiller = vi.fn();
 
-        killProcessTree(childProcess, {
+        const result = killProcessTree(childProcess, {
             platform: 'linux',
-            processGroupKiller: (processIdentifier, signal) => {
-                processGroupSignals.push({ processIdentifier, signal });
-            },
+            processGroupKiller,
         });
 
-        expect(processGroupSignals).toEqual([
-            {
-                processIdentifier: -32_100,
-                signal: 'SIGTERM',
-            },
-        ]);
+        expect(processGroupKiller).toHaveBeenCalledWith(-32_100, 'SIGTERM');
         expect(childProcess.kill).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            mechanism: 'process-group-signal',
+            succeeded: true,
+        });
     });
 
-    it('falls back to the direct child when process group signaling is unavailable', () => {
+    it('falls back to the direct child when group signaling fails', () => {
         const childProcess = {
             kill: vi.fn(() => true),
             pid: 32_101,
         };
 
-        killProcessTree(childProcess, {
+        const result = killProcessTree(childProcess, {
             platform: 'linux',
             processGroupKiller: () => {
                 throw new Error('process group is unavailable');
@@ -117,49 +67,21 @@ describe('abortable command process cleanup', () => {
         });
 
         expect(childProcess.kill).toHaveBeenCalledWith('SIGTERM');
-    });
-
-    it('can force-kill a non-Windows process group after graceful shutdown fails', () => {
-        const childProcess = {
-            kill: vi.fn(() => true),
-            pid: 32_103,
-        };
-        const processGroupSignals: {
-            readonly processIdentifier: number;
-            readonly signal: NodeJS.Signals;
-        }[] = [];
-
-        killProcessTree(childProcess, {
-            platform: 'linux',
-            processGroupKiller: (processIdentifier, signal) => {
-                processGroupSignals.push({ processIdentifier, signal });
-            },
-            signal: 'SIGKILL',
+        expect(result).toMatchObject({
+            fallbackReason: { message: 'process group is unavailable' },
+            mechanism: 'direct-signal',
+            succeeded: true,
         });
-
-        expect(processGroupSignals).toEqual([
-            {
-                processIdentifier: -32_103,
-                signal: 'SIGKILL',
-            },
-        ]);
-        expect(childProcess.kill).not.toHaveBeenCalled();
     });
 
-    it('keeps using taskkill for Windows process trees', () => {
+    it('uses taskkill for the complete Windows process tree', () => {
         const childProcess = {
             kill: vi.fn(() => true),
             pid: 32_102,
         };
-        const windowsTaskKiller = vi.fn(
-            (
-                command: string,
-                commandArguments: readonly string[],
-                options: { readonly stdio: 'ignore' },
-            ) => ({ command, commandArguments, options }),
-        );
+        const windowsTaskKiller = vi.fn();
 
-        killProcessTree(childProcess, {
+        const result = killProcessTree(childProcess, {
             platform: 'win32',
             windowsTaskKiller,
         });
@@ -170,19 +92,17 @@ describe('abortable command process cleanup', () => {
             { stdio: 'ignore' },
         );
         expect(childProcess.kill).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            mechanism: 'taskkill-tree-force',
+            succeeded: true,
+        });
     });
 
-    it('kills active child processes on terminal signals and unregisters handlers', () => {
+    it('cleans up every child on terminal signals and unregisters handlers', () => {
         const originalExitCode = process.exitCode;
         const childProcesses = new Set([
-            {
-                kill: vi.fn(() => true),
-                pid: 41_001,
-            },
-            {
-                kill: vi.fn(() => true),
-                pid: 41_002,
-            },
+            { kill: vi.fn(() => true), pid: 41_001 },
+            { kill: vi.fn(() => true), pid: 41_002 },
         ]);
         const listeners = new Map<string, () => void>();
         const processEvents = {
@@ -190,60 +110,66 @@ describe('abortable command process cleanup', () => {
                 if (listeners.get(signal) === listener) {
                     listeners.delete(signal);
                 }
-
                 return processEvents;
             }),
             on: vi.fn((signal: string, listener: () => void) => {
                 listeners.set(signal, listener);
-
                 return processEvents;
             }),
         };
-        const killedProcessIds: number[] = [];
-        const forceKilledProcessIds: number[] = [];
+        const gracefulKill = vi.fn(() => ({
+            mechanism: 'direct-signal' as const,
+            succeeded: true,
+        }));
+        const forceKill = vi.fn(() => ({
+            mechanism: 'direct-signal' as const,
+            succeeded: true,
+        }));
         let scheduledForceKill: (() => void) | undefined;
 
         try {
             const uninstall = installProcessSignalChildCleanup({
                 activeChildProcesses: childProcesses,
                 clearScheduledForceKill: vi.fn(),
-                forceKillChildProcess: (childProcess) => {
-                    if (childProcess.pid !== undefined) {
-                        forceKilledProcessIds.push(childProcess.pid);
-                    }
-                },
-                killChildProcess: (childProcess) => {
-                    if (childProcess.pid !== undefined) {
-                        killedProcessIds.push(childProcess.pid);
-                    }
-                },
+                forceKillChildProcess: forceKill,
+                killChildProcess: gracefulKill,
                 processEvents,
-                scheduleForceKill: (callback, delayMilliseconds) => {
-                    expect(delayMilliseconds).toBe(5_000);
+                scheduleForceKill: (callback) => {
                     scheduledForceKill = callback;
-
-                    return 'force-kill-timer';
+                    return 'timer';
                 },
             });
 
-            listeners.get('SIGINT')?.();
+            listeners.get('SIGTERM')?.();
             scheduledForceKill?.();
             uninstall();
 
-            expect(processEvents.on).toHaveBeenCalledWith(
-                'SIGINT',
-                expect.any(Function),
-            );
-            expect(processEvents.on).toHaveBeenCalledWith(
-                'SIGTERM',
-                expect.any(Function),
-            );
-            expect(killedProcessIds).toEqual([41_001, 41_002]);
-            expect(forceKilledProcessIds).toEqual([41_001, 41_002]);
-            expect(processEvents.off).toHaveBeenCalledTimes(2);
+            expect(gracefulKill).toHaveBeenCalledTimes(2);
+            expect(forceKill).toHaveBeenCalledTimes(2);
             expect(listeners.size).toBe(0);
         } finally {
             process.exitCode = originalExitCode;
         }
+    });
+});
+
+describe('process status normalization', () => {
+    it('retains raw crash status while naming the Windows failure', () => {
+        expect(normalizeProcessStatus(-1_073_741_502, null)).toMatchObject({
+            hexadecimalExitCode: '0xC0000142',
+            rawExitCode: -1_073_741_502,
+            symbolicStatus: 'STATUS_DLL_INIT_FAILED',
+            unsignedExitCode: 3_221_225_794,
+        });
+    });
+
+    it('marks shell signal decoding as inferred', () => {
+        expect(normalizeProcessStatus(143, null)).toMatchObject({
+            conventionalShellSignal: {
+                evidence: 'inferred-from-shell-convention',
+                signalName: 'SIGTERM',
+            },
+            rawExitCode: 143,
+        });
     });
 });

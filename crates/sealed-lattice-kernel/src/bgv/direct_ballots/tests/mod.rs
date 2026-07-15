@@ -1,9 +1,7 @@
 use std::sync::OnceLock;
 
 mod aggregation_and_evaluator;
-mod proof_transport;
 mod relation_proof_checks;
-mod request_validation;
 
 use serde_json::json;
 
@@ -23,15 +21,12 @@ struct DirectBallotRelationProofFixture {
 fn direct_ballot_relation_proof_fixture() -> &'static DirectBallotRelationProofFixture {
     static FIXTURE: OnceLock<DirectBallotRelationProofFixture> = OnceLock::new();
     FIXTURE.get_or_init(|| {
-        let setup_package = setup_package();
-        let evaluator_key =
-            development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
-                .expect("evaluator key");
+        let evaluator_key = DevelopmentBgvKey::generate(TEST_SETUP_SEED).expect("evaluator key");
         let encrypted_ballot =
-            encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
-                .expect("encrypted ballot");
+            encrypt_direct_ballot(&evaluator_key, valid_ballot_input()).expect("encrypted ballot");
         let proof_randomness_seed_hex =
             direct_ballot_proof_randomness_seed(TEST_SETUP_SEED, &encrypted_ballot);
+        let setup_package = setup_package();
         let proof_generation = generate_direct_ballot_relation_proof(
             &setup_package,
             &evaluator_key,
@@ -49,53 +44,15 @@ fn direct_ballot_relation_proof_fixture() -> &'static DirectBallotRelationProofF
     })
 }
 
-fn direct_ballot_test_proof_mask_randomness(ballot_count: usize) -> Value {
-    json!({
-        "source": PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE,
-        "ballotProofRandomnessHexes": (0..ballot_count)
-            .map(|index| direct_ballot_test_randomness_hex("ballot-proof", index))
-            .collect::<Vec<_>>()
-    })
-}
-
-fn direct_ballot_test_ballot_encryption_randomness(ballot_count: usize) -> Value {
-    json!({
-        "source": ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
-        "encryptionSeedHexes": (0..ballot_count)
-            .map(|index| direct_ballot_test_randomness_hex("ballot-encryption", index))
-            .collect::<Vec<_>>()
-    })
-}
-
-fn direct_ballot_test_ballot_json(voter_identity: &str, ballot_index: usize) -> Value {
-    json!({
-        "voterIdentity": voter_identity,
-        "actionContextHash": derive_canonical_object_hash(
-            &json!({
-                "objectType": "ActionContextHash",
-                "action": "direct encrypted ballot randomness rejection test",
-                "ballotIndex": ballot_index
-            }),
-        ).expect("action hash"),
-        "scores": [
-            10, 9, 8, 7, 6,
-            5, 4, 3, 2, 1,
-            1, 2, 3, 4, 5,
-            6, 7, 8, 9, 10
-        ]
-    })
-}
-
 fn direct_ballot_test_randomness_hex(label: &str, index: usize) -> String {
-    let randomness_hex = hash512_hex(
+    hash512_hex(
         "sealed-lattice/direct-encrypted-ballot/test-randomness",
         &[
             TEST_SETUP_SEED.as_bytes(),
             label.as_bytes(),
             index.to_string().as_bytes(),
         ],
-    );
-    randomness_hex[..PROOF_MASK_RANDOMNESS_HEX_BYTES * 2].to_string()
+    )
 }
 
 fn valid_ballot_input() -> DirectBallotInput {
@@ -130,8 +87,7 @@ fn direct_ballot_relation_commitment_offset(proof_bytes: &[u8]) -> usize {
 
 fn direct_ballot_response_coefficient_bytes() -> usize {
     super::relation_proof::direct_ballot_relation_response_bytes()
-        / (4 * POLYNOMIAL_DEGREE
-            + super::relation_proof::direct_ballot_relation_response_scalar_count())
+        / super::relation_proof::direct_ballot_relation_response_scalar_count()
 }
 
 fn direct_ballot_score_response_offset(proof_bytes: &[u8]) -> usize {
@@ -146,28 +102,21 @@ fn setup_package() -> Value {
         .clone()
 }
 
-fn setup_package_not_reached() -> Value {
-    json!({})
-}
-
 fn setup_package_with_seed(setup_seed: &str) -> Value {
-    crate::bgv::commands::generate_bgv_passive_setup_from_request(&json!({
-        "ceremonyId": "direct-encrypted-ballot-test-ceremony",
-        "manifestHash": derive_canonical_object_hash(
-            &json!({ "objectType": "ElectionManifestHash", "manifest": "direct encrypted ballot test" }),
-        ).expect("manifest hash"),
-        "rosterHash": derive_canonical_object_hash(
-            &json!({ "objectType": "RosterHash", "roster": "direct encrypted ballot test" }),
-        ).expect("roster hash"),
-        "thresholdParametersHash": derive_canonical_object_hash(
-            &json!({ "objectType": "ThresholdParametersHash", "threshold": "direct encrypted ballot test" }),
-        ).expect("threshold hash"),
-        "participants": [
-            { "trusteeIdentity": "trustee-1", "rosterPosition": 0, "boardPosition": 0 },
-            { "trusteeIdentity": "trustee-2", "rosterPosition": 1, "boardPosition": 1 },
-            { "trusteeIdentity": "trustee-3", "rosterPosition": 2, "boardPosition": 2 }
-        ],
-        "setupSeed": setup_seed
-    }))
-    .expect("setup package")
+    json!({
+        "objectType": "SetupPackage",
+        "setupContext": {
+            "ceremonyId": "direct-encrypted-ballot-test-ceremony",
+            "manifestHash": derive_canonical_object_hash(
+                &json!({ "objectType": "ElectionManifestHash", "manifest": "direct encrypted ballot test" }),
+            ).expect("manifest hash"),
+            "rosterHash": derive_canonical_object_hash(
+                &json!({ "objectType": "RosterHash", "roster": "direct encrypted ballot test" }),
+            ).expect("roster hash"),
+            "setupParametersHash": derive_canonical_object_hash(
+                &json!({ "objectType": "ThresholdParametersHash", "threshold": "direct encrypted ballot test" }),
+            ).expect("threshold hash"),
+            "testBinding": setup_seed,
+        }
+    })
 }

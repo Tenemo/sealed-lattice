@@ -25,13 +25,11 @@ const detectPackageManager = (
     );
 };
 
-export const buildPackageManagerEntryPointCandidates = (
+const buildPackageManagerEntryPointCandidates = (
     packageManager: PackageManager,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
 ): readonly string[] => {
-    const nodeDirectoryPath = path.dirname(nodeExecutablePath);
-    const pathDirectoryPaths = pathEnvironment
+    const nodeDirectoryPath = path.dirname(process.execPath);
+    const pathDirectoryPaths = (process.env.PATH ?? '')
         .split(path.delimiter)
         .filter((directoryPath) => directoryPath.length > 0);
     const baseDirectoryPaths = [nodeDirectoryPath, ...pathDirectoryPaths];
@@ -70,11 +68,8 @@ export const buildPackageManagerEntryPointCandidates = (
 
 const resolvePackageManagerEntryPoint = (
     packageManager: PackageManager,
-    packageManagerEntryPointPath = process.env.npm_execpath,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-    pathExists: (candidatePath: string) => boolean = existsSync,
 ): string => {
+    const packageManagerEntryPointPath = process.env.npm_execpath;
     if (packageManagerEntryPointPath !== undefined) {
         try {
             if (
@@ -88,11 +83,10 @@ const resolvePackageManagerEntryPoint = (
         }
     }
 
-    const entryPointPath = buildPackageManagerEntryPointCandidates(
-        packageManager,
-        pathEnvironment,
-        nodeExecutablePath,
-    ).find(pathExists);
+    const entryPointPath =
+        buildPackageManagerEntryPointCandidates(packageManager).find(
+            existsSync,
+        );
 
     if (entryPointPath === undefined) {
         throw new Error(
@@ -103,24 +97,13 @@ const resolvePackageManagerEntryPoint = (
     return entryPointPath;
 };
 
-export const resolvePackageManagerRunner = (
-    packageManagerEntryPointPath = process.env.npm_execpath,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-    pathExists: (candidatePath: string) => boolean = existsSync,
-): PackageManagerRunner => {
+export const resolvePackageManagerRunner = (): PackageManagerRunner => {
+    const packageManagerEntryPointPath = process.env.npm_execpath;
     const resolvedPackageManagerEntryPointPath =
-        packageManagerEntryPointPath ??
-        resolvePackageManagerEntryPoint(
-            'pnpm',
-            undefined,
-            pathEnvironment,
-            nodeExecutablePath,
-            pathExists,
-        );
+        packageManagerEntryPointPath ?? resolvePackageManagerEntryPoint('pnpm');
 
     return {
-        command: nodeExecutablePath,
+        command: process.execPath,
         commandArgumentsPrefix: [resolvedPackageManagerEntryPointPath],
         kind: detectPackageManager(resolvedPackageManagerEntryPointPath),
     };
@@ -128,21 +111,11 @@ export const resolvePackageManagerRunner = (
 
 export const resolvePackageManagerRunnerForPackageManager = (
     packageManager: PackageManager,
-    packageManagerEntryPointPath = process.env.npm_execpath,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-    pathExists: (candidatePath: string) => boolean = existsSync,
 ): PackageManagerRunner => {
-    const entryPointPath = resolvePackageManagerEntryPoint(
-        packageManager,
-        packageManagerEntryPointPath,
-        pathEnvironment,
-        nodeExecutablePath,
-        pathExists,
-    );
+    const entryPointPath = resolvePackageManagerEntryPoint(packageManager);
 
     return {
-        command: nodeExecutablePath,
+        command: process.execPath,
         commandArgumentsPrefix: [entryPointPath],
         kind: packageManager,
     };

@@ -1,4 +1,8 @@
 use super::*;
+use crate::bgv::{
+    ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
+    parameters::PLAINTEXT_MODULUS,
+};
 
 fn require_same_level(left: &Ciphertext, right: &Ciphertext) -> CanonicalResult<()> {
     if left.level != right.level {
