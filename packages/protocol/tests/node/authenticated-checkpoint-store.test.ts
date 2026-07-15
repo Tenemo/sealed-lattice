@@ -52,6 +52,15 @@ const boundaryPolicy: CheckpointBoundaryPolicy = {
     validateResume: () => undefined,
 };
 
+const proofAttemptIdentifiers = (
+    count: number,
+): readonly Uint8Array[] =>
+    Object.freeze(
+        Array.from({ length: count }, (_unused, index) =>
+            new Uint8Array(32).fill(index + 1),
+        ),
+    );
+
 const chunkState = (stateBytes: Uint8Array): readonly Uint8Array[] => {
     const chunks: Uint8Array[] = [];
     for (
@@ -234,7 +243,9 @@ describe('Authenticated checkpoint store', () => {
 
     it('publishes and resumes exact multi-chunk state with shared-attempt cursors', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(1);
+        const identity = await checkpointStore.beginOperation(
+            proofAttemptIdentifiers(1),
+        );
         const stateBytes = stateBytesFor(1);
         const boundary = boundaryFor({ identity, stateBytes });
         const canonicalManifest = await checkpointStore.publish({
@@ -261,7 +272,7 @@ describe('Authenticated checkpoint store', () => {
 
     it('publishes deterministic checkpoint state without random cursors', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(0);
+        const identity = await checkpointStore.beginOperation([]);
         const stateBytes = stateBytesFor(7);
         const boundary: CheckpointBoundary = {
             operationKind: 8,
@@ -287,7 +298,7 @@ describe('Authenticated checkpoint store', () => {
 
     it('rejects a wrong full-object digest after every chunk digest matches', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(0);
+        const identity = await checkpointStore.beginOperation([]);
         const stateBytes = stateBytesFor(8);
         const exactDescriptorBytes = streamDescriptorFor(stateBytes);
         const wrongFullObjectDigestDescriptorBytes =
@@ -336,7 +347,7 @@ describe('Authenticated checkpoint store', () => {
 
     it('rejects a stale resumed identity after another handle advances the lineage', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(0);
+        const identity = await checkpointStore.beginOperation([]);
         const firstState = stateBytesFor(12);
         const firstBoundary = deterministicBoundaryFor({
             stateBytes: firstState,
@@ -381,8 +392,8 @@ describe('Authenticated checkpoint store', () => {
 
     it('snapshots queued resume and publication inputs before taking the lineage lock', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(0);
-        const otherIdentity = await checkpointStore.beginOperation(0);
+        const identity = await checkpointStore.beginOperation([]);
+        const otherIdentity = await checkpointStore.beginOperation([]);
         const firstState = stateBytesFor(14);
         const firstBoundary = deterministicBoundaryFor({
             stateBytes: firstState,
@@ -480,7 +491,7 @@ describe('Authenticated checkpoint store', () => {
             limits: checkpointLimits,
             store,
         });
-        const identity = await refusingStore.beginOperation(0);
+        const identity = await refusingStore.beginOperation([]);
         const stateBytes = stateBytesFor(17);
         await expect(
             refusingStore.publish({
@@ -495,7 +506,7 @@ describe('Authenticated checkpoint store', () => {
 
     it('rejects replacement boundary rewinds and operation or source switches', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(0);
+        const identity = await checkpointStore.beginOperation([]);
         const firstState = stateBytesFor(20);
         const firstBoundary = deterministicBoundaryFor({
             stateBytes: firstState,
@@ -544,7 +555,9 @@ describe('Authenticated checkpoint store', () => {
 
     it('rejects replacement cursor counter and buffered-bit rewinds', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(1);
+        const identity = await checkpointStore.beginOperation(
+            proofAttemptIdentifiers(1),
+        );
         const firstState = stateBytesFor(22);
         const firstBoundary = boundaryFor({ identity, stateBytes: firstState });
         await checkpointStore.publish({
@@ -612,7 +625,7 @@ describe('Authenticated checkpoint store', () => {
             limits: { ...checkpointLimits, maximumRecordSealingCount: 1 },
             store,
         });
-        const identity = await boundedStore.beginOperation(0);
+        const identity = await boundedStore.beginOperation([]);
         const stateBytes = stateBytesFor(22);
         await expect(
             boundedStore.publish({
@@ -628,7 +641,9 @@ describe('Authenticated checkpoint store', () => {
 
     it('refuses every changed resume cursor, source, operation, and boundary coordinate', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(1);
+        const identity = await checkpointStore.beginOperation(
+            proofAttemptIdentifiers(1),
+        );
         const stateBytes = stateBytesFor(2);
         const boundary = boundaryFor({ identity, stateBytes });
         await checkpointStore.publish({
@@ -688,7 +703,9 @@ describe('Authenticated checkpoint store', () => {
 
     it('recovers a failed replacement without exposing partial state', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(1);
+        const identity = await checkpointStore.beginOperation(
+            proofAttemptIdentifiers(1),
+        );
         const firstState = stateBytesFor(3);
         const firstBoundary = boundaryFor({ identity, stateBytes: firstState });
         await checkpointStore.publish({
@@ -742,7 +759,7 @@ describe('Authenticated checkpoint store', () => {
 
     it('refuses interrupted-publication repair when obsolete committed chunk ciphertext is corrupt', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(0);
+        const identity = await checkpointStore.beginOperation([]);
         const firstState = stateBytesFor(18);
         const firstBoundary = deterministicBoundaryFor({
             stateBytes: firstState,
@@ -799,7 +816,9 @@ describe('Authenticated checkpoint store', () => {
 
     it('rejects unissued attempts, duplicate cursors, malformed offsets, and wrong cursor schemas', async () => {
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(1);
+        const identity = await checkpointStore.beginOperation(
+            proofAttemptIdentifiers(1),
+        );
         const stateBytes = stateBytesFor(5);
         const boundary = boundaryFor({ identity, stateBytes });
         const forgedIdentity = {
@@ -876,7 +895,9 @@ describe('Authenticated checkpoint store', () => {
             limits: checkpointLimits,
             store,
         });
-        const wrongKernelIdentity = await wrongKernelStore.beginOperation(1);
+        const wrongKernelIdentity = await wrongKernelStore.beginOperation(
+            proofAttemptIdentifiers(1),
+        );
         await expect(
             wrongKernelStore.publish({
                 boundary: boundaryFor({
@@ -908,12 +929,14 @@ describe('Authenticated checkpoint store', () => {
         await expect(
             openStore({
                 cryptoProvider: repeatingCryptoProvider,
-            }).beginOperation(1),
+            }).beginOperation(proofAttemptIdentifiers(1)),
         ).rejects.toMatchObject({ code: 'EntropyFailure' });
         expect(randomnessInvocationCount).toBe(2);
 
         const checkpointStore = openStore();
-        const identity = await checkpointStore.beginOperation(1);
+        const identity = await checkpointStore.beginOperation(
+            proofAttemptIdentifiers(1),
+        );
         const stateBytes = stateBytesFor(6);
         const boundary = boundaryFor({ identity, stateBytes });
         await checkpointStore.publish({

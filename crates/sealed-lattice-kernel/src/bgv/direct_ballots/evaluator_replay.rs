@@ -26,7 +26,7 @@ pub(crate) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {
 
 pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
     input: DirectBallotPackedBatchedPairEvaluatorInput<'_>,
-) -> CanonicalResult<Vec<Value>> {
+) -> CanonicalResult<Vec<(Value, EncryptedSparseTarget)>> {
     let DirectBallotPackedBatchedPairEvaluatorInput {
         setup_package,
         evaluator_key,
@@ -58,15 +58,13 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
     let working_level = direct_ballot_evaluator_working_level(ballot_count);
     let context = EvaluatorContext::from_key(evaluator_key.clone(), &replay_seed, working_level)?;
     let working_aggregate = modulus_switch_to(aggregate_ciphertext, context.working_level())?;
-    let packed_scores =
-        pack_direct_score_slots(&context, &working_aggregate, OPTION_COUNT, &replay_seed)?;
+    let packed_scores = pack_direct_score_slots(&context, &working_aggregate, OPTION_COUNT)?;
     drop(working_aggregate);
     let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
         &context,
         &packed_scores,
         OPTION_COUNT,
         score_domain_max,
-        &replay_seed,
     )?;
     drop(packed_scores);
 
@@ -95,7 +93,7 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
                 target_ciphertext_hash: &target_ciphertext_hash,
             },
         )?;
-        let evaluation = json!({
+        let evaluator_replay_record = json!({
             "topCount": top_count,
             "targetLayoutHash": target_layout_root,
             "targetIdRoot": target_id_root,
@@ -103,13 +101,13 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             "targetCiphertextHash": target_ciphertext_hash,
             "evaluatorReplayRecordHash": evaluator_replay_record_hash
         });
-        evaluations.push(evaluation);
+        evaluations.push((evaluator_replay_record, target));
     }
 
     Ok(evaluations)
 }
 
-pub(crate) fn direct_ballot_evaluator_working_level(ballot_count: usize) -> usize {
+fn direct_ballot_evaluator_working_level(ballot_count: usize) -> usize {
     if ballot_count == 1 {
         SINGLE_BALLOT_TARGET_WORKING_LEVEL
     } else {
@@ -117,7 +115,7 @@ pub(crate) fn direct_ballot_evaluator_working_level(ballot_count: usize) -> usiz
     }
 }
 
-pub(crate) fn direct_ballot_comparison_domain_max(ballot_count: usize) -> CanonicalResult<u64> {
+fn direct_ballot_comparison_domain_max(ballot_count: usize) -> CanonicalResult<u64> {
     let ballot_count_u64 = usize_to_u64(ballot_count, "ballot count")?;
     let score_span = MAXIMUM_SCORE - MINIMUM_SCORE;
 

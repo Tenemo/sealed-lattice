@@ -123,20 +123,6 @@ impl CanonicalProofMaterialBytes {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn into_contiguous(self) -> Vec<u8> {
-        match self.backing {
-            CanonicalProofMaterialBacking::Contiguous(bytes) => bytes,
-            CanonicalProofMaterialBacking::StreamChunks(chunks) => {
-                let mut bytes = Vec::with_capacity(self.total_byte_length);
-                for chunk in chunks {
-                    bytes.extend_from_slice(&chunk);
-                }
-                bytes
-            }
-        }
-    }
-
     pub(crate) fn hash512_hex(&self, domain: &str) -> CanonicalResult<String> {
         crate::hashing::hash512_hex_streamed_part(domain, self.len(), self.chunks())
     }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::evaluator::circuit::modulus_switch_to;
 use std::collections::BTreeSet;
 
 #[test]
@@ -62,13 +63,10 @@ fn direct_score_packing_duplicates_the_canonical_option_window() {
         .key()
         .encrypt_slots(&option_values, "logical-score-packing-input")
         .expect("encrypt scores");
-    let packed_scores = pack_direct_score_slots(
-        &context,
-        &encrypted_scores,
-        option_values.len(),
-        "logical-score-packing",
-    )
-    .expect("pack scores");
+    let working_scores = modulus_switch_to(&encrypted_scores, context.working_level())
+        .expect("working-level scores");
+    let packed_scores = pack_direct_score_slots(&context, &working_scores, option_values.len())
+        .expect("pack scores");
     let decoded_slots = context
         .key()
         .decrypt_to_slots(&packed_scores)

@@ -128,10 +128,11 @@ mod tests {
         object.residues_by_modulus[0][0] = DATA_PRIMES[0];
         assert!(object.validate().is_err());
 
-        let mut wrong_basis = object.clone();
-        wrong_basis.residues_by_modulus[0][0] = 0;
-        wrong_basis.basis_kind = BgvBasisKind::Special;
-        assert!(wrong_basis.validate().is_err());
+        let mut unsupported_special_level = object.clone();
+        unsupported_special_level.residues_by_modulus[0][0] = 0;
+        unsupported_special_level.basis_kind = BgvBasisKind::Special;
+        unsupported_special_level.level = 1;
+        assert!(unsupported_special_level.validate().is_err());
 
         let mut wrong_coefficient_count = object.clone();
         wrong_coefficient_count.residues_by_modulus[0][0] = 0;

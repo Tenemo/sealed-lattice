@@ -12,13 +12,41 @@ type DeriveCollectiveBgvSetupRosterHash = (
         readonly signingPublicKeyHash: string;
     }>[],
 ) => string;
+type CreateCanonicalManifest = (input: {
+    readonly options: readonly string[];
+    readonly pollId: string;
+    readonly question: string;
+    readonly topOptionCount: number;
+}) => Promise<{
+    readonly canonicalBytes: Uint8Array;
+    readonly manifestHash: string;
+}>;
+type VerifyCanonicalManifest = (canonicalBytes: Uint8Array) => Promise<
+    | Readonly<{
+          readonly isValid: true;
+          readonly value: Readonly<{ readonly manifestHash: string }>;
+      }>
+    | Readonly<{ readonly isValid: false; readonly refusalReason: string }>
+>;
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const deriveCollectiveBgvSetupRosterHash =
     publicApiRuntimeRecord.deriveCollectiveBgvSetupRosterHash as DeriveCollectiveBgvSetupRosterHash;
+const createCanonicalManifest =
+    publicApiRuntimeRecord.createCanonicalManifest as CreateCanonicalManifest;
+const verifyCanonicalManifest =
+    publicApiRuntimeRecord.verifyCanonicalManifest as VerifyCanonicalManifest;
 const expectedPublicRuntimeExportNames = [
+    'createCanonicalActionDefinition',
+    'createCanonicalBoardPolicy',
+    'createCanonicalManifest',
     'deriveCollectiveBgvSetupRosterHash',
-    'derivePollSpecHash',
     'validatePollSpec',
+    'verifyCanonicalActionContext',
+    'verifyCanonicalActionDefinition',
+    'verifyCanonicalBoardPolicy',
+    'verifyCanonicalCeremonyContext',
+    'verifyCanonicalManifest',
+    'verifyCanonicalSuiteRecord',
     'verifyPrivateVssShare',
     'verifySetupPackage',
 ] as const;
@@ -71,6 +99,24 @@ describe('election foundation public package API in Node', () => {
         ).toBe(expectedSetupRosterHash);
     });
 
+    it('creates and verifies canonical manifest bytes through the packaged kernel', async () => {
+        const manifest = await createCanonicalManifest({
+            options: Array.from(
+                { length: 20 },
+                (_value, optionIndex) => `Option ${String(optionIndex)}`,
+            ),
+            pollId: 'public-api-ceremony',
+            question: 'Choose priorities',
+            topOptionCount: 5,
+        });
+
+        expect(manifest.canonicalBytes.byteLength).toBeGreaterThan(0);
+        expect(await verifyCanonicalManifest(manifest.canonicalBytes)).toEqual({
+            isValid: true,
+            value: { manifestHash: manifest.manifestHash },
+        });
+    });
+
     it('publishes setup verification as a result-only operation', () => {
         const declarations = readFileSync(
             new URL('../../dist/index.d.ts', import.meta.url),
@@ -79,6 +125,10 @@ describe('election foundation public package API in Node', () => {
 
         expect(declarations).toContain(
             'type SetupPackageVerification = VerificationResult<void>;',
+        );
+        expect(declarations).not.toContain('derivePollSpecHash');
+        expect(declarations).toContain(
+            'declare const createCanonicalManifest:',
         );
     });
 });

@@ -46,7 +46,7 @@ fn committed_material_check_context() -> RelationPlanCheckContext {
         quotient_component_degree_bound_exclusive: 64,
         fri_fold_count: 4,
         final_polynomial_degree_bound_exclusive: 8,
-        unique_query_count: 8,
+        unique_query_count: 1,
         non_native_modular_identity_challenge_count: 1,
         maximum_fiat_shamir_candidate_draws_per_output: 128,
         resolved_moduli: vec![ResolvedSuiteModulus::new(
@@ -65,7 +65,7 @@ fn committed_material_input() -> CommittedMaterialRelationPlanInput {
         participant_count: 3,
         threshold: 2,
         sharing_data_modulus_indices: vec![0],
-        trace_mask_degree_bound_exclusive: 2,
+        trace_mask_degree_bound_exclusive: 7,
         first_mask_purpose: 100,
     }
 }
@@ -356,6 +356,24 @@ fn full_ring_high_half_low_multiplier_transpose_is_exact_for_dense_small_rings()
 
 #[test]
 fn signed_magnitudes_are_unique_for_arbitrary_width_bounds() {
+    let zero_tuple =
+        canonical_signed_integer_tuple(&BigInt::zero()).expect("canonical zero signed magnitude");
+    assert_eq!(zero_tuple.items[0].canonical_bytes(), &[0]);
+    assert!(
+        zero_tuple.items[1]
+            .variable_value_bytes()
+            .expect("zero magnitude bytes")
+            .is_empty()
+    );
+    assert!(
+        canonical_unsigned_magnitude_item(&BigUint::zero())
+            .expect("canonical zero unsigned magnitude")
+            .variable_value_bytes()
+            .expect("zero unsigned magnitude bytes")
+            .is_empty()
+    );
+    assert_eq!(signed_integer_from_magnitude(0, &[]), Ok(BigInt::zero()));
+
     let large_positive = BigInt::one() << 300_u32;
     let large_negative = -large_positive.clone();
     let positive_tuple =

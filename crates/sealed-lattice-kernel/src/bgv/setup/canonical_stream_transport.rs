@@ -74,13 +74,6 @@ pub(in crate::bgv::setup) struct CanonicalSetupProofBindingLease {
     binding: VerifiedCanonicalSetupProofBinding,
 }
 
-#[cfg(test)]
-impl CanonicalSetupProofBindingLease {
-    pub(in crate::bgv::setup) fn proof_bytes_hash(&self) -> &str {
-        &self.proof_bytes_hash
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(crate) struct AcceptedSetupProofBindingSession {
     pub(in crate::bgv::setup) session_handle: u32,
@@ -108,28 +101,6 @@ impl AcceptedSetupProofBindingSession {
         );
         Ok(Self { session_handle })
     }
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn begin_accepted_setup_fixture_proof_binding_session()
--> CanonicalResult<AcceptedSetupProofBindingSession> {
-    AcceptedSetupProofBindingSession::begin_fresh()
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn finish_accepted_setup_fixture_proof_binding_session(
-    session: AcceptedSetupProofBindingSession,
-    proof_bytes_hash: &str,
-) -> CanonicalResult<CanonicalSetupProofBindingLease> {
-    let lease = accepted_setup_proof_binding_lease(session.session_handle, proof_bytes_hash)?
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "accepted-setup fixture proof binding was not retained",
-            )
-        })?;
-    cancel_accepted_setup_proof_binding_session(session.session_handle)?;
-    Ok(lease)
 }
 
 struct AcceptedSetupProofBindingSessionState {

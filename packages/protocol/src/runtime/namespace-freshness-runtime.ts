@@ -131,11 +131,17 @@ export type NamespaceFreshnessWitnessStore = Readonly<{
 
 export type NamespaceFreshnessWitnessServiceState = 'active' | 'retired';
 
+export type NamespaceFreshnessWitnessServiceBinding = Readonly<{
+    context: NamespaceFreshnessContext;
+    witnessParticipantIdentity: Uint8Array;
+}>;
+
 /**
  * Participant-client runtime for one roster member witnessing another member.
  * This is not an external network service or a separate ceremony actor.
  */
 export type NamespaceFreshnessWitnessService = Readonly<{
+    copyBinding(): NamespaceFreshnessWitnessServiceBinding;
     state(): NamespaceFreshnessWitnessServiceState;
     vote(
         canonicalCheckpoint: Uint8Array,
@@ -185,6 +191,7 @@ export type NamespaceFreshnessRetirementReason =
 
 export type NamespaceFreshnessSubjectRuntime = Readonly<{
     activeCapability(): NamespaceFreshnessActiveCapability;
+    copyContext(): NamespaceFreshnessContext;
     certifyMutation(
         durableMutation: () => Promise<void>,
     ): Promise<NamespaceFreshnessSubjectState>;
@@ -406,6 +413,11 @@ export const openNamespaceFreshnessWitnessService = (input: {
     };
 
     return Object.freeze({
+        copyBinding: (): NamespaceFreshnessWitnessServiceBinding =>
+            Object.freeze({
+                context: copyContext(context),
+                witnessParticipantIdentity: witnessParticipantIdentity.slice(),
+            }),
         state: () => state,
         vote: async (
             canonicalCheckpoint,
@@ -863,6 +875,7 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
     return Object.freeze({
         state: () => state,
         retirementReason: () => retirementReason,
+        copyContext: () => copyContext(context),
         activeCapability: () => {
             if (state !== 'active' || activeCapability === undefined) {
                 throw new NamespaceFreshnessError(

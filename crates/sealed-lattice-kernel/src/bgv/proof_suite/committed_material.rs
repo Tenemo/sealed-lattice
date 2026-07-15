@@ -20,13 +20,14 @@ use crate::foundation::{
 };
 
 use super::{
-    CommonProofBoundOpeningProvider, CommonProofByteSink, CommonProofEncodingError,
-    CommonProofOpeningArtifact, CommonProofOpeningGeometry, CommonProofProverError,
-    CommonProofQuerySectionWriter, CommonProofSourcePolynomial, PROOF_BASE_FIELD_MODULUS,
-    PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
-    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, ProofBaseFieldElement,
-    ProofEvaluationDomain, ProofFieldError, ProofPolynomialError, ProofTreeCatalogEntry,
-    ProofTreeCatalogSource, apply_trace_mask,
+    BoundedCommonProofByteSinkError, CommonProofBoundOpeningProvider, CommonProofByteSink,
+    CommonProofEncodingError, CommonProofOpeningArtifact, CommonProofOpeningGeometry,
+    CommonProofProverError, CommonProofQuerySectionWriter, CommonProofSourcePolynomial,
+    CompleteProofTreeCatalog, PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_BLOWUP_FACTOR,
+    PROOF_EVALUATION_COSET_OFFSET, PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    ProofBaseFieldElement, ProofEvaluationDomain, ProofFieldError, ProofPolynomialError,
+    ProofTreeCatalogEntry, ProofTreeCatalogSource, apply_trace_mask,
+    encode_common_proof_query_tree_fragment,
 };
 
 const MATERIAL_DERIVATION_INPUT_SCHEMA_IDENTIFIER: u16 = 0x2105;
@@ -600,6 +601,35 @@ impl CommonProofBoundOpeningProvider for CommittedMaterialBoundOpeningProvider<'
                 CommittedMaterialError::InvalidInput,
             ))?;
         writer.write_next_opening(artifact)
+    }
+
+    fn encode_bound_opening_fragment(
+        &mut self,
+        catalog: &CompleteProofTreeCatalog,
+        catalog_index: usize,
+        geometry: CommonProofOpeningGeometry,
+        sorted_query_representatives: &[u64],
+        maximum_fragment_byte_length: usize,
+    ) -> Result<Vec<u8>, CommonProofEncodingError<BoundedCommonProofByteSinkError, Self::Error>>
+    {
+        let entry =
+            catalog
+                .entries()
+                .get(catalog_index)
+                .ok_or(CommonProofEncodingError::Artifact(
+                    CommittedMaterialError::InvalidInput,
+                ))?;
+        let artifact = self.artifacts.get_mut(&entry.tree_catalog_index()).ok_or(
+            CommonProofEncodingError::Artifact(CommittedMaterialError::InvalidInput),
+        )?;
+        encode_common_proof_query_tree_fragment(
+            catalog,
+            catalog_index,
+            geometry,
+            sorted_query_representatives,
+            artifact,
+            maximum_fragment_byte_length,
+        )
     }
 }
 

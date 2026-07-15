@@ -667,7 +667,7 @@ mod tests {
             quotient_component_degree_bound_exclusive: 64,
             fri_fold_count: 4,
             final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: 8,
+            unique_query_count: 1,
             non_native_modular_identity_challenge_count: 1,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
             resolved_moduli: vec![ResolvedSuiteModulus::new(
@@ -683,7 +683,7 @@ mod tests {
             participant_count: 3,
             threshold: 2,
             sharing_data_modulus_indices: vec![0],
-            trace_mask_degree_bound_exclusive: 2,
+            trace_mask_degree_bound_exclusive: 7,
             first_mask_purpose: 100,
         };
         let compiled = compile_vss_share_linkage_relation_plan(&input, &context)

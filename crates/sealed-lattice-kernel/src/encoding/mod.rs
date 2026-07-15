@@ -394,7 +394,7 @@ mod tests {
             serde_json::json!({
                 "command": "DeriveCanonicalObjectHash",
                 "value": {
-                    "objectType": "PollSpec",
+                    "objectType": "CanonicalJsonTestObject",
                     "poll": "main"
                 }
             })

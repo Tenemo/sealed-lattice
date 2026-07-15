@@ -4,6 +4,7 @@ import type {
     BrowserActionRandomnessReservationVerificationInput,
     BrowserActionStateReservationVerificationInput,
     BrowserActionStateVerifierSessionInput,
+    BrowserActionStorageRootBinding,
     BrowserOpenedActionRandomnessSession,
     BrowserPersistentProofAttemptInput,
     BrowserSealedActionRandomnessSession,
@@ -51,6 +52,7 @@ export type BrowserDeviceWrappingSnapshot = Readonly<{
  * plaintext roots, and root handles never occur in this contract.
  */
 export type BrowserActionStorageCustody = Readonly<{
+    copyBinding(): BrowserActionStorageRootBinding;
     /**
      * Persists a fresh wrapping pair but leaves root access inactive. The
      * snapshot's public commitment is the proposal to sign and publish.

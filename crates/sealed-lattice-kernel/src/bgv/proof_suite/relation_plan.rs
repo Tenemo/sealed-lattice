@@ -1448,7 +1448,7 @@ impl RelationChallengeEpochCatalog {
     }
 
     pub(crate) fn canonical_catalog_bytes(&self) -> Result<Vec<u8>, RelationPlanError> {
-        CanonicalTuple::new(
+        let tuple = CanonicalTuple::new(
             RELATION_CHALLENGE_EPOCH_CATALOG_SCHEMA_IDENTIFIER,
             SCHEMA_VERSION,
             vec![
@@ -1460,9 +1460,8 @@ impl RelationChallengeEpochCatalog {
                         .collect::<Result<Vec<_>, _>>()?,
                 )?,
             ],
-        )
-        .encode()
-        .map_err(canonical_encoding_error)
+        );
+        encode_generated_tuple(&tuple)
     }
 }
 
@@ -1832,7 +1831,10 @@ impl SignedIntegerInterval {
 }
 
 fn canonical_signed_integer_tuple(value: &BigInt) -> Result<CanonicalTuple, RelationPlanError> {
-    let (sign, magnitude) = value.to_bytes_be();
+    let (sign, mut magnitude) = value.to_bytes_be();
+    if value.is_zero() {
+        magnitude.clear();
+    }
     let sign_code = match sign {
         Sign::Minus => 1,
         Sign::NoSign | Sign::Plus => 0,
@@ -2011,7 +2013,10 @@ impl RelationBoundCertificate {
 }
 
 fn canonical_unsigned_magnitude_item(value: &BigUint) -> Result<CanonicalItem, RelationPlanError> {
-    let magnitude = value.to_bytes_be();
+    let mut magnitude = value.to_bytes_be();
+    if value.is_zero() {
+        magnitude.clear();
+    }
     if !magnitude.is_empty() && magnitude[0] == 0 {
         return Err(RelationPlanError::InvalidSignedMagnitude);
     }
@@ -4431,6 +4436,34 @@ impl CompiledRelationPlan {
     ) -> Result<(), RelationPlanError> {
         RelationPlanChecker::new(context).check(self)
     }
+}
+
+pub(crate) fn merge_checked_relation_plan_variants(
+    application_statement_schema_identifier: u16,
+    plans: Vec<CompiledRelationPlan>,
+    context: &RelationPlanCheckContext,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
+    if plans.is_empty()
+        || plans.iter().any(|plan| {
+            plan.application_statement_schema_identifier()
+                != application_statement_schema_identifier
+        })
+    {
+        return Err(RelationPlanError::UnsupportedApplicationFamily);
+    }
+
+    let variants = plans
+        .into_iter()
+        .flat_map(|plan| plan.plan.variants)
+        .collect::<Vec<_>>();
+    let merged = CompiledRelationPlan {
+        plan: RelationPlan {
+            application_statement_schema_identifier,
+            variants,
+        },
+    };
+    merged.check(context)?;
+    Ok(merged)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

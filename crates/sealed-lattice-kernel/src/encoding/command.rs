@@ -8,6 +8,15 @@ use crate::hashing::derive_canonical_object_hash;
 #[serde(tag = "command")]
 enum TranscriptCoreCommand {
     DeriveCanonicalObjectHash,
+    EncodeFoundationManifest,
+    VerifyFoundationManifest,
+    EncodeFoundationActionDefinition,
+    VerifyFoundationActionDefinition,
+    EncodeFoundationBoardPolicy,
+    VerifyFoundationBoardPolicy,
+    VerifyFoundationSuiteRecord,
+    VerifyFoundationCeremonyContext,
+    VerifyFoundationActionContext,
     DecodeProofApplicationBinding,
     EncodeMailboxKeyScheduleInput,
     DecodeMailboxKeyScheduleInput,
@@ -65,6 +74,33 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
             Ok(json!({
                 "canonicalObjectHash": derive_canonical_object_hash(value)?,
             }))
+        }
+        TranscriptCoreCommand::EncodeFoundationManifest => {
+            super::foundation_command::encode_foundation_manifest(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationManifest => {
+            super::foundation_command::verify_foundation_manifest(&request)
+        }
+        TranscriptCoreCommand::EncodeFoundationActionDefinition => {
+            super::foundation_command::encode_foundation_action_definition(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationActionDefinition => {
+            super::foundation_command::verify_foundation_action_definition(&request)
+        }
+        TranscriptCoreCommand::EncodeFoundationBoardPolicy => {
+            super::foundation_command::encode_foundation_board_policy(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationBoardPolicy => {
+            super::foundation_command::verify_foundation_board_policy(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationSuiteRecord => {
+            super::foundation_command::verify_foundation_suite_record(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationCeremonyContext => {
+            super::foundation_command::verify_foundation_ceremony_context(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationActionContext => {
+            super::foundation_command::verify_foundation_action_context(&request)
         }
         TranscriptCoreCommand::DecodeProofApplicationBinding => {
             super::foundation_command::decode_proof_application_binding(&request)

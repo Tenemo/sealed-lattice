@@ -4,6 +4,7 @@ import {
     openProofApplicationLedger,
     type ProofApplicationLedger,
     type ProofApplicationLedgerLimits,
+    type ProofApplicationReservationCapability,
 } from '#packages/protocol/src/index';
 import {
     generateRuntimeStorageEncryptionKey,
@@ -12,10 +13,12 @@ import {
     type InMemoryRuntimeStorageAdapter,
 } from '#packages/protocol/tests/support/runtime-storage-test-support';
 import {
+    copyProofApplicationReservationBindingDescription,
     loadFreshTranscriptCoreKernel,
-    verifyProofApplicationBinding,
+    prepareProofApplicationReservationBinding,
+    type ProofApplicationReservationBinding,
+    ProofApplicationReservationBindingPreparationError,
     type TranscriptCoreKernel,
-    type VerifiedProofApplicationBinding,
 } from '#packages/wasm/src/index';
 
 const canonicalItemTypes = Object.freeze({
@@ -157,11 +160,11 @@ const proofApplicationBinding = (input?: {
     ]);
 };
 
-const requireVerifiedBinding = (
+const prepareReservationBinding = (
     kernel: TranscriptCoreKernel,
     canonicalBindingBytes: Uint8Array,
-): VerifiedProofApplicationBinding => {
-    const result = verifyProofApplicationBinding(kernel, {
+): ProofApplicationReservationBinding =>
+    prepareProofApplicationReservationBinding(kernel, {
         authorityContext: {
             actionContextHash: authorityContext.actionContextHash,
             ceremonyContextHash: authorityContext.ceremonyContextHash,
@@ -169,12 +172,21 @@ const requireVerifiedBinding = (
         },
         canonicalBindingBytes,
     });
-    if (!result.isValid) {
-        throw new Error(
-            `proof application binding refused: ${result.refusalReason}`,
+
+const requirePreparationRefusal = (
+    operation: () => unknown,
+): ProofApplicationReservationBindingPreparationError => {
+    try {
+        operation();
+    } catch (error) {
+        expect(error).toBeInstanceOf(
+            ProofApplicationReservationBindingPreparationError,
         );
+        return error as ProofApplicationReservationBindingPreparationError;
     }
-    return result.value;
+    throw new Error(
+        'Expected proof application reservation binding preparation to fail.',
+    );
 };
 
 describe('proof application ledger', () => {
@@ -201,64 +213,179 @@ describe('proof application ledger', () => {
         });
     });
 
-    it('accepts only a kernel-issued binding in the exact action context', async () => {
+    it('prepares an opaque reservation binding only after canonical decoding and context checks', async () => {
         const canonicalBindingBytes = proofApplicationBinding();
-        const valid = verifyProofApplicationBinding(kernel, {
-            authorityContext: {
-                actionContextHash: authorityContext.actionContextHash,
-                ceremonyContextHash: authorityContext.ceremonyContextHash,
-                suiteIdentifier: authorityContext.suiteIdentifier,
-            },
-            canonicalBindingBytes,
-        });
-        expect(valid.isValid).toBe(true);
-
-        const wrongContext = verifyProofApplicationBinding(kernel, {
-            authorityContext: {
-                actionContextHash: new Uint8Array(64).fill(0xaa),
-                ceremonyContextHash: authorityContext.ceremonyContextHash,
-                suiteIdentifier: authorityContext.suiteIdentifier,
-            },
-            canonicalBindingBytes,
-        });
-        expect(wrongContext).toEqual({
-            isValid: false,
-            refusalReason: 'wrongContext',
-        });
-
-        const malformed = canonicalBindingBytes.slice(0, -1);
-        expect(
-            verifyProofApplicationBinding(kernel, {
+        const reservationBinding = prepareProofApplicationReservationBinding(
+            kernel,
+            {
                 authorityContext: {
                     actionContextHash: authorityContext.actionContextHash,
                     ceremonyContextHash: authorityContext.ceremonyContextHash,
                     suiteIdentifier: authorityContext.suiteIdentifier,
                 },
-                canonicalBindingBytes: malformed,
-            }),
-        ).toEqual({
-            isValid: false,
-            refusalReason: 'malformedEncoding',
-        });
+                canonicalBindingBytes,
+            },
+        );
 
-        await expect(
-            ledger.reserve({} as VerifiedProofApplicationBinding),
-        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        const wrongContextError = requirePreparationRefusal(() =>
+            prepareProofApplicationReservationBinding(kernel, {
+                authorityContext: {
+                    actionContextHash: new Uint8Array(64).fill(0xaa),
+                    ceremonyContextHash: authorityContext.ceremonyContextHash,
+                    suiteIdentifier: authorityContext.suiteIdentifier,
+                },
+                canonicalBindingBytes,
+            }),
+        );
+        expect(wrongContextError.refusalReason).toBe('wrongContext');
+
+        const malformedError = requirePreparationRefusal(() =>
+            prepareProofApplicationReservationBinding(kernel, {
+                authorityContext: {
+                    actionContextHash: authorityContext.actionContextHash,
+                    ceremonyContextHash: authorityContext.ceremonyContextHash,
+                    suiteIdentifier: authorityContext.suiteIdentifier,
+                },
+                canonicalBindingBytes: canonicalBindingBytes.slice(0, -1),
+            }),
+        );
+        expect(malformedError.refusalReason).toBe('malformedEncoding');
+
+        const wrongTypeError = requirePreparationRefusal(() =>
+            prepareProofApplicationReservationBinding(kernel, {
+                authorityContext: {
+                    actionContextHash: new Uint8Array(63),
+                    ceremonyContextHash: authorityContext.ceremonyContextHash,
+                    suiteIdentifier: authorityContext.suiteIdentifier,
+                },
+                canonicalBindingBytes,
+            }),
+        );
+        expect(wrongTypeError.refusalReason).toBe('wrongTypeOrLength');
+
+        const reservation = await ledger.reserve(reservationBinding);
+        expect(ledger.copyReservation(reservation)).toMatchObject({
+            proofByteLength: 1n,
+            verificationStarted: false,
+        });
     });
 
-    it('reserves exact bindings idempotently and refuses a changed header in the same slot', async () => {
-        const binding = requireVerifiedBinding(
+    it('rejects bytes, decoded descriptions, copies, and fabricated reservation bindings', async () => {
+        const canonicalBindingBytes = proofApplicationBinding();
+        const reservationBinding = prepareProofApplicationReservationBinding(
+            kernel,
+            {
+                authorityContext: {
+                    actionContextHash: authorityContext.actionContextHash,
+                    ceremonyContextHash: authorityContext.ceremonyContextHash,
+                    suiteIdentifier: authorityContext.suiteIdentifier,
+                },
+                canonicalBindingBytes,
+            },
+        );
+        const decodedKernelDescription = kernel.decodeProofApplicationBinding({
+            canonicalBytesHex: Array.from(canonicalBindingBytes, (byte) =>
+                byte.toString(16).padStart(2, '0'),
+            ).join(''),
+        });
+        const copiedReservationDescription =
+            copyProofApplicationReservationBindingDescription(
+                reservationBinding,
+            );
+        copiedReservationDescription.applicationSlotHash.fill(0);
+        copiedReservationDescription.canonicalBindingBytes.fill(0);
+        copiedReservationDescription.proofHeaderHash.fill(0);
+        const fabricatedCandidates = [
+            canonicalBindingBytes,
+            decodedKernelDescription,
+            copiedReservationDescription,
+            Object.freeze({}),
+            Object.freeze({ isValid: true, value: reservationBinding }),
+            structuredClone(reservationBinding),
+        ] as const;
+
+        for (const fabricatedCandidate of fabricatedCandidates) {
+            await expect(
+                ledger.reserve(
+                    fabricatedCandidate as unknown as ProofApplicationReservationBinding,
+                ),
+            ).rejects.toMatchObject({ code: 'InvalidInput' });
+        }
+
+        const reservation = await ledger.reserve(reservationBinding);
+        expect(ledger.copyReservation(reservation)).toMatchObject({
+            proofByteLength: 1n,
+            verificationStarted: false,
+        });
+    });
+
+    it('does not let a reservation binding cross runtime authority contexts', async () => {
+        const reservationBinding = prepareReservationBinding(
             kernel,
             proofApplicationBinding(),
         );
-        const changedHeaderBinding = requireVerifiedBinding(
+        const opened = await openRuntimeTestStore({
+            namespace: 'proof-application-ledger-wrong-context-test',
+        });
+        const wrongContextLedger = openProofApplicationLedger({
+            authorityContext: {
+                ...authorityContext,
+                actionContextHash: new Uint8Array(64).fill(0xaa),
+            },
+            encryptionKey,
+            limits,
+            store: opened.store,
+        });
+
+        await expect(
+            wrongContextLedger.reserve(reservationBinding),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        expect(await wrongContextLedger.snapshot()).toEqual({
+            proofByteCount: 0n,
+            proofObjectCount: 0,
+            proofQueryCount: 0n,
+            proofVerificationCount: 0,
+            signatureVerificationCount: 0,
+        });
+    });
+
+    it('rejects malformed runtime input with a typed refusal before calling the ledger', () => {
+        const canonicalBindingBytes = proofApplicationBinding();
+        const wrongCanonicalByteType = requirePreparationRefusal(() =>
+            prepareProofApplicationReservationBinding(kernel, {
+                authorityContext: {
+                    actionContextHash: authorityContext.actionContextHash,
+                    ceremonyContextHash: authorityContext.ceremonyContextHash,
+                    suiteIdentifier: authorityContext.suiteIdentifier,
+                },
+                canonicalBindingBytes:
+                    canonicalBindingBytes.buffer as unknown as Uint8Array,
+            }),
+        );
+        expect(wrongCanonicalByteType.refusalReason).toBe('wrongTypeOrLength');
+
+        const nullInput = requirePreparationRefusal(() =>
+            prepareProofApplicationReservationBinding(kernel, null as never),
+        );
+        expect(nullInput.refusalReason).toBe('wrongTypeOrLength');
+    });
+
+    it('reserves exact bindings idempotently and refuses a changed header in the same slot', async () => {
+        const binding = prepareReservationBinding(
+            kernel,
+            proofApplicationBinding(),
+        );
+        const changedHeaderBinding = prepareReservationBinding(
             kernel,
             proofApplicationBinding({ headerHashByte: 0x51 }),
         );
 
         const first = await ledger.reserve(binding);
         const replay = await ledger.reserve(binding);
-        expect(replay).toEqual(first);
+        expect(replay).not.toBe(first);
+        expect(ledger.copyReservation(replay)).toEqual(
+            ledger.copyReservation(first),
+        );
         expect(await ledger.snapshot()).toEqual({
             proofByteCount: 1n,
             proofObjectCount: 1,
@@ -273,22 +400,22 @@ describe('proof application ledger', () => {
     });
 
     it('consumes verification charges once and never releases after header validation starts', async () => {
-        const binding = requireVerifiedBinding(
+        const binding = prepareReservationBinding(
             kernel,
             proofApplicationBinding(),
         );
-        await ledger.reserve(binding);
+        const reservation = await ledger.reserve(binding);
         const started = await ledger.beginVerification({
             proofQueryCount: 7n,
+            reservation,
             signatureVerificationCount: 2,
-            verifiedBinding: binding,
         });
         expect(started.verificationStarted).toBe(true);
         await expect(
             ledger.beginVerification({
                 proofQueryCount: 7n,
+                reservation,
                 signatureVerificationCount: 2,
-                verifiedBinding: binding,
             }),
         ).resolves.toEqual(started);
         expect(await ledger.snapshot()).toEqual({
@@ -302,27 +429,27 @@ describe('proof application ledger', () => {
         await expect(
             ledger.beginVerification({
                 proofQueryCount: 8n,
+                reservation,
                 signatureVerificationCount: 2,
-                verifiedBinding: binding,
             }),
         ).rejects.toMatchObject({ code: 'Conflict' });
         await expect(
-            ledger.releaseBeforeVerification(binding),
+            ledger.releaseBeforeVerification(reservation),
         ).rejects.toMatchObject({ code: 'InvalidState' });
     });
 
     it('releases only an unstarted reservation and enforces the family and query ceilings', async () => {
-        const binding = requireVerifiedBinding(
+        const binding = prepareReservationBinding(
             kernel,
             proofApplicationBinding(),
         );
-        await ledger.reserve(binding);
-        await expect(ledger.releaseBeforeVerification(binding)).resolves.toBe(
-            true,
-        );
-        await expect(ledger.releaseBeforeVerification(binding)).resolves.toBe(
-            false,
-        );
+        const releasedReservation = await ledger.reserve(binding);
+        await expect(
+            ledger.releaseBeforeVerification(releasedReservation),
+        ).resolves.toBe(true);
+        await expect(
+            ledger.releaseBeforeVerification(releasedReservation),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
         expect(await ledger.snapshot()).toEqual({
             proofByteCount: 0n,
             proofObjectCount: 0,
@@ -331,8 +458,8 @@ describe('proof application ledger', () => {
             signatureVerificationCount: 0,
         });
 
-        await ledger.reserve(binding);
-        const secondSlot = requireVerifiedBinding(
+        const secondReservation = await ledger.reserve(binding);
+        const secondSlot = prepareReservationBinding(
             kernel,
             proofApplicationBinding({ rosterPosition: 3 }),
         );
@@ -342,14 +469,66 @@ describe('proof application ledger', () => {
         await expect(
             ledger.beginVerification({
                 proofQueryCount: 11n,
+                reservation: secondReservation,
                 signatureVerificationCount: 0,
-                verifiedBinding: binding,
             }),
         ).rejects.toMatchObject({ code: 'ResourceLimit' });
     });
 
+    it('rejects forged, stale, and wrong-owner reservation capabilities', async () => {
+        const binding = prepareReservationBinding(
+            kernel,
+            proofApplicationBinding(),
+        );
+        const reservation = await ledger.reserve(binding);
+        const forgedReservation = Object.freeze(
+            Object.create(null) as object,
+        ) as ProofApplicationReservationCapability;
+
+        expect(() => ledger.copyReservation(forgedReservation)).toThrowError(
+            expect.objectContaining({ code: 'InvalidInput' }),
+        );
+        await expect(
+            ledger.beginVerification({
+                proofQueryCount: 1n,
+                reservation: forgedReservation,
+                signatureVerificationCount: 0,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+
+        const opened = await openRuntimeTestStore({
+            namespace: 'proof-application-ledger-capability-owner-test',
+        });
+        const otherLedger = openProofApplicationLedger({
+            authorityContext,
+            encryptionKey,
+            limits,
+            store: opened.store,
+        });
+        expect(() => otherLedger.copyReservation(reservation)).toThrowError(
+            expect.objectContaining({ code: 'InvalidInput' }),
+        );
+        await expect(
+            otherLedger.releaseBeforeVerification(reservation),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+
+        await expect(
+            ledger.releaseBeforeVerification(reservation),
+        ).resolves.toBe(true);
+        expect(() => ledger.copyReservation(reservation)).toThrowError(
+            expect.objectContaining({ code: 'InvalidInput' }),
+        );
+        await expect(
+            ledger.beginVerification({
+                proofQueryCount: 1n,
+                reservation,
+                signatureVerificationCount: 0,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+    });
+
     it('fails closed when untrusted storage changes an authenticated ledger record', async () => {
-        const binding = requireVerifiedBinding(
+        const binding = prepareReservationBinding(
             kernel,
             proofApplicationBinding(),
         );

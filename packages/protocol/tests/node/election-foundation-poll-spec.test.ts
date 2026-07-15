@@ -1,7 +1,10 @@
 import { foundationProfile, type PollSpecInput } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
-import { validatePollSpec } from '#packages/protocol/src/lifecycle/poll-spec';
+import {
+    prepareFoundationManifestIngress,
+    validatePollSpec,
+} from '#packages/protocol/src/lifecycle/poll-spec';
 
 const createValidPollSpecInput = (
     overrides: Partial<PollSpecInput> = {},
@@ -27,58 +30,50 @@ const expectErrorCodes = (
     }
 };
 
-describe('election foundation poll-spec validation', () => {
-    it('normalizes roster bounds and policy', () => {
+describe('pre-protocol poll input validation', () => {
+    it('accepts only the fixed twenty-option input shape', () => {
+        const input = createValidPollSpecInput();
+        const validation = validatePollSpec(input);
+
+        expect(validation).toEqual({ isValid: true, normalized: input });
+        expectErrorCodes(
+            createValidPollSpecInput({
+                options: input.options.slice(0, 19),
+                topOptionCount: 19,
+            }),
+            ['InvalidOptionCount'],
+        );
+        expectErrorCodes(
+            createValidPollSpecInput({
+                options: [...input.options, 'Option 20'],
+            }),
+            ['InvalidOptionCount'],
+        );
+    });
+
+    it('deterministically assigns canonical option indexes and identifiers', () => {
         const validation = validatePollSpec(createValidPollSpecInput());
+        expect(validation.isValid).toBe(true);
+        if (!validation.isValid) {
+            return;
+        }
 
-        expect(validation).toEqual({
-            isValid: true,
-            normalized: createValidPollSpecInput({
-                maxRosterSize: 20,
-                minRosterSize: 10,
-                smallRosterPolicy: 'ForbidMicroRoster',
-            }),
+        const ingress = prepareFoundationManifestIngress(validation.normalized);
+        expect(ingress.displayTitle).toBe(validation.normalized.question);
+        expect(ingress.optionDefinitions).toHaveLength(20);
+        expect(ingress.optionDefinitions[0]).toEqual({
+            displayLabel: 'Option 0',
+            optionIdentifier: 'option-0',
+            optionIndex: 0,
+        });
+        expect(ingress.optionDefinitions[19]).toEqual({
+            displayLabel: 'Option 19',
+            optionIdentifier: 'option-19',
+            optionIndex: 19,
         });
     });
 
-    it('applies default roster choices', () => {
-        const validation = validatePollSpec(
-            createValidPollSpecInput({
-                options: ['A', 'B', 'C'],
-                topOptionCount: 2,
-            }),
-        );
-
-        expect(validation).toMatchObject({
-            isValid: true,
-            normalized: {
-                maxRosterSize: 20,
-                minRosterSize: 10,
-                smallRosterPolicy: 'ForbidMicroRoster',
-            },
-        });
-    });
-
-    it('accepts explicit roster bounds and parameter family policy', () => {
-        const validation = validatePollSpec(
-            createValidPollSpecInput({
-                maxRosterSize: 20,
-                minRosterSize: 11,
-                smallRosterPolicy: 'AllowMicroRoster',
-            }),
-        );
-
-        expect(validation).toMatchObject({
-            isValid: true,
-            normalized: {
-                maxRosterSize: 20,
-                minRosterSize: 11,
-                smallRosterPolicy: 'AllowMicroRoster',
-            },
-        });
-    });
-
-    it('rejects option count, question, and topOptionCount errors', () => {
+    it('rejects missing identifiers, labels, options, and top counts', () => {
         expectErrorCodes(
             createValidPollSpecInput({
                 pollId: '',
@@ -95,80 +90,58 @@ describe('election foundation poll-spec validation', () => {
         );
     });
 
-    it('returns structured errors for malformed JavaScript input', () => {
-        const decodedPollSpec: unknown = {
-            pollId: 'poll',
-            question: 'Question',
-            options: ['A', 42, 'B'],
-            topOptionCount: 2,
-        };
+    it('returns structured errors for hostile JavaScript input without invoking accessors', () => {
+        let accessorInvocations = 0;
+        const input = createValidPollSpecInput() as Record<string, unknown>;
+        Object.defineProperty(input, 'question', {
+            get: () => {
+                accessorInvocations += 1;
+                return 'Question';
+            },
+        });
 
+        expectErrorCodes(input, ['EmptyQuestion']);
+        expect(accessorInvocations).toBe(0);
         expectErrorCodes({}, [
             'EmptyPollId',
             'EmptyQuestion',
             'InvalidOptionCount',
             'InvalidTopOptionCount',
         ]);
-
-        expectErrorCodes(decodedPollSpec, ['EmptyOptionLabel']);
     });
 
-    it('rejects unsupported roster policy and invalid roster bounds', () => {
-        expectErrorCodes(
-            createValidPollSpecInput({
-                maxRosterSize: 2,
-                minRosterSize: 51,
-                smallRosterPolicy:
-                    'SilentMicroRoster' as PollSpecInput['smallRosterPolicy'],
-            }),
-            ['UnsupportedSmallRosterPolicy', 'InvalidRosterBounds'],
-        );
-    });
+    it('rejects empty and duplicate labels but accepts assigned Unicode display text', () => {
+        const options = createValidPollSpecInput().options.slice();
+        options[1] = '';
+        options[2] = 'Option 0';
+        expectErrorCodes(createValidPollSpecInput({ options }), [
+            'EmptyOptionLabel',
+            'DuplicateOptionLabel',
+        ]);
 
-    it('rejects too many options and topOptionCount larger than the option count', () => {
-        expectErrorCodes(
+        const validation = validatePollSpec(
             createValidPollSpecInput({
+                question: 'Wybór priorytetów',
                 options: Array.from(
-                    { length: 21 },
-                    (_value, index) => `Option ${index}`,
+                    { length: 20 },
+                    (_value, index) => `Opcja ${String(index)} ł`,
                 ),
-                topOptionCount: 22,
             }),
-            ['InvalidOptionCount', 'InvalidTopOptionCount'],
         );
+        expect(validation.isValid).toBe(true);
     });
 
-    it('rejects empty, duplicate, and non-ASCII hash-critical text', () => {
+    it('rejects non-printable identifiers and malformed Unicode display text', () => {
         expectErrorCodes(
-            createValidPollSpecInput({
-                options: [
-                    'Alpha',
-                    '',
-                    'Alpha',
-                    'Alpha ',
-                    'Cafe\u0301',
-                    'Caf\u00e9',
-                ],
-                topOptionCount: 1,
-            }),
-            [
-                'EmptyOptionLabel',
-                'DuplicateOptionLabel',
-                'UnsupportedHashCriticalText',
-                'UnsupportedHashCriticalText',
-            ],
+            createValidPollSpecInput({ pollId: 'poll\nsecond-line' }),
+            ['UnsupportedHashCriticalText'],
         );
-
-        expectErrorCodes(
-            createValidPollSpecInput({
-                pollId: 'g\u0142osowanie',
-                question: 'Wyb\u00f3r',
-            }),
-            ['UnsupportedHashCriticalText', 'UnsupportedHashCriticalText'],
-        );
+        expectErrorCodes(createValidPollSpecInput({ question: '\ud800' }), [
+            'UnsupportedHashCriticalText',
+        ]);
     });
 
-    it('enforces the identifier and aggregate display-text budgets', () => {
+    it('enforces the identifier and aggregate display-text byte budgets', () => {
         expectErrorCodes(
             createValidPollSpecInput({
                 pollId: 'p'.repeat(
@@ -178,24 +151,38 @@ describe('election foundation poll-spec validation', () => {
             ['UnsupportedHashCriticalText'],
         );
 
+        const optionLabels = Array.from(
+            { length: 20 },
+            (_value, index) => `O${String(index)}`,
+        );
+        const optionByteLength = optionLabels.reduce(
+            (total, label) => total + new TextEncoder().encode(label).length,
+            0,
+        );
+        // The canonical manifest has 920 non-display bytes: its tuple and
+        // list framing plus the fixed option indexes and option-N identifiers.
+        const canonicalManifestNonDisplayByteLength = 920;
         const exactBudgetValidation = validatePollSpec(
             createValidPollSpecInput({
-                options: ['A'],
+                options: optionLabels,
                 question: 'Q'.repeat(
-                    foundationProfile.maximumCopiedBufferByteLength - 1,
+                    foundationProfile.maximumCopiedBufferByteLength -
+                        canonicalManifestNonDisplayByteLength -
+                        optionByteLength,
                 ),
-                topOptionCount: 1,
             }),
         );
         expect(exactBudgetValidation.isValid).toBe(true);
 
         expectErrorCodes(
             createValidPollSpecInput({
-                options: ['A'],
+                options: optionLabels,
                 question: 'Q'.repeat(
-                    foundationProfile.maximumCopiedBufferByteLength,
+                    foundationProfile.maximumCopiedBufferByteLength -
+                        canonicalManifestNonDisplayByteLength -
+                        optionByteLength +
+                        1,
                 ),
-                topOptionCount: 1,
             }),
             ['UnsupportedHashCriticalText'],
         );

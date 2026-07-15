@@ -142,7 +142,7 @@ export const copyBoundedBytes = (
     return value.slice();
 };
 
-const copyAuthorityContext = (
+export const copyRuntimeStorageAuthorityContext = (
     context: RuntimeStorageAuthorityContext,
 ): RuntimeStorageAuthorityContext =>
     Object.freeze({
@@ -224,7 +224,9 @@ export const createRuntimeRecordProtection = (input: {
         runtimeRecordKeySealingStates.set(input.encryptionKey, keySealingState);
     }
     return Object.freeze({
-        authorityContext: copyAuthorityContext(input.authorityContext),
+        authorityContext: copyRuntimeStorageAuthorityContext(
+            input.authorityContext,
+        ),
         cryptoProvider,
         encryptionKey: input.encryptionKey,
         keySealingState,

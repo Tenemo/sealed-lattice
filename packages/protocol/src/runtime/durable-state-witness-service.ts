@@ -13,6 +13,7 @@ import {
     bytesEqual,
     bytesToHex,
     copyBoundedBytes,
+    copyRuntimeStorageAuthorityContext,
     createRuntimeRecordProtection,
     mapStorageError,
     readRuntimeRecord,
@@ -82,6 +83,7 @@ export type DurableStateWitnessServiceLimits = Readonly<{
  * This is not an external network service or a separate ceremony actor.
  */
 export type DurableStateWitnessService = Readonly<{
+    copyAuthorityContext(): RuntimeStorageAuthorityContext;
     cacheSignedVoteCarrier(input: {
         canonicalSignedVoteCarrier: Uint8Array;
         verifiedIntentBinding: VerifiedStateDurableBinding;
@@ -1199,6 +1201,8 @@ export const openDurableStateWitnessService = (input: {
         cacheExactOutput,
         cacheSignedVoteCarrier,
         compareAndLockIntent,
+        copyAuthorityContext: () =>
+            copyRuntimeStorageAuthorityContext(protection.authorityContext),
         readExactOutput,
         readSignedVoteCarrier,
     });

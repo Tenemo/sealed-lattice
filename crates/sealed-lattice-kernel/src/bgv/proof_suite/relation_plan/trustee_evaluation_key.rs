@@ -1029,7 +1029,8 @@ mod tests {
     #[test]
     fn round_one_plan_covers_all_limbs_with_shared_small_witnesses() {
         let context = check_context();
-        let plan = compile_relinearization_round_one_relation_plan(&round_one_input(), &context)
+        let input = round_one_input();
+        let plan = compile_relinearization_round_one_relation_plan(&input, &context)
             .expect("round-one relation plan");
         assert_eq!(
             plan.application_statement_schema_identifier(),
@@ -1043,14 +1044,27 @@ mod tests {
             .iter()
             .map(|batch| batch.modulus_reference)
             .collect::<BTreeSet<_>>();
-        assert_eq!(
-            batch_moduli,
-            BTreeSet::from([
-                SuiteModulusReference::data(0),
-                SuiteModulusReference::data(1),
-                SuiteModulusReference::special(0),
-            ])
-        );
+        let expected_batch_moduli =
+            input
+                .geometry
+                .data_moduli
+                .iter()
+                .enumerate()
+                .map(|(modulus_index, _)| {
+                    SuiteModulusReference::data(
+                        u16::try_from(modulus_index).expect("test data-modulus index fits u16"),
+                    )
+                })
+                .chain(input.geometry.special_moduli.iter().enumerate().map(
+                    |(modulus_index, _)| {
+                        SuiteModulusReference::special(
+                            u16::try_from(modulus_index)
+                                .expect("test special-modulus index fits u16"),
+                        )
+                    },
+                ))
+                .collect::<BTreeSet<_>>();
+        assert_eq!(batch_moduli, expected_batch_moduli);
         for source in &variant.ordered_verifier_sources {
             if let RelationVerifierSource::Protocol {
                 protocol_source_kind: 5 | 7,
@@ -1090,9 +1104,25 @@ mod tests {
             }
         }
         assert_eq!(round_one_small_multiplier_columns.len(), 2);
-        let data_zero_opening = &anchor_multiplicands_by_modulus[&SuiteModulusReference::data(0)];
-        let data_one_opening = &anchor_multiplicands_by_modulus[&SuiteModulusReference::data(1)];
-        assert!(data_zero_opening.is_disjoint(data_one_opening));
+        assert_eq!(
+            anchor_multiplicands_by_modulus.len(),
+            input.geometry.data_moduli.len(),
+            "every data modulus must have its own pair of anchor openings"
+        );
+        let data_modulus_anchor_multiplicands =
+            anchor_multiplicands_by_modulus.values().collect::<Vec<_>>();
+        for (left_index, left_multiplicands) in data_modulus_anchor_multiplicands.iter().enumerate()
+        {
+            for right_multiplicands in data_modulus_anchor_multiplicands
+                .iter()
+                .skip(left_index + 1)
+            {
+                assert!(
+                    left_multiplicands.is_disjoint(right_multiplicands),
+                    "each data modulus must bind a distinct pair of anchor openings"
+                );
+            }
+        }
         assert_radix_three_quotients(variant);
     }
 

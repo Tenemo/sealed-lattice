@@ -598,6 +598,48 @@ impl DecodedProofBody {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DecodedProofBodyPrefix {
+    query_section_offset: usize,
+    tree_roots: Vec<[u8; 64]>,
+    deep_evaluations: Vec<ProofChallengeExtensionElement>,
+    terminal_coefficients: Vec<ProofChallengeExtensionElement>,
+}
+
+impl DecodedProofBodyPrefix {
+    pub(crate) const fn query_section_offset(&self) -> usize {
+        self.query_section_offset
+    }
+
+    pub(crate) fn tree_roots(&self) -> &[[u8; 64]] {
+        &self.tree_roots
+    }
+
+    pub(crate) fn deep_evaluations(&self) -> &[ProofChallengeExtensionElement] {
+        &self.deep_evaluations
+    }
+
+    pub(crate) fn terminal_coefficients(&self) -> &[ProofChallengeExtensionElement] {
+        &self.terminal_coefficients
+    }
+}
+
+pub(crate) struct DecodedProofTreeOpening {
+    leaves: Vec<DecodedProofPhasePairLeaf>,
+}
+
+impl DecodedProofTreeOpening {
+    pub(crate) fn as_opening<'opening>(
+        &'opening self,
+        catalog_entry: &'opening ProofTreeCatalogEntry,
+    ) -> ProofTreeOpening<'opening> {
+        ProofTreeOpening {
+            catalog_entry,
+            leaves: &self.leaves,
+        }
+    }
+}
+
 pub(crate) struct PendingProofBodyQueries<'source, 'layout, Source: ProofByteSource + ?Sized> {
     source: &'source Source,
     layout: &'layout ProofBodyLayout,
@@ -676,15 +718,14 @@ impl<Source: ProofByteSource + ?Sized> PendingProofBodyQueries<'_, '_, Source> {
     }
 }
 
-pub(crate) fn decode_proof_body_prefix<'source, 'layout, Source>(
-    source: &'source Source,
+pub(crate) fn decode_proof_body_prefix_owned<Source>(
+    source: &Source,
     declared_byte_length: usize,
     proof_byte_ceiling: usize,
-    layout: &'layout ProofBodyLayout,
-) -> Result<PendingProofBodyQueries<'source, 'layout, Source>, ProofBodyError>
+    layout: &ProofBodyLayout,
+) -> Result<DecodedProofBodyPrefix, ProofBodyError>
 where
     Source: ProofByteSource + ?Sized,
-    Source: 'source,
 {
     let mut decoder = BoundedProofDecoder::new(source, declared_byte_length, proof_byte_ceiling)?;
     let mut tree_roots = Vec::new();
@@ -765,14 +806,34 @@ where
     }
     drop(decoder);
 
-    Ok(PendingProofBodyQueries {
-        source,
-        layout,
-        declared_byte_length,
+    Ok(DecodedProofBodyPrefix {
         query_section_offset,
         tree_roots,
         deep_evaluations,
         terminal_coefficients,
+    })
+}
+
+pub(crate) fn decode_proof_body_prefix<'source, 'layout, Source>(
+    source: &'source Source,
+    declared_byte_length: usize,
+    proof_byte_ceiling: usize,
+    layout: &'layout ProofBodyLayout,
+) -> Result<PendingProofBodyQueries<'source, 'layout, Source>, ProofBodyError>
+where
+    Source: ProofByteSource + ?Sized,
+    Source: 'source,
+{
+    let prefix =
+        decode_proof_body_prefix_owned(source, declared_byte_length, proof_byte_ceiling, layout)?;
+    Ok(PendingProofBodyQueries {
+        source,
+        layout,
+        declared_byte_length,
+        query_section_offset: prefix.query_section_offset,
+        tree_roots: prefix.tree_roots,
+        deep_evaluations: prefix.deep_evaluations,
+        terminal_coefficients: prefix.terminal_coefficients,
     })
 }
 
@@ -913,7 +974,163 @@ impl<'source, 'layout, Source: ProofByteSource + ?Sized>
     }
 }
 
-fn proof_body_prefix_byte_length(layout: &ProofBodyLayout) -> Result<usize, ProofBodyError> {
+struct ProofRangeByteSource<'source, Source: ProofByteSource + ?Sized> {
+    source: &'source Source,
+    source_offset: usize,
+    byte_length: usize,
+}
+
+impl<Source: ProofByteSource + ?Sized> ProofByteSource for ProofRangeByteSource<'_, Source> {
+    fn byte_length(&self) -> usize {
+        self.byte_length
+    }
+
+    fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool {
+        let Some(end) = offset.checked_add(destination.len()) else {
+            return false;
+        };
+        if end > self.byte_length {
+            return false;
+        }
+        let Some(source_offset) = self.source_offset.checked_add(offset) else {
+            return false;
+        };
+        self.source.copy_bytes(source_offset, destination)
+    }
+}
+
+pub(crate) fn decode_proof_query_section_header_at<Source: ProofByteSource + ?Sized>(
+    source: &Source,
+    query_section_offset: usize,
+    expected_record_pair_count: usize,
+) -> Result<usize, ProofBodyError> {
+    let byte_length = source
+        .byte_length()
+        .checked_sub(query_section_offset)
+        .filter(|byte_length| *byte_length > 0)
+        .ok_or(ProofDecodeError::Truncated)?;
+    let range = ProofRangeByteSource {
+        source,
+        source_offset: query_section_offset,
+        byte_length,
+    };
+    let mut decoder = BoundedProofDecoder::new(&range, byte_length, byte_length)?;
+    if decoder.read_u32()?
+        != u32::try_from(expected_record_pair_count).map_err(|_| ProofBodyError::CountOverflow)?
+    {
+        return Err(ProofBodyError::InvalidListCount);
+    }
+    query_section_offset
+        .checked_add(decoder.offset())
+        .ok_or(ProofBodyError::CountOverflow)
+}
+
+pub(crate) fn decode_proof_query_tree_at<Source: ProofByteSource + ?Sized>(
+    source: &Source,
+    tree_fragment_offset: usize,
+    layout: &ProofBodyLayout,
+    catalog_index: usize,
+    expected_root: [u8; 64],
+    sorted_query_representatives: &[u64],
+) -> Result<(usize, DecodedProofTreeOpening), ProofBodyError> {
+    layout.validate_query_representatives(sorted_query_representatives)?;
+    let entry = layout
+        .catalog
+        .entries
+        .get(catalog_index)
+        .ok_or(ProofBodyError::InvalidTreeCatalogIndex)?;
+    let byte_length = source
+        .byte_length()
+        .checked_sub(tree_fragment_offset)
+        .filter(|byte_length| *byte_length > 0)
+        .ok_or(ProofDecodeError::Truncated)?;
+    let range = ProofRangeByteSource {
+        source,
+        source_offset: tree_fragment_offset,
+        byte_length,
+    };
+    let mut decoder = BoundedProofDecoder::new(&range, byte_length, byte_length)?;
+    let opened_leaf_indexes = layout.opened_leaf_indexes(entry, sorted_query_representatives)?;
+    let expected_leaf_count = entry_leaf_count(entry, layout.catalog.evaluation_domain_size)?;
+    let expected_leaf_byte_length = canonical_leaf_byte_length(entry)?;
+    if expected_leaf_byte_length > source.byte_length() {
+        return Err(ProofBodyError::InvalidItemLength);
+    }
+    let mut opened_leaves = Vec::new();
+    opened_leaves
+        .try_reserve_exact(opened_leaf_indexes.len())
+        .map_err(|_| ProofBodyError::AllocationLimitExceeded)?;
+    let mut opened_leaf_digests = Vec::new();
+    opened_leaf_digests
+        .try_reserve_exact(opened_leaf_indexes.len())
+        .map_err(|_| ProofBodyError::AllocationLimitExceeded)?;
+
+    read_tuple_header(
+        &mut decoder,
+        PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER,
+        2,
+    )?;
+    read_u16_item(
+        &mut decoder,
+        entry.tree_catalog_index,
+        ProofBodyError::InvalidTreeCatalogIndex,
+    )?;
+    let opening_list_byte_length =
+        raw_byte_list_byte_length(opened_leaf_indexes.len(), expected_leaf_byte_length)?;
+    read_item_header(
+        &mut decoder,
+        CanonicalItemType::HomogeneousList,
+        opening_list_byte_length,
+    )?;
+    read_list_header(
+        &mut decoder,
+        CanonicalItemType::RawBytes,
+        opened_leaf_indexes.len(),
+    )?;
+    for expected_leaf_index in opened_leaf_indexes.iter().copied() {
+        if usize::try_from(decoder.read_u32()?).map_err(|_| ProofBodyError::CountOverflow)?
+            != expected_leaf_byte_length
+        {
+            return Err(ProofBodyError::InvalidItemLength);
+        }
+        let canonical_leaf_bytes = decoder.read_bytes(expected_leaf_byte_length)?;
+        let (leaf, digest) = decode_phase_pair_leaf(
+            entry,
+            expected_leaf_index,
+            expected_leaf_count,
+            &canonical_leaf_bytes,
+        )?;
+        opened_leaves.push(leaf);
+        opened_leaf_digests.push((expected_leaf_index, digest));
+    }
+    let expected_frontier_count =
+        minimal_frontier_node_count(&opened_leaf_indexes, expected_leaf_count)?;
+    let frontier = read_authentication_frontier(
+        &mut decoder,
+        entry.tree_catalog_index,
+        expected_frontier_count,
+    )?;
+    authenticate_opening(
+        entry,
+        &opened_leaf_digests,
+        &frontier,
+        expected_root,
+        expected_leaf_count,
+    )?;
+    let next_offset = tree_fragment_offset
+        .checked_add(decoder.offset())
+        .ok_or(ProofBodyError::CountOverflow)?;
+    Ok((
+        next_offset,
+        DecodedProofTreeOpening {
+            leaves: opened_leaves,
+        },
+    ))
+}
+
+pub(crate) fn proof_body_prefix_byte_length(
+    layout: &ProofBodyLayout,
+) -> Result<usize, ProofBodyError> {
     let serialized_root_count = layout
         .catalog
         .entries

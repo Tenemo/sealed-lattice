@@ -7,6 +7,7 @@ import type {
     SetupMailboxSlot,
     SignedMailboxEnvelope,
     UnsignedMailboxEnvelope,
+    VerificationResult,
 } from '@sealed-lattice/types';
 
 export type {
@@ -66,6 +67,60 @@ export type DecodedProofApplicationBinding = Readonly<{
     readonly proofHeaderHash: ProtocolHash;
     readonly proofStreamDescriptorCanonicalBytesHex: string;
     readonly proofByteLength: string;
+}>;
+
+export type FoundationOptionDefinitionIngress = Readonly<{
+    readonly displayLabelUtf8Hex: string;
+    readonly optionIdentifier: string;
+    readonly optionIndex: number;
+}>;
+
+export type EncodedFoundationManifest = Readonly<{
+    readonly canonicalBytesHex: string;
+    readonly manifestHash: ProtocolHash;
+}>;
+
+export type FoundationManifestVerification = VerificationResult<{
+    readonly manifestHash: ProtocolHash;
+}>;
+
+export type EncodedFoundationActionDefinition = Readonly<{
+    readonly actionDefinitionHash: ProtocolHash;
+    readonly canonicalBytesHex: string;
+}>;
+
+export type FoundationActionDefinitionVerification = VerificationResult<{
+    readonly actionDefinitionHash: ProtocolHash;
+}>;
+
+export type EncodedFoundationBoardPolicy = Readonly<{
+    readonly boardPolicyHash: ProtocolHash;
+    readonly canonicalBytesHex: string;
+}>;
+
+export type FoundationBoardPolicyVerification = VerificationResult<{
+    readonly boardPolicyHash: ProtocolHash;
+}>;
+
+export type FoundationSuiteRecordVerification = VerificationResult<{
+    readonly suiteId: ProtocolHash;
+}>;
+
+export type FoundationCeremonyContextVerification = VerificationResult<{
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly suiteId: ProtocolHash;
+}>;
+
+export type FoundationActionContextVerification = VerificationResult<{
+    readonly actionContextHash: ProtocolHash;
+    readonly actionDefinitionHash: ProtocolHash;
+    readonly boardPolicyHash: ProtocolHash;
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly submissionCutoffHash: ProtocolHash;
+    readonly suiteId: ProtocolHash;
 }>;
 
 export type EncodedMailboxKeyScheduleInput = Readonly<{
@@ -197,6 +252,47 @@ type BgvTrusteeEvaluationKeyProofInput =
 export type TranscriptCoreKernel = {
     beginAcceptedSetupSession(): AcceptedSetupSession;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
+    encodeFoundationManifest(input: {
+        readonly displayTitleUtf8Hex: string;
+        readonly optionDefinitions: readonly FoundationOptionDefinitionIngress[];
+    }): EncodedFoundationManifest;
+    verifyFoundationManifest(input: {
+        readonly canonicalBytesHex: string;
+    }): FoundationManifestVerification;
+    encodeFoundationActionDefinition(input: {
+        readonly submissionCutoffUnixMilliseconds: string;
+        readonly topCount: number;
+    }): EncodedFoundationActionDefinition;
+    verifyFoundationActionDefinition(input: {
+        readonly canonicalBytesHex: string;
+    }): FoundationActionDefinitionVerification;
+    encodeFoundationBoardPolicy(input: {
+        readonly boardOriginIdentifier: string;
+    }): EncodedFoundationBoardPolicy;
+    verifyFoundationBoardPolicy(input: {
+        readonly canonicalBytesHex: string;
+    }): FoundationBoardPolicyVerification;
+    verifyFoundationSuiteRecord(input: {
+        readonly canonicalBytesHex: string;
+    }): FoundationSuiteRecordVerification;
+    verifyFoundationCeremonyContext(input: {
+        readonly canonicalManifestBytesHex: string;
+        readonly canonicalRosterBytesHex: string;
+        readonly canonicalSuiteRecordBytesHex: string;
+        readonly ceremonyIdentifier: string;
+        readonly expectedSuiteId: ProtocolHash;
+    }): FoundationCeremonyContextVerification;
+    verifyFoundationActionContext(input: {
+        readonly actionIdentifier: string;
+        readonly canonicalActionDefinitionBytesHex: string;
+        readonly canonicalBoardPolicyBytesHex: string;
+        readonly canonicalManifestBytesHex: string;
+        readonly canonicalRosterBytesHex: string;
+        readonly canonicalSuiteRecordBytesHex: string;
+        readonly ceremonyIdentifier: string;
+        readonly expectedCeremonyContextHash: ProtocolHash;
+        readonly expectedSuiteId: ProtocolHash;
+    }): FoundationActionContextVerification;
     decodeProofApplicationBinding(input: {
         readonly canonicalBytesHex: string;
     }): DecodedProofApplicationBinding;
@@ -275,7 +371,17 @@ export type TranscriptCoreKernelContextOwner = object;
 
 export type PublishedSdkKernel = Pick<
     TranscriptCoreKernel,
-    'beginAcceptedSetupSession' | 'verifyPrivateVssShareEnvelope'
+    | 'beginAcceptedSetupSession'
+    | 'encodeFoundationActionDefinition'
+    | 'encodeFoundationBoardPolicy'
+    | 'encodeFoundationManifest'
+    | 'verifyFoundationActionContext'
+    | 'verifyFoundationActionDefinition'
+    | 'verifyFoundationBoardPolicy'
+    | 'verifyFoundationCeremonyContext'
+    | 'verifyFoundationManifest'
+    | 'verifyFoundationSuiteRecord'
+    | 'verifyPrivateVssShareEnvelope'
 >;
 
 type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
@@ -300,6 +406,42 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'DeriveCanonicalObjectHash',
           'deriveCanonicalObjectHash'
+      >
+    | KernelCommandFromMethod<
+          'EncodeFoundationManifest',
+          'encodeFoundationManifest'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationManifest',
+          'verifyFoundationManifest'
+      >
+    | KernelCommandFromMethod<
+          'EncodeFoundationActionDefinition',
+          'encodeFoundationActionDefinition'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationActionDefinition',
+          'verifyFoundationActionDefinition'
+      >
+    | KernelCommandFromMethod<
+          'EncodeFoundationBoardPolicy',
+          'encodeFoundationBoardPolicy'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationBoardPolicy',
+          'verifyFoundationBoardPolicy'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationSuiteRecord',
+          'verifyFoundationSuiteRecord'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationCeremonyContext',
+          'verifyFoundationCeremonyContext'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationActionContext',
+          'verifyFoundationActionContext'
       >
     | KernelCommandFromMethod<
           'DecodeProofApplicationBinding',

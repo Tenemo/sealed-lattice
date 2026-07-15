@@ -7,7 +7,12 @@
 
 use std::collections::BTreeSet;
 
-use crate::foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple};
+use crate::{
+    bgv::evaluator::suite_closure::EvaluatorCandidateInput,
+    foundation::{
+        CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
+    },
+};
 
 use super::relation_plan::{
     BoundTreeConstructionKind, BoundTreeRootUse, RelationColumnValueType,
@@ -287,7 +292,7 @@ impl ValidatedRelationPlanArtifact {
         &self.canonical_plan_tuple
     }
 
-    fn compiled_plan(&self) -> &CompiledRelationPlan {
+    pub(crate) fn compiled_plan(&self) -> &CompiledRelationPlan {
         &self.compiled_plan
     }
 }
@@ -315,8 +320,8 @@ impl EvaluatorKeyShareSourceKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EvaluatorKeyAggregateEntryTopology {
-    pub(crate) source_kind: EvaluatorKeyShareSourceKind,
-    pub(crate) schedule_position: u32,
+    source_kind: EvaluatorKeyShareSourceKind,
+    schedule_position: u32,
 }
 
 /// Instance topology needed to expand relation-plan variants into concrete
@@ -324,28 +329,113 @@ pub(crate) struct EvaluatorKeyAggregateEntryTopology {
 /// endpoints or edges; the profile derives those from the checked plans.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FirstProfileRootTopology {
-    pub(crate) roster_size: u16,
-    pub(crate) ordered_evaluator_key_entries: Vec<EvaluatorKeyAggregateEntryTopology>,
-    pub(crate) target_evaluator_key_entry_count: u16,
-    pub(crate) ordered_ballot_producer_sequences: Vec<u64>,
+    roster_size: u16,
+    ordered_evaluator_key_entries: Vec<EvaluatorKeyAggregateEntryTopology>,
+    ordered_ballot_producer_sequences: Vec<u64>,
 }
 
 impl FirstProfileRootTopology {
+    pub(crate) fn selected(
+        maximum_ballot_attempts_per_participant: u16,
+    ) -> Result<Self, ProofProfileError> {
+        if maximum_ballot_attempts_per_participant == 0 {
+            return Err(ProofProfileError::InvalidRootTopology);
+        }
+        let evaluator_candidate = EvaluatorCandidateInput::implemented()
+            .map_err(|_| ProofProfileError::InvalidRootTopology)?;
+        let mut ordered_evaluator_key_entries = evaluator_candidate
+            .relinearization_levels
+            .iter()
+            .enumerate()
+            .map(|(schedule_position, _)| {
+                Ok(EvaluatorKeyAggregateEntryTopology {
+                    source_kind: EvaluatorKeyShareSourceKind::Relinearization,
+                    schedule_position: u32::try_from(schedule_position)
+                        .map_err(|_| ProofProfileError::CountOverflow)?,
+                })
+            })
+            .collect::<Result<Vec<_>, ProofProfileError>>()?;
+        ordered_evaluator_key_entries.extend(
+            evaluator_candidate
+                .galois_key_schedule
+                .iter()
+                .enumerate()
+                .map(|(schedule_position, _)| {
+                    Ok(EvaluatorKeyAggregateEntryTopology {
+                        source_kind: EvaluatorKeyShareSourceKind::Galois,
+                        schedule_position: u32::try_from(schedule_position)
+                            .map_err(|_| ProofProfileError::CountOverflow)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ProofProfileError>>()?,
+        );
+        let topology = Self {
+            roster_size: FOUNDATION_PROFILE.participant_count,
+            ordered_evaluator_key_entries,
+            ordered_ballot_producer_sequences: (0..u64::from(
+                maximum_ballot_attempts_per_participant,
+            ))
+                .collect(),
+        };
+        topology.validate()?;
+        Ok(topology)
+    }
+
     fn validate(&self) -> Result<(), ProofProfileError> {
-        if !(3..=20).contains(&self.roster_size)
+        if self.roster_size != FOUNDATION_PROFILE.participant_count
             || self.ordered_evaluator_key_entries.is_empty()
             || self.ordered_evaluator_key_entries.len() != 20
-            || self.target_evaluator_key_entry_count == 0
-            || usize::from(self.target_evaluator_key_entry_count)
-                > self.ordered_evaluator_key_entries.len()
-            || !self
+            || self.ordered_ballot_producer_sequences.is_empty()
+            || self
                 .ordered_ballot_producer_sequences
-                .windows(2)
-                .all(|window| window[0] < window[1])
+                .iter()
+                .copied()
+                .enumerate()
+                .any(|(ordinal, producer_sequence)| {
+                    u64::try_from(ordinal).ok() != Some(producer_sequence)
+                })
         {
             return Err(ProofProfileError::InvalidRootTopology);
         }
+
+        let selected = Self::selected_evaluator_key_entries()?;
+        if self.ordered_evaluator_key_entries != selected {
+            return Err(ProofProfileError::InvalidRootTopology);
+        }
         Ok(())
+    }
+
+    fn selected_evaluator_key_entries()
+    -> Result<Vec<EvaluatorKeyAggregateEntryTopology>, ProofProfileError> {
+        let evaluator_candidate = EvaluatorCandidateInput::implemented()
+            .map_err(|_| ProofProfileError::InvalidRootTopology)?;
+        let mut entries = evaluator_candidate
+            .relinearization_levels
+            .iter()
+            .enumerate()
+            .map(|(schedule_position, _)| {
+                Ok(EvaluatorKeyAggregateEntryTopology {
+                    source_kind: EvaluatorKeyShareSourceKind::Relinearization,
+                    schedule_position: u32::try_from(schedule_position)
+                        .map_err(|_| ProofProfileError::CountOverflow)?,
+                })
+            })
+            .collect::<Result<Vec<_>, ProofProfileError>>()?;
+        entries.extend(
+            evaluator_candidate
+                .galois_key_schedule
+                .iter()
+                .enumerate()
+                .map(|(schedule_position, _)| {
+                    Ok(EvaluatorKeyAggregateEntryTopology {
+                        source_kind: EvaluatorKeyShareSourceKind::Galois,
+                        schedule_position: u32::try_from(schedule_position)
+                            .map_err(|_| ProofProfileError::CountOverflow)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ProofProfileError>>()?,
+        );
+        Ok(entries)
     }
 }
 
@@ -584,6 +674,14 @@ impl ProofProfileSet {
             ],
         );
         encode_generated_tuple(&tuple)
+    }
+
+    pub(crate) fn relation_plans(&self) -> &[ValidatedRelationPlanArtifact] {
+        &self.relation_plans
+    }
+
+    pub(crate) fn root_compatibility_edges(&self) -> &[RelationRootCompatibilityEdge] {
+        &self.root_compatibility_edges
     }
 }
 
@@ -960,8 +1058,10 @@ fn derive_root_compatibility_edges(
             BoundTreeRootUse::Input,
         )?;
         require_root_count(&aggregate_outputs, sharing_limb_count)?;
-        require_root_count(&target_inputs, sharing_limb_count)?;
-        for sharing_limb_ordinal in 0..sharing_limb_count {
+        if target_inputs.is_empty() || target_inputs.len() > aggregate_outputs.len() {
+            return Err(ProofProfileError::InvalidRootTopology);
+        }
+        for sharing_limb_ordinal in 0..target_inputs.len() {
             append_root_edge(
                 &mut edges,
                 &mut assigned_consumers,
@@ -1381,40 +1481,6 @@ fn derive_evaluator_aggregate_edges(
         }
     }
 
-    let selected_top_count = topology.target_evaluator_key_entry_count;
-    let evaluator_outputs = ordered_bound_root_slots(
-        relation_plans,
-        0x1218,
-        None,
-        None,
-        Some(selected_top_count),
-        None,
-        RelationRootConstructionKind::SetupPolynomial,
-        BoundTreeRootUse::Output,
-    )?;
-    require_root_count(&evaluator_outputs, usize::from(selected_top_count))?;
-    for roster_position in 0..topology.roster_size {
-        let target_inputs = ordered_bound_root_slots(
-            relation_plans,
-            0x1621,
-            Some(roster_position),
-            None,
-            None,
-            None,
-            RelationRootConstructionKind::SetupPolynomial,
-            BoundTreeRootUse::Input,
-        )?;
-        require_root_count(&target_inputs, usize::from(selected_top_count))?;
-        for entry_ordinal in 0..usize::from(selected_top_count) {
-            append_root_edge(
-                edges,
-                assigned_consumers,
-                &evaluator_outputs[entry_ordinal],
-                &target_inputs[entry_ordinal],
-                RelationRootConstructionKind::SetupPolynomial,
-            )?;
-        }
-    }
     Ok(())
 }
 
@@ -1519,7 +1585,6 @@ fn allowed_root_transition(producer_family: u16, consumer_family: u16) -> bool {
             | (0x1214, 0x1215)
             | (0x1215, 0x1216 | 0x1217)
             | (0x1216 | 0x1217, 0x1218)
-            | (0x1218, 0x1621)
     )
 }
 
@@ -1536,8 +1601,7 @@ fn root_scopes_are_compatible(
         | (0x1212, 0x1213)
         | (0x1213, 0x1302)
         | (0x1214, 0x1215)
-        | (0x1216 | 0x1217, 0x1218)
-        | (0x1218, 0x1621) => true,
+        | (0x1216 | 0x1217, 0x1218) => true,
         _ => producer
             .roster_position
             .zip(consumer.roster_position)

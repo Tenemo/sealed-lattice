@@ -47,11 +47,8 @@ pub(in crate::bgv::setup) use canonical_stream_transport::{
 #[cfg(test)]
 pub(in crate::bgv::setup) use canonical_stream_transport::{
     CanonicalSetupProofBindingLease, accepted_setup_proof_binding_lease,
-    begin_accepted_setup_fixture_proof_binding_session,
-    evict_verified_canonical_setup_proof_materials,
-    finish_accepted_setup_fixture_proof_binding_session,
-    restore_accepted_setup_proof_binding_lease, retain_accepted_setup_proof_binding,
-    verified_canonical_setup_proof_material_bytes,
+    evict_verified_canonical_setup_proof_materials, restore_accepted_setup_proof_binding_lease,
+    retain_accepted_setup_proof_binding, verified_canonical_setup_proof_material_bytes,
 };
 #[cfg(test)]
 pub(crate) use canonical_stream_transport::{
@@ -90,12 +87,10 @@ pub(crate) use setup_proof::ProofByteSource;
 pub(crate) use setup_proof::{
     BgvProofMaterialBytes, authenticate_setup_proof_material_stream_for_test,
 };
+pub(in crate::bgv) use trustee_evaluation_key_proof::TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND;
 #[cfg(test)]
+pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMILY;
 pub(in crate::bgv) use trustee_evaluation_key_proof::target_decryption_interpolation_denominator_clearing_factor;
-#[cfg(test)]
-pub(crate) use trustee_evaluation_key_proof::{
-    TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND, TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-};
 
 pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
     request: &Value,

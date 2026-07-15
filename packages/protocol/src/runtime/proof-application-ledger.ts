@@ -1,13 +1,15 @@
 import {
-    copyVerifiedProofApplicationBinding,
-    type ProofApplicationBindingDescription,
-    type VerifiedProofApplicationBinding,
+    copyProofApplicationReservationBindingDescription,
+    type ProofApplicationReservationBinding,
+    type ProofApplicationReservationBindingDescription,
 } from '@sealed-lattice/wasm';
 
 import {
     AuthenticatedRuntimeRecordError,
     type AuthenticatedRuntimeRecordErrorCode,
     bytesEqual,
+    bytesToHex,
+    copyRuntimeStorageAuthorityContext,
     createRuntimeRecordProtection,
     mapStorageError,
     readRuntimeRecord,
@@ -59,6 +61,17 @@ export type ProofApplicationReservation = Readonly<{
     verificationStarted: boolean;
 }>;
 
+declare const proofApplicationReservationCapabilityBrand: unique symbol;
+
+/**
+ * Process-local ownership of one durable proof resource reservation. Canonical
+ * proof-binding bytes can create this reservation, but they cannot reconstruct
+ * its capability after release or in another ledger instance.
+ */
+export type ProofApplicationReservationCapability = Readonly<{
+    readonly [proofApplicationReservationCapabilityBrand]: true;
+}>;
+
 export type ProofApplicationLedgerSnapshot = Readonly<{
     proofByteCount: bigint;
     proofObjectCount: number;
@@ -68,16 +81,20 @@ export type ProofApplicationLedgerSnapshot = Readonly<{
 }>;
 
 export type ProofApplicationLedger = Readonly<{
+    copyAuthorityContext(): RuntimeStorageAuthorityContext;
     reserve(
-        verifiedBinding: VerifiedProofApplicationBinding,
-    ): Promise<ProofApplicationReservation>;
+        reservationBinding: ProofApplicationReservationBinding,
+    ): Promise<ProofApplicationReservationCapability>;
+    copyReservation(
+        reservation: ProofApplicationReservationCapability,
+    ): ProofApplicationReservation;
     beginVerification(input: {
         proofQueryCount: bigint;
+        reservation: ProofApplicationReservationCapability;
         signatureVerificationCount: number;
-        verifiedBinding: VerifiedProofApplicationBinding;
     }): Promise<ProofApplicationReservation>;
     releaseBeforeVerification(
-        verifiedBinding: VerifiedProofApplicationBinding,
+        reservation: ProofApplicationReservationCapability,
     ): Promise<boolean>;
     snapshot(): Promise<ProofApplicationLedgerSnapshot>;
 }>;
@@ -105,6 +122,13 @@ type OpenedProofApplicationRecord = Readonly<{
     record: ProofApplicationRecord;
     sealedBytes: Uint8Array | null;
 }>;
+
+type ProofApplicationReservationCapabilityRecord = {
+    binding: ProofApplicationReservationBinding;
+    generation: number;
+    reservation: ProofApplicationReservation;
+    slotKey: string;
+};
 
 const requireSafePositiveInteger = (value: number, label: string): void => {
     if (!Number.isSafeInteger(value) || value <= 0) {
@@ -263,11 +287,59 @@ export const openProofApplicationLedger = (input: {
         );
         return result;
     };
+    const reservationCapabilityRecords = new WeakMap<
+        object,
+        ProofApplicationReservationCapabilityRecord
+    >();
+    const reservationGenerationBySlot = new Map<string, number>();
+    const mintReservationCapability = (
+        binding: ProofApplicationReservationBinding,
+        reservation: ProofApplicationReservation,
+    ): ProofApplicationReservationCapability => {
+        const slotKey = bytesToHex(reservation.applicationSlotHash);
+        const capability = Object.freeze(
+            Object.create(null) as object,
+        ) as ProofApplicationReservationCapability;
+        reservationCapabilityRecords.set(capability, {
+            binding,
+            generation: reservationGenerationBySlot.get(slotKey) ?? 0,
+            reservation,
+            slotKey,
+        });
+        return capability;
+    };
+    const requireReservationCapability = (
+        reservation: ProofApplicationReservationCapability,
+    ): ProofApplicationReservationCapabilityRecord => {
+        const record =
+            (typeof reservation === 'object' ||
+                typeof reservation === 'function') &&
+            reservation !== null
+                ? reservationCapabilityRecords.get(reservation)
+                : undefined;
+        if (
+            record === undefined ||
+            record.generation !==
+                (reservationGenerationBySlot.get(record.slotKey) ?? 0)
+        ) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidInput',
+                'The proof application reservation capability is forged, stale, or owned by another ledger.',
+            );
+        }
+        return record;
+    };
+    const copyReservation = (
+        reservation: ProofApplicationReservationCapability,
+    ): ProofApplicationReservation =>
+        copyReservationValue(
+            requireReservationCapability(reservation).reservation,
+        );
 
-    const reserve: ProofApplicationLedger['reserve'] = (verifiedBinding) =>
+    const reserve: ProofApplicationLedger['reserve'] = (reservationBinding) =>
         enqueue(async () => {
             const description = copyAndRequireBinding(
-                verifiedBinding,
+                reservationBinding,
                 protection.authorityContext,
                 limits,
             );
@@ -283,7 +355,10 @@ export const openProofApplicationLedger = (input: {
                 );
                 if (existing !== undefined) {
                     requireExactBinding(existing, description);
-                    return reservationFromEntry(existing);
+                    return mintReservationCapability(
+                        reservationBinding,
+                        reservationFromEntry(existing),
+                    );
                 }
                 requireAvailableFamilySlot(opened.record, description, limits);
                 const nextProofByteCount = checkedBigIntAdd(
@@ -322,7 +397,10 @@ export const openProofApplicationLedger = (input: {
                     opened.record,
                     opened.sealedBytes,
                 );
-                return reservationFromEntry(entry);
+                return mintReservationCapability(
+                    reservationBinding,
+                    reservationFromEntry(entry),
+                );
             } finally {
                 destroyBindingDescription(description);
             }
@@ -332,8 +410,11 @@ export const openProofApplicationLedger = (input: {
         verificationInput,
     ) =>
         enqueue(async () => {
+            const capabilityRecord = requireReservationCapability(
+                verificationInput.reservation,
+            );
             const description = copyAndRequireBinding(
-                verificationInput.verifiedBinding,
+                capabilityRecord.binding,
                 protection.authorityContext,
                 limits,
             );
@@ -373,7 +454,9 @@ export const openProofApplicationLedger = (input: {
                             'An exact proof binding already began with different resource charges.',
                         );
                     }
-                    return reservationFromEntry(entry);
+                    const reservation = reservationFromEntry(entry);
+                    capabilityRecord.reservation = reservation;
+                    return reservation;
                 }
                 const nextProofVerificationCount = checkedNumberAdd(
                     opened.record.proofVerificationCount,
@@ -412,17 +495,21 @@ export const openProofApplicationLedger = (input: {
                     opened.record,
                     opened.sealedBytes,
                 );
-                return reservationFromEntry(entry);
+                const reservation = reservationFromEntry(entry);
+                capabilityRecord.reservation = reservation;
+                return reservation;
             } finally {
                 destroyBindingDescription(description);
             }
         });
 
     const releaseBeforeVerification: ProofApplicationLedger['releaseBeforeVerification'] =
-        (verifiedBinding) =>
+        (reservation) =>
             enqueue(async () => {
+                const capabilityRecord =
+                    requireReservationCapability(reservation);
                 const description = copyAndRequireBinding(
-                    verifiedBinding,
+                    capabilityRecord.binding,
                     protection.authorityContext,
                     limits,
                 );
@@ -460,6 +547,10 @@ export const openProofApplicationLedger = (input: {
                         opened.record,
                         opened.sealedBytes,
                     );
+                    reservationGenerationBySlot.set(
+                        capabilityRecord.slotKey,
+                        capabilityRecord.generation + 1,
+                    );
                     return true;
                 } finally {
                     destroyBindingDescription(description);
@@ -473,7 +564,10 @@ export const openProofApplicationLedger = (input: {
         });
 
     return Object.freeze({
+        copyAuthorityContext: () =>
+            copyRuntimeStorageAuthorityContext(protection.authorityContext),
         reserve,
+        copyReservation,
         beginVerification,
         releaseBeforeVerification,
         snapshot,
@@ -481,17 +575,20 @@ export const openProofApplicationLedger = (input: {
 };
 
 const copyAndRequireBinding = (
-    verifiedBinding: VerifiedProofApplicationBinding,
+    reservationBinding: ProofApplicationReservationBinding,
     authorityContext: RuntimeStorageAuthorityContext,
     limits: ProofApplicationLedgerLimits,
-): ProofApplicationBindingDescription => {
-    let description: ProofApplicationBindingDescription;
+): ProofApplicationReservationBindingDescription => {
+    let description: ProofApplicationReservationBindingDescription;
     try {
-        description = copyVerifiedProofApplicationBinding(verifiedBinding);
+        description =
+            copyProofApplicationReservationBindingDescription(
+                reservationBinding,
+            );
     } catch (error) {
         throw new AuthenticatedRuntimeRecordError(
             'InvalidInput',
-            'The proof binding was not issued by the WASM verifier.',
+            'The proof application reservation binding was not prepared by the WASM binding decoder.',
             error,
         );
     }
@@ -512,7 +609,7 @@ const copyAndRequireBinding = (
         destroyBindingDescription(description);
         throw new AuthenticatedRuntimeRecordError(
             'InvalidInput',
-            'The verified proof binding belongs to another runtime context.',
+            'The proof application reservation binding belongs to another runtime context.',
         );
     }
     if (
@@ -522,7 +619,7 @@ const copyAndRequireBinding = (
     ) {
         destroyBindingDescription(description);
         throw resourceLimit(
-            'The verified proof binding exceeds the configured action bounds.',
+            'The proof application reservation binding exceeds the configured action bounds.',
         );
     }
     return description;
@@ -886,7 +983,7 @@ const recomputeCounters = (
 
 const requireAvailableFamilySlot = (
     record: ProofApplicationRecord,
-    description: ProofApplicationBindingDescription,
+    description: ProofApplicationReservationBindingDescription,
     limits: ProofApplicationLedgerLimits,
 ): void => {
     const ceiling = limits.orderedFamilyApplicationCeilings.find(
@@ -914,7 +1011,7 @@ const requireAvailableFamilySlot = (
 
 const requireExactBinding = (
     entry: ProofApplicationEntry,
-    description: ProofApplicationBindingDescription,
+    description: ProofApplicationReservationBindingDescription,
 ): void => {
     if (
         entry.applicationStatementSchemaIdentifier !==
@@ -968,6 +1065,17 @@ const reservationFromEntry = (
             entry.applicationStatementSchemaIdentifier,
         proofByteLength: entry.proofByteLength,
         verificationStarted: entry.verificationStarted,
+    });
+
+const copyReservationValue = (
+    reservation: ProofApplicationReservation,
+): ProofApplicationReservation =>
+    Object.freeze({
+        applicationSlotHash: reservation.applicationSlotHash.slice(),
+        applicationStatementSchemaIdentifier:
+            reservation.applicationStatementSchemaIdentifier,
+        proofByteLength: reservation.proofByteLength,
+        verificationStarted: reservation.verificationStarted,
     });
 
 const snapshotFromRecord = (
@@ -1076,7 +1184,7 @@ const destroyEntries = (entries: ProofApplicationEntry[]): void => {
 };
 
 const destroyBindingDescription = (
-    description: ProofApplicationBindingDescription,
+    description: ProofApplicationReservationBindingDescription,
 ): void => {
     description.actionContextHash.fill(0);
     description.applicationSlotCanonicalBytes.fill(0);

@@ -466,6 +466,7 @@ const isCustodyWorkerRequest = (
 
 class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCustody {
     #activeRequest: ActiveClientRequest | undefined;
+    #binding: BrowserActionStorageRootBinding | undefined;
     #closed = false;
     #closing = false;
     #closePromise: Promise<void> | undefined;
@@ -530,13 +531,24 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
             );
         }
 
-        return this.#queueOperation(() =>
-            this.#sendRequest(
+        return this.#queueOperation(async () => {
+            await this.#sendRequest(
                 'open-custody',
                 copiedConfiguration,
                 validateVoidResult,
-            ),
-        );
+            );
+            this.#binding = copyRootBinding(copiedConfiguration.binding);
+        });
+    }
+
+    public copyBinding(): BrowserActionStorageRootBinding {
+        if (this.#binding === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The browser action-storage worker binding is unavailable.',
+            );
+        }
+        return copyRootBinding(this.#binding);
     }
 
     public initialize(): Promise<BrowserDeviceWrappingSnapshot> {
@@ -1020,6 +1032,7 @@ export const openBrowserActionStorageCustodyWorker = async (input: {
             closeActionStateVerifierSession: (identifier) =>
                 client.closeActionStateVerifierSession(identifier),
             close: () => client.close(),
+            copyBinding: () => client.copyBinding(),
             currentSnapshot: () => client.currentSnapshot(),
             createAndSealActionRandomness: (operationInput) =>
                 client.createAndSealActionRandomness(operationInput),

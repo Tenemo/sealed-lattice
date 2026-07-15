@@ -206,14 +206,18 @@ fn minimum_radix_digit_count(maximum: u128) -> Result<usize, RelationPlanError> 
     Ok(count)
 }
 
-fn fixed_radix_digits(mut value: u128, count: usize) -> Result<Vec<u64>, RelationPlanError> {
+fn fixed_radix_digits(
+    mut value: u128,
+    count: usize,
+    radix: u64,
+) -> Result<Vec<u64>, RelationPlanError> {
     let mut digits = Vec::with_capacity(count);
     for _ in 0..count {
         digits.push(
-            u64::try_from(value % u128::from(RADIX))
+            u64::try_from(value % u128::from(radix))
                 .map_err(|_| RelationPlanError::IntegerBoundOverflow)?,
         );
-        value /= u128::from(RADIX);
+        value /= u128::from(radix);
     }
     if value != 0 {
         return Err(RelationPlanError::IntegerBoundOverflow);
@@ -390,6 +394,7 @@ fn add_role_equations(
     let modulus_digits = fixed_radix_digits(
         u128::from(modulus),
         minimum_radix_digit_count(u128::from(modulus))?,
+        RADIX,
     )?;
     if product_layer_count < modulus_digits.len() {
         return Err(RelationPlanError::IntegerBoundOverflow);
@@ -432,6 +437,7 @@ fn add_role_equations(
     let flooding_constant_digits = fixed_radix_digits(
         u128::from(input.flooding_bound) * u128::from(input.simulation_scale),
         product_layer_count,
+        RADIX,
     )?;
 
     for challenge_ordinal in 0..context.non_native_modular_identity_challenge_count {
@@ -700,6 +706,19 @@ fn interpolate_signed_rows(
     ))
 }
 
+fn evaluate_base_polynomial_on_subgroup(
+    trace_domain: ProofEvaluationDomain,
+    coefficients: &[ProofBaseFieldElement],
+) -> Result<Vec<ProofBaseFieldElement>, TargetReleaseWitnessError> {
+    let mut reduced_coefficients = vec![ProofBaseFieldElement::ZERO; trace_domain.size()];
+    for (coefficient_ordinal, coefficient) in coefficients.iter().copied().enumerate() {
+        let reduced_ordinal = coefficient_ordinal % trace_domain.size();
+        reduced_coefficients[reduced_ordinal] =
+            reduced_coefficients[reduced_ordinal].add(coefficient);
+    }
+    Ok(trace_domain.evaluate_base_polynomial(&reduced_coefficients)?)
+}
+
 fn insert_unsigned_half_column(
     columns: &mut BTreeMap<u32, CommonProofSourcePolynomial>,
     trace_domain: ProofEvaluationDomain,
@@ -961,7 +980,7 @@ fn insert_bounded_unsigned_vector(
         return Err(TargetReleaseWitnessError::InvalidWitness);
     }
     let digit_layers = unsigned_radix_layers(values, MATERIAL_DIGIT_RADIX, 2)?;
-    let maximum_digits = fixed_radix_digits(u128::from(maximum), 2)?;
+    let maximum_digits = fixed_radix_digits(u128::from(maximum), 2, MATERIAL_DIGIT_RADIX)?;
     for half_ordinal in 0..2 {
         for digit_ordinal in 0..2 {
             let half_start = half_ordinal * trace_domain.size();
@@ -1044,7 +1063,7 @@ fn insert_committed_share_columns(
         return Err(TargetReleaseWitnessError::InvalidWitness);
     }
     let digit_layers = unsigned_radix_layers(share, MATERIAL_DIGIT_RADIX, 2)?;
-    let maximum_digits = fixed_radix_digits(u128::from(modulus - 1), 2)?;
+    let maximum_digits = fixed_radix_digits(u128::from(modulus - 1), 2, MATERIAL_DIGIT_RADIX)?;
     for (physical_ordinal, column_ordinal) in layout.bound_columns.iter().copied().enumerate() {
         let digit_ordinal = physical_ordinal / 2;
         let half_ordinal = physical_ordinal % 2;
@@ -1052,7 +1071,7 @@ fn insert_committed_share_columns(
             .masked_coefficients_by_physical_column()
             .get(physical_ordinal)
             .ok_or(TargetReleaseWitnessError::InvalidWitness)?;
-        let trace_values = trace_domain.evaluate_base_polynomial(masked_coefficients)?;
+        let trace_values = evaluate_base_polynomial_on_subgroup(trace_domain, masked_coefficients)?;
         let start = half_ordinal * trace_domain.size();
         if trace_values
             .iter()
@@ -1314,10 +1333,12 @@ fn insert_role_equation_columns(
     let modulus_digits = fixed_radix_digits(
         u128::from(modulus),
         minimum_radix_digit_count(u128::from(modulus))?,
+        RADIX,
     )?;
     let flooding_constant_digits = fixed_radix_digits(
         u128::from(flooding_bound) * u128::from(simulation_scale),
         product_layers.len(),
+        RADIX,
     )?;
     let mut carry_layers = vec![vec![0_i128; ring_degree]; layout.carry_values.len()];
     let mut previous_carry = vec![0_i128; ring_degree];

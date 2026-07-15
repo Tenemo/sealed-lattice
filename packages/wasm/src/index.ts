@@ -7,6 +7,7 @@ import {
     openCanonicalBoardVerifierSession,
 } from './canonical-board-runtime.js';
 import { openFinalityVerifierSession } from './finality-verifier-runtime.js';
+import { openFoundationCeremonyRuntime } from './foundation-ceremony-runtime.js';
 import {
     createWasmBrowserActionStorageWorkerKernel,
     openClosedWorkerSetupMailboxRandomness,
@@ -44,9 +45,17 @@ export {
     openClosedWorkerSetupMailboxRandomness,
     openClosedWorkerStructuredCommitmentOpenings,
     openFinalityVerifierSession,
+    openFoundationCeremonyRuntime,
     openMailboxGcmRuntime,
     TranscriptCoreKernelCommandError,
 };
+export type {
+    CanonicalFoundationActionDefinition,
+    CanonicalFoundationBoardPolicy,
+    CanonicalFoundationManifest,
+    FoundationCeremonyRuntime,
+    FoundationManifestInput,
+} from './foundation-ceremony-runtime.js';
 export type {
     AcceptedSetupSession,
     ClosedWorkerSetupMailboxRandomnessOperations,
@@ -108,13 +117,15 @@ export type {
     VerifiedFinalityDescription,
 } from './finality-verifier-runtime.js';
 export {
-    copyVerifiedProofApplicationBinding,
-    verifyProofApplicationBinding,
+    copyProofApplicationReservationBindingDescription,
+    prepareProofApplicationReservationBinding,
+    ProofApplicationReservationBindingPreparationError,
 } from './proof-application-runtime.js';
 export type {
     ProofApplicationAuthorityContext,
-    ProofApplicationBindingDescription,
-    VerifiedProofApplicationBinding,
+    ProofApplicationReservationBinding,
+    ProofApplicationReservationBindingDescription,
+    ProofApplicationReservationBindingPreparationRefusalReason,
 } from './proof-application-runtime.js';
 export type {
     StateDurableBindingDescription,

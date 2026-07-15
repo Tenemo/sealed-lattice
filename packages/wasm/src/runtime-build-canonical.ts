@@ -676,9 +676,9 @@ export const decodeSuiteArtifactReferences = (
     const tuple = parseCanonicalTuple(
         canonicalSuiteRecordBytes,
         suiteRecordSchemaIdentifier,
-        20,
+        29,
     );
-    const references = readNestedTupleList(tuple, 19).map((referenceTuple) => {
+    const references = readNestedTupleList(tuple, 28).map((referenceTuple) => {
         if (
             referenceTuple.schemaIdentifier !==
                 suiteArtifactReferenceSchemaIdentifier ||

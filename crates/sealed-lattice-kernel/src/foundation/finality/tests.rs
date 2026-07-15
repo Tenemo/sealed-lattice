@@ -79,6 +79,7 @@ impl FinalityTestFixture {
             let (mailbox_key, _) =
                 ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
             roster_entries.push(RosterEntry {
+                roster_position,
                 signing_verification_key: verification_key.into_bytes(),
                 mailbox_encapsulation_key: mailbox_key.into_bytes(),
             });

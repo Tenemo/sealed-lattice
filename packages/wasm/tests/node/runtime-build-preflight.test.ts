@@ -217,7 +217,7 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
     );
     const suiteRecordBytes = canonicalTuple(
         0x0118,
-        ...Array.from({ length: 19 }, () => unsigned16Item(1)),
+        ...Array.from({ length: 28 }, () => unsigned16Item(1)),
         nestedTupleListItem(artifactReferences),
     );
     const suiteIdentifier = deriveHash(

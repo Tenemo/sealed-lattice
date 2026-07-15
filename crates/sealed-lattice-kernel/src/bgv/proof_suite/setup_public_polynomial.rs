@@ -17,10 +17,11 @@ use crate::{
 };
 
 use super::{
-    CommonProofBoundOpeningProvider, CommonProofByteSink, CommonProofEncodingError,
-    CommonProofOpeningArtifact, CommonProofOpeningGeometry, CommonProofQuerySectionWriter,
-    PROOF_EVALUATION_COSET_OFFSET, ProofBaseFieldElement, ProofEvaluationDomain, ProofFieldError,
-    ProofPolynomialError, ProofTreeCatalogEntry, ProofTreeCatalogSource,
+    BoundedCommonProofByteSinkError, CommonProofBoundOpeningProvider, CommonProofByteSink,
+    CommonProofEncodingError, CommonProofOpeningArtifact, CommonProofOpeningGeometry,
+    CommonProofQuerySectionWriter, CompleteProofTreeCatalog, PROOF_EVALUATION_COSET_OFFSET,
+    ProofBaseFieldElement, ProofEvaluationDomain, ProofFieldError, ProofPolynomialError,
+    ProofTreeCatalogEntry, ProofTreeCatalogSource, encode_common_proof_query_tree_fragment,
 };
 
 const SETUP_PUBLIC_POLYNOMIAL_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x121b;
@@ -512,6 +513,35 @@ impl CommonProofBoundOpeningProvider for SetupPublicPolynomialBoundOpeningProvid
                 SetupPublicPolynomialError::InvalidInput,
             ))?;
         writer.write_next_opening(artifact)
+    }
+
+    fn encode_bound_opening_fragment(
+        &mut self,
+        catalog: &CompleteProofTreeCatalog,
+        catalog_index: usize,
+        geometry: CommonProofOpeningGeometry,
+        sorted_query_representatives: &[u64],
+        maximum_fragment_byte_length: usize,
+    ) -> Result<Vec<u8>, CommonProofEncodingError<BoundedCommonProofByteSinkError, Self::Error>>
+    {
+        let entry =
+            catalog
+                .entries()
+                .get(catalog_index)
+                .ok_or(CommonProofEncodingError::Artifact(
+                    SetupPublicPolynomialError::InvalidInput,
+                ))?;
+        let artifact = self.artifacts.get_mut(&entry.tree_catalog_index()).ok_or(
+            CommonProofEncodingError::Artifact(SetupPublicPolynomialError::InvalidInput),
+        )?;
+        encode_common_proof_query_tree_fragment(
+            catalog,
+            catalog_index,
+            geometry,
+            sorted_query_representatives,
+            artifact,
+            maximum_fragment_byte_length,
+        )
     }
 }
 

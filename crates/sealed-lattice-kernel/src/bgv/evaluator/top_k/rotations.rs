@@ -197,8 +197,6 @@ pub(crate) fn rotate_with_compact_positive_generator_basis(
     context: &EvaluatorContext,
     ciphertext: &Ciphertext,
     galois_element: usize,
-    level: usize,
-    seed_hex: &str,
 ) -> CanonicalResult<Ciphertext> {
     if galois_element == 1 {
         return Ok(ciphertext.clone());
@@ -207,20 +205,10 @@ pub(crate) fn rotate_with_compact_positive_generator_basis(
     let (requires_conjugation, exponent) = generator_exponent_or_conjugated(galois_element)?;
     let mut rotated = ciphertext.clone();
     if requires_conjugation {
-        rotated = context.rotate_ciphertext(
-            &rotated,
-            ring_order - 1,
-            level,
-            &format!("{seed_hex}-conjugation"),
-        )?;
+        rotated = context.rotate_ciphertext(&rotated, ring_order - 1)?;
     }
     for basis_rotation in generator_power_basis_for_exponent(exponent)? {
-        rotated = context.rotate_ciphertext(
-            &rotated,
-            basis_rotation,
-            level,
-            &format!("{seed_hex}-generator-basis-{basis_rotation}"),
-        )?;
+        rotated = context.rotate_ciphertext(&rotated, basis_rotation)?;
     }
 
     Ok(rotated)
@@ -230,17 +218,10 @@ pub(crate) fn rotate_with_compact_inverse_generator_basis(
     context: &EvaluatorContext,
     ciphertext: &Ciphertext,
     shift: usize,
-    level: usize,
-    seed_hex: &str,
 ) -> CanonicalResult<Ciphertext> {
     let mut rotated = ciphertext.clone();
     for basis_rotation in generator_inverse_power_basis_for_exponent(shift)? {
-        rotated = context.rotate_ciphertext(
-            &rotated,
-            basis_rotation,
-            level,
-            &format!("{seed_hex}-inverse-generator-basis-{basis_rotation}"),
-        )?;
+        rotated = context.rotate_ciphertext(&rotated, basis_rotation)?;
     }
 
     Ok(rotated)

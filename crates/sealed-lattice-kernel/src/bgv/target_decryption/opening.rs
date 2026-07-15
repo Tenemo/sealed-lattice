@@ -76,11 +76,22 @@ pub(super) fn verify_aggregate_opening_credential(
 pub(super) fn compute_aggregate_opening(
     input: AggregateOpeningRootsInput<'_>,
 ) -> CanonicalResult<AggregateOpeningComputation> {
+    let rns_prime = DATA_PRIMES
+        .get(input.rns_limb_index)
+        .copied()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "aggregate opening coordinate exceeds the canonical Q_share basis",
+            )
+        })?;
     let commitment_context = json!({
         "objectType": "VssPublicAggregateThresholdCommitmentContext",
         "setupContextHash": input.setup_context_hash,
+        "recipientIdentity": input.participant.trustee_identity,
         "recipientRosterPosition": input.participant.roster_position,
         "rnsLimbIndex": input.rns_limb_index,
+        "rnsPrime": rns_prime,
     });
     let computation =
         compute_vss_committed_material_commitment(VssCommittedMaterialCommitmentInput {

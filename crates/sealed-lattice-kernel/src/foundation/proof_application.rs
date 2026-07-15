@@ -345,11 +345,11 @@ mod tests {
     }
 
     #[test]
-    fn proof_header_rejects_a_noncanonical_or_wrongly_typed_statement() {
+    fn proof_header_rejects_a_noncanonical_statement_or_wrong_item_type() {
         let limits = CanonicalDecodeLimits::default();
         assert!(ProofObjectHeader::from_canonical_application_statement(vec![], &limits).is_err());
 
-        let malformed_statement = vec![0_u8; 8];
+        let malformed_statement = vec![0_u8; 7];
         assert!(
             ProofObjectHeader::from_canonical_application_statement(malformed_statement, &limits,)
                 .is_err()

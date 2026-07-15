@@ -70,8 +70,18 @@ struct LogicalRoot {
 }
 
 impl PublicAggregateRelationGeometry {
+    fn trace_domain_size(&self) -> Result<u64, RelationPlanError> {
+        self.ring_degree
+            .checked_div(2)
+            .filter(|trace_domain_size| {
+                *trace_domain_size > 1 && *trace_domain_size * 2 == self.ring_degree
+            })
+            .ok_or(RelationPlanError::InvalidDomain)
+    }
+
     fn validate(&self, context: &RelationPlanCheckContext) -> Result<(), RelationPlanError> {
         RelationPlanChecker::new(context).check_context()?;
+        self.trace_domain_size()?;
         if self.ring_degree < 2
             || !self.ring_degree.is_power_of_two()
             || self.evaluation_domain_size == 0
@@ -112,8 +122,8 @@ impl PublicAggregateRelationGeometry {
         ordered_moduli: &[SuiteModulusReference],
         context: &RelationPlanCheckContext,
     ) -> Result<(), RelationPlanError> {
-        if ordered_moduli.is_empty() || !strictly_sorted_unique(ordered_moduli) {
-            return Err(RelationPlanError::NonCanonicalOrder);
+        if ordered_moduli.is_empty() {
+            return Err(RelationPlanError::InvalidModulus);
         }
         for modulus_reference in ordered_moduli {
             let modulus = context.resolved_modulus(*modulus_reference)?;
@@ -420,7 +430,9 @@ fn compile_public_aggregate_variant(
                 numerator_postfix_expression: ordered_injective_integer_factor_product_expression(
                     &factor_expressions,
                 )?,
-                zeroifier_postfix_expression: full_trace_zeroifier_expression(geometry.ring_degree),
+                zeroifier_postfix_expression: full_trace_zeroifier_expression(
+                    geometry.trace_domain_size()?,
+                ),
                 enforce_proof_base_field_no_wrap: false,
                 ordered_injective_integer_factor_expressions: factor_expressions,
             });
@@ -470,7 +482,7 @@ fn compile_public_aggregate_variant(
         schedule_position,
         top_count,
         proof_privacy_mode: ProofPrivacyMode::PublicOnly,
-        trace_domain_size: geometry.ring_degree,
+        trace_domain_size: geometry.trace_domain_size()?,
         evaluation_domain_size: geometry.evaluation_domain_size,
         opening_degree_bound_exclusive: geometry.opening_degree_bound_exclusive,
         ordered_non_native_moduli,

@@ -654,7 +654,13 @@ fn statement_owned_material_and_setup_trees_use_their_exact_leaf_and_node_equati
     .expect("bound-tree catalog derives");
     let layout = ProofBodyLayout::new(catalog, &schedule, 1).expect("bound layout derives");
     let quotient_opening = common_tree_opening(&layout.catalog.entries[2]);
-    let tree_openings = vec![material_opening, setup_opening, quotient_opening];
+    let opening_batch_mask = common_tree_opening(&layout.catalog.entries[3]);
+    let tree_openings = vec![
+        material_opening,
+        setup_opening,
+        quotient_opening,
+        opening_batch_mask,
+    ];
     let bytes = encode_body(
         &layout,
         &tree_openings,
@@ -675,7 +681,7 @@ fn statement_owned_material_and_setup_trees_use_their_exact_leaf_and_node_equati
     transcript
         .finish_query_openings(absorber)
         .expect("streamed query bytes finish");
-    assert_eq!(observed_widths, [4, 2, 1]);
+    assert_eq!(observed_widths, [4, 2, 1, 1]);
 }
 
 #[test]

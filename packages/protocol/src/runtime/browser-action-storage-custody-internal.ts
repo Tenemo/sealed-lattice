@@ -383,6 +383,10 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
                   );
     }
 
+    public copyBinding(): BrowserActionStorageRootBinding {
+        return copyStorageRootBinding(this.#binding, 'InvalidState');
+    }
+
     public initialize(): Promise<BrowserDeviceWrappingSnapshot> {
         return this.#runOperation(async () => {
             if (this.#expectedStorageRootCommitment !== undefined) {

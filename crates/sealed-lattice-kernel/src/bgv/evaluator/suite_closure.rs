@@ -34,21 +34,15 @@ use super::{
 
 const CANDIDATE_INPUT_HASH_DOMAIN: &str = "sealed-lattice/evaluator/candidate-input-evidence/v1";
 const CANDIDATE_OUTPUT_HASH_DOMAIN: &str = "sealed-lattice/evaluator/candidate-output-evidence/v1";
-const CANDIDATE_REJECTION_HASH_DOMAIN: &str =
-    "sealed-lattice/evaluator/candidate-infeasibility-certificate/v1";
-const CANDIDATE_SEARCH_REJECTION_HASH_DOMAIN: &str =
-    "sealed-lattice/evaluator/candidate-search-infeasibility-certificate/v1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EvaluatorKeySwitchMethod {
-    RawCrtIdempotent,
     HybridExactInteger,
 }
 
 impl EvaluatorKeySwitchMethod {
     fn identifier(self) -> &'static str {
         match self {
-            Self::RawCrtIdempotent => "raw-crt-idempotent",
             Self::HybridExactInteger => "hybrid-exact-integer",
         }
     }
@@ -411,9 +405,6 @@ fn generate_ballot_count_evidence_at_working_level(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum EvaluatorCandidateFailure {
     InputEvidenceHashMismatch,
-    NonoperativeKeySwitchMethod {
-        observed_method: EvaluatorKeySwitchMethod,
-    },
     MissingOrDisorderedBallotCount {
         expected_ballot_count: usize,
         observed_ballot_count: Option<usize>,
@@ -453,11 +444,6 @@ impl EvaluatorCandidateFailure {
         match self {
             Self::InputEvidenceHashMismatch => json!({
                 "failureCode": "input-evidence-hash-mismatch",
-            }),
-            Self::NonoperativeKeySwitchMethod { observed_method } => json!({
-                "failureCode": "nonoperative-key-switch-method",
-                "observedMethod": observed_method.identifier(),
-                "requiredMethod": EvaluatorKeySwitchMethod::HybridExactInteger.identifier(),
             }),
             Self::MissingOrDisorderedBallotCount {
                 expected_ballot_count,
@@ -550,92 +536,12 @@ impl EvaluatorCandidateInfeasibilityCertificate {
     pub(crate) fn canonical_bytes(&self) -> CanonicalResult<Vec<u8>> {
         Ok(canonical_json(&self.canonical_value())?.into_bytes())
     }
-
-    pub(crate) fn evidence_hash(&self) -> CanonicalResult<String> {
-        let bytes = self.canonical_bytes()?;
-        Ok(hash512_hex(CANDIDATE_REJECTION_HASH_DOMAIN, &[&bytes]))
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AcceptedEvaluatorCandidate {
     pub(crate) input_evidence_hash: String,
     pub(crate) output_evidence_hash: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct AcceptedEvaluatorCandidateSearch {
-    pub(crate) input: EvaluatorCandidateInput,
-    pub(crate) output: EvaluatorCandidateOutputEvidence,
-    pub(crate) evidence: AcceptedEvaluatorCandidate,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct EvaluatorCandidateSearchAttempt {
-    pub(crate) single_ballot_working_level: usize,
-    pub(crate) multi_ballot_working_level: usize,
-    pub(crate) input_evidence_hash: String,
-    pub(crate) output_evidence_hash: String,
-    pub(crate) failures: Vec<EvaluatorCandidateFailure>,
-}
-
-impl EvaluatorCandidateSearchAttempt {
-    fn canonical_value(&self) -> Value {
-        json!({
-            "singleBallotWorkingLevel": self.single_ballot_working_level,
-            "multiBallotWorkingLevel": self.multi_ballot_working_level,
-            "inputEvidenceHash": self.input_evidence_hash,
-            "outputEvidenceHash": self.output_evidence_hash,
-            "failures": self.failures.iter()
-                .map(EvaluatorCandidateFailure::canonical_value)
-                .collect::<Vec<_>>(),
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct EvaluatorCandidateSearchInfeasibilityCertificate {
-    pub(crate) special_primes: Vec<u64>,
-    pub(crate) data_primes_per_block: usize,
-    pub(crate) searched_working_levels: Vec<usize>,
-    pub(crate) attempts: Vec<EvaluatorCandidateSearchAttempt>,
-}
-
-impl EvaluatorCandidateSearchInfeasibilityCertificate {
-    fn canonical_value(&self) -> Value {
-        json!({
-            "objectType": "EvaluatorCandidateSearchInfeasibilityCertificate",
-            "version": 1,
-            "specialPrimes": self.special_primes,
-            "dataPrimesPerBlock": self.data_primes_per_block,
-            "searchedWorkingLevels": self.searched_working_levels,
-            "candidateOrder": [
-                "single-ballot-working-level",
-                "multi-ballot-working-level",
-            ],
-            "attempts": self.attempts.iter()
-                .map(EvaluatorCandidateSearchAttempt::canonical_value)
-                .collect::<Vec<_>>(),
-        })
-    }
-
-    pub(crate) fn canonical_bytes(&self) -> CanonicalResult<Vec<u8>> {
-        Ok(canonical_json(&self.canonical_value())?.into_bytes())
-    }
-
-    pub(crate) fn evidence_hash(&self) -> CanonicalResult<String> {
-        let bytes = self.canonical_bytes()?;
-        Ok(hash512_hex(
-            CANDIDATE_SEARCH_REJECTION_HASH_DOMAIN,
-            &[&bytes],
-        ))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum EvaluatorCandidateSearchResult {
-    Accepted(AcceptedEvaluatorCandidateSearch),
-    Infeasible(EvaluatorCandidateSearchInfeasibilityCertificate),
 }
 
 pub(crate) fn apply_evaluator_candidate_gates(
@@ -648,11 +554,6 @@ pub(crate) fn apply_evaluator_candidate_gates(
     let mut failures = Vec::new();
     if output.input_evidence_hash != input_evidence_hash {
         failures.push(EvaluatorCandidateFailure::InputEvidenceHashMismatch);
-    }
-    if input.key_switch_method != EvaluatorKeySwitchMethod::HybridExactInteger {
-        failures.push(EvaluatorCandidateFailure::NonoperativeKeySwitchMethod {
-            observed_method: input.key_switch_method,
-        });
     }
     for expected_ballot_count in 1..=input.maximum_ballot_count {
         let Some(ballot_evidence) = output.ballot_counts.get(expected_ballot_count - 1) else {
@@ -760,84 +661,6 @@ pub(crate) fn apply_evaluator_candidate_gates(
     }
 }
 
-pub(crate) fn search_implemented_evaluator_candidates()
--> CanonicalResult<EvaluatorCandidateSearchResult> {
-    let baseline_input = EvaluatorCandidateInput::implemented()?;
-    let searched_working_levels = (baseline_input.target_ciphertext_level
-        ..baseline_input.data_primes.len())
-        .collect::<Vec<_>>();
-    let single_ballot_evidence = searched_working_levels
-        .iter()
-        .map(|working_level| {
-            (
-                *working_level,
-                generate_ballot_count_evidence_at_working_level(&baseline_input, 1, *working_level),
-            )
-        })
-        .collect::<Vec<_>>();
-    let multi_ballot_evidence = searched_working_levels
-        .iter()
-        .map(|working_level| {
-            (
-                *working_level,
-                (2..=baseline_input.maximum_ballot_count)
-                    .map(|ballot_count| {
-                        generate_ballot_count_evidence_at_working_level(
-                            &baseline_input,
-                            ballot_count,
-                            *working_level,
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let mut attempts = Vec::new();
-
-    for (single_working_level, single_evidence) in &single_ballot_evidence {
-        for (multi_working_level, multi_evidence) in &multi_ballot_evidence {
-            let mut input = baseline_input.clone();
-            input.single_ballot_working_level = *single_working_level;
-            input.multi_ballot_working_level = *multi_working_level;
-            let input_evidence_hash = input.evidence_hash()?;
-            let mut ballot_counts = Vec::with_capacity(input.maximum_ballot_count);
-            ballot_counts.push(single_evidence.clone());
-            ballot_counts.extend(multi_evidence.iter().cloned());
-            let output = EvaluatorCandidateOutputEvidence {
-                input_evidence_hash,
-                ballot_counts,
-            };
-            match apply_evaluator_candidate_gates(&input, &output)? {
-                Ok(evidence) => {
-                    return Ok(EvaluatorCandidateSearchResult::Accepted(
-                        AcceptedEvaluatorCandidateSearch {
-                            input,
-                            output,
-                            evidence,
-                        },
-                    ));
-                }
-                Err(certificate) => attempts.push(EvaluatorCandidateSearchAttempt {
-                    single_ballot_working_level: *single_working_level,
-                    multi_ballot_working_level: *multi_working_level,
-                    input_evidence_hash: certificate.input_evidence_hash,
-                    output_evidence_hash: certificate.output_evidence_hash,
-                    failures: certificate.failures,
-                }),
-            }
-        }
-    }
-
-    Ok(EvaluatorCandidateSearchResult::Infeasible(
-        EvaluatorCandidateSearchInfeasibilityCertificate {
-            special_primes: baseline_input.special_primes,
-            data_primes_per_block: baseline_input.key_switch_data_primes_per_block,
-            searched_working_levels,
-            attempts,
-        },
-    ))
-}
-
 fn invalid_closure(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
@@ -886,41 +709,56 @@ mod tests {
     }
 
     #[test]
-    fn current_candidate_preserves_every_failure_in_one_certificate() {
+    fn current_candidate_certificate_preserves_recomputed_failures() {
         let (input, output) = implemented_evidence();
+        assert_eq!(
+            input.key_switch_method,
+            EvaluatorKeySwitchMethod::HybridExactInteger
+        );
         let certificate = apply_evaluator_candidate_gates(&input, &output)
             .unwrap()
             .expect_err("the implemented candidate must not be accepted");
+        let recurrence_failure_count = certificate
+            .failures
+            .iter()
+            .filter(|failure| {
+                matches!(failure, EvaluatorCandidateFailure::RecurrenceFailure { .. })
+            })
+            .count();
+        let nonpositive_margin_failure_count = certificate
+            .failures
+            .iter()
+            .filter(|failure| {
+                matches!(
+                    failure,
+                    EvaluatorCandidateFailure::NonpositiveDecryptionMargin { .. }
+                )
+            })
+            .count();
+        assert_eq!(recurrence_failure_count, 1);
+        assert_eq!(nonpositive_margin_failure_count, 171);
         assert_eq!(
-            certificate.failures[0],
-            EvaluatorCandidateFailure::NonoperativeKeySwitchMethod {
-                observed_method: EvaluatorKeySwitchMethod::RawCrtIdempotent,
-            }
+            certificate.failures.len(),
+            recurrence_failure_count + nonpositive_margin_failure_count
         );
-        assert!(certificate.failures.iter().any(|failure| matches!(
-            failure,
-            EvaluatorCandidateFailure::RecurrenceFailure {
+        assert!(matches!(
+            certificate.failures.first(),
+            Some(EvaluatorCandidateFailure::RecurrenceFailure {
                 ballot_count: 1,
                 ..
-            }
-        )));
-        assert!(certificate.failures.iter().any(|failure| matches!(
-            failure,
-            EvaluatorCandidateFailure::TerminalLevelMismatch {
-                ballot_count: 10,
-                top_count: 1,
-                identifier_level: 1,
-                order_level: 1,
-                ..
-            }
-        )));
+            })
+        ));
         assert!(certificate.failures.iter().any(|failure| matches!(
             failure,
             EvaluatorCandidateFailure::NonpositiveDecryptionMargin {
                 ballot_count: 10,
-                top_count: 20,
+                top_count: 19,
                 ..
             }
+        )));
+        assert!(!certificate.failures.iter().any(|failure| matches!(
+            failure,
+            EvaluatorCandidateFailure::NonpositiveDecryptionMargin { top_count: 20, .. }
         )));
         assert_eq!(
             certificate.canonical_bytes().unwrap(),
@@ -939,19 +777,42 @@ mod tests {
             panic!("maximum-roster recurrence must produce target evidence");
         };
         assert_eq!(targets.len(), 20);
-        let expected_error_bound_bit_lengths = [
-            6568, 6568, 6568, 6568, 6567, 6567, 6568, 6568, 6568, 6568, 6568, 6568, 6567, 6567,
-            6565, 6566, 6567, 6568, 6568, 381,
+        let expected_error_bound_bit_lengths = vec![
+            5195, 5196, 5196, 5196, 5195, 5195, 5195, 5196, 5196, 5196, 5196, 5196, 5195, 5195,
+            5193, 5194, 5195, 5196, 5195, 74,
         ];
-        for (target, expected_error_bound_bit_length) in
-            targets.iter().zip(expected_error_bound_bit_lengths)
-        {
-            let maximum_error_bound = target
+        let actual_error_bound_bit_lengths = targets
+            .iter()
+            .map(|target| {
+                target
+                    .target_identifier
+                    .error_coefficient_bound
+                    .clone()
+                    .max(target.target_order.error_coefficient_bound.clone())
+                    .bits()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_error_bound_bit_lengths,
+            expected_error_bound_bit_lengths
+        );
+        let (all_options_target, bounded_targets) = targets
+            .split_last()
+            .expect("the maximum-roster evidence retains every target");
+        assert_eq!(all_options_target.top_count, 20);
+        assert!(
+            all_options_target
                 .target_identifier
-                .error_coefficient_bound
-                .clone()
-                .max(target.target_order.error_coefficient_bound.clone());
-            assert_eq!(maximum_error_bound.bits(), expected_error_bound_bit_length);
+                .minimum_decryption_margin
+                .is_positive()
+        );
+        assert!(
+            all_options_target
+                .target_order
+                .minimum_decryption_margin
+                .is_positive()
+        );
+        for target in bounded_targets {
             assert!(
                 target
                     .target_identifier

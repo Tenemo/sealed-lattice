@@ -381,6 +381,7 @@ describe('durable state witness service', () => {
             | 'cacheExactOutput'
             | 'cacheSignedVoteCarrier'
             | 'compareAndLockIntent'
+            | 'copyAuthorityContext'
             | 'readExactOutput'
             | 'readSignedVoteCarrier'
         >();

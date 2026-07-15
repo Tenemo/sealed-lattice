@@ -20,7 +20,10 @@ export type {
     BrowserLocalMailboxCapability,
     BrowserLocalSigningCapability,
 } from './browser-local-key-provider.js';
-export { openAuthenticatedMailboxFrozenRoster } from './authenticated-mailbox-frozen-roster.js';
+export {
+    copyAuthenticatedMailboxFrozenRosterParticipantIdentities,
+    openAuthenticatedMailboxFrozenRoster,
+} from './authenticated-mailbox-frozen-roster.js';
 export type { AuthenticatedMailboxFrozenRoster } from './authenticated-mailbox-frozen-roster.js';
 export {
     AuthenticatedMailboxCleanupError,

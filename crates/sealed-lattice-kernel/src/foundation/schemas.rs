@@ -165,12 +165,33 @@ pub(super) type SchemaResult<Value> = Result<Value, FoundationSchemaError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RosterEntry {
+    pub roster_position: u16,
     pub signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
     pub mailbox_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
 }
 
 impl RosterEntry {
+    pub fn new(
+        roster_position: u16,
+        signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+        mailbox_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
+    ) -> SchemaResult<Self> {
+        let entry = Self {
+            roster_position,
+            signing_verification_key,
+            mailbox_encapsulation_key,
+        };
+        entry.validate()?;
+        Ok(entry)
+    }
+
     fn validate(&self) -> SchemaResult<()> {
+        if self.roster_position >= FOUNDATION_PROFILE.participant_count {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "roster position is outside the supported profile",
+            ));
+        }
         validate_ml_kem_768_encapsulation_key(&self.mailbox_encapsulation_key)
     }
 
@@ -184,6 +205,7 @@ impl RosterEntry {
             ROSTER_ENTRY_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
             vec![
+                CanonicalItem::unsigned16(self.roster_position),
                 CanonicalItem::fixed_bytes(self.signing_verification_key)?,
                 CanonicalItem::fixed_bytes(self.mailbox_encapsulation_key)?,
             ],
@@ -191,10 +213,11 @@ impl RosterEntry {
     }
 
     fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 2)?;
+        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 3)?;
         let entry = Self {
-            signing_verification_key: read_fixed_bytes(&tuple.items[0])?,
-            mailbox_encapsulation_key: read_fixed_bytes(&tuple.items[1])?,
+            roster_position: read_u16(&tuple.items[0])?,
+            signing_verification_key: read_fixed_bytes(&tuple.items[1])?,
+            mailbox_encapsulation_key: read_fixed_bytes(&tuple.items[2])?,
         };
         entry.validate()?;
         Ok(entry)
@@ -225,8 +248,14 @@ impl Roster {
         let mut signing_keys = BTreeSet::new();
         let mut mailbox_keys = BTreeSet::new();
         let mut participant_identities = BTreeSet::new();
-        for entry in &entries {
+        for (entry_index, entry) in entries.iter().enumerate() {
             entry.validate()?;
+            if usize::from(entry.roster_position) != entry_index {
+                return Err(FoundationSchemaError::new(
+                    RefusalReason::WrongTypeOrLength,
+                    "roster positions must be consecutive and canonically ordered",
+                ));
+            }
             let participant_identity =
                 derive_participant_identity(&entry.signing_verification_key)?;
             if !signing_keys.insert(entry.signing_verification_key.as_slice())
@@ -1125,6 +1154,7 @@ mod tests {
                     ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
 
                 RosterEntry {
+                    roster_position,
                     signing_verification_key: signing_key.into_bytes(),
                     mailbox_encapsulation_key: mailbox_key.into_bytes(),
                 }
@@ -1149,12 +1179,50 @@ mod tests {
             &CanonicalDecodeLimits::default(),
         )
         .expect("entry tuple decodes");
-        assert_eq!(tuple.items.len(), 2);
+        assert_eq!(tuple.items.len(), 3);
         assert_eq!(
-            read_item(&tuple.items[1], CanonicalItemType::RawBytes)
+            read_u16(&tuple.items[0]).expect("roster position decodes"),
+            0
+        );
+        assert_eq!(
+            read_item(&tuple.items[2], CanonicalItemType::RawBytes)
                 .expect("mailbox key bytes decode")
                 .len(),
             ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH
+        );
+    }
+
+    #[test]
+    fn roster_requires_explicit_consecutive_positions_in_canonical_order() {
+        let mut duplicate_position = roster_entries();
+        duplicate_position[4].roster_position = 3;
+        assert_eq!(
+            Roster::new(duplicate_position)
+                .expect_err("duplicate roster position must refuse")
+                .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+
+        let mut reordered_positions = roster_entries();
+        reordered_positions.swap(2, 7);
+        assert_eq!(
+            Roster::new(reordered_positions)
+                .expect_err("reordered roster positions must refuse")
+                .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+
+        let mut outside_profile = roster_entries()[0].clone();
+        outside_profile.roster_position = FOUNDATION_PROFILE.participant_count;
+        assert_eq!(
+            RosterEntry::new(
+                outside_profile.roster_position,
+                outside_profile.signing_verification_key,
+                outside_profile.mailbox_encapsulation_key,
+            )
+            .expect_err("out-of-range roster position must refuse")
+            .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
         );
     }
 

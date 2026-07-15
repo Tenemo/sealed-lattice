@@ -1,16 +1,10 @@
 use super::*;
 
 use crate::bgv::direct_ballots::{
-    DirectBallotPackedBatchedPairEvaluatorInput, direct_ballot_comparison_domain_max,
-    direct_ballot_evaluator_working_level, direct_ballot_plaintext_target_slots,
+    DirectBallotPackedBatchedPairEvaluatorInput, direct_ballot_plaintext_target_slots,
     run_direct_ballot_packed_batched_pair_evaluator_for_top_counts,
 };
-use crate::bgv::evaluator::circuit::{EvaluatorContext, modulus_switch_to};
 use crate::bgv::evaluator::engine::{ciphertext_add, ciphertext_object_root};
-use crate::bgv::evaluator::top_k::{
-    evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs, pack_direct_score_slots,
-    project_packed_sparse_target_from_rank_evaluation,
-};
 use crate::hashing::hash512_hex;
 
 #[test]
@@ -57,7 +51,7 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
     }
 
     phase("running the production packed batched-pair evaluator replay");
-    let evaluations = run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
+    let mut evaluations = run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         DirectBallotPackedBatchedPairEvaluatorInput {
             setup_package: &setup_package,
             evaluator_key: &evaluator_key,
@@ -68,71 +62,29 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
     )
     .expect("production evaluator replay");
     assert_eq!(evaluations.len(), 1, "one top-count evaluation record");
-    let evaluation = &evaluations[0];
+    let (evaluation_record, target) = evaluations.pop().expect("one top-count evaluation");
 
-    phase("reproducing the deterministic pipeline for the target pair");
+    phase("checking the production target pair against its replay record");
     let aggregate_ciphertext_root =
         ciphertext_object_root(&aggregate_ciphertext).expect("aggregate root");
-    let replay_seed = hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/packed-batched-pair-evaluator-seed",
-        &[
-            aggregate_ciphertext_root.as_bytes(),
-            top_count.to_string().as_bytes(),
-        ],
-    );
-    let working_level = direct_ballot_evaluator_working_level(ballot_count);
-    let context = EvaluatorContext::from_key(evaluator_key.clone(), &replay_seed, working_level)
-        .expect("replay context");
-    let working_aggregate = modulus_switch_to(&aggregate_ciphertext, context.working_level())
-        .expect("working aggregate");
-    let packed_scores =
-        pack_direct_score_slots(&context, &working_aggregate, option_count, &replay_seed)
-            .expect("packed scores");
-    let score_domain_max =
-        direct_ballot_comparison_domain_max(ballot_count).expect("comparison domain");
-    let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
-        &context,
-        &packed_scores,
-        option_count,
-        score_domain_max,
-        &replay_seed,
-    )
-    .expect("rank evaluation");
-    let target = project_packed_sparse_target_from_rank_evaluation(
-        &context,
-        &rank_evaluation,
-        option_count,
-        top_count,
-    )
-    .expect("target projection");
     let target_id_root = ciphertext_object_root(&target.target_id).expect("target id root");
     let target_order_root =
         ciphertext_object_root(&target.target_order).expect("target order root");
-    // Byte-identity with the production replay: the reproduced pair must carry
-    // exactly the ciphertext roots the production evaluator recorded, so the
-    // pair released below is the pair the production path produced.
     assert_eq!(
         Some(target_id_root.as_str()),
-        evaluation["targetIdRoot"].as_str(),
-        "reproduced target-id root must match the production replay record"
+        evaluation_record["targetIdRoot"].as_str(),
+        "production target-id root must match the replay record"
     );
     assert_eq!(
         Some(target_order_root.as_str()),
-        evaluation["targetOrderRoot"].as_str(),
-        "reproduced target-order root must match the production replay record"
+        evaluation_record["targetOrderRoot"].as_str(),
+        "production target-order root must match the replay record"
     );
     assert_eq!(
         target.target_id.level, CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         "genuine target pair must land on the canonical target ciphertext level"
     );
     assert_eq!(target.target_order.level, CANONICAL_TARGET_CIPHERTEXT_LEVEL);
-    // Release the evaluator context before share proving: its rotation-key
-    // cache holds tens of gigabytes after packing, and each share proof below
-    // budgets its own multi-gigabyte prover working set.
-    drop(rank_evaluation);
-    drop(packed_scores);
-    drop(working_aggregate);
-    drop(context);
 
     phase("binding the genuine pair into the accepted target record");
     let target_layout = target_layout_hash(option_count).expect("target layout hash");
@@ -144,6 +96,11 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
         &target_order_root,
     )
     .expect("target ciphertext hash");
+    assert_eq!(
+        Some(target_ciphertext_hash.as_str()),
+        evaluation_record["targetCiphertextHash"].as_str(),
+        "production target ciphertext hash must match the replay record"
+    );
     let accepted = accepted_record(&setup_package, &target_ciphertext_hash);
     let target_ciphertext_binding = json!({
         "aggregateCiphertextRoot": aggregate_ciphertext_root,

@@ -7,6 +7,7 @@ mod board_ingestion_runtime;
 mod canonical_stream;
 mod canonical_stream_runtime;
 mod canonical_tuple;
+mod ceremony;
 mod finality;
 mod finality_runtime;
 mod hash;
@@ -24,6 +25,7 @@ mod refusal;
 mod schemas;
 mod state;
 mod state_runtime;
+mod suite;
 mod text;
 
 pub use authenticated_mailbox::{
@@ -53,6 +55,11 @@ pub use canonical_tuple::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
     CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple, IncrementalCanonicalTupleDecoder,
+};
+pub use ceremony::{
+    ACTION_DEFINITION_SCHEMA_IDENTIFIER, ActionContext, ActionDefinition,
+    BOARD_POLICY_SCHEMA_IDENTIFIER, BoardPolicy, CeremonyContext, MANIFEST_SCHEMA_IDENTIFIER,
+    Manifest, OPTION_DEFINITION_SCHEMA_IDENTIFIER, OptionDefinition,
 };
 pub use finality::{
     FINALITY_CERTIFICATE_SCHEMA_IDENTIFIER, FINALITY_SIGNATURE_PAYLOAD_SCHEMA_IDENTIFIER,
@@ -143,5 +150,11 @@ pub(crate) use state_runtime::{
     certify_verified_state_intent_from_unordered_vote_carriers, describe_verified_state_object,
     finish_state_output_intent_verification, finish_state_output_verification,
     release_verified_state_object, verify_state_reservation, verify_state_reservation_intent,
+};
+pub use suite::{
+    ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER, ArtifactKind, ArtifactReference,
+    DISTRIBUTION_RECORD_SCHEMA_IDENTIFIER, DistributionKind, DistributionPurpose,
+    DistributionRecord, SUITE_RECORD_SCHEMA_IDENTIFIER, SuiteByteLimits, SuiteCountLimits,
+    SuiteRecord,
 };
 pub use text::{DisplayTextError, StabilizedDisplayText};

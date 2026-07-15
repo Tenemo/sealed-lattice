@@ -6,7 +6,10 @@ use num_traits::{Signed, Zero};
 
 use super::*;
 use crate::bgv::{
-    evaluator::engine::{Ciphertext, DevelopmentBgvKey, negacyclic_mul, signed_residue},
+    evaluator::{
+        circuit::modulus_switch_to,
+        engine::{Ciphertext, DevelopmentBgvKey, negacyclic_mul, signed_residue},
+    },
     modular_arithmetic::{add_mod, inverse_mod},
     parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
 };
@@ -109,19 +112,15 @@ fn production_rank_lookup_level_budget_measurement() {
         .key()
         .encrypt_slots(&scores, "production-rank-lookup-level-budget-scores")
         .expect("encrypted scores");
-    let packed_scores = pack_direct_score_slots(
-        &context,
-        &encrypted_scores,
-        scores.len(),
-        "production-rank-lookup-level-budget-pack",
-    )
-    .expect("packed scores");
+    let working_scores = modulus_switch_to(&encrypted_scores, context.working_level())
+        .expect("working-level scores");
+    let packed_scores =
+        pack_direct_score_slots(&context, &working_scores, scores.len()).expect("packed scores");
     let evaluated = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
         &context,
         &packed_scores,
         scores.len(),
         2,
-        "production-rank-lookup-level-budget-evaluation",
     )
     .expect("production rank evaluation");
     let decrypted = context

@@ -1907,7 +1907,7 @@ mod common_challenge_chain_tests {
         let encoded = candidate.to_bytes_le();
         let mut block = [0_u8; 64];
         block[..encoded.len()].copy_from_slice(&encoded);
-        let mut stream = CommonChallengeStream::new(block, "test-extension".to_owned());
+        let stream = CommonChallengeStream::new(block, "test-extension".to_owned());
 
         let sampled = stream
             .sample_extension_candidate()
@@ -1957,12 +1957,12 @@ mod common_challenge_chain_tests {
         let extension_cardinality = modulus.pow(
             u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE).expect("the extension degree fits u32"),
         );
-        let sample_space = BigUint::from(1_u8) << (PROOF_CHALLENGE_EXTENSION_DEGREE * 64);
+        let sample_space = BigUint::from(1_u8) << 512_usize;
         let acceptance_limit = (&sample_space / &extension_cardinality) * extension_cardinality;
         let encoded = acceptance_limit.to_bytes_le();
         let mut block = [0_u8; 64];
         block[..encoded.len()].copy_from_slice(&encoded);
-        let mut stream = CommonChallengeStream::new(block, "test-extension".to_owned());
+        let stream = CommonChallengeStream::new(block, "test-extension".to_owned());
 
         assert_eq!(
             stream

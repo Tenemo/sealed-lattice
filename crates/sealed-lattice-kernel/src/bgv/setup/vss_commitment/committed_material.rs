@@ -389,13 +389,13 @@ mod tests {
             "a non-power-of-two ring degree must be rejected"
         );
 
-        // A trace below the minimum supported size is refused by the domain
-        // plan, not silently committed.
-        let tiny_message = &message[..64];
+        // A ring below the selected profile's minimum size is refused by the
+        // domain plan, not silently committed.
+        let tiny_message = &message[..4];
         let tiny_degree_request = commitment_request(tiny_message, &seed);
         assert!(
             compute_vss_committed_material_commitment_request(&tiny_degree_request).is_err(),
-            "a ring degree below the minimum trace size must be rejected"
+            "a ring degree below the selected profile minimum must be rejected"
         );
 
         let flooding_noise_message = vec![32; TEST_RING_DEGREE];

@@ -1053,8 +1053,8 @@ mod tests {
     use num_bigint::BigUint;
 
     use super::{
-        SELECTED_EVALUATOR_WORKING_LEVEL, SymbolicCiphertextBound,
-        direct_ballot_target_noise_bounds,
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL, SELECTED_EVALUATOR_WORKING_LEVEL,
+        SymbolicCiphertextBound, direct_ballot_target_noise_bounds,
     };
     use crate::bgv::parameters::POLYNOMIAL_DEGREE;
 
@@ -1091,24 +1091,31 @@ mod tests {
                 .collect::<Vec<_>>(),
             (1..=20).collect::<Vec<_>>()
         );
-        let expected_error_bound_bit_lengths = [
-            6568, 6568, 6568, 6568, 6567, 6567, 6568, 6568, 6568, 6568, 6568, 6568, 6567, 6567,
-            6565, 6566, 6567, 6568, 6568, 381,
+        let expected_error_bound_bit_lengths = vec![
+            5195, 5196, 5196, 5196, 5195, 5195, 5195, 5196, 5196, 5196, 5196, 5196, 5195, 5195,
+            5193, 5194, 5195, 5196, 5195, 74,
         ];
-        for (bound, expected_error_bound_bit_length) in
-            bounds.iter().zip(expected_error_bound_bit_lengths)
-        {
+        let actual_error_bound_bit_lengths = bounds
+            .iter()
+            .map(|bound| bound.maximum_error_coefficient_bound().bits())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_error_bound_bit_lengths,
+            expected_error_bound_bit_lengths
+        );
+        for bound in &bounds {
             assert_eq!(bound.target_identifier.component_count, 2);
             assert_eq!(bound.target_order.component_count, 2);
             assert!(bound.maximum_error_coefficient_bound() > &BigUint::from(0_u8));
             assert_eq!(
-                bound.maximum_error_coefficient_bound().bits(),
-                expected_error_bound_bit_length
+                bound.every_decryption_margin_is_positive(),
+                bound.top_count == 20
             );
-            assert!(!bound.every_decryption_margin_is_positive());
-            let expected_level = if bound.top_count == 20 { 6 } else { 1 };
-            assert_eq!(bound.target_identifier.level, expected_level);
-            assert_eq!(bound.target_order.level, expected_level);
+            assert_eq!(
+                bound.target_identifier.level,
+                CANONICAL_TARGET_CIPHERTEXT_LEVEL
+            );
+            assert_eq!(bound.target_order.level, CANONICAL_TARGET_CIPHERTEXT_LEVEL);
         }
     }
 

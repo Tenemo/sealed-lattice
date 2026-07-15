@@ -13,16 +13,21 @@ mod polynomial;
 mod profile;
 mod prover;
 mod relation_plan;
+mod runtime;
+mod selected_profile;
 mod setup_public_polynomial;
 mod transcript;
 mod verifier;
 mod zero_knowledge;
 
 pub(crate) use body::{
-    CompleteProofTreeCatalog, DecodedProofBody, DecodedProofPhasePairLeaf, PendingProofBodyQueries,
-    ProofBodyError, ProofBodyLayout, ProofTreeCatalogEntry, ProofTreeCatalogInput,
-    ProofTreeCatalogSource, ProofTreeOpening, RelationProofTreeInput, StatementOwnedProofTreeInput,
-    build_complete_proof_tree_catalog, decode_proof_body_prefix,
+    CompleteProofTreeCatalog, DecodedProofBody, DecodedProofBodyPrefix,
+    DecodedProofPhasePairLeaf, PendingProofBodyQueries, ProofBodyError, ProofBodyLayout,
+    ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeOpening,
+    RelationProofTreeInput, StatementOwnedProofTreeInput, build_complete_proof_tree_catalog,
+    decode_proof_body_prefix, decode_proof_body_prefix_owned,
+    decode_proof_query_section_header_at, decode_proof_query_tree_at,
+    proof_body_prefix_byte_length,
 };
 pub(crate) use committed_material::{
     CommittedMaterialBoundOpeningProvider, CommittedMaterialError, CommittedMaterialProfile,
@@ -122,6 +127,21 @@ pub(crate) use relation_plan::{
     compile_relinearization_round_two_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
     compile_same_secret_relation_plan, compile_target_release_relation,
     compile_target_release_relation_plan, compile_vss_share_linkage_relation_plan,
+    merge_checked_relation_plan_variants,
+};
+pub(crate) use runtime::{
+    CommonProofAttemptBinding, CommonProofOperationHandle, CommonProofOperationKind,
+    CommonProofRelationPlanCapability,
+    CommonProofRelationPlanCapabilityError, CommonProofRuntimeCancellation,
+    CommonProofRuntimeError, CommonProofRuntimeLimits, CommonProofRuntimeRegistry,
+    CommonProofRuntimeVerificationError, CommonProofStorageTransactionRuntime,
+    MAXIMUM_COMMON_PROOF_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+    MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS, PollableCommonProofByteSink,
+    PollableCommonProofByteSinkError, ResidentCommonProofByteSource,
+    ResidentCommonProofInputChunk, VerifiedCommonProofCapabilityHandle,
+};
+pub(crate) use selected_profile::{
+    selected_proof_profile_set, selected_relation_plan_check_context,
 };
 pub(crate) use setup_public_polynomial::{
     SetupPublicPolynomialBoundOpeningProvider, SetupPublicPolynomialContext,
@@ -134,8 +154,10 @@ pub(crate) use transcript::{
     CommonProofRound, CommonProofTranscript, CommonProofTranscriptSchedule, TranscriptError,
 };
 pub(crate) use verifier::{
-    CommonProofVerificationInput, CommonProofVerifierError, VerifiedCommonProof,
-    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, verify_common_proof,
+    CommonProofRequiredByteRange, CommonProofVerificationInput, CommonProofVerificationPoll,
+    CommonProofVerificationStateMachine, CommonProofVerifierError,
+    PollableCommonProofVerificationInput, VerifiedCommonProof, VerifiedRelationColumnEvaluator,
+    VerifiedStatementOwnedTree, verify_common_proof,
 };
 pub(crate) use zero_knowledge::validate_zero_knowledge_mask_image;
 

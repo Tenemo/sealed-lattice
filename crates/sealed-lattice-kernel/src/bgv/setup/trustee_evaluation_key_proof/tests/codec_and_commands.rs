@@ -235,9 +235,7 @@ fn proof_command_validates_and_consumes_randomness_seed() {
 #[test]
 fn proof_codec_round_trips_and_rejects_malformed_bytes() {
     let codec_test_ring_degree = LOW_DEGREE_QUERY_COUNT.next_power_of_two();
-    let (statement, witness) =
-        generate_development_trustee_instance("c0dec0de", &[round_one(0)], codec_test_ring_degree)
-            .expect("trustee evaluation-key instance");
+    let (statement, witness) = private_vss_proof_fixture(codec_test_ring_degree);
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let bytes = encode_trustee_evaluation_key_proof(&proof);
@@ -283,9 +281,7 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
 #[test]
 fn proof_codec_decodes_chunked_material_across_adversarial_boundaries() {
     let codec_test_ring_degree = LOW_DEGREE_QUERY_COUNT.next_power_of_two();
-    let (statement, witness) =
-        generate_development_trustee_instance("c0dec0df", &[round_one(0)], codec_test_ring_degree)
-            .expect("trustee evaluation-key instance");
+    let (statement, witness) = private_vss_proof_fixture(codec_test_ring_degree);
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let bytes = encode_trustee_evaluation_key_proof(&proof);
@@ -325,12 +321,7 @@ fn folded_layer_proof_codec_fixture() -> &'static (TrusteeEvaluationKeyStatement
     // smallest ring that still commits a folded Merkle layer.
     static FIXTURE: OnceLock<(TrusteeEvaluationKeyStatement, Vec<u8>)> = OnceLock::new();
     FIXTURE.get_or_init(|| {
-        let (statement, witness) = generate_development_trustee_instance(
-            "c0dec0de",
-            &[round_one(0)],
-            FOLDED_LAYER_RING_DEGREE,
-        )
-        .expect("trustee evaluation-key instance");
+        let (statement, witness) = private_vss_proof_fixture(FOLDED_LAYER_RING_DEGREE);
         let canonical_proof =
             prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
         let canonical_proof_bytes = encode_trustee_evaluation_key_proof(&canonical_proof);
@@ -478,16 +469,14 @@ fn heavy_rust_kernel_proof_codec_rejects_noncanonical_values_in_every_encoded_ar
 }
 
 #[test]
-fn proof_codec_rejects_noncanonical_values_for_retained_trustee_family() {
-    let (statement, witness) =
-        generate_development_trustee_instance("2222bbbb", &[round_one(0)], SMALL_RING_DEGREE)
-            .expect("trustee evaluation-key instance");
+fn proof_codec_rejects_noncanonical_values_for_retained_private_vss_family() {
+    let (statement, witness) = private_vss_proof_fixture(SMALL_RING_DEGREE);
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     proof.limb_proofs[0].masked_consistency_claims[0] = statement.limb_moduli()[0];
     let encoded = encode_trustee_evaluation_key_proof(&proof);
     assert!(
         decode_trustee_evaluation_key_proof(&statement, &encoded).is_err(),
-        "noncanonical trustee evaluation-key proof bytes must reject"
+        "noncanonical private VSS proof bytes must reject"
     );
 }

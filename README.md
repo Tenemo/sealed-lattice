@@ -68,7 +68,7 @@ Node.js consumers require Node.js 24.14.1 or later.
 ## Usage
 
 ```typescript
-import { validatePollSpec } from "sealed-lattice";
+import { createCanonicalManifest, validatePollSpec } from "sealed-lattice";
 
 const pollValidation = validatePollSpec({
     pollId: "board-election-2026",
@@ -86,8 +86,12 @@ if (!pollValidation.isValid) {
     );
 }
 
-console.log(pollValidation.normalized);
+const manifest = await createCanonicalManifest(pollValidation.normalized);
+console.log(manifest.manifestHash, manifest.canonicalBytes);
 ```
+
+`validatePollSpec` handles pre-protocol user input only. Protocol identity starts
+with the canonical manifest bytes and hash produced by the Rust/WASM kernel.
 
 Import public APIs from the package root. Workspace packages, test fixtures, and internal source paths are not public API.
 

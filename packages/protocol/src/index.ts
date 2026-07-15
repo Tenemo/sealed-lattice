@@ -1,4 +1,8 @@
-export { derivePollSpecHash, validatePollSpec } from './lifecycle/poll-spec.js';
+export {
+    prepareFoundationManifestIngress,
+    validatePollSpec,
+} from './lifecycle/poll-spec.js';
+export type { FoundationManifestIngress } from './lifecycle/poll-spec.js';
 export {
     openUntrustedStorageTransactionStore,
     UntrustedStorageTransactionError,
@@ -6,6 +10,30 @@ export {
 } from './runtime/untrusted-storage-transaction-store.js';
 export { createRuntimeRecordAuthenticatedRepairProtection } from './runtime/authenticated-runtime-record.js';
 export { openCanonicalBoardRuntime } from './runtime/canonical-board-runtime.js';
+export {
+    BrowserFoundationAuthorityError,
+    openBrowserFoundationAuthority,
+} from './runtime/browser-foundation-authority.js';
+export type {
+    BrowserFoundationActionRandomness,
+    BrowserFoundationActionRandomnessDescription,
+    BrowserFoundationActiveCapability,
+    BrowserFoundationAuthority,
+    BrowserFoundationAuthorityErrorCode,
+    BrowserFoundationAuthorityInput,
+    BrowserFoundationAuthorityRetirementReason,
+    BrowserFoundationAuthorityState,
+    BrowserFoundationCheckpoint,
+    BrowserFoundationCheckpointDescription,
+    BrowserFoundationPersistentProofAttemptInput,
+    BrowserFoundationRandomnessReservationInput,
+    BrowserFoundationStateReservation,
+    BrowserFoundationStateReservationInput,
+    BrowserFoundationTargetReleaseAttemptInput,
+    BrowserFoundationWitnessRole,
+    BrowserFoundationWitnessRoleDescription,
+    BrowserFoundationWitnessRoleInput,
+} from './runtime/browser-foundation-authority.js';
 export {
     NamespaceFreshnessError,
     openNamespaceFreshnessSubjectRuntime,
@@ -30,6 +58,7 @@ export type {
     NamespaceFreshnessWitnessCompareAndLockResult,
     NamespaceFreshnessWitnessCoordinate,
     NamespaceFreshnessWitnessService,
+    NamespaceFreshnessWitnessServiceBinding,
     NamespaceFreshnessWitnessServiceState,
     NamespaceFreshnessWitnessStore,
     NamespaceFreshnessWitnessStoreSnapshot,
@@ -89,6 +118,7 @@ export type {
     ProofApplicationLedgerLimits,
     ProofApplicationLedgerSnapshot,
     ProofApplicationReservation,
+    ProofApplicationReservationCapability,
     ProofFamilyApplicationCeiling,
 } from './runtime/proof-application-ledger.js';
 export {

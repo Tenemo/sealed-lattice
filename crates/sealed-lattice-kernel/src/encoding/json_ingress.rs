@@ -228,7 +228,7 @@ mod tests {
     fn duplicate_fields_refuse_at_every_object_depth() {
         for request in [
             br#"{"command":"DescribeBgvRnsParameters","command":"DeriveCanonicalObjectHash"}"#.as_slice(),
-            br#"{"command":"DeriveCanonicalObjectHash","value":{"objectType":"PollSpec","objectType":"Other"}}"#.as_slice(),
+            br#"{"command":"DeriveCanonicalObjectHash","value":{"objectType":"CanonicalJsonTestObject","objectType":"Other"}}"#.as_slice(),
         ] {
             let error = parse_transcript_core_request(request)
                 .expect_err("duplicate JSON fields must refuse");

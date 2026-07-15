@@ -9,6 +9,7 @@ import {
     bytesToHex,
     copyBoundedBytes,
     copyExactBytes,
+    copyRuntimeStorageAuthorityContext,
     createRuntimeRecordProtection,
     mapStorageError,
     readRuntimeRecord,
@@ -126,8 +127,9 @@ export type ResumedCheckpoint = Readonly<{
 }>;
 
 export type AuthenticatedCheckpointStore = Readonly<{
+    copyAuthorityContext(): RuntimeStorageAuthorityContext;
     beginOperation(
-        streamAttemptCount: number,
+        streamAttemptIdentifiers: readonly Uint8Array[],
     ): Promise<CheckpointOperationIdentity>;
     evict(checkpointLineageIdentifier: Uint8Array): Promise<void>;
     publish(input: {
@@ -1621,15 +1623,41 @@ export const openAuthenticatedCheckpointStore = (input: {
     };
 
     const beginOperation: AuthenticatedCheckpointStore['beginOperation'] =
-        async (streamAttemptCount) => {
-            requireSafeNonnegativeInteger(
-                streamAttemptCount,
-                'streamAttemptCount',
-            );
-            if (streamAttemptCount > limits.maximumStreamAttemptCount) {
+        async (untrustedStreamAttemptIdentifiers) => {
+            if (!Array.isArray(untrustedStreamAttemptIdentifiers)) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidInput',
+                    'Checkpoint stream-attempt identifiers must be an array.',
+                );
+            }
+            if (
+                untrustedStreamAttemptIdentifiers.length >
+                limits.maximumStreamAttemptCount
+            ) {
                 throw new AuthenticatedRuntimeRecordError(
                     'ResourceLimit',
                     'Checkpoint stream-attempt count exceeds the configured profile.',
+                );
+            }
+            const streamAttemptIdentifiers =
+                untrustedStreamAttemptIdentifiers.map(
+                    (identifier, identifierIndex) =>
+                        copyExactBytes(
+                            identifier,
+                            identifierByteLength,
+                            `streamAttemptIdentifiers[${String(identifierIndex)}]`,
+                        ),
+                );
+            if (
+                new Set(streamAttemptIdentifiers.map(bytesToHex)).size !==
+                streamAttemptIdentifiers.length
+            ) {
+                for (const identifier of streamAttemptIdentifiers) {
+                    identifier.fill(0);
+                }
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidInput',
+                    'Checkpoint stream-attempt identifiers must be distinct.',
                 );
             }
             const checkpointLineageIdentifier = sampleRuntimeIdentifier(
@@ -1660,20 +1688,6 @@ export const openAuthenticatedCheckpointStore = (input: {
                     }
                 },
             );
-            const streamAttemptIdentifiers: Uint8Array[] = [];
-            for (
-                let attemptIndex = 0;
-                attemptIndex < streamAttemptCount;
-                attemptIndex += 1
-            ) {
-                streamAttemptIdentifiers.push(
-                    sampleRuntimeIdentifier(
-                        protection,
-                        issuedIdentifiers,
-                        'checkpoint stream-attempt identifier',
-                    ),
-                );
-            }
             return createOperationIdentity(
                 checkpointLineageIdentifier,
                 streamAttemptIdentifiers,
@@ -2267,7 +2281,15 @@ export const openAuthenticatedCheckpointStore = (input: {
         );
     };
 
-    return Object.freeze({ beginOperation, evict, publish, repair, resume });
+    return Object.freeze({
+        beginOperation,
+        copyAuthorityContext: () =>
+            copyRuntimeStorageAuthorityContext(protection.authorityContext),
+        evict,
+        publish,
+        repair,
+        resume,
+    });
 };
 
 export { AuthenticatedRuntimeRecordError as AuthenticatedCheckpointStoreError };

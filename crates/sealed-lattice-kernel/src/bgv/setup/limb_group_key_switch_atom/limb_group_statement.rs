@@ -1020,15 +1020,6 @@ mod tests {
             }
             rotated
         };
-        let hybrid_gadget_source = rotated_secret
-            .iter()
-            .map(|coefficient| {
-                coefficient
-                    .checked_mul(i64::try_from(SPECIAL_PRIME).expect("special prime fits i64"))
-                    .expect("hybrid gadget source fits i64")
-            })
-            .collect::<Vec<_>>();
-
         for (digit_index, component) in galois_key.components.iter().enumerate() {
             let component_b = component
                 .component_b_coefficients()
@@ -1060,6 +1051,8 @@ mod tests {
                     .uniform_residues(*modulus, POLYNOMIAL_DEGREE)
                 })
                 .collect::<Vec<_>>();
+            let mut special_prime_polynomial = vec![0_u64; POLYNOMIAL_DEGREE];
+            special_prime_polynomial[0] = SPECIAL_PRIME % group_primes[digit_index];
 
             let report = verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
                 group: &group,
@@ -1069,7 +1062,10 @@ mod tests {
                 public_sample_by_limb: &public_sample_by_limb,
                 secret_coefficients: key.secret(),
                 error_coefficients: &error,
-                source: DigitAtomSource::DiagonalSignedPolynomial(&hybrid_gadget_source),
+                source: DigitAtomSource::DiagonalPublicProduct {
+                    aggregate_residues: &special_prime_polynomial,
+                    signed_polynomial: &rotated_secret,
+                },
             })
             .expect("kernel-generated digit material satisfies the limb-group atom");
             assert!(report.maximum_carry_magnitude <= report.carry_bound);

@@ -16,8 +16,9 @@ use super::super::{
     BoundedCommonProofByteSink, CollectivePublicKeyAggregatePlanInput,
     CommittedMaterialBoundOpeningProvider, CommittedMaterialProfile, CommittedMaterialTree,
     CommittedMaterialTreeInput, CommonProofGenerationInput, CommonProofPrivateCoinSource,
-    CommonProofSourcePolynomial, CommonProofVerificationInput, CommonProofVerifierError,
-    CompiledRelationPlan, CompiledTargetReleaseRelation, EvaluatorKeyAggregateEntryPlanInput,
+    CommonProofSourcePolynomial, CommonProofVerificationInput, CommonProofVerificationPoll,
+    CommonProofVerificationStateMachine, CommonProofVerifierError, CompiledRelationPlan,
+    CompiledTargetReleaseRelation, EvaluatorKeyAggregateEntryPlanInput,
     EvaluatorKeyAggregatePlanInput, EvaluatorKeyAggregateVariantInput, PROOF_BASE_FIELD_MODULUS,
     PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT, PROOF_EVALUATION_BLOWUP_FACTOR,
     PROOF_EVALUATION_COSET_OFFSET, PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
@@ -25,14 +26,17 @@ use super::super::{
     PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT, PROOF_UNIQUE_QUERY_COUNT, ProofBaseFieldElement,
     ProofEvaluationDomain, ProofExternalMemory, ProofExternalMemoryObject,
     ProofExternalMemoryProtection, ProofLeafVisibility, ProofTreeRole,
-    PublicAggregateRelationGeometry, RelationPlanCheckContext, RelationProofTreeInput,
-    ResolvedSuiteModulus, RkgRoundOneAggregatePlanInput, RkgRoundOneAggregateVariantInput,
+    PollableCommonProofVerificationInput, PublicAggregateRelationGeometry,
+    RelationPlanCheckContext, RelationProofTreeInput, ResidentCommonProofByteSource,
+    ResidentCommonProofInputChunk, ResolvedSuiteModulus, RkgRoundOneAggregatePlanInput,
+    RkgRoundOneAggregateVariantInput,
     SameSecretRelationPlanInput, SetupPublicPolynomialBoundOpeningProvider,
     SetupPublicPolynomialContext, SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput,
     StatementOwnedProofTreeInput, SuiteModulusReference, TargetReleaseModulusWitness,
     TargetReleaseRelationPlanInput, TargetReleaseRoleWitness, TargetReleaseWitness,
     VerifiedCommonProof, VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree,
     VerifiedTargetReleaseModulusInput, VerifiedTargetReleaseProof,
+    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
     canonical_proof_object_header_bytes, compile_collective_public_key_aggregate_relation_plan,
     compile_evaluator_key_aggregate_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
     compile_same_secret_relation_plan, compile_target_release_relation, generate_common_proof,
@@ -796,7 +800,7 @@ fn target_relation_tree_inputs(
 
 fn public_aggregate_geometry() -> PublicAggregateRelationGeometry {
     PublicAggregateRelationGeometry {
-        ring_degree: 2,
+        ring_degree: 4,
         evaluation_domain_size: EVALUATION_DOMAIN_SIZE,
         opening_degree_bound_exclusive: OPENING_DEGREE_BOUND_EXCLUSIVE,
         public_polynomial_column_degree_bound_exclusive: 1,
@@ -907,6 +911,86 @@ fn verify_fixture_proof_capability(
     )
 }
 
+fn verify_fixture_proof_incrementally(
+    fixture: &CommonProofEngineFixture,
+    proof_bytes: &[u8],
+    statement_owned_trees: &[VerifiedStatementOwnedTree],
+) -> Result<VerifiedCommonProof, CommonProofVerifierError> {
+    let maximum_resident_window_byte_length =
+        2 * MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH;
+    let mut verifier = CommonProofVerificationStateMachine::new(
+        PollableCommonProofVerificationInput {
+            protocol_version: 1,
+            suite_identifier: [0x11; 64],
+            canonical_application_statement_bytes: &fixture
+                .canonical_application_statement_bytes,
+            relation_plan: &fixture.relation_plan,
+            relation_context: &fixture.relation_context,
+            schedule_position: fixture.schedule_position,
+            top_count: fixture.top_count,
+            statement_owned_trees,
+            declared_proof_byte_length: proof_bytes.len(),
+            proof_byte_ceiling: MAXIMUM_PROOF_BYTE_LENGTH,
+            maximum_resident_window_byte_length,
+        },
+    )?;
+    let mut poll_ordinal = 0_usize;
+    loop {
+        assert!(
+            verifier.take_verified_common_proof().is_none(),
+            "verification must not mint a capability before its terminal poll",
+        );
+        let required_range = verifier
+            .required_byte_range()
+            .expect("a nonterminal verifier requests one exact resident range");
+        assert!(required_range.byte_length() <= maximum_resident_window_byte_length);
+        let range_end = required_range
+            .offset()
+            .checked_add(required_range.byte_length())
+            .expect("the checked proof range fits usize");
+        let requested_bytes = proof_bytes
+            .get(required_range.offset()..range_end)
+            .expect("the verifier never requests beyond the declared proof");
+        let minimum_first_chunk_byte_length = requested_bytes
+            .len()
+            .saturating_sub(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH);
+        let maximum_first_chunk_byte_length = requested_bytes
+            .len()
+            .min(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH);
+        let split_byte_length = if requested_bytes.len() <= 1 {
+            requested_bytes.len()
+        } else {
+            let rotating_boundary = 1 + (poll_ordinal.wrapping_mul(7_919) % (requested_bytes.len() - 1));
+            rotating_boundary
+                .max(minimum_first_chunk_byte_length)
+                .min(maximum_first_chunk_byte_length)
+                .min(requested_bytes.len() - 1)
+        };
+        let mut chunks = vec![ResidentCommonProofInputChunk::new(
+            required_range.offset(),
+            &requested_bytes[..split_byte_length],
+        )];
+        if split_byte_length < requested_bytes.len() {
+            chunks.push(ResidentCommonProofInputChunk::new(
+                required_range.offset() + split_byte_length,
+                &requested_bytes[split_byte_length..],
+            ));
+        }
+        let source = ResidentCommonProofByteSource::new(proof_bytes.len(), chunks)
+            .expect("the required range fits the two-chunk resident window");
+        let progress = verifier.poll(&source, &mut NoVerifiedSequenceColumns)?;
+        poll_ordinal += 1;
+        if progress == CommonProofVerificationPoll::Complete {
+            break;
+        }
+    }
+    let verified = verifier
+        .take_verified_common_proof()
+        .expect("only the terminal poll mints the verified capability");
+    assert!(verifier.take_verified_common_proof().is_none());
+    Ok(verified)
+}
+
 fn verify_fixture_proof(
     fixture: &CommonProofEngineFixture,
     proof_bytes: &[u8],
@@ -991,6 +1075,18 @@ fn complete_common_proof_engine_round_trip_binds_proof_statement_and_verified_so
     assert_eq!(verified_proof.top_count(), None);
     assert_ne!(verified_proof.application_statement_hash(), [0_u8; 64]);
     assert_ne!(verified_proof.relation_plan_variant_hash(), [0_u8; 64]);
+
+    let incrementally_verified_proof =
+        verify_fixture_proof_incrementally(&fixture, &proof_bytes, &verified_trees)
+            .expect("the same proof verifies across changing two-chunk resident windows");
+    assert_eq!(
+        incrementally_verified_proof.application_statement_hash(),
+        verified_proof.application_statement_hash(),
+    );
+    assert_eq!(
+        incrementally_verified_proof.relation_plan_variant_hash(),
+        verified_proof.relation_plan_variant_hash(),
+    );
 
     let header_byte_length =
         canonical_proof_object_header_bytes(&fixture.canonical_application_statement_bytes)

@@ -1,5 +1,5 @@
 import { shake256 } from '@noble/hashes/sha3.js';
-import { bytesToHex } from '@noble/hashes/utils.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
@@ -7,6 +7,7 @@ import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
 const canonicalTupleVersion = 1;
 const canonicalBytesItemType = 0x01;
 const canonicalAsciiItemType = 0x02;
+const canonicalUnsigned16ItemType = 0x03;
 const canonicalNestedTupleItemType = 0x09;
 const canonicalHomogeneousListItemType = 0x0e;
 const canonicalHashFrameSchemaIdentifier = 0x0001;
@@ -20,6 +21,8 @@ const mlKem768EncapsulationKeyByteLength = ml_kem768.lengths.publicKey!;
 const mlKem768EncapsulationCoinByteLength = ml_kem768.lengths.msg!;
 const canonicalRosterEntryByteLength =
     canonicalTupleHeaderByteLength +
+    canonicalItemHeaderByteLength +
+    2 +
     canonicalItemHeaderByteLength +
     mlDsa65VerificationKeyByteLength +
     canonicalItemHeaderByteLength +
@@ -42,6 +45,7 @@ export type AuthenticatedMailboxFrozenRoster = Readonly<{
 }>;
 
 type FrozenRosterState = Readonly<{
+    readonly orderedParticipantIdentities: readonly Uint8Array[];
     readonly rosterHash: ProtocolHash;
     readonly sourceVerificationKeys: ReadonlyMap<string, Uint8Array>;
 }>;
@@ -220,6 +224,23 @@ const readFixedBytesItem = (
     return reader.readBytes(byteLength, fieldName);
 };
 
+const readUnsigned16Item = (
+    reader: CanonicalRosterReader,
+    fieldName: string,
+): number => {
+    requireValue(
+        reader.readUnsigned16(`${fieldName}.itemType`),
+        canonicalUnsigned16ItemType,
+        `${fieldName}.itemType`,
+    );
+    requireValue(
+        reader.readUnsigned32(`${fieldName}.byteLength`),
+        2,
+        `${fieldName}.byteLength`,
+    );
+    return reader.readUnsigned16(fieldName);
+};
+
 const parseCanonicalRoster = (
     canonicalRosterBytes: Uint8Array,
 ): readonly ParsedRosterEntry[] => {
@@ -269,8 +290,13 @@ const parseCanonicalRoster = (
             readCanonicalTupleHeader(
                 listReader,
                 rosterEntrySchemaIdentifier,
-                2,
+                3,
                 entryName,
+            );
+            requireValue(
+                readUnsigned16Item(listReader, `${entryName}.rosterPosition`),
+                rosterPosition,
+                `${entryName}.rosterPosition`,
             );
             entries.push({
                 signingVerificationKey: readFixedBytesItem(
@@ -382,6 +408,7 @@ export const openAuthenticatedMailboxFrozenRoster = (
         const signingVerificationKeys = new Set<string>();
         const mailboxEncapsulationKeys = new Set<string>();
         const sourceVerificationKeys = new Map<string, Uint8Array>();
+        const orderedParticipantIdentities: Uint8Array[] = [];
         for (const entry of parsedEntries) {
             validateMailboxEncapsulationKey(entry.mailboxEncapsulationKey);
             const participantIdentity = deriveParticipantIdentity(
@@ -410,12 +437,16 @@ export const openAuthenticatedMailboxFrozenRoster = (
                 participantIdentity,
                 entry.signingVerificationKey.slice(),
             );
+            orderedParticipantIdentities.push(hexToBytes(participantIdentity));
         }
 
         const frozenRoster = Object.freeze(
             {},
         ) as AuthenticatedMailboxFrozenRoster;
         frozenRosterStates.set(frozenRoster, {
+            orderedParticipantIdentities: Object.freeze(
+                orderedParticipantIdentities,
+            ),
             rosterHash: deriveRosterHash(ownedRosterBytes),
             sourceVerificationKeys,
         });
@@ -427,6 +458,25 @@ export const openAuthenticatedMailboxFrozenRoster = (
             entry.mailboxEncapsulationKey.fill(0);
         }
     }
+};
+
+/**
+ * Copies the canonical roster's participant identities in roster order. Only
+ * an opaque roster returned by `openAuthenticatedMailboxFrozenRoster` can be
+ * inspected through this function.
+ */
+export const copyAuthenticatedMailboxFrozenRosterParticipantIdentities = (
+    frozenRoster: AuthenticatedMailboxFrozenRoster,
+): readonly Uint8Array[] => {
+    const state = frozenRosterStates.get(frozenRoster);
+    if (state === undefined) {
+        throw new TypeError(
+            'The authenticated mailbox frozen roster capability is forged or owned by another runtime.',
+        );
+    }
+    return Object.freeze(
+        state.orderedParticipantIdentities.map((identity) => identity.slice()),
+    );
 };
 
 export const resolveAuthenticatedMailboxFrozenRosterSourceVerificationKey = (

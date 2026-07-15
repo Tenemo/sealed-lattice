@@ -1,4 +1,4 @@
-import type { RefusalReason, VerificationResult } from '@sealed-lattice/types';
+import type { RefusalReason } from '@sealed-lattice/types';
 
 import { TranscriptCoreKernelCommandError } from './transcript-core-bridge/kernel-runtime.js';
 import type {
@@ -11,11 +11,30 @@ const maximumUnsigned64 = 0xffff_ffff_ffff_ffffn;
 const lowercaseHexPattern = /^(?:[0-9a-f]{2})+$/u;
 const canonicalUnsignedDecimalPattern = /^(?:0|[1-9][0-9]*)$/u;
 
-declare const verifiedProofApplicationBindingBrand: unique symbol;
+declare const proofApplicationReservationBindingBrand: unique symbol;
 
-export type VerifiedProofApplicationBinding = Readonly<{
-    readonly [verifiedProofApplicationBindingBrand]: true;
+export type ProofApplicationReservationBinding = Readonly<{
+    readonly [proofApplicationReservationBindingBrand]: true;
 }>;
+
+export type ProofApplicationReservationBindingPreparationRefusalReason =
+    Extract<
+        RefusalReason,
+        'malformedEncoding' | 'wrongContext' | 'wrongTypeOrLength'
+    >;
+
+export class ProofApplicationReservationBindingPreparationError extends Error {
+    public override readonly name =
+        'ProofApplicationReservationBindingPreparationError';
+
+    public constructor(
+        public readonly refusalReason: ProofApplicationReservationBindingPreparationRefusalReason,
+    ) {
+        super(
+            `Proof application reservation binding preparation refused: ${refusalReason}.`,
+        );
+    }
+}
 
 export type ProofApplicationAuthorityContext = Readonly<{
     actionContextHash: Uint8Array;
@@ -23,7 +42,7 @@ export type ProofApplicationAuthorityContext = Readonly<{
     suiteIdentifier: Uint8Array;
 }>;
 
-export type ProofApplicationBindingDescription = Readonly<{
+export type ProofApplicationReservationBindingDescription = Readonly<{
     actionContextHash: Uint8Array;
     applicationSlotCanonicalBytes: Uint8Array;
     applicationSlotHash: Uint8Array;
@@ -39,14 +58,14 @@ export type ProofApplicationBindingDescription = Readonly<{
     suiteIdentifier: Uint8Array;
 }>;
 
-const verifiedBindingDescriptions = new WeakMap<
+const reservationBindingDescriptions = new WeakMap<
     object,
-    ProofApplicationBindingDescription
+    ProofApplicationReservationBindingDescription
 >();
 
 const copyDescription = (
-    description: ProofApplicationBindingDescription,
-): ProofApplicationBindingDescription =>
+    description: ProofApplicationReservationBindingDescription,
+): ProofApplicationReservationBindingDescription =>
     Object.freeze({
         actionContextHash: description.actionContextHash.slice(),
         applicationSlotCanonicalBytes:
@@ -72,34 +91,34 @@ const copyDescription = (
         suiteIdentifier: description.suiteIdentifier.slice(),
     });
 
-export const copyVerifiedProofApplicationBinding = (
-    binding: VerifiedProofApplicationBinding,
-): ProofApplicationBindingDescription => {
+export const copyProofApplicationReservationBindingDescription = (
+    binding: ProofApplicationReservationBinding,
+): ProofApplicationReservationBindingDescription => {
     if (
         (typeof binding !== 'object' && typeof binding !== 'function') ||
         binding === null
     ) {
         throw new TypeError(
-            'The proof application binding was not issued by the WASM verifier.',
+            'The proof application reservation binding was not prepared by the WASM binding decoder.',
         );
     }
-    const description = verifiedBindingDescriptions.get(binding);
+    const description = reservationBindingDescriptions.get(binding);
     if (description === undefined) {
         throw new TypeError(
-            'The proof application binding was not issued by the WASM verifier.',
+            'The proof application reservation binding was not prepared by the WASM binding decoder.',
         );
     }
     return copyDescription(description);
 };
 
-export const verifyProofApplicationBinding = (
+export const prepareProofApplicationReservationBinding = (
     kernel: TranscriptCoreKernel,
     input: Readonly<{
         authorityContext: ProofApplicationAuthorityContext;
         canonicalBindingBytes: Uint8Array;
     }>,
-): VerificationResult<VerifiedProofApplicationBinding> => {
-    let canonicalBindingBytes: Uint8Array;
+): ProofApplicationReservationBinding => {
+    let canonicalBindingBytes: Uint8Array | undefined;
     let authorityContext: ProofApplicationAuthorityContext;
     try {
         canonicalBindingBytes = copyBytes(
@@ -110,7 +129,10 @@ export const verifyProofApplicationBinding = (
         );
         authorityContext = copyAuthorityContext(input.authorityContext);
     } catch {
-        return refused('wrongTypeOrLength');
+        canonicalBindingBytes?.fill(0);
+        throw new ProofApplicationReservationBindingPreparationError(
+            'wrongTypeOrLength',
+        );
     }
 
     let decoded: DecodedProofApplicationBinding;
@@ -121,12 +143,14 @@ export const verifyProofApplicationBinding = (
     } catch (error) {
         canonicalBindingBytes.fill(0);
         if (error instanceof TranscriptCoreKernelCommandError) {
-            return refused('malformedEncoding');
+            throw new ProofApplicationReservationBindingPreparationError(
+                'malformedEncoding',
+            );
         }
         throw error;
     }
 
-    let description: ProofApplicationBindingDescription;
+    let description: ProofApplicationReservationBindingDescription;
     try {
         description = descriptionFromKernel(decoded);
     } catch {
@@ -158,18 +182,20 @@ export const verifyProofApplicationBinding = (
         )
     ) {
         destroyDescription(description);
-        return refused('wrongContext');
+        throw new ProofApplicationReservationBindingPreparationError(
+            'wrongContext',
+        );
     }
 
-    const binding = Object.freeze({}) as VerifiedProofApplicationBinding;
-    verifiedBindingDescriptions.set(binding, copyDescription(description));
+    const binding = Object.freeze({}) as ProofApplicationReservationBinding;
+    reservationBindingDescriptions.set(binding, copyDescription(description));
     destroyDescription(description);
-    return Object.freeze({ isValid: true, value: binding });
+    return binding;
 };
 
 const descriptionFromKernel = (
     value: DecodedProofApplicationBinding,
-): ProofApplicationBindingDescription => {
+): ProofApplicationReservationBindingDescription => {
     if (
         typeof value !== 'object' ||
         value === null ||
@@ -375,7 +401,7 @@ const parsePositiveUnsigned64 = (value: unknown, label: string): bigint => {
 };
 
 const destroyDescription = (
-    description: ProofApplicationBindingDescription,
+    description: ProofApplicationReservationBindingDescription,
 ): void => {
     description.actionContextHash.fill(0);
     description.applicationSlotCanonicalBytes.fill(0);
@@ -386,8 +412,3 @@ const destroyDescription = (
     description.proofStreamDescriptorCanonicalBytes.fill(0);
     description.suiteIdentifier.fill(0);
 };
-
-const refused = <Value>(
-    refusalReason: RefusalReason,
-): VerificationResult<Value> =>
-    Object.freeze({ isValid: false, refusalReason });

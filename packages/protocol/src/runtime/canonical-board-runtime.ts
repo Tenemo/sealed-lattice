@@ -25,6 +25,7 @@ export type CanonicalBoardRuntimeState = 'active' | 'closed';
 
 export type CanonicalBoardRuntime = Readonly<{
     close(): void;
+    copyConfiguration(): CanonicalBoardVerifierConfiguration;
     copyCachedCarrier(
         snapshot: VerifiedCanonicalBoardSnapshot,
         objectHash: Uint8Array,
@@ -119,12 +120,21 @@ const copyDescription = (
 };
 
 class CanonicalBoardRuntimeImplementation implements CanonicalBoardRuntime {
+    readonly #configuration: CanonicalBoardVerifierConfiguration;
     readonly #objectsByHash = new Map<string, RetainedObject>();
     readonly #verifierSession: CanonicalBoardVerifierSession;
     #state: CanonicalBoardRuntimeState = 'active';
 
-    public constructor(verifierSession: CanonicalBoardVerifierSession) {
+    public constructor(
+        verifierSession: CanonicalBoardVerifierSession,
+        configuration: CanonicalBoardVerifierConfiguration,
+    ) {
         this.#verifierSession = verifierSession;
+        this.#configuration = copyConfiguration(configuration);
+    }
+
+    public copyConfiguration(): CanonicalBoardVerifierConfiguration {
+        return copyConfiguration(this.#configuration);
     }
 
     public state(): CanonicalBoardRuntimeState {
@@ -295,11 +305,43 @@ class CanonicalBoardRuntimeImplementation implements CanonicalBoardRuntime {
 export const openCanonicalBoardRuntime = (
     input: CanonicalBoardRuntimeInput,
 ): VerificationResult<CanonicalBoardRuntime> => {
-    const opened = openCanonicalBoardVerifierSession(input);
+    let configuration: CanonicalBoardVerifierConfiguration;
+    try {
+        configuration = copyConfiguration(input.configuration);
+    } catch {
+        return refused('wrongTypeOrLength');
+    }
+    const opened = openCanonicalBoardVerifierSession({
+        configuration,
+        kernel: input.kernel,
+    });
     if (!opened.isValid) {
         return opened;
     }
     return valid(
-        Object.freeze(new CanonicalBoardRuntimeImplementation(opened.value)),
+        Object.freeze(
+            new CanonicalBoardRuntimeImplementation(
+                opened.value,
+                configuration,
+            ),
+        ),
     );
 };
+
+const copyConfiguration = (
+    configuration: CanonicalBoardVerifierConfiguration,
+): CanonicalBoardVerifierConfiguration =>
+    Object.freeze({
+        actionContextHash: configuration.actionContextHash.slice(),
+        canonicalRosterBytes: configuration.canonicalRosterBytes.slice(),
+        ceremonyContextHash: configuration.ceremonyContextHash.slice(),
+        maximumBallotAttemptsPerParticipant:
+            configuration.maximumBallotAttemptsPerParticipant,
+        maximumRetainedCanonicalCarrierByteLength:
+            configuration.maximumRetainedCanonicalCarrierByteLength,
+        maximumRetainedTranscriptObjects:
+            configuration.maximumRetainedTranscriptObjects,
+        maximumUnorderedCarriersPerBatch:
+            configuration.maximumUnorderedCarriersPerBatch,
+        suiteIdentifier: configuration.suiteIdentifier.slice(),
+    });
