@@ -1,7 +1,6 @@
 use super::decoding::*;
 use super::share_linkage_transport::*;
 use super::*;
-use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::trustee_evaluation_key_proof::VSS_SHARE_LINKAGE_PROOF_FAMILY;
 use crate::encoding::CanonicalError;
 
@@ -13,6 +12,7 @@ pub(in crate::bgv::setup) struct VssShareLinkageMaterialRecordStatementInput<'a>
     pub(in crate::bgv::setup) participant_count: usize,
     pub(in crate::bgv::setup) q_share_rns_limb_count: usize,
     pub(in crate::bgv::setup) threshold_degree: usize,
+    pub(in crate::bgv::setup) trustee_identities: &'a [String],
 }
 
 pub(super) struct VssShareLinkagePublicRecordInput<'a> {
@@ -22,6 +22,7 @@ pub(super) struct VssShareLinkagePublicRecordInput<'a> {
     pub(super) participant_count: usize,
     pub(super) q_share_rns_limb_count: usize,
     pub(super) threshold_degree: usize,
+    pub(super) trustee_identities: &'a [String],
     pub(super) item_index: usize,
 }
 
@@ -33,20 +34,6 @@ pub(in crate::bgv::setup) struct ReconstructedVssShareLinkageStatement {
 pub(super) fn compare_string_value(
     actual: &str,
     expected: &str,
-    description: &str,
-) -> CanonicalResult<()> {
-    if actual != expected {
-        return Err(invalid_succinct_setup_proof(format!(
-            "{description} must match"
-        )));
-    }
-
-    Ok(())
-}
-
-pub(super) fn compare_u64_value(
-    actual: u64,
-    expected: u64,
     description: &str,
 ) -> CanonicalResult<()> {
     if actual != expected {
@@ -81,16 +68,17 @@ pub(in crate::bgv::setup) fn verify_vss_share_linkage_material_record_statement(
     for (item_index, item) in input.coverage_items.iter().enumerate() {
         let (reconstructed_item, coverage_item) =
             verify_vss_share_linkage_item_against_public_records(
-            VssShareLinkagePublicRecordInput {
-                item,
-                coefficient_commitment_set: input.coefficient_commitment_set,
-                recipient_share_commitment_set: input.recipient_share_commitment_set,
-                participant_count: input.participant_count,
-                q_share_rns_limb_count: input.q_share_rns_limb_count,
-                threshold_degree: input.threshold_degree,
-                item_index,
-            },
-        )?;
+                VssShareLinkagePublicRecordInput {
+                    item,
+                    coefficient_commitment_set: input.coefficient_commitment_set,
+                    recipient_share_commitment_set: input.recipient_share_commitment_set,
+                    participant_count: input.participant_count,
+                    q_share_rns_limb_count: input.q_share_rns_limb_count,
+                    threshold_degree: input.threshold_degree,
+                    trustee_identities: input.trustee_identities,
+                    item_index,
+                },
+            )?;
         reconstructed_items.push(reconstructed_item);
         coverage.push(coverage_item);
     }
@@ -168,29 +156,26 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
                 "share-linkage recipient-share set is missing the proof source",
             )
         })?;
-    let source_trustee_identity = read_string(coefficient_source_record, "sourceTrusteeIdentity")?;
-    compare_string_value(
-        read_string(recipient_source_record, "sourceTrusteeIdentity")?,
-        source_trustee_identity,
-        "share-linkage proof sourceTrusteeIdentity",
-    )?;
+    let source_trustee_identity = input
+        .trustee_identities
+        .get(source_roster_position)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "share-linkage source position is missing from the canonical trustee roster",
+            )
+        })?;
     let source_coefficient_commitment_root =
         crate::bgv::setup::vss_commitment::vss_public_source_coefficient_record_root(
             coefficient_source_record,
+            source_trustee_identity,
         )?;
     let source_recipient_share_commitment_root =
         crate::bgv::setup::vss_commitment::vss_public_source_recipient_share_record_root(
             recipient_source_record,
+            source_trustee_identity,
+            input.trustee_identities,
         )?;
 
-    let source_message_modulus = DATA_PRIMES
-        .get(source_rns_limb_index)
-        .copied()
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "share-linkage item sourceRnsLimbIndex is outside the canonical modulus schedule",
-            )
-        })?;
     let coefficient_records = array_field(coefficient_source_record, "coefficientCommitments")?;
     let mut coefficient_commitment_roots = Vec::with_capacity(threshold_degree);
     let mut coefficient_commitments = Vec::with_capacity(threshold_degree);
@@ -209,20 +194,9 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
                 )
             })?;
         coefficient_commitment_roots.push(
-            crate::bgv::setup::vss_commitment::vss_public_commitment_body_root(
-                coefficient_record,
-            )?,
+            crate::bgv::setup::vss_commitment::vss_public_commitment_body_root(coefficient_record)?,
         );
-        coefficient_commitments.push(
-            coefficient_record
-                .get("commitment")
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof(
-                        "share-linkage coefficient record is missing its commitment body",
-                    )
-                })?
-                .clone(),
-        );
+        coefficient_commitments.push(coefficient_record.clone());
     }
 
     let recipient_records = array_field(recipient_source_record, "recipientShareCommitments")?;
@@ -239,17 +213,17 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
                 "share-linkage recipient-share set is missing a proof item recipient",
             )
         })?;
-    let recipient_identity = read_string(recipient_record, "recipientIdentity")?;
-    let recipient_share_commitment_root =
-        crate::bgv::setup::vss_commitment::vss_public_commitment_body_root(recipient_record)?;
-    let recipient_share_commitment = recipient_record
-        .get("commitment")
+    let recipient_identity = input
+        .trustee_identities
+        .get(recipient_roster_position)
         .ok_or_else(|| {
             invalid_succinct_setup_proof(
-                "share-linkage recipient-share record is missing its commitment body",
+                "share-linkage recipient position is missing from the canonical trustee roster",
             )
-        })?
-        .clone();
+        })?;
+    let recipient_share_commitment_root =
+        crate::bgv::setup::vss_commitment::vss_public_commitment_body_root(recipient_record)?;
+    let recipient_share_commitment = recipient_record.clone();
 
     let reconstructed_item = json!({
         "sourceTrusteeIdentity": source_trustee_identity,
@@ -259,7 +233,6 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
         "sourceRnsLimbIndex": source_rns_limb_index,
-        "sourceMessageModulus": source_message_modulus,
         "coefficientCommitmentRoots": coefficient_commitment_roots,
         "coefficientCommitments": coefficient_commitments,
         "recipientShareCommitmentRoot": recipient_share_commitment_root,
@@ -277,26 +250,36 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
 #[cfg(test)]
 pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
     request: &Value,
+    trustee_identities: &[String],
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<()> {
     let statement_verification =
-        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(request)?;
+        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(
+            request,
+            trustee_identities,
+        )?;
     verify_vss_share_linkage_proof_material_set_with_statement_verification(
         request,
         &statement_verification,
+        trustee_identities,
         proof_binding_session,
     )
 }
 
 pub(in crate::bgv::setup) fn verify_vss_share_linkage_statement_and_proof_material_set_from_request(
     request: &Value,
+    trustee_identities: &[String],
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Value> {
     let statement_verification =
-        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(request)?;
+        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(
+            request,
+            trustee_identities,
+        )?;
     verify_vss_share_linkage_proof_material_set_with_statement_verification(
         request,
         &statement_verification,
+        trustee_identities,
         proof_binding_session,
     )?;
     Ok(statement_verification)
@@ -305,6 +288,7 @@ pub(in crate::bgv::setup) fn verify_vss_share_linkage_statement_and_proof_materi
 fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
     request: &Value,
     statement_verification: &Value,
+    trustee_identities: &[String],
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<()> {
     let statement = request.get("statement").ok_or_else(|| {
@@ -370,6 +354,7 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
                 participant_count,
                 q_share_rns_limb_count,
                 threshold_degree,
+                trustee_identities,
             },
         )?;
         for coverage_item in &reconstructed.coverage {

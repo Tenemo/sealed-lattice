@@ -28,17 +28,13 @@ const envelopeReference = (
     sourceTrusteeRosterPosition: number,
     recipientRosterPosition: number,
 ): PrivateVssEnvelopeVerificationReference => {
-    const sourceTrusteeIdentity = `trustee-${String(sourceTrusteeRosterPosition)}`;
-    const recipientIdentity = `trustee-${String(recipientRosterPosition)}`;
     const trusteePairLabel = `${String(sourceTrusteeRosterPosition)}-${String(
         recipientRosterPosition,
     )}`;
 
     return {
         objectType: 'PrivateVssEnvelopeCommitment',
-        sourceTrusteeIdentity,
         sourceTrusteeRosterPosition,
-        recipientIdentity,
         recipientRosterPosition,
         privateEnvelopeHash: fixtureHash(
             `private-envelope-${trusteePairLabel}`,
@@ -113,9 +109,8 @@ const vssPublicCoefficientCommitmentSet =
     (): AcceptanceRecordInput['vssPublicCoefficientCommitmentSet'] => ({
         objectType: 'VssPublicCoefficientCommitmentSet',
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-        sourceTrusteeRecords: [0, 1].map((rosterPosition) => ({
+        sourceTrusteeRecords: [0, 1].map(() => ({
             objectType: 'VssPublicSourceCoefficientCommitments' as const,
-            sourceTrusteeIdentity: `trustee-${String(rosterPosition)}`,
             coefficientCommitments: [],
         })),
     });
@@ -142,29 +137,45 @@ const acceptanceRecordInput = (
     signRoot: signer.signRoot,
 });
 
-const shareVerificationPayloadFields = (input: AcceptanceRecordInput) => ({
-    setupContextHash: deriveCollectiveBgvSetupContextHash(input.setupContext),
-    sourceTrusteeIdentity: input.envelopeReference.sourceTrusteeIdentity,
-    sourceTrusteeRosterPosition:
-        input.envelopeReference.sourceTrusteeRosterPosition,
-    recipientIdentity: input.envelopeReference.recipientIdentity,
-    recipientRosterPosition: input.envelopeReference.recipientRosterPosition,
-    sourceTrusteeCommitmentRoot: deriveCanonicalObjectHash(
-        input.vssPublicCoefficientCommitmentSet.sourceTrusteeRecords[
+const shareVerificationPayloadFields = (input: AcceptanceRecordInput) => {
+    const sourceRegistration =
+        input.setupIntent.trusteeRegistrations[
             input.envelopeReference.sourceTrusteeRosterPosition
-        ],
-    ),
-    privateVssEnvelopeCommitmentRoot: input.privateVssEnvelopeCommitmentRoot,
-    privateEnvelopeHash: input.envelopeReference.privateEnvelopeHash,
-    recoveryEpoch:
+        ];
+    const recipientRegistration =
         input.setupIntent.trusteeRegistrations[
             input.envelopeReference.recipientRosterPosition
-        ]?.recoveryEpoch,
-    deviceEpoch:
-        input.setupIntent.trusteeRegistrations[
-            input.envelopeReference.recipientRosterPosition
-        ]?.deviceEpoch,
-});
+        ];
+    if (
+        sourceRegistration === undefined ||
+        recipientRegistration === undefined
+    ) {
+        throw new Error('The fixture must contain both trustee registrations.');
+    }
+
+    return {
+        setupContextHash: deriveCollectiveBgvSetupContextHash(
+            input.setupContext,
+        ),
+        sourceTrusteeIdentity: sourceRegistration.trusteeIdentity,
+        sourceTrusteeRosterPosition:
+            input.envelopeReference.sourceTrusteeRosterPosition,
+        recipientIdentity: recipientRegistration.trusteeIdentity,
+        recipientRosterPosition:
+            input.envelopeReference.recipientRosterPosition,
+        sourceTrusteeCommitmentRoot: deriveCanonicalObjectHash({
+            ...input.vssPublicCoefficientCommitmentSet.sourceTrusteeRecords[
+                input.envelopeReference.sourceTrusteeRosterPosition
+            ],
+            sourceTrusteeIdentity: sourceRegistration.trusteeIdentity,
+        }),
+        privateVssEnvelopeCommitmentRoot:
+            input.privateVssEnvelopeCommitmentRoot,
+        privateEnvelopeHash: input.envelopeReference.privateEnvelopeHash,
+        recoveryEpoch: recipientRegistration.recoveryEpoch,
+        deviceEpoch: recipientRegistration.deviceEpoch,
+    };
+};
 
 const expectReturnedTrusteeSignature = (
     record: VerificationRecord,

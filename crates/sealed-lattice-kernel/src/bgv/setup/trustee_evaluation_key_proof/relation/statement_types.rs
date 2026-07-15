@@ -103,7 +103,6 @@ pub(crate) struct PrivateVssShareStatement {
     pub(crate) recipient_roster_position: u64,
     pub(crate) source_trustee_commitment_root: String,
     pub(crate) source_rns_limb_index: usize,
-    pub(crate) source_message_modulus: u64,
     pub(crate) share_values: Vec<u64>,
     pub(crate) coefficient_commitment_roots: Vec<String>,
     pub(crate) coefficient_commitments: Vec<SetupCommitmentValue>,
@@ -118,7 +117,6 @@ pub(crate) struct VssShareLinkageStatement {
     pub(crate) source_coefficient_commitment_root: String,
     pub(crate) source_recipient_share_commitment_root: String,
     pub(crate) source_rns_limb_index: usize,
-    pub(crate) source_message_modulus: u64,
     pub(crate) coefficient_commitment_roots: Vec<String>,
     pub(crate) coefficient_commitments: Vec<VssShareLinkageCommitment>,
     pub(crate) recipient_share_commitment_root: String,
@@ -161,7 +159,6 @@ pub(crate) struct VssShareLinkageItem {
     pub(crate) recipient_identity: String,
     pub(crate) recipient_roster_position: u64,
     pub(crate) source_rns_limb_index: usize,
-    pub(crate) source_message_modulus: u64,
     pub(crate) coefficient_commitment_roots: Vec<String>,
     pub(crate) coefficient_commitments: Vec<VssShareLinkageCommitment>,
     pub(crate) recipient_share_commitment_root: String,
@@ -172,7 +169,6 @@ pub(crate) struct VssShareLinkageItem {
 pub(crate) struct VssPublicCoefficientWitnessSlot {
     pub(crate) source_trustee_roster_position: u64,
     pub(crate) source_rns_limb_index: usize,
-    pub(crate) source_message_modulus: u64,
     pub(crate) shamir_coefficient_index: usize,
     pub(crate) commitment_root: String,
 }
@@ -188,7 +184,6 @@ pub(crate) struct SameSecretBridgeStatement {
 }
 
 pub(crate) struct TargetDecryptionShareRoleStatement {
-    pub(crate) target_role: String,
     pub(crate) target_ciphertext_component_one: Vec<u64>,
     pub(crate) released_partial_decryption: Vec<u64>,
     pub(crate) flooding_noise_commitment_root: String,
@@ -197,7 +192,6 @@ pub(crate) struct TargetDecryptionShareRoleStatement {
 
 pub(crate) struct TargetDecryptionShareLimbStatement {
     pub(crate) target_rns_limb_index: usize,
-    pub(crate) target_rns_prime: u64,
     pub(crate) aggregate_commitment_root: String,
     pub(crate) aggregate_opening_root: String,
     pub(crate) aggregate_commitment: VssShareLinkageCommitment,
@@ -206,12 +200,27 @@ pub(crate) struct TargetDecryptionShareLimbStatement {
 
 pub(crate) struct TargetDecryptionShareStatement {
     pub(crate) public_matrix_seed_hash: String,
+    pub(crate) participant_count: u64,
     pub(crate) trustee_identity: String,
     pub(crate) trustee_roster_position: u64,
     pub(crate) active_credential_binding_root: String,
-    pub(crate) aggregate_message_coefficient_bound: u64,
     pub(crate) smudging_commitment_set_root: String,
     pub(crate) limb_statements: Vec<TargetDecryptionShareLimbStatement>,
+}
+
+impl TargetDecryptionShareStatement {
+    pub(crate) fn aggregate_message_coefficient_bound(&self) -> Option<u64> {
+        let mut aggregate_bound = None;
+        for limb_statement in &self.limb_statements {
+            let target_prime = DATA_PRIMES
+                .get(limb_statement.target_rns_limb_index)
+                .copied()?;
+            aggregate_bound = Some(aggregate_bound.map_or(target_prime, |current_bound: u64| {
+                current_bound.max(target_prime)
+            }));
+        }
+        aggregate_bound
+    }
 }
 
 // Setup context the proof is bound to: one canonical context hash, the trustee,
@@ -240,6 +249,13 @@ pub(crate) enum SetupProofStatement {
         same_secret_linkage: SameSecretLinkageStatement,
         same_secret_bridge: SameSecretBridgeStatement,
     },
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the target-decryption proof relation remains browser-compiled while its command surface is test-owned"
+        )
+    )]
     TargetDecryptionShare(TargetDecryptionShareStatement),
     TrusteeEvaluationKey {
         keys: Vec<EvaluationKeyShareDescriptor>,
@@ -316,6 +332,13 @@ pub(crate) enum TrusteeEvaluationKeyWitness {
         linkage: SameSecretLinkageWitness,
         committed_material: VssCommittedMaterialWitness,
     },
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the target-decryption proof relation remains browser-compiled while its command surface is test-owned"
+        )
+    )]
     TargetDecryptionShare {
         message_vectors: Vec<Vec<i64>>,
         committed_material: VssCommittedMaterialWitness,
@@ -833,7 +856,6 @@ impl VssShareLinkageStatement {
         slot_indices_by_item: &mut Vec<Vec<usize>>,
         source_trustee_roster_position: u64,
         source_rns_limb_index: usize,
-        source_message_modulus: u64,
         coefficient_commitment_roots: &[String],
     ) {
         let mut item_slot_indices = Vec::with_capacity(coefficient_commitment_roots.len());
@@ -843,7 +865,6 @@ impl VssShareLinkageStatement {
             let slot = VssPublicCoefficientWitnessSlot {
                 source_trustee_roster_position,
                 source_rns_limb_index,
-                source_message_modulus,
                 shamir_coefficient_index,
                 commitment_root: commitment_root.clone(),
             };
@@ -871,7 +892,6 @@ impl VssShareLinkageStatement {
             &mut slot_indices_by_item,
             self.source_trustee_roster_position,
             self.source_rns_limb_index,
-            self.source_message_modulus,
             &self.coefficient_commitment_roots,
         );
         for item in &self.additional_linkage_items {
@@ -880,7 +900,6 @@ impl VssShareLinkageStatement {
                 &mut slot_indices_by_item,
                 item.source_trustee_roster_position,
                 item.source_rns_limb_index,
-                item.source_message_modulus,
                 &item.coefficient_commitment_roots,
             );
         }
@@ -896,13 +915,13 @@ impl VssShareLinkageStatement {
         let (coefficient_slots, _) = self.coefficient_witness_slot_layout();
         let mut bounds = coefficient_slots
             .iter()
-            .map(|slot| slot.source_message_modulus)
+            .map(|slot| DATA_PRIMES[slot.source_rns_limb_index])
             .collect::<Vec<_>>();
-        bounds.push(self.source_message_modulus);
+        bounds.push(DATA_PRIMES[self.source_rns_limb_index]);
         bounds.extend(
             self.additional_linkage_items
                 .iter()
-                .map(|item| item.source_message_modulus),
+                .map(|item| DATA_PRIMES[item.source_rns_limb_index]),
         );
 
         bounds
@@ -1200,7 +1219,7 @@ impl TrusteeEvaluationKeyStatement {
         let statement = self.target_decryption_share()?;
         match self.target_decryption_message_claim_kind(global_message_index)? {
             TargetDecryptionMessageClaimKind::AggregateOpening => {
-                Some(statement.aggregate_message_coefficient_bound)
+                statement.aggregate_message_coefficient_bound()
             }
             TargetDecryptionMessageClaimKind::FloodingNoiseOpening => {
                 Some((TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND as u64) * 2 + 1)
@@ -1222,16 +1241,38 @@ impl TrusteeEvaluationKeyStatement {
 
     pub(crate) fn target_decryption_smudging_message_global_index(&self) -> Option<usize> {
         let statement = self.target_decryption_share()?;
-        let mut offset = 0_usize;
-        for limb_statement in &statement.limb_statements {
-            let limb_message_count = Self::target_decryption_limb_message_count(limb_statement);
-            if limb_message_count > 1 {
-                return Some(offset + 1);
-            }
-            offset += limb_message_count;
-        }
+        let first_limb = statement.limb_statements.first()?;
+        self.target_decryption_smudging_message_global_index_for(
+            first_limb.target_rns_limb_index,
+            0,
+        )
+    }
 
-        None
+    pub(crate) fn target_decryption_smudging_message_global_index_for(
+        &self,
+        target_rns_limb_index: usize,
+        role_index: usize,
+    ) -> Option<usize> {
+        let range = self.target_decryption_limb_message_range(target_rns_limb_index)?;
+        let global_message_index = range.start.checked_add(1)?.checked_add(role_index)?;
+        (global_message_index < range.end).then_some(global_message_index)
+    }
+
+    pub(crate) fn target_decryption_smudging_equality_count(
+        &self,
+        proof_limb_index: usize,
+    ) -> usize {
+        let Some(statement) = self.target_decryption_share() else {
+            return 0;
+        };
+        if SETUP_COMMITMENT_MODULUS_LIMB_INDICES.first().copied() != Some(proof_limb_index) {
+            return 0;
+        }
+        let Some(reference_limb) = statement.limb_statements.first() else {
+            return 0;
+        };
+
+        (statement.limb_statements.len() - 1) * reference_limb.role_statements.len()
     }
 
     fn target_decryption_message_target_limb_index(
@@ -1390,10 +1431,9 @@ impl TrusteeEvaluationKeyStatement {
             .count()
     }
 
-    // Target-decryption relation challenges: the per-role target-share lincheck
-    // rows plus the digit decoder rows. The aggregate and smudging commitments
-    // are bound by the material openings and Z_H binding rows, so no additional
-    // per-coordinate relation blocks are needed.
+    // Target-decryption relation challenges cover the per-role share equations,
+    // cross-limb equality of each integer smudging polynomial, and digit decoders.
+    // Material openings and Z_H rows bind the aggregate and smudging commitments.
     pub(crate) fn target_decryption_relation_count(&self, limb_index: usize) -> usize {
         match self.target_decryption_share() {
             Some(statement) => {
@@ -1405,6 +1445,9 @@ impl TrusteeEvaluationKeyStatement {
                         limb_statement.role_statements.len() * LINCHECK_REPETITIONS
                     })
                     .unwrap_or(0);
+                let smudging_equality_relation_count = self
+                    .target_decryption_smudging_equality_count(limb_index)
+                    * LINCHECK_REPETITIONS;
                 let decoder_relation_count = self
                     .target_decryption_message_encoding_layouts(limb_index)
                     .unwrap_or_default()
@@ -1412,7 +1455,7 @@ impl TrusteeEvaluationKeyStatement {
                     .map(Self::target_decryption_decoder_digit_count_for_layout)
                     .sum::<usize>()
                     * LINCHECK_REPETITIONS;
-                target_relation_count + decoder_relation_count
+                target_relation_count + smudging_equality_relation_count + decoder_relation_count
             }
             None => 0,
         }

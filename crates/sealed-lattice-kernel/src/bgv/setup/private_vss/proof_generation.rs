@@ -76,9 +76,18 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "sourceTrusteeCoefficientCommitmentRecord must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
+    let source_trustee_roster_position = u64_field(
+        request,
+        "sourceTrusteeRosterPosition",
+        "sourceTrusteeRosterPosition",
+        PrivateVssRefusalCode::missing("sourceTrusteeRosterPositionMissing"),
+        "sourceTrusteeRosterPosition must be provided for private VSS proof generation",
+    )
+    .map_err(private_vss_refusal_to_error)?;
     let source_trustee_binding = verify_source_trustee_commitment_record(
         source_trustee_record,
         setup_context,
+        source_trustee_roster_position,
     )?
     .map_err(private_vss_refusal_to_error)?;
     let material_records = array_field(
@@ -169,8 +178,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             "shareValues must be canonical Q_share residues with length ringDegree",
         ));
     }
-    let mut coefficient_commitment_roots =
-        Vec::with_capacity(roster.decryption_threshold as usize);
+    let mut coefficient_commitment_roots = Vec::with_capacity(roster.decryption_threshold as usize);
     let mut coefficient_commitment_values =
         Vec::with_capacity(roster.decryption_threshold as usize);
     for shamir_coefficient_index in 0..roster.decryption_threshold {
@@ -272,7 +280,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         proof_randomness_seed_hex: &bound_proof_randomness_seed_hex,
     };
     let statement_hash = private_vss_share_succinct_statement_hash(generation_input)?;
-    let proof_record = private_vss_share_succinct_proof_record(generation_input)?;
+    let proof_bytes_hash = private_vss_share_succinct_proof_bytes_hash_for_tests(generation_input)?;
 
     Ok((
         json!({
@@ -283,7 +291,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             "rnsLimbIndex": rns_limb_index,
             "rnsPrime": rns_prime,
             "ringDegree": ring_degree,
-            "privateVssShareProof": proof_record,
+            "privateVssShareProofBytesHash": proof_bytes_hash,
         }),
         statement_hash,
     ))

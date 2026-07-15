@@ -8,9 +8,8 @@ import {
     createRelinearizationKeyShareRounds,
     createTrusteeEvaluationKeyProofs,
     type EvaluationKeyProofCommonInput,
-    type EvaluationKeyShareComponentMaterialChunkSource,
+    type EvaluationKeyShareComponentMaterialStream,
     type EvaluationKeyShareComponentMaterialWriter,
-    type EvaluationKeyShareMaterial,
     type EvaluationKeyTrusteeReference,
     type GaloisKeyShareBatchContribution,
     type RelinearizationRoundOneContribution,
@@ -44,12 +43,10 @@ type TrusteeEvaluationKeyProofsInput = Parameters<
 type EvaluationKeyShareMaterialTransportInput = Parameters<
     typeof createBinaryChunkedEvaluationKeyShareMaterialTransport
 >[0];
-type EvaluationKeyShareComponentMaterialTransportInput =
-    EvaluationKeyShareMaterialTransportInput['relinearizationRoundOneContributions'][number]['shareMaterial'];
-type KeySwitchComponentVectorEntry =
-    EvaluationKeyShareComponentMaterialTransportInput['keySwitchComponentVectors'][number];
 type SourceRelinearizationContribution =
     EvaluationKeyShareMaterialTransportInput['relinearizationRoundOneContributions'][number];
+type EvaluationKeyShareComponentVectors =
+    SourceRelinearizationContribution['keySwitchComponentVectorsLittleEndianHexByDigitAndLimb'];
 
 const qSharePrimes = [
     140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
@@ -169,10 +166,8 @@ const componentCoefficients = (
         );
     });
 
-const componentVectorEntries = (
-    label: string,
-): KeySwitchComponentVectorEntry[] => {
-    const entries: KeySwitchComponentVectorEntry[] = [];
+const componentVectorEntries = (label: string): string[] => {
+    const entries: string[] = [];
     for (let digitIndex = 0; digitIndex < digitCount; digitIndex += 1) {
         for (
             let rnsLimbIndex = 0;
@@ -184,9 +179,7 @@ const componentVectorEntries = (
                 digitIndex,
                 rnsLimbIndex,
             );
-            entries.push({
-                coefficientsLeHex: coefficientsToLittleEndianHex(coefficients),
-            });
+            entries.push(coefficientsToLittleEndianHex(coefficients));
         }
     }
 
@@ -223,20 +216,14 @@ const expectedStatementKeyOrder: readonly (readonly [string, number | null])[] =
 
 const componentMaterialTransportInput = (
     label: string,
-): EvaluationKeyShareComponentMaterialTransportInput => {
-    const entries = componentVectorEntries(label);
-
-    return {
-        keySwitchComponentVectors: entries,
-    };
-};
+): EvaluationKeyShareComponentVectors => componentVectorEntries(label);
 
 const componentVectorRoot = (
     proofFamily: 'relinearization-key-share' | 'galois-key-share',
     keySwitchDomain: string,
     keySwitchSeedHex: string,
     level: number,
-    sourceMaterial: EvaluationKeyShareComponentMaterialTransportInput,
+    componentVectorsLittleEndianHexByDigitAndLimb: EvaluationKeyShareComponentVectors,
 ): string => {
     return deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentVectorSet',
@@ -245,40 +232,37 @@ const componentVectorRoot = (
         keySwitchSeedHex,
         level,
         ringDegree,
-        componentVectors: sourceMaterial.keySwitchComponentVectors,
+        componentVectorsLittleEndianHexByDigitAndLimb,
     });
 };
 
-const transportedShareMaterial = (
+const transportedShareMaterialRoot = (
     proofFamily: 'relinearization-key-share' | 'galois-key-share',
-    sourceMaterial: EvaluationKeyShareComponentMaterialTransportInput,
+    componentVectorsLittleEndianHexByDigitAndLimb: EvaluationKeyShareComponentVectors,
     keySwitchDomain: string,
     keySwitchSeedHex: string,
     trusteeIdentity: string,
     trusteeRosterPosition: number,
     level: number,
-): EvaluationKeyShareMaterial => {
+): string => {
     const keySwitchComponentVectorRoot = componentVectorRoot(
         proofFamily,
         keySwitchDomain,
         keySwitchSeedHex,
         level,
-        sourceMaterial,
+        componentVectorsLittleEndianHexByDigitAndLimb,
     );
 
-    return {
-        keySwitchComponentMaterialRoot:
-            evaluationKeyShareComponentMaterialReferenceRoot(
-                proofFamily,
-                ringDegree,
-                keySwitchComponentVectorRoot,
-                keySwitchDomain,
-                keySwitchSeedHex,
-                trusteeIdentity,
-                trusteeRosterPosition,
-                level,
-            ),
-    };
+    return evaluationKeyShareComponentMaterialReferenceRoot(
+        proofFamily,
+        ringDegree,
+        keySwitchComponentVectorRoot,
+        keySwitchDomain,
+        keySwitchSeedHex,
+        trusteeIdentity,
+        trusteeRosterPosition,
+        level,
+    );
 };
 
 const sourceRelinearizationContributions = (
@@ -289,9 +273,10 @@ const sourceRelinearizationContributions = (
         (_unused, trusteeRosterPosition) => ({
             trusteeRosterPosition,
             level: scheduledLevel,
-            shareMaterial: componentMaterialTransportInput(
-                `${round}-${String(trusteeRosterPosition)}`,
-            ),
+            keySwitchComponentVectorsLittleEndianHexByDigitAndLimb:
+                componentMaterialTransportInput(
+                    `${round}-${String(trusteeRosterPosition)}`,
+                ),
         }),
     );
 
@@ -301,10 +286,11 @@ const transportedRelinearizationContributions = (
     round: 'round-one' | 'round-two',
 ): RelinearizationRoundOneContribution[] =>
     contributions.map((contribution) => ({
-        ...contribution,
-        shareMaterial: transportedShareMaterial(
+        trusteeRosterPosition: contribution.trusteeRosterPosition,
+        level: contribution.level,
+        keySwitchComponentMaterialRoot: transportedShareMaterialRoot(
             'relinearization-key-share',
-            contribution.shareMaterial,
+            contribution.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
             'relinearization',
             relinearizationKeySwitchSeed(schedule, round, contribution.level),
             trusteeIdentityAtPosition(contribution.trusteeRosterPosition),
@@ -341,14 +327,16 @@ const evaluationKeyFixture = (): EvaluationKeyFixture => {
         (_unused, trusteeRosterPosition) => ({
             trusteeRosterPosition,
             galoisKeyShares: requiredGaloisKeySchedule.map((scheduleEntry) => {
-                const shareMaterial = componentMaterialTransportInput(
-                    `galois-${String(scheduleEntry.rotation)}-${String(trusteeRosterPosition)}`,
-                );
+                const componentVectorsLittleEndianHexByDigitAndLimb =
+                    componentMaterialTransportInput(
+                        `galois-${String(scheduleEntry.rotation)}-${String(trusteeRosterPosition)}`,
+                    );
 
                 return {
                     rotation: scheduleEntry.rotation,
                     level: scheduleEntry.level,
-                    shareMaterial,
+                    keySwitchComponentVectorsLittleEndianHexByDigitAndLimb:
+                        componentVectorsLittleEndianHexByDigitAndLimb,
                 };
             }),
         }),
@@ -368,22 +356,24 @@ const evaluationKeyFixture = (): EvaluationKeyFixture => {
             ...batchContribution,
             galoisKeyShares: batchContribution.galoisKeyShares.map(
                 (contribution) => ({
-                    ...contribution,
-                    shareMaterial: transportedShareMaterial(
-                        'galois-key-share',
-                        contribution.shareMaterial,
-                        `galois-${String(contribution.rotation)}`,
-                        galoisKeySwitchSeed(
-                            schedule,
-                            contribution.rotation,
+                    rotation: contribution.rotation,
+                    level: contribution.level,
+                    keySwitchComponentMaterialRoot:
+                        transportedShareMaterialRoot(
+                            'galois-key-share',
+                            contribution.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
+                            `galois-${String(contribution.rotation)}`,
+                            galoisKeySwitchSeed(
+                                schedule,
+                                contribution.rotation,
+                                contribution.level,
+                            ),
+                            trusteeIdentityAtPosition(
+                                batchContribution.trusteeRosterPosition,
+                            ),
+                            batchContribution.trusteeRosterPosition,
                             contribution.level,
                         ),
-                        trusteeIdentityAtPosition(
-                            batchContribution.trusteeRosterPosition,
-                        ),
-                        batchContribution.trusteeRosterPosition,
-                        contribution.level,
-                    ),
                 }),
             ),
         }),
@@ -435,11 +425,30 @@ const stubGenerator = (
 
         return Promise.resolve({
             proofBytesHash,
-            canonicalMaterial: {
+            proofMaterialStream: {
                 descriptorBytes: canonicalStreamDescriptorFixture(
                     proofBytesHex.length / 2,
                     0x51 + input.context.trusteeRosterPosition,
                 ),
+                pullChunk: ({ chunkIndex, expectedByteLength }) =>
+                    Promise.resolve(
+                        chunkIndex === 0 &&
+                            expectedByteLength === proofBytesHex.length / 2
+                            ? Uint8Array.from(
+                                  Array.from(
+                                      { length: proofBytesHex.length / 2 },
+                                      (_unused, byteIndex) =>
+                                          Number.parseInt(
+                                              proofBytesHex.slice(
+                                                  byteIndex * 2,
+                                                  byteIndex * 2 + 2,
+                                              ),
+                                              16,
+                                          ),
+                                  ),
+                              ).buffer
+                            : undefined,
+                    ),
             },
         });
     };
@@ -447,7 +456,6 @@ const stubGenerator = (
 
 const componentMaterialStore = (): Readonly<{
     chunks(materialRoot: string): readonly ArrayBuffer[] | undefined;
-    sources(): readonly EvaluationKeyShareComponentMaterialChunkSource[];
     writer: EvaluationKeyShareComponentMaterialWriter;
 }> => {
     const storedMaterial = new Map<string, readonly ArrayBuffer[]>();
@@ -486,31 +494,31 @@ const componentMaterialStore = (): Readonly<{
             input.keySwitchComponentMaterialRoot.slice(0, 2),
             16,
         );
-        return canonicalStreamDescriptorFixture(
-            input.totalByteLength,
-            rootByte,
-        );
+        const pullChunk: EvaluationKeyShareComponentMaterialStream['pullChunk'] =
+            ({ chunkIndex, expectedByteLength }) => {
+                const chunk = chunks[chunkIndex];
+                if (chunk === undefined) {
+                    return Promise.resolve(undefined);
+                }
+                if (chunk.byteLength !== expectedByteLength) {
+                    throw new Error(
+                        'The requested component chunk length is invalid.',
+                    );
+                }
+                return Promise.resolve(chunk.slice(0));
+            };
+        return {
+            descriptorBytes: canonicalStreamDescriptorFixture(
+                input.totalByteLength,
+                rootByte,
+            ),
+            pullChunk,
+        };
     };
 
     return {
         chunks: (materialRoot) => storedMaterial.get(materialRoot),
         writer,
-        sources: () =>
-            [...storedMaterial].map(([materialRoot, chunks]) => ({
-                keySwitchComponentMaterialRoot: materialRoot,
-                pullChunk: ({ chunkIndex, expectedByteLength }) => {
-                    const chunk = chunks[chunkIndex];
-                    if (chunk === undefined) {
-                        return Promise.resolve(undefined);
-                    }
-                    if (chunk.byteLength !== expectedByteLength) {
-                        throw new Error(
-                            'The requested component chunk length is invalid.',
-                        );
-                    }
-                    return Promise.resolve(chunk.slice(0));
-                },
-            })),
     };
 };
 
@@ -535,13 +543,12 @@ const trusteeWitnesses = (): TrusteeEvaluationKeyWitnessInput[] =>
     );
 
 const sameSecretBridgeStatementSet = (): VssSameSecretBridgeStatementSet => {
-    const statementRecords = trusteeReferences().map((trusteeReference) => {
+    const statementRecords = trusteeReferences().map(() => {
         const sourceConstantCoefficientCommitments = qSharePrimes.map(
-            (rnsPrime, rnsLimbIndex) =>
+            (_unusedRnsPrime, rnsLimbIndex) =>
                 ({
                     objectType: 'SetupCommitment',
                     sourceRnsLimbIndex: rnsLimbIndex,
-                    sourceMessageModulus: rnsPrime,
                     shamirCoefficientIndex: 0,
                     ringDegree,
                     commitmentLimbs: [],
@@ -549,7 +556,6 @@ const sameSecretBridgeStatementSet = (): VssSameSecretBridgeStatementSet => {
         );
         const statementRecord = {
             objectType: 'VssSameSecretBridgeStatement',
-            ...trusteeReference,
             sourceConstantCoefficientCommitments,
         } as const;
 
@@ -578,7 +584,7 @@ const sameSecretBridgeStatementSetWithWrongSourceLimb =
                                 statementIndex === 0 && sourceLimbIndex === 0
                                     ? {
                                           ...sourceCommitment,
-                                          sourceMessageModulus: qSharePrimes[1],
+                                          sourceRnsLimbIndex: 1,
                                       }
                                     : sourceCommitment,
                         ),
@@ -620,7 +626,7 @@ const replaceFirstArrayEntry = <Item>(
 
 const relinearizationInputWithFirstMaterialMutation = (
     fixture: EvaluationKeyFixture,
-    materialMutation: Partial<EvaluationKeyShareMaterial>,
+    materialMutation: Partial<RelinearizationRoundOneContribution>,
 ): RelinearizationKeyShareRoundsInput => {
     const firstContribution = fixture.roundOneContributions[0];
     return relinearizationKeyShareRoundsInput(fixture, {
@@ -628,10 +634,7 @@ const relinearizationInputWithFirstMaterialMutation = (
             fixture.roundOneContributions,
             {
                 ...firstContribution,
-                shareMaterial: {
-                    ...firstContribution.shareMaterial,
-                    ...materialMutation,
-                },
+                ...materialMutation,
             },
         ),
     });
@@ -668,10 +671,8 @@ const trusteeEvaluationKeyProofsInput = async (
         trusteeWitnesses: trusteeWitnesses(),
         sameSecretBridgeStatementSet: sameSecretBridgeStatementSet(),
         trusteeEvaluationKeyProofGenerator: stubGenerator([]),
-        transportedEvaluationKeyShareComponentMaterial:
-            componentTransport.transportedEvaluationKeyShareComponentMaterial,
-        evaluationKeyShareComponentMaterialChunkSources:
-            materialStore.sources(),
+        evaluationKeyShareComponentMaterialStreams:
+            componentTransport.evaluationKeyShareComponentMaterialStreams,
         ...overrides,
     };
 };
@@ -902,28 +903,22 @@ const evaluationKeyShareMaterialTransportRejectionCases = [
         name: 'rejects coefficients outside the prime derived from vector position',
         createOverrides: (fixture: EvaluationKeyFixture) => {
             const firstContribution = fixture.sourceRoundOneContributions[0];
-            const nonCanonicalFirstVector = {
-                coefficientsLeHex: coefficientsToLittleEndianHex(
-                    Array.from({ length: ringDegree }, () => qSharePrimes[0]),
-                ),
-            };
+            const nonCanonicalFirstVector = coefficientsToLittleEndianHex(
+                Array.from({ length: ringDegree }, () => qSharePrimes[0]),
+            );
 
             return {
-                relinearizationRoundOneContributions: [
+                relinearizationRoundOneContributions: replaceFirstArrayEntry(
+                    fixture.sourceRoundOneContributions,
                     {
                         ...firstContribution,
-                        shareMaterial: {
-                            ...firstContribution.shareMaterial,
-                            keySwitchComponentVectors: replaceFirstArrayEntry(
-                                firstContribution.shareMaterial
-                                    .keySwitchComponentVectors,
+                        keySwitchComponentVectorsLittleEndianHexByDigitAndLimb:
+                            replaceFirstArrayEntry(
+                                firstContribution.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
                                 nonCanonicalFirstVector,
                             ),
-                        },
                     },
-                ],
-                relinearizationRoundTwoContributions: [],
-                galoisKeyShareBatchContributions: [],
+                ),
             };
         },
         expectedMessage:
@@ -932,46 +927,24 @@ const evaluationKeyShareMaterialTransportRejectionCases = [
     {
         name: 'rejects contributions for unknown trustee roster positions',
         createOverrides: (fixture: EvaluationKeyFixture) => ({
-            relinearizationRoundOneContributions: [
+            relinearizationRoundOneContributions: replaceFirstArrayEntry(
+                fixture.sourceRoundOneContributions,
                 {
                     ...fixture.sourceRoundOneContributions[0],
                     trusteeRosterPosition: 7,
                 },
-            ],
-            relinearizationRoundTwoContributions: [],
-            galoisKeyShareBatchContributions: [],
+            ),
         }),
         expectedMessage:
             'references a trustee roster position without a trustee reference',
     },
-    {
-        name: 'rejects duplicate component material roots',
-        createOverrides: (fixture: EvaluationKeyFixture) => ({
-            relinearizationRoundOneContributions: [
-                fixture.sourceRoundOneContributions[0],
-                fixture.sourceRoundOneContributions[0],
-            ],
-            relinearizationRoundTwoContributions: [],
-            galoisKeyShareBatchContributions: [],
-        }),
-        expectedMessage:
-            'transported evaluation-key component material contains duplicate roots',
-    },
 ] as const;
 
-const expectedRelinearizationRecords = (
+const expectedRelinearizationRoots = (
     contributions: readonly RelinearizationRoundOneContribution[],
-    objectType:
-        | 'RelinearizationKeyShareRoundOne'
-        | 'RelinearizationKeyShareRoundTwo',
-): unknown[] =>
+): string[] =>
     contributions.map(
-        (contribution) =>
-            expect.objectContaining({
-                objectType,
-                keySwitchComponentMaterialRoot:
-                    contribution.shareMaterial.keySwitchComponentMaterialRoot,
-            }) as unknown,
+        (contribution) => contribution.keySwitchComponentMaterialRoot,
     );
 
 const expectedGaloisBatches = (fixture: EvaluationKeyFixture): unknown[] =>
@@ -979,15 +952,10 @@ const expectedGaloisBatches = (fixture: EvaluationKeyFixture): unknown[] =>
         (batchContribution) =>
             expect.objectContaining({
                 objectType: 'GaloisKeyShareBatch',
-                galoisKeyShareMaterialRecords:
+                keySwitchComponentMaterialRoots:
                     batchContribution.galoisKeyShares.map(
                         (contribution) =>
-                            expect.objectContaining({
-                                objectType: 'GaloisKeyShareMaterial',
-                                keySwitchComponentMaterialRoot:
-                                    contribution.shareMaterial
-                                        .keySwitchComponentMaterialRoot,
-                            }) as unknown,
+                            contribution.keySwitchComponentMaterialRoot,
                     ),
             }) as unknown,
     );
@@ -1000,17 +968,11 @@ describe('createRelinearizationKeyShareRounds', () => {
         );
 
         expect(rounds.objectType).toBe('RelinearizationKeyShareRounds');
-        expect(rounds.roundOneRecords).toEqual(
-            expectedRelinearizationRecords(
-                fixture.roundOneContributions,
-                'RelinearizationKeyShareRoundOne',
-            ),
+        expect(rounds.roundOneKeySwitchComponentMaterialRoots).toEqual(
+            expectedRelinearizationRoots(fixture.roundOneContributions),
         );
-        expect(rounds.roundTwoRecords).toEqual(
-            expectedRelinearizationRecords(
-                fixture.roundTwoContributions,
-                'RelinearizationKeyShareRoundTwo',
-            ),
+        expect(rounds.roundTwoKeySwitchComponentMaterialRoots).toEqual(
+            expectedRelinearizationRoots(fixture.roundTwoContributions),
         );
     });
 
@@ -1107,31 +1069,22 @@ describe('createTrusteeEvaluationKeyProofs', () => {
             );
         });
 
-        expect(trusteeEvaluationKeyProofs.proofRecords).toHaveLength(
+        expect(trusteeEvaluationKeyProofs.proofBytesHashes).toHaveLength(
             participantCount,
         );
         expect(trusteeEvaluationKeyProofs).toMatchObject({
             objectType: 'TrusteeEvaluationKeyProofSet',
-            proofRecords: Array.from(
+            proofBytesHashes: Array.from(
                 { length: participantCount },
                 (_unused, trusteeRosterPosition) =>
-                    expect.objectContaining({
-                        objectType: 'TrusteeEvaluationKeyProof',
-                        proofBytesHash: trusteeEvaluationKeyProofBytesHash(
-                            stubProofBytesHex(trusteeRosterPosition),
-                        ),
-                    }) as unknown,
+                    trusteeEvaluationKeyProofBytesHash(
+                        stubProofBytesHex(trusteeRosterPosition),
+                    ),
             ),
         });
         expect(
-            transportedEvaluationKeyShareProofMaterial.proofMaterials.map(
-                (material) => material.proofBytesHash,
-            ),
-        ).toEqual(
-            trusteeEvaluationKeyProofs.proofRecords.map(
-                (record) => record.proofBytesHash,
-            ),
-        );
+            transportedEvaluationKeyShareProofMaterial.proofMaterialStreams,
+        ).toHaveLength(trusteeEvaluationKeyProofs.proofBytesHashes.length);
     });
 
     it.each(trusteeEvaluationKeyProofsRejectionCases)(
@@ -1148,19 +1101,19 @@ describe('createTrusteeEvaluationKeyProofs', () => {
     it('rejects tampered transported component bytes during aggregate recomputation', async () => {
         const fixture = evaluationKeyFixture();
         const validInput = await trusteeEvaluationKeyProofsInput(fixture);
-        const [firstSource, ...remainingSources] =
-            validInput.evaluationKeyShareComponentMaterialChunkSources;
-        if (firstSource === undefined) {
+        const [firstStream, ...remainingStreams] =
+            validInput.evaluationKeyShareComponentMaterialStreams;
+        if (firstStream === undefined) {
             throw new Error('The fixture must carry component material.');
         }
         await expect(
             createTrusteeEvaluationKeyProofs({
                 ...validInput,
-                evaluationKeyShareComponentMaterialChunkSources: [
+                evaluationKeyShareComponentMaterialStreams: [
                     {
-                        ...firstSource,
+                        ...firstStream,
                         pullChunk: async (input) => {
-                            const chunk = await firstSource.pullChunk(input);
+                            const chunk = await firstStream.pullChunk(input);
                             if (chunk === undefined || input.chunkIndex !== 0) {
                                 return chunk;
                             }
@@ -1169,7 +1122,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                             return tamperedChunk;
                         },
                     },
-                    ...remainingSources,
+                    ...remainingStreams,
                 ],
             }),
         ).rejects.toThrow('wrong format marker');
@@ -1177,24 +1130,23 @@ describe('createTrusteeEvaluationKeyProofs', () => {
 });
 
 describe('trustee evaluation-key canonical proof material', () => {
-    it('returns proof references and descriptor-authenticated binary sidecars together', async () => {
+    it('returns proof references and canonical proof streams together', async () => {
         const fixture = evaluationKeyFixture();
         const transport = await builtTrusteeProofs(fixture);
 
-        expect(
-            transport.transportedEvaluationKeyShareProofMaterial.proofMaterials,
-        ).toEqual(
-            transport.trusteeEvaluationKeyProofs.proofRecords.map(
-                (proofRecord, trusteeRosterPosition) =>
-                    expect.objectContaining({
-                        descriptorBytes: canonicalStreamDescriptorFixture(
-                            stubProofBytesHex(trusteeRosterPosition).length / 2,
-                            0x51 + trusteeRosterPosition,
-                        ),
-                        proofBytesHash: proofRecord.proofBytesHash,
-                    }) as unknown,
-            ),
-        );
+        const proofMaterialStreams =
+            transport.transportedEvaluationKeyShareProofMaterial
+                .proofMaterialStreams;
+        expect(proofMaterialStreams).toHaveLength(participantCount);
+        proofMaterialStreams.forEach((stream, trusteeRosterPosition) => {
+            expect(stream.descriptorBytes).toEqual(
+                canonicalStreamDescriptorFixture(
+                    stubProofBytesHex(trusteeRosterPosition).length / 2,
+                    0x51 + trusteeRosterPosition,
+                ),
+            );
+            expect(typeof stream.pullChunk).toBe('function');
+        });
     });
 });
 
@@ -1212,11 +1164,11 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
         const expectedComponentMaterialCount =
             participantCount * (2 + requiredGaloisKeySchedule.length);
         expect(
-            transport.transportedEvaluationKeyShareComponentMaterial
-                .componentMaterials,
+            transport.evaluationKeyShareComponentMaterialStreams,
         ).toHaveLength(expectedComponentMaterialCount);
         const sourceMaterial =
-            fixture.sourceRoundOneContributions[0].shareMaterial;
+            fixture.sourceRoundOneContributions[0]
+                .keySwitchComponentVectorsLittleEndianHexByDigitAndLimb;
         const keySwitchSeedHex = relinearizationKeySwitchSeed(
             fixture.schedule,
             'round-one',
@@ -1230,7 +1182,7 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
             sourceMaterial,
         );
         expect(
-            transport.relinearizationRoundOneContributions[0].shareMaterial
+            transport.relinearizationRoundOneContributions[0]
                 .keySwitchComponentMaterialRoot,
         ).toBe(
             evaluationKeyShareComponentMaterialReferenceRoot(
@@ -1244,34 +1196,52 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
                 scheduledLevel,
             ),
         );
-        const sourceByRoot = new Map(
-            materialStore
-                .sources()
-                .map((source) => [
-                    source.keySwitchComponentMaterialRoot,
-                    source,
-                ]),
+        const rootsInCanonicalOrder = [
+            ...transport.relinearizationRoundOneContributions.map(
+                ({ keySwitchComponentMaterialRoot }) =>
+                    keySwitchComponentMaterialRoot,
+            ),
+            ...transport.relinearizationRoundTwoContributions.map(
+                ({ keySwitchComponentMaterialRoot }) =>
+                    keySwitchComponentMaterialRoot,
+            ),
+            ...transport.galoisKeyShareBatchContributions.flatMap(
+                ({ galoisKeyShares }) =>
+                    galoisKeyShares.map(
+                        ({ keySwitchComponentMaterialRoot }) =>
+                            keySwitchComponentMaterialRoot,
+                    ),
+            ),
+        ];
+        expect(new Set(rootsInCanonicalOrder).size).toBe(
+            expectedComponentMaterialCount,
         );
-        expect(sourceByRoot.size).toBe(expectedComponentMaterialCount);
-        for (const componentMaterial of transport
-            .transportedEvaluationKeyShareComponentMaterial
-            .componentMaterials) {
-            const material = componentMaterial;
+        for (const [
+            streamIndex,
+            componentMaterialStream,
+        ] of transport.evaluationKeyShareComponentMaterialStreams.entries()) {
             const keySwitchComponentMaterialRoot =
-                material.keySwitchComponentMaterialRoot;
-            const source = sourceByRoot.get(keySwitchComponentMaterialRoot);
-            expect(source).toBeDefined();
+                rootsInCanonicalOrder[streamIndex];
+            expect(keySwitchComponentMaterialRoot).toBeDefined();
             const chunks =
                 materialStore.chunks(keySwitchComponentMaterialRoot) ?? [];
             expect(chunks).toHaveLength(1);
+            expect(componentMaterialStream.descriptorBytes).toEqual(
+                canonicalStreamDescriptorFixture(
+                    chunks[0].byteLength,
+                    Number.parseInt(
+                        keySwitchComponentMaterialRoot.slice(0, 2),
+                        16,
+                    ),
+                ),
+            );
             expect([...new Uint8Array(chunks[0]).slice(0, 8)]).toEqual([
                 0x53, 0x4c, 0x45, 0x4b, 0x43, 0x4d, 0x56, 0x32,
             ]);
         }
         const roundOneRoots = new Set(
             transport.relinearizationRoundOneContributions.map(
-                (contribution) =>
-                    contribution.shareMaterial.keySwitchComponentMaterialRoot,
+                (contribution) => contribution.keySwitchComponentMaterialRoot,
             ),
         );
         expect(roundOneRoots.size).toBe(participantCount);

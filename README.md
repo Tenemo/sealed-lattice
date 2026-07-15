@@ -19,34 +19,15 @@ Transcript and mailbox services only relay bytes. Correctness and acceptance mus
 
 ## Prototype status
 
-The repository contains development implementations of these building blocks:
+The repository implements canonical protocol objects, browser-local
+authenticated storage, development collective BGV setup and VSS proofs, and
+internal ballot, aggregation, evaluation, and target-decryption components.
 
-- canonical poll, roster, and protocol-object encoding and validation;
-- roster-bound browser-local signing and mailbox capabilities, streaming signed
-  authenticated mailboxes, and bounded browser-local transaction and checkpoint
-  storage;
-- collective BGV setup data structures and development proof relations for
-  verifiable secret sharing, public-key construction, and evaluation-key
-  material;
-- internal bounded encrypted-ballot and target-decryption relations, homomorphic aggregation, and deterministic top-k evaluation.
-
-They are not yet composed into one complete participant workflow. The repository
-retains transcript, Merkle, decoding, and proof-domain primitives,
-but does not ship a generated common-proof compiler or accept-ready profile.
-Application extraction, zero-knowledge simulation, typed-transcript reduction,
-and shared-oracle post-quantum composition remain incomplete. Proof-backed
-private VSS delivery is also absent because one dealer's encrypted recipient
-shares are not yet covered by the required source-wide linkage proof.
-
-The public package does not provide accepted canonical-board finality, state
-authorization, or target decryption. Target-share generation remains test-only
-until it has authenticated finalized-target authority, durable one-shot
-authorization, and theorem-matched private flooding. The intended
-participant-facing verification path is a mobile browser, but the complete
-ceremony has not been demonstrated on supported physical phones.
-Native, Node.js, desktop-browser, fixture, and emulated-mobile results are
-development evidence only. The authoritative limitations are maintained in
-[SECURITY.md](SECURITY.md).
+These components are not yet a complete participant workflow or a supported-phone
+profile. The public package does not provide accepted board finality, state
+authorization, or target decryption. Proof-system and end-to-end security work
+also remains open. See [SECURITY.md](SECURITY.md) for the authoritative
+limitations and evidence boundaries.
 
 ## Installation
 
@@ -65,11 +46,11 @@ Node.js consumers require Node.js 24.14.1 or later.
 ## Usage
 
 ```typescript
-import { validatePollSpec } from 'sealed-lattice';
+import { validatePollSpec } from "sealed-lattice";
 
 const pollValidation = validatePollSpec({
-    pollId: 'board-election-2026',
-    question: 'Which proposals should be adopted?',
+    pollId: "board-election-2026",
+    question: "Which proposals should be adopted?",
     options: Array.from(
         { length: 20 },
         (_unused, optionIndex) => `Proposal ${optionIndex + 1}`,
@@ -79,7 +60,7 @@ const pollValidation = validatePollSpec({
 
 if (!pollValidation.isValid) {
     throw new Error(
-        pollValidation.errors[0]?.message ?? 'Invalid poll specification.',
+        pollValidation.errors[0]?.message ?? "Invalid poll specification.",
     );
 }
 

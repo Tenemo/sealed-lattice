@@ -17,13 +17,21 @@ pub(super) fn verify_setup_commitment_opening(
     randomness_by_column: &[Vec<i128>],
     randomness_infinity_bound: i128,
 ) -> CanonicalResult<SetupCommitmentOpeningVerification> {
+    let source_message_modulus = DATA_PRIMES
+        .get(expected_commitment.source_rns_limb_index)
+        .copied()
+        .ok_or_else(|| {
+            invalid_commitment_input(
+                "commitment source RNS limb is outside the selected Q_share prime list",
+            )
+        })?;
     verify_setup_commitment_opening_with_message_bound(
         public_matrix_seed_hash,
         expected_commitment,
         message_coefficients,
         randomness_by_column,
         randomness_infinity_bound,
-        Some(u128::from(expected_commitment.source_message_modulus)),
+        Some(u128::from(source_message_modulus)),
     )
 }
 
@@ -78,7 +86,6 @@ pub(super) fn verify_setup_signed_lifted_commitment_opening(
     let computed_commitment = compute_setup_signed_lifted_commitment_for_degree(
         public_matrix_seed_hash,
         expected_commitment.source_rns_limb_index,
-        expected_commitment.source_message_modulus,
         expected_commitment.shamir_coefficient_index,
         message_coefficients,
         randomness_by_column,
@@ -126,7 +133,6 @@ fn verify_setup_commitment_opening_with_message_bound(
     let computed_commitment = compute_setup_commitment_for_degree(
         public_matrix_seed_hash,
         expected_commitment.source_rns_limb_index,
-        expected_commitment.source_message_modulus,
         expected_commitment.shamir_coefficient_index,
         message_coefficients,
         randomness_by_column,
@@ -151,7 +157,6 @@ pub(super) fn validate_same_commitment_domain(
     commitment: &SetupCommitmentValue,
 ) -> CanonicalResult<()> {
     if first_commitment.source_rns_limb_index != commitment.source_rns_limb_index
-        || first_commitment.source_message_modulus != commitment.source_message_modulus
         || first_commitment.ring_degree != commitment.ring_degree
         || first_commitment.limbs.len() != commitment.limbs.len()
     {

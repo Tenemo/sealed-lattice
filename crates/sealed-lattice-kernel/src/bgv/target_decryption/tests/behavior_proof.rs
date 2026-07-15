@@ -167,10 +167,9 @@ fn target_share_proof_statement_binding_rejects_wrong_aggregate_commitment_body(
     let mut tampered_material_root_bytes = crate::transcript_core::decode_hex(&first_material_root)
         .expect("aggregate material root bytes");
     tampered_material_root_bytes[0] ^= 0x01;
-    statement["aggregateOpeningCredentials"][0]["aggregateCommitment"]["commitmentFields"][0]
-        ["materialRootHex"] = json!(crate::transcript_core::encode_hex(
-        &tampered_material_root_bytes
-    ));
+    statement["aggregateOpeningCredentials"][0]["aggregateCommitment"]["commitmentFields"][0]["materialRootHex"] = json!(
+        crate::transcript_core::encode_hex(&tampered_material_root_bytes)
+    );
     let error = verify_share_proof_statement_binding(TargetShareProofStatementBindingInput {
         setup_package: &setup_package,
         accepted_record: &accepted_record,

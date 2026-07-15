@@ -146,7 +146,7 @@ fn public_key_share_rejects_a_foreign_common_reference_polynomial() {
 }
 
 #[test]
-fn succinct_setup_statement_hash_vectors_cover_current_families() {
+fn succinct_setup_statement_hash_vectors_pin_selected_families() {
     let same_secret_statement = super::super::commands::same_secret_bridge_statement_from_request(
         &same_secret_statement_hash_vector_request(),
     )
@@ -198,7 +198,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
     assert_eq!(same_secret["proofFamily"], "same-secret-bridge");
     assert_eq!(
         same_secret["statementHash"],
-        expected_statement_hashes["sameSecret"]
+        expected_statement_hashes["sameSecretBridge"]
     );
     assert_eq!(public_key["proofFamily"], "public-key-share");
     assert_eq!(

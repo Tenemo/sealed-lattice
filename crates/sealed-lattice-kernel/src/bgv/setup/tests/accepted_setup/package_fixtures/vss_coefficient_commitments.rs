@@ -27,7 +27,7 @@ pub(super) fn vss_coefficient_commitments_object(
 
     for source_trustee_roster_position in 0..participant_count {
         let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
-        let mut coefficient_commitments = Vec::new();
+        let mut coefficient_commitment_roots = Vec::new();
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
             for shamir_coefficient_index in 0..decryption_threshold {
                 let coefficient_message = accepted_vss_coefficient_message_fixture(
@@ -50,7 +50,6 @@ pub(super) fn vss_coefficient_commitments_object(
                 let commitment = compute_setup_commitment_for_tests(
                     public_matrix_seed_hash,
                     rns_limb_index,
-                    rns_prime,
                     shamir_coefficient_index,
                     &coefficient_message_wide,
                     &randomness_by_column,
@@ -58,22 +57,15 @@ pub(super) fn vss_coefficient_commitments_object(
                 )
                 .expect("setup commitment");
                 let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
-                coefficient_commitments.push(serde_json::json!({
-                    "objectType": "VssCoefficientCommitment",
-                    "commitmentRoot": commitment_root,
-                }));
-                coefficient_commitment_material.push(serde_json::json!({
-                    "objectType": "VssCoefficientCommitmentMaterial",
-                    "commitment": setup_commitment_full_value(&commitment),
-                }));
+                coefficient_commitment_roots.push(commitment_root);
+                coefficient_commitment_material.push(setup_commitment_full_value(&commitment));
             }
         }
 
         let source_trustee_record = serde_json::json!({
             "objectType": "VssSourceTrusteeCoefficientCommitments",
             "sourceTrusteeIdentity": source_trustee_identity,
-            "sourceTrusteeRosterPosition": source_trustee_roster_position,
-            "coefficientCommitments": coefficient_commitments,
+            "coefficientCommitmentRoots": coefficient_commitment_roots,
         });
         source_trustee_records.push(source_trustee_record);
     }

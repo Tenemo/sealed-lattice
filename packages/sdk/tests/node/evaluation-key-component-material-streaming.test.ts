@@ -12,7 +12,6 @@ type ChunkPullRequest = Readonly<{
     readonly expectedByteLength: number;
 }>;
 type TestComponentMaterialSource = Readonly<{
-    readonly keySwitchComponentMaterialRoot: string;
     readonly pullChunk: Mock<
         (input: ChunkPullRequest) => Promise<ArrayBuffer | undefined>
     >;
@@ -64,28 +63,26 @@ const publicKeyShareMaterialSource = {
 const setupVerificationBindings = {
     expectedManifestHash,
     expectedRosterHash,
-    transportedPublicKeyShareMaterial: {
-        publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
+    publicKeyShareMaterialStream: {
         descriptorBytes: canonicalStreamDescriptorFixture(4, 8),
+        pullChunk: publicKeyShareMaterialSource.pullChunk,
     },
-    publicKeyShareMaterialChunkSource: publicKeyShareMaterialSource,
     transportedPublicKeyShareProofMaterial: {
-        proofMaterials: [],
+        proofMaterialStreams: [],
     },
     transportedVssShareLinkageProofMaterial: {
-        proofMaterials: [],
+        proofMaterialStreams: [],
     },
     transportedSameSecretBridgeProofMaterial: {
-        proofMaterials: [],
+        proofMaterialStreams: [],
     },
     transportedEvaluationKeyShareProofMaterial: {
-        proofMaterials: [],
+        proofMaterialStreams: [],
     },
 } as const;
 
-const componentMaterial = (keySwitchComponentMaterialRoot: string) =>
+const componentMaterial = () =>
     ({
-        keySwitchComponentMaterialRoot,
         descriptorBytes: canonicalStreamDescriptorFixture(4, 0x53),
     }) as const;
 
@@ -97,20 +94,30 @@ const setupPackageWithComponentReferences = (
     }>,
 ): JsonRecord => ({
     objectType: 'SetupPackage',
+    publicKeyShareMaterial: {
+        objectType: 'PublicKeyShareMaterialSet',
+        publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
+    },
+    publicKeyShareSuccinctProofs: {
+        objectType: 'PublicKeyShareSuccinctProofSet',
+        proofBytesHashes: [],
+    },
+    vssShareLinkageProofMaterialSet: {
+        objectType: 'VssShareLinkageProofMaterialSet',
+        proofRecords: [],
+    },
+    sameSecretBridgeProofMaterialSet: {
+        objectType: 'VssSameSecretBridgeProofMaterialSet',
+        proofBytesHashes: [],
+    },
+    trusteeEvaluationKeyProofs: {
+        objectType: 'TrusteeEvaluationKeyProofSet',
+        proofBytesHashes: [],
+    },
     relinearizationKeyShareRounds: {
         objectType: 'RelinearizationKeyShareRounds',
-        roundOneRecords: (input.roundOneRoots ?? []).map(
-            (keySwitchComponentMaterialRoot) => ({
-                objectType: 'RelinearizationKeyShareRoundOne',
-                keySwitchComponentMaterialRoot,
-            }),
-        ),
-        roundTwoRecords: (input.roundTwoRoots ?? []).map(
-            (keySwitchComponentMaterialRoot) => ({
-                objectType: 'RelinearizationKeyShareRoundTwo',
-                keySwitchComponentMaterialRoot,
-            }),
-        ),
+        roundOneKeySwitchComponentMaterialRoots: input.roundOneRoots ?? [],
+        roundTwoKeySwitchComponentMaterialRoots: input.roundTwoRoots ?? [],
     },
     galoisKeyShareBatches:
         (input.galoisRoots?.length ?? 0) === 0
@@ -118,18 +125,12 @@ const setupPackageWithComponentReferences = (
             : [
                   {
                       objectType: 'GaloisKeyShareBatch',
-                      galoisKeyShareMaterialRecords: (
-                          input.galoisRoots ?? []
-                      ).map((keySwitchComponentMaterialRoot) => ({
-                          objectType: 'GaloisKeyShareMaterial',
-                          keySwitchComponentMaterialRoot,
-                      })),
+                      keySwitchComponentMaterialRoots: input.galoisRoots ?? [],
                   },
               ],
 });
 
 const componentMaterialSource = (
-    keySwitchComponentMaterialRoot: string,
     firstChunkBytes: readonly number[],
 ): TestComponentMaterialSource => {
     const chunks = [
@@ -137,7 +138,6 @@ const componentMaterialSource = (
     ] as const;
 
     return {
-        keySwitchComponentMaterialRoot,
         pullChunk: vi.fn(
             ({ chunkIndex, expectedByteLength }: ChunkPullRequest) => {
                 const chunk = chunks[chunkIndex];
@@ -179,29 +179,17 @@ describe('evaluation-key component material streaming before terminal verificati
     });
 
     it('authenticates each component from its descriptor and bounded source', async () => {
-        const firstSource = componentMaterialSource(
-            componentMaterialRoot,
-            [0xaa, 0xbb],
-        );
-        const secondSource = componentMaterialSource(
-            secondComponentMaterialRoot,
-            [0xcc, 0xdd],
-        );
+        const firstSource = componentMaterialSource([0xaa, 0xbb]);
+        const secondSource = componentMaterialSource([0xcc, 0xdd]);
         await prepare({
             setupPackage: setupPackageWithComponentReferences({
                 roundOneRoots: [componentMaterialRoot],
                 galoisRoots: [secondComponentMaterialRoot],
             }),
             ...setupVerificationBindings,
-            transportedEvaluationKeyShareComponentMaterial: {
-                componentMaterials: [
-                    componentMaterial(componentMaterialRoot),
-                    componentMaterial(secondComponentMaterialRoot),
-                ],
-            },
-            evaluationKeyShareComponentMaterialChunkSources: [
-                firstSource,
-                secondSource,
+            evaluationKeyShareComponentMaterialStreams: [
+                { ...componentMaterial(), pullChunk: firstSource.pullChunk },
+                { ...componentMaterial(), pullChunk: secondSource.pullChunk },
             ],
         });
 
@@ -231,12 +219,9 @@ describe('evaluation-key component material streaming before terminal verificati
     });
 
     it('uses one descriptor snapshot when a chunk callback mutates the caller buffer', async () => {
-        const callerMaterial = componentMaterial(componentMaterialRoot);
+        const callerMaterial = componentMaterial();
         const authenticatedDescriptor = callerMaterial.descriptorBytes.slice();
-        const source = componentMaterialSource(
-            componentMaterialRoot,
-            [0xaa, 0xbb],
-        );
+        const source = componentMaterialSource([0xaa, 0xbb]);
         const mutatingPullChunk = vi.fn(
             async (
                 request: ChunkPullRequest,
@@ -250,12 +235,9 @@ describe('evaluation-key component material streaming before terminal verificati
                 roundOneRoots: [componentMaterialRoot],
             }),
             ...setupVerificationBindings,
-            transportedEvaluationKeyShareComponentMaterial: {
-                componentMaterials: [callerMaterial],
-            },
-            evaluationKeyShareComponentMaterialChunkSources: [
+            evaluationKeyShareComponentMaterialStreams: [
                 {
-                    ...source,
+                    ...callerMaterial,
                     pullChunk: mutatingPullChunk,
                 },
             ],
@@ -304,64 +286,30 @@ describe('evaluation-key component material streaming before terminal verificati
                     roundOneRoots: [componentMaterialRoot],
                 }),
                 ...setupVerificationBindings,
-                transportedEvaluationKeyShareComponentMaterial: {
-                    componentMaterials: [
-                        componentMaterial(componentMaterialRoot),
-                    ],
-                },
-                evaluationKeyShareComponentMaterialChunkSources: [
-                    componentMaterialSource(
-                        componentMaterialRoot,
-                        [0xaa, 0xbb],
-                    ),
+                evaluationKeyShareComponentMaterialStreams: [
+                    {
+                        ...componentMaterial(),
+                        ...componentMaterialSource([0xaa, 0xbb]),
+                    },
                 ],
             }),
         ).rejects.toThrow('canonical component stream rejected');
     });
 
-    it('rejects a source for an unknown component material root', async () => {
+    it('rejects streams beyond the authoritative component references', async () => {
+        const stream = {
+            ...componentMaterial(),
+            ...componentMaterialSource([0xaa, 0xbb]),
+        };
         await expect(
             prepare({
                 setupPackage: setupPackageWithComponentReferences({
                     roundOneRoots: [componentMaterialRoot],
                 }),
                 ...setupVerificationBindings,
-                transportedEvaluationKeyShareComponentMaterial: {
-                    componentMaterials: [
-                        componentMaterial(componentMaterialRoot),
-                    ],
-                },
-                evaluationKeyShareComponentMaterialChunkSources: [
-                    componentMaterialSource(
-                        secondComponentMaterialRoot,
-                        [0xaa, 0xbb],
-                    ),
-                ],
+                evaluationKeyShareComponentMaterialStreams: [stream, stream],
             }),
-        ).rejects.toThrow(/must match exactly one transported reference/u);
-    });
-
-    it('rejects a material root referenced by conflicting component families', async () => {
-        await expect(
-            prepare({
-                setupPackage: setupPackageWithComponentReferences({
-                    roundOneRoots: [componentMaterialRoot],
-                    galoisRoots: [componentMaterialRoot],
-                }),
-                ...setupVerificationBindings,
-                transportedEvaluationKeyShareComponentMaterial: {
-                    componentMaterials: [
-                        componentMaterial(componentMaterialRoot),
-                    ],
-                },
-                evaluationKeyShareComponentMaterialChunkSources: [
-                    componentMaterialSource(
-                        componentMaterialRoot,
-                        [0xaa, 0xbb],
-                    ),
-                ],
-            }),
-        ).rejects.toThrow(/conflicting material root/u);
+        ).rejects.toThrow(/one stream per setup-package/u);
     });
 
     it('rejects duplicate authoritative component references', async () => {
@@ -372,16 +320,11 @@ describe('evaluation-key component material streaming before terminal verificati
                     roundTwoRoots: [componentMaterialRoot],
                 }),
                 ...setupVerificationBindings,
-                transportedEvaluationKeyShareComponentMaterial: {
-                    componentMaterials: [
-                        componentMaterial(componentMaterialRoot),
-                    ],
-                },
-                evaluationKeyShareComponentMaterialChunkSources: [
-                    componentMaterialSource(
-                        componentMaterialRoot,
-                        [0xaa, 0xbb],
-                    ),
+                evaluationKeyShareComponentMaterialStreams: [
+                    {
+                        ...componentMaterial(),
+                        ...componentMaterialSource([0xaa, 0xbb]),
+                    },
                 ],
             }),
         ).rejects.toThrow(/duplicate material root/u);
@@ -394,44 +337,17 @@ describe('evaluation-key component material streaming before terminal verificati
                     roundOneRoots: ['not-a-protocol-hash'],
                 }),
                 ...setupVerificationBindings,
-                transportedEvaluationKeyShareComponentMaterial: {
-                    componentMaterials: [
-                        componentMaterial(componentMaterialRoot),
-                    ],
-                },
-                evaluationKeyShareComponentMaterialChunkSources: [
-                    componentMaterialSource(
-                        componentMaterialRoot,
-                        [0xaa, 0xbb],
-                    ),
+                evaluationKeyShareComponentMaterialStreams: [
+                    {
+                        ...componentMaterial(),
+                        ...componentMaterialSource([0xaa, 0xbb]),
+                    },
                 ],
             }),
         ).rejects.toThrow(/must be a protocol hash/u);
     });
 
-    it('rejects a sidecar that is not referenced by the setup package', async () => {
-        await expect(
-            prepare({
-                setupPackage: setupPackageWithComponentReferences({
-                    roundOneRoots: [componentMaterialRoot],
-                }),
-                ...setupVerificationBindings,
-                transportedEvaluationKeyShareComponentMaterial: {
-                    componentMaterials: [
-                        componentMaterial(secondComponentMaterialRoot),
-                    ],
-                },
-                evaluationKeyShareComponentMaterialChunkSources: [
-                    componentMaterialSource(
-                        secondComponentMaterialRoot,
-                        [0xaa, 0xbb],
-                    ),
-                ],
-            }),
-        ).rejects.toThrow(/sidecar is not referenced/u);
-    });
-
-    it('rejects an authoritative reference without a transported sidecar', async () => {
+    it('rejects an authoritative reference without a component stream', async () => {
         await expect(
             prepare({
                 setupPackage: setupPackageWithComponentReferences({
@@ -441,18 +357,13 @@ describe('evaluation-key component material streaming before terminal verificati
                     ],
                 }),
                 ...setupVerificationBindings,
-                transportedEvaluationKeyShareComponentMaterial: {
-                    componentMaterials: [
-                        componentMaterial(componentMaterialRoot),
-                    ],
-                },
-                evaluationKeyShareComponentMaterialChunkSources: [
-                    componentMaterialSource(
-                        componentMaterialRoot,
-                        [0xaa, 0xbb],
-                    ),
+                evaluationKeyShareComponentMaterialStreams: [
+                    {
+                        ...componentMaterial(),
+                        ...componentMaterialSource([0xaa, 0xbb]),
+                    },
                 ],
             }),
-        ).rejects.toThrow(/without a transported sidecar/u);
+        ).rejects.toThrow(/one stream per setup-package/u);
     });
 });

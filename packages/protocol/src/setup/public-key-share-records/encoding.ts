@@ -2,7 +2,6 @@ import { hash512Hex } from '@sealed-lattice/crypto';
 
 import { coefficientVectorToLittleEndianBytes } from '../coefficient-vector-encoding.js';
 import {
-    assertNonEmptyString,
     assertProtocolHash,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
@@ -15,13 +14,11 @@ import {
 } from './constants-and-types.js';
 
 export {
-    assertSetupContextHashMatches,
     assertProtocolHash,
     deriveCollectiveBgvSetupContextHash,
 } from '../common-fields.js';
 
 export { assertNonNegativeSafeInteger, assertPositiveSafeInteger };
-export { assertNonEmptyString };
 
 export const publicKeyShareMaterialBinaryMagic = new Uint8Array([
     0x53, 0x4c, 0x50, 0x4b, 0x53, 0x4d, 0x56, 0x32,

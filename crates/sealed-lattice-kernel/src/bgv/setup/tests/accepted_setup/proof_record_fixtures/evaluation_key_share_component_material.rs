@@ -7,7 +7,6 @@ use crate::bgv::setup::evaluation_key_share_material::{
 };
 use crate::bgv::setup::trustee_evaluation_key_proof::public_key_switch_sample;
 use crate::foundation::{CanonicalStreamDomain, CanonicalStreamWriter};
-use crate::hashing::derive_canonical_object_hash;
 
 // Deterministic public key-switch component material for one evaluation-key
 // share, built so the trustee evaluation-key relation holds: for digit j and
@@ -321,14 +320,12 @@ fn evaluation_key_component_vector_root(
     ring_degree: usize,
     component_b_by_digit: &[Vec<Vec<u64>>],
 ) -> String {
-    let entries = component_b_by_digit
+    let component_vectors_little_endian_hex_by_digit_and_limb = component_b_by_digit
         .iter()
         .flat_map(|component_b_by_limb| {
-            component_b_by_limb.iter().map(|coefficients| {
-                serde_json::json!({
-                    "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
-                })
-            })
+            component_b_by_limb
+                .iter()
+                .map(|coefficients| coefficient_vector_le_hex(coefficients))
         })
         .collect::<Vec<_>>();
     evaluation_key_share_component_vector_root(
@@ -337,51 +334,9 @@ fn evaluation_key_component_vector_root(
         key_switch_seed_hex,
         level,
         ring_degree,
-        &entries,
+        &component_vectors_little_endian_hex_by_digit_and_limb,
     )
     .expect("evaluation-key component vector root")
-}
-
-// The shared relinearization key-switch sample seed, byte-identical to the
-// accepted-setup verifier's `expected_relinearization_key_switch_seed`: the
-// canonical hash of the schedule slot binds every trustee to the same sampler
-// and no profile-identifier fields enter the preimage.
-pub(in super::super) fn relinearization_key_switch_seed_for_test(
-    schedule: &serde_json::Value,
-    public_matrix_seed_hash: &str,
-    round: &str,
-    level: u64,
-) -> String {
-    let evaluator_key_schedule_root =
-        derive_canonical_object_hash(schedule).expect("evaluator-key schedule root");
-    derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "RelinearizationKeySwitchPublicSampleSeed",
-        "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "round": round,
-        "level": level,
-    }))
-    .expect("relinearization key-switch seed")
-}
-
-// The shared Galois key-switch sample seed, byte-identical to the
-// accepted-setup verifier's `expected_galois_key_switch_seed`.
-pub(in super::super) fn galois_key_switch_seed_for_test(
-    schedule: &serde_json::Value,
-    public_matrix_seed_hash: &str,
-    rotation: u64,
-    level: u64,
-) -> String {
-    let evaluator_key_schedule_root =
-        derive_canonical_object_hash(schedule).expect("evaluator-key schedule root");
-    derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "GaloisKeySwitchPublicSampleSeed",
-        "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "rotation": rotation,
-        "level": level,
-    }))
-    .expect("Galois key-switch seed")
 }
 
 pub(in super::super) struct KeySwitchComponentBFixtureInput<'a> {
@@ -486,7 +441,7 @@ fn signed_i128_residue_for_fixture(value: i128, modulus: u64) -> u64 {
 mod tests {
     use super::*;
 
-    use crate::bgv::setup::evaluation_key_share_material::component_b_vectors_from_record;
+    use crate::bgv::setup::evaluation_key_share_material::component_b_vectors_from_root;
     use crate::encoding::CanonicalErrorCode;
 
     // The exact per-digit, per-limb relation the accepted-setup verifier's
@@ -606,9 +561,6 @@ mod tests {
             &key_switch_seed_hex,
             Some(&source),
         );
-        let mut record = serde_json::json!({
-            "objectType": "RelinearizationKeyShareRoundOne",
-        });
         let correct_binding = EvaluationKeyShareDerivedMaterialBinding {
             trustee_identity,
             trustee_roster_position,
@@ -627,11 +579,9 @@ mod tests {
                 &fixture_material,
                 accepted_setup_session,
             );
-        record["keySwitchComponentMaterialRoot"] =
-            serde_json::Value::String(authenticated_material_root);
-        let decoded_material = component_b_vectors_from_record(
+        let decoded_material = component_b_vectors_from_root(
             proof_family,
-            &record,
+            &authenticated_material_root,
             usize::try_from(level).expect("level fits usize"),
             ring_degree,
             correct_binding,
@@ -644,9 +594,9 @@ mod tests {
             fixture_material.component_b_by_digit
         );
 
-        let wrong_ring_degree_error = component_b_vectors_from_record(
+        let wrong_ring_degree_error = component_b_vectors_from_root(
             proof_family,
-            &record,
+            &authenticated_material_root,
             usize::try_from(level).expect("level fits usize"),
             ring_degree + 1,
             correct_binding,
@@ -691,9 +641,9 @@ mod tests {
             ),
         ];
         for (substituted_field, substituted_binding) in substituted_bindings {
-            let error = component_b_vectors_from_record(
+            let error = component_b_vectors_from_root(
                 proof_family,
-                &record,
+                &authenticated_material_root,
                 usize::try_from(level).expect("level fits usize"),
                 ring_degree,
                 substituted_binding,

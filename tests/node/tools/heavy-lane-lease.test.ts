@@ -99,7 +99,7 @@ describe('local guarded heavy-lane lease', () => {
                     },
                     waitDiagnosticIntervalMilliseconds: 1,
                 },
-                laneLabel: 'Node kernel heavy',
+                laneLabel: 'Rust kernel heavy',
                 runLog: secondRun.runLog,
             });
 
@@ -206,7 +206,7 @@ describe('local guarded heavy-lane lease', () => {
                     leaseIdentifier: () => 'successor',
                     processIdentifier: 6002,
                 },
-                laneLabel: 'Node kernel heavy',
+                laneLabel: 'Rust kernel heavy',
                 runLog: recoveringRun.runLog,
             });
             resumeStaleRetirement.resolve();

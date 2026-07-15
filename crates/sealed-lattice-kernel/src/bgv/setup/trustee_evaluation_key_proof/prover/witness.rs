@@ -7,7 +7,7 @@ use super::super::relation::{
 };
 use super::super::{
     TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND, TRACE_SPLIT, invalid_succinct_setup_proof,
-    signed_value_residue,
+    signed_value_residue, target_decryption_interpolation_denominator_clearing_factor,
 };
 use super::claim_masking::{mask_digit_columns, masked_half_coefficients};
 use super::salted_tree::{SaltedTree, commit_salted_extension_row_pairs};
@@ -15,7 +15,7 @@ use super::{COLUMN_MASK_DOMAIN, LEAF_SALT_DOMAIN};
 use crate::bgv::evaluator::engine::negacyclic_mul;
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::modular_arithmetic::{add_mod_fast, mul_mod_fast};
-use crate::bgv::parameters::PLAINTEXT_MODULUS;
+use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS};
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH;
 use crate::encoding::CanonicalResult;
 
@@ -587,17 +587,49 @@ fn validate_target_decryption_share_witness(
             "target-decryption witness shape does not match the statement",
         ));
     }
-    let aggregate_message_bound_i64 = i64::try_from(statement.aggregate_message_coefficient_bound)
-        .map_err(|_| {
-            invalid_succinct_setup_proof(
-                "target-decryption aggregate message bound does not fit i64",
-            )
-        })?;
+    let reference_limb = statement.limb_statements.first().ok_or_else(|| {
+        invalid_succinct_setup_proof("target-decryption witness has no active target limb")
+    })?;
+    let reference_role_count = reference_limb.role_statements.len();
+    let mut compared_limb_message_offset = 1 + reference_role_count;
+    for compared_limb in statement.limb_statements.iter().skip(1) {
+        if compared_limb.role_statements.len() != reference_role_count {
+            return Err(invalid_succinct_setup_proof(
+                "target-decryption witness has inconsistent target roles across limbs",
+            ));
+        }
+        for role_index in 0..reference_role_count {
+            if witness.target_decryption_message_vectors()[1 + role_index]
+                != witness.target_decryption_message_vectors()
+                    [compared_limb_message_offset + 1 + role_index]
+            {
+                return Err(invalid_succinct_setup_proof(
+                    "target-decryption flooding-noise witness must be identical across RNS limbs",
+                ));
+            }
+        }
+        compared_limb_message_offset += 1 + reference_role_count;
+    }
+    let aggregate_message_bound_i64 = i64::try_from(
+        statement
+            .aggregate_message_coefficient_bound()
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "target-decryption statement has no canonical aggregate message bound",
+                )
+            })?,
+    )
+    .map_err(|_| {
+        invalid_succinct_setup_proof("target-decryption aggregate message bound does not fit i64")
+    })?;
     let message_bound_i64 = TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND * 2 + 1;
+    let denominator_clearing_factor =
+        target_decryption_interpolation_denominator_clearing_factor(statement.participant_count)?;
 
     let mut limb_message_offset = 0;
     for limb_statement in &statement.limb_statements {
-        let target_prime_i64 = i64::try_from(limb_statement.target_rns_prime).map_err(|_| {
+        let target_rns_prime = DATA_PRIMES[limb_statement.target_rns_limb_index];
+        let target_prime_i64 = i64::try_from(target_rns_prime).map_err(|_| {
             invalid_succinct_setup_proof("target-decryption target prime does not fit i64")
         })?;
         let aggregate_messages = &witness.target_decryption_message_vectors()[limb_message_offset];
@@ -621,13 +653,17 @@ fn validate_target_decryption_share_witness(
                 })
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
-        let plaintext_multiple = PLAINTEXT_MODULUS % limb_statement.target_rns_prime;
+        let plaintext_multiple = mul_mod_fast(
+            PLAINTEXT_MODULUS % target_rns_prime,
+            denominator_clearing_factor % target_rns_prime,
+            target_rns_prime,
+        );
         let mut smudging_message_offset = limb_message_offset + 1;
         for role_statement in &limb_statement.role_statements {
             let mut expected_partial = negacyclic_mul(
                 &role_statement.target_ciphertext_component_one,
                 &aggregate_share,
-                limb_statement.target_rns_prime,
+                target_rns_prime,
             )?;
             let flooding_noise_message =
                 &witness.target_decryption_message_vectors()[smudging_message_offset];
@@ -651,17 +687,10 @@ fn validate_target_decryption_share_witness(
                         )
                     })?;
                 let flooding_noise_residue =
-                    signed_value_residue(signed_coefficient, limb_statement.target_rns_prime);
-                let flooding_noise_term = mul_mod_fast(
-                    plaintext_multiple,
-                    flooding_noise_residue,
-                    limb_statement.target_rns_prime,
-                );
-                *partial = add_mod_fast(
-                    *partial,
-                    flooding_noise_term,
-                    limb_statement.target_rns_prime,
-                );
+                    signed_value_residue(signed_coefficient, target_rns_prime);
+                let flooding_noise_term =
+                    mul_mod_fast(plaintext_multiple, flooding_noise_residue, target_rns_prime);
+                *partial = add_mod_fast(*partial, flooding_noise_term, target_rns_prime);
             }
             if expected_partial != role_statement.released_partial_decryption {
                 return Err(invalid_succinct_setup_proof(
@@ -711,7 +740,7 @@ fn validate_vss_public_witness(
         )
         .enumerate()
     {
-        let source_modulus_i64 = i64::try_from(coefficient_slot.source_message_modulus)
+        let source_modulus_i64 = i64::try_from(DATA_PRIMES[coefficient_slot.source_rns_limb_index])
             .map_err(|_| invalid_succinct_setup_proof("VSS source modulus does not fit i64"))?;
         if messages.len() != ring_degree
             || messages
@@ -732,7 +761,7 @@ fn validate_vss_public_witness(
         ) = if item_index == 0 {
             (
                 statement.recipient_roster_position,
-                statement.source_message_modulus,
+                DATA_PRIMES[statement.source_rns_limb_index],
                 statement.coefficient_commitments.len(),
                 &coefficient_slot_indices_by_item[0],
             )
@@ -740,7 +769,7 @@ fn validate_vss_public_witness(
             let item = &statement.additional_linkage_items[item_index - 1];
             (
                 item.recipient_roster_position,
-                item.source_message_modulus,
+                DATA_PRIMES[item.source_rns_limb_index],
                 item.coefficient_commitments.len(),
                 &coefficient_slot_indices_by_item[item_index],
             )
@@ -859,7 +888,8 @@ fn validate_private_vss_witness(
             "private VSS witness shape does not match the statement",
         ));
     }
-    let source_modulus_i64 = i64::try_from(statement.source_message_modulus)
+    let source_message_modulus = DATA_PRIMES[statement.source_rns_limb_index];
+    let source_modulus_i64 = i64::try_from(source_message_modulus)
         .map_err(|_| invalid_succinct_setup_proof("private VSS source modulus does not fit i64"))?;
     for (coefficient_index, (messages, randomness_columns)) in witness
         .private_vss_coefficient_messages_by_shamir_index()
@@ -904,7 +934,7 @@ fn validate_private_vss_witness(
         usize::try_from(statement.recipient_roster_position).map_err(|_| {
             invalid_succinct_setup_proof("private VSS recipient roster position does not fit usize")
         })?,
-        statement.source_message_modulus,
+        source_message_modulus,
     )?);
     let mut powers = Vec::with_capacity(coefficient_count);
     let mut power = 1_i128;
@@ -935,7 +965,7 @@ fn validate_private_vss_witness(
         }
         left = left
             .checked_sub(
-                i128::from(statement.source_message_modulus)
+                i128::from(source_message_modulus)
                     .checked_mul(i128::from(
                         witness.private_vss_carry_witnesses()[coefficient_position],
                     ))

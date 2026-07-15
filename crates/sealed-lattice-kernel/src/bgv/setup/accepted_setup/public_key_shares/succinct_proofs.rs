@@ -110,23 +110,24 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         ));
     }
     let roster = super::accepted_roster_from_package(setup_package)?;
-    let Some(proof_records_array) = proof_set.get("proofRecords").and_then(Value::as_array) else {
+    let Some(proof_bytes_hashes) = proof_set.get("proofBytesHashes").and_then(Value::as_array)
+    else {
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
             public_key_refusal(
                 crate::foundation::RefusalReason::MissingPrerequisite,
-                "publicKeyShareSuccinctProofRecordsMissing",
-                "publicKeyShareSuccinctProofs.proofRecords must be present on the accepted proof set",
-                "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
+                "publicKeyShareSuccinctProofHashesMissing",
+                "publicKeyShareSuccinctProofs.proofBytesHashes must be present on the accepted proof set",
+                "setupPackage.publicKeyShareSuccinctProofs.proofBytesHashes",
             )?,
         ));
     };
-    if proof_records_array.len() != roster.participant_count as usize {
+    if proof_bytes_hashes.len() != roster.participant_count as usize {
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
             public_key_refusal(
                 crate::foundation::RefusalReason::WrongTypeOrLength,
                 "publicKeyShareSuccinctProofCountMismatch",
-                "publicKeyShareSuccinctProofs.proofRecords must contain one proof per trustee",
-                "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
+                "publicKeyShareSuccinctProofs.proofBytesHashes must contain one proof per trustee",
+                "setupPackage.publicKeyShareSuccinctProofs.proofBytesHashes",
             )?,
         ));
     }
@@ -142,10 +143,15 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
     // Resolve or consume one proof before advancing to the next record. This is
     // the same bounded lifecycle on native and browser targets and prevents a
     // native verifier from retaining one multi-megabyte proof per worker.
-    for (record_position, succinct_proof_record) in proof_records_array.iter().enumerate() {
+    for (record_position, proof_bytes_hash) in proof_bytes_hashes.iter().enumerate() {
         match verify_public_key_share_succinct_proof_record(
             &verification_context,
-            succinct_proof_record,
+            proof_bytes_hash.as_str().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "public-key share succinct proof hash must be a string",
+                )
+            })?,
             record_position as u64,
         ) {
             Ok(()) => {}
@@ -155,7 +161,7 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
                         crate::foundation::RefusalReason::InvalidProof,
                         "publicKeyShareSuccinctProofVerificationFailed",
                         error.message,
-                        "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
+                        "setupPackage.publicKeyShareSuccinctProofs.proofBytesHashes",
                     )?,
                 ));
             }
@@ -183,32 +189,19 @@ struct PublicKeyShareSuccinctProofVerificationContext<'a> {
 
 fn verify_public_key_share_succinct_proof_record(
     context: &PublicKeyShareSuccinctProofVerificationContext<'_>,
-    proof_record: &Value,
+    proof_bytes_hash: &str,
     trustee_roster_position: u64,
 ) -> CanonicalResult<()> {
-    if !proof_record.is_object() {
+    validate_hash_string(
+        proof_bytes_hash,
+        "publicKeyShareSuccinctProofs.proofBytesHashes",
+    )?;
+    if !context.share_records.contains_key(&trustee_roster_position) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proof records must be objects",
+            "public-key share succinct proof must reference an accepted share record",
         ));
     }
-    if proof_record.get("objectType").and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_SUCCINCT_PROOF_OBJECT_TYPE)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proof objectType must be PublicKeyShareSuccinctProof",
-        ));
-    }
-    let share_record = context
-        .share_records
-        .get(&trustee_roster_position)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share succinct proof must reference an accepted share record",
-            )
-        })?;
     let material_binding = context
         .material_bindings
         .get(&trustee_roster_position)
@@ -230,13 +223,7 @@ fn verify_public_key_share_succinct_proof_record(
         })?;
     let bridge_binding =
         verified_same_secret_bridge.statement_for_roster_position(trustee_roster_position)?;
-    let trustee_identity = value_string(share_record, "trusteeIdentity")?;
-    if trustee_identity != bridge_binding.trustee_identity.as_str() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "verified same-secret bridge material must bind the accepted public-key trustee",
-        ));
-    }
+    let trustee_identity = bridge_binding.trustee_identity.as_str();
     if bridge_binding.statement.bridge_rns_primes.is_empty()
         || bridge_binding
             .statement
@@ -273,9 +260,8 @@ fn verify_public_key_share_succinct_proof_record(
             same_secret_bridge: bridge_binding.statement.clone(),
         },
     };
-    let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
     let verification_binding_hash =
-        public_key_share_succinct_proof_verification_binding_hash(proof_record, &statement)?;
+        public_key_share_succinct_proof_verification_binding_hash(proof_bytes_hash, &statement)?;
     if !crate::bgv::setup::consume_accepted_setup_proof_binding(
         context.proof_binding_session.session_handle,
         PUBLIC_KEY_SHARE_PROOF_FAMILY,
@@ -306,12 +292,12 @@ fn verify_public_key_share_succinct_proof_record(
 }
 
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_verification_binding_hash(
-    proof_record: &Value,
+    proof_bytes_hash: &str,
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "AcceptedSetupPublicKeyShareSuccinctProofVerificationBinding",
-        "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
+        "proofBytesHash": proof_bytes_hash,
         "statementHash": crate::hashing::to_hex(&statement.statement_hash()),
     }))
 }

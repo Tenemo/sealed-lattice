@@ -266,8 +266,7 @@ fn verify_private_envelope_limb(
     }
 
     let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
-    let mut coefficient_commitment_roots =
-        Vec::with_capacity(roster.decryption_threshold as usize);
+    let mut coefficient_commitment_roots = Vec::with_capacity(roster.decryption_threshold as usize);
     let mut coefficient_commitment_values =
         Vec::with_capacity(roster.decryption_threshold as usize);
     for shamir_coefficient_index in 0..roster.decryption_threshold {
@@ -279,7 +278,7 @@ fn verify_private_envelope_limb(
             return Ok(Err(PrivateVssRefusal::new(
                 PrivateVssRefusalCode::missing("privateVssCoefficientCommitmentRootMissing"),
                 "source trustee commitment record must include every coefficient root for the private VSS limb",
-                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments",
+                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots",
             )));
         };
         let Some(material_binding) =
@@ -297,21 +296,21 @@ fn verify_private_envelope_limb(
                     "privateVssCoefficientCommitmentMaterialRootMismatch",
                 ),
                 "coefficient commitment material root must match the source trustee commitment record",
-                "sourceTrusteeCoefficientCommitmentMaterialRecords.commitment",
+                "sourceTrusteeCoefficientCommitmentMaterialRecords",
             )));
         }
         coefficient_commitment_roots.push(commitment_root);
         coefficient_commitment_values.push(material_binding.commitment.clone());
     }
 
-    let private_vss_share_proof = match object_field(
+    let private_vss_share_proof_bytes_hash = match hash_string_field(
         limb_opening,
-        "privateVssShareProof",
-        "privateEnvelope.rnsShareOpenings.privateVssShareProof",
-        PrivateVssRefusalCode::missing("privateVssShareProofMissing"),
-        "private VSS limb opening must include a recipient-local zero-knowledge privateVssShareProof",
+        "privateVssShareProofBytesHash",
+        "privateEnvelope.rnsShareOpenings.privateVssShareProofBytesHash",
+        PrivateVssRefusalCode::missing("privateVssShareProofBytesHashMissing"),
+        "private VSS limb opening must include its recipient-local proof bytes hash",
     ) {
-        Ok(private_vss_share_proof) => private_vss_share_proof,
+        Ok(private_vss_share_proof_bytes_hash) => private_vss_share_proof_bytes_hash,
         Err(refusal) => return Ok(Err(refusal)),
     };
 
@@ -331,13 +330,13 @@ fn verify_private_envelope_limb(
             coefficient_commitment_roots: &coefficient_commitment_roots,
             share_values: &share_values,
             coefficient_commitments: &coefficient_commitment_values,
-            proof_record: private_vss_share_proof,
+            proof_bytes_hash: private_vss_share_proof_bytes_hash,
         },
     ) {
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::invalid_proof("privateVssShareProofVerificationFailed"),
             error.message,
-            "privateEnvelope.rnsShareOpenings.privateVssShareProof",
+            "privateEnvelope.rnsShareOpenings.privateVssShareProofBytesHash",
         )));
     }
 

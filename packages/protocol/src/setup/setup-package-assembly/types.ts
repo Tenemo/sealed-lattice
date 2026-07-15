@@ -6,7 +6,6 @@ import type {
     RelinearizationKeyShareRounds,
     TrusteeEvaluationKeyProofSet,
 } from '../evaluation-key-proof-records.js';
-import type { EvaluatorKeySchedule } from '../evaluator-key-schedule.js';
 import type { PrivateVssEnvelopeCommitmentSet } from '../private-vss-envelope-commitment.js';
 import type {
     CollectivePublicKey,
@@ -51,7 +50,6 @@ export type SetupPackage = Readonly<{
     readonly publicKeyShareMaterial: SetupPackagePublicKeyShareMaterialSet;
     readonly publicKeyShareSuccinctProofs: PublicKeyShareSuccinctProofSet;
     readonly collectivePublicKey: CollectivePublicKey;
-    readonly evaluatorKeySchedule: EvaluatorKeySchedule;
     readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
     readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
     readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;

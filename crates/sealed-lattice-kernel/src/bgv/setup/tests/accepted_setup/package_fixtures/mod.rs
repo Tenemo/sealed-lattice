@@ -243,7 +243,6 @@ fn build_collective_setup_package_fixture_parts(
     vss_material_ring_degree: usize,
     participant_count: u64,
 ) -> CollectiveSetupPackageFixture {
-    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
     let ceremony_id = "ceremony-main";
     let manifest_hash = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "ElectionManifestHash",
@@ -351,16 +350,8 @@ fn build_collective_setup_package_fixture_parts(
     let vss_coefficient_commitments = vss_components.vss_coefficient_commitments.clone();
     let vss_coefficient_commitment_material =
         vss_components.vss_coefficient_commitment_material.clone();
-    let private_vss_envelope_commitments = private_vss_envelope_commitments_object(
-        ceremony_id,
-        &manifest_hash,
-        &roster_hash,
-        setup_parameters_hash,
-        setup_epoch,
-        &common_randomness,
-        &vss_coefficient_commitments,
-        participant_count,
-    );
+    let private_vss_envelope_commitments =
+        private_vss_envelope_commitments_object(participant_count);
     let vss_share_acceptances = vss_share_acceptances_object(
         ceremony_id,
         &manifest_hash,
@@ -372,17 +363,6 @@ fn build_collective_setup_package_fixture_parts(
         participant_count,
     );
     let public_key_shares = public_key_shares_object(participant_count);
-    let evaluator_key_schedule = evaluator_key_schedule_object(
-        ceremony_id,
-        &manifest_hash,
-        &roster_hash,
-        setup_parameters_hash,
-        setup_epoch,
-        &setup_parameters,
-        &common_randomness,
-        &public_key_shares,
-        participant_count,
-    );
     let package = serde_json::json!({
         "objectType": "SetupPackage",
         "setupContext": setup_context,
@@ -393,7 +373,6 @@ fn build_collective_setup_package_fixture_parts(
         "privateVssEnvelopeCommitments": private_vss_envelope_commitments,
         "vssShareAcceptances": vss_share_acceptances,
         "publicKeyShares": public_key_shares,
-        "evaluatorKeySchedule": evaluator_key_schedule,
         "relinearizationKeyShareRounds": {},
         "galoisKeyShareBatches": [],
         "trusteeEvaluationKeyProofs": {},

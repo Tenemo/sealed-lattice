@@ -1,9 +1,6 @@
 use serde_json::Value;
 
 #[cfg(test)]
-use serde_json::json;
-
-#[cfg(test)]
 use crate::hashing::{hash512_hex, to_hex};
 
 use crate::{
@@ -49,7 +46,7 @@ pub(super) struct PrivateVssShareSuccinctProofVerificationInput<'a> {
     pub(super) coefficient_commitment_roots: &'a [String],
     pub(super) share_values: &'a [u64],
     pub(super) coefficient_commitments: &'a [SetupCommitmentValue],
-    pub(super) proof_record: &'a Value,
+    pub(super) proof_bytes_hash: &'a str,
 }
 
 #[cfg(test)]
@@ -84,12 +81,12 @@ pub(super) fn verify_private_vss_share_succinct_relation_proof(
     input: PrivateVssShareSuccinctProofVerificationInput<'_>,
 ) -> CanonicalResult<()> {
     validate_private_vss_share_statement_material(&input)?;
-    validate_private_vss_share_proof_record(input.proof_record)?;
+    validate_hash(input.proof_bytes_hash, "privateVssShareProofBytesHash")?;
 
-    let proof_bytes = private_vss_share_succinct_proof_bytes_from_record(&input)?;
+    let proof_bytes = private_vss_share_succinct_proof_bytes_from_hash(&input)?;
     let proof_bytes_hash =
         private_vss_share_succinct_proof_material_bytes_hash(proof_bytes.as_ref())?;
-    if value_string(input.proof_record, "proofBytesHash")? != proof_bytes_hash {
+    if input.proof_bytes_hash != proof_bytes_hash {
         return Err(invalid_private_vss_share_proof(
             "private VSS share proofBytesHash must match supplied proof bytes",
         ));
@@ -146,7 +143,6 @@ fn validate_private_vss_share_statement_material(
         .enumerate()
     {
         if commitment.source_rns_limb_index != input.rns_limb_index
-            || commitment.source_message_modulus != input.rns_prime
             || commitment.shamir_coefficient_index != coefficient_index as u64
             || commitment.ring_degree != input.ring_degree
             || setup_commitment_root(commitment)? != *commitment_root
@@ -160,30 +156,13 @@ fn validate_private_vss_share_statement_material(
     Ok(())
 }
 
-fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalResult<()> {
-    expect_string_field(
-        proof_record,
-        "objectType",
-        "PrivateVssShareProof",
-        "private VSS share proof objectType must be PrivateVssShareProof",
-    )?;
-    validate_hash(
-        value_string(proof_record, "proofBytesHash")?,
-        "proofBytesHash",
-    )?;
-
-    Ok(())
-}
-
-fn private_vss_share_succinct_proof_bytes_from_record(
+fn private_vss_share_succinct_proof_bytes_from_hash(
     input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    let proof_record = input.proof_record;
-    let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
     take_verified_setup_proof_material_bytes(
         PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        proof_bytes_hash,
-        "privateVssShareProof.proofBytesHash",
+        input.proof_bytes_hash,
+        "privateVssShareProofBytesHash",
         None,
     )
 }
@@ -209,7 +188,6 @@ fn private_vss_share_succinct_statement(
             recipient_roster_position: input.recipient_roster_position,
             source_trustee_commitment_root: input.source_trustee_commitment_root.to_string(),
             source_rns_limb_index: input.rns_limb_index,
-            source_message_modulus: input.rns_prime,
             share_values: input.share_values.to_vec(),
             coefficient_commitment_roots: input.coefficient_commitment_roots.to_vec(),
             coefficient_commitments: input.coefficient_commitments.to_vec(),
@@ -248,26 +226,6 @@ fn checked_i128_sum_with_extra(values: &[i128], extra: i128) -> CanonicalResult<
     })
 }
 
-fn value_string<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
-    value
-        .get(field_name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid_private_vss_share_proof(format!("{field_name} must be a string")))
-}
-
-fn expect_string_field(
-    value: &Value,
-    field_name: &str,
-    expected: &str,
-    message: &'static str,
-) -> CanonicalResult<()> {
-    if value.get(field_name).and_then(Value::as_str) != Some(expected) {
-        return Err(invalid_private_vss_share_proof(message));
-    }
-
-    Ok(())
-}
-
 fn validate_hash(hash: &str, field_name: &str) -> CanonicalResult<()> {
     if hash.len() == 128
         && hash
@@ -297,10 +255,9 @@ fn private_vss_share_succinct_proof_bytes_hash(proof_bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
-pub(super) fn private_vss_share_succinct_proof_record(
+pub(super) fn private_vss_share_succinct_proof_bytes_hash_for_tests(
     input: PrivateVssShareSuccinctProofGenerationInput<'_>,
-) -> CanonicalResult<Value> {
-    let empty_proof_record = Value::Null;
+) -> CanonicalResult<String> {
     let verification_input = PrivateVssShareSuccinctProofVerificationInput {
         setup_context: input.setup_context,
         public_matrix_seed_hash: input.public_matrix_seed_hash,
@@ -316,7 +273,7 @@ pub(super) fn private_vss_share_succinct_proof_record(
         coefficient_commitment_roots: input.coefficient_commitment_roots,
         share_values: input.share_values,
         coefficient_commitments: input.coefficient_commitments,
-        proof_record: &empty_proof_record,
+        proof_bytes_hash: "",
     };
     validate_private_vss_share_statement_material(&verification_input)?;
     validate_private_vss_share_witness(&input)?;
@@ -381,17 +338,13 @@ pub(super) fn private_vss_share_succinct_proof_record(
         proof_bytes_hash.clone(),
         proof_bytes,
     )?;
-    Ok(json!({
-        "objectType": "PrivateVssShareProof",
-        "proofBytesHash": proof_bytes_hash,
-    }))
+    Ok(proof_bytes_hash)
 }
 
 #[cfg(test)]
 pub(super) fn private_vss_share_succinct_statement_hash(
     input: PrivateVssShareSuccinctProofGenerationInput<'_>,
 ) -> CanonicalResult<String> {
-    let empty_proof_record = Value::Null;
     let verification_input = PrivateVssShareSuccinctProofVerificationInput {
         setup_context: input.setup_context,
         public_matrix_seed_hash: input.public_matrix_seed_hash,
@@ -407,7 +360,7 @@ pub(super) fn private_vss_share_succinct_statement_hash(
         coefficient_commitment_roots: input.coefficient_commitment_roots,
         share_values: input.share_values,
         coefficient_commitments: input.coefficient_commitments,
-        proof_record: &empty_proof_record,
+        proof_bytes_hash: "",
     };
     validate_private_vss_share_statement_material(&verification_input)?;
     Ok(to_hex(

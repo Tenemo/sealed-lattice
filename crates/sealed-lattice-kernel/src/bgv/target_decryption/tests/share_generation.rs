@@ -75,9 +75,11 @@ fn private_flooding_seed_controls_only_private_noise_and_its_commitment() {
         target_decryption_smudging_commitment_set_root(&second_statement["smudgingCommitmentSet"])
             .expect("second smudging commitment set root")
     );
-    assert!(!first_statement
-        .to_string()
-        .contains("privateFloodingSeedHex"));
+    assert!(
+        !first_statement
+            .to_string()
+            .contains("privateFloodingSeedHex")
+    );
 }
 
 #[test]
@@ -212,8 +214,8 @@ fn target_share_generation_uses_the_setup_aggregate_opening_handoff() {
         "trustee-2",
     );
     let first_credential = &local_witness["aggregateOpening"]["aggregateOpeningCredentials"][0];
-    let accepted_record_for_trustee = &setup_package["vssPublicAggregateThresholdCommitmentSet"]
-        ["recipientRecords"][CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1];
+    let accepted_record_for_trustee = &setup_package["vssPublicAggregateThresholdCommitmentSet"]["recipientRecords"]
+        [CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1];
     assert_eq!(
         first_credential["aggregateCommitmentRoot"],
         accepted_record_for_trustee["aggregateCommitmentRoot"]
@@ -249,8 +251,8 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     );
 
     let mut seed_tampered_witness = local_witness.clone();
-    seed_tampered_witness["aggregateOpening"]["aggregateOpeningCredentials"][0]
-        ["aggregateMaterialSeedHex"] = json!("0".repeat(128));
+    seed_tampered_witness["aggregateOpening"]["aggregateOpeningCredentials"][0]["aggregateMaterialSeedHex"] =
+        json!("0".repeat(128));
     let seed_error = with_staged_aggregate_opening_material(&seed_tampered_witness, || {
         generate_bgv_target_decryption_share_from_local_share_request(&json!({
             "setupPackage": setup_package.clone(),
@@ -298,13 +300,13 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     assert!(message_error.message.contains("credential commitment root"));
 
     let mut merkle_root_tampered_setup_package = setup_package;
-    let aggregate_record = &mut merkle_root_tampered_setup_package
-        ["vssPublicAggregateThresholdCommitmentSet"]["recipientRecords"][0];
-    let material_root_hex = aggregate_record["commitment"]["commitmentFields"][0]
-        ["materialRootHex"]
-        .as_str()
-        .expect("aggregate material root")
-        .to_string();
+    let aggregate_record = &mut merkle_root_tampered_setup_package["vssPublicAggregateThresholdCommitmentSet"]
+        ["recipientRecords"][0];
+    let material_root_hex =
+        aggregate_record["commitment"]["commitmentFields"][0]["materialRootHex"]
+            .as_str()
+            .expect("aggregate material root")
+            .to_string();
     let replacement_prefix = if material_root_hex.starts_with("00") {
         "01"
     } else {
@@ -314,10 +316,10 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     tampered_material_root_hex.replace_range(0..2, replacement_prefix);
     aggregate_record["commitment"]["commitmentFields"][0]["materialRootHex"] =
         json!(tampered_material_root_hex);
-    aggregate_record["aggregateCommitmentRoot"] = json!(derive_canonical_object_hash(
-        &aggregate_record["commitment"]
-    )
-    .expect("tampered aggregate commitment root"));
+    aggregate_record["aggregateCommitmentRoot"] = json!(
+        derive_canonical_object_hash(&aggregate_record["commitment"])
+            .expect("tampered aggregate commitment root")
+    );
     let aggregate_set =
         &mut merkle_root_tampered_setup_package["vssPublicAggregateThresholdCommitmentSet"];
     let mut aggregate_set_without_root = aggregate_set
@@ -325,10 +327,10 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
         .expect("aggregate threshold commitment set")
         .clone();
     aggregate_set_without_root.remove("aggregateThresholdCommitmentRoot");
-    aggregate_set["aggregateThresholdCommitmentRoot"] = json!(derive_canonical_object_hash(
-        &Value::Object(aggregate_set_without_root)
-    )
-    .expect("tampered aggregate threshold commitment root"));
+    aggregate_set["aggregateThresholdCommitmentRoot"] = json!(
+        derive_canonical_object_hash(&Value::Object(aggregate_set_without_root))
+            .expect("tampered aggregate threshold commitment root")
+    );
     let merkle_root_tampered_witness = local_witness;
     let merkle_root_error =
         with_staged_aggregate_opening_material(&merkle_root_tampered_witness, || {

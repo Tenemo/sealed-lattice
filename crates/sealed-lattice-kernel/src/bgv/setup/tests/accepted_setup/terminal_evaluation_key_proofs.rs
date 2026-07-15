@@ -101,8 +101,8 @@ fn replace_first_trustee_evaluation_key_proof_with_tampered_material(
         crate::bgv::setup::trustee_evaluation_key_proof::trustee_evaluation_key_proof_bytes_hash(
             &proof_bytes,
         );
-    let proof_record = &mut fixture.package["trusteeEvaluationKeyProofs"]["proofRecords"][0];
-    proof_record["proofBytesHash"] = serde_json::json!(&proof_bytes_hash);
+    fixture.package["trusteeEvaluationKeyProofs"]["proofBytesHashes"][0] =
+        serde_json::json!(&proof_bytes_hash);
 
     authenticate_setup_proof_material_stream_in_session_for_test(
         crate::bgv::setup::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,

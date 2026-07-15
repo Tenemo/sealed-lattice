@@ -14,7 +14,7 @@ use super::{
     },
     private_vss_share_proof::{
         PrivateVssShareSuccinctProofGenerationInput, PrivateVssShareSuccinctProofVerificationInput,
-        PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_record,
+        PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_bytes_hash_for_tests,
         verify_private_vss_share_succinct_relation_proof,
     },
     vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},

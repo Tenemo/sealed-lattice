@@ -7,7 +7,7 @@ use crate::bgv::{
     setup::accepted_setup_target_decryption_setup_parameters_hash,
 };
 use crate::foundation::{
-    derive_canonical_stream_descriptor, CanonicalStreamDomain, FOUNDATION_PROFILE,
+    CanonicalStreamDomain, FOUNDATION_PROFILE, derive_canonical_stream_descriptor,
 };
 use crate::protocol_signatures::{
     create_ml_dsa_public_key_hash_fixture, create_protocol_signature_fixture,
@@ -377,7 +377,6 @@ fn aggregate_threshold_commitment_set(
             }));
             recipient_records.push(json!({
                 "objectType": "VssPublicAggregateThresholdCommitment",
-                "recipientIdentity": participant.trustee_identity.as_str(),
                 "aggregateCommitmentRoot": computation.commitment_root,
                 "aggregateOpeningRoot": computation.opening_root,
                 "commitment": computation.commitment,
@@ -395,8 +394,23 @@ fn aggregate_threshold_commitment_set(
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "recipientRecords": recipient_records,
     });
-    set["aggregateThresholdCommitmentRoot"] =
-        json!(derive_canonical_object_hash(&set).expect("aggregate threshold commitment set root"));
+    let trustee_identities = participants
+        .iter()
+        .map(|participant| participant.trustee_identity.clone())
+        .collect::<Vec<_>>();
+    let aggregate_threshold_commitment_root = verify_vss_public_aggregate_threshold_commitment_set(
+        &set,
+        &VssPublicAggregateThresholdCommitmentSetContext {
+            setup_context_hash: &setup_context_hashes.setup_context_hash,
+            public_matrix_seed_hash,
+            participant_count: participants.len(),
+            trustee_identities: &trustee_identities,
+            rns_limb_count,
+            ring_degree: POLYNOMIAL_DEGREE,
+        },
+    )
+    .expect("aggregate threshold commitment set root");
+    set["aggregateThresholdCommitmentRoot"] = json!(aggregate_threshold_commitment_root);
     AggregateThresholdCommitmentSetupOutput {
         public_commitment_set: set,
         local_aggregate_opening_handoffs,
@@ -711,7 +725,7 @@ fn limbwise_difference(
         .collect()
 }
 
-fn assert_flooding_noise_is_independent(
+fn assert_flooding_noise_is_independent_and_rns_consistent(
     role_name: &str,
     interpolation_points: &[u64],
     noise_by_participant: &[Vec<Vec<u64>>],
@@ -734,6 +748,37 @@ fn assert_flooding_noise_is_independent(
         .first()
         .expect("at least one flooding-noise share")
         .len();
+    let denominator_clearing_factor = target_decryption_interpolation_denominator_clearing_factor(
+        TARGET_DECRYPTION_FIXTURE_PARTICIPANT_COUNT,
+    )
+    .expect("supported target-decryption fixture participant count");
+    let integer_noise_scale =
+        i128::from(PLAINTEXT_MODULUS) * i128::from(denominator_clearing_factor);
+    for participant_limbs in noise_by_participant {
+        let reference_limb = participant_limbs
+            .first()
+            .expect("participant flooding noise has an active reference limb");
+        for (rns_limb_index, participant_limb) in participant_limbs.iter().enumerate().skip(1) {
+            let modulus = DATA_PRIMES[rns_limb_index];
+            for (coefficient_index, coefficient) in participant_limb.iter().enumerate() {
+                let reference_coefficient = reference_limb[coefficient_index];
+                let reference_centered = if reference_coefficient <= DATA_PRIMES[0] / 2 {
+                    i128::from(reference_coefficient)
+                } else {
+                    i128::from(reference_coefficient) - i128::from(DATA_PRIMES[0])
+                };
+                let centered = if *coefficient <= modulus / 2 {
+                    i128::from(*coefficient)
+                } else {
+                    i128::from(*coefficient) - i128::from(modulus)
+                };
+                assert_eq!(
+                    centered, reference_centered,
+                    "{role_name} flooding noise must represent one integer polynomial in every RNS limb"
+                );
+            }
+        }
+    }
     let mut reconstructed_noise_is_nonzero = false;
     for (rns_limb_index, &modulus) in DATA_PRIMES.iter().enumerate().take(active_limb_count) {
         let lagrange_weights = lagrange_weights_at_zero(interpolation_points, modulus)
@@ -755,9 +800,9 @@ fn assert_flooding_noise_is_independent(
                     i128::from(*coefficient) - i128::from(modulus)
                 };
                 assert_eq!(
-                    centered_coefficient % i128::from(PLAINTEXT_MODULUS),
+                    centered_coefficient % integer_noise_scale,
                     0,
-                    "{role_name} flooding-noise contribution must be plaintext-scaled"
+                    "{role_name} flooding-noise contribution must include plaintext and interpolation-denominator scaling"
                 );
             }
             for (coefficient_index, coefficient) in participant_limb.iter().enumerate() {

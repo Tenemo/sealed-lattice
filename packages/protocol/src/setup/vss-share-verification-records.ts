@@ -94,15 +94,25 @@ const shareVerificationPayloadFields = (
             'setupIntent.objectType must be CollectiveBgvSetupIntent.',
         );
     }
+    const sourceRegistration =
+        input.setupIntent.trusteeRegistrations[
+            envelopeReference.sourceTrusteeRosterPosition
+        ];
+    if (
+        sourceRegistration?.objectType !==
+        'CollectiveBgvSetupIntentTrusteeRegistration'
+    ) {
+        throw new Error(
+            'setupIntent must contain the envelope source trustee registration at the source roster position.',
+        );
+    }
     const recipientRegistration =
         input.setupIntent.trusteeRegistrations[
             envelopeReference.recipientRosterPosition
         ];
     if (
         recipientRegistration?.objectType !==
-            'CollectiveBgvSetupIntentTrusteeRegistration' ||
-        recipientRegistration.trusteeIdentity !==
-            envelopeReference.recipientIdentity
+        'CollectiveBgvSetupIntentTrusteeRegistration'
     ) {
         throw new Error(
             'setupIntent must contain the envelope recipient registration at the recipient roster position.',
@@ -122,8 +132,7 @@ const shareVerificationPayloadFields = (
             envelopeReference.sourceTrusteeRosterPosition
         ];
     if (
-        sourceCommitment?.sourceTrusteeIdentity !==
-        envelopeReference.sourceTrusteeIdentity
+        sourceCommitment?.objectType !== 'VssPublicSourceCoefficientCommitments'
     ) {
         throw new Error(
             'vssPublicCoefficientCommitmentSet must contain the envelope source trustee at the source roster position.',
@@ -138,13 +147,15 @@ const shareVerificationPayloadFields = (
         setupContextHash: deriveCollectiveBgvSetupContextHash(
             input.setupContext,
         ),
-        sourceTrusteeIdentity: envelopeReference.sourceTrusteeIdentity,
+        sourceTrusteeIdentity: sourceRegistration.trusteeIdentity,
         sourceTrusteeRosterPosition:
             envelopeReference.sourceTrusteeRosterPosition,
-        recipientIdentity: envelopeReference.recipientIdentity,
+        recipientIdentity: recipientRegistration.trusteeIdentity,
         recipientRosterPosition: envelopeReference.recipientRosterPosition,
-        sourceTrusteeCommitmentRoot:
-            deriveCanonicalObjectHash(sourceCommitment),
+        sourceTrusteeCommitmentRoot: deriveCanonicalObjectHash({
+            ...sourceCommitment,
+            sourceTrusteeIdentity: sourceRegistration.trusteeIdentity,
+        }),
         privateVssEnvelopeCommitmentRoot:
             input.privateVssEnvelopeCommitmentRoot,
         privateEnvelopeHash: envelopeReference.privateEnvelopeHash,

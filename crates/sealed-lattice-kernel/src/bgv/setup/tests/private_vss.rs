@@ -88,7 +88,6 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
             compute_setup_commitment_for_tests(
                 public_matrix_seed_hash,
                 0,
-                rns_prime,
                 shamir_coefficient_index as u64,
                 &vec![0_u128; ring_degree],
                 opening_randomness,
@@ -108,8 +107,8 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
         "rnsLimbIndex": 0,
     }))
     .expect("private VSS proof randomness seed");
-    let proof_record =
-        private_vss_share_succinct_proof_record(PrivateVssShareSuccinctProofGenerationInput {
+    let proof_bytes_hash = private_vss_share_succinct_proof_bytes_hash_for_tests(
+        PrivateVssShareSuccinctProofGenerationInput {
             setup_context: &setup_context,
             public_matrix_seed_hash,
             private_envelope_aad_hash,
@@ -130,8 +129,9 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
                 carry_witnesses: vec![0_i128; ring_degree],
             },
             proof_randomness_seed_hex: &proof_randomness_seed_hex,
-        })
-        .expect("private VSS proof record");
+        },
+    )
+    .expect("private VSS proof bytes hash");
     verify_private_vss_share_succinct_relation_proof(
         PrivateVssShareSuccinctProofVerificationInput {
             setup_context: &setup_context,
@@ -148,7 +148,7 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
             coefficient_commitment_roots: &coefficient_commitment_roots,
             share_values: &share_values,
             coefficient_commitments: &coefficient_commitments,
-            proof_record: &proof_record,
+            proof_bytes_hash: &proof_bytes_hash,
         },
     )
     .expect("private VSS succinct proof verifies");
@@ -202,7 +202,6 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
                 compute_setup_commitment_for_tests(
                     public_matrix_seed_hash,
                     0,
-                    rns_prime,
                     shamir_coefficient_index as u64,
                     &messages_u128,
                     opening_randomness,
@@ -237,8 +236,8 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
         }))
         .expect("private VSS proof randomness seed");
         let recipient_identity = format!("trustee-{recipient_roster_position}");
-        let proof_record =
-            private_vss_share_succinct_proof_record(PrivateVssShareSuccinctProofGenerationInput {
+        let proof_bytes_hash = private_vss_share_succinct_proof_bytes_hash_for_tests(
+            PrivateVssShareSuccinctProofGenerationInput {
                 setup_context: &setup_context,
                 public_matrix_seed_hash,
                 private_envelope_aad_hash,
@@ -260,13 +259,14 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
                     carry_witnesses,
                 },
                 proof_randomness_seed_hex: &proof_randomness_seed_hex,
-            })
-            .unwrap_or_else(|error| {
-                panic!(
-                    "proof record for recipient {recipient_roster_position}: {}",
-                    error.message
-                )
-            });
+            },
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "proof bytes hash for recipient {recipient_roster_position}: {}",
+                error.message
+            )
+        });
         verify_private_vss_share_succinct_relation_proof(
             PrivateVssShareSuccinctProofVerificationInput {
                 setup_context: &setup_context,
@@ -283,7 +283,7 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
                 coefficient_commitment_roots: &coefficient_commitment_roots,
                 share_values: &share_values,
                 coefficient_commitments: &coefficient_commitments,
-                proof_record: &proof_record,
+                proof_bytes_hash: &proof_bytes_hash,
             },
         )
         .unwrap_or_else(|error| {
@@ -330,7 +330,6 @@ fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_openi
             compute_setup_commitment_for_tests(
                 public_matrix_seed_hash,
                 0,
-                rns_prime,
                 shamir_coefficient_index as u64,
                 &vec![0_u128; ring_degree],
                 opening_randomness,
@@ -362,8 +361,8 @@ fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_openi
     }))
     .expect("private VSS proof randomness seed");
 
-    let generation =
-        private_vss_share_succinct_proof_record(PrivateVssShareSuccinctProofGenerationInput {
+    let generation = private_vss_share_succinct_proof_bytes_hash_for_tests(
+        PrivateVssShareSuccinctProofGenerationInput {
             setup_context: &setup_context,
             public_matrix_seed_hash,
             private_envelope_aad_hash,
@@ -384,7 +383,8 @@ fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_openi
                 carry_witnesses: vec![0_i128; ring_degree],
             },
             proof_randomness_seed_hex: &proof_randomness_seed_hex,
-        });
+        },
+    );
 
     let error = generation.expect_err(
         "a coefficient message that disagrees with its commitment opening must be refused: \
@@ -422,8 +422,8 @@ fn private_vss_share_envelope_verifier_refuses_private_share_proof_bytes_hash_dr
         "fixture": "private-vss-proof-bytes-hash-drift",
     }))
     .expect("private VSS replacement proof bytes hash");
-    let proof_bytes_hash = &mut request["privateEnvelope"]["rnsShareOpenings"][0]["privateVssShareProof"]
-        ["proofBytesHash"];
+    let proof_bytes_hash =
+        &mut request["privateEnvelope"]["rnsShareOpenings"][0]["privateVssShareProofBytesHash"];
     assert_ne!(
         proof_bytes_hash.as_str().expect("proof bytes hash"),
         replacement_hash
@@ -440,7 +440,7 @@ fn private_vss_share_envelope_verifier_refuses_unauthenticated_proof_material_re
         "refuses-unauthenticated-proof-material-reference",
     );
     let proof_bytes_hash =
-        request["privateEnvelope"]["rnsShareOpenings"][0]["privateVssShareProof"]["proofBytesHash"]
+        request["privateEnvelope"]["rnsShareOpenings"][0]["privateVssShareProofBytesHash"]
             .as_str()
             .expect("private VSS proof bytes hash");
     let _removed_proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
@@ -523,7 +523,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
     }))
     .expect("private VSS envelope AAD hash");
 
-    let mut source_trustee_coefficient_commitments = Vec::new();
+    let mut source_trustee_coefficient_commitment_roots = Vec::new();
     let mut source_trustee_coefficient_commitment_material_records = Vec::new();
     let mut rns_share_openings = Vec::new();
     for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
@@ -546,7 +546,6 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
             let commitment = compute_setup_commitment_for_tests(
                 &public_matrix_seed_hash,
                 rns_limb_index,
-                rns_prime,
                 shamir_coefficient_index,
                 &coefficient_message_wide,
                 &randomness_by_column,
@@ -555,14 +554,9 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
             .expect("setup commitment");
             let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
             coefficient_commitment_roots.push(commitment_root.clone());
-            source_trustee_coefficient_commitments.push(serde_json::json!({
-                "objectType": "VssCoefficientCommitment",
-                "commitmentRoot": commitment_root.clone(),
-            }));
-            source_trustee_coefficient_commitment_material_records.push(serde_json::json!({
-                "objectType": "VssCoefficientCommitmentMaterial",
-                "commitment": setup_commitment_full_value(&commitment),
-            }));
+            source_trustee_coefficient_commitment_roots.push(commitment_root.clone());
+            source_trustee_coefficient_commitment_material_records
+                .push(setup_commitment_full_value(&commitment));
             coefficient_openings.push(serde_json::json!({
                 "shamirCoefficientIndex": shamir_coefficient_index,
                 "commitmentRoot": coefficient_commitment_roots
@@ -593,14 +587,18 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         }));
     }
 
-    let source_trustee_record = serde_json::json!({
+    let source_trustee_commitment_root = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssSourceTrusteeCoefficientCommitments",
         "sourceTrusteeIdentity": "trustee-0",
         "sourceTrusteeRosterPosition": 0,
-        "coefficientCommitments": source_trustee_coefficient_commitments,
+        "coefficientCommitmentRoots": &source_trustee_coefficient_commitment_roots,
+    }))
+    .expect("source trustee commitment root");
+    let source_trustee_record = serde_json::json!({
+        "objectType": "VssSourceTrusteeCoefficientCommitments",
+        "sourceTrusteeIdentity": "trustee-0",
+        "coefficientCommitmentRoots": source_trustee_coefficient_commitment_roots,
     });
-    let source_trustee_commitment_root = derive_canonical_object_hash(&source_trustee_record)
-        .expect("source trustee commitment root");
 
     let private_envelope = serde_json::json!({
         "objectType": "PrivateVssShareEnvelope",
@@ -646,10 +644,10 @@ fn proof_shaped_private_vss_share_envelope_request(
         .as_array()
         .expect("material records")
         .clone();
-    let source_commitment_records =
-        request["sourceTrusteeCoefficientCommitmentRecord"]["coefficientCommitments"]
+    let source_commitment_roots =
+        request["sourceTrusteeCoefficientCommitmentRecord"]["coefficientCommitmentRoots"]
             .as_array()
-            .expect("source coefficient commitment records")
+            .expect("source coefficient commitment roots")
             .clone();
     let rns_share_openings = request["privateEnvelope"]["rnsShareOpenings"]
         .as_array_mut()
@@ -669,11 +667,11 @@ fn proof_shaped_private_vss_share_envelope_request(
             .iter()
             .map(|value| value.as_u64().expect("share value"))
             .collect::<Vec<_>>();
-        let coefficient_commitment_roots = source_commitment_records
+        let coefficient_commitment_roots = source_commitment_roots
             [rns_limb_index * 4..(rns_limb_index + 1) * 4]
             .iter()
             .map(|value| {
-                value["commitmentRoot"]
+                value
                     .as_str()
                     .expect("coefficient commitment root")
                     .to_string()
@@ -684,8 +682,7 @@ fn proof_shaped_private_vss_share_envelope_request(
                 let material_record = material_records
                     .get(rns_limb_index * 4 + shamir_coefficient_index as usize)
                     .expect("coefficient commitment material");
-                parse_setup_commitment_full_value(&material_record["commitment"])
-                    .expect("setup commitment")
+                parse_setup_commitment_full_value(material_record).expect("setup commitment")
             })
             .collect::<Vec<_>>();
         let coefficient_messages_by_shamir_index = (0..4_u64)
@@ -720,33 +717,38 @@ fn proof_shaped_private_vss_share_envelope_request(
             "rnsLimbIndex": rns_limb_index,
         }))
         .expect("private VSS proof randomness seed");
-        let private_vss_share_proof =
-            private_vss_share_succinct_proof_record(PrivateVssShareSuccinctProofGenerationInput {
-                setup_context: &setup_context,
-                public_matrix_seed_hash: &public_matrix_seed_hash,
-                private_envelope_aad_hash: &private_envelope_aad_hash,
-                source_trustee_identity: "trustee-0",
-                source_trustee_roster_position: 0,
-                recipient_identity: "trustee-2",
-                recipient_roster_position: 2,
-                source_trustee_commitment_root: &source_trustee_commitment_root,
-                rns_limb_index,
-                rns_prime,
-                ring_degree,
-                coefficient_commitment_roots: &coefficient_commitment_roots,
-                share_values: &share_values,
-                coefficient_commitments: &coefficient_commitments,
-                witness: &PrivateVssShareSuccinctProofWitness {
-                    coefficient_messages_by_shamir_index,
-                    opening_randomness_by_shamir_index,
-                    carry_witnesses,
+        let private_vss_share_proof_bytes_hash =
+            private_vss_share_succinct_proof_bytes_hash_for_tests(
+                PrivateVssShareSuccinctProofGenerationInput {
+                    setup_context: &setup_context,
+                    public_matrix_seed_hash: &public_matrix_seed_hash,
+                    private_envelope_aad_hash: &private_envelope_aad_hash,
+                    source_trustee_identity: "trustee-0",
+                    source_trustee_roster_position: 0,
+                    recipient_identity: "trustee-2",
+                    recipient_roster_position: 2,
+                    source_trustee_commitment_root: &source_trustee_commitment_root,
+                    rns_limb_index,
+                    rns_prime,
+                    ring_degree,
+                    coefficient_commitment_roots: &coefficient_commitment_roots,
+                    share_values: &share_values,
+                    coefficient_commitments: &coefficient_commitments,
+                    witness: &PrivateVssShareSuccinctProofWitness {
+                        coefficient_messages_by_shamir_index,
+                        opening_randomness_by_shamir_index,
+                        carry_witnesses,
+                    },
+                    proof_randomness_seed_hex: &proof_randomness_seed_hex,
                 },
-                proof_randomness_seed_hex: &proof_randomness_seed_hex,
-            })
+            )
             .expect("private VSS share proof");
         limb_object.remove("aggregateOpening");
         limb_object.remove("carryWitnessesDecimal");
-        limb_object.insert("privateVssShareProof".to_string(), private_vss_share_proof);
+        limb_object.insert(
+            "privateVssShareProofBytesHash".to_string(),
+            serde_json::json!(private_vss_share_proof_bytes_hash),
+        );
     }
 
     request

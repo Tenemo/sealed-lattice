@@ -1,6 +1,10 @@
 use super::*;
 use rayon::prelude::*;
 
+use crate::bgv::setup::accepted_setup::{
+    evaluation_key_proof_common_binding, expected_relinearization_key_switch_seed,
+    scheduled_relinearization_levels,
+};
 use crate::bgv::setup::evaluation_key_share_material::{
     EvaluationKeyShareDerivedMaterialBinding, EvaluationKeyShareProofFamily,
 };
@@ -15,31 +19,21 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
     package: &serde_json::Value,
     accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> RelinearizationKeyShareRoundsFixture {
-    let schedule = &package["evaluatorKeySchedule"];
-    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
-        .as_str()
-        .expect("public matrix seed hash");
+    let evaluation_key_binding =
+        evaluation_key_proof_common_binding(package).expect("evaluation-key proof binding");
     let participant_count = participant_count_from_package(package);
     let trustee_roster_positions = (0..participant_count).collect::<Vec<_>>();
-    let level_schedule = schedule["relinearizationLevelSchedule"]
-        .as_array()
-        .expect("relinearization level schedule");
-    let scheduled_levels = level_schedule
-        .iter()
-        .map(|level_entry| level_entry["level"].as_u64().expect("level"))
-        .collect::<Vec<_>>();
+    let scheduled_levels =
+        scheduled_relinearization_levels().expect("relinearization level schedule");
 
-    let mut round_one_records = Vec::new();
+    let mut round_one_key_switch_component_material_roots = Vec::new();
     let mut round_one_aggregate_diagonals_by_level = BTreeMap::<u64, Vec<Vec<u64>>>::new();
     let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     for level in &scheduled_levels {
         let level = *level;
-        let key_switch_seed_hex = relinearization_key_switch_seed_for_test(
-            schedule,
-            public_matrix_seed_hash,
-            "round-one",
-            level,
-        );
+        let key_switch_seed_hex =
+            expected_relinearization_key_switch_seed(&evaluation_key_binding, "round-one", level)
+                .expect("round-one relinearization key-switch seed");
         // Generate every trustee's key-switch component material for this level
         // in parallel; the deterministic material is then consumed in roster
         // order by the sequential aggregate-accumulation and record-building
@@ -87,9 +81,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                         .expect("round-one aggregate accumulation");
                 }
             }
-            let mut record = serde_json::json!({
-                "objectType": "RelinearizationKeyShareRoundOne",
-            });
             let authenticated_material_root =
                 authenticate_evaluation_key_share_component_material_fixture(
                     EvaluationKeyShareProofFamily::Relinearization,
@@ -104,21 +95,16 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                     &fixture_material,
                     accepted_setup_session,
                 );
-            record["keySwitchComponentMaterialRoot"] =
-                serde_json::json!(authenticated_material_root);
-            round_one_records.push(record);
+            round_one_key_switch_component_material_roots.push(authenticated_material_root);
         }
     }
 
-    let mut round_two_records = Vec::new();
+    let mut round_two_key_switch_component_material_roots = Vec::new();
     for level in &scheduled_levels {
         let level = *level;
-        let key_switch_seed_hex = relinearization_key_switch_seed_for_test(
-            schedule,
-            public_matrix_seed_hash,
-            "round-two",
-            level,
-        );
+        let key_switch_seed_hex =
+            expected_relinearization_key_switch_seed(&evaluation_key_binding, "round-two", level)
+                .expect("round-two relinearization key-switch seed");
         let round_one_aggregate_diagonals = round_one_aggregate_diagonals_by_level
             .get(&level)
             .expect("round-one aggregate diagonals");
@@ -148,9 +134,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
             .zip(level_materials)
         {
             let trustee_identity = format!("trustee-{trustee_roster_position}");
-            let mut record = serde_json::json!({
-                "objectType": "RelinearizationKeyShareRoundTwo",
-            });
             let authenticated_material_root =
                 authenticate_evaluation_key_share_component_material_fixture(
                     EvaluationKeyShareProofFamily::Relinearization,
@@ -165,16 +148,14 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                     &fixture_material,
                     accepted_setup_session,
                 );
-            record["keySwitchComponentMaterialRoot"] =
-                serde_json::json!(authenticated_material_root);
-            round_two_records.push(record);
+            round_two_key_switch_component_material_roots.push(authenticated_material_root);
         }
     }
 
     let rounds = serde_json::json!({
         "objectType": "RelinearizationKeyShareRounds",
-        "roundOneRecords": round_one_records,
-        "roundTwoRecords": round_two_records,
+        "roundOneKeySwitchComponentMaterialRoots": round_one_key_switch_component_material_roots,
+        "roundTwoKeySwitchComponentMaterialRoots": round_two_key_switch_component_material_roots,
     });
 
     RelinearizationKeyShareRoundsFixture {

@@ -103,51 +103,7 @@ fn top_k_order_polynomial_masks_unselected_ranks() {
 
 #[test]
 #[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
-fn heavy_rust_kernel_packed_rank_evaluation_decrypts_expected_ranks_and_tie_policy() {
-    let context = EvaluatorContext::new(
-        "packed-rank-evaluation-decrypts-expected-ranks",
-        SELECTED_EVALUATOR_WORKING_LEVEL,
-    )
-    .expect("context");
-    let score_domain_max = 2;
-    let score_values = [0_u64, 2, 2];
-    let expected_rank_values = [2_u64, 0, 1];
-    let encrypted_scores = context
-        .key()
-        .encrypt_slots(&score_values, "boundary-tie-scores")
-        .expect("score ciphertext");
-    let packed_scores = pack_direct_score_slots(
-        &context,
-        &encrypted_scores,
-        score_values.len(),
-        "boundary-tie-pack",
-    )
-    .expect("packed scores");
-    let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
-        &context,
-        &packed_scores,
-        score_values.len(),
-        score_domain_max,
-        "boundary-tie-rank",
-    )
-    .expect("rank evaluation");
-    let decrypted_slots = context
-        .key()
-        .decrypt_to_slots(&rank_evaluation.packed_ranks)
-        .expect("rank slots");
-    let decrypted_rank_values = (0..score_values.len())
-        .map(|logical_index| decrypted_slots[logical_index])
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        decrypted_rank_values, expected_rank_values,
-        "packed ranks should follow higher-score-first and lower-index tie ordering"
-    );
-}
-
-#[test]
-#[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
-fn heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders() {
+fn heavy_rust_kernel_packed_rank_and_sparse_target_projection_decrypt_expected_values() {
     let context = EvaluatorContext::new(
         "sparse-target-projection-decrypts-selected-values",
         SELECTED_EVALUATOR_WORKING_LEVEL,
@@ -156,6 +112,7 @@ fn heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders()
     let score_domain_max = 2;
     let top_count = 2;
     let score_values = [0_u64, 2, 2, 1];
+    let expected_rank_values = [3_u64, 0, 1, 2];
     let expected_target_ids = [0_u64, 2, 3, 0];
     let expected_target_orders = [0_u64, 1, 2, 0];
     let encrypted_scores = context
@@ -184,6 +141,10 @@ fn heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders()
         top_count,
     )
     .expect("sparse target");
+    let decrypted_rank_slots = context
+        .key()
+        .decrypt_to_slots(&rank_evaluation.packed_ranks)
+        .expect("rank slots");
     let decrypted_target_id_slots = context
         .key()
         .decrypt_to_slots(&sparse_target.target_id)
@@ -192,6 +153,9 @@ fn heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders()
         .key()
         .decrypt_to_slots(&sparse_target.target_order)
         .expect("target order slots");
+    let decrypted_rank_values = (0..score_values.len())
+        .map(|logical_index| decrypted_rank_slots[logical_index])
+        .collect::<Vec<_>>();
     let decrypted_target_ids = (0..score_values.len())
         .map(|logical_index| decrypted_target_id_slots[logical_index])
         .collect::<Vec<_>>();
@@ -199,6 +163,10 @@ fn heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders()
         .map(|logical_index| decrypted_target_order_slots[logical_index])
         .collect::<Vec<_>>();
 
+    assert_eq!(
+        decrypted_rank_values, expected_rank_values,
+        "packed ranks should follow higher-score-first and lower-index tie ordering"
+    );
     assert_eq!(
         decrypted_target_ids, expected_target_ids,
         "sparse target should keep only selected option identifiers"

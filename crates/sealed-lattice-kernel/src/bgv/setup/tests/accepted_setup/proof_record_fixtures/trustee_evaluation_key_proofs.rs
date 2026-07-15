@@ -48,7 +48,7 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         .as_u64()
         .expect("same-secret bridge ring degree") as usize;
 
-    let mut proof_records = Vec::with_capacity(trustee_roster_positions.len());
+    let mut proof_bytes_hashes = Vec::with_capacity(trustee_roster_positions.len());
     for trustee_roster_position in trustee_roster_positions {
         let statement =
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
@@ -59,11 +59,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
                 accepted_setup_session: proof_binding_session,
             })
             .expect("trustee evaluation-key statement");
-        let witness = trustee_evaluation_key_witness_for_fixture(
-            trustee_roster_position,
-            ring_degree,
-            &statement,
-        );
         let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "TrusteeEvaluationKeyProofRandomness",
             "fixture": "trustee-evaluation-key-proof-randomness",
@@ -77,14 +72,16 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         // the atom prover's transcript changes; slksats4 binds the combined
         // source-constant relation directly.
         let checkpoint_key = format!("{statement_hash_hex}-slksats4");
-        let CheckpointedProofBytes {
-            proof_bytes,
-            was_semantically_verified,
-        } = checkpointed_proof_bytes_with_verification_state(
+        let proof_bytes = current_run_checkpointed_proof_bytes(
             TRUSTEE_EVALUATION_KEY_PROOF_CHECKPOINT_DIRECTORY,
             &checkpoint_key,
             |proof_bytes| verify_trustee_evaluation_key_proof_bytes(&statement, proof_bytes),
             || {
+                let witness = trustee_evaluation_key_witness_for_fixture(
+                    trustee_roster_position,
+                    ring_degree,
+                    &statement,
+                );
                 prove_trustee_evaluation_key_proof_bytes(
                     &statement,
                     &witness,
@@ -93,27 +90,18 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
                 .expect("trustee evaluation-key proof bytes")
             },
         );
-        let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
-        let record = serde_json::json!({
-            "objectType": "TrusteeEvaluationKeyProof",
-            "proofBytesHash": &proof_bytes_hash,
-        });
+        let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(proof_bytes.as_ref());
         authenticate_setup_proof_material_stream_for_test(
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             &proof_bytes_hash,
-            &proof_bytes,
+            proof_bytes.as_ref(),
         )
         .expect("authenticate trustee evaluation-key proof material stream");
         final_package_phase(&format!(
-            "generated trustee evaluation-key proof trustee {trustee_roster_position}"
+            "prepared trustee evaluation-key proof trustee {trustee_roster_position}"
         ));
-
-        if !was_semantically_verified {
-            verify_trustee_evaluation_key_proof_bytes(&statement, &proof_bytes)
-                .expect("verify generated trustee evaluation-key proof bytes");
-        }
         let verification_binding_hash = crate::bgv::setup::accepted_setup::
-            trustee_evaluation_key_proof_verification_binding_hash(&record, &statement)
+            trustee_evaluation_key_proof_verification_binding_hash(&proof_bytes_hash, &statement)
             .expect("trustee evaluation-key proof verification binding");
         crate::bgv::setup::retain_accepted_setup_proof_binding(
             proof_binding_session.session_handle,
@@ -122,12 +110,12 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             verification_binding_hash,
         )
         .expect("retain trustee evaluation-key proof binding");
-        proof_records.push(record);
+        proof_bytes_hashes.push(proof_bytes_hash);
     }
 
     let proof_set = serde_json::json!({
         "objectType": "TrusteeEvaluationKeyProofSet",
-        "proofRecords": proof_records,
+        "proofBytesHashes": proof_bytes_hashes,
     });
 
     TrusteeEvaluationKeyProofFixture { proof_set }

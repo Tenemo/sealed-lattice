@@ -16,7 +16,8 @@ use super::accepted_setup;
 #[cfg(test)]
 use super::private_vss_share_proof::{
     PrivateVssShareSuccinctProofGenerationInput, PrivateVssShareSuccinctProofWitness,
-    private_vss_share_succinct_proof_record, private_vss_share_succinct_statement_hash,
+    private_vss_share_succinct_proof_bytes_hash_for_tests,
+    private_vss_share_succinct_statement_hash,
 };
 #[cfg(test)]
 use super::sharing::canonical_trustee_point;
@@ -95,10 +96,21 @@ fn verify_private_vss_share_envelope_inner(
         Ok(private_envelope) => private_envelope,
         Err(refusal) => return Ok(Err(refusal)),
     };
+    let source_trustee_roster_position = match u64_field(
+        private_envelope,
+        "sourceTrusteeRosterPosition",
+        "privateEnvelope.sourceTrusteeRosterPosition",
+        PrivateVssRefusalCode::missing("sourceTrusteeRosterPositionMissing"),
+        "privateEnvelope.sourceTrusteeRosterPosition is required",
+    ) {
+        Ok(source_trustee_roster_position) => source_trustee_roster_position,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
 
     let source_trustee_binding = match verify_source_trustee_commitment_record(
         source_trustee_record,
         setup_context,
+        source_trustee_roster_position,
     )? {
         Ok(source_trustee_binding) => source_trustee_binding,
         Err(refusal) => return Ok(Err(refusal)),

@@ -15,6 +15,7 @@ describe('CI heavy-lane change classification', () => {
             ['README.md', 'SECURITY.md', 'reference-documents/paper.txt'],
             [
                 '.github/workflows/ci.yml',
+                'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/profile-and-state.kernel.test.ts',
                 'tests/node/tools/run-command.test.ts',
                 'tools/ci/run-command.ts',
             ],

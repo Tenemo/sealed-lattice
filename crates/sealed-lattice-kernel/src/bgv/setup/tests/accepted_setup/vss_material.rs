@@ -53,19 +53,39 @@ fn install_signed_vss_complaint(package: &mut serde_json::Value) {
                 && envelope_reference["recipientRosterPosition"] == recipient_roster_position
         })
         .expect("accepted pair private VSS envelope reference");
-    let source_trustee_identity = envelope_reference["sourceTrusteeIdentity"]
+    let source_trustee_identity = package["setupIntent"]["trusteeRegistrations"]
+        [source_trustee_roster_position as usize]["trusteeIdentity"]
         .as_str()
         .expect("source trustee identity");
-    let recipient_identity = envelope_reference["recipientIdentity"]
+    let recipient_identity = package["setupIntent"]["trusteeRegistrations"]
+        [recipient_roster_position as usize]["trusteeIdentity"]
         .as_str()
         .expect("recipient identity");
+    let trustee_identities = package["setupIntent"]["trusteeRegistrations"]
+        .as_array()
+        .expect("trustee registrations")
+        .iter()
+        .map(|registration| {
+            registration["trusteeIdentity"]
+                .as_str()
+                .expect("trustee identity")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
     let source_trustee_record = &package["vssPublicCoefficientCommitmentSet"]["sourceTrusteeRecords"]
         [source_trustee_roster_position as usize];
-    let source_trustee_commitment_root = derive_canonical_object_hash(source_trustee_record)
+    let source_trustee_commitment_root =
+        crate::bgv::setup::vss_commitment::vss_public_source_coefficient_record_root(
+            source_trustee_record,
+            source_trustee_identity,
+        )
         .expect("source trustee commitment root");
     let vss_coefficient_commitment_root =
-        derive_canonical_object_hash(&package["vssPublicCoefficientCommitmentSet"])
-            .expect("VSS coefficient commitment root");
+        crate::bgv::setup::vss_commitment::vss_public_coefficient_commitment_set_root(
+            &package["vssPublicCoefficientCommitmentSet"],
+            &trustee_identities,
+        )
+        .expect("VSS coefficient commitment root");
     let private_vss_envelope_commitment_root = derive_canonical_object_hash(
         &private_vss_envelope_commitment_set_root_input(&serde_json::json!({
             "objectType": "PrivateVssEnvelopeCommitmentSet",
@@ -145,28 +165,10 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
             "malformedEncoding",
         ),
         (
-            "wrong private VSS envelope AAD",
-            |package| {
-                package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
-                    ["privateEnvelopeAad"]["recipientIdentity"] = serde_json::json!("trustee-9");
-                rebind_first_private_vss_encrypted_envelope_hash(package);
-            },
-            "wrongHashOrRoot",
-        ),
-        (
             "wrong private VSS encrypted envelope hash",
             |package| {
                 package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelopeHash"] =
                     serde_json::json!(valid_hash('6'));
-            },
-            "wrongHashOrRoot",
-        ),
-        (
-            "wrong private VSS envelope recipient mailbox public-key hash",
-            |package| {
-                package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
-                    ["recipientMailboxPublicKeyHash"] = serde_json::json!(valid_hash('7'));
-                rebind_first_private_vss_encrypted_envelope_hash(package);
             },
             "wrongHashOrRoot",
         ),
@@ -279,9 +281,10 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
     }
 }
 
-fn compact_aggregate_threshold_proof_context(
-    fixture: &serde_json::Value,
-) -> crate::bgv::setup::VssAggregateThresholdProofContext<'_> {
+fn compact_aggregate_threshold_proof_context<'a>(
+    fixture: &'a serde_json::Value,
+    trustee_identities: &'a [String],
+) -> crate::bgv::setup::VssAggregateThresholdProofContext<'a> {
     let setup_context = &fixture["setupContext"];
     let aggregate_threshold_commitment_set = &fixture["vssPublicAggregateThresholdCommitmentSet"];
 
@@ -296,6 +299,7 @@ fn compact_aggregate_threshold_proof_context(
             .try_into()
             .expect("participant count fits usize"),
         rns_limb_count: DATA_PRIMES.len(),
+        trustee_identities,
     }
 }
 
@@ -311,12 +315,15 @@ fn verify_compact_aggregate_threshold_proofs(
         )?;
     }
     let package = &fixture.package;
+    let trustee_identities = (0..proof_record_fixtures::participant_count_from_package(package))
+        .map(|roster_position| format!("trustee-{roster_position}"))
+        .collect::<Vec<_>>();
     let verification = crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
         Some(&proof_binding_session),
         &package["vssPublicCoefficientCommitmentSet"],
         &package["vssPublicRecipientShareCommitmentSet"],
         aggregate_threshold_commitment_set,
-        &compact_aggregate_threshold_proof_context(package),
+        &compact_aggregate_threshold_proof_context(package, &trustee_identities),
     );
     match verification {
         Ok(()) => crate::bgv::setup::finish_accepted_setup_proof_binding_session(
@@ -385,7 +392,7 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
         (
             "missing aggregate threshold proof",
             |aggregate_threshold_commitment_set| {
-                aggregate_threshold_commitment_set["aggregateThresholdProofs"]
+                aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"]
                     .as_array_mut()
                     .expect("aggregate threshold proofs")
                     .pop();
@@ -396,9 +403,10 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
         (
             "duplicate aggregate threshold proof reference",
             |aggregate_threshold_commitment_set| {
-                let proofs = aggregate_threshold_commitment_set["aggregateThresholdProofs"]
-                    .as_array_mut()
-                    .expect("aggregate threshold proofs");
+                let proofs =
+                    aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"]
+                        .as_array_mut()
+                        .expect("aggregate threshold proofs");
                 proofs[1] = proofs[0].clone();
             },
             CanonicalErrorCode::MalformedLength,
@@ -407,9 +415,10 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
         (
             "cross-wired aggregate threshold proof references",
             |aggregate_threshold_commitment_set| {
-                let proofs = aggregate_threshold_commitment_set["aggregateThresholdProofs"]
-                    .as_array_mut()
-                    .expect("aggregate threshold proofs");
+                let proofs =
+                    aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"]
+                        .as_array_mut()
+                        .expect("aggregate threshold proofs");
                 proofs.swap(0, 1);
             },
             CanonicalErrorCode::InvalidProtocolObject,
@@ -418,7 +427,7 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
         (
             "tampered aggregate threshold proof bytes hash",
             |aggregate_threshold_commitment_set| {
-                aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]["proofBytesHash"] =
+                aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"][0] =
                     serde_json::json!(valid_hash('a'));
             },
             CanonicalErrorCode::ComponentMismatch,
@@ -427,7 +436,7 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
         (
             "aggregate threshold proof hash type mismatch",
             |aggregate_threshold_commitment_set| {
-                aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]["proofBytesHash"] =
+                aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"][0] =
                     serde_json::json!(17);
             },
             CanonicalErrorCode::InvalidFixture,

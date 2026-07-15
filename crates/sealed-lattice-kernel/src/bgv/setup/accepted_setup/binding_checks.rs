@@ -26,7 +26,26 @@ pub(in super::super) fn accepted_vss_coefficient_commitment_root(
                 "VSS public coefficient commitment set is required",
             )
         })?;
-    crate::bgv::setup::vss_commitment::vss_public_coefficient_commitment_set_root(commitment_set)
+    let expected_trustees = setup_intent::expected_trustees_from_setup_intent(
+        &setup_intent::setup_intent_trustee_registrations_from_package(setup_package)?,
+    );
+    let trustee_identities = (0..expected_trustees.len())
+        .map(|roster_position| {
+            expected_trustees
+                .get(&(roster_position as u64))
+                .cloned()
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "setup-intent trustee positions must be contiguous",
+                    )
+                })
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    crate::bgv::setup::vss_commitment::vss_public_coefficient_commitment_set_root(
+        commitment_set,
+        &trustee_identities,
+    )
 }
 
 pub(super) fn value_string<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {

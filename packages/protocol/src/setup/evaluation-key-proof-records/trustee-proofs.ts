@@ -1,4 +1,4 @@
-import { foundationProfile } from '@sealed-lattice/types';
+import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
 
 import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js';
 import {
@@ -8,12 +8,9 @@ import {
 import { deriveEvaluatorKeyScheduleRoot } from '../evaluator-key-schedule.js';
 
 import {
-    type EvaluationKeyShareComponentMaterialChunkSource,
-    type JsonRecord,
+    type EvaluationKeyShareComponentMaterialStream,
     type RelinearizationKeyShareRounds,
-    type TransportedEvaluationKeyShareComponentMaterialSet,
     type TransportedEvaluationKeyShareProofMaterialSet,
-    type TrusteeEvaluationKeyProofRecord,
     type TrusteeEvaluationKeyProofSet,
     type TrusteeEvaluationKeyProofsInput,
     type TrusteeEvaluationKeyStatementKey,
@@ -26,7 +23,6 @@ import {
     assertProtocolHash,
     assertJsonRecord,
     freshProofRandomnessHex,
-    stringRecordField,
 } from './encoding.js';
 import {
     assertSetupContextHashMatches,
@@ -34,7 +30,7 @@ import {
 } from './share-records.js';
 
 class BoundedComponentMaterialReader {
-    readonly #pullChunk: EvaluationKeyShareComponentMaterialChunkSource['pullChunk'];
+    readonly #pullChunk: EvaluationKeyShareComponentMaterialStream['pullChunk'];
     readonly #totalByteLength: number;
     #chunk?: Uint8Array;
     #chunkByteOffset = 0;
@@ -42,7 +38,7 @@ class BoundedComponentMaterialReader {
     #consumedByteLength = 0;
 
     public constructor(
-        pullChunk: EvaluationKeyShareComponentMaterialChunkSource['pullChunk'],
+        pullChunk: EvaluationKeyShareComponentMaterialStream['pullChunk'],
         totalByteLength: number,
     ) {
         this.#pullChunk = pullChunk;
@@ -154,7 +150,7 @@ const safeUnsignedWord = (view: DataView, byteOffset: number): number => {
 };
 
 const decodeTransportedComponentMaterial = async (
-    componentMaterialSource: EvaluationKeyShareComponentMaterialChunkSource,
+    componentMaterialStream: EvaluationKeyShareComponentMaterialStream,
     totalByteLength: number,
     level: number,
     ringDegree: number,
@@ -162,7 +158,7 @@ const decodeTransportedComponentMaterial = async (
 ): Promise<DecodedEvaluationKeyShareComponentMaterial> => {
     const digitCount = level + 1;
     const reader = new BoundedComponentMaterialReader(
-        componentMaterialSource.pullChunk,
+        componentMaterialStream.pullChunk,
         totalByteLength,
     );
     const materialBytes = await reader.readBytes(totalByteLength);
@@ -231,14 +227,13 @@ const decodeTransportedComponentMaterial = async (
 };
 
 const componentMaterialFromTransport = async (
-    record: JsonRecord,
+    expectedMaterialRoot: ProtocolHash,
     level: number,
     ringDegree: number,
     qSharePrimes: readonly number[],
-    transportedComponentMaterial: TransportedEvaluationKeyShareComponentMaterialSet,
-    componentMaterialSourcesByRoot: ReadonlyMap<
+    componentMaterialStreamsByRoot: ReadonlyMap<
         string,
-        EvaluationKeyShareComponentMaterialChunkSource
+        EvaluationKeyShareComponentMaterialStream
     >,
     decodedComponentMaterialByRoot: Map<
         string,
@@ -252,42 +247,28 @@ const componentMaterialFromTransport = async (
     if (digitCount > qSharePrimes.length) {
         throw new Error(`${objectPath}.level is outside the Q_share basis.`);
     }
-    const expectedMaterialRoot = stringRecordField(
-        record,
-        'keySwitchComponentMaterialRoot',
-        objectPath,
-    );
-    const matchingMaterials =
-        transportedComponentMaterial.componentMaterials.filter(
-            (componentMaterial) =>
-                componentMaterial.keySwitchComponentMaterialRoot ===
-                expectedMaterialRoot,
-        );
-    if (matchingMaterials.length !== 1) {
+    assertProtocolHash(expectedMaterialRoot, objectPath);
+    const componentMaterialStream =
+        componentMaterialStreamsByRoot.get(expectedMaterialRoot);
+    if (componentMaterialStream === undefined) {
         throw new Error(
-            `${objectPath} transported component material must match exactly one keySwitchComponentMaterialRoot.`,
+            `${objectPath} must have one component material stream in canonical record order.`,
         );
     }
-    const componentMaterial = assertJsonRecord(
-        matchingMaterials[0],
-        'componentMaterial',
-    );
-    const descriptorBytes = componentMaterial.descriptorBytes;
+    const descriptorBytes = componentMaterialStream.descriptorBytes;
     if (
         !ArrayBuffer.isView(descriptorBytes) ||
         Object.prototype.toString.call(descriptorBytes) !==
             '[object Uint8Array]' ||
-        (descriptorBytes as Uint8Array).byteLength === 0
+        descriptorBytes.byteLength === 0
     ) {
         throw new TypeError(
             `${objectPath} transported component material requires non-empty descriptorBytes.`,
         );
     }
-    const componentMaterialSource =
-        componentMaterialSourcesByRoot.get(expectedMaterialRoot);
-    if (componentMaterialSource === undefined) {
-        throw new Error(
-            `${objectPath} transported component material must match exactly one bounded component source.`,
+    if (typeof componentMaterialStream.pullChunk !== 'function') {
+        throw new TypeError(
+            `${objectPath} component material pullChunk must be a function.`,
         );
     }
     usedComponentMaterialRoots.add(expectedMaterialRoot);
@@ -303,7 +284,7 @@ const componentMaterialFromTransport = async (
         decodedComponentMaterialByRoot.get(expectedMaterialRoot);
     if (decodedMaterial === undefined) {
         decodedMaterial = decodeTransportedComponentMaterial(
-            componentMaterialSource,
+            componentMaterialStream,
             totalByteLength,
             level,
             ringDegree,
@@ -319,33 +300,123 @@ const componentMaterialFromTransport = async (
 };
 
 const relinearizationRecordForTrusteeAndLevel = (
-    records: readonly JsonRecord[],
+    roots: readonly ProtocolHash[],
     trusteeRosterPosition: number,
     level: number,
     scheduledLevels: readonly number[],
     participantCount: number,
     recordFieldName: string,
-): JsonRecord => {
+): ProtocolHash => {
     const levelIndex = scheduledLevels.indexOf(level);
     const expectedRecordCount = scheduledLevels.length * participantCount;
     if (
         levelIndex < 0 ||
-        records.length !== expectedRecordCount ||
+        roots.length !== expectedRecordCount ||
         trusteeRosterPosition >= participantCount
     ) {
         throw new Error(
             `${recordFieldName} must contain exactly one record per scheduled trustee and level.`,
         );
     }
-    const record =
-        records[levelIndex * participantCount + trusteeRosterPosition];
-    if (record === undefined) {
+    const root = roots[levelIndex * participantCount + trusteeRosterPosition];
+    if (root === undefined) {
         throw new Error(
             `${recordFieldName} must contain exactly one record per scheduled trustee and level.`,
         );
     }
 
-    return record;
+    return root;
+};
+
+const componentMaterialStreamsByAuthoritativeRoot = (
+    relinearizationKeyShareRounds: RelinearizationKeyShareRounds,
+    galoisKeyShareBatches: TrusteeEvaluationKeyProofsInput['galoisKeyShareBatches'],
+    componentMaterialStreams: readonly EvaluationKeyShareComponentMaterialStream[],
+    scheduledLevelCount: number,
+    requiredGaloisKeyCount: number,
+    participantCount: number,
+): ReadonlyMap<string, EvaluationKeyShareComponentMaterialStream> => {
+    const expectedRelinearizationRecordCount =
+        scheduledLevelCount * participantCount;
+    if (
+        relinearizationKeyShareRounds.roundOneKeySwitchComponentMaterialRoots
+            .length !== expectedRelinearizationRecordCount ||
+        relinearizationKeyShareRounds.roundTwoKeySwitchComponentMaterialRoots
+            .length !== expectedRelinearizationRecordCount
+    ) {
+        throw new Error(
+            'Relinearization records must contain exactly one record per scheduled trustee and level.',
+        );
+    }
+    if (galoisKeyShareBatches.length !== participantCount) {
+        throw new Error(
+            'galoisKeyShareBatches must contain one batch per participant.',
+        );
+    }
+
+    const authoritativeRoots: Readonly<{
+        readonly root: ProtocolHash;
+        readonly objectPath: string;
+    }>[] = [
+        ...relinearizationKeyShareRounds.roundOneKeySwitchComponentMaterialRoots.map(
+            (root, rootIndex) => ({
+                root,
+                objectPath: `relinearizationKeyShareRounds.roundOneKeySwitchComponentMaterialRoots.${String(rootIndex)}`,
+            }),
+        ),
+        ...relinearizationKeyShareRounds.roundTwoKeySwitchComponentMaterialRoots.map(
+            (root, rootIndex) => ({
+                root,
+                objectPath: `relinearizationKeyShareRounds.roundTwoKeySwitchComponentMaterialRoots.${String(rootIndex)}`,
+            }),
+        ),
+        ...galoisKeyShareBatches.flatMap((batch, batchIndex) => {
+            if (
+                batch.keySwitchComponentMaterialRoots.length !==
+                requiredGaloisKeyCount
+            ) {
+                throw new Error(
+                    'keySwitchComponentMaterialRoots must follow the frozen Galois key schedule.',
+                );
+            }
+            return batch.keySwitchComponentMaterialRoots.map(
+                (root, rootIndex) => ({
+                    root,
+                    objectPath: `galoisKeyShareBatches.${String(batchIndex)}.keySwitchComponentMaterialRoots.${String(rootIndex)}`,
+                }),
+            );
+        }),
+    ];
+    if (componentMaterialStreams.length !== authoritativeRoots.length) {
+        throw new Error(
+            'evaluationKeyShareComponentMaterialStreams must contain one stream per evaluation-key share record in canonical order.',
+        );
+    }
+
+    const streamsByRoot = new Map<
+        string,
+        EvaluationKeyShareComponentMaterialStream
+    >();
+    authoritativeRoots.forEach(({ root, objectPath }, recordIndex) => {
+        assertProtocolHash(root, objectPath);
+        if (streamsByRoot.has(root)) {
+            throw new Error(
+                'Evaluation-key share records must not repeat a component material root.',
+            );
+        }
+        const componentMaterialStream = componentMaterialStreams[recordIndex];
+        if (
+            componentMaterialStream === null ||
+            typeof componentMaterialStream !== 'object'
+        ) {
+            throw new TypeError(
+                `evaluationKeyShareComponentMaterialStreams.${String(recordIndex)} must be an object.`,
+            );
+        }
+        streamsByRoot.set(root, componentMaterialStream);
+    });
+
+    return streamsByRoot;
 };
 
 // The public round-one aggregate diagonal per scheduled level: for digit j,
@@ -358,10 +429,9 @@ const roundOnePublicAggregateDiagonals = async (
     qSharePrimes: readonly number[],
     participantCount: number,
     scheduledLevels: readonly number[],
-    transportedComponentMaterial: TransportedEvaluationKeyShareComponentMaterialSet,
-    componentMaterialSourcesByRoot: ReadonlyMap<
+    componentMaterialStreamsByRoot: ReadonlyMap<
         string,
-        EvaluationKeyShareComponentMaterialChunkSource
+        EvaluationKeyShareComponentMaterialStream
     >,
     decodedComponentMaterialByRoot: Map<
         string,
@@ -370,11 +440,12 @@ const roundOnePublicAggregateDiagonals = async (
     usedComponentMaterialRoots: Set<string>,
 ): Promise<ReadonlyMap<number, number[][]>> => {
     if (
-        relinearizationKeyShareRounds.roundOneRecords.length !==
+        relinearizationKeyShareRounds.roundOneKeySwitchComponentMaterialRoots
+            .length !==
         scheduledLevels.length * participantCount
     ) {
         throw new Error(
-            'roundOneRecords must contain one record per scheduled trustee and level.',
+            'roundOneKeySwitchComponentMaterialRoots must contain one root per scheduled trustee and level.',
         );
     }
     const aggregatesByLevel = new Map<
@@ -383,27 +454,25 @@ const roundOnePublicAggregateDiagonals = async (
     >();
     for (const [
         recordIndex,
-        record,
-    ] of relinearizationKeyShareRounds.roundOneRecords.entries()) {
-        const recordFields = record as JsonRecord;
+        componentMaterialRoot,
+    ] of relinearizationKeyShareRounds.roundOneKeySwitchComponentMaterialRoots.entries()) {
         const level =
             scheduledLevels[Math.floor(recordIndex / participantCount)];
         if (level === undefined) {
             throw new Error(
-                'roundOneRecords must follow the frozen relinearization schedule.',
+                'roundOneKeySwitchComponentMaterialRoots must follow the frozen relinearization schedule.',
             );
         }
         const digitCount = level + 1;
         const componentMaterial = await componentMaterialFromTransport(
-            recordFields,
+            componentMaterialRoot,
             level,
             ringDegree,
             qSharePrimes,
-            transportedComponentMaterial,
-            componentMaterialSourcesByRoot,
+            componentMaterialStreamsByRoot,
             decodedComponentMaterialByRoot,
             usedComponentMaterialRoots,
-            'roundOneRecords',
+            'roundOneKeySwitchComponentMaterialRoots',
         );
         const components = componentMaterial.componentBByDigit;
         if ((components[0]?.[0]?.length ?? 0) !== ringDegree) {
@@ -468,11 +537,11 @@ export const createTrusteeEvaluationKeyProofs = async (
     }
     input.galoisKeyShareBatches.forEach((batch) => {
         if (
-            batch.galoisKeyShareMaterialRecords.length !==
+            batch.keySwitchComponentMaterialRoots.length !==
             input.evaluatorKeySchedule.requiredGaloisKeySchedule.length
         ) {
             throw new Error(
-                'galoisKeyShareMaterialRecords must follow the frozen Galois key schedule.',
+                'keySwitchComponentMaterialRoots must follow the frozen Galois key schedule.',
             );
         }
     });
@@ -527,13 +596,7 @@ export const createTrusteeEvaluationKeyProofs = async (
             (statementRecord, expectedRosterPosition) => {
                 const expectedTrusteeReference =
                     trusteeReferences[expectedRosterPosition];
-                if (
-                    expectedTrusteeReference === undefined ||
-                    statementRecord.trusteeRosterPosition !==
-                        expectedRosterPosition ||
-                    statementRecord.trusteeIdentity !==
-                        expectedTrusteeReference.trusteeIdentity
-                ) {
+                if (expectedTrusteeReference === undefined) {
                     throw new Error(
                         'sameSecretBridgeStatementSet statement records must follow the canonical trustee roster order.',
                     );
@@ -556,8 +619,6 @@ export const createTrusteeEvaluationKeyProofs = async (
                             sourceCommitment.objectType !== 'SetupCommitment' ||
                             sourceCommitment.sourceRnsLimbIndex !==
                                 expectedRnsLimbIndex ||
-                            sourceCommitment.sourceMessageModulus !==
-                                input.qSharePrimes[expectedRnsLimbIndex] ||
                             sourceCommitment.shamirCoefficientIndex !== 0 ||
                             sourceCommitment.ringDegree !==
                                 sameSecretBridgeStatementSet.ringDegree ||
@@ -570,10 +631,7 @@ export const createTrusteeEvaluationKeyProofs = async (
                     },
                 );
 
-                return [
-                    statementRecord.trusteeRosterPosition,
-                    statementRecord,
-                ] as const;
+                return [expectedRosterPosition, statementRecord] as const;
             },
         ),
     );
@@ -587,29 +645,15 @@ export const createTrusteeEvaluationKeyProofs = async (
         input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
             (entry) => entry.level,
         );
-    const componentMaterialSourcesByRoot = new Map<
-        string,
-        EvaluationKeyShareComponentMaterialChunkSource
-    >();
-    for (const source of input.evaluationKeyShareComponentMaterialChunkSources) {
-        assertProtocolHash(
-            source.keySwitchComponentMaterialRoot,
-            'evaluationKeyShareComponentMaterialChunkSources.keySwitchComponentMaterialRoot',
+    const componentMaterialStreamsByRoot =
+        componentMaterialStreamsByAuthoritativeRoot(
+            input.relinearizationKeyShareRounds,
+            input.galoisKeyShareBatches,
+            input.evaluationKeyShareComponentMaterialStreams,
+            scheduledLevels.length,
+            input.evaluatorKeySchedule.requiredGaloisKeySchedule.length,
+            participantCount,
         );
-        if (
-            componentMaterialSourcesByRoot.has(
-                source.keySwitchComponentMaterialRoot,
-            )
-        ) {
-            throw new Error(
-                'evaluationKeyShareComponentMaterialChunkSources must not repeat a material root.',
-            );
-        }
-        componentMaterialSourcesByRoot.set(
-            source.keySwitchComponentMaterialRoot,
-            source,
-        );
-    }
     const usedComponentMaterialRoots = new Set<string>();
     const decodedComponentMaterialByRoot = new Map<
         string,
@@ -622,15 +666,14 @@ export const createTrusteeEvaluationKeyProofs = async (
         input.qSharePrimes,
         participantCount,
         scheduledLevels,
-        input.transportedEvaluationKeyShareComponentMaterial,
-        componentMaterialSourcesByRoot,
+        componentMaterialStreamsByRoot,
         decodedComponentMaterialByRoot,
         usedComponentMaterialRoots,
     );
 
-    const transportedProofMaterials: TransportedEvaluationKeyShareProofMaterialSet['proofMaterials'][number][] =
+    const proofMaterialStreams: TransportedEvaluationKeyShareProofMaterialSet['proofMaterialStreams'][number][] =
         [];
-    const proofRecords: TrusteeEvaluationKeyProofRecord[] = [];
+    const proofBytesHashes: ProtocolHash[] = [];
     for (const trusteeReference of trusteeReferences) {
         const witness = witnessesByRosterPosition.get(
             trusteeReference.trusteeRosterPosition,
@@ -658,23 +701,23 @@ export const createTrusteeEvaluationKeyProofs = async (
         const statementKeys: TrusteeEvaluationKeyStatementKey[] = [];
         for (const level of scheduledLevels) {
             const record = relinearizationRecordForTrusteeAndLevel(
-                input.relinearizationKeyShareRounds.roundOneRecords,
+                input.relinearizationKeyShareRounds
+                    .roundOneKeySwitchComponentMaterialRoots,
                 trusteeReference.trusteeRosterPosition,
                 level,
                 scheduledLevels,
                 participantCount,
-                'roundOneRecords',
+                'roundOneKeySwitchComponentMaterialRoots',
             );
             const componentMaterial = await componentMaterialFromTransport(
                 record,
                 level,
                 ringDegree,
                 input.qSharePrimes,
-                input.transportedEvaluationKeyShareComponentMaterial,
-                componentMaterialSourcesByRoot,
+                componentMaterialStreamsByRoot,
                 decodedComponentMaterialByRoot,
                 usedComponentMaterialRoots,
-                'roundOneRecords',
+                'roundOneKeySwitchComponentMaterialRoots',
             );
             statementKeys.push({
                 proofFamily: 'relinearization-round-one',
@@ -685,12 +728,13 @@ export const createTrusteeEvaluationKeyProofs = async (
         }
         for (const level of scheduledLevels) {
             const record = relinearizationRecordForTrusteeAndLevel(
-                input.relinearizationKeyShareRounds.roundTwoRecords,
+                input.relinearizationKeyShareRounds
+                    .roundTwoKeySwitchComponentMaterialRoots,
                 trusteeReference.trusteeRosterPosition,
                 level,
                 scheduledLevels,
                 participantCount,
-                'roundTwoRecords',
+                'roundTwoKeySwitchComponentMaterialRoots',
             );
             const aggregateDiagonal = aggregateDiagonalsByLevel.get(level);
             if (aggregateDiagonal === undefined) {
@@ -703,11 +747,10 @@ export const createTrusteeEvaluationKeyProofs = async (
                 level,
                 ringDegree,
                 input.qSharePrimes,
-                input.transportedEvaluationKeyShareComponentMaterial,
-                componentMaterialSourcesByRoot,
+                componentMaterialStreamsByRoot,
                 decodedComponentMaterialByRoot,
                 usedComponentMaterialRoots,
-                'roundTwoRecords',
+                'roundTwoKeySwitchComponentMaterialRoots',
             );
             statementKeys.push({
                 proofFamily: 'relinearization-round-two',
@@ -723,19 +766,22 @@ export const createTrusteeEvaluationKeyProofs = async (
             scheduleIndex,
             scheduleEntry,
         ] of input.evaluatorKeySchedule.requiredGaloisKeySchedule.entries()) {
-            const materialRecord = batch.galoisKeyShareMaterialRecords[
-                scheduleIndex
-            ] as JsonRecord;
+            const materialRoot =
+                batch.keySwitchComponentMaterialRoots[scheduleIndex];
+            if (materialRoot === undefined) {
+                throw new Error(
+                    'keySwitchComponentMaterialRoots must follow the frozen Galois key schedule.',
+                );
+            }
             const componentMaterial = await componentMaterialFromTransport(
-                materialRecord,
+                materialRoot,
                 scheduleEntry.level,
                 ringDegree,
                 input.qSharePrimes,
-                input.transportedEvaluationKeyShareComponentMaterial,
-                componentMaterialSourcesByRoot,
+                componentMaterialStreamsByRoot,
                 decodedComponentMaterialByRoot,
                 usedComponentMaterialRoots,
-                'galoisKeyShareMaterialRecords',
+                'keySwitchComponentMaterialRoots',
             );
             statementKeys.push({
                 proofFamily: 'galois-rotation',
@@ -778,40 +824,44 @@ export const createTrusteeEvaluationKeyProofs = async (
             generatedProof.proofBytesHash,
             'generatedProof.proofBytesHash',
         );
-        transportedProofMaterials.push({
-            proofBytesHash: generatedProof.proofBytesHash,
+        if (
+            typeof generatedProof.proofMaterialStream.pullChunk !== 'function'
+        ) {
+            throw new TypeError(
+                'generated proof material stream pullChunk must be a function.',
+            );
+        }
+        proofMaterialStreams.push({
             descriptorBytes: copyCanonicalStreamDescriptor(
-                generatedProof.canonicalMaterial.descriptorBytes,
-                'canonical generated proof material descriptorBytes',
+                generatedProof.proofMaterialStream.descriptorBytes,
+                'generated proof material stream descriptorBytes',
             ),
+            pullChunk: generatedProof.proofMaterialStream.pullChunk,
         });
-        proofRecords.push({
-            objectType: 'TrusteeEvaluationKeyProof',
-            proofBytesHash: generatedProof.proofBytesHash,
-        } satisfies TrusteeEvaluationKeyProofRecord);
+        proofBytesHashes.push(generatedProof.proofBytesHash);
     }
-    if (proofRecords.length === 0) {
+    if (proofBytesHashes.length === 0) {
         throw new Error(
             'trustee evaluation-key proofs require at least one participant.',
         );
     }
     if (
-        usedComponentMaterialRoots.size !== componentMaterialSourcesByRoot.size
+        usedComponentMaterialRoots.size !== componentMaterialStreamsByRoot.size
     ) {
         throw new Error(
-            'evaluationKeyShareComponentMaterialChunkSources contains material that no evaluation-key share record references.',
+            'evaluationKeyShareComponentMaterialStreams must match the canonical evaluation-key share records exactly.',
         );
     }
 
     const trusteeEvaluationKeyProofs = {
         objectType: 'TrusteeEvaluationKeyProofSet',
-        proofRecords,
+        proofBytesHashes,
     } satisfies TrusteeEvaluationKeyProofSet;
 
     return {
         trusteeEvaluationKeyProofs,
         transportedEvaluationKeyShareProofMaterial: {
-            proofMaterials: transportedProofMaterials,
+            proofMaterialStreams,
         },
     };
 };

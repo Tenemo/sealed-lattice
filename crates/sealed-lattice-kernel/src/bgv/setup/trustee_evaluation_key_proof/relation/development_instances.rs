@@ -347,7 +347,6 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
         commitments.push(compute_setup_big_signed_lifted_commitment(
             &public_matrix_seed_hash,
             source_limb_index,
-            source_modulus,
             0,
             &message,
             &randomness_i128,

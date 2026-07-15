@@ -1,5 +1,4 @@
 import {
-    type PublicKeyShareSuccinctProofRecord,
     type PublicKeyShareSuccinctProofSet,
     type PublicKeyShareSuccinctProofSetInput,
 } from './constants-and-types.js';
@@ -14,22 +13,18 @@ export const createPublicKeyShareSuccinctProofSet = (
         );
     }
 
-    const proofRecords = input.proofMaterials.map(
+    const proofBytesHashes = input.proofMaterials.map(
         (proofMaterial, trusteeRosterPosition) => {
             assertProtocolHash(
                 proofMaterial.proofBytesHash,
                 `proofMaterials.${String(trusteeRosterPosition)}.proofBytesHash`,
             );
-
-            return {
-                objectType: 'PublicKeyShareSuccinctProof',
-                proofBytesHash: proofMaterial.proofBytesHash,
-            } satisfies PublicKeyShareSuccinctProofRecord;
+            return proofMaterial.proofBytesHash;
         },
     );
 
     return {
         objectType: 'PublicKeyShareSuccinctProofSet',
-        proofRecords,
+        proofBytesHashes,
     } satisfies PublicKeyShareSuccinctProofSet;
 };

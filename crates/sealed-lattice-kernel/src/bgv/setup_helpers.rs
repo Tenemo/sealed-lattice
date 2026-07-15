@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
+#[cfg(test)]
 pub(super) fn read_non_empty_string<'a>(
     value: &'a Value,
     field_name: &str,
@@ -25,14 +26,7 @@ pub(super) fn read_non_empty_string<'a>(
     Ok(field)
 }
 
-pub(super) fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
-    value
-        .get(field_name)
-        .and_then(Value::as_str)
-        .filter(|field| !field.is_empty())
-        .ok_or_else(|| invalid_setup_fixture(format!("{field_name} must be a non-empty string")))
-}
-
+#[cfg(test)]
 pub(super) fn u64_field(value: &Value, field_name: &str) -> CanonicalResult<u64> {
     value
         .get(field_name)
@@ -42,6 +36,7 @@ pub(super) fn u64_field(value: &Value, field_name: &str) -> CanonicalResult<u64>
         })
 }
 
+#[cfg(test)]
 pub(super) fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<usize> {
     usize::try_from(u64_field(value, field_name)?)
         .map_err(|_| invalid_setup_fixture(format!("{field_name} does not fit usize")))
@@ -58,6 +53,7 @@ pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalRes
     Ok(())
 }
 
+#[cfg(test)]
 fn invalid_setup_fixture(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }

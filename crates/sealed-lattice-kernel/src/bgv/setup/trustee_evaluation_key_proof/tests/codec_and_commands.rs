@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::OnceLock;
 
 #[test]
 fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
@@ -95,8 +96,12 @@ fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
 fn key_bearing_atom_command_requires_source_linkage() {
     let (statement, witness) =
         generate_development_trustee_instance("cdcdabac", &[round_one(1)], SMALL_RING_DEGREE)
-            .expect("development instance without source linkage");
-    let request = proof_generation_request(&statement, &witness);
+            .expect("development instance");
+    let mut request = proof_generation_request(&statement, &witness);
+    request
+        .as_object_mut()
+        .expect("proof-generation request object")
+        .remove("sameSecretLinkage");
     assert!(
         super::generate_trustee_evaluation_key_proof_from_request(&request).is_err(),
         "a key-bearing statement without BDLOP source linkage must be refused"
@@ -283,19 +288,27 @@ fn proof_codec_decodes_chunked_material_across_adversarial_boundaries() {
     );
 }
 
-#[test]
-#[ignore = "heavy Rust kernel proof test; run pnpm run test:rust:kernel:heavy"]
-fn heavy_rust_kernel_proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
+fn folded_layer_proof_codec_fixture() -> &'static (TrusteeEvaluationKeyStatement, Vec<u8>) {
     // The adaptive low-degree final layer absorbs the whole recursion below a
     // 4096-coefficient claim bound, so folded-layer shape checks need the
     // smallest ring that still commits a folded Merkle layer.
-    let (statement, witness) =
-        generate_development_public_key_share_instance("c0dec0de", FOLDED_LAYER_RING_DEGREE)
-            .expect("public-key share instance");
-    let canonical_proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    let canonical_proof_bytes = encode_trustee_evaluation_key_proof(&canonical_proof);
-    let mut proof = decode_trustee_evaluation_key_proof(&statement, &canonical_proof_bytes)
+    static FIXTURE: OnceLock<(TrusteeEvaluationKeyStatement, Vec<u8>)> = OnceLock::new();
+    FIXTURE.get_or_init(|| {
+        let (statement, witness) =
+            generate_development_public_key_share_instance("c0dec0de", FOLDED_LAYER_RING_DEGREE)
+                .expect("public-key share instance");
+        let canonical_proof =
+            prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+        let canonical_proof_bytes = encode_trustee_evaluation_key_proof(&canonical_proof);
+        (statement, canonical_proof_bytes)
+    })
+}
+
+#[test]
+#[ignore = "heavy Rust kernel proof test; run pnpm run test:rust:kernel:heavy"]
+fn heavy_rust_kernel_proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
+    let (statement, canonical_proof_bytes) = folded_layer_proof_codec_fixture();
+    let mut proof = decode_trustee_evaluation_key_proof(statement, canonical_proof_bytes)
         .expect("decode canonical proof");
     proof.limb_proofs[0]
         .low_degree
@@ -303,7 +316,7 @@ fn heavy_rust_kernel_proof_codec_rejects_low_degree_shape_mismatches_before_veri
         .pop()
         .expect("at least one committed folded layer");
     let encoded = encode_trustee_evaluation_key_proof(&proof);
-    let error = match decode_trustee_evaluation_key_proof(&statement, &encoded) {
+    let error = match decode_trustee_evaluation_key_proof(statement, &encoded) {
         Ok(_) => panic!("wrong low-degree fold count must reject at decode"),
         Err(error) => error,
     };
@@ -315,7 +328,7 @@ fn heavy_rust_kernel_proof_codec_rejects_low_degree_shape_mismatches_before_veri
         error.message
     );
 
-    let mut proof = decode_trustee_evaluation_key_proof(&statement, &canonical_proof_bytes)
+    let mut proof = decode_trustee_evaluation_key_proof(statement, canonical_proof_bytes)
         .expect("decode canonical proof");
     proof.limb_proofs[0]
         .sumcheck_residual_low_degree
@@ -323,7 +336,7 @@ fn heavy_rust_kernel_proof_codec_rejects_low_degree_shape_mismatches_before_veri
         .pop()
         .expect("at least one committed folded layer");
     let encoded = encode_trustee_evaluation_key_proof(&proof);
-    let error = match decode_trustee_evaluation_key_proof(&statement, &encoded) {
+    let error = match decode_trustee_evaluation_key_proof(statement, &encoded) {
         Ok(_) => panic!("wrong residual low-degree fold count must reject at decode"),
         Err(error) => error,
     };
@@ -335,12 +348,13 @@ fn heavy_rust_kernel_proof_codec_rejects_low_degree_shape_mismatches_before_veri
         error.message
     );
 
-    let mut proof = canonical_proof;
+    let mut proof = decode_trustee_evaluation_key_proof(statement, canonical_proof_bytes)
+        .expect("decode canonical proof");
     // A batched folded-layer opening whose node count exceeds its per-layer
     // bound by one is rejected at decode, before any oversized allocation. The
     // bound mirrors the decoder: LOW_DEGREE_QUERY_COUNT openings over a layer of
     // the given depth.
-    let layout = LimbColumnLayout::new(&statement, 0).expect("limb layout");
+    let layout = LimbColumnLayout::new(statement, 0).expect("limb layout");
     let extension_size = layout.trace_size * DOMAIN_BLOWUP;
     let maximum_layer_zero_nodes =
         LOW_DEGREE_QUERY_COUNT * folded_layer_path_length(extension_size, 0);
@@ -348,7 +362,7 @@ fn heavy_rust_kernel_proof_codec_rejects_low_degree_shape_mismatches_before_veri
         .authentication_nodes
         .resize(maximum_layer_zero_nodes + 1, [0_u8; 64]);
     let encoded = encode_trustee_evaluation_key_proof(&proof);
-    let error = match decode_trustee_evaluation_key_proof(&statement, &encoded) {
+    let error = match decode_trustee_evaluation_key_proof(statement, &encoded) {
         Ok(_) => panic!("an oversized batched opening must reject at decode"),
         Err(error) => error,
     };
@@ -382,17 +396,10 @@ fn assert_noncanonical_encoded_proof_rejects(
 #[test]
 #[ignore = "heavy Rust kernel proof test; run pnpm run test:rust:kernel:heavy"]
 fn heavy_rust_kernel_proof_codec_rejects_noncanonical_values_in_every_encoded_area() {
-    let (statement, witness) =
-        generate_development_public_key_share_instance("c0decafe", FOLDED_LAYER_RING_DEGREE)
-            .expect("public-key share instance");
-    let canonical_proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    let canonical_proof_bytes = encode_trustee_evaluation_key_proof(&canonical_proof);
+    let (statement, canonical_proof_bytes) = folded_layer_proof_codec_fixture();
 
-    let mutation_cases: [(
-        &str,
-        fn(&mut super::prover::SuccinctEvaluationKeyProof, u64),
-    ); 8] = [
+    type ProofResidueMutation = fn(&mut super::prover::SuccinctEvaluationKeyProof, u64);
+    let mutation_cases: [(&str, ProofResidueMutation); 8] = [
         ("masked consistency claim", |proof, modulus| {
             proof.limb_proofs[0].masked_consistency_claims[0] = modulus;
         }),
@@ -429,8 +436,8 @@ fn heavy_rust_kernel_proof_codec_rejects_noncanonical_values_in_every_encoded_ar
     for (label, mutate_proof) in mutation_cases {
         assert_noncanonical_encoded_proof_rejects(
             label,
-            &statement,
-            &canonical_proof_bytes,
+            statement,
+            canonical_proof_bytes,
             mutate_proof,
         );
     }

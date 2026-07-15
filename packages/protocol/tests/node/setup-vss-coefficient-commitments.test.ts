@@ -434,32 +434,30 @@ describe('VSS coefficient commitment builders', () => {
                 sourceTrusteeOpeningState(0),
             ]),
         );
-        const firstMaterialRecord =
+        const firstCommitment =
             bundle.privateOpeningMaterialBySourceTrustee[0]
-                ?.sourceTrusteeCoefficientCommitmentMaterialRecords[0];
+                ?.coefficientCommitments[0];
         const firstOpening = requiredOpening(sourceTrusteeOpeningState(0), 0);
 
         expect(
             bundle.commitmentSet.sourceTrusteeRecords.map(
-                (record) => record.sourceTrusteeRosterPosition,
+                (record) => record.sourceTrusteeIdentity,
             ),
-        ).toEqual([0, 1]);
+        ).toEqual(['trustee-0', 'trustee-1']);
         expect(bundle.commitmentSet.setupContextHash).toBe(setupContextHash);
         expect(deriveCanonicalObjectHash(bundle.commitmentSet)).toBe(
             deriveCanonicalObjectHash(repeatedBundle.commitmentSet),
         );
         const recomputedCommitment = setupCommitmentComputer({
-                publicMatrixSeedHash,
-                sourceRnsLimbIndex: firstOpening.rnsLimbIndex,
-                shamirCoefficientIndex: firstOpening.shamirCoefficientIndex,
-                messageCoefficients: firstOpening.coefficientMessage,
-                randomnessByColumn: firstOpening.randomnessByColumn,
-                ringDegree,
-            }).commitment;
-        expect(firstMaterialRecord?.commitment).toEqual(recomputedCommitment);
-        expect(
-            deriveCanonicalObjectHash(recomputedCommitment),
-        ).toBe(
+            publicMatrixSeedHash,
+            sourceRnsLimbIndex: firstOpening.rnsLimbIndex,
+            shamirCoefficientIndex: firstOpening.shamirCoefficientIndex,
+            messageCoefficients: firstOpening.coefficientMessage,
+            randomnessByColumn: firstOpening.randomnessByColumn,
+            ringDegree,
+        }).commitment;
+        expect(firstCommitment).toEqual(recomputedCommitment);
+        expect(deriveCanonicalObjectHash(recomputedCommitment)).toBe(
             bundle.privateOpeningMaterialBySourceTrustee[0]
                 ?.coefficientOpenings[0]?.commitmentRoot,
         );

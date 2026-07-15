@@ -1,18 +1,18 @@
-import { deriveCanonicalObjectHash } from "@sealed-lattice/crypto";
-import type { ProtocolHash } from "@sealed-lattice/types";
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
     deriveCollectiveBgvSetupContextHash,
-} from "./common-fields.js";
+} from './common-fields.js';
 import {
     derivePublicKeyShareSetRoot,
     publicKeyShareRecordsByRosterPosition,
-} from "./public-key-share-records/share-statement-records.js";
-import type { PublicKeyShareSet } from "./public-key-share-records.js";
-import type { CollectiveBgvSetupContext } from "./vss-share-verification-records.js";
+} from './public-key-share-records/share-statement-records.js';
+import type { PublicKeyShareSet } from './public-key-share-records.js';
+import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 type RelinearizationLevelScheduleEntry = Readonly<{
     readonly level: number;
@@ -24,7 +24,7 @@ export type RequiredGaloisKeyScheduleEntry = Readonly<{
 }>;
 
 export type EvaluatorKeySchedule = Readonly<{
-    readonly objectType: "EvaluatorKeySchedule";
+    readonly objectType: 'EvaluatorKeySchedule';
     readonly setupContextHash: ProtocolHash;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly publicKeyShareSetRoot: ProtocolHash;
@@ -64,12 +64,12 @@ const validateRequiredGaloisSchedule = (
     });
     const seenKeys = new Set<string>();
     sortedEntries.forEach((entry) => {
-        assertPositiveSafeInteger(entry.rotation, "rotation");
-        assertNonNegativeSafeInteger(entry.level, "level");
+        assertPositiveSafeInteger(entry.rotation, 'rotation');
+        assertNonNegativeSafeInteger(entry.level, 'level');
         const key = `${String(entry.rotation)}:${String(entry.level)}`;
         if (seenKeys.has(key)) {
             throw new Error(
-                "requiredGaloisKeySchedule must not repeat a rotation and level.",
+                'requiredGaloisKeySchedule must not repeat a rotation and level.',
             );
         }
         seenKeys.add(key);
@@ -87,10 +87,10 @@ const selectedEvaluatorWorkingLevel = 16;
 const createRelinearizationLevelSchedule = (
     rnsLimbCount: number,
 ): RelinearizationLevelScheduleEntry[] => {
-    assertPositiveSafeInteger(rnsLimbCount, "rnsLimbCount");
+    assertPositiveSafeInteger(rnsLimbCount, 'rnsLimbCount');
     if (selectedEvaluatorWorkingLevel >= rnsLimbCount) {
         throw new Error(
-            "selected evaluator working level must stay inside the Q_share basis.",
+            'selected evaluator working level must stay inside the Q_share basis.',
         );
     }
 
@@ -101,7 +101,7 @@ export const createEvaluatorKeySchedule = (
     input: EvaluatorKeyScheduleInput,
 ): EvaluatorKeySchedule => {
     if (input.qSharePrimes.length === 0) {
-        throw new Error("qSharePrimes must contain at least one RNS prime.");
+        throw new Error('qSharePrimes must contain at least one RNS prime.');
     }
     input.qSharePrimes.forEach((qSharePrime, rnsLimbIndex) => {
         assertPositiveSafeInteger(
@@ -109,14 +109,14 @@ export const createEvaluatorKeySchedule = (
             `qSharePrimes.${String(rnsLimbIndex)}`,
         );
     });
-    assertProtocolHash(input.publicMatrixSeedHash, "publicMatrixSeedHash");
+    assertProtocolHash(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
     publicKeyShareRecordsByRosterPosition(input);
     const rnsLimbCount = input.qSharePrimes.length;
     const requiredGaloisKeySchedule = validateRequiredGaloisSchedule(
         input.requiredGaloisKeySchedule,
     );
     return {
-        objectType: "EvaluatorKeySchedule",
+        objectType: 'EvaluatorKeySchedule',
         setupContextHash: deriveCollectiveBgvSetupContextHash(
             input.setupContext,
         ),

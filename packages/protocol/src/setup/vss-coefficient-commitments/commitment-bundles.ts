@@ -1,10 +1,10 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
+    type SetupCommitmentValue,
     type VssCoefficientCommitmentBundle,
     type VssCoefficientCommitmentBundleInput,
-    type VssCoefficientCommitmentMaterialRecord,
-    type VssCoefficientCommitmentRecord,
     type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningMaterial,
     type VssSourceTrusteeCoefficientCommitmentContributionInput,
@@ -75,8 +75,8 @@ const createVssSourceTrusteeCoefficientCommitmentContribution = (
         input.ringDegree,
         input.thresholdDegree,
     );
-    const materialRecords: VssCoefficientCommitmentMaterialRecord[] = [];
-    const coefficientCommitments: VssCoefficientCommitmentRecord[] = [];
+    const coefficientCommitments: SetupCommitmentValue[] = [];
+    const coefficientCommitmentRoots: ProtocolHash[] = [];
     const sourceTrusteePrivateOpenings: VssCoefficientOpeningMaterial[] = [];
     input.qSharePrimes.forEach((_rnsPrime, rnsLimbIndex) => {
         for (
@@ -107,28 +107,19 @@ const createVssSourceTrusteeCoefficientCommitmentContribution = (
                 ...openingState,
                 commitmentRoot,
             });
-            coefficientCommitments.push({
-                objectType: 'VssCoefficientCommitment',
-                commitmentRoot,
-            });
-            const materialRecord = {
-                objectType: 'VssCoefficientCommitmentMaterial',
-                commitment: commitmentComputation.commitment,
-            } satisfies VssCoefficientCommitmentMaterialRecord;
-            materialRecords.push(materialRecord);
+            coefficientCommitmentRoots.push(commitmentRoot);
+            coefficientCommitments.push(commitmentComputation.commitment);
         }
     });
     const sourceTrusteeRecord = {
         objectType: 'VssSourceTrusteeCoefficientCommitments',
         sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
-        sourceTrusteeRosterPosition:
-            sourceTrusteeState.sourceTrusteeRosterPosition,
-        coefficientCommitments,
+        coefficientCommitmentRoots,
     } as const satisfies VssSourceTrusteeCoefficientCommitmentRecord;
 
     return {
         sourceTrusteeCoefficientCommitmentRecord: sourceTrusteeRecord,
-        sourceTrusteeCoefficientCommitmentMaterialRecords: materialRecords,
+        coefficientCommitments,
         coefficientOpenings: sourceTrusteePrivateOpenings,
     };
 };

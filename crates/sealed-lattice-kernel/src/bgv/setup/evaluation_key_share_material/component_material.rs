@@ -16,7 +16,7 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
     key_switch_seed_hex: &str,
     level: usize,
     ring_degree: usize,
-    component_vector_entries: &[Value],
+    component_vectors_little_endian_hex_by_digit_and_limb: &[String],
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "EvaluationKeyShareComponentVectorSet",
@@ -25,7 +25,7 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
         "keySwitchSeedHex": key_switch_seed_hex,
         "level": level,
         "ringDegree": ring_degree,
-        "componentVectors": component_vector_entries,
+        "componentVectorsLittleEndianHexByDigitAndLimb": component_vectors_little_endian_hex_by_digit_and_limb,
     }))
 }
 
@@ -189,15 +189,14 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
     }))
 }
 
-pub(in crate::bgv::setup) fn component_b_vectors_from_record(
+pub(in crate::bgv::setup) fn component_b_vectors_from_root(
     proof_family: EvaluationKeyShareProofFamily,
-    record: &Value,
+    expected_material_root: &str,
     level: usize,
     ring_degree: usize,
     derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
     accepted_setup_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
-    let expected_material_root = string_field(record, "keySwitchComponentMaterialRoot")?;
     validate_hash_string(
         expected_material_root,
         "evaluationKeyShareRecord.keySwitchComponentMaterialRoot",
@@ -323,7 +322,8 @@ fn decode_evaluation_key_share_component_vectors(
     }
     validate_hex_string(derived_binding.key_switch_seed_hex, "keySwitchSeedHex")?;
     let mut component_b_by_digit = vec![vec![Vec::<u64>::new(); limb_count]; digit_count];
-    let mut entries = Vec::with_capacity(digit_count * limb_count);
+    let mut component_vectors_little_endian_hex_by_digit_and_limb =
+        Vec::with_capacity(digit_count * limb_count);
     for component_b_limbs in &mut component_b_by_digit {
         for (component_b_limb, &rns_prime) in component_b_limbs.iter_mut().zip(DATA_PRIMES.iter()) {
             let mut coefficients = Vec::with_capacity(ring_degree);
@@ -336,9 +336,8 @@ fn decode_evaluation_key_share_component_vectors(
                 }
                 coefficients.push(coefficient);
             }
-            entries.push(json!({
-                "coefficientsLeHex": coefficient_vector_le_hex(&coefficients),
-            }));
+            component_vectors_little_endian_hex_by_digit_and_limb
+                .push(coefficient_vector_le_hex(&coefficients));
             *component_b_limb = coefficients;
         }
     }
@@ -353,7 +352,7 @@ fn decode_evaluation_key_share_component_vectors(
         derived_binding.key_switch_seed_hex,
         level,
         ring_degree,
-        &entries,
+        &component_vectors_little_endian_hex_by_digit_and_limb,
     )?;
 
     Ok(DecodedEvaluationKeyShareComponentMaterial {

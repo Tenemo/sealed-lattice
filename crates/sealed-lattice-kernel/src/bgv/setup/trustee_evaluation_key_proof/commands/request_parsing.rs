@@ -20,12 +20,10 @@ use serde_json::Value;
 
 fn same_secret_bridge_fields_from_value(
     statement_value: &Value,
+    context: &SuccinctSetupProofContext,
+    public_matrix_seed_hash: &str,
     ring_degree: usize,
 ) -> CanonicalResult<SameSecretBridgeStatement> {
-    let source_trustee_identity =
-        read_string(statement_value, "sourceTrusteeIdentity")?.to_string();
-    let source_trustee_roster_position = read_u64(statement_value, "sourceTrusteeRosterPosition")?;
-    let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
     let target_constant_commitment_values = statement_value
         .get("targetConstantCommitments")
         .and_then(Value::as_array)
@@ -65,9 +63,9 @@ fn same_secret_bridge_fields_from_value(
         )
         .collect::<CanonicalResult<Vec<_>>>()?;
     Ok(SameSecretBridgeStatement {
-        public_matrix_seed_hash,
-        source_trustee_identity,
-        source_trustee_roster_position,
+        public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
+        source_trustee_identity: context.trustee_identity.clone(),
+        source_trustee_roster_position: context.trustee_roster_position,
         bridge_rns_primes: DATA_PRIMES.to_vec(),
         target_constant_commitment_roots,
         target_constant_commitments,
@@ -78,12 +76,19 @@ fn same_secret_bridge_fields_from_value(
 // committed material the atom schedule's linkage connects.
 fn same_secret_bridge_from_statement_request(
     request: &Value,
+    context: &SuccinctSetupProofContext,
     ring_degree: usize,
 ) -> CanonicalResult<SameSecretBridgeStatement> {
     let statement_value = request
         .get("sameSecretBridge")
         .ok_or_else(|| invalid_succinct_setup_proof("sameSecretBridge must be present"))?;
-    same_secret_bridge_fields_from_value(statement_value, ring_degree)
+    let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?;
+    same_secret_bridge_fields_from_value(
+        statement_value,
+        context,
+        public_matrix_seed_hash,
+        ring_degree,
+    )
 }
 
 fn same_secret_linkage_from_statement_request(
@@ -144,6 +149,7 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn statement_from_reques
                 key,
                 same_secret_bridge: same_secret_bridge_from_statement_request(
                     request,
+                    &context,
                     ring_degree,
                 )?,
             }
@@ -251,7 +257,6 @@ pub(super) fn vss_share_linkage_statement_from_request(
             source_recipient_share_commitment_root: primary_item
                 .source_recipient_share_commitment_root,
             source_rns_limb_index: primary_item.source_rns_limb_index,
-            source_message_modulus: primary_item.source_message_modulus,
             coefficient_commitment_roots: primary_item.coefficient_commitment_roots,
             coefficient_commitments: primary_item.coefficient_commitments,
             recipient_share_commitment_root: primary_item.recipient_share_commitment_root,
@@ -302,23 +307,19 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn same_secret_bridge_st
         context_value,
         SuccinctSetupProofFamilyShape::SameSecretBridge,
     )?;
-    let source_trustee_identity =
-        read_string(statement_value, "sourceTrusteeIdentity")?.to_string();
-    let source_trustee_roster_position = read_u64(statement_value, "sourceTrusteeRosterPosition")?;
-    if context.trustee_identity != source_trustee_identity
-        || context.trustee_roster_position != source_trustee_roster_position
-    {
-        return Err(invalid_succinct_setup_proof(
-            "same-secret bridge context trustee must match the source trustee",
-        ));
-    }
-    let bridge_fields = same_secret_bridge_fields_from_value(statement_value, ring_degree)?;
+    let same_secret_linkage = same_secret_linkage_from_statement_request(request)?;
+    let bridge_fields = same_secret_bridge_fields_from_value(
+        statement_value,
+        &context,
+        &same_secret_linkage.public_matrix_seed_hash,
+        ring_degree,
+    )?;
 
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree,
         proof: SetupProofStatement::SameSecretBridge {
-            same_secret_linkage: same_secret_linkage_from_statement_request(request)?,
+            same_secret_linkage,
             same_secret_bridge: bridge_fields,
         },
     };
@@ -346,43 +347,6 @@ pub(super) fn same_secret_bridge_witness_from_request(
             )?,
         },
     })
-}
-
-#[cfg(test)]
-mod same_secret_bridge_witness_tests {
-    use super::*;
-
-    #[test]
-    fn derives_negative_indicators_from_the_ternary_secret() {
-        let mut request = serde_json::json!({
-            "secretCoefficients": [-1, 0, 1],
-            "openingRandomnessByLimb": [],
-            "vssCommittedMaterialSeedsByBoundMessage": [],
-        });
-        let witness = same_secret_bridge_witness_from_request(&request)
-            .expect("a ternary same-secret witness must parse");
-        let TrusteeEvaluationKeyWitness::SameSecretBridge {
-            secret_coefficients,
-            linkage,
-            ..
-        } = witness
-        else {
-            panic!("the same-secret parser must return a same-secret witness");
-        };
-        assert_eq!(secret_coefficients, [-1, 0, 1]);
-        assert_eq!(linkage.negative_indicator_coefficients, [1, 0, 0]);
-
-        request["secretCoefficients"][1] = serde_json::json!(2);
-        let Err(error) = same_secret_bridge_witness_from_request(&request) else {
-            panic!("a non-ternary same-secret witness must reject");
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("secretCoefficients must contain only ternary coefficients"),
-            "unexpected non-ternary secret error: {error}"
-        );
-    }
 }
 
 pub(super) fn vss_share_linkage_item_from_value(
@@ -416,7 +380,15 @@ pub(super) fn vss_share_linkage_item_from_value(
                 "{field_name}.sourceRnsLimbIndex does not fit usize"
             ))
         })?;
-    let source_message_modulus = read_u64(value, "sourceMessageModulus")?;
+    let source_message_modulus =
+        DATA_PRIMES
+            .get(source_rns_limb_index)
+            .copied()
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(format!(
+                    "{field_name}.sourceRnsLimbIndex is outside the canonical modulus schedule"
+                ))
+            })?;
     let coefficient_commitment_roots = read_string_array(value, "coefficientCommitmentRoots")?;
     let coefficient_commitment_values = value
         .get("coefficientCommitments")
@@ -484,10 +456,46 @@ pub(super) fn vss_share_linkage_item_from_value(
         recipient_identity: read_string(value, "recipientIdentity")?.to_string(),
         recipient_roster_position: read_u64(value, "recipientRosterPosition")?,
         source_rns_limb_index,
-        source_message_modulus,
         coefficient_commitment_roots,
         coefficient_commitments,
         recipient_share_commitment_root,
         recipient_share_commitment,
     })
+}
+
+#[cfg(test)]
+mod same_secret_bridge_witness_tests {
+    use super::*;
+
+    #[test]
+    fn derives_negative_indicators_from_the_ternary_secret() {
+        let mut request = serde_json::json!({
+            "secretCoefficients": [-1, 0, 1],
+            "openingRandomnessByLimb": [],
+            "vssCommittedMaterialSeedsByBoundMessage": [],
+        });
+        let witness = same_secret_bridge_witness_from_request(&request)
+            .expect("a ternary same-secret witness must parse");
+        let TrusteeEvaluationKeyWitness::SameSecretBridge {
+            secret_coefficients,
+            linkage,
+            ..
+        } = witness
+        else {
+            panic!("the same-secret parser must return a same-secret witness");
+        };
+        assert_eq!(secret_coefficients, [-1, 0, 1]);
+        assert_eq!(linkage.negative_indicator_coefficients, [1, 0, 0]);
+
+        request["secretCoefficients"][1] = serde_json::json!(2);
+        let Err(error) = same_secret_bridge_witness_from_request(&request) else {
+            panic!("a non-ternary same-secret witness must reject");
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("secretCoefficients must contain only ternary coefficients"),
+            "unexpected non-ternary secret error: {error}"
+        );
+    }
 }

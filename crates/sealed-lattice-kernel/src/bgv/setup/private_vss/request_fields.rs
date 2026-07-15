@@ -150,28 +150,3 @@ pub(super) fn u64_vector_field(
         })
         .collect()
 }
-
-pub(super) fn hash_vector_field(
-    value: &Value,
-    field_name: &str,
-    object_path: &str,
-    code: PrivateVssRefusalCode,
-    message: impl Into<String>,
-) -> Result<Vec<String>, PrivateVssRefusal> {
-    let values = array_field(value, field_name, object_path, code, message)?;
-    values
-        .iter()
-        .map(|value| {
-            let hash = value.as_str().ok_or_else(|| {
-                PrivateVssRefusal::new(
-                    code,
-                    format!("{object_path} must contain protocol hashes"),
-                    object_path,
-                )
-            })?;
-            validate_hash_string(hash, object_path)
-                .map_err(|error| PrivateVssRefusal::new(code, error.message, object_path))?;
-            Ok(hash.to_string())
-        })
-        .collect()
-}

@@ -3,12 +3,11 @@ export {
     type CollectivePublicKey,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialContributionInput,
-    type PublicKeyShareMaterialChunkSource,
+    type PublicKeyShareMaterialStream,
     type PublicKeyShareSet,
     type PublicKeyShareSuccinctProofSet,
     type PublicKeyShareSuccinctProofSetInput,
     type SetupPackagePublicKeyShareMaterialSet,
-    type SetupTransportedPublicKeyShareMaterial,
     type TransportedPublicKeyShareProofMaterialSet,
 } from './public-key-share-records/constants-and-types.js';
 export { createPublicKeyShareSet } from './public-key-share-records/share-statement-records.js';

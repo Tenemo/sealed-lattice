@@ -2,38 +2,26 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type {
     CanonicalProofMaterialChunkPull,
-    TransportedSetupProofMaterialSet,
+    SetupProofMaterialStreamSet,
 } from '../setup-proof-material-transport.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 export const publicKeyShareCoefficientVectorHashDomain =
     'sealed-lattice-bgv-rns/public-key-share-coefficient-vector';
 
-type PublicKeyShareCoefficientVectorHash = Readonly<{
-    readonly coefficientVectorHash512: ProtocolHash;
-}>;
-
 export type PublicKeyShareContributionInput = Readonly<{
-    readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
-    readonly shareCoefficientVectorHash512ByLimb: readonly PublicKeyShareCoefficientVectorHash[];
-}>;
-
-export type PublicKeyShareCoefficientVectorMaterial = Readonly<{
-    readonly coefficientsLeHex: string;
+    readonly shareCoefficientVectorHashesByLimb: readonly ProtocolHash[];
 }>;
 
 export type PublicKeyShareMaterialContributionInput = Readonly<{
-    readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
-    readonly shareCoefficientVectorsByLimb: readonly PublicKeyShareCoefficientVectorMaterial[];
+    readonly shareCoefficientVectorsLittleEndianHexByLimb: readonly string[];
 }>;
 
 export type PublicKeyShareRecord = Readonly<{
     readonly objectType: 'PublicKeyShare';
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-    readonly shareCoefficientVectorHash512ByLimb: readonly PublicKeyShareCoefficientVectorHash[];
+    readonly shareCoefficientVectorHashesByLimb: readonly ProtocolHash[];
 }>;
 
 export type PublicKeyShareSet = Readonly<{
@@ -43,7 +31,7 @@ export type PublicKeyShareSet = Readonly<{
 
 export type PublicKeyShareMaterialRecord = Readonly<{
     readonly objectType: 'PublicKeyShareMaterial';
-    readonly shareCoefficientVectorsByLimb: readonly PublicKeyShareCoefficientVectorMaterial[];
+    readonly shareCoefficientVectorsLittleEndianHexByLimb: readonly string[];
 }>;
 
 export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<{
@@ -51,12 +39,8 @@ export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<{
     readonly publicKeyShareMaterialSetRoot: ProtocolHash;
 }>;
 
-export type SetupTransportedPublicKeyShareMaterial = Readonly<{
-    readonly publicKeyShareMaterialSetRoot: ProtocolHash;
+export type PublicKeyShareMaterialStream = Readonly<{
     readonly descriptorBytes: Uint8Array;
-}>;
-
-export type PublicKeyShareMaterialChunkSource = Readonly<{
     readonly pullChunk: CanonicalProofMaterialChunkPull;
 }>;
 
@@ -74,8 +58,7 @@ export type BinaryChunkedPublicKeyShareMaterialBundleInput = Readonly<
 
 export type BinaryChunkedPublicKeyShareMaterialBundle = Readonly<{
     readonly materialSet: BinaryChunkedPublicKeyShareMaterialSet;
-    readonly transportedPublicKeyShareMaterial: SetupTransportedPublicKeyShareMaterial;
-    readonly publicKeyShareMaterialChunkSource: PublicKeyShareMaterialChunkSource;
+    readonly publicKeyShareMaterialStream: PublicKeyShareMaterialStream;
 }>;
 
 export type SetupPackagePublicKeyShareMaterialSet =
@@ -85,23 +68,14 @@ export type PublicKeyShareSuccinctProofMaterial = Readonly<{
     readonly proofBytesHash: ProtocolHash;
 }>;
 
-export type PublicKeyShareSuccinctProofRecord = Readonly<{
-    readonly objectType: 'PublicKeyShareSuccinctProof';
-    readonly proofBytesHash: ProtocolHash;
-}>;
-
 export type PublicKeyShareSuccinctProofSet = Readonly<{
     readonly objectType: 'PublicKeyShareSuccinctProofSet';
-    readonly proofRecords: readonly PublicKeyShareSuccinctProofRecord[];
-}>;
-
-type CollectivePublicKeyCoefficientVectorMaterial = Readonly<{
-    readonly coefficientsLeHex: string;
+    readonly proofBytesHashes: readonly ProtocolHash[];
 }>;
 
 export type CollectivePublicKey = Readonly<{
     readonly objectType: 'CollectivePublicKey';
-    readonly aggregateCoefficientVectorsByLimb: readonly CollectivePublicKeyCoefficientVectorMaterial[];
+    readonly aggregateCoefficientVectorsLittleEndianHexByLimb: readonly string[];
 }>;
 
 export type PublicKeyShareSetInput = {
@@ -126,4 +100,4 @@ export type PublicKeyShareSuccinctProofSetInput = Readonly<{
 }>;
 
 export type TransportedPublicKeyShareProofMaterialSet =
-    TransportedSetupProofMaterialSet;
+    SetupProofMaterialStreamSet;

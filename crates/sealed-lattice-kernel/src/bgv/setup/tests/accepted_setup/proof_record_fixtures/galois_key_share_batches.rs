@@ -1,6 +1,10 @@
 use super::*;
 use rayon::prelude::*;
 
+use crate::bgv::setup::accepted_setup::{
+    evaluation_key_proof_common_binding, expected_galois_key_switch_seed,
+    expected_required_galois_key_schedule,
+};
 use crate::bgv::setup::evaluation_key_share_material::{
     EvaluationKeyShareDerivedMaterialBinding, EvaluationKeyShareProofFamily,
 };
@@ -12,14 +16,12 @@ pub(in super::super) fn galois_key_share_batches_object(
     package: &serde_json::Value,
     accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> GaloisKeyShareBatchesFixture {
-    let schedule = &package["evaluatorKeySchedule"];
-    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
-        .as_str()
-        .expect("public matrix seed hash");
+    let evaluation_key_binding =
+        evaluation_key_proof_common_binding(package).expect("evaluation-key proof binding");
     let participant_count = participant_count_from_package(package);
-    let required_schedule = schedule["requiredGaloisKeySchedule"]
-        .as_array()
-        .expect("Galois key schedule");
+    let required_schedule =
+        expected_required_galois_key_schedule().expect("required Galois key schedule");
+    let required_schedule = required_schedule.as_array().expect("Galois key schedule");
     let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     // Generate each trustee's Galois key-switch component material across the
     // scheduled rotations in parallel, then consume that trustee's material in
@@ -36,12 +38,9 @@ pub(in super::super) fn galois_key_share_batches_object(
                 .map(|schedule_entry| {
                     let rotation = schedule_entry["rotation"].as_u64().expect("rotation");
                     let level = schedule_entry["level"].as_u64().expect("level");
-                    let key_switch_seed_hex = galois_key_switch_seed_for_test(
-                        schedule,
-                        public_matrix_seed_hash,
-                        rotation,
-                        level,
-                    );
+                    let key_switch_seed_hex =
+                        expected_galois_key_switch_seed(&evaluation_key_binding, rotation, level)
+                            .expect("Galois key-switch seed");
                     evaluation_key_share_fixture_material(
                         EvaluationKeyShareProofFamily::Galois,
                         trustee_roster_position,
@@ -53,22 +52,16 @@ pub(in super::super) fn galois_key_share_batches_object(
                     )
                 })
                 .collect();
-            let mut galois_key_share_material_records = Vec::new();
+            let mut key_switch_component_material_roots = Vec::new();
             for (schedule_entry, fixture_material) in
                 required_schedule.iter().zip(trustee_materials)
             {
                 let rotation = schedule_entry["rotation"].as_u64().expect("rotation");
                 let level = schedule_entry["level"].as_u64().expect("level");
-                let key_switch_seed_hex = galois_key_switch_seed_for_test(
-                    schedule,
-                    public_matrix_seed_hash,
-                    rotation,
-                    level,
-                );
+                let key_switch_seed_hex =
+                    expected_galois_key_switch_seed(&evaluation_key_binding, rotation, level)
+                        .expect("Galois key-switch seed");
                 let key_switch_domain = format!("galois-{rotation}");
-                let mut material_record = serde_json::json!({
-                    "objectType": "GaloisKeyShareMaterial",
-                });
                 let authenticated_material_root =
                     authenticate_evaluation_key_share_component_material_fixture(
                         EvaluationKeyShareProofFamily::Galois,
@@ -83,13 +76,11 @@ pub(in super::super) fn galois_key_share_batches_object(
                         &fixture_material,
                         accepted_setup_session,
                     );
-                material_record["keySwitchComponentMaterialRoot"] =
-                    serde_json::json!(authenticated_material_root);
-                galois_key_share_material_records.push(material_record);
+                key_switch_component_material_roots.push(authenticated_material_root);
             }
             serde_json::json!({
                 "objectType": "GaloisKeyShareBatch",
-                "galoisKeyShareMaterialRecords": galois_key_share_material_records,
+                "keySwitchComponentMaterialRoots": key_switch_component_material_roots,
             })
         })
         .collect::<Vec<_>>();

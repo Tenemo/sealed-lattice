@@ -8,7 +8,6 @@ import {
     type PublicKeyShareSetInput,
 } from './constants-and-types.js';
 import {
-    assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertProtocolHash,
     deriveCollectiveBgvSetupContextHash,
@@ -19,16 +18,16 @@ import {
 export const derivePublicKeyShareRoot = (
     setupContext: PublicKeyShareSetInput['setupContext'],
     publicMatrixSeedHash: PublicKeyShareSetInput['publicMatrixSeedHash'],
+    trusteeRosterPosition: number,
     shareRecord: PublicKeyShareRecord,
 ) =>
     deriveCanonicalObjectHash({
         objectType: 'PublicKeyShare',
         setupContextHash: deriveCollectiveBgvSetupContextHash(setupContext),
-        trusteeIdentity: shareRecord.trusteeIdentity,
-        trusteeRosterPosition: shareRecord.trusteeRosterPosition,
+        trusteeRosterPosition,
         publicMatrixSeedHash,
-        shareCoefficientVectorHash512ByLimb:
-            shareRecord.shareCoefficientVectorHash512ByLimb,
+        shareCoefficientVectorHashesByLimb:
+            shareRecord.shareCoefficientVectorHashesByLimb,
     });
 
 export const derivePublicKeyShareSetRoot = (
@@ -48,7 +47,6 @@ const validatePublicKeyShare = (
     expectedRosterPosition: number,
     qSharePrimes: readonly number[],
 ): void => {
-    assertNonEmptyString(contribution.trusteeIdentity, 'trusteeIdentity');
     assertNonNegativeSafeInteger(
         contribution.trusteeRosterPosition,
         'trusteeRosterPosition',
@@ -59,18 +57,40 @@ const validatePublicKeyShare = (
         );
     }
     if (
-        contribution.shareCoefficientVectorHash512ByLimb.length !==
+        contribution.shareCoefficientVectorHashesByLimb.length !==
         qSharePrimes.length
     ) {
         throw new Error(
-            'shareCoefficientVectorHash512ByLimb must contain one entry for every Q_share limb.',
+            'shareCoefficientVectorHashesByLimb must contain one entry for every Q_share limb.',
         );
     }
-    contribution.shareCoefficientVectorHash512ByLimb.forEach(
-        (coefficientHash) => {
+    contribution.shareCoefficientVectorHashesByLimb.forEach(
+        (coefficientVectorHash) => {
             assertProtocolHash(
-                coefficientHash.coefficientVectorHash512,
-                'shareCoefficientVectorHash512ByLimb.coefficientVectorHash512',
+                coefficientVectorHash,
+                'shareCoefficientVectorHashesByLimb',
+            );
+        },
+    );
+};
+
+const validatePublicKeyShareRecord = (
+    shareRecord: PublicKeyShareRecord,
+    qSharePrimes: readonly number[],
+): void => {
+    if (
+        shareRecord.shareCoefficientVectorHashesByLimb.length !==
+        qSharePrimes.length
+    ) {
+        throw new Error(
+            'shareCoefficientVectorHashesByLimb must contain one entry for every Q_share limb.',
+        );
+    }
+    shareRecord.shareCoefficientVectorHashesByLimb.forEach(
+        (coefficientVectorHash) => {
+            assertProtocolHash(
+                coefficientVectorHash,
+                'shareCoefficientVectorHashesByLimb',
             );
         },
     );
@@ -95,10 +115,8 @@ export const createPublicKeyShareSet = (
             );
             return {
                 objectType: 'PublicKeyShare',
-                trusteeIdentity: contribution.trusteeIdentity,
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                shareCoefficientVectorHash512ByLimb:
-                    contribution.shareCoefficientVectorHash512ByLimb,
+                shareCoefficientVectorHashesByLimb:
+                    contribution.shareCoefficientVectorHashesByLimb,
             } satisfies PublicKeyShareRecord;
         },
     );
@@ -126,15 +144,8 @@ export const publicKeyShareRecordsByRosterPosition = (
     }
     const recordsByRosterPosition = new Map<number, PublicKeyShareRecord>();
     shareRecords.forEach((shareRecord, expectedRosterPosition) => {
-        validatePublicKeyShare(
-            shareRecord,
-            expectedRosterPosition,
-            input.qSharePrimes,
-        );
-        recordsByRosterPosition.set(
-            shareRecord.trusteeRosterPosition,
-            shareRecord,
-        );
+        validatePublicKeyShareRecord(shareRecord, input.qSharePrimes);
+        recordsByRosterPosition.set(expectedRosterPosition, shareRecord);
     });
 
     return recordsByRosterPosition;

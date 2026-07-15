@@ -119,11 +119,13 @@ pub fn append_string(output: &mut Vec<u8>, value: &str) {
     append_bytes(output, value.as_bytes());
 }
 
+#[cfg(test)]
 pub struct CanonicalReader<'a> {
     bytes: &'a [u8],
     offset: usize,
 }
 
+#[cfg(test)]
 impl<'a> CanonicalReader<'a> {
     pub fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, offset: 0 }

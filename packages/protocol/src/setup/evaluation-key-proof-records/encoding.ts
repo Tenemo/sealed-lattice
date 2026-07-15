@@ -1,5 +1,5 @@
-import { deriveCanonicalObjectHash } from "@sealed-lattice/crypto";
-import type { ProtocolHash } from "@sealed-lattice/types";
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     assertJsonRecord,
@@ -9,13 +9,10 @@ import {
     assertProtocolHash,
     bytesFromHex,
     bytesToHex,
-} from "../common-fields.js";
-export { coefficientVectorFromLittleEndianHex } from "../coefficient-vector-encoding.js";
+} from '../common-fields.js';
+export { coefficientVectorFromLittleEndianHex } from '../coefficient-vector-encoding.js';
 
-import {
-    type EvaluationKeyShareProofFamily,
-    type JsonRecord,
-} from "./constants-and-types.js";
+import { type EvaluationKeyShareProofFamily } from './constants-and-types.js';
 
 export {
     assertJsonRecord,
@@ -26,45 +23,13 @@ export {
     bytesFromHex,
 };
 
-export const stringRecordField = (
-    record: JsonRecord,
-    fieldName: string,
-    objectPath: string,
-): string => {
-    const value = record[fieldName];
-    if (typeof value !== "string" || value.length === 0) {
-        throw new TypeError(`${objectPath}.${fieldName} must be non-empty.`);
-    }
-
-    return value;
-};
-
-export const nonNegativeIntegerRecordField = (
-    record: JsonRecord,
-    fieldName: string,
-    objectPath: string,
-): number => {
-    const value = record[fieldName];
-    if (
-        typeof value !== "number" ||
-        !Number.isSafeInteger(value) ||
-        value < 0
-    ) {
-        throw new TypeError(
-            `${objectPath}.${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-
-    return value;
-};
-
 const proofRandomnessByteLength = 64;
 
 const defaultProofRandomBytes = (byteLength: number): Uint8Array => {
     const cryptoProvider = globalThis.crypto;
     if (cryptoProvider === undefined) {
         throw new Error(
-            "Trustee evaluation-key proof generation requires Web Crypto getRandomValues.",
+            'Trustee evaluation-key proof generation requires Web Crypto getRandomValues.',
         );
     }
     const bytes = new Uint8Array(byteLength);
@@ -77,7 +42,7 @@ export const freshProofRandomnessHex = (): string => {
     const bytes = defaultProofRandomBytes(proofRandomnessByteLength);
     if (bytes.byteLength !== proofRandomnessByteLength) {
         throw new Error(
-            "proof randomness byte source must return exactly 64 bytes.",
+            'proof randomness byte source must return exactly 64 bytes.',
         );
     }
 
@@ -90,18 +55,16 @@ export const evaluationKeyShareComponentVectorRoot = (
     keySwitchSeedHex: string,
     level: number,
     ringDegree: number,
-    componentVectors: readonly Readonly<{
-        readonly coefficientsLeHex: string;
-    }>[],
+    componentVectorsLittleEndianHexByDigitAndLimb: readonly string[],
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
-        objectType: "EvaluationKeyShareComponentVectorSet",
+        objectType: 'EvaluationKeyShareComponentVectorSet',
         proofFamily,
         keySwitchDomain,
         keySwitchSeedHex,
         level,
         ringDegree,
-        componentVectors,
+        componentVectorsLittleEndianHexByDigitAndLimb,
     });
 
 export const evaluationKeyShareComponentMaterialReferenceRoot = (
@@ -115,7 +78,7 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
     level: number,
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
-        objectType: "EvaluationKeyShareComponentMaterialReference",
+        objectType: 'EvaluationKeyShareComponentMaterialReference',
         proofFamily,
         trusteeIdentity,
         trusteeRosterPosition,

@@ -161,43 +161,6 @@ fn collective_setup_intent_refuses_tampered_signature_bytes() {
 }
 
 #[test]
-fn collective_setup_verifier_binds_private_vss_envelopes_to_registered_mailbox_keys() {
-    let mut package = collective_setup_intent_package();
-    let coefficient_set = vss_public_coefficient_commitment_set_object(&package, 128);
-    let coefficient_view = coefficient_set.clone();
-    let setup_context = &package["setupContext"];
-    let private_vss_envelope_commitments = private_vss_envelope_commitments_object(
-        setup_context["ceremonyId"].as_str().expect("ceremony id"),
-        setup_context["manifestHash"]
-            .as_str()
-            .expect("manifest hash"),
-        setup_context["rosterHash"].as_str().expect("roster hash"),
-        setup_context["setupParametersHash"]
-            .as_str()
-            .expect("setup parameters hash"),
-        setup_context["setupEpoch"].as_str().expect("setup epoch"),
-        &package["commonRandomness"],
-        &coefficient_view,
-        setup_context["participantCount"]
-            .as_u64()
-            .expect("participant count"),
-    );
-    package["privateVssEnvelopeCommitments"] = private_vss_envelope_commitments;
-    package["vssPublicCoefficientCommitmentSet"] = coefficient_set;
-    package["setupIntent"]["trusteeRegistrations"][0]["privateVssMailboxPublicKeyHash"] =
-        serde_json::json!(valid_hash('8'));
-    rebind_collective_setup_intent_registration(&mut package, 0);
-
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-    assert_eq!(result["isValid"], false, "unexpected result: {result}");
-    assert_eq!(
-        result["refusalReason"], "wrongHashOrRoot",
-        "unexpected refusal: {result}"
-    );
-}
-
-#[test]
 fn collective_setup_verifier_refuses_malformed_setup_context_tokens_first() {
     for (field_name, malformed_value) in [
         ("ceremonyId", "ceremony one"),

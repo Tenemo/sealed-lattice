@@ -15,10 +15,10 @@ pub(super) struct StatementRecordVerificationInput<'a> {
     pub(super) threshold_degree: usize,
     pub(super) ring_degree: usize,
     pub(super) statement_set: StatementSetBinding<'a>,
+    pub(super) trustee_identity: &'a str,
 }
 
 pub(super) struct ReconstructedSameSecretBridgeProofVerification<'a> {
-    pub(super) bridge_statement: &'a Value,
     pub(super) coefficient_commitment_set: &'a Value,
     pub(super) statement_set: StatementSetBinding<'a>,
     pub(super) expected_position: usize,
@@ -26,6 +26,7 @@ pub(super) struct ReconstructedSameSecretBridgeProofVerification<'a> {
     pub(super) threshold_degree: usize,
     pub(super) ring_degree: usize,
     pub(super) source_constant_commitment_values: &'a [Value],
+    pub(super) trustee_identity: &'a str,
 }
 
 pub(in crate::bgv::setup) struct AuthoritativeSameSecretBridgeTarget<'a> {
@@ -34,7 +35,6 @@ pub(in crate::bgv::setup) struct AuthoritativeSameSecretBridgeTarget<'a> {
 
 pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
     coefficient_commitment_set: &'a Value,
-    trustee_identity: &str,
     expected_position: usize,
     q_share_rns_limb_count: usize,
     threshold_degree: usize,
@@ -51,11 +51,6 @@ pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
         string_at_path(source_record, &["objectType"])?,
         "VssPublicSourceCoefficientCommitments",
         "authoritative bridge target source record objectType",
-    )?;
-    compare_required_string(
-        string_at_path(source_record, &["sourceTrusteeIdentity"])?,
-        trustee_identity,
-        "authoritative bridge target source trustee identity",
     )?;
     let coefficient_records = array_at_path(source_record, &["coefficientCommitments"])?;
     let expected_record_count = q_share_rns_limb_count
@@ -89,11 +84,6 @@ pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
                     "authoritative VSS coefficient commitment is missing for a bridge target limb",
                 )
             })?;
-            compare_required_string(
-                string_at_path(record, &["objectType"])?,
-                "VssPublicCoefficientCommitment",
-                "authoritative bridge target commitment objectType",
-            )?;
             let canonical_prime = DATA_PRIMES.get(rns_limb_index).copied().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
@@ -102,7 +92,7 @@ pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
             })?;
             let coefficient_commitment_root =
                 super::super::vss_commitment::vss_public_commitment_body_root(record)?;
-            let commitment_body = value_at_path(record, &["commitment"])?;
+            let commitment_body = record;
             compare_required_string(
                 string_at_path(commitment_body, &["objectType"])?,
                 "VssCommittedMaterialCommitment",
@@ -146,11 +136,11 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
     vss_coefficient_commitments: &Value,
     expected_position: usize,
 ) -> CanonicalResult<Value> {
-    let source_records = array_at_path(coefficient_commitment_set, &["sourceTrusteeRecords"])?;
+    let source_records = array_at_path(vss_coefficient_commitments, &["sourceTrusteeRecords"])?;
     let source_record = source_records.get(expected_position).ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "same-secret bridge coefficient commitments are missing the proof source",
+            "same-secret bridge VSS coefficient commitments are missing the proof source",
         )
     })?;
     let trustee_identity = string_at_path(source_record, &["sourceTrusteeIdentity"])?;
@@ -174,7 +164,6 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
 
     reconstructed_same_secret_bridge_proof_verification_request(
         ReconstructedSameSecretBridgeProofVerification {
-            bridge_statement,
             coefficient_commitment_set,
             statement_set: StatementSetBinding {
                 setup_context_hash: hash_at_path(statement_set, &["setupContextHash"])?,
@@ -185,6 +174,7 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
             threshold_degree,
             ring_degree,
             source_constant_commitment_values: &source_constant_commitments.commitment_values,
+            trustee_identity,
         },
     )
 }
@@ -192,19 +182,8 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
 pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
     input: ReconstructedSameSecretBridgeProofVerification<'_>,
 ) -> CanonicalResult<Value> {
-    let source_records =
-        array_at_path(input.coefficient_commitment_set, &["sourceTrusteeRecords"])?;
-    let source_record = source_records.get(input.expected_position).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "same-secret bridge coefficient commitments are missing the proof source",
-        )
-    })?;
-    let trustee_identity = string_at_path(source_record, &["sourceTrusteeIdentity"])?;
-
     let authoritative_targets = authoritative_same_secret_bridge_targets(
         input.coefficient_commitment_set,
-        trustee_identity,
         input.expected_position,
         input.q_share_rns_limb_count,
         input.threshold_degree,
@@ -218,7 +197,7 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
     Ok(json!({
         "context": {
             "setupContextHash": input.statement_set.setup_context_hash,
-            "trusteeIdentity": trustee_identity,
+            "trusteeIdentity": input.trustee_identity,
             "trusteeRosterPosition": input.expected_position,
         },
         "ringDegree": input.ring_degree,
@@ -227,9 +206,6 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
             "commitments": input.source_constant_commitment_values,
         },
         "sameSecretBridge": {
-            "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
-            "sourceTrusteeIdentity": trustee_identity,
-            "sourceTrusteeRosterPosition": input.expected_position,
             "targetConstantCommitments": target_constant_commitments,
         },
     }))

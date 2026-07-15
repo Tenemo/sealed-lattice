@@ -70,6 +70,13 @@ pub(super) fn encode_logical_slots_to_plaintext_coefficients(
     Ok(coefficients_mod_plaintext)
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the browser-compiled evaluator decode path is not yet reached by a transcript-core command"
+    )
+)]
 pub(super) fn decode_plaintext_coefficients_to_logical_slots(
     coefficients_mod_plaintext: &[u64],
 ) -> CanonicalResult<Vec<u64>> {

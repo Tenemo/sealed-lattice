@@ -220,6 +220,7 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
         "targetDecryptionShare": {
             "targetShareProofStatementRoot": proof_statement_root,
             "publicMatrixSeedHash": input.setup_binding.public_matrix_seed_hash,
+            "participantCount": input.setup_binding.participants.len(),
             "trusteeIdentity": input.participant.trustee_identity,
             "trusteeRosterPosition": input.participant.roster_position,
             "activeCredentialBindingRoot": active_credential_binding_root,

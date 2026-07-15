@@ -96,6 +96,10 @@ pub(crate) fn build_target_decryption_share_public_vectors(
     let target_relation_count = active_target_limb
         .map(|limb_statement| limb_statement.role_statements.len() * LINCHECK_REPETITIONS)
         .unwrap_or(0);
+    let smudging_equality_count = input
+        .proof_statement
+        .target_decryption_smudging_equality_count(input.limb_index);
+    let smudging_equality_relation_count = smudging_equality_count * LINCHECK_REPETITIONS;
     let decoder_relation_count =
         message_encoding_layouts
             .iter()
@@ -108,7 +112,8 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                     })
             })?
             * LINCHECK_REPETITIONS;
-    let decoder_relation_offset = target_relation_count;
+    let smudging_equality_relation_offset = target_relation_count;
+    let decoder_relation_offset = target_relation_count + smudging_equality_relation_count;
     if input.relation_alpha.len() != decoder_relation_offset + decoder_relation_count {
         return Err(invalid_succinct_setup_proof(
             "target-decryption share challenge count does not match the relation count",
@@ -116,7 +121,15 @@ pub(crate) fn build_target_decryption_share_public_vectors(
     }
 
     if let Some(limb_statement) = active_target_limb {
-        let plaintext_multiple = (PLAINTEXT_MODULUS_I64 as u64) % input.modulus;
+        let denominator_clearing_factor =
+            target_decryption_interpolation_denominator_clearing_factor(
+                input.statement.participant_count,
+            )?;
+        let plaintext_multiple = mul_mod_fast(
+            (PLAINTEXT_MODULUS_I64 as u64) % input.modulus,
+            denominator_clearing_factor % input.modulus,
+            input.modulus,
+        );
         let coefficient_offset = signed_value_residue(
             TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND,
             input.modulus,
@@ -198,6 +211,102 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                 );
             }
             smudging_message_offset += 1;
+        }
+    }
+
+    if smudging_equality_count > 0 {
+        let reference_limb = input.statement.limb_statements.first().ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "target-decryption smudging equality requires an active reference limb",
+            )
+        })?;
+        let mut equality_index = 0_usize;
+        for compared_limb in input.statement.limb_statements.iter().skip(1) {
+            if compared_limb.role_statements.len() != reference_limb.role_statements.len() {
+                return Err(invalid_succinct_setup_proof(
+                    "target-decryption smudging equality requires the same roles on every limb",
+                ));
+            }
+            for role_index in 0..reference_limb.role_statements.len() {
+                let reference_global_message_index = input
+                    .proof_statement
+                    .target_decryption_smudging_message_global_index_for(
+                        reference_limb.target_rns_limb_index,
+                        role_index,
+                    )
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof(
+                            "target-decryption reference smudging message is missing",
+                        )
+                    })?;
+                let compared_global_message_index = input
+                    .proof_statement
+                    .target_decryption_smudging_message_global_index_for(
+                        compared_limb.target_rns_limb_index,
+                        role_index,
+                    )
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof(
+                            "target-decryption compared smudging message is missing",
+                        )
+                    })?;
+                let reference_local_message_index = message_global_indices
+                    .iter()
+                    .position(|index| *index == reference_global_message_index)
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof(
+                            "target-decryption reference smudging message is not carried by the equality field",
+                        )
+                    })?;
+                let compared_local_message_index = message_global_indices
+                    .iter()
+                    .position(|index| *index == compared_global_message_index)
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof(
+                            "target-decryption compared smudging message is not carried by the equality field",
+                        )
+                    })?;
+                for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
+                    let alpha_index = smudging_equality_relation_offset
+                        + equality_index * LINCHECK_REPETITIONS
+                        + repetition;
+                    let alpha_value = &input.relation_alpha[alpha_index];
+                    let scaled_u = u_powers
+                        .iter()
+                        .map(|value| tower.mul(alpha_value, value))
+                        .collect::<Vec<_>>();
+                    add_scaled_extension_vector_to_message_digits(
+                        AddScaledExtensionVectorToMessageDigitsInput {
+                            message_encoding_vectors: &mut message_encoding_vectors,
+                            message_encoding_offsets: &message_encoding_offsets,
+                            message_encoding_layouts: &message_encoding_layouts,
+                            message_index: reference_local_message_index,
+                            source: &scaled_u,
+                            coefficient: 1,
+                            modulus: input.modulus,
+                        },
+                        tower,
+                    )?;
+                    add_scaled_extension_vector_to_message_digits(
+                        AddScaledExtensionVectorToMessageDigitsInput {
+                            message_encoding_vectors: &mut message_encoding_vectors,
+                            message_encoding_offsets: &message_encoding_offsets,
+                            message_encoding_layouts: &message_encoding_layouts,
+                            message_index: compared_local_message_index,
+                            source: &scaled_u,
+                            coefficient: sub_mod_fast(0, 1, input.modulus),
+                            modulus: input.modulus,
+                        },
+                        tower,
+                    )?;
+                }
+                equality_index += 1;
+            }
+        }
+        if equality_index != smudging_equality_count {
+            return Err(invalid_succinct_setup_proof(
+                "target-decryption smudging equality count does not match the statement",
+            ));
         }
     }
 

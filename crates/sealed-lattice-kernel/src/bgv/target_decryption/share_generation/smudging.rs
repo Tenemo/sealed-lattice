@@ -6,6 +6,7 @@ pub(in super::super) fn apply_plaintext_multiple_flooding_noise(
     flooding_noise_openings: &[TargetDecryptionFloodingNoiseOpening],
     role: &str,
     partials_by_limb: &[Vec<u64>],
+    denominator_clearing_factor: u64,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     let mut flooded_partials = partials_by_limb.to_vec();
     for (rns_limb_index, limb_partials) in flooded_partials.iter_mut().enumerate() {
@@ -16,7 +17,11 @@ pub(in super::super) fn apply_plaintext_multiple_flooding_noise(
             rns_limb_index,
             rns_prime,
         )?;
-        let plaintext_multiple = PLAINTEXT_MODULUS % rns_prime;
+        let plaintext_multiple = mul_mod_fast(
+            PLAINTEXT_MODULUS % rns_prime,
+            denominator_clearing_factor % rns_prime,
+            rns_prime,
+        );
         for (partial_coefficient, noise_coefficient) in
             limb_partials.iter_mut().zip(noise.coefficients.iter())
         {
@@ -59,7 +64,6 @@ fn target_decryption_flooding_noise_for_limb<'a>(
     Ok(opening)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(in super::super) fn target_decryption_flooding_noise_coefficients(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -67,8 +71,6 @@ pub(in super::super) fn target_decryption_flooding_noise_coefficients(
     participant: &ParticipantBinding,
     private_flooding_seed_hex: &str,
     role: &str,
-    rns_limb_index: usize,
-    rns_prime: u64,
 ) -> CanonicalResult<Vec<i64>> {
     let private_flooding_seed = decode_private_flooding_seed(private_flooding_seed_hex)?;
     if !TARGET_DECRYPTION_SMUDGING_ROLES.contains(&role) {
@@ -87,8 +89,6 @@ pub(in super::super) fn target_decryption_flooding_noise_coefficients(
         )
     })?;
     let roster_position = (participant.roster_position as u64).to_le_bytes();
-    let rns_limb_index_bytes = (rns_limb_index as u64).to_le_bytes();
-    let rns_prime_bytes = rns_prime.to_le_bytes();
     let mut sampler = DeterministicSampler::new(
         TARGET_DECRYPTION_FLOODING_NOISE_DOMAIN,
         &[
@@ -99,8 +99,6 @@ pub(in super::super) fn target_decryption_flooding_noise_coefficients(
             participant.trustee_identity.as_bytes(),
             &roster_position,
             role.as_bytes(),
-            &rns_limb_index_bytes,
-            &rns_prime_bytes,
         ],
     );
 
@@ -131,21 +129,20 @@ pub(in super::super) fn target_decryption_flooding_noise_openings(
     let mut openings =
         Vec::with_capacity(TARGET_DECRYPTION_SMUDGING_ROLES.len() * active_limb_count);
     for role in TARGET_DECRYPTION_SMUDGING_ROLES {
+        let coefficients = target_decryption_flooding_noise_coefficients(
+            setup_binding,
+            target_accepted,
+            target_ciphertexts,
+            participant,
+            private_flooding_seed_hex,
+            role,
+        )?;
         for (rns_limb_index, &rns_prime) in DATA_PRIMES.iter().enumerate().take(active_limb_count) {
             openings.push(TargetDecryptionFloodingNoiseOpening {
                 role: role.to_string(),
                 rns_limb_index,
                 rns_prime,
-                coefficients: target_decryption_flooding_noise_coefficients(
-                    setup_binding,
-                    target_accepted,
-                    target_ciphertexts,
-                    participant,
-                    private_flooding_seed_hex,
-                    role,
-                    rns_limb_index,
-                    rns_prime,
-                )?,
+                coefficients: coefficients.clone(),
             });
         }
     }

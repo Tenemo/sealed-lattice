@@ -396,5 +396,4 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
             }),
         ).resolves.toBeUndefined();
     });
-
 });

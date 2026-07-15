@@ -54,6 +54,7 @@ pub(super) fn target_decryption_share_statement_from_request(
     }
 
     let public_matrix_seed_hash = read_string(target_value, "publicMatrixSeedHash")?.to_string();
+    let participant_count = read_u64(target_value, "participantCount")?;
     let trustee_identity = read_string(target_value, "trusteeIdentity")?.to_string();
     let trustee_roster_position = read_u64(target_value, "trusteeRosterPosition")?;
     let smudging_commitment_set = target_value
@@ -106,25 +107,15 @@ pub(super) fn target_decryption_share_statement_from_request(
             "target-decryption proof must cover every active target limb in canonical order",
         ));
     }
-    let aggregate_message_coefficient_bound = limb_statements
-        .iter()
-        .map(|limb_statement| limb_statement.target_rns_prime)
-        .max()
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "target-decryption proof must include at least one active target limb",
-            )
-        })?;
-
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree,
         proof: SetupProofStatement::TargetDecryptionShare(TargetDecryptionShareStatement {
             public_matrix_seed_hash,
+            participant_count,
             trustee_identity,
             trustee_roster_position,
             active_credential_binding_root,
-            aggregate_message_coefficient_bound,
             smudging_commitment_set_root,
             limb_statements,
         }),
@@ -205,7 +196,6 @@ pub(super) fn target_decryption_share_limb_statement_from_value(
 
     Ok(TargetDecryptionShareLimbStatement {
         target_rns_limb_index,
-        target_rns_prime,
         aggregate_commitment_root,
         aggregate_opening_root,
         aggregate_commitment,
@@ -267,7 +257,6 @@ pub(super) fn target_decryption_share_role_statement_from_value(
         )?;
 
     Ok(TargetDecryptionShareRoleStatement {
-        target_role: target_role.to_string(),
         target_ciphertext_component_one: read_u64_array(
             role_statement_value,
             "targetCiphertextComponentOne",

@@ -83,12 +83,16 @@ fn verify_vss_public_material_binding(
         .get(VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD)
         .ok_or_else(|| public_material_error("share-linkage proof material set"))?;
 
-    verify_vss_public_material_roster_bindings(
-        coefficient_set,
-        recipient_share_set,
-        aggregate_threshold_set,
-        expected_trustees,
-    )?;
+    let trustee_identities = (0..expected_trustees.len())
+        .map(|roster_position| {
+            expected_trustees
+                .get(&(roster_position as u64))
+                .cloned()
+                .ok_or_else(|| {
+                    public_material_error("accepted setup roster positions must be contiguous")
+                })
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
 
     let proof_material_request = serde_json::Map::from_iter([
         ("statement".to_string(), statement.clone()),
@@ -109,6 +113,7 @@ fn verify_vss_public_material_binding(
     let statement_verification =
         crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_statement_and_proof_material_set_from_request(
             &Value::Object(proof_material_request),
+            &trustee_identities,
             proof_binding_session,
         )?;
     let setup_context = setup_package
@@ -162,101 +167,11 @@ fn verify_vss_public_material_binding(
                 .map_err(|_| {
                     public_material_error("aggregate RNS limb count does not fit usize")
                 })?,
+            trustee_identities: &trustee_identities,
         },
     )?;
 
     Ok(ring_degree)
-}
-
-fn verify_vss_public_material_roster_bindings(
-    coefficient_set: &Value,
-    recipient_share_set: &Value,
-    aggregate_threshold_set: &Value,
-    expected_trustees: &BTreeMap<u64, String>,
-) -> CanonicalResult<()> {
-    let participant_count = expected_trustees.len();
-    let coefficient_sources = array_at_path(coefficient_set, &["sourceTrusteeRecords"])?;
-    let recipient_sources = array_at_path(recipient_share_set, &["sourceTrusteeRecords"])?;
-    if coefficient_sources.len() != participant_count
-        || recipient_sources.len() != participant_count
-    {
-        return Err(public_material_error(
-            "VSS public source records must cover the accepted setup roster",
-        ));
-    }
-
-    for source_roster_position in 0..participant_count {
-        let expected_identity = expected_trustees
-            .get(&(source_roster_position as u64))
-            .ok_or_else(|| {
-                public_material_error("accepted setup roster positions must be contiguous")
-            })?;
-        for source_record in [
-            &coefficient_sources[source_roster_position],
-            &recipient_sources[source_roster_position],
-        ] {
-            compare_required_string(
-                string_at_path(source_record, &["sourceTrusteeIdentity"])?,
-                expected_identity,
-                "VSS public source trustee identity",
-            )?;
-        }
-
-        let recipient_records = array_at_path(
-            &recipient_sources[source_roster_position],
-            &["recipientShareCommitments"],
-        )?;
-        let expected_record_count = participant_count
-            .checked_mul(DATA_PRIMES.len())
-            .ok_or_else(|| public_material_error("VSS recipient coordinate count overflowed"))?;
-        if recipient_records.len() != expected_record_count {
-            return Err(public_material_error(
-                "VSS recipient-share records must cover the accepted setup roster",
-            ));
-        }
-        for recipient_roster_position in 0..participant_count {
-            let expected_recipient_identity = expected_trustees
-                .get(&(recipient_roster_position as u64))
-                .ok_or_else(|| {
-                    public_material_error("accepted setup roster positions must be contiguous")
-                })?;
-            for rns_limb_index in 0..DATA_PRIMES.len() {
-                let record_index = recipient_roster_position * DATA_PRIMES.len() + rns_limb_index;
-                compare_required_string(
-                    string_at_path(&recipient_records[record_index], &["recipientIdentity"])?,
-                    expected_recipient_identity,
-                    "VSS public recipient trustee identity",
-                )?;
-            }
-        }
-    }
-
-    let aggregate_records = array_at_path(aggregate_threshold_set, &["recipientRecords"])?;
-    let expected_aggregate_count = participant_count
-        .checked_mul(DATA_PRIMES.len())
-        .ok_or_else(|| public_material_error("VSS aggregate coordinate count overflowed"))?;
-    if aggregate_records.len() != expected_aggregate_count {
-        return Err(public_material_error(
-            "VSS aggregate records must cover the accepted setup roster",
-        ));
-    }
-    for recipient_roster_position in 0..participant_count {
-        let expected_recipient_identity = expected_trustees
-            .get(&(recipient_roster_position as u64))
-            .ok_or_else(|| {
-                public_material_error("accepted setup roster positions must be contiguous")
-            })?;
-        for rns_limb_index in 0..DATA_PRIMES.len() {
-            let record_index = recipient_roster_position * DATA_PRIMES.len() + rns_limb_index;
-            compare_required_string(
-                string_at_path(&aggregate_records[record_index], &["recipientIdentity"])?,
-                expected_recipient_identity,
-                "VSS aggregate recipient trustee identity",
-            )?;
-        }
-    }
-
-    Ok(())
 }
 
 fn public_material_error(message: &'static str) -> CanonicalError {

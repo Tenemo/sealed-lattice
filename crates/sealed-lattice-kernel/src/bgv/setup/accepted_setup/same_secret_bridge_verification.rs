@@ -159,11 +159,11 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     let threshold_degree = verified_statement_set.threshold_degree;
     let public_matrix_seed_hash = value_string(statement_set, "publicMatrixSeedHash")?;
     let statement_records = array_value(statement_set, "statementRecords")?;
-    let proof_records = array_value(proof_material_set, "proofRecords")?;
-    if proof_records.len() != statement_records.len() {
+    let proof_bytes_hashes = array_value(proof_material_set, "proofBytesHashes")?;
+    if proof_bytes_hashes.len() != statement_records.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "same-secret bridge statement and proof records must be aligned",
+            "same-secret bridge statements and proof hashes must be aligned",
         ));
     }
     let vss_coefficient_commitments =
@@ -177,19 +177,19 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
         .ok_or_else(|| {
             same_secret_bridge_error("same-secret bridge public coefficient commitments")
         })?;
-    let coefficient_source_records = array_value(coefficient_commitment_set, "sourceTrusteeRecords")?;
+    let trustee_identities = expected_trustees_from_setup_intent(
+        &setup_intent::setup_intent_trustee_registrations_from_package(setup_package)?,
+    );
     let mut statements_by_roster_position = BTreeMap::new();
     for (trustee_roster_position, statement_record) in statement_records.iter().enumerate() {
-        let coefficient_source_record = coefficient_source_records
-            .get(trustee_roster_position)
-            .ok_or_else(|| same_secret_bridge_error("same-secret bridge proof source"))?;
-        let trustee_identity =
-            value_string(coefficient_source_record, "sourceTrusteeIdentity")?.to_string();
         let trustee_roster_position = trustee_roster_position as u64;
+        let trustee_identity = trustee_identities
+            .get(&trustee_roster_position)
+            .cloned()
+            .ok_or_else(|| same_secret_bridge_error("same-secret bridge proof source"))?;
         let authoritative_targets =
             crate::bgv::setup::same_secret_bridge::authoritative_same_secret_bridge_targets(
                 coefficient_commitment_set,
-                &trustee_identity,
                 trustee_roster_position as usize,
                 q_share_rns_limb_count,
                 threshold_degree,

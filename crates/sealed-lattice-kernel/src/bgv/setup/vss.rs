@@ -1,4 +1,6 @@
 #[cfg(test)]
+use crate::bgv::parameters::DATA_PRIMES;
+#[cfg(test)]
 use crate::encoding::CanonicalResult;
 #[cfg(test)]
 use crate::encoding::{CanonicalError, CanonicalErrorCode};
@@ -220,7 +222,9 @@ pub(super) fn verify_carry_aware_vss_commitment_opening(
     }
 
     for (coefficient_index, commitment) in coefficient_commitments.iter().enumerate() {
-        if commitment.source_message_modulus != modulus || commitment.ring_degree != ring_degree {
+        if DATA_PRIMES.get(commitment.source_rns_limb_index) != Some(&modulus)
+            || commitment.ring_degree != ring_degree
+        {
             return Err(invalid_vss_input(
                 "VSS coefficient commitment domain does not match the share opening",
             ));

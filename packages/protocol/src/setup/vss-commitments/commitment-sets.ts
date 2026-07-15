@@ -21,15 +21,9 @@ type VssCommittedMaterialCommitmentValue = {
     readonly commitmentFields: readonly VssCommittedMaterialCommitmentField[];
 };
 
-type VssPublicCoefficientCommitment = {
-    readonly objectType: 'VssPublicCoefficientCommitment';
-    readonly commitment: VssCommittedMaterialCommitmentValue;
-};
-
 type VssPublicSourceCoefficientCommitments = {
     readonly objectType: 'VssPublicSourceCoefficientCommitments';
-    readonly sourceTrusteeIdentity: string;
-    readonly coefficientCommitments: readonly VssPublicCoefficientCommitment[];
+    readonly coefficientCommitments: readonly VssCommittedMaterialCommitmentValue[];
 };
 
 export type VssPublicCoefficientCommitmentSet = {
@@ -38,16 +32,9 @@ export type VssPublicCoefficientCommitmentSet = {
     readonly sourceTrusteeRecords: readonly VssPublicSourceCoefficientCommitments[];
 };
 
-type VssPublicRecipientShareCommitment = {
-    readonly objectType: 'VssPublicRecipientShareCommitment';
-    readonly recipientIdentity: string;
-    readonly commitment: VssCommittedMaterialCommitmentValue;
-};
-
 type VssPublicSourceRecipientShareCommitments = {
     readonly objectType: 'VssPublicSourceRecipientShareCommitments';
-    readonly sourceTrusteeIdentity: string;
-    readonly recipientShareCommitments: readonly VssPublicRecipientShareCommitment[];
+    readonly recipientShareCommitments: readonly VssCommittedMaterialCommitmentValue[];
 };
 
 export type VssPublicRecipientShareCommitmentSet = {
@@ -58,19 +45,13 @@ export type VssPublicRecipientShareCommitmentSet = {
 
 type VssPublicAggregateThresholdCommitment = {
     readonly objectType: 'VssPublicAggregateThresholdCommitment';
-    readonly recipientIdentity: string;
     readonly aggregateOpeningRoot: ProtocolHash;
     readonly commitment: VssCommittedMaterialCommitmentValue;
-};
-
-type VssAggregateThresholdProofRecord = {
-    readonly objectType: 'VssAggregateThresholdProofRecord';
-    readonly proofBytesHash: ProtocolHash;
 };
 
 export type VssPublicAggregateThresholdCommitmentSet = {
     readonly objectType: 'VssPublicAggregateThresholdCommitmentSet';
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly recipientRecords: readonly VssPublicAggregateThresholdCommitment[];
-    readonly aggregateThresholdProofs: readonly VssAggregateThresholdProofRecord[];
+    readonly aggregateThresholdProofBytesHashes: readonly ProtocolHash[];
 };

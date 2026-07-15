@@ -4,14 +4,12 @@ import { foundationProfile } from '@sealed-lattice/types';
 import type { CanonicalProofMaterialChunkPull } from '../setup-proof-material-transport.js';
 
 import {
-    type PublicKeyShareCoefficientVectorMaterial,
     type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareMaterialRecord,
     type PublicKeyShareMaterialSetInput,
     type PublicKeyShareRecord,
 } from './constants-and-types.js';
 import {
-    assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     coefficientVectorFromLittleEndianHex,
@@ -31,6 +29,7 @@ export const derivePublicKeyShareMaterialRoot = (
         PublicKeyShareMaterialSetInput,
         'setupContext' | 'publicMatrixSeedHash'
     >,
+    trusteeRosterPosition: number,
     shareRecord: PublicKeyShareRecord,
     materialRecord: PublicKeyShareMaterialRecord,
 ) =>
@@ -39,16 +38,16 @@ export const derivePublicKeyShareMaterialRoot = (
         setupContextHash: deriveCollectiveBgvSetupContextHash(
             input.setupContext,
         ),
-        trusteeIdentity: shareRecord.trusteeIdentity,
-        trusteeRosterPosition: shareRecord.trusteeRosterPosition,
+        trusteeRosterPosition,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         publicKeyShareRoot: derivePublicKeyShareRoot(
             input.setupContext,
             input.publicMatrixSeedHash,
+            trusteeRosterPosition,
             shareRecord,
         ),
-        shareCoefficientVectorsByLimb:
-            materialRecord.shareCoefficientVectorsByLimb,
+        shareCoefficientVectorsLittleEndianHexByLimb:
+            materialRecord.shareCoefficientVectorsLittleEndianHexByLimb,
     });
 
 const validatePublicKeyShareMaterialContribution = (
@@ -56,22 +55,18 @@ const validatePublicKeyShareMaterialContribution = (
     expectedRosterPosition: number,
     input: PublicKeyShareMaterialSetInput,
     shareRecord: PublicKeyShareRecord,
-): readonly PublicKeyShareCoefficientVectorMaterial[] => {
-    assertNonEmptyString(contribution.trusteeIdentity, 'trusteeIdentity');
+): readonly string[] => {
     assertNonNegativeSafeInteger(
         contribution.trusteeRosterPosition,
         'trusteeRosterPosition',
     );
-    if (
-        contribution.trusteeRosterPosition !== expectedRosterPosition ||
-        contribution.trusteeIdentity !== shareRecord.trusteeIdentity
-    ) {
+    if (contribution.trusteeRosterPosition !== expectedRosterPosition) {
         throw new Error(
             'publicKeyShareMaterialContributions must match accepted public-key share records.',
         );
     }
     if (
-        contribution.shareCoefficientVectorsByLimb.length !==
+        contribution.shareCoefficientVectorsLittleEndianHexByLimb.length !==
         input.qSharePrimes.length
     ) {
         throw new Error(
@@ -79,8 +74,8 @@ const validatePublicKeyShareMaterialContribution = (
         );
     }
 
-    return contribution.shareCoefficientVectorsByLimb.map(
-        (coefficientVector, rnsLimbIndex) => {
+    return contribution.shareCoefficientVectorsLittleEndianHexByLimb.map(
+        (coefficientVectorLittleEndianHex, rnsLimbIndex) => {
             const rnsPrime = input.qSharePrimes[rnsLimbIndex];
             if (rnsPrime === undefined) {
                 throw new Error(
@@ -88,9 +83,9 @@ const validatePublicKeyShareMaterialContribution = (
                 );
             }
             const coefficients = coefficientVectorFromLittleEndianHex(
-                coefficientVector.coefficientsLeHex,
+                coefficientVectorLittleEndianHex,
                 input.ringDegree,
-                'publicKeyShareMaterialContributions.coefficientsLeHex',
+                'publicKeyShareMaterialContributions.shareCoefficientVectorsLittleEndianHexByLimb',
             );
             if (coefficients.some((coefficient) => coefficient >= rnsPrime)) {
                 throw new Error(
@@ -100,19 +95,14 @@ const validatePublicKeyShareMaterialContribution = (
             const coefficientVectorHash =
                 coefficientVectorHash512(coefficients);
             const shareCoefficientHash =
-                shareRecord.shareCoefficientVectorHash512ByLimb[rnsLimbIndex];
-            if (
-                shareCoefficientHash?.coefficientVectorHash512 !==
-                coefficientVectorHash
-            ) {
+                shareRecord.shareCoefficientVectorHashesByLimb[rnsLimbIndex];
+            if (shareCoefficientHash !== coefficientVectorHash) {
                 throw new Error(
                     'publicKeyShareMaterialContributions coefficient hash must match the accepted share record.',
                 );
             }
 
-            return {
-                coefficientsLeHex: coefficientVector.coefficientsLeHex,
-            };
+            return coefficientVectorLittleEndianHex;
         },
     );
 };
@@ -137,7 +127,7 @@ export const publicKeyShareMaterialRecordsFromContributions = (
                     'publicKeyShareMaterialContributions must reference accepted public-key share records.',
                 );
             }
-            const shareCoefficientVectorsByLimb =
+            const shareCoefficientVectorsLittleEndianHexByLimb =
                 validatePublicKeyShareMaterialContribution(
                     contribution,
                     expectedRosterPosition,
@@ -146,7 +136,7 @@ export const publicKeyShareMaterialRecordsFromContributions = (
                 );
             return {
                 objectType: 'PublicKeyShareMaterial',
-                shareCoefficientVectorsByLimb,
+                shareCoefficientVectorsLittleEndianHexByLimb,
             } satisfies PublicKeyShareMaterialRecord;
         },
     );
@@ -216,8 +206,8 @@ const publicKeyShareMaterialBinarySegments = (
     appendBytes(publicKeyShareMaterialBinaryMagic.slice());
     for (const materialRecord of input.shareMaterialRecords) {
         if (
-            materialRecord.shareCoefficientVectorsByLimb.length !==
-            input.qSharePrimes.length
+            materialRecord.shareCoefficientVectorsLittleEndianHexByLimb
+                .length !== input.qSharePrimes.length
         ) {
             throw new Error(
                 'publicKeyShareMaterial must contain one coefficient vector per Q_share limb.',
@@ -225,8 +215,8 @@ const publicKeyShareMaterialBinarySegments = (
         }
         for (const [
             expectedRnsLimbIndex,
-            coefficientVector,
-        ] of materialRecord.shareCoefficientVectorsByLimb.entries()) {
+            coefficientVectorLittleEndianHex,
+        ] of materialRecord.shareCoefficientVectorsLittleEndianHexByLimb.entries()) {
             const rnsPrime = input.qSharePrimes[expectedRnsLimbIndex];
             if (rnsPrime === undefined) {
                 throw new Error(
@@ -234,16 +224,16 @@ const publicKeyShareMaterialBinarySegments = (
                 );
             }
             const coefficients = coefficientVectorFromLittleEndianHex(
-                coefficientVector.coefficientsLeHex,
+                coefficientVectorLittleEndianHex,
                 input.ringDegree,
-                'publicKeyShareMaterial.coefficientsLeHex',
+                'publicKeyShareMaterial.shareCoefficientVectorsLittleEndianHexByLimb',
             );
             if (coefficients.some((coefficient) => coefficient >= rnsPrime)) {
                 throw new Error(
                     'publicKeyShareMaterial coefficient vectors must contain canonical residues before transport encoding.',
                 );
             }
-            appendHex(coefficientVector.coefficientsLeHex);
+            appendHex(coefficientVectorLittleEndianHex);
         }
     }
 

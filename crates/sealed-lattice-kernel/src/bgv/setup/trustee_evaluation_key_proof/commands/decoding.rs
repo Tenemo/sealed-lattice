@@ -84,6 +84,23 @@ pub(super) fn read_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> 
         })
 }
 
+#[cfg(test)]
+pub(super) fn read_u64_array(value: &Value, field_name: &str) -> CanonicalResult<Vec<u64>> {
+    value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_succinct_setup_proof(format!("{field_name} must be an array")))?
+        .iter()
+        .map(|entry| {
+            entry.as_u64().ok_or_else(|| {
+                invalid_succinct_setup_proof(format!(
+                    "{field_name} entries must be non-negative integers"
+                ))
+            })
+        })
+        .collect()
+}
+
 pub(super) fn read_hex_bytes(value: &Value, field_name: &str) -> CanonicalResult<Vec<u8>> {
     let text = read_string(value, field_name)?;
     decode_hex_bytes(text, field_name)
@@ -153,22 +170,6 @@ pub(super) fn read_string_array(value: &Value, field_name: &str) -> CanonicalRes
         .map(|entry| {
             entry.as_str().map(str::to_string).ok_or_else(|| {
                 invalid_succinct_setup_proof(format!("{field_name} entries must be strings"))
-            })
-        })
-        .collect()
-}
-
-pub(super) fn read_u64_array(value: &Value, field_name: &str) -> CanonicalResult<Vec<u64>> {
-    value
-        .get(field_name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid_succinct_setup_proof(format!("{field_name} must be an array")))?
-        .iter()
-        .map(|entry| {
-            entry.as_u64().ok_or_else(|| {
-                invalid_succinct_setup_proof(format!(
-                    "{field_name} entries must be non-negative integers"
-                ))
             })
         })
         .collect()

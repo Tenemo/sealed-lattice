@@ -166,13 +166,10 @@ pub(super) fn validate_randomness_shape(
     Ok(())
 }
 
-pub(super) fn validate_source_rns_limb(
-    source_rns_limb_index: usize,
-    source_message_modulus: u64,
-) -> CanonicalResult<()> {
-    if DATA_PRIMES.get(source_rns_limb_index) != Some(&source_message_modulus) {
+pub(super) fn validate_source_rns_limb(source_rns_limb_index: usize) -> CanonicalResult<()> {
+    if DATA_PRIMES.get(source_rns_limb_index).is_none() {
         return Err(invalid_commitment_input(
-            "commitment source RNS limb does not match the selected Q_share prime list",
+            "commitment source RNS limb is outside the selected Q_share prime list",
         ));
     }
 

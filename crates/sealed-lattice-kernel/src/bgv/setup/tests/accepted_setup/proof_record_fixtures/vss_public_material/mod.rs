@@ -17,7 +17,7 @@ struct VssProofRecordFixture {
 }
 
 struct VssProofRecordSetFixture {
-    records: Vec<serde_json::Value>,
+    proof_bytes_hashes: Vec<String>,
     proof_binding_leases: Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
 }
 
@@ -139,8 +139,8 @@ pub(in super::super) fn compact_aggregate_threshold_proof_fixture()
         &aggregate_threshold_commitment_set,
         &[(0, 0), (0, 1)],
     );
-    aggregate_threshold_commitment_set["aggregateThresholdProofs"] =
-        serde_json::json!(aggregate_threshold_proofs.records);
+    aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"] =
+        serde_json::json!(aggregate_threshold_proofs.proof_bytes_hashes);
     package["vssPublicAggregateThresholdCommitmentSet"] = aggregate_threshold_commitment_set;
 
     CompactAggregateThresholdProofFixture {
@@ -149,7 +149,6 @@ pub(in super::super) fn compact_aggregate_threshold_proof_fixture()
     }
 }
 
-pub(in super::super) use commitment_sets::vss_public_coefficient_commitment_set_object;
 pub(in super::super) use finalized_package::{
     FinalizedCollectiveSetupPackageFixture, finalize_collective_setup_package,
 };

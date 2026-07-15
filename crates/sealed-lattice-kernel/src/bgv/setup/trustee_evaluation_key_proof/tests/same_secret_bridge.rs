@@ -494,7 +494,6 @@ pub(super) fn same_secret_bridge_instance() -> (
             compute_setup_commitment_for_tests(
                 &public_matrix_seed_hash,
                 source_rns_limb_index,
-                *source_rns_prime,
                 0,
                 &source_message_coefficients,
                 &randomness,

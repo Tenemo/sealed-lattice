@@ -1,4 +1,8 @@
 use super::super::*;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex, OnceLock},
+};
 
 // Checkpoint subdirectories for the expensive proof families. The trustee
 // evaluation-key family already persists its authenticated proof material under a
@@ -10,6 +14,40 @@ pub(in super::super) const PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY: &str =
     "public-key-share-proof-material";
 pub(in super::super) const TRUSTEE_EVALUATION_KEY_PROOF_CHECKPOINT_DIRECTORY: &str =
     "trustee-evaluation-key-proof-material";
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+struct CurrentRunProofCacheKey {
+    family_directory: String,
+    statement_hash_hex: String,
+}
+
+type CurrentRunProofBytesCell = Arc<OnceLock<Arc<[u8]>>>;
+
+// CI proves each deterministic statement fresh once. Tests that need the same
+// proof in a second independent verifier session reuse only bytes generated and
+// semantically verified inside this process; nothing crosses run boundaries.
+static CURRENT_RUN_PROOF_BYTES_BY_KEY: OnceLock<
+    Mutex<BTreeMap<CurrentRunProofCacheKey, CurrentRunProofBytesCell>>,
+> = OnceLock::new();
+
+fn current_run_proof_bytes(
+    cache_key: CurrentRunProofCacheKey,
+    initialize: impl FnOnce() -> Arc<[u8]>,
+) -> Arc<[u8]> {
+    let proof_bytes_cell = {
+        let mut proof_bytes_by_key = CURRENT_RUN_PROOF_BYTES_BY_KEY
+            .get_or_init(|| Mutex::new(BTreeMap::new()))
+            .lock()
+            .expect("current-run proof byte cache lock");
+        Arc::clone(
+            proof_bytes_by_key
+                .entry(cache_key)
+                .or_insert_with(|| Arc::new(OnceLock::new())),
+        )
+    };
+
+    Arc::clone(proof_bytes_cell.get_or_init(initialize))
+}
 
 fn proof_checkpoint_path(family_directory: &str, statement_hash_hex: &str) -> std::path::PathBuf {
     crate::bgv::setup::accepted_setup_final_package_material_store_checkpoint_directory()
@@ -95,6 +133,36 @@ pub(in super::super) fn checkpointed_proof_bytes_with_verification_state(
     }
 }
 
+pub(in super::super) fn current_run_checkpointed_proof_bytes(
+    family_directory: &str,
+    statement_hash_hex: &str,
+    verify_proof_bytes: impl Fn(&[u8]) -> crate::encoding::CanonicalResult<()>,
+    generate_proof_bytes: impl FnOnce() -> Vec<u8>,
+) -> Arc<[u8]> {
+    current_run_proof_bytes(
+        CurrentRunProofCacheKey {
+            family_directory: family_directory.to_string(),
+            statement_hash_hex: statement_hash_hex.to_string(),
+        },
+        || {
+            let CheckpointedProofBytes {
+                proof_bytes,
+                was_semantically_verified,
+            } = checkpointed_proof_bytes_with_verification_state(
+                family_directory,
+                statement_hash_hex,
+                |proof_bytes| verify_proof_bytes(proof_bytes),
+                generate_proof_bytes,
+            );
+            if !was_semantically_verified {
+                verify_proof_bytes(&proof_bytes)
+                    .expect("fresh current-run proof bytes must verify before reuse");
+            }
+            Arc::from(proof_bytes)
+        },
+    )
+}
+
 fn refresh_checkpoint_last_used(path: &std::path::Path) -> std::io::Result<()> {
     std::fs::OpenOptions::new()
         .write(true)
@@ -128,4 +196,29 @@ pub(in super::super) fn final_package_checkpoint_resume_enabled() -> bool {
         std::env::var("SEALED_LATTICE_RESUME_TEST_CHECKPOINTS").as_deref(),
         Ok("1")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn current_run_proof_byte_cache_initializes_once() {
+        let initialization_count = AtomicUsize::new(0);
+        let cache_key = CurrentRunProofCacheKey {
+            family_directory: "current-run-cache-test".to_string(),
+            statement_hash_hex: format!("process-{}", std::process::id()),
+        };
+        let first = current_run_proof_bytes(cache_key.clone(), || {
+            initialization_count.fetch_add(1, Ordering::SeqCst);
+            Arc::from([3_u8, 1, 4, 1, 5])
+        });
+        let second = current_run_proof_bytes(cache_key, || {
+            panic!("an initialized current-run proof must not run a second producer")
+        });
+
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(initialization_count.load(Ordering::SeqCst), 1);
+    }
 }

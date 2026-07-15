@@ -77,12 +77,17 @@ fn read_aggregate_threshold_commitment_set_binding(
             "aggregate threshold commitment set has more limbs than the canonical data basis",
         ));
     }
+    let trustee_identities = participants
+        .iter()
+        .map(|participant| participant.trustee_identity.clone())
+        .collect::<Vec<_>>();
     verify_vss_public_aggregate_threshold_commitment_set(
         aggregate_set,
         &VssPublicAggregateThresholdCommitmentSetContext {
             setup_context_hash,
             public_matrix_seed_hash: setup_public_matrix_seed_hash,
             participant_count: participants.len(),
+            trustee_identities: &trustee_identities,
             rns_limb_count,
             ring_degree: POLYNOMIAL_DEGREE,
         },
@@ -90,7 +95,7 @@ fn read_aggregate_threshold_commitment_set_binding(
 
     let records = array_at_path(aggregate_set, &["recipientRecords"])?;
     let mut recipient_records = Vec::with_capacity(participants.len());
-    for (recipient_position, participant) in participants.iter().enumerate() {
+    for recipient_position in 0..participants.len() {
         let mut limb_records = Vec::with_capacity(rns_limb_count);
         for (rns_limb_index, expected_rns_prime) in
             DATA_PRIMES.iter().copied().enumerate().take(rns_limb_count)
@@ -110,12 +115,6 @@ fn read_aggregate_threshold_commitment_set_binding(
                     "aggregate threshold commitment set is missing a recipient limb record",
                 )
             })?;
-            compare_string_field(
-                record,
-                "recipientIdentity",
-                &participant.trustee_identity,
-                "aggregate threshold commitment recipient identity",
-            )?;
             limb_records.push(AggregateThresholdCommitmentRecordBinding {
                 rns_prime: expected_rns_prime,
                 aggregate_commitment_root: hash_at_path(record, &["aggregateCommitmentRoot"])?

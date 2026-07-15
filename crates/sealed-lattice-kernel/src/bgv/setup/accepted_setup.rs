@@ -26,16 +26,16 @@ pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
     TrusteeEvaluationKeyStatementInputs, trustee_evaluation_key_proof_verification_binding_hash,
     trustee_evaluation_key_statement_from_package,
 };
-use self::evaluation_key_share_rounds::{
+pub(in crate::bgv::setup) use self::evaluation_key_share_rounds::{
     evaluation_key_proof_common_binding, expected_galois_key_switch_seed,
-    expected_relinearization_key_switch_seed, galois_key_share_material_for_schedule,
-    scheduled_relinearization_levels, verify_galois_key_share_batches,
+    expected_relinearization_key_switch_seed, scheduled_relinearization_levels,
+};
+use self::evaluation_key_share_rounds::{
+    galois_key_share_material_for_schedule, verify_galois_key_share_batches,
     verify_galois_key_switch_sample_binding, verify_relinearization_key_share_rounds,
     verify_relinearization_key_switch_sample_binding,
 };
-use self::evaluator_key_schedule::{
-    verify_evaluator_key_schedule, verify_pending_evaluation_key_material_boundary,
-};
+use self::evaluator_key_schedule::verify_pending_evaluation_key_material_boundary;
 use self::private_vss_envelopes::{
     PrivateVssEnvelopeBindingMap, private_vss_envelope_bindings_from_package,
     private_vss_envelope_commitment_root, verify_private_vss_envelope_commitments,
@@ -91,7 +91,7 @@ use super::*;
 use super::{
     evaluation_key_share_material::{
         DecodedEvaluationKeyShareComponentMaterial, EvaluationKeyShareDerivedMaterialBinding,
-        EvaluationKeyShareProofFamily, component_b_vectors_from_record,
+        EvaluationKeyShareProofFamily, component_b_vectors_from_root,
     },
     setup_proof::SetupProofMaterialBytes,
 };
@@ -114,20 +114,13 @@ const PUBLIC_KEY_SHARE_MATERIAL_SET_OBJECT_TYPE: &str = "PublicKeyShareMaterialS
 const PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE: &str = "PublicKeyShareMaterial";
 const PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC: &[u8; 8] = b"SLPKSMV2";
 const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareSuccinctProofSet";
-const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_OBJECT_TYPE: &str = "PublicKeyShareSuccinctProof";
 const COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE: &str = "CollectivePublicKey";
-const EVALUATOR_KEY_SCHEDULE_OBJECT_TYPE: &str = "EvaluatorKeySchedule";
 const RELINEARIZATION_KEY_SHARE_ROUNDS_OBJECT_TYPE: &str = "RelinearizationKeyShareRounds";
-const RELINEARIZATION_KEY_SHARE_ROUND_ONE_OBJECT_TYPE: &str = "RelinearizationKeyShareRoundOne";
-const RELINEARIZATION_KEY_SHARE_ROUND_TWO_OBJECT_TYPE: &str = "RelinearizationKeyShareRoundTwo";
 const GALOIS_KEY_SHARE_BATCH_OBJECT_TYPE: &str = "GaloisKeyShareBatch";
-const GALOIS_KEY_SHARE_MATERIAL_OBJECT_TYPE: &str = "GaloisKeyShareMaterial";
 const TRUSTEE_EVALUATION_KEY_PROOF_SET_OBJECT_TYPE: &str = "TrusteeEvaluationKeyProofSet";
-const TRUSTEE_EVALUATION_KEY_PROOF_OBJECT_TYPE: &str = "TrusteeEvaluationKeyProof";
 use super::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY;
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitmentSet";
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitment";
-const PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE: &str = "PrivateVssEnvelopeAad";
 const ENCRYPTED_PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "EncryptedPrivateVssShareEnvelope";
 const FOUNDATION_ROSTER_PARTICIPANT_COUNT: u64 = 10;
 // Roster range accepted by the parameterized verifier. Quorums and the
@@ -515,9 +508,6 @@ fn verify_collective_setup_package(
     )? {
         return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(refusals) = verify_evaluator_key_schedule(setup_package)? {
-        return Ok(SetupPackageVerification::Refused(refusals));
-    }
     if let Some(refusals) = verify_pending_evaluation_key_material_boundary(
         setup_package,
         Some(&verified_same_secret_bridge),
@@ -688,6 +678,7 @@ use binding_checks::*;
 use setup_parameters::*;
 
 pub(super) use binding_checks::{accepted_vss_coefficient_commitment_root, setup_context_hash};
+pub(in crate::bgv::setup) use setup_parameters::expected_required_galois_key_schedule;
 pub(super) use setup_parameters::setup_parameters_hash_for_roster;
 
 #[cfg(test)]

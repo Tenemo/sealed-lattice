@@ -15,7 +15,6 @@ type SetupCommitmentLimbValue = {
 export type SetupCommitmentValue = {
     readonly objectType: 'SetupCommitment';
     readonly sourceRnsLimbIndex: number;
-    readonly sourceMessageModulus: number;
     readonly shamirCoefficientIndex: number;
     readonly ringDegree: number;
     readonly commitmentLimbs: readonly SetupCommitmentLimbValue[];
@@ -76,21 +75,10 @@ export type VssSourceTrusteeCoefficientOpeningStateProviderInput = Readonly<{
     ) => VssOpeningRandomByteSource;
 }>;
 
-export type VssCoefficientCommitmentRecord = Readonly<{
-    readonly objectType: 'VssCoefficientCommitment';
-    readonly commitmentRoot: ProtocolHash;
-}>;
-
 export type VssSourceTrusteeCoefficientCommitmentRecord = Readonly<{
     readonly objectType: 'VssSourceTrusteeCoefficientCommitments';
     readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
-    readonly coefficientCommitments: readonly VssCoefficientCommitmentRecord[];
-}>;
-
-export type VssCoefficientCommitmentMaterialRecord = Readonly<{
-    readonly objectType: 'VssCoefficientCommitmentMaterial';
-    readonly commitment: SetupCommitmentValue;
+    readonly coefficientCommitmentRoots: readonly ProtocolHash[];
 }>;
 
 export type VssCoefficientCommitmentSet = Readonly<{
@@ -102,7 +90,7 @@ export type VssCoefficientCommitmentSet = Readonly<{
 
 export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly sourceTrusteeCoefficientCommitmentRecord: VssSourceTrusteeCoefficientCommitmentRecord;
-    readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly VssCoefficientCommitmentMaterialRecord[];
+    readonly coefficientCommitments: readonly SetupCommitmentValue[];
     readonly coefficientOpenings: readonly VssCoefficientOpeningMaterial[];
 }>;
 

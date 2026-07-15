@@ -39,13 +39,13 @@ jobs:
                   PUSH_BASE_SHA: ${{ github.event.before }}
               run: node ./tools/ci/classify-ci-changes.mjs
 
-    static-build:
-        name: static and build
+    routine:
+        name: static, Node, and browser
         needs:
             - changes
         if: ${{ needs.changes.outputs.run_routine == 'true' }}
         runs-on: ubuntu-24.04
-        timeout-minutes: 30
+        timeout-minutes: 135
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -56,11 +56,24 @@ jobs:
                   toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - run: pnpm run build
-            - run: pnpm run build:verify-reproducible
-            - run: pnpm run lint
-            - run: pnpm run tsc
-            - run: pnpm exec knip
+            - name: Build workspace packages
+              run: pnpm run build
+            - name: Verify reproducible build output
+              run: pnpm run build:verify-reproducible
+            - name: Lint workspace
+              run: pnpm run lint
+            - name: Type-check workspace
+              run: pnpm run tsc
+            - name: Scan for unused code
+              run: pnpm exec knip
+            - name: Run Node tests against the built workspace
+              timeout-minutes: 90
+              run: pnpm run test:node:built
+            - name: Install browser engines
+              run: pnpm exec playwright install --with-deps chromium firefox webkit
+            - name: Run browser matrix against the built workspace
+              timeout-minutes: 55
+              run: pnpm run test:browser:built
 
     rust-fast:
         name: rust fast
@@ -92,27 +105,6 @@ jobs:
                   if-no-files-found: warn
                   name: rust-fast-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
-
-    node:
-        name: node
-        needs:
-            - changes
-        if: ${{ needs.changes.outputs.run_routine == 'true' }}
-        runs-on: ubuntu-24.04
-        timeout-minutes: 135
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-              with:
-                  persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  toolchain: 1.90.0
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - name: Run ordinary Node tests
-              timeout-minutes: 110
-              run: pnpm run test:node
 
     rust-heavy:
         name: rust heavy
@@ -168,69 +160,16 @@ jobs:
                   name: rust-accepted-setup-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
 
-    node-kernel-heavy:
-        name: node kernel heavy
-        needs:
-            - changes
-        if: ${{ needs.changes.outputs.run_heavy == 'true' }}
-        runs-on: ubuntu-24.04
-        timeout-minutes: 105
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-              with:
-                  persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  toolchain: 1.90.0
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - name: Run heavy Node kernel tests
-              timeout-minutes: 90
-              run: pnpm run test:node:kernel:heavy
-            - name: Upload Node heavy diagnostics
-              if: ${{ always() }}
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-              with:
-                  if-no-files-found: warn
-                  name: node-heavy-logs-${{ github.run_id }}-${{ github.run_attempt }}
-                  path: logs
-
-    browser:
-        name: browser
-        needs:
-            - changes
-        if: ${{ needs.changes.outputs.run_routine == 'true' }}
-        runs-on: ubuntu-24.04
-        timeout-minutes: 75
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-              with:
-                  persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  toolchain: 1.90.0
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - run: pnpm exec playwright install --with-deps chromium firefox webkit
-            - name: Run browser matrix
-              timeout-minutes: 55
-              run: pnpm run test:browser
-
     verify:
         name: verify
         runs-on: ubuntu-24.04
         timeout-minutes: 5
         needs:
             - changes
-            - static-build
+            - routine
             - rust-fast
-            - node
             - rust-heavy
             - rust-accepted-setup
-            - node-kernel-heavy
-            - browser
         if: ${{ always() }}
         steps:
             - name: Check verify jobs
@@ -252,13 +191,10 @@ jobs:
                   if (process.env.RUN_HEAVY === 'false') {
                     allowedSkippedJobs.add('rust-heavy');
                     allowedSkippedJobs.add('rust-accepted-setup');
-                    allowedSkippedJobs.add('node-kernel-heavy');
                   }
                   if (process.env.RUN_ROUTINE === 'false') {
-                    allowedSkippedJobs.add('static-build');
+                    allowedSkippedJobs.add('routine');
                     allowedSkippedJobs.add('rust-fast');
-                    allowedSkippedJobs.add('node');
-                    allowedSkippedJobs.add('browser');
                   }
                   const failed = Object.entries(needs).filter(
                     ([jobName, job]) =>

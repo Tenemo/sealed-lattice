@@ -36,14 +36,14 @@ pub(super) fn decode_public_key_share_material_bindings(
                     "public-key share material must reference an accepted share record",
                 )
             })?;
-        let trustee_identity = value_string(share_record, "trusteeIdentity")?.to_string();
         let public_key_share_root = derive_public_key_share_root(
             setup_context,
             common_binding.public_matrix_seed_hash.as_str(),
+            expected_roster_position,
             share_record,
         )?;
         let share_hashes = share_record
-            .get("shareCoefficientVectorHash512ByLimb")
+            .get("shareCoefficientVectorHashesByLimb")
             .and_then(Value::as_array)
             .ok_or_else(|| {
                 CanonicalError::new(
@@ -57,10 +57,7 @@ pub(super) fn decode_public_key_share_material_bindings(
             let material_limb = &material_record.limbs[rns_limb_index];
             let coefficient_hash =
                 public_key_share_coefficient_vector_hash(&material_limb.coefficients);
-            if share_hashes
-                .get(rns_limb_index)
-                .and_then(|share_hash| share_hash.get("coefficientVectorHash512"))
-                .and_then(Value::as_str)
+            if share_hashes.get(rns_limb_index).and_then(Value::as_str)
                 != Some(coefficient_hash.as_str())
             {
                 return Err(CanonicalError::new(
@@ -68,26 +65,22 @@ pub(super) fn decode_public_key_share_material_bindings(
                     "public-key share coefficient hash must match the accepted share record",
                 ));
             }
-            limb_records.push(json!({
-                "coefficientsLeHex": coefficient_vector_le_hex(&material_limb.coefficients),
-            }));
+            limb_records.push(coefficient_vector_le_hex(&material_limb.coefficients));
             coefficients_by_limb.push(material_limb.coefficients.clone());
         }
         let material_root_input = json!({
             "objectType": PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE,
             "setupContextHash": setup_context_hash(setup_context)?,
-            "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": expected_roster_position,
             "publicMatrixSeedHash": common_binding.public_matrix_seed_hash.as_str(),
             "publicKeyShareRoot": public_key_share_root.as_str(),
-            "shareCoefficientVectorsByLimb": limb_records,
+            "shareCoefficientVectorsLittleEndianHexByLimb": limb_records,
         });
         let public_key_share_material_root = derive_canonical_object_hash(&material_root_input)?;
         let binding = PublicKeyShareMaterialBinding {
             coefficients_by_limb,
         };
         material_root_references.push(json!({
-            "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": expected_roster_position,
             "publicKeyShareMaterialRoot": public_key_share_material_root,
         }));

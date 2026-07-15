@@ -414,12 +414,24 @@ pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
             )
         })?;
     let mut source_trustee_roots = BTreeMap::new();
+    let expected_trustees = super::setup_intent::expected_trustees_from_setup_intent(
+        &super::setup_intent::setup_intent_trustee_registrations_from_package(setup_package)?,
+    );
     for (source_trustee_roster_position, source_trustee_record) in
         source_trustee_records.iter().enumerate()
     {
+        let source_trustee_identity = expected_trustees
+            .get(&(source_trustee_roster_position as u64))
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "setup-intent trustee positions must cover VSS source commitments",
+                )
+            })?;
         let source_trustee_commitment_root =
             crate::bgv::setup::vss_commitment::vss_public_source_coefficient_record_root(
                 source_trustee_record,
+                source_trustee_identity,
             )?;
         source_trustee_roots.insert(
             source_trustee_roster_position as u64,

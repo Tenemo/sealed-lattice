@@ -182,7 +182,12 @@ fn round_one_aggregate_recomputation_rejects_malformed_components() {
 
 #[test]
 fn trustee_proof_statements_reject_noncanonical_context_and_hash_fields() {
-    let mutation_cases: [(&str, &str, fn(&mut TrusteeEvaluationKeyStatement)); 4] = [
+    type ContextMutationCase = (
+        &'static str,
+        &'static str,
+        fn(&mut TrusteeEvaluationKeyStatement),
+    );
+    let mutation_cases: [ContextMutationCase; 4] = [
         (
             "ctxbad01",
             "setupContextHash must be a complete lowercase 512-bit protocol hash",
@@ -232,7 +237,8 @@ fn private_vss_statement_rejects_noncanonical_context_and_hash_fields() {
         .validate_shape()
         .expect("canonical private VSS statement");
 
-    let mutation_cases: [(&str, fn(&mut TrusteeEvaluationKeyStatement)); 3] = [
+    type StatementMutationCase = (&'static str, fn(&mut TrusteeEvaluationKeyStatement));
+    let mutation_cases: [StatementMutationCase; 3] = [
         (
             "private VSS setupContextHash must be canonical",
             |statement| statement.context.setup_context_hash = "11".repeat(63),

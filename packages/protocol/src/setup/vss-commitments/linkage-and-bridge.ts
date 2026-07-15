@@ -1,5 +1,6 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import type { SetupProofMaterialStream } from '../setup-proof-material-transport.js';
 import type { SetupCommitmentValue } from '../vss-coefficient-commitments.js';
 
 export type VssShareLinkageStatement = {
@@ -24,17 +25,12 @@ export type VssShareLinkageProofMaterialSet = Readonly<{
     readonly proofRecords: readonly VssShareLinkageProofRecord[];
 }>;
 
-export type GeneratedVssCanonicalProofMaterial = Readonly<{
-    readonly proofBytesHash: ProtocolHash;
-    readonly descriptorBytes: Uint8Array;
-}>;
-
 export type VssShareLinkageProofMaterialBuild<
     ProofMaterialSet extends VssShareLinkageProofMaterialSet =
         VssShareLinkageProofMaterialSet,
 > = Readonly<{
     readonly proofMaterialSet: ProofMaterialSet;
-    readonly canonicalProofMaterials: readonly GeneratedVssCanonicalProofMaterial[];
+    readonly proofMaterialStreams: readonly SetupProofMaterialStream[];
 }>;
 
 type VssSameSecretBridgeStatement = {
@@ -50,14 +46,9 @@ export type VssSameSecretBridgeStatementSet = {
     readonly statementRecords: readonly VssSameSecretBridgeStatement[];
 };
 
-type VssSameSecretBridgeProofRecord = {
-    readonly objectType: 'VssSameSecretBridgeProofRecord';
-    readonly proofBytesHash: ProtocolHash;
-};
-
 export type VssSameSecretBridgeProofMaterialSet = {
     readonly objectType: 'VssSameSecretBridgeProofMaterialSet';
-    readonly proofRecords: readonly VssSameSecretBridgeProofRecord[];
+    readonly proofBytesHashes: readonly ProtocolHash[];
 };
 
 export type VssSameSecretBridgeProofMaterialBuild<
@@ -65,5 +56,5 @@ export type VssSameSecretBridgeProofMaterialBuild<
         VssSameSecretBridgeProofMaterialSet,
 > = Readonly<{
     readonly proofMaterialSet: ProofMaterialSet;
-    readonly canonicalProofMaterials: readonly GeneratedVssCanonicalProofMaterial[];
+    readonly proofMaterialStreams: readonly SetupProofMaterialStream[];
 }>;

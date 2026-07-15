@@ -96,6 +96,7 @@ pub(crate) struct VssPublicCoefficientCommitmentSetContext<'a> {
     pub(crate) setup_context_hash: &'a str,
     pub(crate) public_matrix_seed_hash: &'a str,
     pub(crate) participant_count: usize,
+    pub(crate) trustee_identities: &'a [String],
     pub(crate) rns_limb_count: usize,
     pub(crate) threshold_degree: usize,
     pub(crate) ring_degree: usize,
@@ -105,6 +106,7 @@ pub(crate) struct VssPublicRecipientShareCommitmentSetContext<'a> {
     pub(crate) setup_context_hash: &'a str,
     pub(crate) public_matrix_seed_hash: &'a str,
     pub(crate) participant_count: usize,
+    pub(crate) trustee_identities: &'a [String],
     pub(crate) rns_limb_count: usize,
     pub(crate) ring_degree: usize,
 }
@@ -113,6 +115,7 @@ pub(crate) struct VssPublicAggregateThresholdCommitmentSetContext<'a> {
     pub(crate) setup_context_hash: &'a str,
     pub(crate) public_matrix_seed_hash: &'a str,
     pub(crate) participant_count: usize,
+    pub(crate) trustee_identities: &'a [String],
     pub(crate) rns_limb_count: usize,
     pub(crate) ring_degree: usize,
 }
@@ -132,7 +135,9 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set(
         "VSS coefficient commitment set publicMatrixSeedHash",
     )?;
     let source_trustee_records = array_at_path(coefficient_set, &["sourceTrusteeRecords"])?;
-    if source_trustee_records.len() != context.participant_count {
+    if source_trustee_records.len() != context.participant_count
+        || context.trustee_identities.len() != context.participant_count
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "VSS coefficient commitment set must contain one source record per participant",
@@ -155,6 +160,8 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set(
             VssPublicSourceCoefficientRecordInput {
                 source_record,
                 setup_context_hash: context.setup_context_hash,
+                source_trustee_identity: &context.trustee_identities
+                    [source_trustee_roster_position],
                 source_trustee_roster_position,
                 expected_coefficient_count,
                 threshold_degree: context.threshold_degree,
@@ -186,7 +193,9 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set(
         "VSS recipient-share commitment set publicMatrixSeedHash",
     )?;
     let source_trustee_records = array_at_path(recipient_set, &["sourceTrusteeRecords"])?;
-    if source_trustee_records.len() != context.participant_count {
+    if source_trustee_records.len() != context.participant_count
+        || context.trustee_identities.len() != context.participant_count
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "VSS recipient-share commitment set must contain one source record per participant",
@@ -209,6 +218,9 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set(
             VssPublicSourceRecipientShareRecordInput {
                 source_record,
                 setup_context_hash: context.setup_context_hash,
+                source_trustee_identity: &context.trustee_identities
+                    [source_trustee_roster_position],
+                trustee_identities: context.trustee_identities,
                 source_trustee_roster_position,
                 expected_recipient_share_count,
                 rns_limb_count: context.rns_limb_count,
@@ -249,7 +261,9 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set(
                 "VSS aggregate threshold commitment coordinate count overflowed",
             )
         })?;
-    if recipient_records.len() != expected_recipient_record_count {
+    if recipient_records.len() != expected_recipient_record_count
+        || context.trustee_identities.len() != context.participant_count
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "VSS aggregate threshold commitment set must cover every recipient and RNS limb",
@@ -263,6 +277,8 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set(
                 recipient_record,
                 setup_context_hash: context.setup_context_hash,
                 expected_recipient_roster_position: recipient_record_index / context.rns_limb_count,
+                recipient_identity: &context.trustee_identities
+                    [recipient_record_index / context.rns_limb_count],
                 expected_rns_limb_index: recipient_record_index % context.rns_limb_count,
                 ring_degree: context.ring_degree,
             },
@@ -307,10 +323,12 @@ pub(in crate::bgv::setup) use message_encoding::{
 #[cfg(test)]
 pub(crate) use record_verification::validate_standalone_vss_committed_material_commitment;
 pub(crate) use share_linkage::verify_vss_share_linkage_bindings_request;
-#[cfg(test)]
-pub(in crate::bgv::setup) use share_linkage::vss_aggregate_threshold_statement_from_commitment_records;
 pub(crate) use share_linkage::{
     VssAggregateThresholdProofContext, verify_vss_public_aggregate_threshold_proofs,
+};
+#[cfg(test)]
+pub(in crate::bgv::setup) use share_linkage::{
+    VssAggregateThresholdStatementInput, vss_aggregate_threshold_statement_from_commitment_records,
 };
 
 #[cfg(test)]

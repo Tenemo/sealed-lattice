@@ -53,7 +53,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
     package["publicKeyShareSuccinctProofs"]
         .as_object_mut()
         .expect("public-key proof set")
-        .remove("proofRecords");
+        .remove("proofBytesHashes");
     let verification_request = fixture.verification_request.clone();
     let result = fixture
         .verify_values(&package, &verification_request)
@@ -73,7 +73,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
     let mut package = fixture.package.clone();
     let coefficients_hex = package["publicKeyShareMaterial"]["shareMaterialRecords"][0]
-        ["shareCoefficientVectorsByLimb"][0]["coefficientsLeHex"]
+        ["shareCoefficientVectorsLittleEndianHexByLimb"][0]
         .as_str()
         .expect("coefficient hex");
     let replacement_prefix = if coefficients_hex.starts_with("00") {
@@ -82,8 +82,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         "00"
     };
     let tampered_hex = format!("{replacement_prefix}{}", &coefficients_hex[2..]);
-    package["publicKeyShareMaterial"]["shareMaterialRecords"][0]["shareCoefficientVectorsByLimb"]
-        [0]["coefficientsLeHex"] = serde_json::json!(tampered_hex);
+    package["publicKeyShareMaterial"]["shareMaterialRecords"][0]["shareCoefficientVectorsLittleEndianHexByLimb"]
+        [0] = serde_json::json!(tampered_hex);
     let result = fixture
         .verify_values(&package, &fixture.verification_request)
         .expect("verification response");
@@ -112,8 +112,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         crate::bgv::setup::trustee_evaluation_key_proof::public_key_share_succinct_proof_bytes_hash(
             &proof_bytes,
         );
-    let proof_record = &mut package["publicKeyShareSuccinctProofs"]["proofRecords"][0];
-    proof_record["proofBytesHash"] = serde_json::json!(&proof_bytes_hash);
+    package["publicKeyShareSuccinctProofs"]["proofBytesHashes"][0] =
+        serde_json::json!(&proof_bytes_hash);
 
     authenticate_setup_proof_material_stream_in_session_for_test(
         crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
@@ -155,7 +155,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
     let fixture = collective_public_key_bearing_collective_setup_fixture();
     let mut package = fixture.package.clone();
     let coefficients_hex =
-        package["collectivePublicKey"]["aggregateCoefficientVectorsByLimb"][0]["coefficientsLeHex"]
+        package["collectivePublicKey"]["aggregateCoefficientVectorsLittleEndianHexByLimb"][0]
             .as_str()
             .expect("aggregate coefficients");
     let mut coefficients = coefficient_vector_from_le_hex(
@@ -165,7 +165,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
     )
     .expect("aggregate coefficients decode");
     coefficients[0] = add_mod(coefficients[0], 1, DATA_PRIMES[0]).expect("tamper coefficient");
-    package["collectivePublicKey"]["aggregateCoefficientVectorsByLimb"][0]["coefficientsLeHex"] =
+    package["collectivePublicKey"]["aggregateCoefficientVectorsLittleEndianHexByLimb"][0] =
         serde_json::json!(coefficient_vector_le_hex(&coefficients));
     let result = fixture
         .verify_values(&package, &fixture.verification_request)

@@ -8,7 +8,7 @@ import {
     type BinaryChunkedPublicKeyShareMaterialBundle,
     type BinaryChunkedPublicKeyShareMaterialBundleInput,
     type BinaryChunkedPublicKeyShareMaterialSet,
-    type PublicKeyShareMaterialChunkSource,
+    type PublicKeyShareMaterialStream,
     type PublicKeyShareMaterialRecord,
     type PublicKeyShareSet,
 } from './constants-and-types.js';
@@ -42,6 +42,7 @@ const binaryChunkedPublicKeyShareMaterialSet = (
 
             return derivePublicKeyShareMaterialRoot(
                 input,
+                trusteeRosterPosition,
                 shareRecord,
                 materialRecord,
             );
@@ -63,18 +64,7 @@ const binaryChunkedPublicKeyShareMaterialSet = (
             ),
             publicKeyShareMaterialRoots: publicKeyShareMaterialRoots.map(
                 (publicKeyShareMaterialRoot, trusteeRosterPosition) => {
-                    const shareRecord =
-                        input.publicKeyShares.shareRecords[
-                            trusteeRosterPosition
-                        ];
-                    if (shareRecord === undefined) {
-                        throw new Error(
-                            'public-key share material must have one accepted share record per trustee.',
-                        );
-                    }
-
                     return {
-                        trusteeIdentity: shareRecord.trusteeIdentity,
                         trusteeRosterPosition,
                         publicKeyShareMaterialRoot,
                     };
@@ -87,7 +77,7 @@ const binaryChunkedPublicKeyShareMaterialSet = (
 const finishPublicKeyShareMaterialTransport = async (
     materialSet: BinaryChunkedPublicKeyShareMaterialSet,
     encodingSource: Readonly<{
-        readonly pullChunk: PublicKeyShareMaterialChunkSource['pullChunk'];
+        readonly pullChunk: PublicKeyShareMaterialStream['pullChunk'];
         readonly totalByteLength: number;
     }>,
     writePublicKeyShareMaterial: BinaryChunkedPublicKeyShareMaterialBundleInput['writePublicKeyShareMaterial'],
@@ -101,18 +91,12 @@ const finishPublicKeyShareMaterialTransport = async (
         }),
         'writePublicKeyShareMaterial descriptorBytes',
     );
-    const publicKeyShareMaterialChunkSource = {
-        pullChunk: encodingSource.pullChunk,
-    } satisfies PublicKeyShareMaterialChunkSource;
-
     return {
         materialSet,
-        transportedPublicKeyShareMaterial: {
-            publicKeyShareMaterialSetRoot:
-                materialSet.publicKeyShareMaterialSetRoot,
+        publicKeyShareMaterialStream: {
             descriptorBytes,
+            pullChunk: encodingSource.pullChunk,
         },
-        publicKeyShareMaterialChunkSource,
     };
 };
 

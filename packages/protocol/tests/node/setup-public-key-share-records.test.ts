@@ -34,16 +34,12 @@ const setupContextHash = deriveCanonicalObjectHash({
 const shareContribution = (
     trusteeRosterPosition: number,
 ): PublicKeyShareContributionInput => ({
-    trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
     trusteeRosterPosition,
-    shareCoefficientVectorHash512ByLimb: qSharePrimes.map(
-        (_unusedRnsPrime, rnsLimbIndex) => ({
-            coefficientVectorHash512: fixtureHash(
-                `share-coefficient-${String(trusteeRosterPosition)}-${String(
-                    rnsLimbIndex,
-                )}`,
+    shareCoefficientVectorHashesByLimb: qSharePrimes.map(
+        (_unusedRnsPrime, rnsLimbIndex) =>
+            fixtureHash(
+                `share-coefficient-${String(trusteeRosterPosition)}-${String(rnsLimbIndex)}`,
             ),
-        }),
     ),
 });
 
@@ -89,9 +85,8 @@ const shareMaterialCoefficients = (
 const shareMaterialContribution = (
     trusteeRosterPosition: number,
 ): PublicKeyShareMaterialContributionInput => ({
-    trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
     trusteeRosterPosition,
-    shareCoefficientVectorsByLimb: qSharePrimes.map(
+    shareCoefficientVectorsLittleEndianHexByLimb: qSharePrimes.map(
         (rnsPrime, rnsLimbIndex) => {
             const coefficients = shareMaterialCoefficients(
                 trusteeRosterPosition,
@@ -99,9 +94,7 @@ const shareMaterialContribution = (
                 rnsPrime,
             );
 
-            return {
-                coefficientsLeHex: coefficientVectorLeHex(coefficients),
-            };
+            return coefficientVectorLeHex(coefficients);
         },
     ),
 });
@@ -109,26 +102,22 @@ const shareMaterialContribution = (
 const shareContributionFromMaterial = (
     contribution: PublicKeyShareMaterialContributionInput,
 ): PublicKeyShareContributionInput => ({
-    trusteeIdentity: contribution.trusteeIdentity,
     trusteeRosterPosition: contribution.trusteeRosterPosition,
-    shareCoefficientVectorHash512ByLimb:
-        contribution.shareCoefficientVectorsByLimb.map(
+    shareCoefficientVectorHashesByLimb:
+        contribution.shareCoefficientVectorsLittleEndianHexByLimb.map(
             (_unusedCoefficientVector, rnsLimbIndex) => {
                 const rnsPrime = qSharePrimes[rnsLimbIndex];
                 if (rnsPrime === undefined) {
                     throw new Error('Expected the selected Q_share prime.');
                 }
 
-                return {
-                    coefficientVectorHash512:
-                        publicKeyShareCoefficientVectorHash(
-                            shareMaterialCoefficients(
-                                contribution.trusteeRosterPosition,
-                                rnsLimbIndex,
-                                rnsPrime,
-                            ),
-                        ),
-                };
+                return publicKeyShareCoefficientVectorHash(
+                    shareMaterialCoefficients(
+                        contribution.trusteeRosterPosition,
+                        rnsLimbIndex,
+                        rnsPrime,
+                    ),
+                );
             },
         ),
 });
@@ -163,14 +152,10 @@ describe('public-key share builders', () => {
             throw new Error('fixture public-key share record is missing');
         }
 
-        expect(
-            publicKeyShares.shareRecords.map(
-                (record) => record.trusteeRosterPosition,
-            ),
-        ).toEqual([0, 1]);
         expect(firstShareRecord).toEqual({
             objectType: 'PublicKeyShare',
-            ...shareContribution(0),
+            shareCoefficientVectorHashesByLimb:
+                shareContribution(0).shareCoefficientVectorHashesByLimb,
         });
     });
 
@@ -183,29 +168,15 @@ describe('public-key share builders', () => {
                 shareContributions: [
                     {
                         ...shareContribution(0),
-                        shareCoefficientVectorHash512ByLimb:
+                        shareCoefficientVectorHashesByLimb:
                             shareContribution(
                                 0,
-                            ).shareCoefficientVectorHash512ByLimb.slice(1),
+                            ).shareCoefficientVectorHashesByLimb.slice(1),
                     },
                     shareContribution(1),
                 ],
             }),
         ).toThrow(/one entry for every Q_share limb/u);
-        expect(() =>
-            createPublicKeyShareSet({
-                setupContext,
-                qSharePrimes,
-                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                shareContributions: [
-                    {
-                        ...shareContribution(0),
-                        trusteeIdentity: '',
-                    },
-                    shareContribution(1),
-                ],
-            }),
-        ).toThrow(/trusteeIdentity/u);
     });
 
     it('rejects material that does not match the accepted public-key share hashes', async () => {
@@ -229,15 +200,11 @@ describe('public-key share builders', () => {
         const mismatchingShareRecords = [
             {
                 ...firstShareRecord,
-                shareCoefficientVectorHash512ByLimb:
-                    firstShareRecord.shareCoefficientVectorHash512ByLimb.map(
+                shareCoefficientVectorHashesByLimb:
+                    firstShareRecord.shareCoefficientVectorHashesByLimb.map(
                         (coefficientHash, rnsLimbIndex) =>
                             rnsLimbIndex === 0
-                                ? {
-                                      coefficientVectorHash512: fixtureHash(
-                                          'mismatching-coefficient-vector',
-                                      ),
-                                  }
+                                ? fixtureHash('mismatching-coefficient-vector')
                                 : coefficientHash,
                     ),
             },
@@ -298,13 +265,15 @@ describe('public-key share builders', () => {
                 writePublicKeyShareMaterial,
             });
         const firstPull =
-            await directMaterialBundle.publicKeyShareMaterialChunkSource.pullChunk(
-                { chunkIndex: 0, expectedByteLength: totalByteLength },
-            );
+            await directMaterialBundle.publicKeyShareMaterialStream.pullChunk({
+                chunkIndex: 0,
+                expectedByteLength: totalByteLength,
+            });
         const repeatedPull =
-            await directMaterialBundle.publicKeyShareMaterialChunkSource.pullChunk(
-                { chunkIndex: 0, expectedByteLength: totalByteLength },
-            );
+            await directMaterialBundle.publicKeyShareMaterialStream.pullChunk({
+                chunkIndex: 0,
+                expectedByteLength: totalByteLength,
+            });
 
         const { publicKeyShareMaterialSetRoot, ...materialSetWithoutRoot } =
             directMaterialBundle.materialSet;
@@ -313,26 +282,23 @@ describe('public-key share builders', () => {
                 const publicKeyShareRoot = deriveCanonicalObjectHash({
                     objectType: shareRecord.objectType,
                     setupContextHash,
-                    trusteeIdentity: shareRecord.trusteeIdentity,
-                    trusteeRosterPosition: shareRecord.trusteeRosterPosition,
+                    trusteeRosterPosition,
                     publicMatrixSeedHash: materialSetInput.publicMatrixSeedHash,
-                    shareCoefficientVectorHash512ByLimb:
-                        shareRecord.shareCoefficientVectorHash512ByLimb,
+                    shareCoefficientVectorHashesByLimb:
+                        shareRecord.shareCoefficientVectorHashesByLimb,
                 });
                 const publicKeyShareMaterialRoot = deriveCanonicalObjectHash({
                     objectType: 'PublicKeyShareMaterial',
                     setupContextHash,
-                    trusteeIdentity: shareRecord.trusteeIdentity,
                     trusteeRosterPosition,
                     publicMatrixSeedHash: materialSetInput.publicMatrixSeedHash,
                     publicKeyShareRoot,
-                    shareCoefficientVectorsByLimb: shareMaterialContribution(
-                        trusteeRosterPosition,
-                    ).shareCoefficientVectorsByLimb,
+                    shareCoefficientVectorsLittleEndianHexByLimb:
+                        shareMaterialContribution(trusteeRosterPosition)
+                            .shareCoefficientVectorsLittleEndianHexByLimb,
                 });
 
                 return {
-                    trusteeIdentity: shareRecord.trusteeIdentity,
                     trusteeRosterPosition,
                     publicKeyShareMaterialRoot,
                 };
@@ -397,21 +363,23 @@ describe('public-key share builders', () => {
             }
         }
         expect(totalByteLength).toBe(expectedBytes.byteLength);
+        expect(
+            directMaterialBundle.publicKeyShareMaterialStream.descriptorBytes,
+        ).toEqual(canonicalStreamDescriptorFixture(totalByteLength));
         expect(directBytes).toEqual(expectedBytes);
     });
 
-    it('builds one succinct public-key proof record per accepted trustee', () => {
+    it('builds one succinct public-key proof hash per accepted trustee', () => {
         const input = createSuccinctProofFixture();
         const succinctProofs = createPublicKeyShareSuccinctProofSet(input);
-        const firstProofRecord = succinctProofs.proofRecords[0];
-        if (firstProofRecord === undefined) {
-            throw new Error('Expected the first succinct proof record.');
+        const firstProofBytesHash = succinctProofs.proofBytesHashes[0];
+        if (firstProofBytesHash === undefined) {
+            throw new Error('Expected the first succinct proof hash.');
         }
-        expect(succinctProofs.proofRecords).toHaveLength(participantCount);
-        expect(firstProofRecord).toEqual({
-            objectType: 'PublicKeyShareSuccinctProof',
-            proofBytesHash: input.proofMaterials[0]?.proofBytesHash,
-        });
+        expect(succinctProofs.proofBytesHashes).toHaveLength(participantCount);
+        expect(firstProofBytesHash).toBe(
+            input.proofMaterials[0]?.proofBytesHash,
+        );
     });
 
     it('rejects an incomplete proof set', () => {

@@ -14,7 +14,7 @@ pub(in crate::bgv::setup) use self::component_material::{
 };
 pub(super) use self::component_material::{
     DecodedEvaluationKeyShareComponentMaterial, EvaluationKeyShareDerivedMaterialBinding,
-    component_b_vectors_from_record,
+    component_b_vectors_from_root,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::component_material::{
@@ -28,12 +28,11 @@ use std::{collections::BTreeMap, sync::Arc};
 #[cfg(not(target_arch = "wasm32"))]
 use std::{fs::File, io::Read, path::PathBuf};
 
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::{
     bgv::coefficient_codec::coefficient_vector_le_hex,
     bgv::parameters::DATA_PRIMES,
-    bgv::setup_helpers::string_field,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::VerifiedCanonicalStreamSummary,
 };

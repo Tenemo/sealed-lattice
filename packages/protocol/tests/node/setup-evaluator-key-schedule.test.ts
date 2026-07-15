@@ -1,5 +1,5 @@
-import { deriveCanonicalObjectHash } from "@sealed-lattice/crypto";
-import { describe, expect, it } from "vitest";
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+import { describe, expect, it } from 'vitest';
 
 import {
     createEvaluatorKeySchedule,
@@ -7,11 +7,11 @@ import {
     type PublicKeyShareContributionInput,
     type PublicKeyShareSet,
     type RequiredGaloisKeyScheduleEntry,
-} from "#packages/protocol/src/index";
+} from '#packages/protocol/src/index';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
-} from "#tests/support/setup-fixtures";
+} from '#tests/support/setup-fixtures';
 
 // The frozen evaluator working level requires the full accepted Q_share basis.
 const qSharePrimes = [
@@ -24,27 +24,25 @@ const qSharePrimes = [
 ] as const;
 const participantCount = 2;
 
-const fixtureHash = makeSetupFixtureHash("setup-evaluator-key-schedule");
+const fixtureHash = makeSetupFixtureHash('setup-evaluator-key-schedule');
 
 const setupContext = makeSetupContext(fixtureHash, participantCount);
 const setupContextHash = deriveCanonicalObjectHash({
-    objectType: "CollectiveBgvSetupContext",
+    objectType: 'CollectiveBgvSetupContext',
     ...setupContext,
 });
 
 const shareContribution = (
     trusteeRosterPosition: number,
 ): PublicKeyShareContributionInput => ({
-    trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
     trusteeRosterPosition,
-    shareCoefficientVectorHash512ByLimb: qSharePrimes.map(
-        (_unusedRnsPrime, rnsLimbIndex) => ({
-            coefficientVectorHash512: fixtureHash(
+    shareCoefficientVectorHashesByLimb: qSharePrimes.map(
+        (_unusedRnsPrime, rnsLimbIndex) =>
+            fixtureHash(
                 `share-coefficient-${String(trusteeRosterPosition)}-${String(
                     rnsLimbIndex,
                 )}`,
             ),
-        }),
     ),
 });
 
@@ -52,7 +50,7 @@ const publicKeySharesFixture = (): PublicKeyShareSet =>
     createPublicKeyShareSet({
         setupContext,
         qSharePrimes,
-        publicMatrixSeedHash: fixtureHash("public-matrix-seed"),
+        publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
         shareContributions: [shareContribution(0), shareContribution(1)],
     });
 
@@ -67,13 +65,13 @@ const requiredGaloisKeySchedule = [
     },
 ] as const satisfies readonly RequiredGaloisKeyScheduleEntry[];
 
-describe("evaluator key schedule builder", () => {
-    it("creates a deterministic normalized foundation schedule", () => {
+describe('evaluator key schedule builder', () => {
+    it('creates a deterministic normalized foundation schedule', () => {
         const publicKeyShares = publicKeySharesFixture();
         const evaluatorKeySchedule = createEvaluatorKeySchedule({
             setupContext,
             qSharePrimes,
-            publicMatrixSeedHash: fixtureHash("public-matrix-seed"),
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
             publicKeyShares,
             requiredGaloisKeySchedule,
         });
@@ -86,15 +84,15 @@ describe("evaluator key schedule builder", () => {
             { level: 16 },
         ]);
         expect(evaluatorKeySchedule.setupContextHash).toBe(setupContextHash);
-        expect(evaluatorKeySchedule.objectType).toBe("EvaluatorKeySchedule");
+        expect(evaluatorKeySchedule.objectType).toBe('EvaluatorKeySchedule');
     });
 
-    it("rejects malformed schedule inputs", () => {
+    it('rejects malformed schedule inputs', () => {
         const publicKeyShares = publicKeySharesFixture();
         const validInput = {
             setupContext,
             qSharePrimes,
-            publicMatrixSeedHash: fixtureHash("public-matrix-seed"),
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
             publicKeyShares,
             requiredGaloisKeySchedule,
         } as const;

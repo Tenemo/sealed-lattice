@@ -56,7 +56,6 @@ pub(super) fn vss_public_source_coefficient_record(
         .collect::<Vec<_>>();
     serde_json::json!({
         "objectType": "VssPublicSourceCoefficientCommitments",
-        "sourceTrusteeIdentity": source_trustee_identity,
         "coefficientCommitments": coefficient_commitments,
     })
 }
@@ -101,10 +100,7 @@ pub(super) fn vss_public_coefficient_commitment_record(
         }))
         .expect("VSS coefficient committed-material commitment");
 
-    serde_json::json!({
-        "objectType": "VssPublicCoefficientCommitment",
-        "commitment": computation["commitment"],
-    })
+    computation["commitment"].clone()
 }
 
 pub(in super::super::super) fn vss_public_recipient_share_commitment_set_object(
@@ -155,7 +151,6 @@ pub(super) fn vss_public_source_recipient_share_record(
         .collect::<Vec<_>>();
     serde_json::json!({
         "objectType": "VssPublicSourceRecipientShareCommitments",
-        "sourceTrusteeIdentity": source_trustee_identity,
         "recipientShareCommitments": recipient_share_commitments,
     })
 }
@@ -206,11 +201,7 @@ pub(super) fn vss_public_recipient_share_commitment_record(
         }))
         .expect("VSS recipient-share committed-material commitment");
 
-    serde_json::json!({
-        "objectType": "VssPublicRecipientShareCommitment",
-        "recipientIdentity": recipient_identity,
-        "commitment": computation["commitment"],
-    })
+    computation["commitment"].clone()
 }
 
 pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_object(
@@ -233,8 +224,8 @@ pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_obj
         &aggregate_set,
         &recipient_coordinates,
     );
-    aggregate_set["aggregateThresholdProofs"] =
-        serde_json::json!(aggregate_threshold_proofs.records);
+    aggregate_set["aggregateThresholdProofBytesHashes"] =
+        serde_json::json!(aggregate_threshold_proofs.proof_bytes_hashes);
 
     VssProofMaterialSetFixture {
         value: aggregate_set,
@@ -325,7 +316,6 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
 
     serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
-        "recipientIdentity": recipient_identity,
         "aggregateOpeningRoot": computation["openingRoot"],
         "commitment": computation["commitment"],
     })

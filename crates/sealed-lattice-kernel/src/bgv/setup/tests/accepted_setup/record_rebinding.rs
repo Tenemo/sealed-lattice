@@ -96,12 +96,3 @@ pub(super) fn private_vss_envelope_commitment_set_root_input(
     }
     root_input
 }
-
-pub(super) fn rebind_first_private_vss_encrypted_envelope_hash(package: &mut serde_json::Value) {
-    let encrypted_envelope =
-        &mut package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"];
-    let encrypted_envelope_hash =
-        derive_canonical_object_hash(encrypted_envelope).expect("encrypted envelope hash");
-    package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelopeHash"] =
-        serde_json::json!(encrypted_envelope_hash);
-}

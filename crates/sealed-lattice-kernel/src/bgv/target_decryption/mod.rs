@@ -79,6 +79,7 @@ use crate::{
             TARGET_DECRYPTION_SHARE_PROOF_FAMILY, VssPublicAggregateThresholdCommitmentSetContext,
             accepted_setup_participant_roster_from_package,
             collective_bgv_setup_context_hashes_from_package, derive_collective_setup_package_hash,
+            target_decryption_interpolation_denominator_clearing_factor,
             verify_vss_public_aggregate_threshold_commitment_set,
         },
         setup_helpers::{

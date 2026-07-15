@@ -76,6 +76,8 @@ pub(crate) use same_secret_bridge::{
 };
 pub(crate) use setup_proof::ProofByteSource;
 #[cfg(test)]
+pub(in crate::bgv) use trustee_evaluation_key_proof::target_decryption_interpolation_denominator_clearing_factor;
+#[cfg(test)]
 pub(crate) use trustee_evaluation_key_proof::{
     TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND, TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
     generate_target_decryption_share_proof_bytes_from_request,
@@ -130,8 +132,8 @@ use crate::{
         modular_arithmetic::add_mod,
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         setup_helpers::{
-            array_at_path, hash_at_path, read_non_empty_string, string_at_path, unsigned_at_path,
-            usize_at_path, validate_hash_string, value_at_path,
+            array_at_path, hash_at_path, string_at_path, unsigned_at_path, usize_at_path,
+            validate_hash_string, value_at_path,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},

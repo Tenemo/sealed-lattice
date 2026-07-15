@@ -74,12 +74,23 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
     )?;
     let (participant_count, q_share_rns_limb_count, threshold_degree) =
         same_secret_bridge_profile(statement_set, coefficient_commitment_set)?;
+    let trustee_identities = array_at_path(vss_coefficient_commitments, &["sourceTrusteeRecords"])?
+        .iter()
+        .map(|record| Ok(string_at_path(record, &["sourceTrusteeIdentity"])?.to_string()))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    if trustee_identities.len() != participant_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "VSS coefficient commitments must cover the canonical trustee roster",
+        ));
+    }
     super::vss_commitment::verify_vss_public_coefficient_commitment_set(
         coefficient_commitment_set,
         &super::vss_commitment::VssPublicCoefficientCommitmentSetContext {
             setup_context_hash,
             public_matrix_seed_hash,
             participant_count,
+            trustee_identities: &trustee_identities,
             rns_limb_count: q_share_rns_limb_count,
             threshold_degree,
             ring_degree,
@@ -106,6 +117,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
                 setup_context_hash,
                 public_matrix_seed_hash,
             },
+            trustee_identity: &trustee_identities[expected_position],
         })?;
     }
 
@@ -134,14 +146,14 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
     let vss_coefficient_commitments = value_at_path(request, &["vssCoefficientCommitments"])?;
 
     let bridge_statement_records = array_at_path(statement_set, &["statementRecords"])?;
-    let proof_records = array_at_path(proof_material_set, &["proofRecords"])?;
-    if proof_records.len() != participant_count {
+    let proof_bytes_hashes = array_at_path(proof_material_set, &["proofBytesHashes"])?;
+    if proof_bytes_hashes.len() != participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "same-secret bridge proof material set must contain one proof record per bridge statement",
+            "same-secret bridge proof material set must contain one proof hash per bridge statement",
         ));
     }
-    for (expected_position, proof_record) in proof_records.iter().enumerate() {
+    for (expected_position, proof_bytes_hash) in proof_bytes_hashes.iter().enumerate() {
         let bridge_statement =
             bridge_statement_records
                 .get(expected_position)
@@ -151,12 +163,14 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
                         "same-secret bridge proof material set has no matching bridge statement",
                     )
                 })?;
-        compare_required_string(
-            string_at_path(proof_record, &["objectType"])?,
-            "VssSameSecretBridgeProofRecord",
-            "same-secret bridge proof record objectType",
+        let validated_proof_reference = validate_same_secret_bridge_proof_reference(
+            proof_bytes_hash.as_str().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "same-secret bridge proof hash must be a string",
+                )
+            })?,
         )?;
-        let validated_proof_reference = validate_same_secret_bridge_proof_reference(proof_record)?;
         let proof_verification_request =
             same_secret_bridge_proof_verification_request_from_public_records(
                 statement_set,

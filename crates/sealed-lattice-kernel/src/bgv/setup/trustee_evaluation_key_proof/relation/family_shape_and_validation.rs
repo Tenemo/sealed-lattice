@@ -3,6 +3,7 @@ use super::super::{
     MINIMUM_TRACE_SIZE, TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT, TRACE_SPLIT,
     VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS,
     VSS_PUBLIC_CONSISTENCY_REPETITIONS, invalid_succinct_setup_proof,
+    target_decryption_interpolation_denominator_clearing_factor,
 };
 use super::linkage_and_vss_vectors::{
     masked_claim_bounds_for_global_claim, masked_claim_lift_residue_count_for_moduli,
@@ -24,7 +25,7 @@ use crate::hashing::hash_framed_parts_512 as hash512;
 const STATEMENT_HASH_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/statement";
 const PROTOCOL_HASH_HEX_LENGTH: usize = 128;
 const MAX_CONTEXT_TOKEN_BYTES: usize = 512;
-const TARGET_DECRYPTION_PROOF_TARGET_ROLES: [&str; 2] = ["targetId", "targetOrder"];
+const TARGET_DECRYPTION_PROOF_TARGET_ROLE_COUNT: usize = 2;
 
 // The request parser maps one public-key share descriptor to the public-key
 // share variant and key-switch descriptors to the trustee evaluation-key
@@ -259,7 +260,6 @@ impl TrusteeEvaluationKeyStatement {
             append_usize(&mut preimage, linkage.commitments.len());
             for commitment in &linkage.commitments {
                 append_usize(&mut preimage, commitment.source_rns_limb_index);
-                preimage.extend_from_slice(&commitment.source_message_modulus.to_le_bytes());
                 for limb in &commitment.limbs {
                     for row in &limb.rows {
                         preimage.extend_from_slice(&coefficient_vector_hash(row));
@@ -287,7 +287,6 @@ impl TrusteeEvaluationKeyStatement {
             );
             preimage.extend_from_slice(&private_vss_share.recipient_roster_position.to_le_bytes());
             append_usize(&mut preimage, private_vss_share.source_rns_limb_index);
-            preimage.extend_from_slice(&private_vss_share.source_message_modulus.to_le_bytes());
             append_usize(&mut preimage, private_vss_share.share_values.len());
             preimage.extend_from_slice(&coefficient_vector_hash(&private_vss_share.share_values));
             append_usize(
@@ -303,7 +302,6 @@ impl TrusteeEvaluationKeyStatement {
             );
             for commitment in &private_vss_share.coefficient_commitments {
                 append_usize(&mut preimage, commitment.source_rns_limb_index);
-                preimage.extend_from_slice(&commitment.source_message_modulus.to_le_bytes());
                 preimage.extend_from_slice(&commitment.shamir_coefficient_index.to_le_bytes());
                 for limb in &commitment.limbs {
                     for row in &limb.rows {
@@ -338,7 +336,6 @@ impl TrusteeEvaluationKeyStatement {
             );
             preimage.extend_from_slice(&vss_share_linkage.recipient_roster_position.to_le_bytes());
             append_usize(&mut preimage, vss_share_linkage.source_rns_limb_index);
-            preimage.extend_from_slice(&vss_share_linkage.source_message_modulus.to_le_bytes());
             append_usize(
                 &mut preimage,
                 vss_share_linkage.coefficient_commitment_roots.len(),
@@ -374,7 +371,6 @@ impl TrusteeEvaluationKeyStatement {
                 preimage.extend_from_slice(&item.source_trustee_roster_position.to_le_bytes());
                 preimage.extend_from_slice(&item.recipient_roster_position.to_le_bytes());
                 append_usize(&mut preimage, item.source_rns_limb_index);
-                preimage.extend_from_slice(&item.source_message_modulus.to_le_bytes());
                 append_usize(&mut preimage, item.coefficient_commitment_roots.len());
                 for root in &item.coefficient_commitment_roots {
                     append_len_prefixed_str(&mut preimage, root);
@@ -432,26 +428,20 @@ impl TrusteeEvaluationKeyStatement {
             ] {
                 append_len_prefixed_str(&mut preimage, field);
             }
+            preimage.extend_from_slice(&target_decryption_share.participant_count.to_le_bytes());
             preimage.extend_from_slice(
                 &target_decryption_share
                     .trustee_roster_position
                     .to_le_bytes(),
             );
-            preimage.extend_from_slice(
-                &target_decryption_share
-                    .aggregate_message_coefficient_bound
-                    .to_le_bytes(),
-            );
             append_usize(&mut preimage, target_decryption_share.limb_statements.len());
             for limb_statement in &target_decryption_share.limb_statements {
                 append_usize(&mut preimage, limb_statement.target_rns_limb_index);
-                preimage.extend_from_slice(&limb_statement.target_rns_prime.to_le_bytes());
                 append_len_prefixed_str(&mut preimage, &limb_statement.aggregate_commitment_root);
                 append_len_prefixed_str(&mut preimage, &limb_statement.aggregate_opening_root);
                 append_vss_public_commitment(&mut preimage, &limb_statement.aggregate_commitment);
                 append_usize(&mut preimage, limb_statement.role_statements.len());
                 for role_statement in &limb_statement.role_statements {
-                    append_len_prefixed_str(&mut preimage, &role_statement.target_role);
                     append_usize(
                         &mut preimage,
                         role_statement.target_ciphertext_component_one.len(),
@@ -550,7 +540,6 @@ impl TrusteeEvaluationKeyStatement {
             }
             for (source_limb_index, commitment) in linkage.commitments.iter().enumerate() {
                 if commitment.source_rns_limb_index != source_limb_index
-                    || commitment.source_message_modulus != DATA_PRIMES[source_limb_index]
                     || commitment.ring_degree != self.ring_degree
                     || commitment.shamir_coefficient_index != 0
                     || commitment.limbs.len() != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
@@ -695,6 +684,12 @@ fn validate_target_decryption_share_statement(
     statement: &TargetDecryptionShareStatement,
     ring_degree: usize,
 ) -> CanonicalResult<()> {
+    target_decryption_interpolation_denominator_clearing_factor(statement.participant_count)?;
+    if statement.trustee_roster_position >= statement.participant_count {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption trustee roster position is outside the participant roster",
+        ));
+    }
     validate_protocol_hash_hex(
         "targetDecryptionShare.publicMatrixSeedHash",
         &statement.public_matrix_seed_hash,
@@ -726,13 +721,11 @@ fn validate_target_decryption_share_statement(
             "targetDecryptionShare.aggregateOpeningRoot",
             &limb_statement.aggregate_opening_root,
         )?;
-        if limb_statement.target_rns_limb_index >= DATA_PRIMES.len()
-            || DATA_PRIMES[limb_statement.target_rns_limb_index] != limb_statement.target_rns_prime
-        {
+        let Some(&target_rns_prime) = DATA_PRIMES.get(limb_statement.target_rns_limb_index) else {
             return Err(invalid_succinct_setup_proof(
                 "target-decryption share target limb does not match the selected data basis",
             ));
-        }
+        };
         if previous_limb_index
             .is_some_and(|previous| previous >= limb_statement.target_rns_limb_index)
         {
@@ -741,46 +734,24 @@ fn validate_target_decryption_share_statement(
             ));
         }
         previous_limb_index = Some(limb_statement.target_rns_limb_index);
-        if statement.aggregate_message_coefficient_bound < limb_statement.target_rns_prime {
-            return Err(invalid_succinct_setup_proof(
-                "target-decryption share numeric fields are outside the target field",
-            ));
-        }
         if limb_statement.role_statements.is_empty() {
             return Err(invalid_succinct_setup_proof(
                 "target-decryption share limb statement must include at least one target role",
             ));
         }
-        if limb_statement.role_statements.len() != TARGET_DECRYPTION_PROOF_TARGET_ROLES.len() {
+        if limb_statement.role_statements.len() != TARGET_DECRYPTION_PROOF_TARGET_ROLE_COUNT {
             return Err(invalid_succinct_setup_proof(
                 "target-decryption share limb statement must cover the canonical target roles",
             ));
         }
-        let mut seen_roles = std::collections::BTreeSet::new();
-        for (target_role_index, role_statement) in limb_statement.role_statements.iter().enumerate()
-        {
-            validate_context_token(
-                "targetDecryptionShare.targetRole",
-                &role_statement.target_role,
-            )?;
-            if role_statement.target_role != TARGET_DECRYPTION_PROOF_TARGET_ROLES[target_role_index]
-            {
-                return Err(invalid_succinct_setup_proof(
-                    "target-decryption share target roles must be in canonical order",
-                ));
-            }
-            if !seen_roles.insert(role_statement.target_role.as_str()) {
-                return Err(invalid_succinct_setup_proof(
-                    "target-decryption share statement repeats a target role",
-                ));
-            }
+        for role_statement in &limb_statement.role_statements {
             if role_statement.target_ciphertext_component_one.len() != ring_degree
                 || role_statement.released_partial_decryption.len() != ring_degree
                 || role_statement
                     .target_ciphertext_component_one
                     .iter()
                     .chain(role_statement.released_partial_decryption.iter())
-                    .any(|value| *value >= limb_statement.target_rns_prime)
+                    .any(|value| *value >= target_rns_prime)
             {
                 return Err(invalid_succinct_setup_proof(
                     "target-decryption share ciphertext and released partial must be canonical target-limb vectors",
@@ -833,18 +804,16 @@ fn validate_private_vss_share_statement(
         "privateVssShare.sourceTrusteeCommitmentRoot",
         &statement.source_trustee_commitment_root,
     )?;
-    if statement.source_rns_limb_index >= DATA_PRIMES.len()
-        || DATA_PRIMES[statement.source_rns_limb_index] != statement.source_message_modulus
-    {
+    let Some(&source_message_modulus) = DATA_PRIMES.get(statement.source_rns_limb_index) else {
         return Err(invalid_succinct_setup_proof(
-            "private VSS source limb does not match the selected data basis",
+            "private VSS source limb is outside the selected data basis",
         ));
-    }
+    };
     if statement.share_values.len() != ring_degree
         || statement
             .share_values
             .iter()
-            .any(|value| *value >= statement.source_message_modulus)
+            .any(|value| *value >= source_message_modulus)
     {
         return Err(invalid_succinct_setup_proof(
             "private VSS share values are not canonical for the source limb",
@@ -862,7 +831,6 @@ fn validate_private_vss_share_statement(
     }
     for (coefficient_index, commitment) in statement.coefficient_commitments.iter().enumerate() {
         if commitment.source_rns_limb_index != statement.source_rns_limb_index
-            || commitment.source_message_modulus != statement.source_message_modulus
             || commitment.shamir_coefficient_index != coefficient_index as u64
             || commitment.ring_degree != ring_degree
             || commitment.limbs.len() != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
@@ -892,7 +860,6 @@ fn validate_vss_share_linkage_item(
     field_prefix: &str,
     recipient_identity: &str,
     source_rns_limb_index: usize,
-    source_message_modulus: u64,
     coefficient_commitment_roots: &[String],
     coefficient_commitments: &[VssShareLinkageCommitment],
     recipient_share_commitment_root: &str,
@@ -906,11 +873,9 @@ fn validate_vss_share_linkage_item(
         &format!("{field_prefix}.recipientShareCommitmentRoot"),
         recipient_share_commitment_root,
     )?;
-    if source_rns_limb_index >= DATA_PRIMES.len()
-        || DATA_PRIMES[source_rns_limb_index] != source_message_modulus
-    {
+    if source_rns_limb_index >= DATA_PRIMES.len() {
         return Err(invalid_succinct_setup_proof(
-            "VSS source limb does not match the selected data basis",
+            "VSS source limb is outside the selected data basis",
         ));
     }
     if coefficient_commitments.is_empty()
@@ -964,7 +929,6 @@ fn validate_vss_share_linkage_statement(
         "vssShareLinkage",
         &statement.recipient_identity,
         statement.source_rns_limb_index,
-        statement.source_message_modulus,
         &statement.coefficient_commitment_roots,
         &statement.coefficient_commitments,
         &statement.recipient_share_commitment_root,
@@ -991,7 +955,6 @@ fn validate_vss_share_linkage_statement(
             &format!("vssShareLinkage.additionalLinkageItems.{item_index}"),
             &item.recipient_identity,
             item.source_rns_limb_index,
-            item.source_message_modulus,
             &item.coefficient_commitment_roots,
             &item.coefficient_commitments,
             &item.recipient_share_commitment_root,

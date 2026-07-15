@@ -97,8 +97,8 @@ fn folded_layer_path_length(extension_size: usize, fold_index: usize) -> usize {
     leaf_count.trailing_zeros() as usize
 }
 
-// The native test pins all statement families. The fast WASM test reuses the
-// applicable vectors so both runtimes agree without duplicating expected hashes.
+// Pins representative statement encodings that cross distinct setup proof
+// parsing paths.
 fn expected_statement_hash_vectors() -> serde_json::Value {
     serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -198,12 +198,10 @@ fn test_committed_material_commitment(
 
 fn zero_setup_commitment_for_tests(
     source_rns_limb_index: usize,
-    source_message_modulus: u64,
     shamir_coefficient_index: u64,
 ) -> SetupCommitmentValue {
     SetupCommitmentValue {
         source_rns_limb_index,
-        source_message_modulus,
         shamir_coefficient_index,
         ring_degree: SMALL_RING_DEGREE,
         limbs: (0..SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
@@ -236,7 +234,6 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
             recipient_roster_position: 2,
             source_trustee_commitment_root,
             source_rns_limb_index: 0,
-            source_message_modulus: DATA_PRIMES[0],
             share_values: vec![0_u64; SMALL_RING_DEGREE],
             coefficient_commitment_roots: vec![
                 repeated_hash("77"),
@@ -246,7 +243,7 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
             ],
             coefficient_commitments: (0..4_u64)
                 .map(|shamir_coefficient_index| {
-                    zero_setup_commitment_for_tests(0, DATA_PRIMES[0], shamir_coefficient_index)
+                    zero_setup_commitment_for_tests(0, shamir_coefficient_index)
                 })
                 .collect(),
         }),
@@ -341,14 +338,9 @@ fn zero_opening_randomness() -> Vec<Vec<i64>> {
 
 fn zero_setup_commitment_value(
     source_rns_limb_index: usize,
-    source_message_modulus: u64,
     shamir_coefficient_index: u64,
 ) -> SetupCommitmentValue {
-    zero_setup_commitment_for_tests(
-        source_rns_limb_index,
-        source_message_modulus,
-        shamir_coefficient_index,
-    )
+    zero_setup_commitment_for_tests(source_rns_limb_index, shamir_coefficient_index)
 }
 
 fn vector_context_base(binding_roots: serde_json::Value) -> serde_json::Value {
@@ -437,8 +429,8 @@ fn same_secret_statement_hash_vector_request() -> serde_json::Value {
         .iter()
         .copied()
         .enumerate()
-        .map(|(rns_limb_index, rns_prime)| {
-            setup_commitment_full_value(&zero_setup_commitment_value(rns_limb_index, rns_prime, 0))
+        .map(|(rns_limb_index, _)| {
+            setup_commitment_full_value(&zero_setup_commitment_value(rns_limb_index, 0))
         })
         .collect::<Vec<_>>();
     let target_materials = DATA_PRIMES
@@ -474,9 +466,6 @@ fn same_secret_statement_hash_vector_request() -> serde_json::Value {
             "commitments": commitments,
         },
         "sameSecretBridge": {
-            "publicMatrixSeedHash": repeated_hash("40"),
-            "sourceTrusteeIdentity": "statement-vector-trustee",
-            "sourceTrusteeRosterPosition": 0,
             "targetConstantCommitments": target_constant_commitments,
         },
         "secretCoefficients": zero_i64_vector(),
@@ -527,8 +516,6 @@ fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
         }],
         "sameSecretBridge": {
             "publicMatrixSeedHash": repeated_hash("41"),
-            "sourceTrusteeIdentity": "statement-vector-trustee",
-            "sourceTrusteeRosterPosition": 0,
             "targetConstantCommitments": target_constant_commitments,
         },
         "secretCoefficients": zero_i64_vector(),
@@ -543,8 +530,7 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
     // The key-bearing family links its atom secret to the canonical source
     // constant commitment directly. The TS/WASM vector builds the same source
     // body so both languages pin one statement hash.
-    let source_commitment =
-        setup_commitment_full_value(&zero_setup_commitment_value(0, DATA_PRIMES[0], 0));
+    let source_commitment = setup_commitment_full_value(&zero_setup_commitment_value(0, 0));
     let mut request = serde_json::json!({
         "context": vector_context_base(serde_json::json!({
             "evaluatorKeyScheduleRoot": repeated_hash("34"),
@@ -587,33 +573,26 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
     let setup_context = private_vss_setup_context_vector();
     let public_matrix_seed_hash = repeated_hash("40");
     let private_envelope_aad_hash = repeated_hash("44");
-    let mut coefficient_commitments = Vec::new();
+    let mut coefficient_commitment_roots = Vec::new();
     let mut material_records = Vec::new();
-    for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
+    for rns_limb_index in 0..DATA_PRIMES.len() {
         for shamir_coefficient_index in 0..4_u64 {
-            let commitment =
-                zero_setup_commitment_value(rns_limb_index, rns_prime, shamir_coefficient_index);
+            let commitment = zero_setup_commitment_value(rns_limb_index, shamir_coefficient_index);
             let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
-            coefficient_commitments.push(serde_json::json!({
-                "objectType": "VssCoefficientCommitment",
-                "commitmentRoot": commitment_root,
-            }));
-            material_records.push(serde_json::json!({
-                "objectType": "VssCoefficientCommitmentMaterial",
-                "commitment": setup_commitment_full_value(&commitment),
-            }));
+            coefficient_commitment_roots.push(commitment_root);
+            material_records.push(setup_commitment_full_value(&commitment));
         }
     }
     let source_record = serde_json::json!({
         "objectType": "VssSourceTrusteeCoefficientCommitments",
         "sourceTrusteeIdentity": "statement-vector-trustee",
-        "sourceTrusteeRosterPosition": 0,
-        "coefficientCommitments": coefficient_commitments,
+        "coefficientCommitmentRoots": coefficient_commitment_roots,
     });
     let mut request = serde_json::json!({
         "setupContext": setup_context,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "privateEnvelopeAadHash": private_envelope_aad_hash,
+        "sourceTrusteeRosterPosition": 0,
         "sourceTrusteeCoefficientCommitmentRecord": source_record,
         "sourceTrusteeCoefficientCommitmentMaterialRecords": material_records,
         "recipientIdentity": "statement-vector-recipient",

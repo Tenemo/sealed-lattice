@@ -125,7 +125,6 @@ impl PrivateRandomnessDomain {
             _ => Err(unassigned_randomness_domain()),
         }
     }
-
 }
 
 fn assigned_fixed_purpose_domain(

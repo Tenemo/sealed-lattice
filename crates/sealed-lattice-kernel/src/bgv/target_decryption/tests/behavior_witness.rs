@@ -1,7 +1,42 @@
 use super::*;
 
 #[test]
-fn private_flooding_noise_is_independent_and_plaintext_scaled() {
+fn ten_participant_factor_clears_every_authorized_subset_denominator() {
+    let participant_count = 10_u64;
+    let minimum_shares_for_interpolation = participant_count / 3 + 1;
+    let denominator_clearing_factor =
+        target_decryption_interpolation_denominator_clearing_factor(participant_count)
+            .expect("ten-participant denominator-clearing factor");
+
+    for subset_bits in 0_u64..(1_u64 << participant_count) {
+        if u64::from(subset_bits.count_ones()) < minimum_shares_for_interpolation {
+            continue;
+        }
+        let interpolation_points = (1..=participant_count)
+            .filter(|point| subset_bits & (1_u64 << (point - 1)) != 0)
+            .map(i128::from)
+            .collect::<Vec<_>>();
+        for selected_point in &interpolation_points {
+            let mut numerator = 1_i128;
+            let mut denominator = 1_i128;
+            for other_point in &interpolation_points {
+                if other_point == selected_point {
+                    continue;
+                }
+                numerator *= -*other_point;
+                denominator *= selected_point - other_point;
+            }
+            assert_eq!(
+                i128::from(denominator_clearing_factor) * numerator % denominator,
+                0,
+                "the roster factor must clear every authorized Lagrange denominator"
+            );
+        }
+    }
+}
+
+#[test]
+fn private_flooding_noise_is_independent_across_trustees_and_consistent_across_rns_limbs() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
     let target_share_profile_value = target_share_profile(&setup_package);
@@ -20,12 +55,19 @@ fn private_flooding_noise_is_independent_and_plaintext_scaled() {
     let selected_participants = setup_binding
         .participants
         .iter()
+        .step_by(2)
         .take(target_share_profile_binding.minimum_shares_for_interpolation)
         .collect::<Vec<_>>();
     assert_eq!(
         selected_participants.len(),
         target_share_profile_binding.minimum_shares_for_interpolation,
         "fixture must include enough participants for interpolation"
+    );
+    assert!(
+        selected_participants
+            .windows(2)
+            .any(|pair| pair[1].roster_position > pair[0].roster_position + 1),
+        "the noise test must exercise a quorum with non-integral raw Lagrange weights"
     );
 
     let mut interpolation_points = Vec::with_capacity(selected_participants.len());
@@ -102,12 +144,12 @@ fn private_flooding_noise_is_independent_and_plaintext_scaled() {
         );
     }
 
-    assert_flooding_noise_is_independent(
+    assert_flooding_noise_is_independent_and_rns_consistent(
         "target-id",
         &interpolation_points,
         &target_id_noise_by_participant,
     );
-    assert_flooding_noise_is_independent(
+    assert_flooding_noise_is_independent_and_rns_consistent(
         "target-order",
         &interpolation_points,
         &target_order_noise_by_participant,
@@ -135,12 +177,19 @@ fn target_decryption_quorum_release_recovers_target_slots() {
     let selected_participants = setup_binding
         .participants
         .iter()
+        .step_by(2)
         .take(target_share_profile_binding.minimum_shares_for_interpolation)
         .collect::<Vec<_>>();
     assert_eq!(
         selected_participants.len(),
         target_share_profile_binding.minimum_shares_for_interpolation,
         "fixture must include enough participants for interpolation"
+    );
+    assert!(
+        selected_participants
+            .windows(2)
+            .any(|pair| pair[1].roster_position > pair[0].roster_position + 1),
+        "the release test must exercise a quorum with non-integral raw Lagrange weights"
     );
     let mut interpolation_points = Vec::with_capacity(selected_participants.len());
     let mut target_id_partials_by_share = Vec::with_capacity(selected_participants.len());

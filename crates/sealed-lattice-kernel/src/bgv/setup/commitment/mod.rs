@@ -74,7 +74,6 @@ pub(super) struct SetupCommitmentLimb {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SetupCommitmentValue {
     pub(super) source_rns_limb_index: usize,
-    pub(super) source_message_modulus: u64,
     pub(super) shamir_coefficient_index: u64,
     pub(super) ring_degree: usize,
     pub(super) limbs: Vec<SetupCommitmentLimb>,
@@ -123,7 +122,6 @@ mod tests {
         let commitment = compute_setup_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
-            DATA_PRIMES[0],
             2,
             &message,
             &randomness,
@@ -175,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn commitment_command_derives_the_source_prime() -> CanonicalResult<()> {
+    fn commitment_command_derives_source_domain_from_limb_index() -> CanonicalResult<()> {
         let public_matrix_seed_hash = valid_hash('e');
         let message = message_coefficients();
         let randomness = randomness_columns(1);
@@ -189,10 +187,9 @@ mod tests {
             "ringDegree": TEST_RING_DEGREE,
         }))?;
 
-        assert_eq!(
-            response["commitment"]["sourceMessageModulus"],
-            json!(DATA_PRIMES[0]),
-        );
+        let commitment = super::parse_setup_commitment_full_value(&response["commitment"])?;
+        assert_eq!(commitment.source_rns_limb_index, 0);
+        assert_eq!(commitment.shamir_coefficient_index, 1);
         assert!(response.get("commitmentRoot").is_none());
 
         Ok(())
@@ -221,7 +218,6 @@ mod tests {
         let commitment = compute_setup_signed_lifted_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
-            DATA_PRIMES[0],
             4,
             &signed_message,
             &randomness,
@@ -271,7 +267,6 @@ mod tests {
         let first_commitment = compute_setup_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
-            DATA_PRIMES[0],
             1,
             &first_message,
             &first_randomness,
@@ -280,7 +275,6 @@ mod tests {
         let second_commitment = compute_setup_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
-            DATA_PRIMES[0],
             1,
             &second_message,
             &second_randomness,
@@ -306,7 +300,6 @@ mod tests {
         let direct_combined_commitment = compute_setup_commitment_for_degree(
             &public_matrix_seed_hash,
             0,
-            DATA_PRIMES[0],
             1,
             &combined_message,
             &combined_randomness,

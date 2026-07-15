@@ -1,4 +1,4 @@
-import type { ProtocolHash, VerificationResult } from "@sealed-lattice/types";
+import type { ProtocolHash, VerificationResult } from '@sealed-lattice/types';
 
 export type BgvRnsParametersDescription = {
     readonly parameters: {
@@ -23,7 +23,7 @@ export type BgvCollectiveSetupParametersDescription = {
         readonly primes: readonly number[];
     };
     readonly evaluatorKeySchedule: {
-        readonly objectType: "EvaluatorKeySchedule";
+        readonly objectType: 'EvaluatorKeySchedule';
         readonly relinearizationLevelSchedule: readonly {
             readonly level: number;
         }[];
@@ -33,7 +33,7 @@ export type BgvCollectiveSetupParametersDescription = {
         }[];
     };
     readonly boundedDomainEvaluator: {
-        readonly objectType: "BoundedDomainEvaluatorParameters";
+        readonly objectType: 'BoundedDomainEvaluatorParameters';
         readonly scoreDifferenceBound: number;
         readonly directComparisonOutputLevel: number;
     };
@@ -55,18 +55,18 @@ type BgvTrusteeEvaluationKeyStatementKeyCommon = {
 // carry the recomputed public round-one aggregate diagonals.
 export type BgvTrusteeEvaluationKeyStatementKey =
     | (BgvTrusteeEvaluationKeyStatementKeyCommon & {
-          readonly proofFamily: "relinearization-round-one";
+          readonly proofFamily: 'relinearization-round-one';
       })
     | (BgvTrusteeEvaluationKeyStatementKeyCommon & {
-          readonly proofFamily: "relinearization-round-two";
+          readonly proofFamily: 'relinearization-round-two';
           readonly roundOneAggregateDiagonal: readonly (readonly number[])[];
       })
     | (BgvTrusteeEvaluationKeyStatementKeyCommon & {
-          readonly proofFamily: "galois-rotation";
+          readonly proofFamily: 'galois-rotation';
           readonly rotation: number;
       })
     | (BgvTrusteeEvaluationKeyStatementKeyCommon & {
-          readonly proofFamily: "public-key-share";
+          readonly proofFamily: 'public-key-share';
       });
 
 export type BgvSuccinctSetupProofContext = {
@@ -89,8 +89,10 @@ export type BgvTrusteeEvaluationKeySameSecretLinkage = {
 
 export type BgvTrusteeEvaluationKeySameSecretBridge = {
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
+    readonly targetConstantCommitments: readonly unknown[];
+};
+
+export type BgvSameSecretBridgeTargets = {
     readonly targetConstantCommitments: readonly unknown[];
 };
 
@@ -107,9 +109,8 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
 };
 
 type BgvSetupCommitmentValue = {
-    readonly objectType: "SetupCommitment";
+    readonly objectType: 'SetupCommitment';
     readonly sourceRnsLimbIndex: number;
-    readonly sourceMessageModulus: number;
     readonly shamirCoefficientIndex: number;
     readonly ringDegree: number;
     readonly commitmentLimbs: readonly {

@@ -81,18 +81,21 @@ impl DescriptorBackedVssProofMaterialFixture {
 struct ProofMaterialFamilyFields {
     proof_family: &'static str,
     proof_bytes_hash_domain: &'static str,
+    uses_proof_hash_array: bool,
 }
 
 const VSS_SHARE_LINKAGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
     ProofMaterialFamilyFields {
         proof_family: VSS_SHARE_LINKAGE_PROOF_FAMILY,
         proof_bytes_hash_domain: VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
+        uses_proof_hash_array: false,
     };
 
 const SAME_SECRET_BRIDGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
     ProofMaterialFamilyFields {
         proof_family: SAME_SECRET_BRIDGE_PROOF_FAMILY,
         proof_bytes_hash_domain: SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
+        uses_proof_hash_array: true,
     };
 
 fn retain_proof_material_set(
@@ -100,15 +103,33 @@ fn retain_proof_material_set(
     fields: &ProofMaterialFamilyFields,
     proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
 ) -> Vec<RetainedVssProofMaterial> {
-    let proof_records = proof_material_set["proofRecords"]
-        .as_array()
-        .expect("proof material set proof records");
-    let mut retained_proof_materials = Vec::with_capacity(proof_records.len());
-    for proof_record in proof_records {
-        let proof_bytes_hash = proof_record["proofBytesHash"]
-            .as_str()
-            .expect("proof bytes hash")
-            .to_string();
+    let proof_bytes_hashes = if fields.uses_proof_hash_array {
+        proof_material_set["proofBytesHashes"]
+            .as_array()
+            .expect("proof material set proof hashes")
+            .iter()
+            .map(|proof_bytes_hash| {
+                proof_bytes_hash
+                    .as_str()
+                    .expect("proof bytes hash")
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+    } else {
+        proof_material_set["proofRecords"]
+            .as_array()
+            .expect("proof material set proof records")
+            .iter()
+            .map(|proof_record| {
+                proof_record["proofBytesHash"]
+                    .as_str()
+                    .expect("proof bytes hash")
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut retained_proof_materials = Vec::with_capacity(proof_bytes_hashes.len());
+    for proof_bytes_hash in proof_bytes_hashes {
         let proof_binding_lease = proof_binding_leases
             .iter()
             .find(|lease| lease.proof_bytes_hash() == proof_bytes_hash)
@@ -130,12 +151,12 @@ fn retained_aggregate_threshold_proof_materials(
     package: &serde_json::Value,
     proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
 ) -> Vec<RetainedVssProofMaterial> {
-    package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"]
+    package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofBytesHashes"]
         .as_array()
-        .expect("VSS aggregate threshold proof records")
+        .expect("VSS aggregate threshold proof hashes")
         .iter()
-        .map(|proof_record| {
-            let proof_bytes_hash = proof_record["proofBytesHash"]
+        .map(|proof_bytes_hash| {
+            let proof_bytes_hash = proof_bytes_hash
                 .as_str()
                 .expect("VSS aggregate threshold proof bytes hash")
                 .to_string();
@@ -197,9 +218,13 @@ fn vss_share_linkage_uses_authenticated_descriptor_material() {
         "aggregateThresholdCommitmentSet": package["vssPublicAggregateThresholdCommitmentSet"],
         "proofMaterialSet": package["vssShareLinkageProofMaterialSet"],
     });
+    let trustee_identities = (0..participant_count_from_package(&package))
+        .map(|roster_position| format!("trustee-{roster_position}"))
+        .collect::<Vec<_>>();
     let proof_binding_session = fixture.begin_proof_binding_session();
     crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
         &request,
+        &trustee_identities,
         Some(&proof_binding_session),
     )
     .expect("descriptor-backed share-linkage proof material set verifies");
@@ -224,10 +249,12 @@ fn vss_share_linkage_uses_authenticated_descriptor_material() {
         first_proof_bytes_hash.to_string()
     ]);
     let missing_material_error =
-        crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(&request, None)
-            .expect_err(
-                "descriptor-backed share-linkage records must require authenticated material",
-            );
+        crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
+            &request,
+            &trustee_identities,
+            None,
+        )
+        .expect_err("descriptor-backed share-linkage records must require authenticated material");
     assert_eq!(
         missing_material_error.code,
         crate::encoding::CanonicalErrorCode::InvalidProtocolObject,
@@ -271,10 +298,9 @@ fn same_secret_bridge_uses_authenticated_descriptor_material() {
         proof_binding_session.session_handle,
     )
     .expect("cancel direct same-secret fixture binding session");
-    let first_proof_bytes_hash =
-        package["sameSecretBridgeProofMaterialSet"]["proofRecords"][0]["proofBytesHash"]
-            .as_str()
-            .expect("first same-secret bridge proof bytes hash");
+    let first_proof_bytes_hash = package["sameSecretBridgeProofMaterialSet"]["proofBytesHashes"][0]
+        .as_str()
+        .expect("first same-secret bridge proof bytes hash");
     assert!(
         crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
             SAME_SECRET_BRIDGE_PROOF_FAMILY,

@@ -4,6 +4,7 @@ import type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
     BgvPublicKeyShareStatementContext,
+    BgvSameSecretBridgeTargets,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
@@ -23,10 +24,10 @@ export type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
+    BgvSameSecretBridgeTargets,
     BgvSameSecretBridgeProofContext,
     BgvSameSecretBridgeProofGeneration,
     BgvVssCommittedMaterialCommitmentComputation,
@@ -337,7 +338,7 @@ export type TranscriptCoreKernel = {
         readonly context: BgvSameSecretBridgeProofContext;
         readonly ringDegree: number;
         readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
-        readonly sameSecretBridge: BgvTrusteeEvaluationKeySameSecretBridge;
+        readonly sameSecretBridge: BgvSameSecretBridgeTargets;
         readonly secretCoefficients: readonly number[];
         readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
         readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];

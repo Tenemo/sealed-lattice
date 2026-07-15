@@ -49,18 +49,9 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         .as_str()
         .expect("setup epoch")
         .to_string();
-    let common_randomness = package["commonRandomness"].clone();
     let coefficient_view = package["vssPublicCoefficientCommitmentSet"].clone();
-    let rebuilt_envelopes = super::super::package_fixtures::private_vss_envelope_commitments_object(
-        &ceremony_id,
-        &manifest_hash,
-        &roster_hash,
-        &setup_parameters_hash,
-        &setup_epoch,
-        &common_randomness,
-        &coefficient_view,
-        participant_count,
-    );
+    let rebuilt_envelopes =
+        super::super::package_fixtures::private_vss_envelope_commitments_object(participant_count);
     let rebuilt_acceptances = super::super::package_fixtures::vss_share_acceptances_object(
         &ceremony_id,
         &manifest_hash,

@@ -47,11 +47,11 @@ pub(super) fn verify_relinearization_key_share_rounds(
     let roster = super::accepted_roster_from_package(setup_package)?;
     let expected_levels = scheduled_relinearization_levels()?;
     let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
-    let round_one_records = array_value(rounds, "roundOneRecords")?;
-    let round_two_records = array_value(rounds, "roundTwoRecords")?;
+    let round_one_roots = array_value(rounds, "roundOneKeySwitchComponentMaterialRoots")?;
+    let round_two_roots = array_value(rounds, "roundTwoKeySwitchComponentMaterialRoots")?;
     let expected_record_count = expected_levels.len() * roster.participant_count as usize;
-    if round_one_records.len() != expected_record_count
-        || round_two_records.len() != expected_record_count
+    if round_one_roots.len() != expected_record_count
+        || round_two_roots.len() != expected_record_count
     {
         return Ok(Some(evaluation_key_material_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
@@ -61,24 +61,24 @@ pub(super) fn verify_relinearization_key_share_rounds(
         )?));
     }
 
-    for record in round_one_records {
-        if let Err(error) = verify_relinearization_round_one_record(record) {
+    for root in round_one_roots {
+        if let Err(error) = verify_evaluation_key_component_material_root(root) {
             return Ok(Some(evaluation_key_material_refusal(
                 crate::foundation::RefusalReason::MalformedEncoding,
                 "evaluationKeyMaterialVerificationFailed",
                 error.message,
-                "setupPackage.relinearizationKeyShareRounds.roundOneRecords",
+                "setupPackage.relinearizationKeyShareRounds.roundOneKeySwitchComponentMaterialRoots",
             )?));
         }
     }
 
-    for record in round_two_records {
-        if let Err(error) = verify_relinearization_round_two_record(record) {
+    for root in round_two_roots {
+        if let Err(error) = verify_evaluation_key_component_material_root(root) {
             return Ok(Some(evaluation_key_material_refusal(
                 crate::foundation::RefusalReason::MalformedEncoding,
                 "evaluationKeyMaterialVerificationFailed",
                 error.message,
-                "setupPackage.relinearizationKeyShareRounds.roundTwoRecords",
+                "setupPackage.relinearizationKeyShareRounds.roundTwoKeySwitchComponentMaterialRoots",
             )?));
         }
     }
@@ -149,60 +149,51 @@ pub(super) fn verify_galois_key_share_batches(
 pub(super) fn galois_key_share_material_for_schedule(
     batch: &Value,
     schedule_index: usize,
-) -> CanonicalResult<&Value> {
-    array_value(batch, "galoisKeyShareMaterialRecords")?
+) -> CanonicalResult<&str> {
+    array_value(batch, "keySwitchComponentMaterialRoots")?
         .get(schedule_index)
+        .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "Galois key share batch does not contain a required scheduled material record",
+                "Galois key share batch does not contain a required scheduled material root",
             )
         })
 }
 
-pub(super) struct EvaluationKeyProofCommonBinding {
+pub(in crate::bgv::setup) struct EvaluationKeyProofCommonBinding {
     pub(super) evaluator_key_schedule_root: String,
     pub(super) public_matrix_seed_hash: String,
     pub(super) ring_degree: usize,
     trustee_identities: BTreeMap<u64, String>,
 }
 
-fn derive_evaluator_key_schedule_root(schedule: &Value) -> CanonicalResult<String> {
-    let relinearization_level_schedule =
-        schedule
-            .get("relinearizationLevelSchedule")
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "evaluatorKeySchedule.relinearizationLevelSchedule must be present",
-                )
-            })?;
-    let required_galois_key_schedule =
-        schedule.get("requiredGaloisKeySchedule").ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "evaluatorKeySchedule.requiredGaloisKeySchedule must be present",
-            )
-        })?;
+fn derive_evaluator_key_schedule_root(setup_package: &Value) -> CanonicalResult<String> {
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupContext was required before evaluation-key share verification",
+        )
+    })?;
+    let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "commonRandomness was required before evaluation-key share verification",
+        )
+    })?;
     derive_canonical_object_hash(&json!({
-        "objectType": value_string(schedule, "objectType")?,
-        "setupContextHash": value_string(schedule, "setupContextHash")?,
-        "publicMatrixSeedHash": value_string(schedule, "publicMatrixSeedHash")?,
-        "publicKeyShareSetRoot": value_string(schedule, "publicKeyShareSetRoot")?,
-        "relinearizationLevelSchedule": relinearization_level_schedule,
-        "requiredGaloisKeySchedule": required_galois_key_schedule,
+        "objectType": "EvaluatorKeySchedule",
+        "setupContextHash": setup_context_hash(setup_context)?,
+        "publicMatrixSeedHash": value_string(common_randomness, "publicMatrixSeedHash")?,
+        "publicKeyShareSetRoot": derive_public_key_share_set_root(setup_package)?,
+        "relinearizationLevelSchedule": expected_relinearization_level_schedule(),
+        "requiredGaloisKeySchedule": expected_required_galois_key_schedule()?,
     }))
 }
 
-pub(super) fn evaluation_key_proof_common_binding(
+pub(in crate::bgv::setup) fn evaluation_key_proof_common_binding(
     setup_package: &Value,
 ) -> CanonicalResult<EvaluationKeyProofCommonBinding> {
-    let evaluator_key_schedule = setup_package.get("evaluatorKeySchedule").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "evaluatorKeySchedule was required before evaluation-key share verification",
-        )
-    })?;
     let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -221,7 +212,7 @@ pub(super) fn evaluation_key_proof_common_binding(
         },
     )?;
     Ok(EvaluationKeyProofCommonBinding {
-        evaluator_key_schedule_root: derive_evaluator_key_schedule_root(evaluator_key_schedule)?,
+        evaluator_key_schedule_root: derive_evaluator_key_schedule_root(setup_package)?,
         public_matrix_seed_hash: value_string(common_randomness, "publicMatrixSeedHash")?
             .to_string(),
         ring_degree: usize::try_from(value_u64(vss_share_linkage_statement, "ringDegree")?)
@@ -253,7 +244,7 @@ fn authoritative_trustee_identity(
 
 // The scheduled relinearization key levels, read from the frozen evaluator
 // schedule: one truncated key per round at the selected working level.
-pub(super) fn scheduled_relinearization_levels() -> CanonicalResult<Vec<u64>> {
+pub(in crate::bgv::setup) fn scheduled_relinearization_levels() -> CanonicalResult<Vec<u64>> {
     expected_relinearization_level_schedule()
         .as_array()
         .expect("relinearization level schedule is an array")
@@ -272,7 +263,7 @@ pub(super) fn scheduled_relinearization_levels() -> CanonicalResult<Vec<u64>> {
 // Binds the shared public sampler directly to accepted common randomness and
 // the exact schedule slot. The component-material sampler expands this seed per
 // gadget digit and RNS limb.
-pub(super) fn expected_relinearization_key_switch_seed(
+pub(in crate::bgv::setup) fn expected_relinearization_key_switch_seed(
     binding: &EvaluationKeyProofCommonBinding,
     round: &str,
     level: u64,
@@ -286,7 +277,7 @@ pub(super) fn expected_relinearization_key_switch_seed(
     }))
 }
 
-pub(super) fn expected_galois_key_switch_seed(
+pub(in crate::bgv::setup) fn expected_galois_key_switch_seed(
     binding: &EvaluationKeyProofCommonBinding,
     rotation: u64,
     level: u64,
@@ -301,7 +292,7 @@ pub(super) fn expected_galois_key_switch_seed(
 }
 
 pub(super) fn verify_relinearization_key_switch_sample_binding(
-    record: &Value,
+    material_root: &str,
     binding: &EvaluationKeyProofCommonBinding,
     round: &str,
     level: u64,
@@ -309,9 +300,9 @@ pub(super) fn verify_relinearization_key_switch_sample_binding(
     accepted_setup_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
     let key_switch_seed_hex = expected_relinearization_key_switch_seed(binding, round, level)?;
-    component_b_vectors_from_record(
+    component_b_vectors_from_root(
         EvaluationKeyShareProofFamily::Relinearization,
-        record,
+        material_root,
         usize::try_from(level).map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -330,7 +321,7 @@ pub(super) fn verify_relinearization_key_switch_sample_binding(
 }
 
 pub(super) fn verify_galois_key_switch_sample_binding(
-    record: &Value,
+    material_root: &str,
     binding: &EvaluationKeyProofCommonBinding,
     rotation: u64,
     level: u64,
@@ -339,9 +330,9 @@ pub(super) fn verify_galois_key_switch_sample_binding(
 ) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
     let key_switch_domain = format!("galois-{rotation}");
     let key_switch_seed_hex = expected_galois_key_switch_seed(binding, rotation, level)?;
-    component_b_vectors_from_record(
+    component_b_vectors_from_root(
         EvaluationKeyShareProofFamily::Galois,
-        record,
+        material_root,
         usize::try_from(level).map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -361,23 +352,18 @@ pub(super) fn verify_galois_key_switch_sample_binding(
 
 // A share record binds the canonical streamed component material by root. The
 // material is decoded and verified when the trustee proof statement is rebuilt.
-fn verify_evaluation_key_component_material_encoding(record: &Value) -> CanonicalResult<()> {
+fn verify_evaluation_key_component_material_root(root: &Value) -> CanonicalResult<()> {
     validate_hash_string(
-        value_string(record, "keySwitchComponentMaterialRoot")?,
-        "evaluationKeyShareRecord.keySwitchComponentMaterialRoot",
+        root.as_str().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "evaluation-key component material root must be a string",
+            )
+        })?,
+        "evaluationKeyShareComponentMaterialRoot",
     )?;
 
     Ok(())
-}
-
-fn verify_relinearization_round_one_record(record: &Value) -> CanonicalResult<()> {
-    verify_evaluation_key_record_object(record, RELINEARIZATION_KEY_SHARE_ROUND_ONE_OBJECT_TYPE)?;
-    verify_evaluation_key_component_material_encoding(record)
-}
-
-fn verify_relinearization_round_two_record(record: &Value) -> CanonicalResult<()> {
-    verify_evaluation_key_record_object(record, RELINEARIZATION_KEY_SHARE_ROUND_TWO_OBJECT_TYPE)?;
-    verify_evaluation_key_component_material_encoding(record)
 }
 
 fn verify_galois_key_share_batch(batch: &Value, expected_schedule: &Value) -> CanonicalResult<()> {
@@ -388,36 +374,16 @@ fn verify_galois_key_share_batch(batch: &Value, expected_schedule: &Value) -> Ca
             "expected Galois key schedule must be an array",
         )
     })?;
-    let material_records = array_value(batch, "galoisKeyShareMaterialRecords")?;
-    if material_records.len() != expected_entries.len() {
+    let material_roots = array_value(batch, "keySwitchComponentMaterialRoots")?;
+    if material_roots.len() != expected_entries.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "Galois key share batch must contain one material record per required schedule entry",
+            "Galois key share batch must contain one material root per required schedule entry",
         ));
     }
-    for material_record in material_records {
-        verify_galois_key_share_material_record(material_record)?;
+    for material_root in material_roots {
+        verify_evaluation_key_component_material_root(material_root)?;
     }
-
-    Ok(())
-}
-
-fn verify_galois_key_share_material_record(material_record: &Value) -> CanonicalResult<()> {
-    if !material_record.is_object() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "Galois key share material record must be an object",
-        ));
-    }
-    if material_record.get("objectType").and_then(Value::as_str)
-        != Some(GALOIS_KEY_SHARE_MATERIAL_OBJECT_TYPE)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "Galois key share material objectType must be GaloisKeyShareMaterial",
-        ));
-    }
-    verify_evaluation_key_component_material_encoding(material_record)?;
 
     Ok(())
 }

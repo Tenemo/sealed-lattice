@@ -312,9 +312,9 @@ pub(crate) use bridge_target_commands::{
 #[cfg(test)]
 pub(crate) use share_linkage_verification::verify_vss_share_linkage_proof_material_set_from_request;
 pub(in crate::bgv::setup) use share_linkage_verification::verify_vss_share_linkage_statement_and_proof_material_set_from_request;
+#[cfg(test)]
 pub(in crate::bgv::setup) use share_linkage_verification::{
-    ReconstructedVssShareLinkageStatement, VssShareLinkageMaterialRecordStatementInput,
-    verify_vss_share_linkage_material_record_statement,
+    VssShareLinkageMaterialRecordStatementInput, verify_vss_share_linkage_material_record_statement,
 };
 pub(in crate::bgv::setup) use target_decryption_parsing::vss_share_linkage_commitment_from_value;
 

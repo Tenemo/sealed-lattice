@@ -1,33 +1,29 @@
-import { foundationProfile, type ProtocolHash } from "@sealed-lattice/types";
+import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
 
-import { copyCanonicalStreamDescriptor } from "../canonical-stream-descriptor.js";
-import type { CanonicalProofMaterialChunkPull } from "../setup-proof-material-transport.js";
+import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js';
+import type { CanonicalProofMaterialChunkPull } from '../setup-proof-material-transport.js';
 
 import {
     type BinaryChunkedEvaluationKeyShareMaterialTransport,
-    type EvaluationKeyShareComponentMaterialTransportInput,
-    type EvaluationKeyShareMaterial,
+    type EvaluationKeyShareComponentMaterialStream,
     type EvaluationKeyShareMaterialTransportInput,
     type EvaluationKeyShareProofFamily,
     type EvaluationKeyTrusteeReference,
-    type TransportedEvaluationKeyShareComponentMaterial,
     evaluationKeyShareComponentMaterialMagic,
-} from "./constants-and-types.js";
+} from './constants-and-types.js';
 import {
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
-    assertJsonRecord,
     bytesFromHex,
     coefficientVectorFromLittleEndianHex,
     evaluationKeyShareComponentMaterialReferenceRoot,
     evaluationKeyShareComponentVectorRoot,
-    stringRecordField,
-} from "./encoding.js";
+} from './encoding.js';
 import {
     galoisKeySwitchSeed,
     relinearizationKeySwitchSeed,
-} from "./share-records.js";
+} from './share-records.js';
 
 type EvaluationKeyShareTransportWorkItem = Readonly<{
     readonly proofFamily: EvaluationKeyShareProofFamily;
@@ -36,7 +32,7 @@ type EvaluationKeyShareTransportWorkItem = Readonly<{
     readonly level: number;
     readonly keySwitchDomain: string;
     readonly keySwitchSeedHex: string;
-    readonly shareMaterial: EvaluationKeyShareComponentMaterialTransportInput;
+    readonly keySwitchComponentVectorsLittleEndianHexByDigitAndLimb: readonly string[];
 }>;
 
 const trusteeIdentityByRosterPosition = (
@@ -54,7 +50,7 @@ const trusteeIdentityByRosterPosition = (
         );
         if (identities.has(reference.trusteeRosterPosition)) {
             throw new Error(
-                "trusteeReferences must not repeat trusteeRosterPosition.",
+                'trusteeReferences must not repeat trusteeRosterPosition.',
             );
         }
         identities.set(
@@ -81,12 +77,8 @@ const trusteeIdentityForContribution = (
     return trusteeIdentity;
 };
 
-type CanonicalComponentVector = Readonly<{
-    readonly coefficientsLeHex: string;
-}>;
-
 type ValidatedComponentMaterial = Readonly<{
-    readonly componentVectors: readonly CanonicalComponentVector[];
+    readonly componentVectorsLittleEndianHexByDigitAndLimb: readonly string[];
     readonly componentVectorRoot: ProtocolHash;
     readonly totalByteLength: number;
 }>;
@@ -95,51 +87,50 @@ const validatedEvaluationKeyShareComponentMaterial = (
     proofFamily: EvaluationKeyShareProofFamily,
     keySwitchDomain: string,
     keySwitchSeedHex: string,
-    shareMaterial: EvaluationKeyShareComponentMaterialTransportInput,
+    keySwitchComponentVectorsLittleEndianHexByDigitAndLimb: readonly string[],
     level: number,
     ringDegree: number,
     qSharePrimes: readonly number[],
 ): ValidatedComponentMaterial => {
-    assertNonNegativeSafeInteger(level, "level");
-    assertPositiveSafeInteger(ringDegree, "ringDegree");
+    assertNonNegativeSafeInteger(level, 'level');
+    assertPositiveSafeInteger(ringDegree, 'ringDegree');
     const digitCount = level + 1;
     if (digitCount > qSharePrimes.length) {
         throw new Error(
-            "evaluation-key component material level is outside the Q_share basis.",
+            'evaluation-key component material level is outside the Q_share basis.',
         );
     }
-    if (!Array.isArray(shareMaterial.keySwitchComponentVectors)) {
+    const componentVectorValues: unknown =
+        keySwitchComponentVectorsLittleEndianHexByDigitAndLimb;
+    if (!Array.isArray(componentVectorValues)) {
         throw new TypeError(
-            "evaluation-key component material must supply component vectors before transport.",
+            'evaluation-key component material must supply component vectors before transport.',
         );
     }
-    if (shareMaterial.keySwitchComponentVectors.length !== digitCount ** 2) {
+    if (componentVectorValues.length !== digitCount ** 2) {
         throw new Error(
-            "evaluation-key component material must contain one vector per scheduled digit and RNS limb.",
+            'evaluation-key component material must contain one vector per scheduled digit and RNS limb.',
         );
     }
-    const canonicalComponentVectors: CanonicalComponentVector[] = [];
+    const canonicalComponentVectorsLittleEndianHexByDigitAndLimb: string[] = [];
     for (let digitIndex = 0; digitIndex < digitCount; digitIndex += 1) {
         for (
             let rnsLimbIndex = 0;
             rnsLimbIndex < digitCount;
             rnsLimbIndex += 1
         ) {
-            const componentVector = assertJsonRecord(
-                shareMaterial.keySwitchComponentVectors[
-                    digitIndex * digitCount + rnsLimbIndex
-                ],
-                "keySwitchComponentVectors",
-            );
-            const vectorPath = `keySwitchComponentVectors.${String(
+            const vectorPath = `keySwitchComponentVectorsLittleEndianHexByDigitAndLimb.${String(
                 digitIndex,
             )}.${String(rnsLimbIndex)}`;
             const rnsPrime = qSharePrimes[rnsLimbIndex];
-            const coefficientsLeHex = stringRecordField(
-                componentVector,
-                "coefficientsLeHex",
-                vectorPath,
-            );
+            const coefficientsLeHex: unknown =
+                componentVectorValues[digitIndex * digitCount + rnsLimbIndex];
+            if (
+                typeof coefficientsLeHex !== 'string' ||
+                coefficientsLeHex.length === 0
+            ) {
+                throw new TypeError(`${vectorPath} must be non-empty.`);
+            }
             const coefficients = coefficientVectorFromLittleEndianHex(
                 coefficientsLeHex,
                 ringDegree,
@@ -147,12 +138,12 @@ const validatedEvaluationKeyShareComponentMaterial = (
             );
             if (coefficients.some((coefficient) => coefficient >= rnsPrime)) {
                 throw new Error(
-                    "evaluation-key component material coefficients must be canonical residues.",
+                    'evaluation-key component material coefficients must be canonical residues.',
                 );
             }
-            canonicalComponentVectors.push({
+            canonicalComponentVectorsLittleEndianHexByDigitAndLimb.push(
                 coefficientsLeHex,
-            });
+            );
         }
     }
     const componentVectorRoot = evaluationKeyShareComponentVectorRoot(
@@ -161,19 +152,22 @@ const validatedEvaluationKeyShareComponentMaterial = (
         keySwitchSeedHex,
         level,
         ringDegree,
-        canonicalComponentVectors,
+        canonicalComponentVectorsLittleEndianHexByDigitAndLimb,
     );
     const totalByteLength =
         evaluationKeyShareComponentMaterialMagic.byteLength +
-        canonicalComponentVectors.length * ringDegree * 8;
+        canonicalComponentVectorsLittleEndianHexByDigitAndLimb.length *
+            ringDegree *
+            8;
     if (!Number.isSafeInteger(totalByteLength) || totalByteLength <= 0) {
         throw new Error(
-            "evaluation-key component material byte length is outside the JavaScript safe integer range.",
+            'evaluation-key component material byte length is outside the JavaScript safe integer range.',
         );
     }
 
     return {
-        componentVectors: canonicalComponentVectors,
+        componentVectorsLittleEndianHexByDigitAndLimb:
+            canonicalComponentVectorsLittleEndianHexByDigitAndLimb,
         componentVectorRoot,
         totalByteLength,
     };
@@ -187,14 +181,14 @@ const evaluationKeyShareComponentMaterialSegments = function* (
     header.set(evaluationKeyShareComponentMaterialMagic);
     yield header;
 
-    for (const componentVector of validatedMaterial.componentVectors) {
+    for (const coefficientsLeHex of validatedMaterial.componentVectorsLittleEndianHexByDigitAndLimb) {
         const coefficientBytes = bytesFromHex(
-            componentVector.coefficientsLeHex,
-            "evaluation-key component coefficientsLeHex",
+            coefficientsLeHex,
+            'evaluation-key component coefficientsLeHex',
         );
         if (coefficientBytes.byteLength !== ringDegree * 8) {
             throw new Error(
-                "evaluation-key component coefficient bytes must match ringDegree.",
+                'evaluation-key component coefficient bytes must match ringDegree.',
             );
         }
         yield coefficientBytes;
@@ -214,13 +208,13 @@ const sequentialChunkPull = (
         Promise.resolve().then(() => {
             if (chunkIndex !== nextChunkIndex) {
                 throw new Error(
-                    "evaluation-key component material chunks must be pulled in ascending order.",
+                    'evaluation-key component material chunks must be pulled in ascending order.',
                 );
             }
             if (emittedByteLength === totalByteLength) {
                 if (expectedByteLength !== 0) {
                     throw new Error(
-                        "evaluation-key component material source was pulled past its declared length.",
+                        'evaluation-key component material source was pulled past its declared length.',
                     );
                 }
                 nextChunkIndex += 1;
@@ -233,7 +227,7 @@ const sequentialChunkPull = (
             );
             if (expectedByteLength !== requiredByteLength) {
                 throw new Error(
-                    "evaluation-key component material pull length does not match the canonical chunk boundary.",
+                    'evaluation-key component material pull length does not match the canonical chunk boundary.',
                 );
             }
             const chunk = new Uint8Array(requiredByteLength);
@@ -247,7 +241,7 @@ const sequentialChunkPull = (
                     const nextSegment = segments.next();
                     if (nextSegment.done) {
                         throw new Error(
-                            "evaluation-key component material encoder ended before its declared length.",
+                            'evaluation-key component material encoder ended before its declared length.',
                         );
                     }
                     currentSegment = nextSegment.value;
@@ -276,20 +270,20 @@ const sequentialChunkPull = (
 
 const transportEvaluationKeyShareComponentMaterial = async (
     workItem: EvaluationKeyShareTransportWorkItem,
-    writeComponentMaterial: EvaluationKeyShareMaterialTransportInput["writeEvaluationKeyShareComponentMaterial"],
+    writeComponentMaterial: EvaluationKeyShareMaterialTransportInput['writeEvaluationKeyShareComponentMaterial'],
     ringDegree: number,
     qSharePrimes: readonly number[],
 ): Promise<
     Readonly<{
-        readonly shareMaterial: EvaluationKeyShareMaterial;
-        readonly componentMaterial: TransportedEvaluationKeyShareComponentMaterial;
+        readonly keySwitchComponentMaterialRoot: ProtocolHash;
+        readonly componentMaterialStream: EvaluationKeyShareComponentMaterialStream;
     }>
 > => {
     const validatedMaterial = validatedEvaluationKeyShareComponentMaterial(
         workItem.proofFamily,
         workItem.keySwitchDomain,
         workItem.keySwitchSeedHex,
-        workItem.shareMaterial,
+        workItem.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
         workItem.level,
         ringDegree,
         qSharePrimes,
@@ -305,39 +299,88 @@ const transportEvaluationKeyShareComponentMaterial = async (
             workItem.trusteeRosterPosition,
             workItem.level,
         );
-    const shareMaterial: EvaluationKeyShareMaterial = {
+    const writtenMaterial = await writeComponentMaterial({
         keySwitchComponentMaterialRoot,
-    };
-    const descriptorBytes = copyCanonicalStreamDescriptor(
-        await writeComponentMaterial({
-            keySwitchComponentMaterialRoot,
-            proofFamily: workItem.proofFamily,
-            pullChunk: sequentialChunkPull(
-                evaluationKeyShareComponentMaterialSegments(
-                    ringDegree,
-                    validatedMaterial,
-                ),
-                validatedMaterial.totalByteLength,
+        proofFamily: workItem.proofFamily,
+        pullChunk: sequentialChunkPull(
+            evaluationKeyShareComponentMaterialSegments(
+                ringDegree,
+                validatedMaterial,
             ),
-            totalByteLength: validatedMaterial.totalByteLength,
-        }),
-        "writeEvaluationKeyShareComponentMaterial descriptorBytes",
+            validatedMaterial.totalByteLength,
+        ),
+        totalByteLength: validatedMaterial.totalByteLength,
+    });
+    if (typeof writtenMaterial.pullChunk !== 'function') {
+        throw new TypeError(
+            'writeEvaluationKeyShareComponentMaterial pullChunk must be a function.',
+        );
+    }
+    const descriptorBytes = copyCanonicalStreamDescriptor(
+        writtenMaterial.descriptorBytes,
+        'writeEvaluationKeyShareComponentMaterial descriptorBytes',
     );
 
     return {
-        shareMaterial,
-        componentMaterial: {
-            keySwitchComponentMaterialRoot,
+        keySwitchComponentMaterialRoot,
+        componentMaterialStream: {
             descriptorBytes,
+            pullChunk: writtenMaterial.pullChunk,
         },
     };
+};
+
+type RelinearizationMaterialContribution = Readonly<{
+    readonly trusteeRosterPosition: number;
+    readonly level: number;
+    readonly keySwitchComponentVectorsLittleEndianHexByDigitAndLimb: readonly string[];
+}>;
+
+const contributionKey = (
+    level: number,
+    trusteeRosterPosition: number,
+): string => `${String(level)}:${String(trusteeRosterPosition)}`;
+
+const relinearizationContributionsByKey = (
+    contributions: readonly RelinearizationMaterialContribution[],
+    fieldName: string,
+    trusteeIdentities: ReadonlyMap<number, string>,
+): ReadonlyMap<string, RelinearizationMaterialContribution> => {
+    const contributionsByKey = new Map<
+        string,
+        RelinearizationMaterialContribution
+    >();
+    contributions.forEach((contribution) => {
+        assertNonNegativeSafeInteger(
+            contribution.trusteeRosterPosition,
+            `${fieldName}.trusteeRosterPosition`,
+        );
+        trusteeIdentityForContribution(
+            trusteeIdentities,
+            contribution.trusteeRosterPosition,
+            fieldName,
+        );
+        assertNonNegativeSafeInteger(contribution.level, `${fieldName}.level`);
+        const key = contributionKey(
+            contribution.level,
+            contribution.trusteeRosterPosition,
+        );
+        if (contributionsByKey.has(key)) {
+            throw new Error(
+                `${fieldName} must not repeat a trustee and level.`,
+            );
+        }
+        contributionsByKey.set(key, contribution);
+    });
+
+    return contributionsByKey;
 };
 
 export const createBinaryChunkedEvaluationKeyShareMaterialTransport = async (
     input: EvaluationKeyShareMaterialTransportInput,
 ): Promise<BinaryChunkedEvaluationKeyShareMaterialTransport> => {
     if (!Array.isArray(input.qSharePrimes) || input.qSharePrimes.length === 0) {
-        throw new Error("qSharePrimes must contain at least one RNS prime.");
+        throw new Error('qSharePrimes must contain at least one RNS prime.');
     }
     input.qSharePrimes.forEach((qSharePrime, rnsLimbIndex) => {
         assertPositiveSafeInteger(
@@ -345,14 +388,26 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = async (
             `qSharePrimes.${String(rnsLimbIndex)}`,
         );
     });
-    assertPositiveSafeInteger(input.ringDegree, "ringDegree");
+    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
     const identities = trusteeIdentityByRosterPosition(input.trusteeReferences);
-    const componentMaterials: TransportedEvaluationKeyShareComponentMaterial[] =
+    const canonicalTrusteeRosterPositions = [...identities.keys()].sort(
+        (left, right) => left - right,
+    );
+    canonicalTrusteeRosterPositions.forEach(
+        (trusteeRosterPosition, expectedRosterPosition) => {
+            if (trusteeRosterPosition !== expectedRosterPosition) {
+                throw new Error(
+                    'trusteeReferences roster positions must be contiguous from zero.',
+                );
+            }
+        },
+    );
+    const evaluationKeyShareComponentMaterialStreams: EvaluationKeyShareComponentMaterialStream[] =
         [];
     const componentRoots = new Set<string>();
-    const transportShareMaterial = async (
+    const transportComponentMaterial = async (
         workItem: EvaluationKeyShareTransportWorkItem,
-    ): Promise<EvaluationKeyShareMaterial> => {
+    ): Promise<ProtocolHash> => {
         const componentTransport =
             await transportEvaluationKeyShareComponentMaterial(
                 workItem,
@@ -361,102 +416,213 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = async (
                 input.qSharePrimes,
             );
         const componentMaterialRoot =
-            componentTransport.componentMaterial.keySwitchComponentMaterialRoot;
+            componentTransport.keySwitchComponentMaterialRoot;
         if (componentRoots.has(componentMaterialRoot)) {
             throw new Error(
-                "transported evaluation-key component material contains duplicate roots.",
+                'transported evaluation-key component material contains duplicate roots.',
             );
         }
         componentRoots.add(componentMaterialRoot);
-        componentMaterials.push(componentTransport.componentMaterial);
+        evaluationKeyShareComponentMaterialStreams.push(
+            componentTransport.componentMaterialStream,
+        );
 
-        return componentTransport.shareMaterial;
+        return componentMaterialRoot;
     };
 
-    const relinearizationRoundOneContributions: BinaryChunkedEvaluationKeyShareMaterialTransport["relinearizationRoundOneContributions"][number][] =
-        [];
-    for (const contribution of input.relinearizationRoundOneContributions) {
-        relinearizationRoundOneContributions.push({
-            trusteeRosterPosition: contribution.trusteeRosterPosition,
-            level: contribution.level,
-            shareMaterial: await transportShareMaterial({
-                proofFamily: "relinearization-key-share",
-                trusteeIdentity: trusteeIdentityForContribution(
-                    identities,
-                    contribution.trusteeRosterPosition,
-                    "relinearizationRoundOneContributions",
-                ),
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                level: contribution.level,
-                keySwitchDomain: "relinearization",
-                keySwitchSeedHex: relinearizationKeySwitchSeed(
-                    input.evaluatorKeySchedule,
-                    "round-one",
-                    contribution.level,
-                ),
-                shareMaterial: contribution.shareMaterial,
-            }),
-        });
+    const scheduledLevels =
+        input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
+            ({ level }) => level,
+        );
+    const roundOneContributionsByKey = relinearizationContributionsByKey(
+        input.relinearizationRoundOneContributions,
+        'relinearizationRoundOneContributions',
+        identities,
+    );
+    const roundTwoContributionsByKey = relinearizationContributionsByKey(
+        input.relinearizationRoundTwoContributions,
+        'relinearizationRoundTwoContributions',
+        identities,
+    );
+    const expectedRelinearizationContributionCount =
+        scheduledLevels.length * canonicalTrusteeRosterPositions.length;
+    if (
+        roundOneContributionsByKey.size !==
+            expectedRelinearizationContributionCount ||
+        roundTwoContributionsByKey.size !==
+            expectedRelinearizationContributionCount
+    ) {
+        throw new Error(
+            'relinearization contributions must contain exactly one material per scheduled trustee and level.',
+        );
     }
-    const relinearizationRoundTwoContributions: BinaryChunkedEvaluationKeyShareMaterialTransport["relinearizationRoundTwoContributions"][number][] =
+    const relinearizationRoundOneContributions: BinaryChunkedEvaluationKeyShareMaterialTransport['relinearizationRoundOneContributions'][number][] =
         [];
-    for (const contribution of input.relinearizationRoundTwoContributions) {
-        relinearizationRoundTwoContributions.push({
-            trusteeRosterPosition: contribution.trusteeRosterPosition,
-            level: contribution.level,
-            shareMaterial: await transportShareMaterial({
-                proofFamily: "relinearization-key-share",
-                trusteeIdentity: trusteeIdentityForContribution(
-                    identities,
-                    contribution.trusteeRosterPosition,
-                    "relinearizationRoundTwoContributions",
-                ),
-                trusteeRosterPosition: contribution.trusteeRosterPosition,
-                level: contribution.level,
-                keySwitchDomain: "relinearization",
-                keySwitchSeedHex: relinearizationKeySwitchSeed(
-                    input.evaluatorKeySchedule,
-                    "round-two",
-                    contribution.level,
-                ),
-                shareMaterial: contribution.shareMaterial,
-            }),
-        });
+    for (const level of scheduledLevels) {
+        for (const trusteeRosterPosition of canonicalTrusteeRosterPositions) {
+            const contribution = roundOneContributionsByKey.get(
+                contributionKey(level, trusteeRosterPosition),
+            );
+            if (contribution === undefined) {
+                throw new Error(
+                    'relinearizationRoundOneContributions is missing a scheduled trustee and level.',
+                );
+            }
+            relinearizationRoundOneContributions.push({
+                trusteeRosterPosition,
+                level,
+                keySwitchComponentMaterialRoot:
+                    await transportComponentMaterial({
+                        proofFamily: 'relinearization-key-share',
+                        trusteeIdentity: trusteeIdentityForContribution(
+                            identities,
+                            trusteeRosterPosition,
+                            'relinearizationRoundOneContributions',
+                        ),
+                        trusteeRosterPosition,
+                        level,
+                        keySwitchDomain: 'relinearization',
+                        keySwitchSeedHex: relinearizationKeySwitchSeed(
+                            input.evaluatorKeySchedule,
+                            'round-one',
+                            level,
+                        ),
+                        keySwitchComponentVectorsLittleEndianHexByDigitAndLimb:
+                            contribution.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
+                    }),
+            });
+        }
     }
-    const galoisKeyShareBatchContributions: BinaryChunkedEvaluationKeyShareMaterialTransport["galoisKeyShareBatchContributions"][number][] =
+    const relinearizationRoundTwoContributions: BinaryChunkedEvaluationKeyShareMaterialTransport['relinearizationRoundTwoContributions'][number][] =
         [];
-    for (const batchContribution of input.galoisKeyShareBatchContributions) {
+    for (const level of scheduledLevels) {
+        for (const trusteeRosterPosition of canonicalTrusteeRosterPositions) {
+            const contribution = roundTwoContributionsByKey.get(
+                contributionKey(level, trusteeRosterPosition),
+            );
+            if (contribution === undefined) {
+                throw new Error(
+                    'relinearizationRoundTwoContributions is missing a scheduled trustee and level.',
+                );
+            }
+            relinearizationRoundTwoContributions.push({
+                trusteeRosterPosition,
+                level,
+                keySwitchComponentMaterialRoot:
+                    await transportComponentMaterial({
+                        proofFamily: 'relinearization-key-share',
+                        trusteeIdentity: trusteeIdentityForContribution(
+                            identities,
+                            trusteeRosterPosition,
+                            'relinearizationRoundTwoContributions',
+                        ),
+                        trusteeRosterPosition,
+                        level,
+                        keySwitchDomain: 'relinearization',
+                        keySwitchSeedHex: relinearizationKeySwitchSeed(
+                            input.evaluatorKeySchedule,
+                            'round-two',
+                            level,
+                        ),
+                        keySwitchComponentVectorsLittleEndianHexByDigitAndLimb:
+                            contribution.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
+                    }),
+            });
+        }
+    }
+    const galoisBatchContributionsByRosterPosition = new Map(
+        input.galoisKeyShareBatchContributions.map((batchContribution) => {
+            assertNonNegativeSafeInteger(
+                batchContribution.trusteeRosterPosition,
+                'galoisKeyShareBatchContributions.trusteeRosterPosition',
+            );
+            return [
+                batchContribution.trusteeRosterPosition,
+                batchContribution,
+            ] as const;
+        }),
+    );
+    if (
+        galoisBatchContributionsByRosterPosition.size !==
+        input.galoisKeyShareBatchContributions.length
+    ) {
+        throw new Error(
+            'galoisKeyShareBatchContributions must not repeat a trustee roster position.',
+        );
+    }
+    if (
+        galoisBatchContributionsByRosterPosition.size !==
+        canonicalTrusteeRosterPositions.length
+    ) {
+        throw new Error(
+            'galoisKeyShareBatchContributions must contain one batch per trustee.',
+        );
+    }
+    const galoisKeyShareBatchContributions: BinaryChunkedEvaluationKeyShareMaterialTransport['galoisKeyShareBatchContributions'][number][] =
+        [];
+    for (const trusteeRosterPosition of canonicalTrusteeRosterPositions) {
+        const batchContribution = galoisBatchContributionsByRosterPosition.get(
+            trusteeRosterPosition,
+        );
+        if (batchContribution === undefined) {
+            throw new Error(
+                'galoisKeyShareBatchContributions is missing a trustee batch.',
+            );
+        }
         const trusteeIdentity = trusteeIdentityForContribution(
             identities,
-            batchContribution.trusteeRosterPosition,
-            "galoisKeyShareBatchContributions",
+            trusteeRosterPosition,
+            'galoisKeyShareBatchContributions',
         );
-        const galoisKeyShares: BinaryChunkedEvaluationKeyShareMaterialTransport["galoisKeyShareBatchContributions"][number]["galoisKeyShares"][number][] =
+        if (
+            batchContribution.galoisKeyShares.length !==
+            input.evaluatorKeySchedule.requiredGaloisKeySchedule.length
+        ) {
+            throw new Error(
+                'galoisKeyShares must contain one share per required Galois key.',
+            );
+        }
+        const galoisKeyShares: BinaryChunkedEvaluationKeyShareMaterialTransport['galoisKeyShareBatchContributions'][number]['galoisKeyShares'][number][] =
             [];
-        for (const shareContribution of batchContribution.galoisKeyShares) {
+        for (const [
+            scheduleIndex,
+            scheduleEntry,
+        ] of input.evaluatorKeySchedule.requiredGaloisKeySchedule.entries()) {
+            const shareContribution =
+                batchContribution.galoisKeyShares[scheduleIndex];
+            if (
+                shareContribution === undefined ||
+                shareContribution.rotation !== scheduleEntry.rotation ||
+                shareContribution.level !== scheduleEntry.level
+            ) {
+                throw new Error(
+                    'galoisKeyShares must follow the frozen Galois key schedule.',
+                );
+            }
             galoisKeyShares.push({
                 rotation: shareContribution.rotation,
                 level: shareContribution.level,
-                shareMaterial: await transportShareMaterial({
-                    proofFamily: "galois-key-share",
-                    trusteeIdentity,
-                    trusteeRosterPosition:
-                        batchContribution.trusteeRosterPosition,
-                    level: shareContribution.level,
-                    keySwitchDomain: `galois-${String(
-                        shareContribution.rotation,
-                    )}`,
-                    keySwitchSeedHex: galoisKeySwitchSeed(
-                        input.evaluatorKeySchedule,
-                        shareContribution.rotation,
-                        shareContribution.level,
-                    ),
-                    shareMaterial: shareContribution.shareMaterial,
-                }),
+                keySwitchComponentMaterialRoot:
+                    await transportComponentMaterial({
+                        proofFamily: 'galois-key-share',
+                        trusteeIdentity,
+                        trusteeRosterPosition,
+                        level: shareContribution.level,
+                        keySwitchDomain: `galois-${String(
+                            shareContribution.rotation,
+                        )}`,
+                        keySwitchSeedHex: galoisKeySwitchSeed(
+                            input.evaluatorKeySchedule,
+                            shareContribution.rotation,
+                            shareContribution.level,
+                        ),
+                        keySwitchComponentVectorsLittleEndianHexByDigitAndLimb:
+                            shareContribution.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
+                    }),
             });
         }
         galoisKeyShareBatchContributions.push({
-            trusteeRosterPosition: batchContribution.trusteeRosterPosition,
+            trusteeRosterPosition,
             galoisKeyShares,
         });
     }
@@ -465,8 +631,6 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = async (
         relinearizationRoundOneContributions,
         relinearizationRoundTwoContributions,
         galoisKeyShareBatchContributions,
-        transportedEvaluationKeyShareComponentMaterial: {
-            componentMaterials,
-        },
+        evaluationKeyShareComponentMaterialStreams,
     };
 };

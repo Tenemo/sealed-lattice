@@ -1,5 +1,6 @@
 use super::super::*;
 use super::*;
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::vss_commitment::{
     VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VssPublicMessageEncodingLayout,
     vss_public_message_digit_weight, vss_public_message_encoding_layout,
@@ -303,7 +304,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
     let coefficient_slot_indices_by_item = statement.coefficient_witness_slot_indices_by_item();
     let mut items = Vec::with_capacity(statement.item_count());
     items.push(VssShareLinkageItemView {
-        source_message_modulus: statement.source_message_modulus,
+        source_message_modulus: DATA_PRIMES[statement.source_rns_limb_index],
         recipient_roster_position: statement.recipient_roster_position,
         coefficient_commitments: &statement.coefficient_commitments,
         coefficient_slot_indices: coefficient_slot_indices_by_item
@@ -317,7 +318,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
         .zip(coefficient_slot_indices_by_item.iter().skip(1))
     {
         items.push(VssShareLinkageItemView {
-            source_message_modulus: item.source_message_modulus,
+            source_message_modulus: DATA_PRIMES[item.source_rns_limb_index],
             recipient_roster_position: item.recipient_roster_position,
             coefficient_commitments: &item.coefficient_commitments,
             coefficient_slot_indices: coefficient_slot_indices.clone(),

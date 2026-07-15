@@ -49,13 +49,3 @@ export const resolveTestDiagnosticPaths = (
         ),
     };
 };
-
-export const buildTestDiagnosticEnvironment = (input: {
-    readonly baseEnvironment?: NodeJS.ProcessEnv;
-    readonly projectLabel: string;
-    readonly runDirectoryPath: string;
-}): NodeJS.ProcessEnv => ({
-    ...(input.baseEnvironment ?? process.env),
-    [testDiagnosticEnvironmentVariables.projectLabel]: input.projectLabel,
-    [testDiagnosticEnvironmentVariables.runDirectory]: input.runDirectoryPath,
-});

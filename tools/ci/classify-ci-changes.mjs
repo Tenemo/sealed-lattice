@@ -36,7 +36,6 @@ const heavyRuntimeDirectoryPrefixes = [
     'packages/sdk/src/',
     'packages/types/src/',
     'packages/wasm/src/',
-    'packages/wasm/tests/node/transcript-core-kernel/',
     'test-vectors/',
     'tests/support/',
     'tools/process-memory-guard/',

@@ -49,6 +49,14 @@ pub(super) fn generate_target_decryption_share_from_secret_share(
     secret_share: &[Vec<u64>],
     flooding_noise_openings: &[TargetDecryptionFloodingNoiseOpening],
 ) -> CanonicalResult<Value> {
+    let participant_count = u64::try_from(setup_binding.participants.len()).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "target-decryption participant count does not fit u64",
+        )
+    })?;
+    let denominator_clearing_factor =
+        target_decryption_interpolation_denominator_clearing_factor(participant_count)?;
     let target_id_partials =
         partial_decryption_by_limb(&target_ciphertexts.target_id, secret_share)?;
     let target_order_partials =
@@ -57,11 +65,13 @@ pub(super) fn generate_target_decryption_share_from_secret_share(
         flooding_noise_openings,
         "targetId",
         &target_id_partials,
+        denominator_clearing_factor,
     )?;
     let target_order_partials = apply_plaintext_multiple_flooding_noise(
         flooding_noise_openings,
         "targetOrder",
         &target_order_partials,
+        denominator_clearing_factor,
     )?;
     let payload = share_payload(&target_id_partials, &target_order_partials)?;
 

@@ -13,14 +13,15 @@ pub(in super::super) fn collective_public_key_object(
         .map(|_| vec![0_u64; ring_degree])
         .collect::<Vec<_>>();
     for material_record in material_records {
-        for (rns_limb_index, limb) in material_record["shareCoefficientVectorsByLimb"]
-            .as_array()
-            .expect("share limbs")
-            .iter()
-            .enumerate()
+        for (rns_limb_index, limb) in
+            material_record["shareCoefficientVectorsLittleEndianHexByLimb"]
+                .as_array()
+                .expect("share limbs")
+                .iter()
+                .enumerate()
         {
             let coefficients = coefficient_vector_from_le_hex(
-                limb["coefficientsLeHex"].as_str().expect("coefficient hex"),
+                limb.as_str().expect("coefficient hex"),
                 ring_degree,
                 "public-key share coefficient width",
             )
@@ -37,15 +38,11 @@ pub(in super::super) fn collective_public_key_object(
     }
     let aggregate_limbs = aggregate_coefficients_by_limb
         .iter()
-        .map(|coefficients| {
-            serde_json::json!({
-                "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
-            })
-        })
+        .map(|coefficients| coefficient_vector_le_hex(coefficients))
         .collect::<Vec<_>>();
     serde_json::json!({
         "objectType": "CollectivePublicKey",
-        "aggregateCoefficientVectorsByLimb": aggregate_limbs,
+        "aggregateCoefficientVectorsLittleEndianHexByLimb": aggregate_limbs,
     })
 }
 
@@ -66,19 +63,11 @@ pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
         );
         let share_hashes = coefficients_by_limb
             .iter()
-            .map(|coefficients| {
-                serde_json::json!({
-                    "coefficientVectorHash512": public_key_share_coefficient_vector_hash(coefficients),
-                })
-            })
+            .map(|coefficients| public_key_share_coefficient_vector_hash(coefficients))
             .collect::<Vec<_>>();
-        package["publicKeyShares"]["shareRecords"][trustee_roster_position as usize]["shareCoefficientVectorHash512ByLimb"] =
+        package["publicKeyShares"]["shareRecords"][trustee_roster_position as usize]["shareCoefficientVectorHashesByLimb"] =
             serde_json::json!(share_hashes);
     }
-    package["evaluatorKeySchedule"]["publicKeyShareSetRoot"] = serde_json::json!(
-        crate::bgv::setup::accepted_setup::derive_public_key_share_set_root(package)
-            .expect("public-key share set root")
-    );
 }
 
 pub(in super::super) fn public_key_share_material_object(
@@ -95,7 +84,6 @@ pub(in super::super) fn public_key_share_material_object(
     let mut material_records = Vec::new();
     let mut material_root_references = Vec::new();
     for trustee_roster_position in 0..participant_count {
-        let trustee_identity = format!("trustee-{trustee_roster_position}");
         let (coefficients_by_limb, _) = public_key_share_coefficients_and_errors_for_fixture(
             public_matrix_seed_hash,
             trustee_roster_position,
@@ -103,11 +91,7 @@ pub(in super::super) fn public_key_share_material_object(
         );
         let limbs = coefficients_by_limb
             .iter()
-            .map(|coefficients| {
-                serde_json::json!({
-                    "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
-                })
-            })
+            .map(|coefficients| coefficient_vector_le_hex(coefficients))
             .collect::<Vec<_>>();
         let share_record =
             &package["publicKeyShares"]["shareRecords"][trustee_roster_position as usize];
@@ -115,27 +99,26 @@ pub(in super::super) fn public_key_share_material_object(
             crate::bgv::setup::accepted_setup::derive_public_key_share_root(
                 setup_context,
                 public_matrix_seed_hash,
+                trustee_roster_position,
                 share_record,
             )
             .expect("public-key share root");
         let material_root_input = serde_json::json!({
             "objectType": "PublicKeyShareMaterial",
             "setupContextHash": setup_context_hash,
-            "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "publicKeyShareRoot": public_key_share_root,
-            "shareCoefficientVectorsByLimb": limbs,
+            "shareCoefficientVectorsLittleEndianHexByLimb": limbs,
         });
         let public_key_share_material_root = derive_canonical_object_hash(&material_root_input)
             .expect("public-key share material root");
         let material_record = serde_json::json!({
             "objectType": "PublicKeyShareMaterial",
-            "shareCoefficientVectorsByLimb":
-                material_root_input["shareCoefficientVectorsByLimb"],
+            "shareCoefficientVectorsLittleEndianHexByLimb":
+                material_root_input["shareCoefficientVectorsLittleEndianHexByLimb"],
         });
         material_root_references.push(serde_json::json!({
-            "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": trustee_roster_position,
             "publicKeyShareMaterialRoot": public_key_share_material_root,
         }));
@@ -179,8 +162,7 @@ pub(in super::super) fn authenticate_public_key_share_material_fixture(
     for material_record in material_records {
         for rns_limb_index in 0..DATA_PRIMES.len() {
             let coefficients = coefficient_vector_from_le_hex(
-                material_record["shareCoefficientVectorsByLimb"][rns_limb_index]
-                    ["coefficientsLeHex"]
+                material_record["shareCoefficientVectorsLittleEndianHexByLimb"][rns_limb_index]
                     .as_str()
                     .expect("public-key material coefficient bytes"),
                 ring_degree,
@@ -309,8 +291,8 @@ pub(in super::super) struct PublicKeyShareSuccinctProofFixture {
         Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
 }
 
-struct PublicKeyShareSuccinctProofRecordFixture {
-    proof_record: serde_json::Value,
+struct PublicKeyShareSuccinctProofReferenceFixture {
+    proof_bytes_hash: String,
     proof_binding_lease: crate::bgv::setup::CanonicalSetupProofBindingLease,
 }
 
@@ -429,10 +411,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
                 was_semantically_verified,
             } = checkpointed_proof;
             let proof_bytes_hash = public_key_share_succinct_proof_bytes_hash(&proof_bytes);
-            let proof_record = serde_json::json!({
-                "objectType": "PublicKeyShareSuccinctProof",
-                "proofBytesHash": &proof_bytes_hash,
-            });
             authenticate_setup_proof_material_stream_for_test(
                 PUBLIC_KEY_SHARE_PROOF_FAMILY,
                 &proof_bytes_hash,
@@ -449,7 +427,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             }
             let verification_binding_hash = crate::bgv::setup::accepted_setup::
             public_key_share_succinct_proof_verification_binding_hash(
-                &proof_record,
+                &proof_bytes_hash,
                 &statement,
             )
             .expect("public-key share proof verification binding");
@@ -467,21 +445,21 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             .expect("public-key share proof binding lease lookup")
             .expect("public-key share proof binding must be retained");
 
-            PublicKeyShareSuccinctProofRecordFixture {
-                proof_record,
+            PublicKeyShareSuccinctProofReferenceFixture {
+                proof_bytes_hash,
                 proof_binding_lease,
             }
         })
         .collect::<Vec<_>>();
-    let mut proof_records = Vec::new();
+    let mut proof_bytes_hashes = Vec::new();
     let mut proof_binding_leases = Vec::new();
     for fixture in per_trustee_records {
-        proof_records.push(fixture.proof_record);
+        proof_bytes_hashes.push(fixture.proof_bytes_hash);
         proof_binding_leases.push(fixture.proof_binding_lease);
     }
     let proof_set = serde_json::json!({
         "objectType": "PublicKeyShareSuccinctProofSet",
-        "proofRecords": proof_records,
+        "proofBytesHashes": proof_bytes_hashes,
     });
 
     PublicKeyShareSuccinctProofFixture {

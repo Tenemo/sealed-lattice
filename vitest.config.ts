@@ -26,7 +26,6 @@ const browserServerBasePort = 41000;
 const nodeHookTimeoutMs = 240_000;
 const nodeTestTimeoutMs = 60_000;
 const nodeKernelTestTimeoutMs = 15 * 60_000;
-const nodeKernelHeavyTestTimeoutMs = 60 * 60_000;
 
 const protocolNodeTestGlobs = [
     'packages/protocol/tests/node/**/*.test.ts',
@@ -35,10 +34,6 @@ const kernelNodeTestGlobs = [
     'packages/wasm/tests/node/**/*.kernel.test.ts',
     'tests/node/**/*.kernel.test.ts',
 ] as const;
-const heavyKernelNodeTestGlobs = [
-    'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/**/*.kernel.test.ts',
-] as const;
-
 const nodeTestProjectDefinitions = [
     {
         exclude: [...protocolNodeTestGlobs, ...kernelNodeTestGlobs],
@@ -55,17 +50,10 @@ const nodeTestProjectDefinitions = [
         testTimeout: nodeKernelTestTimeoutMs,
     },
     {
-        exclude: heavyKernelNodeTestGlobs,
         fileParallelism: false,
         include: kernelNodeTestGlobs,
         projectName: 'node-kernel-fast',
         testTimeout: nodeKernelTestTimeoutMs,
-    },
-    {
-        fileParallelism: false,
-        include: heavyKernelNodeTestGlobs,
-        projectName: 'node-kernel-heavy',
-        testTimeout: nodeKernelHeavyTestTimeoutMs,
     },
 ] as const;
 
@@ -73,6 +61,7 @@ const desktopBrowserTestGlobs = [
     'packages/*/tests/browser/**/*.browser.test.ts',
 ] as const;
 const mobileBrowserTestGlobs = [
+    'packages/wasm/tests/browser/accepted-setup-session-runtime.browser.test.ts',
     'packages/wasm/tests/browser/canonical-stream-runtime.browser.test.ts',
     'packages/wasm/tests/browser/local-storage-root-worker-kernel.browser.test.ts',
     'packages/wasm/tests/browser/state-verifier-runtime.browser.test.ts',

@@ -622,7 +622,6 @@ pub(in super::super) fn absorb_linkage_statement(
         "linkage-source-limb",
         commitment.source_rns_limb_index as u64,
     );
-    transcript.absorb_u64("linkage-source-modulus", commitment.source_message_modulus);
     transcript.absorb(
         "linkage-commitment-root",
         setup_commitment_root(commitment)?.as_bytes(),

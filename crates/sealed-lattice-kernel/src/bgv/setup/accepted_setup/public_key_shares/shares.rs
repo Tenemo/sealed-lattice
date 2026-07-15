@@ -82,30 +82,16 @@ fn verify_public_key_share_record(
             "setupPackage.publicKeyShares.shareRecords.objectType",
         )?));
     }
-    let trustee_identity = value_string(share_record, "trusteeIdentity")?;
-    let trustee_roster_position = value_u64(share_record, "trusteeRosterPosition")?;
-    if trustee_roster_position != expected_roster_position {
-        return Ok(Some(public_key_refusal(
-            crate::foundation::RefusalReason::WrongTypeOrLength,
-            "publicKeyShareOrderMismatch",
-            "public-key share records must follow canonical roster order",
-            "setupPackage.publicKeyShares.shareRecords",
-        )?));
-    }
-    if expected_trustees
-        .get(&trustee_roster_position)
-        .map(String::as_str)
-        != Some(trustee_identity)
-    {
+    if !expected_trustees.contains_key(&expected_roster_position) {
         return Ok(Some(public_key_refusal(
             crate::foundation::RefusalReason::WrongContext,
             "publicKeyShareTrusteeMismatch",
-            "public-key share trustee identity must match the accepted setup roster",
-            "setupPackage.publicKeyShares.shareRecords.trusteeIdentity",
+            "public-key share position must identify an accepted setup trustee",
+            "setupPackage.publicKeyShares.shareRecords",
         )?));
     }
     let share_coefficient_hashes = share_record
-        .get("shareCoefficientVectorHash512ByLimb")
+        .get("shareCoefficientVectorHashesByLimb")
         .and_then(Value::as_array);
     if let Some(response) = verify_public_key_share_limb_hashes(share_coefficient_hashes)? {
         return Ok(Some(response));
@@ -117,10 +103,11 @@ fn verify_public_key_share_record(
 pub(in crate::bgv::setup) fn derive_public_key_share_root(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
+    trustee_roster_position: u64,
     share_record: &Value,
 ) -> CanonicalResult<String> {
     let share_coefficient_hashes = share_record
-        .get("shareCoefficientVectorHash512ByLimb")
+        .get("shareCoefficientVectorHashesByLimb")
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
@@ -131,10 +118,9 @@ pub(in crate::bgv::setup) fn derive_public_key_share_root(
     derive_canonical_object_hash(&json!({
         "objectType": PUBLIC_KEY_SHARE_OBJECT_TYPE,
         "setupContextHash": setup_context_hash(setup_context)?,
-        "trusteeIdentity": value_string(share_record, "trusteeIdentity")?,
-        "trusteeRosterPosition": value_u64(share_record, "trusteeRosterPosition")?,
+        "trusteeRosterPosition": trustee_roster_position,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "shareCoefficientVectorHash512ByLimb": share_coefficient_hashes,
+        "shareCoefficientVectorHashesByLimb": share_coefficient_hashes,
     }))
 }
 
@@ -179,9 +165,9 @@ fn verify_public_key_share_limb_hashes(
     limb_hashes: Option<&Vec<Value>>,
 ) -> CanonicalResult<Option<Refusals>> {
     const LIMB_HASHES_PATH: &str =
-        "publicKeyShares.shareRecords.shareCoefficientVectorHash512ByLimb";
+        "publicKeyShares.shareRecords.shareCoefficientVectorHashesByLimb";
     const LIMB_HASHES_OBJECT_PATH: &str =
-        "setupPackage.publicKeyShares.shareRecords.shareCoefficientVectorHash512ByLimb";
+        "setupPackage.publicKeyShares.shareRecords.shareCoefficientVectorHashesByLimb";
 
     let Some(limb_hashes) = limb_hashes else {
         return Ok(Some(setup_refusals(
@@ -200,8 +186,13 @@ fn verify_public_key_share_limb_hashes(
 
     for limb_hash in limb_hashes {
         validate_hash_string(
-            value_string(limb_hash, "coefficientVectorHash512")?,
-            &format!("{LIMB_HASHES_PATH}.coefficientVectorHash512"),
+            limb_hash.as_str().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "public-key share coefficient hashes must be strings",
+                )
+            })?,
+            LIMB_HASHES_PATH,
         )?;
     }
 
@@ -222,17 +213,8 @@ pub(in super::super) fn public_key_share_records_by_roster_position(
             )
         })?;
     let mut records = BTreeMap::new();
-    for share_record in share_records {
-        let trustee_roster_position = value_u64(share_record, "trusteeRosterPosition")?;
-        if records
-            .insert(trustee_roster_position, share_record.clone())
-            .is_some()
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share records contain duplicate trustee roster positions",
-            ));
-        }
+    for (trustee_roster_position, share_record) in share_records.iter().enumerate() {
+        records.insert(trustee_roster_position as u64, share_record.clone());
     }
 
     Ok(records)
@@ -245,11 +227,7 @@ mod tests {
     fn valid_limb_hashes() -> Vec<Value> {
         DATA_PRIMES
             .iter()
-            .map(|_| {
-                serde_json::json!({
-                    "coefficientVectorHash512": "0".repeat(128),
-                })
-            })
+            .map(|_| serde_json::json!("0".repeat(128)))
             .collect()
     }
 
@@ -297,12 +275,11 @@ mod tests {
             format!("{}G", "0".repeat(127)),
         ] {
             let mut limb_hashes = valid_limb_hashes();
-            limb_hashes[DATA_PRIMES.len() - 1]["coefficientVectorHash512"] =
-                serde_json::json!(malformed_hash);
+            limb_hashes[DATA_PRIMES.len() - 1] = serde_json::json!(malformed_hash);
             let error = verify_public_key_share_limb_hashes(Some(&limb_hashes))
                 .expect_err("malformed coefficient hash must fail closed");
             assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-            assert!(error.message.contains("coefficientVectorHash512"));
+            assert!(error.message.contains("hash"));
         }
     }
 }

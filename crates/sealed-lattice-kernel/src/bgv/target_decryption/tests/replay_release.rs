@@ -1,12 +1,11 @@
 use super::*;
 
 use crate::bgv::direct_ballots::{
-    direct_ballot_comparison_domain_max, direct_ballot_evaluator_working_level,
-    direct_ballot_plaintext_target_slots,
+    DirectBallotPackedBatchedPairEvaluatorInput, direct_ballot_comparison_domain_max,
+    direct_ballot_evaluator_working_level, direct_ballot_plaintext_target_slots,
     run_direct_ballot_packed_batched_pair_evaluator_for_top_counts,
-    DirectBallotPackedBatchedPairEvaluatorInput,
 };
-use crate::bgv::evaluator::circuit::{modulus_switch_to, EvaluatorContext};
+use crate::bgv::evaluator::circuit::{EvaluatorContext, modulus_switch_to};
 use crate::bgv::evaluator::engine::{ciphertext_add, ciphertext_object_root};
 use crate::bgv::evaluator::top_k::{
     evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs, pack_direct_score_slots,
@@ -167,7 +166,14 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
     let quorum = target_share_profile_binding.decryption_share_quorum;
     phase("generating the proof-backed share quorum with real succinct proofs");
     let mut target_share_proofs = Vec::with_capacity(quorum);
-    for participant in setup_binding.participants.iter().take(quorum) {
+    let selected_participants = setup_binding
+        .participants
+        .iter()
+        .step_by(2)
+        .take(quorum)
+        .collect::<Vec<_>>();
+    assert_eq!(selected_participants.len(), quorum);
+    for participant in selected_participants {
         let trustee_identity = participant.trustee_identity.as_str();
         let local_target_share_witness_value = local_target_share_witness(
             &setup_package,

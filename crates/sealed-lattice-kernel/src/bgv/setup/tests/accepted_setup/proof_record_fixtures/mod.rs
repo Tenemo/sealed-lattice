@@ -56,7 +56,7 @@ pub(in super::super) fn vss_commitment_ring_degree_from_fixture_package(
     package: &serde_json::Value,
 ) -> usize {
     let ring_degree = package["vssPublicCoefficientCommitmentSet"]["sourceTrusteeRecords"][0]
-        ["coefficientCommitments"][0]["commitment"]["ringDegree"]
+        ["coefficientCommitments"][0]["ringDegree"]
         .as_u64()
         .or_else(|| {
             package["vssCoefficientCommitmentMaterial"]["ringDegree"].as_u64()
@@ -82,5 +82,5 @@ pub(super) use trustee_evaluation_key_proofs::*;
 pub(super) use vss_public_material::{
     CompactAggregateThresholdProofFixture, FinalizedCollectiveSetupPackageFixture,
     compact_aggregate_threshold_proof_fixture, descriptor_backed_vss_proof_material_fixture,
-    finalize_collective_setup_package, vss_public_coefficient_commitment_set_object,
+    finalize_collective_setup_package,
 };

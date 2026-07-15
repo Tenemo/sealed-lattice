@@ -61,7 +61,8 @@ export { deriveCollectiveBgvSetupRosterHash } from './roster/index.js';
 export type { CollectiveBgvSetupRosterEntryInput } from './roster/index.js';
 export type {
     CanonicalProofMaterialChunkPull,
-    SetupProofMaterialChunkSource,
+    SetupProofMaterialStream,
+    SetupProofMaterialStreamSet,
 } from './setup/setup-proof-material-transport.js';
 export {
     createBinaryChunkedPublicKeyShareMaterialBundle,
@@ -94,17 +95,15 @@ export {
     createVssShareComplaintRecord,
 } from './setup/vss-share-verification-records.js';
 export type {
-    EvaluationKeyShareComponentMaterialChunkSource,
-    TransportedEvaluationKeyShareComponentMaterialSet,
+    EvaluationKeyShareComponentMaterialStream,
     TransportedEvaluationKeyShareProofMaterialSet,
 } from './setup/evaluation-key-proof-records.js';
 export type { RequiredGaloisKeyScheduleEntry } from './setup/evaluator-key-schedule.js';
 export type {
     PublicKeyShareContributionInput,
     PublicKeyShareMaterialContributionInput,
-    PublicKeyShareMaterialChunkSource,
+    PublicKeyShareMaterialStream,
     PublicKeyShareSuccinctProofSetInput,
-    SetupTransportedPublicKeyShareMaterial,
     TransportedPublicKeyShareProofMaterialSet,
     PublicKeyShareSet,
 } from './setup/public-key-share-records.js';

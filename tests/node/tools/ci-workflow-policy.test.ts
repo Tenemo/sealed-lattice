@@ -16,6 +16,23 @@ const tenParticipantEvidenceWorkflowPath = fileURLToPath(
 );
 
 describe('CI workflow policy', () => {
+    it('runs routine JavaScript and WASM checks after one workspace build', async () => {
+        const ciWorkflow = await readFile(ciWorkflowPath, 'utf8');
+        const workspaceBuildCommands = ciWorkflow.match(
+            /^ {14}run: pnpm run build\r?$/gmu,
+        );
+
+        expect(workspaceBuildCommands).toHaveLength(1);
+        expect(ciWorkflow).toMatch(/^ {4}routine:\r?$/mu);
+        expect(ciWorkflow).toContain('run: pnpm run test:node:built');
+        expect(ciWorkflow).toContain('run: pnpm run test:browser:built');
+        expect(ciWorkflow).not.toMatch(
+            /^ {4}(?:static-build|node|browser):\r?$/gmu,
+        );
+        expect(ciWorkflow).not.toContain('    node-kernel-heavy:');
+        expect(ciWorkflow).not.toContain('test:node:kernel:heavy');
+    });
+
     it('keeps ten-participant accepted-setup evidence out of pull request CI', async () => {
         const [ciWorkflow, tenParticipantEvidenceWorkflow] = await Promise.all([
             readFile(ciWorkflowPath, 'utf8'),

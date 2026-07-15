@@ -1,43 +1,11 @@
 use super::*;
 
-#[allow(clippy::too_many_arguments)]
 pub(in super::super) fn private_vss_envelope_commitments_object(
-    ceremony_id: &str,
-    manifest_hash: &str,
-    roster_hash: &str,
-    setup_parameters_hash: &str,
-    setup_epoch: &str,
-    common_randomness: &serde_json::Value,
-    vss_coefficient_commitments: &serde_json::Value,
     participant_count: u64,
 ) -> serde_json::Value {
-    let setup_context_hash =
-        crate::bgv::setup::accepted_setup::setup_context_hash(&serde_json::json!({
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupParametersHash": setup_parameters_hash,
-            "setupEpoch": setup_epoch,
-            "participantCount": participant_count,
-        }))
-        .expect("setup context hash");
-    let public_matrix_seed_hash = common_randomness["publicMatrixSeedHash"]
-        .as_str()
-        .expect("public matrix seed hash");
-    let vss_coefficient_commitment_root = derive_canonical_object_hash(vss_coefficient_commitments)
-        .expect("VSS coefficient commitment root");
     let envelope_references = (0..participant_count)
         .flat_map(|source_trustee_roster_position| {
-            let setup_context_hash = setup_context_hash.clone();
-            let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
-            let source_trustee_commitment_root = derive_canonical_object_hash(
-                &vss_coefficient_commitments["sourceTrusteeRecords"]
-                    [source_trustee_roster_position as usize],
-            )
-            .expect("source trustee commitment root");
-            let vss_coefficient_commitment_root = vss_coefficient_commitment_root.clone();
             (0..participant_count).map(move |recipient_roster_position| {
-                let recipient_identity = format!("trustee-{recipient_roster_position}");
                 let private_envelope_hash = derive_canonical_object_hash(&serde_json::json!({
                     "objectType": "PrivateVssShareEnvelopeHash",
                     "fixture": "private-vss-share-envelope",
@@ -45,23 +13,8 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
                     "recipientRosterPosition": recipient_roster_position,
                 }))
                 .expect("private envelope hash");
-                let private_envelope_aad = serde_json::json!({
-                    "objectType": "PrivateVssEnvelopeAad",
-                    "setupContextHash": setup_context_hash,
-                    "publicMatrixSeedHash": public_matrix_seed_hash,
-                    "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root.as_str(),
-                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
-                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                    "recipientIdentity": recipient_identity.as_str(),
-                    "recipientRosterPosition": recipient_roster_position,
-                    "sourceTrusteeCommitmentRoot": source_trustee_commitment_root.as_str(),
-                });
-                let recipient_mailbox_public_key_hash =
-                    private_vss_mailbox_public_key_hash(recipient_roster_position);
                 let encrypted_envelope = serde_json::json!({
                     "objectType": "EncryptedPrivateVssShareEnvelope",
-                    "privateEnvelopeAad": private_envelope_aad.clone(),
-                    "recipientMailboxPublicKeyHash": recipient_mailbox_public_key_hash.as_str(),
                     "kemCiphertextBytesHex": "a5".repeat(1088),
                     "aeadNonceHex": "5a".repeat(12),
                     "ciphertextBytesHex": "c3".repeat(96),
@@ -70,9 +23,7 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
                     .expect("encrypted envelope hash");
                 serde_json::json!({
                     "objectType": "PrivateVssEnvelopeCommitment",
-                    "sourceTrusteeIdentity": source_trustee_identity.as_str(),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                    "recipientIdentity": recipient_identity.as_str(),
                     "recipientRosterPosition": recipient_roster_position,
                     "privateEnvelopeHash": private_envelope_hash,
                     "encryptedEnvelopeHash": encrypted_envelope_hash,
@@ -114,7 +65,14 @@ pub(in super::super) fn vss_share_acceptances_object(
     let public_matrix_seed_hash = vss_coefficient_commitments["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    let vss_coefficient_commitment_root = derive_canonical_object_hash(vss_coefficient_commitments)
+    let trustee_identities = (0..participant_count)
+        .map(|roster_position| format!("trustee-{roster_position}"))
+        .collect::<Vec<_>>();
+    let vss_coefficient_commitment_root =
+        crate::bgv::setup::vss_commitment::vss_public_coefficient_commitment_set_root(
+            vss_coefficient_commitments,
+            &trustee_identities,
+        )
         .expect("VSS coefficient commitment root");
     let private_vss_envelope_commitment_root = derive_canonical_object_hash(
         &private_vss_envelope_commitment_set_root_input(&serde_json::json!({
@@ -130,9 +88,11 @@ pub(in super::super) fn vss_share_acceptances_object(
         .flat_map(|source_trustee_roster_position| {
             let setup_context_hash = setup_context_hash.clone();
             let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
-            let source_trustee_commitment_root = derive_canonical_object_hash(
+            let source_trustee_commitment_root =
+                crate::bgv::setup::vss_commitment::vss_public_source_coefficient_record_root(
                 &vss_coefficient_commitments["sourceTrusteeRecords"]
                     [source_trustee_roster_position as usize],
+                &source_trustee_identity,
             )
             .expect("source trustee commitment root");
             let private_vss_envelope_commitment_root =

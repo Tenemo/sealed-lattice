@@ -13,12 +13,12 @@ pub(super) fn verify_collective_public_key_coefficients(
         ));
     }
     let aggregate_limbs = aggregate_object
-        .get("aggregateCoefficientVectorsByLimb")
+        .get("aggregateCoefficientVectorsLittleEndianHexByLimb")
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "collectivePublicKey.aggregateCoefficientVectorsByLimb is required",
+                "collectivePublicKey.aggregateCoefficientVectorsLittleEndianHexByLimb is required",
             )
         })?;
     if aggregate_limbs.len() != DATA_PRIMES.len() {
@@ -29,7 +29,12 @@ pub(super) fn verify_collective_public_key_coefficients(
     }
     for (rns_limb_index, aggregate_limb) in aggregate_limbs.iter().enumerate() {
         let coefficients = coefficient_vector_from_le_hex(
-            value_string(aggregate_limb, "coefficientsLeHex")?,
+            aggregate_limb.as_str().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "collective public-key coefficient vectors must be strings",
+                )
+            })?,
             ring_degree,
             "collective public-key coefficient vector width does not match the material ring degree",
         )?;

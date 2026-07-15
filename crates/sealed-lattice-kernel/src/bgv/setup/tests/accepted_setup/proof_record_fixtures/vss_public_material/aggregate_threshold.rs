@@ -30,7 +30,7 @@ pub(in super::super) fn vss_aggregate_threshold_proofs(
         recipient_coordinates.len(),
         "aggregate recipient records and canonical coordinates",
     );
-    let proof_record_fixtures = recipient_records
+    let proof_material_references = recipient_records
         .iter()
         .zip(recipient_coordinates.iter().copied())
         .map(
@@ -47,13 +47,13 @@ pub(in super::super) fn vss_aggregate_threshold_proofs(
         )
         .collect::<Vec<_>>();
     VssProofRecordSetFixture {
-        records: proof_record_fixtures
+        proof_bytes_hashes: proof_material_references
             .iter()
-            .map(|fixture| fixture.record.clone())
+            .map(|reference| reference.proof_bytes_hash.clone())
             .collect(),
-        proof_binding_leases: proof_record_fixtures
+        proof_binding_leases: proof_material_references
             .into_iter()
-            .map(|fixture| fixture.proof_binding_lease)
+            .map(|reference| reference.proof_binding_lease)
             .collect(),
     }
 }
@@ -65,7 +65,7 @@ fn vss_aggregate_threshold_proof_record(
     ring_degree: usize,
     recipient_roster_position: u64,
     rns_limb_index: usize,
-) -> VssProofRecordFixture {
+) -> VssAggregateThresholdProofMaterialReference {
     let threshold_degree = vss_fixture_threshold_degree(package);
     let rns_prime = DATA_PRIMES[rns_limb_index];
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
@@ -126,18 +126,25 @@ fn vss_aggregate_threshold_proof_record(
         .checked_mul(DATA_PRIMES.len())
         .and_then(|offset| offset.checked_add(rns_limb_index))
         .expect("aggregate record index fits usize");
+    let trustee_identities = (0..participant_count)
+        .map(|roster_position| format!("trustee-{roster_position}"))
+        .collect::<Vec<_>>();
     let vss_aggregate =
         crate::bgv::setup::vss_commitment::vss_aggregate_threshold_statement_from_commitment_records(
-        public_matrix_seed_hash,
-        usize::try_from(participant_count).expect("participant count fits usize"),
-        DATA_PRIMES.len(),
-        coefficient_source_records,
-        recipient_source_records,
-        aggregate_record,
-        aggregate_record_index,
+            crate::bgv::setup::vss_commitment::VssAggregateThresholdStatementInput {
+                public_matrix_seed_hash,
+                participant_count: usize::try_from(participant_count)
+                    .expect("participant count fits usize"),
+                rns_limb_count: DATA_PRIMES.len(),
+                coefficient_source_records,
+                recipient_source_records,
+                aggregate_record,
+                aggregate_record_index,
+                trustee_identities: &trustee_identities,
+            },
     )
     .expect("canonical VSS aggregate threshold statement");
-    let proof_material = vss_aggregate_threshold_proof_material_reference(
+    vss_aggregate_threshold_proof_material_reference(
         package,
         &vss_aggregate,
         &summand_messages,
@@ -145,15 +152,7 @@ fn vss_aggregate_threshold_proof_record(
         &wrap_witnesses,
         recipient_roster_position,
         rns_limb_index,
-    );
-
-    VssProofRecordFixture {
-        record: serde_json::json!({
-            "objectType": "VssAggregateThresholdProofRecord",
-            "proofBytesHash": proof_material.proof_bytes_hash,
-        }),
-        proof_binding_lease: proof_material.proof_binding_lease,
-    }
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

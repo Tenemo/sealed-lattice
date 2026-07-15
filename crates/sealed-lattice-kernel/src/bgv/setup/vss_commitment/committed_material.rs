@@ -33,6 +33,7 @@ pub(crate) struct VssCommittedMaterialCommitmentInput<'a> {
 
 pub(crate) struct VssCommittedMaterialCommitmentComputation {
     pub(crate) commitment: Value,
+    #[cfg(test)]
     pub(crate) commitment_root: String,
     pub(crate) opening_root: String,
 }
@@ -108,6 +109,7 @@ pub(crate) fn compute_vss_committed_material_commitment(
         "ringDegree": input.ring_degree,
         "commitmentFields": commitment_fields,
     });
+    #[cfg(test)]
     let commitment_root = derive_canonical_object_hash(&commitment)?;
     let opening_root = derive_canonical_object_hash(&json!({
         "objectType": "VssCommittedMaterialCommitmentOpening",
@@ -125,6 +127,7 @@ pub(crate) fn compute_vss_committed_material_commitment(
 
     Ok(VssCommittedMaterialCommitmentComputation {
         commitment,
+        #[cfg(test)]
         commitment_root,
         opening_root,
     })

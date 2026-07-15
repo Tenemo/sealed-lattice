@@ -300,7 +300,6 @@ fn vss_threshold_aggregate_instance() -> (
             source_coefficient_commitment_root: repeated_hash("91"),
             source_recipient_share_commitment_root: repeated_hash("92"),
             source_rns_limb_index,
-            source_message_modulus,
             coefficient_commitment_roots: summand_commitment_computations
                 .iter()
                 .map(|computation| computation.commitment_root.clone())
@@ -426,7 +425,6 @@ fn vss_share_linkage_instance() -> (
             source_coefficient_commitment_root,
             source_recipient_share_commitment_root,
             source_rns_limb_index: primary_item.source_rns_limb_index,
-            source_message_modulus: primary_item.source_message_modulus,
             coefficient_commitment_roots: primary_item
                 .coefficient_commitment_computations
                 .iter()
@@ -610,7 +608,6 @@ fn share_linkage_item_statement(item: &ShareLinkageItemForTest) -> VssShareLinka
         recipient_identity: item.recipient_identity.clone(),
         recipient_roster_position: item.recipient_roster_position,
         source_rns_limb_index: item.source_rns_limb_index,
-        source_message_modulus: item.source_message_modulus,
         coefficient_commitment_roots: item
             .coefficient_commitment_computations
             .iter()
@@ -636,7 +633,6 @@ struct ShareLinkageItemForTest {
     recipient_identity: String,
     recipient_roster_position: u64,
     source_rns_limb_index: usize,
-    source_message_modulus: u64,
     coefficient_messages: Vec<Vec<u64>>,
     recipient_share_values: Vec<u64>,
     recipient_share_carry_values: Vec<i64>,
@@ -731,7 +727,6 @@ fn share_linkage_item_for_test(
         recipient_identity: format!("trustee-{recipient_roster_position}"),
         recipient_roster_position,
         source_rns_limb_index,
-        source_message_modulus,
         coefficient_messages,
         recipient_share_values,
         recipient_share_carry_values,

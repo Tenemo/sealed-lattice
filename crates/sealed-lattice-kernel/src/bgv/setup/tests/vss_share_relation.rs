@@ -193,7 +193,6 @@ fn carry_aware_vss_commitment_opening_matches_lifted_share_relation() {
             compute_setup_commitment_for_tests(
                 &public_matrix_seed_hash,
                 0,
-                modulus,
                 coefficient_index as u64,
                 &message_coefficients,
                 randomness,

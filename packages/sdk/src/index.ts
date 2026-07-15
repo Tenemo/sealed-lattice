@@ -4,14 +4,13 @@ import {
     validatePollSpec as validatePollSpecInternal,
 } from '@sealed-lattice/protocol';
 import type {
-    SetupProofMaterialChunkSource as ProtocolSetupProofMaterialChunkSource,
-    SetupTransportedPublicKeyShareMaterial as ProtocolSetupTransportedPublicKeyShareMaterial,
-    PublicKeyShareMaterialChunkSource as ProtocolPublicKeyShareMaterialChunkSource,
-    EvaluationKeyShareComponentMaterialChunkSource as ProtocolEvaluationKeyShareComponentMaterialChunkSource,
+    SetupProofMaterialStream as ProtocolSetupProofMaterialStream,
+    SetupProofMaterialStreamSet as ProtocolSetupProofMaterialStreamSet,
+    PublicKeyShareMaterialStream as ProtocolPublicKeyShareMaterialStream,
+    EvaluationKeyShareComponentMaterialStream as ProtocolEvaluationKeyShareComponentMaterialStream,
     TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
     TransportedVssShareLinkageProofMaterialSet as ProtocolTransportedVssShareLinkageProofMaterialSet,
     TransportedSameSecretBridgeProofMaterialSet as ProtocolTransportedSameSecretBridgeProofMaterialSet,
-    TransportedEvaluationKeyShareComponentMaterialSet as ProtocolTransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
     SetupPackage as ProtocolSetupPackage,
     CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput,
@@ -78,8 +77,7 @@ export type VerifyPrivateVssShareInput = Readonly<{
     readonly sourceTrusteeCoefficientCommitmentRecord: unknown;
     readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
     readonly privateEnvelope: unknown;
-    readonly transportedPrivateVssShareProofMaterial?: unknown;
-    readonly privateVssShareProofMaterialChunkSources?: readonly SetupProofMaterialChunkSource[];
+    readonly transportedPrivateVssShareProofMaterial?: SetupProofMaterialStreamSet;
     readonly expectedPrivateEnvelopeHash?: ProtocolHash;
 }>;
 
@@ -91,10 +89,7 @@ export type SetupPackage = ProtocolSetupPackage;
 export type CollectiveBgvSetupRosterEntryInput =
     ProtocolCollectiveBgvSetupRosterEntryInput;
 
-export type SetupTransportedPublicKeyShareMaterial =
-    ProtocolSetupTransportedPublicKeyShareMaterial;
-export type PublicKeyShareMaterialChunkSource =
-    ProtocolPublicKeyShareMaterialChunkSource;
+export type PublicKeyShareMaterialStream = ProtocolPublicKeyShareMaterialStream;
 export type TransportedPublicKeyShareProofMaterialSet =
     ProtocolTransportedPublicKeyShareProofMaterialSet;
 export type TransportedVssShareLinkageProofMaterialSet =
@@ -103,29 +98,21 @@ export type TransportedSameSecretBridgeProofMaterialSet =
     ProtocolTransportedSameSecretBridgeProofMaterialSet;
 export type TransportedEvaluationKeyShareProofMaterialSet =
     ProtocolTransportedEvaluationKeyShareProofMaterialSet;
-export type TransportedEvaluationKeyShareComponentMaterialSet =
-    ProtocolTransportedEvaluationKeyShareComponentMaterialSet;
-export type EvaluationKeyShareComponentMaterialChunkSource =
-    ProtocolEvaluationKeyShareComponentMaterialChunkSource;
-export type SetupProofMaterialChunkSource =
-    ProtocolSetupProofMaterialChunkSource;
+export type EvaluationKeyShareComponentMaterialStream =
+    ProtocolEvaluationKeyShareComponentMaterialStream;
+export type SetupProofMaterialStream = ProtocolSetupProofMaterialStream;
+export type SetupProofMaterialStreamSet = ProtocolSetupProofMaterialStreamSet;
 export type VerifySetupPackageInput = Readonly<{
     readonly setupPackage: unknown;
     readonly expectedSetupPackageHash?: ProtocolHash;
     readonly expectedManifestHash: ProtocolHash;
     readonly expectedRosterHash: ProtocolHash;
-    readonly transportedPublicKeyShareMaterial: SetupTransportedPublicKeyShareMaterial;
-    readonly publicKeyShareMaterialChunkSource: PublicKeyShareMaterialChunkSource;
+    readonly publicKeyShareMaterialStream: PublicKeyShareMaterialStream;
     readonly transportedPublicKeyShareProofMaterial: TransportedPublicKeyShareProofMaterialSet;
     readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
     readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
-    readonly setupProofMaterialChunkSources?: readonly SetupProofMaterialChunkSource[];
-    readonly transportedEvaluationKeyShareComponentMaterial: TransportedEvaluationKeyShareComponentMaterialSet;
-    // Bounded evaluation-key component sources are supplied out of band. Each
-    // source is authenticated against the descriptor on its transported
-    // component reference before terminal setup verification.
-    readonly evaluationKeyShareComponentMaterialChunkSources?: readonly EvaluationKeyShareComponentMaterialChunkSource[];
+    readonly evaluationKeyShareComponentMaterialStreams: readonly EvaluationKeyShareComponentMaterialStream[];
 }>;
 
 export type SetupPackageVerification = VerificationResult<void>;

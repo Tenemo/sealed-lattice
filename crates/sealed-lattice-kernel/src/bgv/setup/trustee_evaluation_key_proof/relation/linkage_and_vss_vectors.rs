@@ -13,6 +13,7 @@ use super::statement_types::{
     PrivateVssShareStatement, SameSecretLinkageStatement, TargetDecryptionMessageClaimKind,
     TrusteeEvaluationKeyStatement, vss_share_linkage_lincheck_roster_position,
 };
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
     StructuralMatrixPolynomial, setup_commitment_matrix_coefficients_cached,
@@ -137,7 +138,7 @@ pub(crate) fn build_linkage_public_vectors(
         }
     };
     for (commitment_index, commitment) in linkage.commitments.iter().enumerate() {
-        let source_modulus_residue = commitment.source_message_modulus % modulus;
+        let source_modulus_residue = DATA_PRIMES[commitment.source_rns_limb_index] % modulus;
         let limb = &commitment.limbs[commitment_field];
         for row_index in 0..SETUP_COMMITMENT_ROW_COUNT {
             // Repetition-combined challenge vector for this relation.
@@ -285,11 +286,12 @@ pub(crate) fn build_private_vss_public_vectors(
     }
 
     let share_relation_index = coefficient_count * SETUP_COMMITMENT_ROW_COUNT;
+    let source_message_modulus = DATA_PRIMES[statement.source_rns_limb_index];
     let trustee_point = canonical_trustee_point(
         usize::try_from(statement.recipient_roster_position).map_err(|_| {
             invalid_succinct_setup_proof("private VSS recipient roster position does not fit usize")
         })?,
-        statement.source_message_modulus,
+        source_message_modulus,
     )?;
     let mut trustee_point_powers = Vec::with_capacity(coefficient_count);
     let mut trustee_point_power = 1_u128;
@@ -299,7 +301,7 @@ pub(crate) fn build_private_vss_public_vectors(
             .checked_mul(u128::from(trustee_point))
             .ok_or_else(|| invalid_succinct_setup_proof("private VSS trustee point overflowed"))?;
     }
-    let source_modulus_residue = statement.source_message_modulus % modulus;
+    let source_modulus_residue = source_message_modulus % modulus;
     let negated_source_modulus = if source_modulus_residue == 0 {
         0
     } else {

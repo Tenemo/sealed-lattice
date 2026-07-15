@@ -195,6 +195,9 @@ fn vss_share_linkage_proof_material_reference(
     proof_record_index: usize,
 ) -> VssShareLinkageProofMaterialReference {
     let participant_count = participant_count_from_package(package) as usize;
+    let trustee_identities = (0..participant_count)
+        .map(|roster_position| format!("trustee-{roster_position}"))
+        .collect::<Vec<_>>();
     let reconstructed_vss_share_linkage =
         crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_material_record_statement(
             crate::bgv::setup::trustee_evaluation_key_proof::VssShareLinkageMaterialRecordStatementInput {
@@ -205,6 +208,7 @@ fn vss_share_linkage_proof_material_reference(
                 participant_count,
                 q_share_rns_limb_count: DATA_PRIMES.len(),
                 threshold_degree: vss_fixture_threshold_degree(package) as usize,
+                trustee_identities: &trustee_identities,
             },
         )
         .expect("reconstruct VSS share-linkage proof statement")
