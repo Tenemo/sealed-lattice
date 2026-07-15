@@ -13,7 +13,7 @@
 //! query leaves, which lets the verifier recompute each authenticated leaf.
 
 use super::super::proof_field::ProofFieldParameters;
-use super::domain::{CyclicDomain, evaluate_polynomial_at};
+use super::domain::{CyclicDomain, CyclicDomainGeometry, evaluate_polynomial_at};
 use super::merkle::{
     BatchedMerkleOpening, MerkleDigest, MerkleTree, consistent_sorted_leaves, leaf_hash,
     sorted_unique_indices, verify_merkle_batch,
@@ -84,44 +84,46 @@ fn commit_layer<const LIMB_COUNT: usize>(
     })
 }
 
-// The fold of one pair at coset point x, shared by prover and verifier:
+// The fold of one pair at coset point x, supplied through x^-1 and shared by
+// prover and verifier:
 // g(x^2) = (f(x)+f(-x))/2 + beta*(f(x)-f(-x))/(2x).
 fn fold_pair<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     value: &[u64; LIMB_COUNT],
     sibling: &[u64; LIMB_COUNT],
-    x: &[u64; LIMB_COUNT],
+    point_inverse: &[u64; LIMB_COUNT],
     two_inverse: &[u64; LIMB_COUNT],
     beta: &[u64; LIMB_COUNT],
 ) -> [u64; LIMB_COUNT] {
     let even = parameters.multiply(&parameters.add(value, sibling), two_inverse);
     let odd_numerator = parameters.multiply(&parameters.subtract(value, sibling), two_inverse);
-    let odd = parameters.multiply(&odd_numerator, &parameters.inverse(x));
+    let odd = parameters.multiply(&odd_numerator, point_inverse);
     parameters.add(&even, &parameters.multiply(beta, &odd))
 }
 
 fn fold_codeword<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     codeword: &[[u64; LIMB_COUNT]],
-    layer_domain: &CyclicDomain<'_, LIMB_COUNT>,
-    layer_offset: &[u64; LIMB_COUNT],
+    layer_domain: &CyclicDomainGeometry<'_, LIMB_COUNT>,
+    layer_offset_inverse: &[u64; LIMB_COUNT],
     two_inverse: &[u64; LIMB_COUNT],
     beta: &[u64; LIMB_COUNT],
 ) -> Vec<[u64; LIMB_COUNT]> {
     let half = codeword.len() / 2;
-    (0..half)
-        .map(|index| {
-            let x = parameters.multiply(layer_offset, &layer_domain.point(index));
-            fold_pair(
-                parameters,
-                &codeword[index],
-                &codeword[index + half],
-                &x,
-                two_inverse,
-                beta,
-            )
-        })
-        .collect()
+    let mut point_inverse = *layer_offset_inverse;
+    let mut folded = Vec::with_capacity(half);
+    for index in 0..half {
+        folded.push(fold_pair(
+            parameters,
+            &codeword[index],
+            &codeword[index + half],
+            &point_inverse,
+            two_inverse,
+            beta,
+        ));
+        point_inverse = parameters.multiply(&point_inverse, layer_domain.generator_inverse());
+    }
+    folded
 }
 
 // The prover's committed FRI layers, held between the commit phase (which
@@ -156,11 +158,11 @@ pub(super) fn fri_commit<const LIMB_COUNT: usize>(
     let mut layers: Vec<ProverLayer<LIMB_COUNT>> = Vec::new();
     let mut layer_roots: Vec<MerkleDigest> = Vec::new();
     let mut current = codeword.to_vec();
-    let mut current_offset = *initial_offset;
+    let mut current_offset_inverse = parameters.inverse(initial_offset);
 
     let final_coefficients = loop {
         if current.len() <= FINAL_LAYER_MAX_SIZE {
-            let domain = CyclicDomain::new(parameters, current.len())?;
+            let domain = CyclicDomain::for_interpolation(parameters, current.len())?;
             let coefficients = domain.interpolate(&current);
             transcript.absorb_field_elements("fri-final", &coefficients);
             break coefficients;
@@ -169,18 +171,19 @@ pub(super) fn fri_commit<const LIMB_COUNT: usize>(
         transcript.absorb_digest("fri-layer-root", &layer.tree.root());
         layer_roots.push(layer.tree.root());
         let beta = transcript.challenge_field_element(parameters, "fri-fold");
-        let layer_domain = CyclicDomain::new(parameters, current.len())?;
+        let layer_domain = CyclicDomainGeometry::new(parameters, current.len())?;
         let folded = fold_codeword(
             parameters,
             &current,
             &layer_domain,
-            &current_offset,
+            &current_offset_inverse,
             &two_inverse,
             &beta,
         );
         layers.push(layer);
         current = folded;
-        current_offset = parameters.multiply(&current_offset, &current_offset);
+        current_offset_inverse =
+            parameters.multiply(&current_offset_inverse, &current_offset_inverse);
     };
 
     Ok(FriCommitment {
@@ -234,9 +237,9 @@ pub(super) fn fri_answer<const LIMB_COUNT: usize>(
 pub(super) struct FriVerification<'a, const LIMB_COUNT: usize> {
     betas: Vec<[u64; LIMB_COUNT]>,
     layer_sizes: Vec<usize>,
-    layer_offsets: Vec<[u64; LIMB_COUNT]>,
-    layer_domains: Vec<CyclicDomain<'a, LIMB_COUNT>>,
-    final_domain: CyclicDomain<'a, LIMB_COUNT>,
+    layer_offset_inverses: Vec<[u64; LIMB_COUNT]>,
+    layer_domains: Vec<CyclicDomainGeometry<'a, LIMB_COUNT>>,
+    final_domain: CyclicDomainGeometry<'a, LIMB_COUNT>,
     two_inverse: [u64; LIMB_COUNT],
 }
 
@@ -285,22 +288,23 @@ pub(super) fn fri_verify_structure<'a, const LIMB_COUNT: usize>(
         }
     }
 
-    let mut layer_offsets = Vec::with_capacity(layer_sizes.len());
-    let mut running_offset = *initial_offset;
+    let mut layer_offset_inverses = Vec::with_capacity(layer_sizes.len());
+    let mut running_offset_inverse = parameters.inverse(initial_offset);
     for _ in &layer_sizes {
-        layer_offsets.push(running_offset);
-        running_offset = parameters.multiply(&running_offset, &running_offset);
+        layer_offset_inverses.push(running_offset_inverse);
+        running_offset_inverse =
+            parameters.multiply(&running_offset_inverse, &running_offset_inverse);
     }
     let mut layer_domains = Vec::with_capacity(layer_sizes.len());
     for size in &layer_sizes {
-        layer_domains.push(CyclicDomain::new(parameters, *size)?);
+        layer_domains.push(CyclicDomainGeometry::new(parameters, *size)?);
     }
-    let final_domain = CyclicDomain::new(parameters, final_size)?;
+    let final_domain = CyclicDomainGeometry::new(parameters, final_size)?;
 
     Ok(Some(FriVerification {
         betas,
         layer_sizes,
-        layer_offsets,
+        layer_offset_inverses,
         layer_domains,
         final_domain,
         two_inverse,
@@ -365,15 +369,15 @@ impl<const LIMB_COUNT: usize> FriVerification<'_, LIMB_COUNT> {
                     return false;
                 }
             }
-            let x = parameters.multiply(
-                &self.layer_offsets[index],
-                &self.layer_domains[index].point(folded_position),
+            let point_inverse = parameters.multiply(
+                &self.layer_offset_inverses[index],
+                &self.layer_domains[index].inverse_point(folded_position),
             );
             chained = Some(fold_pair(
                 parameters,
                 &layer_opening.value,
                 &layer_opening.sibling_value,
-                &x,
+                &point_inverse,
                 &self.two_inverse,
                 &self.betas[index],
             ));
@@ -505,6 +509,51 @@ mod tests {
                 parameters.unsigned_word_to_element(state)
             })
             .collect()
+    }
+
+    fn check_geometric_inverse_folding<const LIMB_COUNT: usize>(
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ) {
+        let size = 128;
+        let domain = CyclicDomainGeometry::new(parameters, size).expect("domain geometry");
+        let offset = coset_offset(parameters);
+        let offset_inverse = parameters.inverse(&offset);
+        let codeword = random_coefficients(parameters, size, 0x1a2b);
+        let two_inverse = parameters.inverse(&parameters.unsigned_word_to_element(2));
+        let beta = parameters.unsigned_word_to_element(0x5eed);
+
+        let geometrically_advanced = fold_codeword(
+            parameters,
+            &codeword,
+            &domain,
+            &offset_inverse,
+            &two_inverse,
+            &beta,
+        );
+        let directly_inverted = (0..size / 2)
+            .map(|index| {
+                let point = parameters.multiply(&offset, &domain.point(index));
+                fold_pair(
+                    parameters,
+                    &codeword[index],
+                    &codeword[index + size / 2],
+                    &parameters.inverse(&point),
+                    &two_inverse,
+                    &beta,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            geometrically_advanced, directly_inverted,
+            "advancing inverse domain points geometrically must preserve every FRI fold"
+        );
+    }
+
+    #[test]
+    fn geometric_inverse_folding_matches_direct_point_inversion() {
+        check_geometric_inverse_folding(&eight_limb_group_field_parameters());
+        check_geometric_inverse_folding(&sixteen_limb_group_field_parameters());
     }
 
     #[test]

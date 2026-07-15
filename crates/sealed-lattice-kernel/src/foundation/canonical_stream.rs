@@ -45,7 +45,6 @@ pub enum CanonicalStreamDomain {
     TargetOrderPartialDecryption,
     MaliciousTargetShareProof,
     CheckpointState,
-    StateBallotCandidateListExactOutput,
     StateFinalitySignatureExactOutput,
     StateTargetReleaseExactOutput,
     PublicKeyShareMaterial,
@@ -96,9 +95,6 @@ impl CanonicalStreamDomain {
                 "sealed-lattice/stream/target-release/malicious-share-proof/v1"
             }
             Self::CheckpointState => "sealed-lattice/stream/checkpoint/state/v1",
-            Self::StateBallotCandidateListExactOutput => {
-                "sealed-lattice/stream/state/ballot-candidate-list-exact-output/v1"
-            }
             Self::StateFinalitySignatureExactOutput => {
                 "sealed-lattice/stream/state/finality-signature-exact-output/v1"
             }
@@ -135,7 +131,6 @@ impl CanonicalStreamDomain {
             Self::TargetOrderPartialDecryption => 20,
             Self::MaliciousTargetShareProof => 21,
             Self::CheckpointState => 22,
-            Self::StateBallotCandidateListExactOutput => 23,
             Self::StateFinalitySignatureExactOutput => 24,
             Self::StateTargetReleaseExactOutput => 25,
             Self::PublicKeyShareMaterial => 26,
@@ -166,7 +161,6 @@ impl CanonicalStreamDomain {
             20 => Some(Self::TargetOrderPartialDecryption),
             21 => Some(Self::MaliciousTargetShareProof),
             22 => Some(Self::CheckpointState),
-            23 => Some(Self::StateBallotCandidateListExactOutput),
             24 => Some(Self::StateFinalitySignatureExactOutput),
             25 => Some(Self::StateTargetReleaseExactOutput),
             26 => Some(Self::PublicKeyShareMaterial),
@@ -176,9 +170,6 @@ impl CanonicalStreamDomain {
 
     pub(crate) const fn state_exact_output_capability_kind(self) -> Option<StateCapabilityKind> {
         match self {
-            Self::StateBallotCandidateListExactOutput => {
-                Some(StateCapabilityKind::BallotCandidateList)
-            }
             Self::StateFinalitySignatureExactOutput => Some(StateCapabilityKind::FinalitySignature),
             Self::StateTargetReleaseExactOutput => Some(StateCapabilityKind::TargetRelease),
             _ => None,
@@ -191,7 +182,7 @@ impl CanonicalStreamDomain {
 /// Its fields and constructor stay private to the stream engine. Downstream
 /// verifiers may consume the summary, but cannot create one from a caller-supplied
 /// digest or descriptor alone.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct VerifiedCanonicalStreamSummary {
     stream_domain: CanonicalStreamDomain,
     total_byte_length: u64,
@@ -339,8 +330,7 @@ impl CanonicalStreamVerifier {
         descriptor: StreamDescriptor,
     ) -> Result<Self, RefusalReason> {
         validate_descriptor(&descriptor)?;
-        let full_object_hasher =
-            full_object_hasher(stream_domain, descriptor.total_byte_length)?;
+        let full_object_hasher = full_object_hasher(stream_domain, descriptor.total_byte_length)?;
         let state_exact_output_hasher = stream_domain
             .state_exact_output_capability_kind()
             .map(|capability_kind| {
@@ -572,8 +562,8 @@ fn full_object_hasher(
     stream_domain: CanonicalStreamDomain,
     total_byte_length: u64,
 ) -> Result<Shake256, RefusalReason> {
-    let object_byte_length = u32::try_from(total_byte_length)
-        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    let object_byte_length =
+        u32::try_from(total_byte_length).map_err(|_| RefusalReason::OutsideSupportedProfile)?;
     let raw_item_byte_length = object_byte_length
         .checked_add(4)
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
@@ -670,7 +660,6 @@ mod tests {
             CanonicalStreamDomain::TargetOrderPartialDecryption,
             CanonicalStreamDomain::MaliciousTargetShareProof,
             CanonicalStreamDomain::CheckpointState,
-            CanonicalStreamDomain::StateBallotCandidateListExactOutput,
             CanonicalStreamDomain::StateFinalitySignatureExactOutput,
             CanonicalStreamDomain::StateTargetReleaseExactOutput,
             CanonicalStreamDomain::PublicKeyShareMaterial,
@@ -711,10 +700,6 @@ mod tests {
             .collect::<Vec<_>>();
         for (stream_domain, capability_kind) in [
             (
-                CanonicalStreamDomain::StateBallotCandidateListExactOutput,
-                StateCapabilityKind::BallotCandidateList,
-            ),
-            (
                 CanonicalStreamDomain::StateFinalitySignatureExactOutput,
                 StateCapabilityKind::FinalitySignature,
             ),
@@ -741,7 +726,10 @@ mod tests {
                 .expect("complete exact-output stream verifies");
             assert_eq!(summary.stream_domain(), stream_domain);
             assert_eq!(summary.total_byte_length(), bytes.len() as u64);
-            assert_eq!(summary.full_object_digest(), descriptor_for(stream_domain, &bytes).full_object_digest);
+            assert_eq!(
+                summary.full_object_digest(),
+                descriptor_for(stream_domain, &bytes).full_object_digest
+            );
             assert_eq!(
                 summary.state_exact_output_hash(),
                 Some(
@@ -811,10 +799,7 @@ mod tests {
                 ],
             )
             .expect("canonical full-object digest");
-            let descriptor = descriptor_for(
-                CanonicalStreamDomain::BallotValidityProof,
-                &bytes,
-            );
+            let descriptor = descriptor_for(CanonicalStreamDomain::BallotValidityProof, &bytes);
             assert_eq!(descriptor.full_object_digest, expected);
         }
     }

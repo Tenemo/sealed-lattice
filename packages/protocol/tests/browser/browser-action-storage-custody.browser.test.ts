@@ -175,7 +175,7 @@ afterEach(async () => {
 });
 
 describe('Browser action-storage custody worker channel', () => {
-    it('persists, reopens, recovers, and deletes custody state', async () => {
+    it('persists, reopens, and deletes custody state', async () => {
         const databaseName = createDatabaseName();
         const firstCustody = await openWorker({
             databaseName,
@@ -206,37 +206,14 @@ describe('Browser action-storage custody worker channel', () => {
             expectedSnapshot: initialSnapshot,
             untrustedExpectedCommitment: commitment,
         });
-        const challenge = await secondCustody.beginRecoveryExport({
-            expectedSnapshot: initialSnapshot,
-            untrustedExpectedCommitment: commitment,
-        });
-        const confirmation = await secondCustody.confirmRecoveryExport({
-            confirmedChecksum: challenge.recoveryChecksum,
-            preparationIdentifier: challenge.preparationIdentifier,
-        });
-        expect(confirmation.canonicalRecoveryText).toHaveLength(708);
-        expect(confirmation.snapshot.recoveryValueExported).toBe(true);
-
-        const recoveredSnapshot = await secondCustody.recover({
-            caseInsensitiveRecoveryText:
-                confirmation.canonicalRecoveryText.toLowerCase(),
-            untrustedExpectedCommitment: commitment,
-            expectedSnapshot: confirmation.snapshot,
-        });
-        expect(recoveredSnapshot.mutationIdentifier).not.toEqual(
-            confirmation.snapshot.mutationIdentifier,
-        );
-        await expect(
-            secondCustody.delete(initialSnapshot),
-        ).rejects.toMatchObject({ code: 'Conflict' });
-        await secondCustody.delete(recoveredSnapshot);
+        await secondCustody.delete(initialSnapshot);
         expect(await secondCustody.currentSnapshot()).toBeUndefined();
         await expect(secondCustody.initialize()).rejects.toMatchObject({
             code: 'CommitmentRequired',
         });
         await expect(
             secondCustody.openIntoOwnedWorker({
-                expectedSnapshot: recoveredSnapshot,
+                expectedSnapshot: initialSnapshot,
                 untrustedExpectedCommitment: commitment,
             }),
         ).rejects.toMatchObject({ code: 'Unavailable' });
@@ -255,7 +232,6 @@ describe('Browser action-storage custody worker channel', () => {
         });
         const expectedContext = {
             actionRandomnessCommitment: createTestBytes(64, 101),
-            creationRecoveryEpoch: 0n,
             identifierInput: {
                 recordType: 'aggregateThresholdShare',
                 recipientInputRoot: createTestBytes(64, 117),
@@ -277,7 +253,6 @@ describe('Browser action-storage custody worker channel', () => {
         await expect(
             custody.openLocalRecord({
                 ...expectedContext,
-                creationRecoveryEpoch: 1n,
                 envelope,
             }),
         ).rejects.toMatchObject({ code: 'OwnedWorkerFailure' });
@@ -362,14 +337,6 @@ describe('Browser action-storage custody worker channel', () => {
             expectedSnapshot: snapshot,
             untrustedExpectedCommitment: commitment,
         });
-        const challenge = await secondCustody.beginRecoveryExport({
-            expectedSnapshot: snapshot,
-            untrustedExpectedCommitment: commitment,
-        });
-        expect(challenge.recoveryChecksum).toHaveLength(16);
-        await secondCustody.cancelRecoveryExport(
-            challenge.preparationIdentifier,
-        );
         expect(await secondCustody.currentSnapshot()).toEqual(snapshot);
     });
 

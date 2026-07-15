@@ -15,10 +15,6 @@ const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 pub(in crate::bgv::setup) struct VssPublicCommandCommitmentExpectation<'a> {
     pub(in crate::bgv::setup) field_name: String,
     pub(in crate::bgv::setup) root: &'a str,
-    pub(in crate::bgv::setup) role: &'a str,
-    pub(in crate::bgv::setup) rns_limb_index: usize,
-    pub(in crate::bgv::setup) rns_prime: u64,
-    pub(in crate::bgv::setup) ring_degree: usize,
 }
 
 // Trustee evaluation-key statements use the key-switch atom backend. The
@@ -43,7 +39,7 @@ fn statement_proof_family(_: &TrusteeEvaluationKeyStatement) -> SetupProofFamily
 #[cfg(test)]
 pub(in crate::bgv::setup) fn verify_trustee_evaluation_key_proof_bytes(
     statement: &TrusteeEvaluationKeyStatement,
-    proof_bytes: &(impl ProofByteSource + Sync + ?Sized),
+    proof_bytes: &(impl ProofByteSource + ?Sized),
 ) -> CanonicalResult<()> {
     atom_schedule::verify_key_bearing_trustee_evaluation_keys(statement, proof_bytes)
 }
@@ -84,7 +80,10 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         },
         linkage: SameSecretLinkageWitness {
             negative_indicator_coefficients,
-            opening_randomness_by_limb: read_i64_matrix(request, "openingRandomnessByLimb")?,
+            opening_randomness_by_source_limb_and_commitment_limb: read_i64_matrix4(
+                request,
+                "openingRandomnessBySourceLimbAndCommitmentLimb",
+            )?,
         },
     };
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
@@ -127,7 +126,6 @@ fn statement_bound_proof_randomness_seed_hex(
         "objectType": "TrusteeEvaluationKeyProofRandomnessBinding",
         "proofFamily": proof_family.wire_label(),
         "statementHash": statement_hash,
-        "trusteeIdentity": &statement.context.trustee_identity,
         "trusteeRosterPosition": statement.context.trustee_roster_position,
         "setupContextHash": &statement.context.setup_context_hash,
         "proofRandomnessSeedHex": to_hex(&seed_bytes),
@@ -137,6 +135,8 @@ mod decoding;
 mod request_parsing;
 mod target_decryption_parsing;
 
-use decoding::{decode_exact_hex_bytes, read_i64_array, read_i64_matrix, read_string};
+use decoding::{
+    decode_exact_hex_bytes, read_i64_array, read_i64_matrix, read_i64_matrix4, read_string,
+};
 pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::statement_from_request;
 pub(in crate::bgv::setup) use target_decryption_parsing::vss_share_linkage_commitment_from_value;

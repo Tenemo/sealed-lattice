@@ -14,7 +14,6 @@ pub(crate) use rank_lookup::*;
 pub(crate) use rotations::*;
 pub(crate) use score_packing::*;
 pub(crate) use sparse_target::*;
-#[cfg(test)]
 use std::collections::BTreeSet;
 
 use crate::bgv::{
@@ -46,8 +45,10 @@ pub(crate) const SELECTED_EVALUATOR_WORKING_LEVEL: usize = 16;
 // Two post-packing modulus switches followed by the depth-eight comparison take
 // the selected level-16 pipeline to the level-6 output.
 pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
-// Target ciphertexts leave the direct-comparison pipeline at this level.
-pub(crate) const CANONICAL_TARGET_CIPHERTEXT_LEVEL: usize = DIRECT_COMPARISON_OUTPUT_LEVEL;
+// Every target stream is normalized to one common two-prime terminal basis.
+// Rank-lookups consume the available depth through level one, so the all-option
+// shortcut is explicitly switched to the same level before release.
+pub(crate) const CANONICAL_TARGET_CIPHERTEXT_LEVEL: usize = 1;
 // Five is near the square root of the degree-19 rank lookup.
 pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
 

@@ -28,7 +28,6 @@ const canonicalTupleSchemaIdentifier = 0x0001;
 const canonicalSchemaVersion = 1;
 const hashByteLength = 64;
 const identifierByteLength = 32;
-const maximumCanonicalStreamByteLength = 2_147_483_648;
 const checkpointRecordVersion = 1;
 const checkpointManifestOperationDomain =
     'sealed-lattice/runtime/checkpoint-manifest-record/v1';
@@ -689,7 +688,7 @@ const parseStreamDescriptor = (
             BigInt(
                 Math.min(
                     limits.maximumCheckpointStateByteLength,
-                    maximumCanonicalStreamByteLength,
+                    foundationProfile.maximumCanonicalStreamByteLength,
                 ),
             )
     ) {
@@ -1310,7 +1309,7 @@ export const openAuthenticatedCheckpointStore = (input: {
     }
     if (
         input.limits.maximumCheckpointStateByteLength >
-        maximumCanonicalStreamByteLength
+        foundationProfile.maximumCanonicalStreamByteLength
     ) {
         throw new AuthenticatedRuntimeRecordError(
             'InvalidConfiguration',

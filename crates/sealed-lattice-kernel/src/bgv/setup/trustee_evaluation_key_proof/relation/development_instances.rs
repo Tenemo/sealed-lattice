@@ -10,8 +10,10 @@ use crate::bgv::evaluator::key_switch::{KEY_SWITCH_ERROR_DOMAIN, PLAINTEXT_MODUL
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::modular_arithmetic::{add_mod_fast, sub_mod_fast};
 use crate::bgv::parameters::DATA_PRIMES;
-use crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH;
 use crate::bgv::setup::commitment::compute_setup_big_signed_lifted_commitment;
+use crate::bgv::setup::commitment::{
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+};
 use crate::bgv::setup::setup_proof::SetupProofFamily;
 use crate::encoding::CanonicalResult;
 use crate::hashing::{derive_canonical_object_hash, hash_framed_parts_512 as hash512};
@@ -239,7 +241,8 @@ const LINKAGE_MATRIX_SEED_DOMAIN: &str =
 // ternary secret and a list of key kinds at their levels, all with real
 // production-shaped component material and its required same-secret linkage:
 // real BDLOP constant commitments to the lifted secret message, with fresh
-// ternary opening randomness.
+// independently sampled ternary hiding-secret and hiding-error opening
+// randomness under purposes eleven and twelve.
 fn development_context(key_switch_seed_hex: &str) -> SuccinctSetupProofContext {
     let derived = |label: &str| -> String {
         hash512(
@@ -252,7 +255,6 @@ fn development_context(key_switch_seed_hex: &str) -> SuccinctSetupProofContext {
     };
     SuccinctSetupProofContext {
         setup_context_hash: derived("setup-context"),
-        trustee_identity: format!("development-trustee-{key_switch_seed_hex}"),
         trustee_roster_position: 1,
         binding_roots: SetupProofFamily::TrusteeEvaluationKey
             .binding_labels()
@@ -302,23 +304,31 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
         .map(|coefficient| i64::from(*coefficient < 0))
         .collect::<Vec<_>>();
     let mut commitments = Vec::with_capacity(linkage_commitment_count);
-    let mut opening_randomness_by_limb = Vec::with_capacity(linkage_commitment_count);
+    let mut opening_randomness_by_source_limb_and_commitment_limb =
+        Vec::with_capacity(linkage_commitment_count);
     for (source_limb_index, source_modulus) in DATA_PRIMES[..linkage_commitment_count]
         .iter()
         .copied()
         .enumerate()
     {
-        let randomness = (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-            .map(|column| {
-                DeterministicSampler::new(
-                    LINKAGE_RANDOMNESS_DOMAIN,
-                    &[
-                        key_switch_seed_hex.as_bytes(),
-                        &(source_limb_index as u64).to_le_bytes(),
-                        &(column as u64).to_le_bytes(),
-                    ],
-                )
-                .ternary(ring_degree)
+        let randomness_by_commitment_limb = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+            .iter()
+            .enumerate()
+            .map(|(commitment_limb_position, _)| {
+                (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+                    .map(|column| {
+                        let mut sampler = DeterministicSampler::new(
+                            LINKAGE_RANDOMNESS_DOMAIN,
+                            &[
+                                key_switch_seed_hex.as_bytes(),
+                                &(source_limb_index as u64).to_le_bytes(),
+                                &(commitment_limb_position as u64).to_le_bytes(),
+                                &(column as u64).to_le_bytes(),
+                            ],
+                        );
+                        sampler.ternary(ring_degree)
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
         let message = secret_coefficients
@@ -328,10 +338,15 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
                 BigInt::from(*secret) + BigInt::from(*indicator) * BigInt::from(source_modulus)
             })
             .collect::<Vec<_>>();
-        let randomness_i128 = randomness
+        let randomness_i128 = randomness_by_commitment_limb
             .iter()
-            .map(|column| column.iter().map(|value| i128::from(*value)).collect())
-            .collect::<Vec<Vec<i128>>>();
+            .map(|randomness_by_column| {
+                randomness_by_column
+                    .iter()
+                    .map(|column| column.iter().map(|value| i128::from(*value)).collect())
+                    .collect::<Vec<Vec<i128>>>()
+            })
+            .collect::<Vec<Vec<Vec<i128>>>>();
         commitments.push(compute_setup_big_signed_lifted_commitment(
             &public_matrix_seed_hash,
             source_limb_index,
@@ -340,7 +355,7 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
             &randomness_i128,
             ring_degree,
         )?);
-        opening_randomness_by_limb.push(randomness);
+        opening_randomness_by_source_limb_and_commitment_limb.push(randomness_by_commitment_limb);
     }
     let same_secret_linkage = SameSecretLinkageStatement {
         public_matrix_seed_hash,
@@ -348,7 +363,7 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
     };
     let linkage_witness = SameSecretLinkageWitness {
         negative_indicator_coefficients,
-        opening_randomness_by_limb,
+        opening_randomness_by_source_limb_and_commitment_limb,
     };
 
     Ok((

@@ -23,23 +23,23 @@ pub(super) struct TargetDecryptionShareProofMaterialVerificationInput<'a> {
     pub(super) proof_material: &'a Value,
 }
 
-pub(super) struct TargetProofMaterialEvictionGuard {
+pub(super) struct TargetProofMaterialAttemptGuard {
     proof_bytes_hash: String,
 }
 
-pub(super) fn target_proof_material_eviction_guard_for_request(
+pub(super) fn target_proof_material_attempt_guard(
     request: &Value,
-) -> Option<TargetProofMaterialEvictionGuard> {
+) -> Option<TargetProofMaterialAttemptGuard> {
     request
         .get("proofMaterial")
         .and_then(|proof_material| proof_material.get("proofBytesHash"))
         .and_then(Value::as_str)
-        .map(|proof_bytes_hash| TargetProofMaterialEvictionGuard {
+        .map(|proof_bytes_hash| TargetProofMaterialAttemptGuard {
             proof_bytes_hash: proof_bytes_hash.to_string(),
         })
 }
 
-impl Drop for TargetProofMaterialEvictionGuard {
+impl Drop for TargetProofMaterialAttemptGuard {
     fn drop(&mut self) {
         crate::bgv::setup::evict_verified_canonical_proof_materials(std::slice::from_ref(
             &self.proof_bytes_hash,
@@ -78,7 +78,7 @@ fn generate_and_retain_target_decryption_share_proof_material(
 pub(super) fn verify_target_decryption_share_proof_material(
     input: TargetDecryptionShareProofMaterialVerificationInput<'_>,
 ) -> CanonicalResult<()> {
-    hash_at_path(input.proof_material, &["proofBytesHash"])?;
+    let proof_bytes_hash = hash_at_path(input.proof_material, &["proofBytesHash"])?;
     validate_target_decryption_share_proof_statement_shape(
         input.proof_statement,
         input.setup_binding,
@@ -95,6 +95,19 @@ pub(super) fn verify_target_decryption_share_proof_material(
             "target-decryption proof material must use the current target proof-material layout",
         ));
     }
+    // Transfer the authenticated bytes out of the store for the one-shot proof
+    // verification. A verifier refusal drops them, while the surrounding
+    // active-attempt guard also clears material on earlier validation errors.
+    let _proof_material_bytes = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        crate::bgv::setup::TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+        &proof_bytes_hash,
+    )?
+    .ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "target-decryption share proof material is missing canonical stream-authenticated bytes",
+        )
+    })?;
     Err(CanonicalError::new(
         CanonicalErrorCode::InvalidProtocolObject,
         "target-decryption share verification requires schema 0x1621 to be verified by the common proof suite",

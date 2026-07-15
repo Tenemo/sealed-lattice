@@ -1,6 +1,6 @@
 use super::committed_material::{
-    CommittedMaterialPlanBuilder, CommittedMaterialRelationPlanInput, IntegerTerm,
-    MaterialRootUse, root_path,
+    CommittedMaterialPlanBuilder, CommittedMaterialRelationPlanInput, IntegerTerm, MaterialRootUse,
+    root_path,
 };
 use super::{CompiledRelationPlan, RelationPlanCheckContext, RelationPlanError};
 
@@ -35,8 +35,7 @@ pub(crate) fn compile_aggregate_threshold_share_relation_plan(
         }
         root_paths.push(root_path(
             AGGREGATE_THRESHOLD_SHARE_ROOTS_FIELD_ORDINAL,
-            u64::try_from(sharing_limb_ordinal)
-                .map_err(|_| RelationPlanError::CountOverflow)?,
+            u64::try_from(sharing_limb_ordinal).map_err(|_| RelationPlanError::CountOverflow)?,
         ));
     }
 

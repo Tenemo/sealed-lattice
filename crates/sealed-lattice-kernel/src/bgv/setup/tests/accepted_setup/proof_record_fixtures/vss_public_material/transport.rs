@@ -94,8 +94,8 @@ fn assert_tampered_canonical_stream_chunk_is_refused(
     proof_bytes: &[u8],
 ) {
     use crate::foundation::{
-        derive_canonical_stream_descriptor, CanonicalStreamVerifier, RefusalReason,
-        VerificationResult, FOUNDATION_PROFILE,
+        CanonicalStreamVerifier, FOUNDATION_PROFILE, RefusalReason, VerificationResult,
+        derive_canonical_stream_descriptor,
     };
 
     let descriptor = derive_canonical_stream_descriptor(stream_domain, proof_bytes)

@@ -6,24 +6,20 @@ import {
     foundationObjectTypes,
     openCanonicalBoardVerifierSession,
 } from './canonical-board-runtime.js';
+import { openFinalityVerifierSession } from './finality-verifier-runtime.js';
 import {
     createWasmBrowserActionStorageWorkerKernel,
     openClosedWorkerSetupMailboxRandomness,
+    openClosedWorkerStructuredCommitmentOpenings,
+    type ClosedWorkerStructuredCommitmentOpeningCapability,
+    type ClosedWorkerStructuredCommitmentOpeningOperations,
     type ClosedWorkerSetupMailboxRandomnessOperations,
 } from './local-storage-root-worker-kernel.js';
 import { openMailboxGcmRuntime } from './mailbox-gcm-runtime.js';
 import {
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
-    type ActionContextInput,
     type AcceptedSetupSession,
-    type BgvCollectiveSetupParametersDescription,
-    type BgvCollectiveSetupVerification,
-    type BgvPrivateVssShareEnvelopeVerification,
-    type BgvRnsParametersDescription,
-    type CanonicalFoundationValueValidation,
-    type CanonicalFoundationValueValidationInput,
-    type CeremonyContextInput,
     type DecodedProofApplicationBinding,
     type DecodedPrivateRandomCursor,
     type EncodedPrivateRandomCursor,
@@ -46,21 +42,17 @@ export {
     openBgvCanonicalStreamRuntime,
     openCanonicalBoardVerifierSession,
     openClosedWorkerSetupMailboxRandomness,
+    openClosedWorkerStructuredCommitmentOpenings,
+    openFinalityVerifierSession,
     openMailboxGcmRuntime,
     TranscriptCoreKernelCommandError,
 };
 export type {
-    ActionContextInput,
     AcceptedSetupSession,
     ClosedWorkerSetupMailboxRandomnessOperations,
+    ClosedWorkerStructuredCommitmentOpeningCapability,
+    ClosedWorkerStructuredCommitmentOpeningOperations,
     TranscriptCoreKernel,
-    BgvCollectiveSetupParametersDescription,
-    BgvCollectiveSetupVerification,
-    BgvPrivateVssShareEnvelopeVerification,
-    BgvRnsParametersDescription,
-    CanonicalFoundationValueValidation,
-    CanonicalFoundationValueValidationInput,
-    CeremonyContextInput,
     DecodedProofApplicationBinding,
     DecodedPrivateRandomCursor,
     EncodedPrivateRandomCursor,
@@ -105,9 +97,16 @@ export {
     copyVerifiedStateDurableBinding,
     openStateVerifierSession,
     stateCapabilityKinds,
-    stateIntentKinds,
     stateWitnessVoteKinds,
 } from './state-verifier-runtime.js';
+export type {
+    FinalityVerification,
+    FinalityVerifierConfiguration,
+    FinalityVerifierSession,
+    VerifiedEvaluatorReplay,
+    VerifiedFinality,
+    VerifiedFinalityDescription,
+} from './finality-verifier-runtime.js';
 export {
     copyVerifiedProofApplicationBinding,
     verifyProofApplicationBinding,
@@ -119,13 +118,10 @@ export type {
 } from './proof-application-runtime.js';
 export type {
     StateDurableBindingDescription,
-    StateIntentKind,
     StateOutputIntentVerification,
     StateOutputIntentVerificationLease,
     StateOutputVerification,
     StateOutputVerificationLease,
-    StateRecoveryIntentVerification,
-    StateRecoveryVerification,
     StateReservationIntentVerification,
     StateReservationVerification,
     StateVerifierSession,
@@ -136,8 +132,6 @@ export type {
     VerifiedStateIntent,
     VerifiedStateOutput,
     VerifiedStateOutputIntent,
-    VerifiedStateRecovery,
-    VerifiedStateRecoveryIntent,
     VerifiedStateReservation,
     VerifiedStateReservationIntent,
 } from './state-verifier-runtime.js';

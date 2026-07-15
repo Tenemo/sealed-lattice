@@ -1,20 +1,130 @@
 use super::*;
 
+use sha3::{
+    CShake256, CShake256Core,
+    digest::{ExtendableOutput, Update, XofReader},
+};
+
+use crate::transcript_core::decode_hex;
+
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 // These JSON setup paths do not receive suite-provided sampling limits, so a
 // fixed cap keeps deterministic rejection work finite.
-const MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
+pub(super) const MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
 
-fn candidate_draw_limit_exhausted_error() -> CanonicalError {
+/// Samples one complete public role-coordinate stream from the ceremony's
+/// public setup seed. The customization bytes already contain the canonical
+/// `PublicSetupSamplerCustomization` tuple, so this function owns the common
+/// cSHAKE and fixed-width modular-rejection mechanics without knowing a
+/// relation-specific coordinate grammar.
+pub(super) fn sample_public_setup_residues(
+    public_setup_seed_hex: &str,
+    canonical_customization_bytes: &[u8],
+    modulus: u64,
+    output_count: usize,
+) -> CanonicalResult<Vec<u64>> {
+    if modulus <= 1 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "public setup sampling modulus must be greater than one",
+        ));
+    }
+    if output_count == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public setup sampling output count must be positive",
+        ));
+    }
+    if canonical_customization_bytes.is_empty() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "public setup sampler customization must be nonempty",
+        ));
+    }
+
+    let public_setup_seed = decode_hex(public_setup_seed_hex)?;
+    if public_setup_seed.len() != 64 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public setup seed must contain exactly 64 bytes",
+        ));
+    }
+
+    // The profile deliberately uses bitLength(m), rather than bitLength(m-1).
+    // For example modulus 256 therefore consumes two bytes, matching the
+    // canonical private sampler rule and its exact zero-rejection case.
+    let modulus_bit_length = u64::BITS - modulus.leading_zeros();
+    let candidate_byte_length =
+        usize::try_from(modulus_bit_length.div_ceil(8)).map_err(|_| public_sampler_size_error())?;
+    let maximum_stream_byte_length = output_count
+        .checked_mul(
+            usize::try_from(MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT)
+                .map_err(|_| public_sampler_size_error())?,
+        )
+        .and_then(|value| value.checked_mul(candidate_byte_length))
+        .ok_or_else(public_sampler_size_error)?;
+    maximum_stream_byte_length
+        .checked_mul(8)
+        .ok_or_else(public_sampler_size_error)?;
+
+    let mut hasher = CShake256::from_core(CShake256Core::new(canonical_customization_bytes));
+    hasher.update(&public_setup_seed);
+    let mut reader = hasher.finalize_xof();
+
+    let candidate_space_size = 1_u128
+        .checked_shl(
+            u32::try_from(candidate_byte_length * 8).map_err(|_| public_sampler_size_error())?,
+        )
+        .ok_or_else(public_sampler_size_error)?;
+    let modulus_wide = u128::from(modulus);
+    let accepted_candidate_count = (candidate_space_size / modulus_wide) * modulus_wide;
+    let mut residues = Vec::with_capacity(output_count);
+    let mut consumed_stream_byte_length = 0_usize;
+
+    for _ in 0..output_count {
+        let mut accepted_residue = None;
+        for _ in 0..MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT {
+            let mut candidate_bytes = [0_u8; 8];
+            reader.read(&mut candidate_bytes[..candidate_byte_length]);
+            consumed_stream_byte_length = consumed_stream_byte_length
+                .checked_add(candidate_byte_length)
+                .ok_or_else(public_sampler_size_error)?;
+            if consumed_stream_byte_length > maximum_stream_byte_length {
+                return Err(public_sampler_size_error());
+            }
+
+            let candidate = u128::from(u64::from_le_bytes(candidate_bytes));
+            if candidate < accepted_candidate_count {
+                accepted_residue = Some(
+                    u64::try_from(candidate % modulus_wide)
+                        .map_err(|_| public_sampler_size_error())?,
+                );
+                break;
+            }
+        }
+        residues.push(accepted_residue.ok_or_else(candidate_draw_limit_exhausted_error)?);
+    }
+
+    Ok(residues)
+}
+
+fn public_sampler_size_error() -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::InvalidProtocolObject,
+        "public setup sampler byte-length arithmetic exceeds the supported profile",
+    )
+}
+
+pub(super) fn candidate_draw_limit_exhausted_error() -> CanonicalError {
     CanonicalError::new(
         CanonicalErrorCode::InvalidProtocolObject,
         "the BGV deterministic sampler candidate-draw limit was exhausted before deriving an output",
     )
 }
 
-fn first_accepted_candidate_from_block(
+pub(super) fn first_accepted_candidate_from_block(
     output: &[u8; 64],
     modulus: u64,
     candidate_draw_count: &mut u32,
@@ -180,5 +290,32 @@ mod tests {
 
         assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
         assert!(error.message.contains("modulus must be positive"));
+    }
+
+    #[test]
+    fn public_setup_sampler_rejects_overflow_before_allocating() {
+        let error = sample_public_setup_residues(
+            &"00".repeat(64),
+            b"nonempty canonical customization",
+            u64::MAX,
+            usize::MAX,
+        )
+        .expect_err("an impossible logical stream length must refuse before allocation");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+        assert!(error.message.contains("byte-length arithmetic"));
+    }
+
+    #[test]
+    fn public_setup_sampler_rejects_noncanonical_seed_hex() {
+        let error = sample_public_setup_residues(
+            &"AA".repeat(64),
+            b"nonempty canonical customization",
+            257,
+            1,
+        )
+        .expect_err("uppercase seed hex is not canonical");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidHex);
     }
 }

@@ -10,9 +10,9 @@ const hashByteLength = 64;
 const wasm32WordByteLength = 4;
 const verifiedObjectDescriptionByteLength = 2 + 2 + hashByteLength;
 const fixedConfigurationByteLength =
-    2 + 3 * hashByteLength + 8 + 8 + 8 + 4 + 4 + 4;
+    2 + 3 * hashByteLength + 8 + 8 + 4 + 4 + 4;
 const maximumUnorderedCarrierCountConfigurationOffset =
-    2 + 3 * hashByteLength + 8 + 8 + 8;
+    2 + 3 * hashByteLength + 8 + 8;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
 const maximumCanonicalBoardBatchCarrierCount = 4_096;
 
@@ -31,7 +31,6 @@ export const foundationObjectTypes = Object.freeze({
     stateReservation: 0x0051,
     stateOutputIntent: 0x0052,
     stateWitnessVote: 0x0053,
-    recoveryTransition: 0x0054,
     targetDecryptionShare: 0x0060,
     storageRootCommitment: 0x0070,
 } as const);
@@ -133,7 +132,6 @@ export type CanonicalBoardVerifierConfiguration = Readonly<{
     canonicalRosterBytes: Uint8Array;
     ceremonyContextHash: Uint8Array;
     maximumBallotAttemptsPerParticipant: number;
-    maximumRecoveryTransitionsPerStateKey: number;
     maximumRetainedCanonicalCarrierByteLength: number;
     maximumRetainedTranscriptObjects: number;
     maximumUnorderedCarriersPerBatch: number;
@@ -299,8 +297,6 @@ const encodeConfiguration = (
             ceremonyContextHash: input.ceremonyContextHash,
             maximumBallotAttemptsPerParticipant:
                 input.maximumBallotAttemptsPerParticipant,
-            maximumRecoveryTransitionsPerStateKey:
-                input.maximumRecoveryTransitionsPerStateKey,
             maximumRetainedCanonicalCarrierByteLength:
                 input.maximumRetainedCanonicalCarrierByteLength,
             maximumRetainedTranscriptObjects:
@@ -330,10 +326,6 @@ const encodeConfiguration = (
     }
     requirePositiveSafeInteger(
         configuration.maximumBallotAttemptsPerParticipant,
-        0xffff,
-    );
-    requirePositiveSafeInteger(
-        configuration.maximumRecoveryTransitionsPerStateKey,
         0xffff,
     );
     requirePositiveSafeInteger(
@@ -380,12 +372,6 @@ const encodeConfiguration = (
     view.setBigUint64(
         offset,
         BigInt(configuration.maximumBallotAttemptsPerParticipant),
-        true,
-    );
-    offset += 8;
-    view.setBigUint64(
-        offset,
-        BigInt(configuration.maximumRecoveryTransitionsPerStateKey),
         true,
     );
     offset += 8;

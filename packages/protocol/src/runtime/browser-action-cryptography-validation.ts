@@ -5,7 +5,6 @@ import {
     type BrowserActionProofAttemptBinding,
     type BrowserActionRandomnessRecordContext,
     type BrowserActionRandomnessReservationVerificationInput,
-    type BrowserActionStateRecoveryVerificationInput,
     type BrowserActionStateReservationVerificationInput,
     type BrowserActionStateVerifierSessionInput,
     type BrowserOpenedActionRandomnessSession,
@@ -122,12 +121,6 @@ export const copyOpaqueWorkerIdentifier = (
     return value;
 };
 
-const copyOptionalOpaqueWorkerIdentifier = (
-    value: unknown,
-    label: string,
-): string | undefined =>
-    value === undefined ? undefined : copyOpaqueWorkerIdentifier(value, label);
-
 export const copyActionStateVerifierSessionInput = (
     value: unknown,
 ): BrowserActionStateVerifierSessionInput => {
@@ -142,11 +135,6 @@ export const copyActionStateVerifierSessionInput = (
         canonicalRosterBytes: copyBytes(
             value.canonicalRosterBytes,
             'Canonical roster bytes',
-        ),
-        maximumRecoveryTransitionsPerStateKey: copyUnsignedInteger(
-            value.maximumRecoveryTransitionsPerStateKey,
-            0xffff,
-            'Maximum recovery transitions per state key',
         ),
     });
 };
@@ -185,11 +173,6 @@ export const copyActionStateReservationVerificationInput = (
             'State subject participant identity',
             foundationHashByteLength,
         ),
-        verifiedPredecessorRecoveryIdentifier:
-            copyOptionalOpaqueWorkerIdentifier(
-                value.verifiedPredecessorRecoveryIdentifier,
-                'Predecessor state-recovery identifier',
-            ),
     });
 };
 
@@ -220,48 +203,6 @@ export const copyActionRandomnessReservationVerificationInput = (
             value.stateVerifierSessionIdentifier,
             'State-verifier session identifier',
         ),
-        verifiedPredecessorRecoveryIdentifier:
-            copyOptionalOpaqueWorkerIdentifier(
-                value.verifiedPredecessorRecoveryIdentifier,
-                'Predecessor state-recovery identifier',
-            ),
-    });
-};
-
-export const copyActionStateRecoveryVerificationInput = (
-    value: unknown,
-): BrowserActionStateRecoveryVerificationInput => {
-    if (!isPlainRecord(value)) {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'The action state-recovery verification input is malformed.',
-        );
-    }
-
-    return Object.freeze({
-        canonicalRecoveryTransitionCarrier: copyBytes(
-            value.canonicalRecoveryTransitionCarrier,
-            'Canonical state-recovery transition carrier',
-        ),
-        canonicalStateCertificate: copyBytes(
-            value.canonicalStateCertificate,
-            'Canonical state certificate',
-        ),
-        capabilityKind: copyCapabilityKind(value.capabilityKind),
-        stateVerifierSessionIdentifier: copyOpaqueWorkerIdentifier(
-            value.stateVerifierSessionIdentifier,
-            'State-verifier session identifier',
-        ),
-        subjectParticipantIdentity: copyBytes(
-            value.subjectParticipantIdentity,
-            'State subject participant identity',
-            foundationHashByteLength,
-        ),
-        verifiedPredecessorRecoveryIdentifier:
-            copyOptionalOpaqueWorkerIdentifier(
-                value.verifiedPredecessorRecoveryIdentifier,
-                'Predecessor state-recovery identifier',
-            ),
     });
 };
 
@@ -294,10 +235,6 @@ const copyActionRandomnessRecordContext = (
     }
 
     return Object.freeze({
-        creationRecoveryEpoch: copyUnsigned64(
-            value.creationRecoveryEpoch,
-            'Action-randomness creation recovery epoch',
-        ),
         predecessorRecordHash,
         recordVersion,
     });

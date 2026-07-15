@@ -33,15 +33,42 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     schedule_index: u64,
     proof_parameters: &KeyFriProofParameters,
 ) -> CanonicalResult<bool> {
+    let negacyclic_domain = NegacyclicDomain::new(parameters, ring_degree)?;
+    verify_key_fri_with_negacyclic_domain(
+        parameters,
+        ring_degree,
+        &negacyclic_domain,
+        public,
+        source,
+        proof,
+        linkage_statement,
+        statement_binding,
+        schedule_index,
+        proof_parameters,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in super::super) fn verify_key_fri_with_negacyclic_domain<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ring_degree: usize,
+    negacyclic: &NegacyclicDomain<'_, LIMB_COUNT>,
+    public: &KeyPublic<LIMB_COUNT>,
+    source: &KeySource<LIMB_COUNT>,
+    proof: &KeyFriProof<LIMB_COUNT>,
+    linkage_statement: Option<&linkage::LinkageStatement<'_>>,
+    statement_binding: &[u8; 64],
+    schedule_index: u64,
+    proof_parameters: &KeyFriProofParameters,
+) -> CanonicalResult<bool> {
     let layout = layout(ring_degree)?;
     let digit_count = public.digits.len();
     if digit_count == 0 {
         return Ok(false);
     }
-    let trace_domain = CyclicDomain::new(parameters, layout.trace_size)?;
-    let coset_domain = CyclicDomain::new(parameters, layout.coset_size)?;
+    let trace_domain = CyclicDomain::for_interpolation(parameters, layout.trace_size)?;
+    let coset_domain = CyclicDomainGeometry::new(parameters, layout.coset_size)?;
     let offset = coset_offset(parameters);
-    let negacyclic = NegacyclicDomain::new(parameters, ring_degree)?;
     let table_count = carry_range_lookup::table_count(ring_degree);
     let linkage_layout_data = match linkage_statement {
         Some(_) => Some(linkage::linkage_layout(ring_degree)?),
@@ -205,7 +232,7 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     let mut material_form_at_slot: Vec<Vec<[u64; LIMB_COUNT]>> = Vec::with_capacity(digit_count);
     let (secret_form, atom_target) = accumulate_forms(
         parameters,
-        &negacyclic,
+        negacyclic,
         ring_degree,
         public,
         source,
@@ -403,18 +430,25 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                     ),
                 );
                 form_index += 1;
-                for randomness_column in
-                    0..crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH
+                for commitment_limb_position in
+                    0..crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
                 {
-                    f_x = parameters.add(
-                        &f_x,
-                        &parameters.multiply(
-                            &forms_at_slot[form_index][slot],
-                            &base_values
-                                [linkage_base + linkage::link_randomness(randomness_column)],
-                        ),
-                    );
-                    form_index += 1;
+                    for randomness_column in
+                        0..crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH
+                    {
+                        f_x = parameters.add(
+                            &f_x,
+                            &parameters.multiply(
+                                &forms_at_slot[form_index][slot],
+                                &base_values[linkage_base
+                                    + linkage::link_randomness(
+                                        commitment_limb_position,
+                                        randomness_column,
+                                    )],
+                            ),
+                        );
+                        form_index += 1;
+                    }
                 }
                 for chunk in 0..2 {
                     f_x = parameters.add(

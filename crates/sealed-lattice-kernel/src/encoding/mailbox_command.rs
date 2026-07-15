@@ -6,16 +6,22 @@ use crate::foundation::{
     MAILBOX_GCM_TAG_BYTE_LENGTH, MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH,
     MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH, MailboxAssociatedData, MailboxKeyScheduleInput,
     MailboxPayloadType, ParticipantIdentity, SignedMailboxEnvelope, StreamDescriptor,
-    derive_mailbox_kem_ciphertext_hash, derive_setup_mailbox_slot_hash,
+    derive_setup_mailbox_slot_hash,
 };
 use crate::transcript_core::{decode_hex, encode_hex};
 
 pub(super) fn encode_mailbox_key_schedule_input(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
     let input = mailbox_key_schedule_input_from_json(required_value(request, "value")?)?;
+    let kem_ciphertext =
+        required_hex_array::<MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH>(request, "kemCiphertextHex")?;
     Ok(json!({
         "canonicalBytesHex": encode_hex(&input.encode().map_err(schema_error)?),
-        "hkdfExtractSaltHex": encode_hex(&input.hkdf_extract_salt().map_err(schema_error)?),
+        "hkdfExtractSaltHex": encode_hex(
+            &input
+                .hkdf_extract_salt(&kem_ciphertext)
+                .map_err(schema_error)?,
+        ),
     }))
 }
 
@@ -26,7 +32,6 @@ pub(super) fn decode_mailbox_key_schedule_input(request: &Value) -> CanonicalRes
         .map_err(schema_error)?;
     Ok(json!({
         "value": mailbox_key_schedule_input_to_json(&input),
-        "hkdfExtractSaltHex": encode_hex(&input.hkdf_extract_salt().map_err(schema_error)?),
     }))
 }
 
@@ -35,12 +40,6 @@ pub(super) fn encode_mailbox_associated_data(request: &Value) -> CanonicalResult
     let associated_data = mailbox_associated_data_from_json(required_value(request, "value")?)?;
     Ok(json!({
         "canonicalBytesHex": encode_hex(&associated_data.encode().map_err(schema_error)?),
-        "hkdfExtractSaltHex": encode_hex(
-            &associated_data
-                .key_schedule_input
-                .hkdf_extract_salt()
-                .map_err(schema_error)?,
-        ),
     }))
 }
 
@@ -51,12 +50,6 @@ pub(super) fn decode_mailbox_associated_data(request: &Value) -> CanonicalResult
         .map_err(schema_error)?;
     Ok(json!({
         "value": mailbox_associated_data_to_json(&associated_data),
-        "hkdfExtractSaltHex": encode_hex(
-            &associated_data
-                .key_schedule_input
-                .hkdf_extract_salt()
-                .map_err(schema_error)?,
-        ),
     }))
 }
 
@@ -95,19 +88,6 @@ pub(super) fn decode_signed_mailbox_envelope(request: &Value) -> CanonicalResult
     Ok(json!({
         "value": signed_mailbox_envelope_to_json(&envelope),
         "envelopeHash": envelope.envelope_hash().map_err(schema_error)?.to_lowercase_hex(),
-    }))
-}
-
-pub(super) fn derive_mailbox_kem_ciphertext_hash_command(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let request = required_object(request, "command request")?;
-    let kem_ciphertext =
-        required_hex_array::<MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH>(request, "kemCiphertextHex")?;
-    Ok(json!({
-        "kemCiphertextHash": derive_mailbox_kem_ciphertext_hash(&kem_ciphertext)
-            .map_err(schema_error)?
-            .to_lowercase_hex(),
     }))
 }
 
@@ -174,7 +154,6 @@ fn mailbox_key_schedule_input_from_json(value: &Value) -> CanonicalResult<Mailbo
         payload_type,
         statement_hash: required_hash(object, "statementHash")?,
         ordered_material_roots: material_roots,
-        kem_ciphertext_hash: required_hash(object, "kemCiphertextHash")?,
     }
     .checked()
     .map_err(schema_error)
@@ -197,29 +176,16 @@ fn mailbox_key_schedule_input_to_json(input: &MailboxKeyScheduleInput) -> Value 
             .iter()
             .map(|root| root.to_lowercase_hex())
             .collect::<Vec<_>>(),
-        "kemCiphertextHash": input.kem_ciphertext_hash.to_lowercase_hex(),
     })
 }
 
 fn mailbox_associated_data_from_json(value: &Value) -> CanonicalResult<MailboxAssociatedData> {
-    let object = required_object(value, "mailbox associated data")?;
-    MailboxAssociatedData::new(
-        mailbox_key_schedule_input_from_json(value)?,
-        required_u64_decimal(object, "plaintextByteLength")?,
-    )
-    .map_err(schema_error)
+    required_object(value, "mailbox associated data")?;
+    MailboxAssociatedData::new(mailbox_key_schedule_input_from_json(value)?).map_err(schema_error)
 }
 
 fn mailbox_associated_data_to_json(associated_data: &MailboxAssociatedData) -> Value {
-    let mut object = mailbox_key_schedule_input_to_json(&associated_data.key_schedule_input)
-        .as_object()
-        .expect("mailbox key-schedule JSON is an object")
-        .clone();
-    object.insert(
-        "plaintextByteLength".to_owned(),
-        Value::String(associated_data.plaintext_byte_length.to_string()),
-    );
-    Value::Object(object)
+    mailbox_key_schedule_input_to_json(&associated_data.key_schedule_input)
 }
 
 fn signed_mailbox_envelope_from_json(
@@ -262,7 +228,10 @@ fn stream_descriptor_from_json(value: &Value) -> CanonicalResult<StreamDescripto
     StreamDescriptor::new(
         required_u64_decimal(object, "totalByteLength")?,
         ordered_chunk_digests,
-        hash_from_value(required_value(object, "fullObjectDigest")?, "fullObjectDigest")?,
+        hash_from_value(
+            required_value(object, "fullObjectDigest")?,
+            "fullObjectDigest",
+        )?,
     )
     .map_err(schema_error)
 }
@@ -407,7 +376,7 @@ mod tests {
             .expect("mailbox command succeeds")
     }
 
-    fn key_schedule_value(kem_ciphertext_hash: &str) -> Value {
+    fn key_schedule_value() -> Value {
         json!({
             "suiteId": "11".repeat(64),
             "ceremonyContextHash": "22".repeat(64),
@@ -420,20 +389,11 @@ mod tests {
             "payloadType": 2,
             "statementHash": "88".repeat(64),
             "orderedMaterialRoots": ["91".repeat(64), "92".repeat(64)],
-            "kemCiphertextHash": kem_ciphertext_hash,
         })
     }
 
-    fn associated_data_value(kem_ciphertext_hash: &str) -> Value {
-        let mut value = key_schedule_value(kem_ciphertext_hash);
-        value
-            .as_object_mut()
-            .expect("key-schedule value is an object")
-            .insert(
-                "plaintextByteLength".to_owned(),
-                Value::String("64".to_owned()),
-            );
-        value
+    fn associated_data_value() -> Value {
+        key_schedule_value()
     }
 
     fn setup_mailbox_slot_value() -> Value {
@@ -451,9 +411,9 @@ mod tests {
         })
     }
 
-    fn unsigned_envelope_value(kem_ciphertext_hash: &str) -> Value {
+    fn unsigned_envelope_value() -> Value {
         json!({
-            "associatedData": associated_data_value(kem_ciphertext_hash),
+            "associatedData": associated_data_value(),
             "kemCiphertextHex": "5a".repeat(MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH),
             "ciphertextDescriptor": {
                 "totalByteLength": "64",
@@ -467,17 +427,11 @@ mod tests {
     #[test]
     fn mailbox_commands_round_trip_all_three_canonical_schemas() {
         let kem_ciphertext_hex = "5a".repeat(MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH);
-        let kem_hash_response = run(json!({
-            "command": "DeriveMailboxKemCiphertextHash",
-            "kemCiphertextHex": kem_ciphertext_hex,
-        }));
-        let kem_ciphertext_hash = kem_hash_response["kemCiphertextHash"]
-            .as_str()
-            .expect("KEM ciphertext hash is returned");
 
         let key_schedule_response = run(json!({
             "command": "EncodeMailboxKeyScheduleInput",
-            "value": key_schedule_value(kem_ciphertext_hash),
+            "value": key_schedule_value(),
+            "kemCiphertextHex": kem_ciphertext_hex,
         }));
         assert_eq!(
             key_schedule_response["hkdfExtractSaltHex"]
@@ -495,19 +449,15 @@ mod tests {
 
         let associated_data_response = run(json!({
             "command": "EncodeMailboxAssociatedData",
-            "value": associated_data_value(kem_ciphertext_hash),
+            "value": associated_data_value(),
         }));
         let decoded_associated_data = run(json!({
             "command": "DecodeMailboxAssociatedData",
             "canonicalBytesHex": associated_data_response["canonicalBytesHex"],
         }));
-        assert_eq!(
-            decoded_associated_data["value"]["plaintextByteLength"],
-            "64"
-        );
+        assert_eq!(decoded_associated_data["value"], associated_data_value());
 
-        let descriptor =
-            unsigned_envelope_value(kem_ciphertext_hash)["ciphertextDescriptor"].clone();
+        let descriptor = unsigned_envelope_value()["ciphertextDescriptor"].clone();
         let encoded_descriptor = run(json!({
             "command": "EncodeStreamDescriptor",
             "value": descriptor,
@@ -518,7 +468,7 @@ mod tests {
         }));
         assert_eq!(decoded_descriptor["value"], descriptor);
 
-        let unsigned_envelope = unsigned_envelope_value(kem_ciphertext_hash);
+        let unsigned_envelope = unsigned_envelope_value();
         let envelope_hash_response = run(json!({
             "command": "DeriveMailboxEnvelopeHash",
             "value": unsigned_envelope,
@@ -531,7 +481,7 @@ mod tests {
             128
         );
 
-        let mut signed_envelope = unsigned_envelope_value(kem_ciphertext_hash);
+        let mut signed_envelope = unsigned_envelope_value();
         signed_envelope
             .as_object_mut()
             .expect("envelope is an object")
@@ -576,20 +526,14 @@ mod tests {
     #[test]
     fn mailbox_commands_reject_noncanonical_numbers_hex_and_bindings() {
         let kem_ciphertext_hex = "5a".repeat(MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH);
-        let kem_hash_response = run(json!({
-            "command": "DeriveMailboxKemCiphertextHash",
-            "kemCiphertextHex": kem_ciphertext_hex,
-        }));
-        let kem_ciphertext_hash = kem_hash_response["kemCiphertextHash"]
-            .as_str()
-            .expect("KEM ciphertext hash is returned");
 
-        let mut leading_zero = key_schedule_value(kem_ciphertext_hash);
+        let mut leading_zero = key_schedule_value();
         leading_zero["producerSequence"] = Value::String("07".to_owned());
         let error = run_transcript_core_command_inner(
             json!({
                 "command": "EncodeMailboxKeyScheduleInput",
                 "value": leading_zero,
+                "kemCiphertextHex": kem_ciphertext_hex,
             })
             .to_string()
             .as_bytes(),
@@ -599,7 +543,8 @@ mod tests {
 
         let error = run_transcript_core_command_inner(
             json!({
-                "command": "DeriveMailboxKemCiphertextHash",
+                "command": "EncodeMailboxKeyScheduleInput",
+                "value": key_schedule_value(),
                 "kemCiphertextHex": "AA".repeat(MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH),
             })
             .to_string()
@@ -607,20 +552,6 @@ mod tests {
         )
         .expect_err("uppercase hex refuses");
         assert_eq!(error.code, CanonicalErrorCode::InvalidHex);
-
-        let mut wrong_hash = unsigned_envelope_value(&"dd".repeat(64));
-        wrong_hash["sourceSignatureHex"] =
-            Value::String("c1".repeat(MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH));
-        let error = run_transcript_core_command_inner(
-            json!({
-                "command": "EncodeSignedMailboxEnvelope",
-                "value": wrong_hash,
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect_err("wrong KEM ciphertext hash refuses");
-        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
 
         let mut invalid_recovery_slot = setup_mailbox_slot_value();
         invalid_recovery_slot["payloadType"] = Value::from(1);

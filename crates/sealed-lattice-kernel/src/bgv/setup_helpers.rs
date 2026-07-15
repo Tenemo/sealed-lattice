@@ -146,7 +146,7 @@ pub(super) fn compare_required_string(
     if actual != expected {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            format!("passive BGV setup package {description} does not match its canonical binding"),
+            format!("BGV setup package {description} does not match its canonical binding"),
         ));
     }
 
@@ -161,7 +161,7 @@ pub(super) fn compare_required_u64(
     if actual != expected {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            format!("passive BGV setup package {description} does not match its canonical binding"),
+            format!("BGV setup package {description} does not match its canonical binding"),
         ));
     }
 

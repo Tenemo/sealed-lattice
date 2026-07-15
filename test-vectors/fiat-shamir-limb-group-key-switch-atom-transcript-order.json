@@ -1,16 +1,13 @@
 {
-  "eventCount": 283,
   "fixture": {
     "digitCount": 3,
     "maskDegree": 16,
     "queryCount": 40,
     "ringDegree": 64
   },
-  "formatVersion": 1,
   "proofFamily": "limb-group-key-switch-atom",
   "transcripts": [
     {
-      "eventCount": 283,
       "segments": [
         {"byteLength": 40, "eventCount": 1, "label": "sealed-lattice/setup/key-switch-atom/key", "operation": "initialize", "squeezeCounterStart": null},
         {"byteLength": 64, "eventCount": 1, "label": "key-statement-binding", "operation": "absorb", "squeezeCounterStart": null},

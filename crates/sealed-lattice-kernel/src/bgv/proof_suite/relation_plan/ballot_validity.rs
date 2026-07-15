@@ -976,6 +976,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             modulus_reference,
             challenge_ordinal,
             ordered_reversed_column_bindings: Vec::new(),
+            ordered_negacyclic_automorphism_permutations: Vec::new(),
             ordered_components,
         };
         let modulus_ordinal =

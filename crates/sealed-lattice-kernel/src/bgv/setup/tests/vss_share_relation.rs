@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
 
 #[test]
 fn carry_aware_vss_share_relation_accepts_no_wrap_and_wrap_cases_for_every_q_share_prime() {
@@ -237,7 +238,7 @@ fn carry_aware_vss_commitment_opening_matches_lifted_share_relation() {
         verification.commitment_opening.message_coefficient_bound,
         *lifted_values.iter().max().expect("lifted max")
     );
-    assert_eq!(verification.homomorphic_randomness_bound, 40);
+    assert_eq!(verification.homomorphic_randomness_bound, 80);
 
     let mut wrong_carry_witnesses = carry_witnesses.clone();
     wrong_carry_witnesses[0] += 1;
@@ -257,7 +258,7 @@ fn carry_aware_vss_commitment_opening_matches_lifted_share_relation() {
     );
 
     let mut wrong_randomness = coefficient_randomness_by_shamir_index.clone();
-    wrong_randomness[0][0][0] += 1;
+    wrong_randomness[0][0][0][0] += 1;
     assert!(
         verify_carry_aware_vss_commitment_opening(CarryAwareVssCommitmentOpeningInput {
             public_matrix_seed_hash: &public_matrix_seed_hash,
@@ -277,16 +278,26 @@ fn carry_aware_vss_commitment_opening_matches_lifted_share_relation() {
 fn commitment_randomness_for_vss_test(
     coefficient_index: usize,
     ring_degree: usize,
-) -> Vec<Vec<i128>> {
-    (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-        .map(|column_index| {
-            (0..ring_degree)
-                .map(|coefficient_position| {
-                    match (coefficient_index + column_index + coefficient_position) % 3 {
-                        0 => -1,
-                        1 => 0,
-                        _ => 1,
-                    }
+) -> Vec<Vec<Vec<i128>>> {
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+        .iter()
+        .enumerate()
+        .map(|(commitment_limb_position, _)| {
+            (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+                .map(|column_index| {
+                    (0..ring_degree)
+                        .map(|coefficient_position| {
+                            let support_position = coefficient_index
+                                + commitment_limb_position
+                                + column_index
+                                + coefficient_position;
+                            match support_position % 3 {
+                                0 => -1,
+                                1 => 0,
+                                _ => 1,
+                            }
+                        })
+                        .collect()
                 })
                 .collect()
         })

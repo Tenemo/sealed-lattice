@@ -7,13 +7,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{
-    RelationChallengeRole, RelationExpressionInstruction, RelationPlanCheckContext,
-    RelationPlanError, RelationPlanVariant, modular_power,
-};
 use super::super::{
     field::{ProofBaseFieldElement, ProofChallengeExtensionElement},
     transcript::CommonProofChallenge,
+};
+use super::{
+    RelationChallengeRole, RelationExpressionInstruction, RelationPlanCheckContext,
+    RelationPlanError, RelationPlanVariant, modular_power,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,8 +78,7 @@ impl CheckedApplicationChallenges {
             .filter(|descriptor| {
                 matches!(
                     descriptor.role,
-                    RelationChallengeRole::NonNativeTheta
-                        | RelationChallengeRole::NonNativeAlpha
+                    RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha
                 )
             })
             .collect::<Vec<_>>();
@@ -90,8 +89,7 @@ impl CheckedApplicationChallenges {
                 | CommonProofChallenge::Alpha { modulus_ordinal } => modulus_ordinal,
                 _ => return Err(RelationPlanError::InvalidChallengeCatalog),
             };
-            if assignment.repetition_ordinal
-                >= context.non_native_modular_identity_challenge_count
+            if assignment.repetition_ordinal >= context.non_native_modular_identity_challenge_count
             {
                 return Err(RelationPlanError::InvalidChallengeCatalog);
             }
@@ -104,10 +102,7 @@ impl CheckedApplicationChallenges {
             if assignment.value >= modulus
                 || sampled_coordinates
                     .insert(
-                        (
-                            assignment.challenge,
-                            assignment.repetition_ordinal,
-                        ),
+                        (assignment.challenge, assignment.repetition_ordinal),
                         assignment.value,
                     )
                     .is_some()
@@ -160,9 +155,7 @@ impl CheckedApplicationChallenges {
                 return Err(RelationPlanError::DuplicateItem);
             }
         }
-        if sampled_coordinates.keys().copied().collect::<BTreeSet<_>>()
-            != required_coordinates
-        {
+        if sampled_coordinates.keys().copied().collect::<BTreeSet<_>>() != required_coordinates {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
         Ok(Self { values })
@@ -200,11 +193,8 @@ impl RelationPlanVariant {
         mut column_value: ColumnValue,
     ) -> Result<Vec<RelationConstraintEvaluation>, RelationPlanError>
     where
-        ColumnValue: FnMut(
-            u32,
-            bool,
-            u64,
-        ) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+        ColumnValue:
+            FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
     {
         let checked_challenges =
             CheckedApplicationChallenges::new(self, context, application_challenges)?;
@@ -249,11 +239,8 @@ impl RelationPlanVariant {
         column_value: ColumnValue,
     ) -> Result<ProofChallengeExtensionElement, RelationPlanError>
     where
-        ColumnValue: FnMut(
-            u32,
-            bool,
-            u64,
-        ) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+        ColumnValue:
+            FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
     {
         if composition_challenges.len() != self.ordered_constraints.len() {
             return Err(RelationPlanError::InvalidChallengeCatalog);
@@ -267,13 +254,16 @@ impl RelationPlanVariant {
         evaluations
             .into_iter()
             .zip(composition_challenges)
-            .try_fold(ProofChallengeExtensionElement::ZERO, |sum, (evaluation, coefficient)| {
-                let normalized = evaluation
-                    .numerator
-                    .divide(evaluation.zeroifier)
-                    .map_err(|_| RelationPlanError::InvalidZeroifier)?;
-                Ok(sum.add(normalized.multiply(*coefficient)))
-            })
+            .try_fold(
+                ProofChallengeExtensionElement::ZERO,
+                |sum, (evaluation, coefficient)| {
+                    let normalized = evaluation
+                        .numerator
+                        .divide(evaluation.zeroifier)
+                        .map_err(|_| RelationPlanError::InvalidZeroifier)?;
+                    Ok(sum.add(normalized.multiply(*coefficient)))
+                },
+            )
     }
 
     /// Verifies the DEEP values against both the complete relation expression
@@ -292,12 +282,11 @@ impl RelationPlanVariant {
         {
             return Err(RelationPlanError::InvalidOpening);
         }
-        let quotient_decomposition_stride =
-            self.quotient_decomposition_stride(context)?;
+        let quotient_decomposition_stride = self.quotient_decomposition_stride(context)?;
 
         for (deep_point_ordinal, deep_point) in deep_points.iter().copied().enumerate() {
-            let deep_point_ordinal = u16::try_from(deep_point_ordinal)
-                .map_err(|_| RelationPlanError::CountOverflow)?;
+            let deep_point_ordinal =
+                u16::try_from(deep_point_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
             let composed_quotient = self.evaluate_composed_quotient_at_point(
                 context,
                 deep_point,
@@ -318,12 +307,8 @@ impl RelationPlanVariant {
                 },
             )?;
 
-            let raw_opening_point_ordinal = self.opening_point_ordinal_for_rotation(
-                deep_point_ordinal,
-                false,
-                0,
-                0,
-            )?;
+            let raw_opening_point_ordinal =
+                self.opening_point_ordinal_for_rotation(deep_point_ordinal, false, 0, 0)?;
             let mut reconstructed_quotient = ProofChallengeExtensionElement::ZERO;
             for component_ordinal in 0..context.quotient_component_count {
                 let component_value = self.opened_value(
@@ -357,13 +342,11 @@ impl RelationPlanVariant {
         {
             return Err(RelationPlanError::InvalidDomain);
         }
-        let evaluation_generator = ProofBaseFieldElement::from_canonical(
-            context.evaluation_domain_generator,
-        )
-        .map_err(|_| RelationPlanError::InvalidDomain)?;
-        let trace_generator = evaluation_generator.power(
-            self.evaluation_domain_size / self.trace_domain_size,
-        );
+        let evaluation_generator =
+            ProofBaseFieldElement::from_canonical(context.evaluation_domain_generator)
+                .map_err(|_| RelationPlanError::InvalidDomain)?;
+        let trace_generator =
+            evaluation_generator.power(self.evaluation_domain_size / self.trace_domain_size);
         let mut result = Vec::with_capacity(self.ordered_opening_points.len());
         let mut canonical_points = BTreeSet::new();
         for descriptor in &self.ordered_opening_points {
@@ -372,8 +355,7 @@ impl RelationPlanVariant {
                 .copied()
                 .ok_or(RelationPlanError::InvalidOpening)?;
             let reduced_rotation = descriptor.trace_rotation_magnitude % self.trace_domain_size;
-            let signed_exponent = if descriptor.trace_rotation_is_negative
-                && reduced_rotation != 0
+            let signed_exponent = if descriptor.trace_rotation_is_negative && reduced_rotation != 0
             {
                 self.trace_domain_size - reduced_rotation
             } else {
@@ -410,10 +392,9 @@ impl RelationPlanVariant {
         if candidate.is_zero() {
             return Ok(true);
         }
-        let evaluation_coset_offset = ProofBaseFieldElement::from_canonical(
-            context.evaluation_coset_offset,
-        )
-        .map_err(|_| RelationPlanError::InvalidDomain)?;
+        let evaluation_coset_offset =
+            ProofBaseFieldElement::from_canonical(context.evaluation_coset_offset)
+                .map_err(|_| RelationPlanError::InvalidDomain)?;
         let evaluation_coset_constant = ProofChallengeExtensionElement::from_base(
             evaluation_coset_offset.power(self.evaluation_domain_size),
         );
@@ -428,14 +409,18 @@ impl RelationPlanVariant {
             return Ok(true);
         }
 
-        let evaluation_generator = ProofBaseFieldElement::from_canonical(
-            context.evaluation_domain_generator,
-        )
-        .map_err(|_| RelationPlanError::InvalidDomain)?;
-        let trace_generator = evaluation_generator.power(
-            self.evaluation_domain_size / self.trace_domain_size,
-        );
-        let mut prior_translated_points = BTreeSet::new();
+        let evaluation_generator =
+            ProofBaseFieldElement::from_canonical(context.evaluation_domain_generator)
+                .map_err(|_| RelationPlanError::InvalidDomain)?;
+        let trace_generator =
+            evaluation_generator.power(self.evaluation_domain_size / self.trace_domain_size);
+        let extension_degree = context.challenge_extension_degree;
+        let frobenius_orbit = |point: ProofChallengeExtensionElement| {
+            (0..extension_degree)
+                .map(|conjugate_index| point.frobenius(conjugate_index).canonical_coordinates())
+                .collect::<BTreeSet<_>>()
+        };
+        let mut prior_translated_orbits = BTreeSet::new();
         for descriptor in self
             .ordered_opening_points
             .iter()
@@ -445,10 +430,8 @@ impl RelationPlanVariant {
                 .get(usize::from(descriptor.deep_point_ordinal))
                 .copied()
                 .ok_or(RelationPlanError::InvalidChallengeCatalog)?;
-            let reduced_rotation =
-                descriptor.trace_rotation_magnitude % self.trace_domain_size;
-            let signed_exponent = if descriptor.trace_rotation_is_negative
-                && reduced_rotation != 0
+            let reduced_rotation = descriptor.trace_rotation_magnitude % self.trace_domain_size;
+            let signed_exponent = if descriptor.trace_rotation_is_negative && reduced_rotation != 0
             {
                 self.trace_domain_size - reduced_rotation
             } else {
@@ -457,19 +440,24 @@ impl RelationPlanVariant {
             let translated = prior_deep_point
                 .multiply_base(trace_generator.power(signed_exponent))
                 .frobenius(descriptor.conjugate_index);
-            if !prior_translated_points.insert(translated.canonical_coordinates()) {
+            let orbit = frobenius_orbit(translated);
+            if orbit.len() != usize::from(extension_degree) {
                 return Err(RelationPlanError::InvalidOpening);
             }
+            for orbit_element in orbit {
+                if !prior_translated_orbits.insert(orbit_element) {
+                    return Err(RelationPlanError::InvalidOpening);
+                }
+            }
         }
-        let mut translated_points = BTreeSet::new();
+        let mut translated_orbits = BTreeSet::new();
         for descriptor in self
             .ordered_opening_points
             .iter()
             .filter(|descriptor| descriptor.deep_point_ordinal == point_ordinal)
         {
             let reduced_rotation = descriptor.trace_rotation_magnitude % self.trace_domain_size;
-            let signed_exponent = if descriptor.trace_rotation_is_negative
-                && reduced_rotation != 0
+            let signed_exponent = if descriptor.trace_rotation_is_negative && reduced_rotation != 0
             {
                 self.trace_domain_size - reduced_rotation
             } else {
@@ -478,13 +466,18 @@ impl RelationPlanVariant {
             let translated = candidate
                 .multiply_base(trace_generator.power(signed_exponent))
                 .frobenius(descriptor.conjugate_index);
+            let orbit = frobenius_orbit(translated);
             if point_is_in_excluded_domain(translated)
                 || !self.zeroifiers_are_nonzero_at(context, translated)?
-                || prior_translated_points.contains(&translated.canonical_coordinates())
-                || !translated_points.insert(translated.canonical_coordinates())
+                || orbit.len() != usize::from(extension_degree)
+                || orbit.iter().any(|orbit_element| {
+                    prior_translated_orbits.contains(orbit_element)
+                        || translated_orbits.contains(orbit_element)
+                })
             {
                 return Ok(true);
             }
+            translated_orbits.extend(orbit);
         }
         Ok(false)
     }
@@ -526,22 +519,20 @@ impl RelationPlanVariant {
             rotation_magnitude,
             self.trace_domain_size,
         )?;
-        let mut matches = self
-            .ordered_opening_points
-            .iter()
-            .enumerate()
-            .filter(|(_, descriptor)| {
-                descriptor.deep_point_ordinal == deep_point_ordinal
-                    && descriptor.conjugate_index == conjugate_index
-                    && signed_rotation_exponent(
-                        descriptor.trace_rotation_is_negative,
-                        descriptor.trace_rotation_magnitude,
-                        self.trace_domain_size,
-                    ) == Ok(target_exponent)
-            });
-        let (ordinal, _) = matches
-            .next()
-            .ok_or(RelationPlanError::InvalidOpening)?;
+        let mut matches =
+            self.ordered_opening_points
+                .iter()
+                .enumerate()
+                .filter(|(_, descriptor)| {
+                    descriptor.deep_point_ordinal == deep_point_ordinal
+                        && descriptor.conjugate_index == conjugate_index
+                        && signed_rotation_exponent(
+                            descriptor.trace_rotation_is_negative,
+                            descriptor.trace_rotation_magnitude,
+                            self.trace_domain_size,
+                        ) == Ok(target_exponent)
+                });
+        let (ordinal, _) = matches.next().ok_or(RelationPlanError::InvalidOpening)?;
         if matches.next().is_some() {
             return Err(RelationPlanError::InvalidOpening);
         }
@@ -595,9 +586,7 @@ impl RelationPlanVariant {
                     && claim.column_ordinal == column_ordinal
                     && claim.opening_point_ordinal == opening_point_ordinal
             });
-        let (claim_ordinal, _) = matches
-            .next()
-            .ok_or(RelationPlanError::InvalidOpening)?;
+        let (claim_ordinal, _) = matches.next().ok_or(RelationPlanError::InvalidOpening)?;
         if matches.next().is_some() {
             return Err(RelationPlanError::InvalidOpening);
         }
@@ -652,13 +641,13 @@ impl RelationPlanVariant {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bgv::proof_suite::{
-        PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
-        PROOF_CHALLENGE_EXTENSION_DEGREE,
-    };
     use crate::bgv::proof_suite::relation_plan::{
         CommittedMaterialRelationPlanInput, RelationPlanCheckContext, ResolvedSuiteModulus,
         SuiteModulusReference, compile_vss_share_linkage_relation_plan,
+    };
+    use crate::bgv::proof_suite::{
+        PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
+        PROOF_CHALLENGE_EXTENSION_DEGREE,
     };
 
     fn vss_linkage_interpreter_fixture() -> (RelationPlanVariant, RelationPlanCheckContext) {
@@ -711,20 +700,13 @@ mod tests {
             96,
         )
         .expect("alpha assignment");
-        let challenges = CheckedApplicationChallenges::new(
-            &variant,
-            &context,
-            &[alpha_assignment],
-        )
-        .expect("one alpha sample resolves the complete coefficient group");
+        let challenges = CheckedApplicationChallenges::new(&variant, &context, &[alpha_assignment])
+            .expect("one alpha sample resolves the complete coefficient group");
 
         let weights = (0_u64..3)
             .map(|unit_ordinal| {
                 challenges
-                    .get_u64(
-                        RelationChallengeRole::NonNativeAlpha,
-                        &[0, 0, unit_ordinal],
-                    )
+                    .get_u64(RelationChallengeRole::NonNativeAlpha, &[0, 0, unit_ordinal])
                     .expect("grouped alpha power")
             })
             .collect::<Vec<_>>();
@@ -743,6 +725,28 @@ mod tests {
             ),
             Err(RelationPlanError::InvalidChallengeCatalog)
         ));
+    }
+
+    #[test]
+    fn deep_sampler_requires_full_degree_disjoint_frobenius_orbits() {
+        let (variant, context) = vss_linkage_interpreter_fixture();
+        let base_field_candidate = ProofChallengeExtensionElement::from_base(
+            ProofBaseFieldElement::from_canonical(17).expect("canonical base-field candidate"),
+        );
+        assert!(
+            variant
+                .deep_point_candidate_is_forbidden(&context, 0, base_field_candidate, &[])
+                .expect("base-field membership is decidable")
+        );
+
+        let full_degree_candidate =
+            ProofChallengeExtensionElement::from_canonical_coordinates([0, 1, 0, 0, 0])
+                .expect("canonical extension generator");
+        assert!(
+            !variant
+                .deep_point_candidate_is_forbidden(&context, 0, full_degree_candidate, &[])
+                .expect("full-degree candidate is decidable")
+        );
     }
 }
 
@@ -772,11 +776,7 @@ fn evaluate_program<ColumnValue>(
     zeroifier_program: bool,
 ) -> Result<ProofChallengeExtensionElement, RelationPlanError>
 where
-    ColumnValue: FnMut(
-        u32,
-        bool,
-        u64,
-    ) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+    ColumnValue: FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
 {
     let mut stack = Vec::with_capacity(program.len());
     for instruction in program {
@@ -815,9 +815,9 @@ where
             RelationExpressionInstruction::TranscriptChallenge {
                 challenge_role,
                 role_coordinates,
-            } if !zeroifier_program => stack.push(
-                application_challenges.get(*challenge_role, role_coordinates)?,
-            ),
+            } if !zeroifier_program => {
+                stack.push(application_challenges.get(*challenge_role, role_coordinates)?)
+            }
             RelationExpressionInstruction::RadixConvolutionCoefficient {
                 convolution_ordinal,
                 coefficient_ordinal,
@@ -935,18 +935,14 @@ fn evaluate_radix_convolution_coefficient<ColumnValue>(
     column_value: &mut ColumnValue,
 ) -> Result<ProofChallengeExtensionElement, RelationPlanError>
 where
-    ColumnValue: FnMut(
-        u32,
-        bool,
-        u64,
-    ) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+    ColumnValue: FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
 {
     let convolution = variant
         .ordered_radix_convolutions
         .get(convolution_ordinal as usize)
         .ok_or(RelationPlanError::InvalidConstraint)?;
-    let coefficient_ordinal = usize::try_from(coefficient_ordinal)
-        .map_err(|_| RelationPlanError::CountOverflow)?;
+    let coefficient_ordinal =
+        usize::try_from(coefficient_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
     let one = ProofChallengeExtensionElement::from_base(
         ProofBaseFieldElement::from_canonical(1)
             .map_err(|_| RelationPlanError::InvalidConstraint)?,
@@ -963,11 +959,7 @@ where
                 } => ordered_column_ordinals
                     .iter()
                     .map(|column_ordinal| {
-                        column_value(
-                            *column_ordinal,
-                            *rotation_is_negative,
-                            *rotation_magnitude,
-                        )
+                        column_value(*column_ordinal, *rotation_is_negative, *rotation_magnitude)
                     })
                     .collect::<Result<Vec<_>, _>>()?,
                 super::RelationRadixFactorDescriptor::ConstantDigits { ordered_digits } => {
@@ -985,8 +977,8 @@ where
                     role_coordinates,
                     digit_count,
                 } => {
-                    let mut remaining = application_challenges
-                        .get_u64(*challenge_role, role_coordinates)?;
+                    let mut remaining =
+                        application_challenges.get_u64(*challenge_role, role_coordinates)?;
                     let mut digits = Vec::with_capacity(usize::from(*digit_count));
                     for _ in 0..*digit_count {
                         let digit = remaining % convolution.radix;
@@ -1084,8 +1076,7 @@ fn convolve_extension_coefficients(
             if output_ordinal >= output_length {
                 break;
             }
-            output[output_ordinal] =
-                output[output_ordinal].add(left_value.multiply(right_value));
+            output[output_ordinal] = output[output_ordinal].add(left_value.multiply(right_value));
         }
     }
     Ok(output)

@@ -19,6 +19,7 @@ pub const SIGNED_CARRIER_SCHEMA_IDENTIFIER: u16 = 0x0101;
 pub const ROSTER_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x0114;
 pub const ROSTER_SCHEMA_IDENTIFIER: u16 = 0x0115;
 pub const STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER: u16 = 0x1800;
+pub(super) const EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1502;
 pub const ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH: usize = ml_kem_768::EK_LEN;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
@@ -167,7 +168,6 @@ pub(super) type SchemaResult<Value> = Result<Value, FoundationSchemaError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RosterEntry {
-    pub roster_position: u16,
     pub signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
     pub mailbox_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
 }
@@ -187,7 +187,6 @@ impl RosterEntry {
             ROSTER_ENTRY_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
             vec![
-                CanonicalItem::unsigned16(self.roster_position),
                 CanonicalItem::fixed_bytes(self.signing_verification_key)?,
                 CanonicalItem::fixed_bytes(self.mailbox_encapsulation_key)?,
             ],
@@ -195,11 +194,10 @@ impl RosterEntry {
     }
 
     fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 3)?;
+        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 2)?;
         let entry = Self {
-            roster_position: read_u16(&tuple.items[0])?,
-            signing_verification_key: read_fixed_bytes(&tuple.items[1])?,
-            mailbox_encapsulation_key: read_fixed_bytes(&tuple.items[2])?,
+            signing_verification_key: read_fixed_bytes(&tuple.items[0])?,
+            mailbox_encapsulation_key: read_fixed_bytes(&tuple.items[1])?,
         };
         entry.validate()?;
         Ok(entry)
@@ -230,16 +228,10 @@ impl Roster {
         let mut signing_keys = BTreeSet::new();
         let mut mailbox_keys = BTreeSet::new();
         let mut participant_identities = BTreeSet::new();
-        for (expected_position, entry) in entries.iter().enumerate() {
+        for entry in &entries {
             entry.validate()?;
             let participant_identity =
                 derive_participant_identity(&entry.signing_verification_key)?;
-            if usize::from(entry.roster_position) != expected_position {
-                return Err(FoundationSchemaError::new(
-                    RefusalReason::WrongTypeOrLength,
-                    "roster positions must be contiguous and increasing",
-                ));
-            }
             if !signing_keys.insert(entry.signing_verification_key.as_slice())
                 || !mailbox_keys.insert(entry.mailbox_encapsulation_key.as_slice())
                 || !participant_identities.insert(participant_identity)
@@ -393,6 +385,92 @@ impl StreamDescriptor {
     }
 }
 
+/// The single canonical representation of a deterministic evaluator replay.
+/// Board ingestion validates its dependency while the evaluator verifier owns
+/// the two streamed ciphertext checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct EvaluatorReplayPayload {
+    verified_setup_source_hash: Hash512,
+    verified_aggregate_source_hash: Hash512,
+    target_identifier_descriptor: StreamDescriptor,
+    target_order_descriptor: StreamDescriptor,
+}
+
+impl EvaluatorReplayPayload {
+    pub(super) fn new(
+        verified_setup_source_hash: Hash512,
+        verified_aggregate_source_hash: Hash512,
+        target_identifier_descriptor: StreamDescriptor,
+        target_order_descriptor: StreamDescriptor,
+    ) -> Self {
+        Self {
+            verified_setup_source_hash,
+            verified_aggregate_source_hash,
+            target_identifier_descriptor,
+            target_order_descriptor,
+        }
+    }
+
+    pub(super) const fn verified_setup_source_hash(&self) -> Hash512 {
+        self.verified_setup_source_hash
+    }
+
+    pub(super) const fn verified_aggregate_source_hash(&self) -> Hash512 {
+        self.verified_aggregate_source_hash
+    }
+
+    pub(super) const fn target_identifier_descriptor(&self) -> &StreamDescriptor {
+        &self.target_identifier_descriptor
+    }
+
+    pub(super) const fn target_order_descriptor(&self) -> &StreamDescriptor {
+        &self.target_order_descriptor
+    }
+
+    pub(super) fn encode(&self) -> SchemaResult<Vec<u8>> {
+        Ok(self.canonical_tuple()?.encode()?)
+    }
+
+    fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
+        let target_identifier_tuple = CanonicalTuple::decode(
+            &self.target_identifier_descriptor.encode()?,
+            &CanonicalDecodeLimits::default(),
+        )?;
+        let target_order_tuple = CanonicalTuple::decode(
+            &self.target_order_descriptor.encode()?,
+            &CanonicalDecodeLimits::default(),
+        )?;
+        Ok(CanonicalTuple::new(
+            EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::hash512(self.verified_setup_source_hash.into_bytes()),
+                CanonicalItem::hash512(self.verified_aggregate_source_hash.into_bytes()),
+                CanonicalItem::nested_tuple(&target_identifier_tuple)?,
+                CanonicalItem::nested_tuple(&target_order_tuple)?,
+            ],
+        ))
+    }
+
+    pub(super) fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
+        let tuple = CanonicalTuple::decode(bytes, limits)?;
+        Self::from_tuple(&tuple, limits)
+    }
+
+    pub(super) fn from_tuple(
+        tuple: &CanonicalTuple,
+        limits: &CanonicalDecodeLimits,
+    ) -> SchemaResult<Self> {
+        require_header(tuple, EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER, 4)?;
+        Ok(Self::new(
+            read_hash(&tuple.items[0])?,
+            read_hash(&tuple.items[1])?,
+            read_stream_descriptor_item(&tuple.items[2], limits)?,
+            read_stream_descriptor_item(&tuple.items[3], limits)?,
+        ))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectEnvelope {
     pub suite_id: Hash512,
@@ -409,12 +487,12 @@ pub struct ObjectEnvelope {
 
 impl ObjectEnvelope {
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
-        let recovery_transition = self
-            .recovery_transition_hash
-            .map(|hash| CanonicalItem::hash512(hash.into_bytes()));
         let producer = self
             .producer_participant_id
             .map(|identity| CanonicalItem::participant_identity(identity.into_bytes()));
+        let recovery_transition = self
+            .recovery_transition_hash
+            .map(|hash| CanonicalItem::hash512(hash.into_bytes()));
         let prerequisites = self
             .ordered_prerequisite_hashes
             .iter()
@@ -896,6 +974,20 @@ pub(super) fn read_hash(item: &CanonicalItem) -> SchemaResult<Hash512> {
     Ok(Hash512::from_bytes(bytes))
 }
 
+fn read_stream_descriptor_item(
+    item: &CanonicalItem,
+    limits: &CanonicalDecodeLimits,
+) -> SchemaResult<StreamDescriptor> {
+    if item.item_type() != CanonicalItemType::NestedTuple {
+        return Err(FoundationSchemaError::new(
+            RefusalReason::WrongTypeOrLength,
+            "evaluator replay stream descriptor has the wrong type",
+        ));
+    }
+    let tuple = CanonicalTuple::decode(item.canonical_bytes(), limits)?;
+    StreamDescriptor::from_tuple(&tuple)
+}
+
 fn read_optional_fixed_64_byte_value(
     item: &CanonicalItem,
     expected_type: CanonicalItemType,
@@ -1053,7 +1145,6 @@ mod tests {
                     ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
 
                 RosterEntry {
-                    roster_position,
                     signing_verification_key: signing_key.into_bytes(),
                     mailbox_encapsulation_key: mailbox_key.into_bytes(),
                 }
@@ -1078,9 +1169,9 @@ mod tests {
             &CanonicalDecodeLimits::default(),
         )
         .expect("entry tuple decodes");
-        assert_eq!(tuple.items.len(), 3);
+        assert_eq!(tuple.items.len(), 2);
         assert_eq!(
-            read_item(&tuple.items[2], CanonicalItemType::RawBytes)
+            read_item(&tuple.items[1], CanonicalItemType::RawBytes)
                 .expect("mailbox key bytes decode")
                 .len(),
             ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH
@@ -1163,7 +1254,7 @@ mod tests {
                 Some(object_type)
             );
         }
-        for unassigned_code in [0, 3, 0x000f, 0x0022, 0x0041, 0xffff] {
+        for unassigned_code in [0, 3, 0x000f, 0x0022, 0x0041, 0x0054, 0xffff] {
             assert_eq!(
                 FoundationObjectType::from_canonical_code(unassigned_code),
                 None
@@ -1204,10 +1295,6 @@ mod tests {
                 "state-output-intent",
             ),
             (FoundationObjectType::StateWitnessVote, "state-witness-vote"),
-            (
-                FoundationObjectType::RecoveryTransition,
-                "state-recovery-transition",
-            ),
             (
                 FoundationObjectType::TargetDecryptionShare,
                 "target-release-output",
@@ -1259,8 +1346,6 @@ mod tests {
             object_type,
             ceremony_context_hash: Hash512::from_bytes([0x22; 64]),
             action_context_hash: Hash512::from_bytes([0x33; 64]),
-            recovery_epoch: 0,
-            recovery_transition_hash: None,
             producer_participant_id: None,
             producer_sequence: 0,
             ordered_prerequisite_hashes: Vec::new(),

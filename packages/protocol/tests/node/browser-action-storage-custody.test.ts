@@ -22,7 +22,6 @@ import {
     testActionStorageRootByteLength,
     testBytesEqual,
     testDeviceWrappingTagByteLength,
-    testRecoveryText,
 } from '#packages/protocol/tests/support/action-storage-custody-test-support';
 
 const cryptoProvider = webcrypto as unknown as Crypto;
@@ -98,7 +97,6 @@ class MaliciousCustodyWorker {
                 ? {
                       deviceKey: this.#secretKey,
                       mutationIdentifier: new Uint8Array(32),
-                      recoveryValueExported: false,
                       wrappedStorageRoot: new Uint8Array(96),
                   }
                 : undefined;
@@ -246,13 +244,7 @@ describe('Browser action-storage custody', () => {
         const snapshot = await custody.initialize();
 
         expect(snapshot.mutationIdentifier).toBeInstanceOf(Uint8Array);
-        expect(snapshot.recoveryValueExported).toBe(false);
         expect(snapshot.mutationIdentifier).toHaveLength(32);
-        expect(Object.keys(snapshot).sort()).toEqual([
-            'mutationIdentifier',
-            'recoveryValueExported',
-            'storageRootCommitment',
-        ]);
         expect(snapshot.storageRootCommitment).toHaveLength(64);
         expect(workerKernel.retainedRootMatchesExpected()).toBe(false);
         expect(workerKernel.stagedRootPresent()).toBe(true);
@@ -273,13 +265,6 @@ describe('Browser action-storage custody', () => {
 
         const storedState = await storage.readState();
         expect(storedState?.deviceKey.extractable).toBe(false);
-        expect(
-            Object.values(snapshot).some(
-                (value) =>
-                    value instanceof Uint8Array &&
-                    value.byteLength === testActionStorageRootByteLength,
-            ),
-        ).toBe(false);
         await expect(custody.initialize()).rejects.toMatchObject({
             code: 'CommitmentRequired',
             name: 'BrowserActionStorageCustodyError',
@@ -313,7 +298,6 @@ describe('Browser action-storage custody', () => {
 
         const expectedContext = {
             actionRandomnessCommitment: createTestBytes(64, 53),
-            creationRecoveryEpoch: 2n,
             identifierInput: {
                 recordType: 'aggregateThresholdShare',
                 recipientInputRoot: preservedRecipientInputRoot,
@@ -445,7 +429,7 @@ describe('Browser action-storage custody', () => {
         expect(workerKernel.retainedRootMatchesExpected()).toBe(true);
     });
 
-    it('recovers the public first-use commitment from persisted state after a pre-publication worker restart', async () => {
+    it('reopens the public first-use commitment from persisted state after a pre-publication worker restart', async () => {
         const storage = new InMemoryDeviceWrappingStateStorage();
         const expectedRoot = createTestBytes(
             testActionStorageRootByteLength,
@@ -477,7 +461,7 @@ describe('Browser action-storage custody', () => {
         expect(restartedWorker.workerKernel.activeRootPresent()).toBe(true);
     });
 
-    it('forbids silent reinitialization when a commitment is known but local storage is missing and permits explicit recovery', async () => {
+    it('forbids reinitialization when a commitment is known but local storage is missing', async () => {
         const expectedRoot = createTestBytes(
             testActionStorageRootByteLength,
             27,
@@ -499,15 +483,9 @@ describe('Browser action-storage custody', () => {
             await missingStorageCustody.custody.currentSnapshot(),
         ).toBeUndefined();
 
-        const recoveredSnapshot = await missingStorageCustody.custody.recover({
-            caseInsensitiveRecoveryText: testRecoveryText.toLowerCase(),
-            untrustedExpectedCommitment:
-                untrustedExpectedCommitment(knownCommitment),
-        });
-        expect(recoveredSnapshot.recoveryValueExported).toBe(true);
-        expect(
-            missingStorageCustody.workerKernel.retainedRootMatchesExpected(),
-        ).toBe(true);
+        expect(missingStorageCustody.workerKernel.activeRootPresent()).toBe(
+            false,
+        );
     });
 
     it('refuses a persisted wrapping pair under a different complete action binding', async () => {
@@ -544,90 +522,6 @@ describe('Browser action-storage custody', () => {
         expect(wrongBindingCustody.workerKernel.activeRootPresent()).toBe(
             false,
         );
-    });
-
-    it('publishes recovery text once and only after worker-confirmed checksum bytes', async () => {
-        const { custody, workerKernel } = createCustody({
-            actionStorageRoot: createTestBytes(
-                testActionStorageRootByteLength,
-                33,
-            ),
-        });
-        const { commitment, snapshot } = await initializeAndActivate(custody);
-        const preparation = await custody.beginRecoveryExport({
-            expectedSnapshot: snapshot,
-            untrustedExpectedCommitment: commitment,
-        });
-
-        expect('canonicalRecoveryText' in preparation).toBe(false);
-        await expect(
-            custody.confirmRecoveryExport({
-                confirmedChecksum: new Uint8Array(16),
-                preparationIdentifier: preparation.preparationIdentifier,
-            }),
-        ).rejects.toMatchObject({ code: 'RecoveryConfirmationFailed' });
-        expect((await custody.currentSnapshot())?.recoveryValueExported).toBe(
-            false,
-        );
-
-        const confirmation = await custody.confirmRecoveryExport({
-            confirmedChecksum: workerKernel.checksum(),
-            preparationIdentifier: preparation.preparationIdentifier,
-        });
-        expect(confirmation.canonicalRecoveryText).toBe(testRecoveryText);
-        expect(confirmation.snapshot.recoveryValueExported).toBe(true);
-        expect(
-            workerKernel.activeMutationIdentifierMatches(
-                confirmation.snapshot.mutationIdentifier,
-            ),
-        ).toBe(true);
-        await expect(
-            custody.beginRecoveryExport({
-                expectedSnapshot: confirmation.snapshot,
-                untrustedExpectedCommitment: commitment,
-            }),
-        ).rejects.toMatchObject({ code: 'RecoveryAlreadyExported' });
-        await expect(custody.delete(snapshot)).rejects.toMatchObject({
-            code: 'Conflict',
-        });
-    });
-
-    it('rewraps validated case-insensitive recovery material with a fresh key, nonce, and version', async () => {
-        const { custody, storage, workerKernel } = createCustody({
-            actionStorageRoot: createTestBytes(
-                testActionStorageRootByteLength,
-                49,
-            ),
-        });
-        const { commitment, snapshot: originalSnapshot } =
-            await initializeAndActivate(custody);
-        const originalState = await storage.readState();
-        const originalNonce = workerKernel.lastEnvelopeNonce();
-
-        const recoveredSnapshot = await custody.recover({
-            caseInsensitiveRecoveryText: testRecoveryText.toLowerCase(),
-            untrustedExpectedCommitment: commitment,
-            expectedSnapshot: originalSnapshot,
-        });
-        const recoveredState = await storage.readState();
-
-        expect(recoveredSnapshot.recoveryValueExported).toBe(true);
-        expect(recoveredSnapshot.mutationIdentifier).not.toEqual(
-            originalSnapshot.mutationIdentifier,
-        );
-        expect(recoveredState?.deviceKey).not.toBe(originalState?.deviceKey);
-        expect(workerKernel.lastEnvelopeNonce()).not.toEqual(originalNonce);
-        expect(
-            workerKernel.activeMutationIdentifierMatches(
-                recoveredSnapshot.mutationIdentifier,
-            ),
-        ).toBe(true);
-        await expect(custody.delete(originalSnapshot)).rejects.toMatchObject({
-            code: 'Conflict',
-        });
-        await custody.delete(recoveredSnapshot);
-        expect(await custody.currentSnapshot()).toBeUndefined();
-        expect(workerKernel.activeRootPresent()).toBe(false);
     });
 
     it('fails closed on ciphertext tampering without replacing the active root', async () => {
@@ -726,32 +620,6 @@ describe('Browser action-storage custody', () => {
         ).rejects.toMatchObject({ code: 'Conflict' });
         expect(workerKernel.activeRootPresent()).toBe(false);
         expect(workerKernel.stagedRootPresent()).toBe(false);
-    });
-
-    it('preserves current storage on stale recovery but destroys staged material', async () => {
-        const { custody, storage, workerKernel } = createCustody({
-            actionStorageRoot: createTestBytes(
-                testActionStorageRootByteLength,
-                129,
-            ),
-        });
-        const { commitment, snapshot } = await initializeAndActivate(custody);
-        storage.forceNextConflict();
-
-        await expect(
-            custody.recover({
-                caseInsensitiveRecoveryText: testRecoveryText,
-                untrustedExpectedCommitment: commitment,
-                expectedSnapshot: snapshot,
-            }),
-        ).rejects.toMatchObject({ code: 'Conflict' });
-        expect(await custody.currentSnapshot()).toEqual(snapshot);
-        expect(workerKernel.stagedRootPresent()).toBe(false);
-        expect(
-            workerKernel.activeMutationIdentifierMatches(
-                snapshot.mutationIdentifier,
-            ),
-        ).toBe(true);
     });
 
     it('terminates a worker that tries to return a key or wrapped envelope', async () => {

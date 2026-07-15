@@ -111,7 +111,6 @@ pub(crate) fn validate_protocol_hash_hex(field_name: &str, value: &str) -> Canon
 impl SuccinctSetupProofContext {
     fn validate_for_statement(&self, shape: SuccinctSetupProofFamilyShape) -> CanonicalResult<()> {
         validate_protocol_hash_hex("setupContextHash", &self.setup_context_hash)?;
-        validate_context_token("trusteeIdentity", &self.trustee_identity)?;
         if self.binding_roots.len() != shape.binding_labels().len() {
             return Err(invalid_succinct_setup_proof(
                 "statement binding roots do not match the proof family",
@@ -130,7 +129,6 @@ impl TrusteeEvaluationKeyStatement {
         for context_field in [
             self.family_shape().proof_family(),
             self.context.setup_context_hash.as_str(),
-            self.context.trustee_identity.as_str(),
         ] {
             append_len_prefixed_str(&mut preimage, context_field);
         }
@@ -182,8 +180,6 @@ impl TrusteeEvaluationKeyStatement {
             for field in [
                 private_vss_share.public_matrix_seed_hash.as_str(),
                 private_vss_share.private_envelope_aad_hash.as_str(),
-                private_vss_share.source_trustee_identity.as_str(),
-                private_vss_share.recipient_identity.as_str(),
                 private_vss_share.source_trustee_commitment_root.as_str(),
             ] {
                 append_len_prefixed_str(&mut preimage, field);
@@ -344,14 +340,6 @@ fn validate_private_vss_share_statement(
     validate_protocol_hash_hex(
         "privateVssShare.privateEnvelopeAadHash",
         &statement.private_envelope_aad_hash,
-    )?;
-    validate_context_token(
-        "privateVssShare.sourceTrusteeIdentity",
-        &statement.source_trustee_identity,
-    )?;
-    validate_context_token(
-        "privateVssShare.recipientIdentity",
-        &statement.recipient_identity,
     )?;
     validate_protocol_hash_hex(
         "privateVssShare.sourceTrusteeCommitmentRoot",

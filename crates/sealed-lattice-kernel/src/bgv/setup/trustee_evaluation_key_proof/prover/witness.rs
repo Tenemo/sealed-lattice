@@ -10,7 +10,9 @@ use super::salted_tree::{SaltedTree, commit_salted_extension_row_pairs};
 use super::{COLUMN_MASK_DOMAIN, LEAF_SALT_DOMAIN};
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::parameters::DATA_PRIMES;
-use crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH;
+use crate::bgv::setup::commitment::{
+    SETUP_COMMITMENT_RANDOMNESS_WIDTH, setup_commitment_randomness_coefficient_bound,
+};
 use crate::encoding::CanonicalResult;
 
 fn signed_residue_vector(coefficients: &[i64], modulus: u64) -> Vec<u64> {
@@ -71,8 +73,18 @@ pub(super) fn build_limb_witness_commitment(
         witness.private_vss_carry_witnesses(),
         modulus,
     ));
-    for randomness_columns in witness.private_vss_opening_randomness_by_shamir_index() {
-        for column in randomness_columns {
+    for randomness_by_commitment_limb in
+        witness.private_vss_opening_randomness_by_shamir_index_and_commitment_limb()
+    {
+        let randomness_by_column =
+            randomness_by_commitment_limb
+                .get(limb_index)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "private VSS witness is missing the current commitment-limb opening tape",
+                    )
+                })?;
+        for column in randomness_by_column {
             append_logical_vector(&signed_residue_vector(column, modulus));
         }
     }
@@ -134,7 +146,7 @@ fn validate_private_vss_witness(
         .len()
         != coefficient_count
         || witness
-            .private_vss_opening_randomness_by_shamir_index()
+            .private_vss_opening_randomness_by_shamir_index_and_commitment_limb()
             .len()
             != coefficient_count
         || witness.private_vss_carry_witnesses().len() != ring_degree
@@ -146,12 +158,12 @@ fn validate_private_vss_witness(
     let source_message_modulus = DATA_PRIMES[statement.source_rns_limb_index];
     let source_modulus_i64 = i64::try_from(source_message_modulus)
         .map_err(|_| invalid_succinct_setup_proof("private VSS source modulus does not fit i64"))?;
-    for (coefficient_index, (messages, randomness_columns)) in witness
+    for (coefficient_index, (messages, randomness_by_commitment_limb)) in witness
         .private_vss_coefficient_messages_by_shamir_index()
         .iter()
         .zip(
             witness
-                .private_vss_opening_randomness_by_shamir_index()
+                .private_vss_opening_randomness_by_shamir_index_and_commitment_limb()
                 .iter(),
         )
         .enumerate()
@@ -160,13 +172,27 @@ fn validate_private_vss_witness(
             || messages
                 .iter()
                 .any(|coefficient| *coefficient < 0 || *coefficient >= source_modulus_i64)
-            || randomness_columns.len() != SETUP_COMMITMENT_RANDOMNESS_WIDTH
-            || randomness_columns.iter().any(|column| {
-                column.len() != ring_degree
-                    || column
-                        .iter()
-                        .any(|coefficient| !(-1..=1).contains(coefficient))
-            })
+            || randomness_by_commitment_limb.len()
+                != crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+            || randomness_by_commitment_limb
+                .iter()
+                .any(|randomness_by_column| {
+                    randomness_by_column.len() != SETUP_COMMITMENT_RANDOMNESS_WIDTH
+                        || randomness_by_column.iter().enumerate().any(
+                            |(randomness_column_index, column)| {
+                                let coefficient_bound =
+                                    setup_commitment_randomness_coefficient_bound(
+                                        randomness_column_index,
+                                    )
+                                    .expect("a canonical commitment column has a support bound");
+                                column.len() != ring_degree
+                                    || column.iter().any(|coefficient| {
+                                        i128::from(*coefficient).unsigned_abs()
+                                            > coefficient_bound as u128
+                                    })
+                            },
+                        )
+                })
         {
             return Err(invalid_succinct_setup_proof(format!(
                 "private VSS witness for Shamir coefficient {coefficient_index} has the wrong shape"

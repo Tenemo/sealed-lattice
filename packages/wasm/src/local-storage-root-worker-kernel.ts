@@ -1,10 +1,10 @@
 import {
     BrowserActionStorageCustodyError,
+    isProtocolHash,
     stateCapabilityKinds,
     type BrowserActionProofAttemptBinding,
     type BrowserActionRandomnessRecordContext,
     type BrowserActionRandomnessReservationVerificationInput,
-    type BrowserActionStateRecoveryVerificationInput,
     type BrowserActionStateReservationVerificationInput,
     type BrowserActionStateVerifierSessionInput,
     type BrowserOpenedActionRandomnessSession,
@@ -20,30 +20,29 @@ import {
     type BrowserActionStorageRootBinding,
     type BrowserActionStorageWorkerKernel,
     type UntrustedExpectedStorageRootCommitment,
-    type LocalStorageRecoveryExportMaterial,
     type WorkerPreparedDeviceWrappingState,
-    type WorkerPreparedRecoveryState,
-} from '@sealed-lattice/types';
+} from "@sealed-lattice/types";
 
+import { actionRandomnessCommandIdentifiers } from "./action-randomness-command-identifiers.js";
 import {
     openStateVerifierSession,
     resolveVerifiedStateReservationKernelAuthorization,
     type StateVerifierSession,
-    type VerifiedStateRecovery,
     type VerifiedStateReservation,
-} from './state-verifier-runtime.js';
+} from "./state-verifier-runtime.js";
 import {
     resolveActionRandomnessKernelContext,
     type ActionRandomnessKernelContext,
-} from './transcript-core-bridge/action-randomness-kernel-context.js';
+} from "./transcript-core-bridge/action-randomness-kernel-context.js";
 import type {
+    BgvSetupCommitmentOpeningComputation,
     SetupMailboxSlot,
     TranscriptCoreKernel,
-} from './transcript-core-bridge/kernel-types.js';
+} from "./transcript-core-bridge/kernel-types.js";
 import {
     resolveLocalStorageRootKernelContext,
     type LocalStorageRootKernelContext,
-} from './transcript-core-bridge/local-storage-root-kernel-context.js';
+} from "./transcript-core-bridge/local-storage-root-kernel-context.js";
 
 const actionStorageRootByteLength = 48;
 const actionRandomnessRootByteLength = 64;
@@ -58,25 +57,24 @@ const maximumLocalRecordPlaintextByteLength = 1_048_576;
 const maximumCommandByteLength = 1_572_864;
 const maximumWrappedStorageRootByteLength = 492;
 const mlDsa65VerificationKeyByteLength = 1_952;
+const mlDsa65SignatureByteLength = 3_309;
 const mlKem768CiphertextByteLength = 1_088;
 const mlKem768EncapsulationKeyByteLength = 1_184;
 const mlKem768SharedSecretByteLength = 32;
-const mutationIdentifierByteLength = 32;
-const recoveryChecksumByteLength = 16;
-const recoveryTextByteLength = 708;
 const wasm32WordByteLength = 4;
 const opaqueWorkerIdentifierPattern = /^[0-9a-f]{64}$/u;
+const setupMailboxSignatureContext = new TextEncoder().encode(
+    "sealed-lattice/mailbox-signature/v1",
+);
 
 const localStorageRootCommands = Object.freeze({
     associatedData: 4,
     commit: 8,
-    confirmRecovery: 12,
     copyForDeviceWrap: 5,
     decodeDeviceEnvelope: 7,
     destroy: 10,
     discard: 9,
     encodeDeviceEnvelope: 6,
-    prepareRecovery: 11,
     reset: 13,
     deriveRecordIdentifier: 14,
     sealRecord: 15,
@@ -84,18 +82,6 @@ const localStorageRootCommands = Object.freeze({
     hashRecordEnvelope: 17,
     stageNew: 1,
     stageOpened: 2,
-    stageRecovery: 3,
-} as const);
-
-const actionRandomnessCommands = Object.freeze({
-    close: 2,
-    createAndSeal: 9,
-    persistentProofAttempt: 5,
-    openSealed: 10,
-    setupMailboxEncapsulate: 3,
-    setupActionRandomnessAuthorization: 11,
-    targetReleaseAttempt: 7,
-    validateSetupMailboxSourceKeys: 12,
 } as const);
 
 const localStorageRootStatuses = Object.freeze({
@@ -137,13 +123,59 @@ export type ClosedWorkerSetupMailboxRandomnessOperations = Readonly<{
         readonly envelopeAttemptIdentifier: Uint8Array<ArrayBuffer>;
         readonly sharedSecret: Uint8Array<ArrayBuffer>;
     }>;
+    signEnvelope(input: {
+        readonly envelopeHash: ProtocolHash;
+        readonly setupMailboxSlot: SetupMailboxSlot;
+        readonly setupMailboxSlotHash: ProtocolHash;
+    }): Uint8Array<ArrayBuffer>;
     revoke(): void;
+}>;
+
+const structuredCommitmentOpeningCapabilityBrand: unique symbol = Symbol(
+    "sealed-lattice/structured-commitment-opening-capability",
+);
+
+export type ClosedWorkerStructuredCommitmentOpeningCapability = Readonly<{
+    readonly [structuredCommitmentOpeningCapabilityBrand]: true;
+}>;
+
+export type ClosedWorkerStructuredCommitmentOpeningOperations = Readonly<{
+    create(input: {
+        readonly sourceSetupIntentObjectHash: ProtocolHash;
+        readonly sourceRosterPosition: number;
+        readonly sourceRnsLimbIndex: number;
+        readonly shamirCoefficientIndex: number;
+    }): ClosedWorkerStructuredCommitmentOpeningCapability;
+    computeCommitment(input: {
+        readonly capability: ClosedWorkerStructuredCommitmentOpeningCapability;
+        readonly messageCoefficients: readonly number[];
+        readonly publicMatrixSeedHash: ProtocolHash;
+    }): BgvSetupCommitmentOpeningComputation;
+    release(
+        capability: ClosedWorkerStructuredCommitmentOpeningCapability,
+    ): void;
+    revoke(): void;
+}>;
+
+type WorkerSetupMailboxSigningOperations = Readonly<{
+    readonly verificationKey: Uint8Array;
+    signClosedMessage(input: {
+        readonly message: Uint8Array;
+        readonly context: Uint8Array;
+        readonly hedge: Uint8Array;
+    }): Uint8Array;
 }>;
 
 type WorkerSetupMailboxRandomnessInput = Readonly<{
     readonly actionRandomnessSessionIdentifier: string;
     readonly sourceMailboxEncapsulationKey: Uint8Array;
-    readonly sourceSigningVerificationKey: Uint8Array;
+    readonly signing: WorkerSetupMailboxSigningOperations;
+    readonly stateReservationIdentifier: string;
+}>;
+
+type WorkerStructuredCommitmentOpeningInput = Readonly<{
+    readonly actionRandomnessSessionIdentifier: string;
+    readonly rosterHash: ProtocolHash;
     readonly stateReservationIdentifier: string;
 }>;
 
@@ -162,17 +194,14 @@ type WorkerActionRandomnessKernelRunner = Readonly<{
     openSetupMailboxRandomness(
         input: WorkerSetupMailboxRandomnessInput,
     ): Promise<ClosedWorkerSetupMailboxRandomnessOperations>;
+    openStructuredCommitmentOpenings(
+        input: WorkerStructuredCommitmentOpeningInput,
+    ): Promise<ClosedWorkerStructuredCommitmentOpeningOperations>;
 }>;
 
-type WorkerStateObject =
-    | Readonly<{
-          kind: 'recovery';
-          sessionIdentifier: string;
-          value: VerifiedStateRecovery;
-      }>
-    | Readonly<{
+type WorkerStateObject = Readonly<{
           capabilityKind: number;
-          kind: 'reservation';
+          kind: "reservation";
           sessionIdentifier: string;
           subjectParticipantIdentity: Uint8Array<ArrayBuffer>;
           value: VerifiedStateReservation;
@@ -196,13 +225,11 @@ type DecodedDeviceEnvelope = Readonly<{
 }>;
 
 type CommandFailureContext =
-    | 'open'
-    | 'recoveryConfirmation'
-    | 'recoveryImport'
-    | 'recordHash'
-    | 'recordOpen'
-    | 'recordSeal'
-    | 'runtime';
+    | "open"
+    | "recordHash"
+    | "recordOpen"
+    | "recordSeal"
+    | "runtime";
 
 type TerminalSetupCheckpointKernelCommandRunner = Readonly<{
     run(command: number, input: Uint8Array): Promise<Uint8Array<ArrayBuffer>>;
@@ -230,17 +257,15 @@ const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
 };
 
 const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
 const protocolHashBytes = (
     value: unknown,
     label: string,
 ): Uint8Array<ArrayBuffer> => {
-    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
+    if (!isProtocolHash(value)) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
+            "InvalidInput",
             `${label} must be a lowercase 64-byte hexadecimal hash.`,
         );
     }
@@ -259,11 +284,11 @@ const requireOpaqueWorkerIdentifier = (
     label: string,
 ): string => {
     if (
-        typeof value !== 'string' ||
+        typeof value !== "string" ||
         !opaqueWorkerIdentifierPattern.test(value)
     ) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
+            "InvalidInput",
             `${label} is malformed.`,
         );
     }
@@ -281,7 +306,7 @@ const copyBoundedBytes = (
         value.byteLength > maximumCommandByteLength
     ) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
+            "InvalidInput",
             `${label} has an unsupported length.`,
         );
     }
@@ -299,7 +324,7 @@ const copyExactBytes = (
         value.byteLength !== expectedByteLength
     ) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
+            "InvalidInput",
             `${label} must contain exactly ${expectedByteLength} bytes.`,
         );
     }
@@ -322,8 +347,8 @@ const concatenateBytes = (
         byteLength > maximumCommandByteLength
     ) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'The local storage-root command exceeds its supported byte limit.',
+            "InvalidInput",
+            "The local storage-root command exceeds its supported byte limit.",
         );
     }
     const output = new Uint8Array(byteLength);
@@ -339,8 +364,8 @@ const concatenateBytes = (
 const encodeUnsigned32 = (value: number): Uint8Array<ArrayBuffer> => {
     if (!Number.isSafeInteger(value) || value <= 0 || value > 0xffff_ffff) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidState',
-            'The WASM local storage-root handle is invalid.',
+            "InvalidState",
+            "The WASM local storage-root handle is invalid.",
         );
     }
     const bytes = new Uint8Array(handleByteLength);
@@ -355,7 +380,7 @@ const encodeCanonicalUnsigned16 = (
 ): Uint8Array<ArrayBuffer> => {
     if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
+            "InvalidInput",
             `${label} must be an unsigned 16-bit integer.`,
         );
     }
@@ -371,7 +396,7 @@ const encodeCanonicalUnsigned32 = (
 ): Uint8Array<ArrayBuffer> => {
     if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff_ffff) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
+            "InvalidInput",
             `${label} must be an unsigned 32-bit integer.`,
         );
     }
@@ -386,12 +411,12 @@ const encodeCanonicalUnsigned64 = (
     label: string,
 ): Uint8Array<ArrayBuffer> => {
     if (
-        typeof value !== 'bigint' ||
+        typeof value !== "bigint" ||
         value < 0n ||
         value > 0xffff_ffff_ffff_ffffn
     ) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
+            "InvalidInput",
             `${label} must be an unsigned 64-bit integer.`,
         );
     }
@@ -399,6 +424,42 @@ const encodeCanonicalUnsigned64 = (
     new DataView(bytes.buffer).setBigUint64(0, value, true);
 
     return bytes;
+};
+
+const encodeStructuredCommitmentMessage = (
+    coefficients: readonly number[],
+): Uint8Array<ArrayBuffer> => {
+    if (!Array.isArray(coefficients)) {
+        throw new BrowserActionStorageCustodyError(
+            "InvalidInput",
+            "Structured-commitment message coefficients must be an array.",
+        );
+    }
+    const byteLength = coefficients.length * 8 + 4;
+    if (
+        !Number.isSafeInteger(byteLength) ||
+        byteLength > maximumCommandByteLength
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            "InvalidInput",
+            "Structured-commitment message exceeds the supported command limit.",
+        );
+    }
+    const encoded = new Uint8Array(byteLength);
+    const view = new DataView(encoded.buffer);
+    view.setUint32(0, coefficients.length, true);
+    coefficients.forEach((coefficient, coefficientIndex) => {
+        if (!Number.isSafeInteger(coefficient) || coefficient < 0) {
+            encoded.fill(0);
+            throw new BrowserActionStorageCustodyError(
+                "InvalidInput",
+                `Structured-commitment message coefficient ${String(coefficientIndex)} must be a nonnegative safe integer.`,
+            );
+        }
+        view.setBigUint64(4 + coefficientIndex * 8, BigInt(coefficient), true);
+    });
+
+    return encoded;
 };
 
 const encodeByteLength = (
@@ -414,45 +475,45 @@ type EncodedLocalRecordIdentifierInput = Readonly<{
 const encodeLocalRecordIdentifierInput = (
     input: BrowserLocalRecordIdentifierInput,
 ): EncodedLocalRecordIdentifierInput => {
-    if (typeof input !== 'object' || input === null) {
+    if (typeof input !== "object" || input === null) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'The local-record identifier input must be an object.',
+            "InvalidInput",
+            "The local-record identifier input must be an object.",
         );
     }
     switch (input.recordType) {
-        case 'actionRandomness':
+        case "actionRandomness":
             return { context: new Uint8Array(0), recordTypeCode: 1 };
-        case 'publicCoinPrivateMaterial':
+        case "publicCoinPrivateMaterial":
             return { context: new Uint8Array(0), recordTypeCode: 2 };
-        case 'sourceVssMaterial':
+        case "sourceVssMaterial":
             return {
                 context: copyExactBytes(
                     input.materialContextHash,
                     foundationHashByteLength,
-                    'Material-context hash',
+                    "Material-context hash",
                 ),
                 recordTypeCode: 3,
             };
-        case 'aggregateThresholdShare':
+        case "aggregateThresholdShare":
             return {
                 context: copyExactBytes(
                     input.recipientInputRoot,
                     foundationHashByteLength,
-                    'Recipient-input root',
+                    "Recipient-input root",
                 ),
                 recordTypeCode: 4,
             };
-        case 'proofAttempt':
+        case "proofAttempt":
             return {
                 context: copyExactBytes(
                     input.applicationSlotHash,
                     foundationHashByteLength,
-                    'Application-slot hash',
+                    "Application-slot hash",
                 ),
                 recordTypeCode: 5,
             };
-        case 'ballotAttempt': {
+        case "ballotAttempt": {
             if (
                 !(input.canonicalBallotStatementBytes instanceof Uint8Array) ||
                 input.canonicalBallotStatementBytes.byteLength === 0 ||
@@ -460,22 +521,22 @@ const encodeLocalRecordIdentifierInput = (
                     maximumCommandByteLength
             ) {
                 throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'The canonical ballot statement has an unsupported length.',
+                    "InvalidInput",
+                    "The canonical ballot statement has an unsupported length.",
                 );
             }
             const statement = input.canonicalBallotStatementBytes.slice();
             const attemptIdentifier = copyExactBytes(
                 input.ballotEncryptionAttemptIdentifier,
                 32,
-                'Ballot-encryption attempt identifier',
+                "Ballot-encryption attempt identifier",
             );
 
             return {
                 context: concatenateBytes(
                     encodeByteLength(
                         statement.byteLength,
-                        'Ballot-statement byte length',
+                        "Ballot-statement byte length",
                     ),
                     statement,
                     attemptIdentifier,
@@ -483,69 +544,69 @@ const encodeLocalRecordIdentifierInput = (
                 recordTypeCode: 6,
             };
         }
-        case 'exactOutputChunk':
+        case "exactOutputChunk":
             return {
                 context: concatenateBytes(
                     encodeCanonicalUnsigned16(
                         input.capabilityKind,
-                        'Capability kind',
+                        "Capability kind",
                     ),
                     copyExactBytes(
                         input.exactOutputHash,
                         foundationHashByteLength,
-                        'Exact-output hash',
+                        "Exact-output hash",
                     ),
                     encodeCanonicalUnsigned64(
                         input.outputChunkIndex,
-                        'Output-chunk index',
+                        "Output-chunk index",
                     ),
                 ),
                 recordTypeCode: 7,
             };
-        case 'subjectState':
+        case "subjectState":
             return {
                 context: copyExactBytes(
                     input.stateKey,
                     foundationHashByteLength,
-                    'Subject-state key',
+                    "Subject-state key",
                 ),
                 recordTypeCode: 8,
             };
-        case 'witnessState':
+        case "witnessState":
             return {
                 context: copyExactBytes(
                     input.stateKey,
                     foundationHashByteLength,
-                    'Witness-state key',
+                    "Witness-state key",
                 ),
                 recordTypeCode: 9,
             };
-        case 'checkpointManifest': {
+        case "checkpointManifest": {
             const orderedSourceDigests: unknown = input.orderedSourceDigests;
             if (!Array.isArray(orderedSourceDigests)) {
                 throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'Ordered checkpoint source digests must be an array.',
+                    "InvalidInput",
+                    "Ordered checkpoint source digests must be an array.",
                 );
             }
             if (orderedSourceDigests.length > 4_096) {
                 throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'Ordered checkpoint source digests exceed the supported count.',
+                    "InvalidInput",
+                    "Ordered checkpoint source digests exceed the supported count.",
                 );
             }
             const sourceDigests = orderedSourceDigests.map((digest) => {
                 if (!(digest instanceof Uint8Array)) {
                     throw new BrowserActionStorageCustodyError(
-                        'InvalidInput',
-                        'Each ordered checkpoint source digest must be bytes.',
+                        "InvalidInput",
+                        "Each ordered checkpoint source digest must be bytes.",
                     );
                 }
 
                 return copyExactBytes(
                     digest,
                     foundationHashByteLength,
-                    'Checkpoint source digest',
+                    "Checkpoint source digest",
                 );
             });
 
@@ -554,46 +615,46 @@ const encodeLocalRecordIdentifierInput = (
                     copyExactBytes(
                         input.runtimeBuildManifestHash,
                         foundationHashByteLength,
-                        'Runtime build-manifest hash',
+                        "Runtime build-manifest hash",
                     ),
                     copyExactBytes(
                         input.checkpointLineageIdentifier,
                         32,
-                        'Checkpoint-lineage identifier',
+                        "Checkpoint-lineage identifier",
                     ),
                     encodeCanonicalUnsigned16(
                         input.operationKind,
-                        'Checkpoint operation kind',
+                        "Checkpoint operation kind",
                     ),
                     encodeCanonicalUnsigned32(
                         input.safeBoundaryOrdinal,
-                        'Checkpoint safe-boundary ordinal',
+                        "Checkpoint safe-boundary ordinal",
                     ),
                     encodeCanonicalUnsigned32(
                         sourceDigests.length,
-                        'Checkpoint source-digest count',
+                        "Checkpoint source-digest count",
                     ),
                     ...sourceDigests,
                 ),
                 recordTypeCode: 10,
             };
         }
-        case 'checkpointChunk':
+        case "checkpointChunk":
             return {
                 context: concatenateBytes(
                     copyExactBytes(
                         input.checkpointIdentifier,
                         foundationHashByteLength,
-                        'Checkpoint identifier',
+                        "Checkpoint identifier",
                     ),
                     encodeCanonicalUnsigned32(
                         input.chunkIndex,
-                        'Checkpoint chunk index',
+                        "Checkpoint chunk index",
                     ),
                     copyExactBytes(
                         input.chunkDigest,
                         foundationHashByteLength,
-                        'Checkpoint chunk digest',
+                        "Checkpoint chunk digest",
                     ),
                 ),
                 recordTypeCode: 11,
@@ -604,10 +665,10 @@ const encodeLocalRecordIdentifierInput = (
 const encodeLocalRecordExpectedContext = (
     input: BrowserLocalRecordExpectedContext,
 ): Uint8Array<ArrayBuffer> => {
-    if (typeof input !== 'object' || input === null) {
+    if (typeof input !== "object" || input === null) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'The local-record expected context must be an object.',
+            "InvalidInput",
+            "The local-record expected context must be an object.",
         );
     }
     const encodedIdentifier = encodeLocalRecordIdentifierInput(
@@ -619,15 +680,15 @@ const encodeLocalRecordExpectedContext = (
             : copyExactBytes(
                   input.predecessorRecordHash,
                   foundationHashByteLength,
-                  'Predecessor record hash',
+                  "Predecessor record hash",
               );
     if (
         (input.recordVersion === 0n) !==
         (predecessorRecordHash === undefined)
     ) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'Predecessor record-hash presence must match the local-record version.',
+            "InvalidInput",
+            "Predecessor record-hash presence must match the local-record version.",
         );
     }
 
@@ -635,22 +696,18 @@ const encodeLocalRecordExpectedContext = (
         copyExactBytes(
             input.actionRandomnessCommitment,
             foundationHashByteLength,
-            'Action-randomness commitment',
+            "Action-randomness commitment",
         ),
         encodeCanonicalUnsigned16(
             encodedIdentifier.recordTypeCode,
-            'Local-record type',
+            "Local-record type",
         ),
         encodeByteLength(
             encodedIdentifier.context.byteLength,
-            'Record-identifier context length',
+            "Record-identifier context length",
         ),
         encodedIdentifier.context,
-        encodeCanonicalUnsigned64(input.recordVersion, 'Local-record version'),
-        encodeCanonicalUnsigned64(
-            input.creationRecoveryEpoch,
-            'Local-record creation recovery epoch',
-        ),
+        encodeCanonicalUnsigned64(input.recordVersion, "Local-record version"),
         predecessorRecordHash === undefined
             ? new Uint8Array([0])
             : concatenateBytes(new Uint8Array([1]), predecessorRecordHash),
@@ -660,8 +717,8 @@ const encodeLocalRecordExpectedContext = (
 const decodeUnsigned32 = (bytes: Uint8Array, offset: number): number => {
     if (offset < 0 || offset + wasm32WordByteLength > bytes.byteLength) {
         throw new BrowserActionStorageCustodyError(
-            'OwnedWorkerFailure',
-            'The WASM local storage-root output is truncated.',
+            "OwnedWorkerFailure",
+            "The WASM local storage-root output is truncated.",
         );
     }
 
@@ -683,21 +740,21 @@ const encodeBinding = (
     binding: BrowserActionStorageRootBinding,
 ): Uint8Array<ArrayBuffer> =>
     concatenateBytes(
-        copyExactBytes(binding.suiteId, foundationHashByteLength, 'Suite ID'),
+        copyExactBytes(binding.suiteId, foundationHashByteLength, "Suite ID"),
         copyExactBytes(
             binding.ceremonyContextHash,
             foundationHashByteLength,
-            'Ceremony-context hash',
+            "Ceremony-context hash",
         ),
         copyExactBytes(
             binding.actionContextHash,
             foundationHashByteLength,
-            'Action-context hash',
+            "Action-context hash",
         ),
         copyExactBytes(
             binding.participantId,
             foundationHashByteLength,
-            'Participant identity',
+            "Participant identity",
         ),
     );
 
@@ -708,22 +765,22 @@ const copyBinding = (
         actionContextHash: copyExactBytes(
             binding.actionContextHash,
             foundationHashByteLength,
-            'Action-context hash',
+            "Action-context hash",
         ),
         ceremonyContextHash: copyExactBytes(
             binding.ceremonyContextHash,
             foundationHashByteLength,
-            'Ceremony-context hash',
+            "Ceremony-context hash",
         ),
         participantId: copyExactBytes(
             binding.participantId,
             foundationHashByteLength,
-            'Participant identity',
+            "Participant identity",
         ),
         suiteId: copyExactBytes(
             binding.suiteId,
             foundationHashByteLength,
-            'Suite ID',
+            "Suite ID",
         ),
     });
 
@@ -731,10 +788,10 @@ const encodeActionRandomnessRecordContext = (
     binding: BrowserActionStorageRootBinding,
     input: WorkerActionRandomnessRecordContext,
 ): Uint8Array<ArrayBuffer> => {
-    if (typeof input !== 'object' || input === null) {
+    if (typeof input !== "object" || input === null) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'The action-randomness record context must be an object.',
+            "InvalidInput",
+            "The action-randomness record context must be an object.",
         );
     }
     const predecessorRecordHash =
@@ -743,26 +800,22 @@ const encodeActionRandomnessRecordContext = (
             : copyExactBytes(
                   input.predecessorRecordHash,
                   foundationHashByteLength,
-                  'Action-randomness predecessor record hash',
+                  "Action-randomness predecessor record hash",
               );
     if (
         (input.recordVersion === 0n) !==
         (predecessorRecordHash === undefined)
     ) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'Action-randomness predecessor presence must match the record version.',
+            "InvalidInput",
+            "Action-randomness predecessor presence must match the record version.",
         );
     }
     return concatenateBytes(
         encodeBinding(binding),
         encodeCanonicalUnsigned64(
             input.recordVersion,
-            'Action-randomness record version',
-        ),
-        encodeCanonicalUnsigned64(
-            input.creationRecoveryEpoch,
-            'Action-randomness creation recovery epoch',
+            "Action-randomness record version",
         ),
         predecessorRecordHash === undefined
             ? new Uint8Array([0])
@@ -776,7 +829,7 @@ const untrustedExpectedCommitmentBytes = (
     copyExactBytes(
         value.storageRootCommitment,
         foundationHashByteLength,
-        'Untrusted expected storage-root commitment',
+        "Untrusted expected storage-root commitment",
     );
 
 class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorkerKernel {
@@ -820,18 +873,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         return this.#enqueue(() => this.#stageDeviceWrappingOpen(input));
     }
 
-    public stageRecoveryValueImportAndDeviceWrapping(input: {
-        binding: BrowserActionStorageRootBinding;
-        caseInsensitiveRecoveryText: string;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-    }): Promise<WorkerPreparedRecoveryState> {
-        return this.#enqueue(() => this.#stageRecoveryAndWrap(input));
-    }
-
-    public commitStagedActionStorageRoot(input: {
-        mutationIdentifier: Uint8Array;
-    }): Promise<void> {
-        return this.#enqueue(() => this.#commitStaged(input));
+    public commitStagedActionStorageRoot(): Promise<void> {
+        return this.#enqueue(() => this.#commitStaged());
     }
 
     public discardStagedActionStorageRoot(): Promise<void> {
@@ -840,19 +883,6 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
 
     public destroyActiveActionStorageRoot(): Promise<void> {
         return this.#enqueue(() => this.#destroyActive());
-    }
-
-    public prepareRecoveryExport(input: {
-        activeMutationIdentifier: Uint8Array;
-    }): Promise<LocalStorageRecoveryExportMaterial> {
-        return this.#enqueue(() => this.#prepareRecovery(input));
-    }
-
-    public confirmRecoveryChecksum(input: {
-        canonicalRecoveryText: string;
-        confirmedChecksum: Uint8Array;
-    }): Promise<void> {
-        return this.#enqueue(() => this.#confirmRecovery(input));
     }
 
     public deriveActiveLocalRecordIdentifier(
@@ -899,12 +929,6 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         );
     }
 
-    public verifyActionStateRecovery(
-        input: BrowserActionStateRecoveryVerificationInput,
-    ): Promise<VerificationResult<string>> {
-        return this.#enqueue(() => this.#verifyActionStateRecovery(input));
-    }
-
     public releaseActionStateObject(identifier: string): Promise<void> {
         return this.#enqueue(() => this.#releaseActionStateObject(identifier));
     }
@@ -922,8 +946,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         return this.#enqueue(() => {
             if (!(input instanceof Uint8Array)) {
                 throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'Checkpoint command input must be bytes.',
+                    "InvalidInput",
+                    "Checkpoint command input must be bytes.",
                 );
             }
             const activeLease = this.#requireActiveLease();
@@ -931,8 +955,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             return this.#runCommand(
                 command,
                 this.#leaseCommandInput(activeLease, input),
-                'run an authenticated checkpoint command',
-                'runtime',
+                "run an authenticated checkpoint command",
+                "runtime",
             );
         });
     }
@@ -944,8 +968,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         return this.#enqueue(() => {
             if (!Number.isSafeInteger(byteLength) || byteLength <= 0) {
                 throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'Checkpoint entropy byte length must be a positive safe integer.',
+                    "InvalidInput",
+                    "Checkpoint entropy byte length must be a positive safe integer.",
                 );
             }
 
@@ -981,6 +1005,12 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         return this.#openClosedSetupMailboxRandomness(input);
     }
 
+    public openClosedStructuredCommitmentOpenings(
+        input: WorkerStructuredCommitmentOpeningInput,
+    ): ClosedWorkerStructuredCommitmentOpeningOperations {
+        return this.#openClosedStructuredCommitmentOpenings(input);
+    }
+
     public derivePersistentProofAttempt(
         input: BrowserPersistentProofAttemptInput,
     ): Promise<BrowserActionProofAttemptBinding> {
@@ -996,29 +1026,22 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #openActionStateVerifierSession(
         input: BrowserActionStateVerifierSessionInput,
     ): VerificationResult<string> {
-        if (typeof input !== 'object' || input === null) {
+        if (typeof input !== "object" || input === null) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The action state-verifier session input must be an object.',
+                "InvalidInput",
+                "The action state-verifier session input must be an object.",
             );
         }
         const activeLease = this.#requireActiveLease();
         const canonicalRosterBytes = copyBoundedBytes(
             input.canonicalRosterBytes,
-            'Canonical roster bytes',
-        );
-        const maximumRecoveryTransitionsPerStateKey = encodeCanonicalUnsigned16(
-            input.maximumRecoveryTransitionsPerStateKey,
-            'Maximum recovery transitions per state key',
+            "Canonical roster bytes",
         );
         const opened = openStateVerifierSession({
             configuration: {
                 actionContextHash: activeLease.binding.actionContextHash,
                 canonicalRosterBytes,
                 ceremonyContextHash: activeLease.binding.ceremonyContextHash,
-                maximumRecoveryTransitionsPerStateKey: new DataView(
-                    maximumRecoveryTransitionsPerStateKey.buffer,
-                ).getUint16(0, true),
                 suiteIdentifier: activeLease.binding.suiteId,
             },
             kernel: this.#kernel,
@@ -1037,10 +1060,10 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #verifyActionStateReservation(
         input: BrowserActionStateReservationVerificationInput,
     ): VerificationResult<string> {
-        if (typeof input !== 'object' || input === null) {
+        if (typeof input !== "object" || input === null) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The action state-reservation input must be an object.',
+                "InvalidInput",
+                "The action state-reservation input must be an object.",
             );
         }
         if (
@@ -1048,38 +1071,34 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             stateCapabilityKinds.setupActionRandomnessRoot
         ) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'Action-randomness reservations must be verified against the retained commitment.',
+                "InvalidInput",
+                "Action-randomness reservations must be verified against the retained commitment.",
             );
         }
         const sessionIdentifier = requireOpaqueWorkerIdentifier(
             input.stateVerifierSessionIdentifier,
-            'State-verifier session identifier',
+            "State-verifier session identifier",
         );
         const session = this.#requireStateVerifierSession(sessionIdentifier);
         const verified = session.verifyReservation({
             canonicalReservationIntentCarrier: copyBoundedBytes(
                 input.canonicalReservationIntentCarrier,
-                'Canonical state-reservation intent carrier',
+                "Canonical state-reservation intent carrier",
             ),
             canonicalStateCertificate: copyBoundedBytes(
                 input.canonicalStateCertificate,
-                'Canonical state certificate',
+                "Canonical state certificate",
             ),
             capabilityKind: input.capabilityKind,
             expectedAuthorizationHash: copyExactBytes(
                 input.expectedAuthorizationHash,
                 foundationHashByteLength,
-                'Expected state authorization hash',
+                "Expected state authorization hash",
             ),
             subjectParticipantIdentity: copyExactBytes(
                 input.subjectParticipantIdentity,
                 foundationHashByteLength,
-                'State subject participant identity',
-            ),
-            verifiedPredecessorRecovery: this.#resolvePredecessorRecovery(
-                input.verifiedPredecessorRecoveryIdentifier,
-                sessionIdentifier,
+                "State subject participant identity",
             ),
         });
         if (!verified.isValid) {
@@ -1088,7 +1107,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         const identifier = this.#issueOpaqueWorkerIdentifier();
         this.#stateObjects.set(identifier, {
             capabilityKind: input.capabilityKind,
-            kind: 'reservation',
+            kind: "reservation",
             sessionIdentifier,
             subjectParticipantIdentity:
                 input.subjectParticipantIdentity.slice(),
@@ -1100,15 +1119,15 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #verifyActionRandomnessReservation(
         input: BrowserActionRandomnessReservationVerificationInput,
     ): VerificationResult<string> {
-        if (typeof input !== 'object' || input === null) {
+        if (typeof input !== "object" || input === null) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The action-randomness reservation input must be an object.',
+                "InvalidInput",
+                "The action-randomness reservation input must be an object.",
             );
         }
         const stateVerifierSessionIdentifier = requireOpaqueWorkerIdentifier(
             input.stateVerifierSessionIdentifier,
-            'State-verifier session identifier',
+            "State-verifier session identifier",
         );
         const stateVerifierSession = this.#requireStateVerifierSessionRecord(
             stateVerifierSessionIdentifier,
@@ -1121,39 +1140,35 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         let expectedAuthorizationHash: Uint8Array<ArrayBuffer> | undefined;
         try {
             expectedAuthorizationHash = this.#runActionRandomnessCommand(
-                actionRandomnessCommands.setupActionRandomnessAuthorization,
+                actionRandomnessCommandIdentifiers.setupActionRandomnessAuthorization,
                 concatenateBytes(
                     encodeUnsigned32(actionRandomnessSessionHandle),
                     stateVerifierSession.canonicalRosterBytes,
                 ),
-                'derive the action-randomness reservation authorization',
-                'runtime',
+                "derive the action-randomness reservation authorization",
+                "runtime",
             );
             if (
                 expectedAuthorizationHash.byteLength !==
                 foundationHashByteLength
             ) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM action-randomness kernel returned a malformed reservation authorization.',
+                    "OwnedWorkerFailure",
+                    "The WASM action-randomness kernel returned a malformed reservation authorization.",
                 );
             }
             const verified = stateVerifierSession.session.verifyReservation({
                 canonicalReservationIntentCarrier: copyBoundedBytes(
                     input.canonicalReservationIntentCarrier,
-                    'Canonical action-randomness reservation intent carrier',
+                    "Canonical action-randomness reservation intent carrier",
                 ),
                 canonicalStateCertificate: copyBoundedBytes(
                     input.canonicalStateCertificate,
-                    'Canonical state certificate',
+                    "Canonical state certificate",
                 ),
                 capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
                 expectedAuthorizationHash,
                 subjectParticipantIdentity: activeBinding.participantId.slice(),
-                verifiedPredecessorRecovery: this.#resolvePredecessorRecovery(
-                    input.verifiedPredecessorRecoveryIdentifier,
-                    stateVerifierSessionIdentifier,
-                ),
             });
             if (!verified.isValid) {
                 return verified;
@@ -1161,7 +1176,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             const identifier = this.#issueOpaqueWorkerIdentifier();
             this.#stateObjects.set(identifier, {
                 capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
-                kind: 'reservation',
+                kind: "reservation",
                 sessionIdentifier: stateVerifierSessionIdentifier,
                 subjectParticipantIdentity: activeBinding.participantId.slice(),
                 value: verified.value,
@@ -1172,56 +1187,10 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         }
     }
 
-    #verifyActionStateRecovery(
-        input: BrowserActionStateRecoveryVerificationInput,
-    ): VerificationResult<string> {
-        if (typeof input !== 'object' || input === null) {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The action state-recovery input must be an object.',
-            );
-        }
-        const sessionIdentifier = requireOpaqueWorkerIdentifier(
-            input.stateVerifierSessionIdentifier,
-            'State-verifier session identifier',
-        );
-        const session = this.#requireStateVerifierSession(sessionIdentifier);
-        const verified = session.verifyRecovery({
-            canonicalRecoveryTransitionCarrier: copyBoundedBytes(
-                input.canonicalRecoveryTransitionCarrier,
-                'Canonical state-recovery transition carrier',
-            ),
-            canonicalStateCertificate: copyBoundedBytes(
-                input.canonicalStateCertificate,
-                'Canonical state certificate',
-            ),
-            capabilityKind: input.capabilityKind,
-            subjectParticipantIdentity: copyExactBytes(
-                input.subjectParticipantIdentity,
-                foundationHashByteLength,
-                'State subject participant identity',
-            ),
-            verifiedPredecessorRecovery: this.#resolvePredecessorRecovery(
-                input.verifiedPredecessorRecoveryIdentifier,
-                sessionIdentifier,
-            ),
-        });
-        if (!verified.isValid) {
-            return verified;
-        }
-        const identifier = this.#issueOpaqueWorkerIdentifier();
-        this.#stateObjects.set(identifier, {
-            kind: 'recovery',
-            sessionIdentifier,
-            value: verified.value,
-        });
-        return Object.freeze({ isValid: true, value: identifier });
-    }
-
     #releaseActionStateObject(identifier: string): void {
         const copiedIdentifier = requireOpaqueWorkerIdentifier(
             identifier,
-            'State object identifier',
+            "State object identifier",
         );
         const stateObject = this.#stateObjects.get(copiedIdentifier);
         if (stateObject === undefined) {
@@ -1233,7 +1202,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         const released = session.releaseVerifiedObject(stateObject.value);
         if (!released.isValid) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidState',
+                "InvalidState",
                 `The state verifier refused object release: ${released.refusalReason}.`,
             );
         }
@@ -1243,7 +1212,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #closeActionStateVerifierSession(identifier: string): void {
         const copiedIdentifier = requireOpaqueWorkerIdentifier(
             identifier,
-            'State-verifier session identifier',
+            "State-verifier session identifier",
         );
         const sessionRecord = this.#stateVerifierSessions.get(copiedIdentifier);
         if (sessionRecord === undefined) {
@@ -1265,18 +1234,18 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         const activeLease = this.#requireActiveLease();
         const actionRoot = this.#randomBytes(
             actionRandomnessRootByteLength,
-            'action-randomness root',
+            "action-randomness root",
         );
         const nonce = this.#randomBytes(
             localRecordNonceByteLength,
-            'action-randomness record nonce',
+            "action-randomness record nonce",
         );
         let output: Uint8Array<ArrayBuffer> | undefined;
         let sessionHandle = 0;
         let sessionRetained = false;
         try {
             output = this.#runActionRandomnessCommand(
-                actionRandomnessCommands.createAndSeal,
+                actionRandomnessCommandIdentifiers.createAndSeal,
                 concatenateBytes(
                     this.#leaseCommandInput(activeLease),
                     actionRoot,
@@ -1286,23 +1255,23 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     ),
                     nonce,
                 ),
-                'create and seal action randomness',
-                'recordSeal',
+                "create and seal action randomness",
+                "recordSeal",
             );
             if (
                 output.byteLength <=
                 handleByteLength + foundationHashByteLength
             ) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM action-randomness kernel returned malformed sealed-session metadata.',
+                    "OwnedWorkerFailure",
+                    "The WASM action-randomness kernel returned malformed sealed-session metadata.",
                 );
             }
             sessionHandle = decodeUnsigned32(output, 0);
             if (sessionHandle === 0) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM action-randomness kernel returned a zero session handle.',
+                    "OwnedWorkerFailure",
+                    "The WASM action-randomness kernel returned a zero session handle.",
                 );
             }
             const sessionIdentifier = this.#issueOpaqueWorkerIdentifier();
@@ -1346,22 +1315,22 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             input.canonicalEnvelope.byteLength > maximumCommandByteLength
         ) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The sealed action-randomness envelope has an unsupported length.',
+                "InvalidInput",
+                "The sealed action-randomness envelope has an unsupported length.",
             );
         }
         const activeLease = this.#requireActiveLease();
         const expectedCommitment = copyExactBytes(
             input.actionRandomnessCommitment,
             foundationHashByteLength,
-            'Action-randomness commitment',
+            "Action-randomness commitment",
         );
         let output: Uint8Array<ArrayBuffer> | undefined;
         let sessionHandle = 0;
         let sessionRetained = false;
         try {
             output = this.#runActionRandomnessCommand(
-                actionRandomnessCommands.openSealed,
+                actionRandomnessCommandIdentifiers.openSealed,
                 concatenateBytes(
                     this.#leaseCommandInput(activeLease),
                     expectedCommitment,
@@ -1371,16 +1340,16 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     ),
                     input.canonicalEnvelope,
                 ),
-                'open sealed action randomness',
-                'recordOpen',
+                "open sealed action randomness",
+                "recordOpen",
             );
             if (
                 output.byteLength !==
                 handleByteLength + foundationHashByteLength
             ) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM action-randomness kernel returned malformed reopened-session metadata.',
+                    "OwnedWorkerFailure",
+                    "The WASM action-randomness kernel returned malformed reopened-session metadata.",
                 );
             }
             sessionHandle = decodeUnsigned32(output, 0);
@@ -1391,8 +1360,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             ) {
                 commitment.fill(0);
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM action-randomness kernel returned inconsistent reopened-session metadata.',
+                    "OwnedWorkerFailure",
+                    "The WASM action-randomness kernel returned inconsistent reopened-session metadata.",
                 );
             }
             const sessionIdentifier = this.#issueOpaqueWorkerIdentifier();
@@ -1419,7 +1388,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #closeActionRandomness(sessionIdentifier: string): void {
         const copiedIdentifier = requireOpaqueWorkerIdentifier(
             sessionIdentifier,
-            'Action-randomness session identifier',
+            "Action-randomness session identifier",
         );
         const sessionHandle =
             this.#actionRandomnessSessions.get(copiedIdentifier);
@@ -1433,19 +1402,19 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #openClosedSetupMailboxRandomness(
         input: WorkerSetupMailboxRandomnessInput,
     ): ClosedWorkerSetupMailboxRandomnessOperations {
-        if (typeof input !== 'object' || input === null) {
+        if (typeof input !== "object" || input === null) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The setup-mailbox randomness input must be an object.',
+                "InvalidInput",
+                "The setup-mailbox randomness input must be an object.",
             );
         }
         const actionRandomnessSessionIdentifier = requireOpaqueWorkerIdentifier(
             input.actionRandomnessSessionIdentifier,
-            'Action-randomness session identifier',
+            "Action-randomness session identifier",
         );
         const stateReservationIdentifier = requireOpaqueWorkerIdentifier(
             input.stateReservationIdentifier,
-            'State-reservation identifier',
+            "State-reservation identifier",
         );
         const initialBinding = this.#requireActiveLease().binding;
         const actionRandomnessSessionHandle =
@@ -1463,12 +1432,12 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         const sourceMailboxEncapsulationKey = copyExactBytes(
             input.sourceMailboxEncapsulationKey,
             mlKem768EncapsulationKeyByteLength,
-            'Source mailbox encapsulation key',
+            "Source mailbox encapsulation key",
         );
         const sourceSigningVerificationKey = copyExactBytes(
-            input.sourceSigningVerificationKey,
+            input.signing.verificationKey,
             mlDsa65VerificationKeyByteLength,
-            'Source signing verification key',
+            "Source signing verification key",
         );
         const reservationAuthorization = this.#reservationAuthorizationBytes(
             initialReservation.value,
@@ -1476,7 +1445,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         let rosterHashBytes: Uint8Array<ArrayBuffer>;
         try {
             const validationOutput = this.#runActionRandomnessCommand(
-                actionRandomnessCommands.validateSetupMailboxSourceKeys,
+                actionRandomnessCommandIdentifiers.validateSetupMailboxSourceKeys,
                 concatenateBytes(
                     encodeUnsigned32(actionRandomnessSessionHandle),
                     reservationAuthorization,
@@ -1484,14 +1453,14 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     sourceMailboxEncapsulationKey,
                     stateVerifierSession.canonicalRosterBytes,
                 ),
-                'validate setup-mailbox source keys against the frozen roster',
-                'runtime',
+                "validate setup-mailbox source keys against the frozen roster",
+                "runtime",
             );
             if (validationOutput.byteLength !== foundationHashByteLength) {
                 validationOutput.fill(0);
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM action-randomness kernel returned a malformed frozen-roster hash.',
+                    "OwnedWorkerFailure",
+                    "The WASM action-randomness kernel returned a malformed frozen-roster hash.",
                 );
             }
             rosterHashBytes = validationOutput;
@@ -1515,15 +1484,15 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         ): Readonly<{
             reservation: Extract<
                 WorkerStateObject,
-                Readonly<{ kind: 'reservation' }>
+                Readonly<{ kind: "reservation" }>
             >;
             sessionHandle: number;
             slotHashBytes: Uint8Array<ArrayBuffer>;
         }> => {
             if (revoked) {
                 throw new BrowserActionStorageCustodyError(
-                    'InvalidState',
-                    'The setup-mailbox randomness capability was revoked.',
+                    "InvalidState",
+                    "The setup-mailbox randomness capability was revoked.",
                 );
             }
             const binding = this.#requireActiveLease().binding;
@@ -1536,7 +1505,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 binding,
             );
             if (
-                typeof setupMailboxSlot !== 'object' ||
+                typeof setupMailboxSlot !== "object" ||
                 setupMailboxSlot === null ||
                 setupMailboxSlot.suiteId !== suiteId ||
                 setupMailboxSlot.ceremonyContextHash !== ceremonyContextHash ||
@@ -1547,8 +1516,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     suppliedSlotHash
             ) {
                 throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'The setup-mailbox slot does not match the worker-owned action randomness and frozen roster.',
+                    "InvalidInput",
+                    "The setup-mailbox slot does not match the worker-owned action randomness and frozen roster.",
                 );
             }
             return Object.freeze({
@@ -1556,7 +1525,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 sessionHandle,
                 slotHashBytes: protocolHashBytes(
                     suppliedSlotHash,
-                    'Setup-mailbox slot hash',
+                    "Setup-mailbox slot hash",
                 ),
             });
         };
@@ -1579,16 +1548,16 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 const copiedRecipientEncapsulationKey = copyExactBytes(
                     recipientEncapsulationKey,
                     mlKem768EncapsulationKeyByteLength,
-                    'Setup-mailbox recipient encapsulation key',
+                    "Setup-mailbox recipient encapsulation key",
                 );
                 const recipientParticipantIdentityBytes = protocolHashBytes(
                     setupMailboxSlot.recipientParticipantId,
-                    'Setup-mailbox recipient participant identity',
+                    "Setup-mailbox recipient participant identity",
                 );
                 let output: Uint8Array<ArrayBuffer> | undefined;
                 try {
                     output = this.#runActionRandomnessCommand(
-                        actionRandomnessCommands.setupMailboxEncapsulate,
+                        actionRandomnessCommandIdentifiers.setupMailboxEncapsulate,
                         concatenateBytes(
                             encodeUnsigned32(sessionHandle),
                             slotReservationAuthorization,
@@ -1597,8 +1566,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                             recipientParticipantIdentityBytes,
                             copiedRecipientEncapsulationKey,
                         ),
-                        'encapsulate a reset-safe setup-mailbox shared secret',
-                        'runtime',
+                        "encapsulate a reset-safe setup-mailbox shared secret",
+                        "runtime",
                     );
                     if (
                         output.byteLength !==
@@ -1607,8 +1576,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                             mlKem768SharedSecretByteLength
                     ) {
                         throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM action-randomness kernel returned a malformed setup-mailbox encapsulation.',
+                            "OwnedWorkerFailure",
+                            "The WASM action-randomness kernel returned a malformed setup-mailbox encapsulation.",
                         );
                     }
                     return Object.freeze({
@@ -1634,6 +1603,66 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     output?.fill(0);
                 }
             },
+            signEnvelope: ({
+                envelopeHash,
+                setupMailboxSlot,
+                setupMailboxSlotHash,
+            }) => {
+                const { reservation, sessionHandle, slotHashBytes } =
+                    requireSlot(setupMailboxSlot, setupMailboxSlotHash);
+                const slotReservationAuthorization =
+                    this.#reservationAuthorizationBytes(reservation.value);
+                const envelopeHashBytes = protocolHashBytes(
+                    envelopeHash,
+                    "Setup-mailbox envelope hash",
+                );
+                let hedge: Uint8Array<ArrayBuffer> | undefined;
+                let providerSignature: Uint8Array | undefined;
+                let providerContext: Uint8Array | undefined;
+                let providerHedge: Uint8Array | undefined;
+                let providerMessage: Uint8Array | undefined;
+                try {
+                    hedge = this.#runActionRandomnessCommand(
+                        actionRandomnessCommandIdentifiers.setupMailboxSignatureHedge,
+                        concatenateBytes(
+                            encodeUnsigned32(sessionHandle),
+                            slotReservationAuthorization,
+                            rosterHashBytes,
+                            envelopeHashBytes,
+                        ),
+                        "sign a reset-safe setup-mailbox envelope",
+                        "runtime",
+                    );
+                    if (hedge.byteLength !== attemptIdentifierByteLength) {
+                        throw new BrowserActionStorageCustodyError(
+                            "OwnedWorkerFailure",
+                            "The WASM action-randomness kernel returned a malformed setup-mailbox signature hedge.",
+                        );
+                    }
+                    providerContext = setupMailboxSignatureContext.slice();
+                    providerHedge = hedge.slice();
+                    providerMessage = envelopeHashBytes.slice();
+                    providerSignature = input.signing.signClosedMessage({
+                        context: providerContext,
+                        hedge: providerHedge,
+                        message: providerMessage,
+                    });
+                    return copyExactBytes(
+                        providerSignature,
+                        mlDsa65SignatureByteLength,
+                        "Setup-mailbox source signature",
+                    );
+                } finally {
+                    envelopeHashBytes.fill(0);
+                    hedge?.fill(0);
+                    providerContext?.fill(0);
+                    providerHedge?.fill(0);
+                    providerMessage?.fill(0);
+                    providerSignature?.fill(0);
+                    slotReservationAuthorization.fill(0);
+                    slotHashBytes.fill(0);
+                }
+            },
             revoke: () => {
                 if (revoked) {
                     return;
@@ -1644,18 +1673,381 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         });
     }
 
+    #openClosedStructuredCommitmentOpenings(
+        input: WorkerStructuredCommitmentOpeningInput,
+    ): ClosedWorkerStructuredCommitmentOpeningOperations {
+        if (typeof input !== "object" || input === null) {
+            throw new BrowserActionStorageCustodyError(
+                "InvalidInput",
+                "The structured-commitment opening input must be an object.",
+            );
+        }
+        const actionRandomnessSessionIdentifier = requireOpaqueWorkerIdentifier(
+            input.actionRandomnessSessionIdentifier,
+            "Action-randomness session identifier",
+        );
+        const stateReservationIdentifier = requireOpaqueWorkerIdentifier(
+            input.stateReservationIdentifier,
+            "State-reservation identifier",
+        );
+        const rosterHashBytes = protocolHashBytes(
+            input.rosterHash,
+            "Structured-commitment roster hash",
+        );
+        const initialBinding = this.#requireActiveLease().binding;
+        this.#requireActionRandomnessSession(actionRandomnessSessionIdentifier);
+        this.#requireStateReservation(
+            stateReservationIdentifier,
+            stateCapabilityKinds.setupActionRandomnessRoot,
+            initialBinding,
+        );
+
+        type RetainedOpeningRecord = {
+            readonly capability: ClosedWorkerStructuredCommitmentOpeningCapability;
+            readonly shamirCoefficientIndex: number;
+            readonly slotKey: string;
+            readonly sourceRnsLimbIndex: number;
+            handles: number[];
+            state: "active" | "releasing" | "released";
+        };
+        const recordsByCapability = new WeakMap<
+            ClosedWorkerStructuredCommitmentOpeningCapability,
+            RetainedOpeningRecord
+        >();
+        const recordsBySlot = new Map<string, RetainedOpeningRecord>();
+        let revoked = false;
+
+        const requireScope = (): Readonly<{
+            reservation: Extract<
+                WorkerStateObject,
+                Readonly<{ kind: "reservation" }>
+            >;
+            sessionHandle: number;
+        }> => {
+            if (revoked) {
+                throw new BrowserActionStorageCustodyError(
+                    "InvalidState",
+                    "The structured-commitment opening operations were revoked.",
+                );
+            }
+            const binding = this.#requireActiveLease().binding;
+            const sessionHandle = this.#requireActionRandomnessSession(
+                actionRandomnessSessionIdentifier,
+            );
+            const reservation = this.#requireStateReservation(
+                stateReservationIdentifier,
+                stateCapabilityKinds.setupActionRandomnessRoot,
+                binding,
+            );
+            return Object.freeze({ reservation, sessionHandle });
+        };
+
+        const requireActiveRecord = (
+            capability: ClosedWorkerStructuredCommitmentOpeningCapability,
+        ): RetainedOpeningRecord => {
+            if (
+                typeof capability !== "object" ||
+                capability === null ||
+                capability[structuredCommitmentOpeningCapabilityBrand] !== true
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    "InvalidInput",
+                    "The structured-commitment opening capability is invalid.",
+                );
+            }
+            const record = recordsByCapability.get(capability);
+            if (record === undefined) {
+                throw new BrowserActionStorageCustodyError(
+                    "InvalidInput",
+                    "The structured-commitment opening capability belongs to another operation scope.",
+                );
+            }
+            if (record.state !== "active") {
+                throw new BrowserActionStorageCustodyError(
+                    "InvalidState",
+                    "The structured-commitment opening capability is no longer active.",
+                );
+            }
+            return record;
+        };
+
+        const releaseRecord = (record: RetainedOpeningRecord): void => {
+            if (record.state === "released") {
+                return;
+            }
+            record.state = "releasing";
+            while (record.handles.length > 0) {
+                const sessionHandle = this.#requireActionRandomnessSession(
+                    actionRandomnessSessionIdentifier,
+                );
+                const openingHandle = record.handles[0];
+                if (openingHandle === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        "InvalidState",
+                        "The retained structured-commitment handle set is inconsistent.",
+                    );
+                }
+                const output = this.#runActionRandomnessCommand(
+                    actionRandomnessCommandIdentifiers.releaseStructuredCommitmentOpening,
+                    concatenateBytes(
+                        encodeUnsigned32(sessionHandle),
+                        encodeUnsigned32(openingHandle),
+                    ),
+                    "release a structured-commitment opening",
+                    "runtime",
+                );
+                try {
+                    if (output.byteLength !== 0) {
+                        throw new BrowserActionStorageCustodyError(
+                            "OwnedWorkerFailure",
+                            "The WASM action-randomness kernel returned unexpected structured-opening release output.",
+                        );
+                    }
+                    record.handles.shift();
+                } finally {
+                    output.fill(0);
+                }
+            }
+            record.state = "released";
+            recordsBySlot.delete(record.slotKey);
+        };
+
+        return Object.freeze({
+            create: (openingInput) => {
+                if (typeof openingInput !== "object" || openingInput === null) {
+                    throw new BrowserActionStorageCustodyError(
+                        "InvalidInput",
+                        "The structured-commitment opening request must be an object.",
+                    );
+                }
+                const {
+                    sourceSetupIntentObjectHash,
+                    sourceRosterPosition,
+                    sourceRnsLimbIndex,
+                    shamirCoefficientIndex,
+                } = openingInput;
+                const sourceSetupIntentObjectHashBytes = protocolHashBytes(
+                    sourceSetupIntentObjectHash,
+                    "Source setup-intent object hash",
+                );
+                const sourceRosterPositionBytes = encodeCanonicalUnsigned16(
+                    sourceRosterPosition,
+                    "Source roster position",
+                );
+                const sourceRnsLimbIndexBytes = encodeCanonicalUnsigned16(
+                    sourceRnsLimbIndex,
+                    "Source RNS-limb index",
+                );
+                const shamirCoefficientIndexBytes = encodeCanonicalUnsigned16(
+                    shamirCoefficientIndex,
+                    "Shamir coefficient index",
+                );
+                const slotKey = `${sourceSetupIntentObjectHash}:${String(sourceRnsLimbIndex)}:${String(shamirCoefficientIndex)}`;
+                const existing = recordsBySlot.get(slotKey);
+                if (existing !== undefined) {
+                    sourceSetupIntentObjectHashBytes.fill(0);
+                    sourceRosterPositionBytes.fill(0);
+                    sourceRnsLimbIndexBytes.fill(0);
+                    shamirCoefficientIndexBytes.fill(0);
+                    if (existing.state !== "active") {
+                        throw new BrowserActionStorageCustodyError(
+                            "InvalidState",
+                            "The structured-commitment opening slot is being released.",
+                        );
+                    }
+                    return existing.capability;
+                }
+                const { reservation, sessionHandle } = requireScope();
+                const reservationAuthorization =
+                    this.#reservationAuthorizationBytes(reservation.value);
+                let output: Uint8Array<ArrayBuffer> | undefined;
+                try {
+                    output = this.#runActionRandomnessCommand(
+                        actionRandomnessCommandIdentifiers.createStructuredCommitmentOpening,
+                        concatenateBytes(
+                            encodeUnsigned32(sessionHandle),
+                            reservationAuthorization,
+                            rosterHashBytes,
+                            sourceRosterPositionBytes,
+                            sourceSetupIntentObjectHashBytes,
+                            sourceRnsLimbIndexBytes,
+                            shamirCoefficientIndexBytes,
+                        ),
+                        "create and retain a structured-commitment opening",
+                        "runtime",
+                    );
+                    if (
+                        output.byteLength === 0 ||
+                        output.byteLength % handleByteLength !== 0
+                    ) {
+                        throw new BrowserActionStorageCustodyError(
+                            "OwnedWorkerFailure",
+                            "The WASM action-randomness kernel returned malformed structured-opening handles.",
+                        );
+                    }
+                    const handles = Array.from(
+                        { length: output.byteLength / handleByteLength },
+                        (_unused, handleIndex) =>
+                            decodeUnsigned32(
+                                output as Uint8Array<ArrayBuffer>,
+                                handleIndex * handleByteLength,
+                            ),
+                    );
+                    if (
+                        handles.some((handle) => handle === 0) ||
+                        new Set(handles).size !== handles.length
+                    ) {
+                        throw new BrowserActionStorageCustodyError(
+                            "OwnedWorkerFailure",
+                            "The WASM action-randomness kernel returned invalid structured-opening handles.",
+                        );
+                    }
+                    const capability = Object.freeze({
+                        [structuredCommitmentOpeningCapabilityBrand]: true,
+                    }) as ClosedWorkerStructuredCommitmentOpeningCapability;
+                    const record: RetainedOpeningRecord = {
+                        capability,
+                        handles,
+                        shamirCoefficientIndex,
+                        slotKey,
+                        sourceRnsLimbIndex,
+                        state: "active",
+                    };
+                    recordsByCapability.set(capability, record);
+                    recordsBySlot.set(slotKey, record);
+                    return capability;
+                } finally {
+                    output?.fill(0);
+                    reservationAuthorization.fill(0);
+                    sourceSetupIntentObjectHashBytes.fill(0);
+                    sourceRosterPositionBytes.fill(0);
+                    sourceRnsLimbIndexBytes.fill(0);
+                    shamirCoefficientIndexBytes.fill(0);
+                }
+            },
+            computeCommitment: (commitmentInput) => {
+                if (
+                    typeof commitmentInput !== "object" ||
+                    commitmentInput === null
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        "InvalidInput",
+                        "The structured-commitment computation request must be an object.",
+                    );
+                }
+                const {
+                    capability,
+                    messageCoefficients,
+                    publicMatrixSeedHash,
+                } = commitmentInput;
+                const record = requireActiveRecord(capability);
+                const { sessionHandle } = requireScope();
+                const publicMatrixSeedHashBytes = protocolHashBytes(
+                    publicMatrixSeedHash,
+                    "Public matrix-seed hash",
+                );
+                const encodedMessageCoefficients =
+                    encodeStructuredCommitmentMessage(messageCoefficients);
+                const encodedHandles = record.handles.map(encodeUnsigned32);
+                let output: Uint8Array<ArrayBuffer> | undefined;
+                try {
+                    output = this.#runActionRandomnessCommand(
+                        actionRandomnessCommandIdentifiers.computeStructuredCommitment,
+                        concatenateBytes(
+                            encodeUnsigned32(sessionHandle),
+                            publicMatrixSeedHashBytes,
+                            ...encodedHandles,
+                            encodedMessageCoefficients,
+                        ),
+                        "compute a commitment from retained structured-opening material",
+                        "runtime",
+                    );
+                    let parsed: unknown;
+                    try {
+                        parsed = JSON.parse(
+                            new TextDecoder("utf-8", { fatal: true }).decode(
+                                output,
+                            ),
+                        ) as unknown;
+                    } catch {
+                        throw new BrowserActionStorageCustodyError(
+                            "OwnedWorkerFailure",
+                            "The WASM action-randomness kernel returned malformed structured-commitment JSON.",
+                        );
+                    }
+                    if (
+                        typeof parsed !== "object" ||
+                        parsed === null ||
+                        !("commitment" in parsed) ||
+                        typeof parsed.commitment !== "object" ||
+                        parsed.commitment === null ||
+                        !("objectType" in parsed.commitment) ||
+                        parsed.commitment.objectType !== "SetupCommitment" ||
+                        !("sourceRnsLimbIndex" in parsed.commitment) ||
+                        parsed.commitment.sourceRnsLimbIndex !==
+                            record.sourceRnsLimbIndex ||
+                        !("shamirCoefficientIndex" in parsed.commitment) ||
+                        parsed.commitment.shamirCoefficientIndex !==
+                            record.shamirCoefficientIndex
+                    ) {
+                        throw new BrowserActionStorageCustodyError(
+                            "OwnedWorkerFailure",
+                            "The WASM action-randomness kernel returned an inconsistent structured commitment.",
+                        );
+                    }
+                    return parsed as BgvSetupCommitmentOpeningComputation;
+                } finally {
+                    output?.fill(0);
+                    publicMatrixSeedHashBytes.fill(0);
+                    encodedMessageCoefficients.fill(0);
+                    encodedHandles.forEach((encodedHandle) =>
+                        encodedHandle.fill(0),
+                    );
+                }
+            },
+            release: (capability) => {
+                const record = recordsByCapability.get(capability);
+                if (record === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        "InvalidInput",
+                        "The structured-commitment opening capability belongs to another operation scope.",
+                    );
+                }
+                releaseRecord(record);
+            },
+            revoke: () => {
+                if (revoked) {
+                    return;
+                }
+                revoked = true;
+                let firstFailure: unknown;
+                for (const record of [...recordsBySlot.values()]) {
+                    try {
+                        releaseRecord(record);
+                    } catch (error) {
+                        firstFailure ??= error;
+                    }
+                }
+                rosterHashBytes.fill(0);
+                if (firstFailure !== undefined) {
+                    throw firstFailure;
+                }
+            },
+        });
+    }
+
     #closeRawActionRandomness(sessionHandle: number): void {
         const output = this.#runActionRandomnessCommand(
-            actionRandomnessCommands.close,
+            actionRandomnessCommandIdentifiers.close,
             encodeUnsigned32(sessionHandle),
-            'close action randomness',
-            'runtime',
+            "close action randomness",
+            "runtime",
         );
         try {
             if (output.byteLength !== 0) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM action-randomness close command returned unexpected output.',
+                    "OwnedWorkerFailure",
+                    "The WASM action-randomness close command returned unexpected output.",
                 );
             }
         } finally {
@@ -1682,10 +2074,10 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #derivePersistentProofAttempt(
         input: BrowserPersistentProofAttemptInput,
     ): BrowserActionProofAttemptBinding {
-        if (typeof input !== 'object' || input === null) {
+        if (typeof input !== "object" || input === null) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The persistent proof-attempt input must be an object.',
+                "InvalidInput",
+                "The persistent proof-attempt input must be an object.",
             );
         }
         const sessionHandle = this.#requireActionRandomnessSession(
@@ -1706,17 +2098,17 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         try {
             return this.#parseProofAttemptOutput(
                 this.#runActionRandomnessCommand(
-                    actionRandomnessCommands.persistentProofAttempt,
+                    actionRandomnessCommandIdentifiers.persistentProofAttempt,
                     concatenateBytes(
                         encodeUnsigned32(sessionHandle),
                         reservationAuthorization,
                         encodeCanonicalUnsigned16(
                             input.statementSchemaIdentifier,
-                            'Proof statement schema identifier',
+                            "Proof statement schema identifier",
                         ),
                         encodeCanonicalUnsigned16(
                             input.rosterPosition,
-                            'Proof roster position',
+                            "Proof roster position",
                         ),
                         input.schedulePosition === undefined
                             ? new Uint8Array([0])
@@ -1724,17 +2116,17 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                                   new Uint8Array([1]),
                                   encodeCanonicalUnsigned32(
                                       input.schedulePosition,
-                                      'Proof schedule position',
+                                      "Proof schedule position",
                                   ),
                               ),
                         copyExactBytes(
                             input.applicationStatementHash,
                             foundationHashByteLength,
-                            'Application statement hash',
+                            "Application statement hash",
                         ),
                     ),
-                    'derive a persistent proof attempt',
-                    'runtime',
+                    "derive a persistent proof attempt",
+                    "runtime",
                 ),
             );
         } finally {
@@ -1745,10 +2137,10 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #deriveTargetReleaseAttempt(
         input: BrowserTargetReleaseAttemptInput,
     ): BrowserActionProofAttemptBinding {
-        if (typeof input !== 'object' || input === null) {
+        if (typeof input !== "object" || input === null) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The target-release attempt input must be an object.',
+                "InvalidInput",
+                "The target-release attempt input must be an object.",
             );
         }
         const sessionHandle = this.#requireActionRandomnessSession(
@@ -1765,17 +2157,17 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         try {
             return this.#parseProofAttemptOutput(
                 this.#runActionRandomnessCommand(
-                    actionRandomnessCommands.targetReleaseAttempt,
+                    actionRandomnessCommandIdentifiers.targetReleaseAttempt,
                     concatenateBytes(
                         encodeUnsigned32(sessionHandle),
                         reservationAuthorization,
                         encodeCanonicalUnsigned16(
                             input.rosterPosition,
-                            'Target-release roster position',
+                            "Target-release roster position",
                         ),
                     ),
-                    'derive a target-release attempt',
-                    'runtime',
+                    "derive a target-release attempt",
+                    "runtime",
                 ),
             );
         } finally {
@@ -1793,56 +2185,30 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         const sessionRecord = this.#stateVerifierSessions.get(identifier);
         if (
             sessionRecord === undefined ||
-            sessionRecord.session.state() !== 'active'
+            sessionRecord.session.state() !== "active"
         ) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidState',
-                'The state-verifier session is closed or unavailable in this worker.',
+                "InvalidState",
+                "The state-verifier session is closed or unavailable in this worker.",
             );
         }
 
         return sessionRecord;
     }
 
-    #resolvePredecessorRecovery(
-        identifier: string | undefined,
-        expectedSessionIdentifier: string,
-    ): VerifiedStateRecovery | undefined {
-        if (identifier === undefined) {
-            return undefined;
-        }
-        const copiedIdentifier = requireOpaqueWorkerIdentifier(
-            identifier,
-            'Predecessor state-recovery identifier',
-        );
-        const stateObject = this.#stateObjects.get(copiedIdentifier);
-        if (
-            stateObject === undefined ||
-            stateObject.kind !== 'recovery' ||
-            stateObject.sessionIdentifier !== expectedSessionIdentifier
-        ) {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidState',
-                'The predecessor recovery is unavailable in the selected state-verifier session.',
-            );
-        }
-
-        return stateObject.value;
-    }
-
     #requireStateReservation(
         identifier: string,
         expectedCapabilityKind: number,
         binding: BrowserActionStorageRootBinding,
-    ): Extract<WorkerStateObject, Readonly<{ kind: 'reservation' }>> {
+    ): Extract<WorkerStateObject, Readonly<{ kind: "reservation" }>> {
         const copiedIdentifier = requireOpaqueWorkerIdentifier(
             identifier,
-            'State-reservation identifier',
+            "State-reservation identifier",
         );
         const stateObject = this.#stateObjects.get(copiedIdentifier);
         if (
             stateObject === undefined ||
-            stateObject.kind !== 'reservation' ||
+            stateObject.kind !== "reservation" ||
             stateObject.capabilityKind !== expectedCapabilityKind ||
             !bytesEqual(
                 stateObject.subjectParticipantIdentity,
@@ -1851,8 +2217,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             !this.#stateVerifierSessions.has(stateObject.sessionIdentifier)
         ) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidState',
-                'The required matching state reservation is unavailable in this worker.',
+                "InvalidState",
+                "The required matching state reservation is unavailable in this worker.",
             );
         }
 
@@ -1870,8 +2236,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             );
         } catch (error) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidState',
-                'The state reservation is no longer active in this worker.',
+                "InvalidState",
+                "The state reservation is no longer active in this worker.",
                 error,
             );
         }
@@ -1883,8 +2249,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 authorization.capabilityMemory.buffer.byteLength
         ) {
             throw new BrowserActionStorageCustodyError(
-                'OwnedWorkerFailure',
-                'The state verifier returned malformed reservation authorization.',
+                "OwnedWorkerFailure",
+                "The state verifier returned malformed reservation authorization.",
             );
         }
         const bytes = new Uint8Array(
@@ -1912,13 +2278,13 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #requireActionRandomnessSession(identifier: string): number {
         const copiedIdentifier = requireOpaqueWorkerIdentifier(
             identifier,
-            'Action-randomness session identifier',
+            "Action-randomness session identifier",
         );
         const handle = this.#actionRandomnessSessions.get(copiedIdentifier);
         if (handle === undefined) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidState',
-                'The action-randomness session is closed or unavailable in this worker.',
+                "InvalidState",
+                "The action-randomness session is closed or unavailable in this worker.",
             );
         }
 
@@ -1933,20 +2299,21 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         let requiresSchedulePosition = false;
         switch (statementSchemaIdentifier) {
             case 0x2110:
-                capabilityKind = stateCapabilityKinds.setupPublicSeedBranch;
-                break;
             case 0x2111:
             case 0x1211:
             case 0x1212:
-                capabilityKind = stateCapabilityKinds.setupDealerSetBranch;
+                capabilityKind =
+                    stateCapabilityKinds.setupActionRandomnessRoot;
                 break;
             case 0x1214:
             case 0x1217:
-                capabilityKind = stateCapabilityKinds.setupDealerSetBranch;
+                capabilityKind =
+                    stateCapabilityKinds.setupActionRandomnessRoot;
                 requiresSchedulePosition = true;
                 break;
             case 0x1216:
-                capabilityKind = stateCapabilityKinds.setupRkgRoundOneBranch;
+                capabilityKind =
+                    stateCapabilityKinds.setupActionRandomnessRoot;
                 requiresSchedulePosition = true;
                 break;
             case 0x1621:
@@ -1954,16 +2321,16 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 break;
             default:
                 throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'The statement schema is not a reset-safe proof family.',
+                    "InvalidInput",
+                    "The statement schema is not a reset-safe proof family.",
                 );
         }
         if (requiresSchedulePosition !== (schedulePosition !== undefined)) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
+                "InvalidInput",
                 requiresSchedulePosition
-                    ? 'The selected proof family requires a schedule position.'
-                    : 'The selected proof family does not accept a schedule position.',
+                    ? "The selected proof family requires a schedule position."
+                    : "The selected proof family does not accept a schedule position.",
             );
         }
 
@@ -1979,8 +2346,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 foundationHashByteLength + attemptIdentifierByteLength
             ) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM action-randomness kernel returned malformed proof-attempt metadata.',
+                    "OwnedWorkerFailure",
+                    "The WASM action-randomness kernel returned malformed proof-attempt metadata.",
                 );
             }
 
@@ -1997,7 +2364,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         for (let attempt = 0; attempt < 16; attempt += 1) {
             const bytes = this.#randomBytes(
                 attemptIdentifierByteLength,
-                'opaque worker identifier',
+                "opaque worker identifier",
             );
             const identifier = bytesToHex(bytes);
             bytes.fill(0);
@@ -2010,8 +2377,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             }
         }
         throw new BrowserActionStorageCustodyError(
-            'Unavailable',
-            'Secure randomness repeatedly produced an existing worker identifier.',
+            "Unavailable",
+            "Secure randomness repeatedly produced an existing worker identifier.",
         );
     }
 
@@ -2026,18 +2393,18 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 activeLease,
                 encodeCanonicalUnsigned16(
                     encodedIdentifier.recordTypeCode,
-                    'Local-record type',
+                    "Local-record type",
                 ),
                 encodedIdentifier.context,
             ),
-            'derive a local-record identifier',
-            'recordSeal',
+            "derive a local-record identifier",
+            "recordSeal",
         );
         if (identifier.byteLength !== foundationHashByteLength) {
             identifier.fill(0);
             throw new BrowserActionStorageCustodyError(
-                'OwnedWorkerFailure',
-                'The WASM kernel returned a malformed local-record identifier.',
+                "OwnedWorkerFailure",
+                "The WASM kernel returned a malformed local-record identifier.",
             );
         }
 
@@ -2048,20 +2415,20 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         input: BrowserLocalRecordSealInput,
     ): Uint8Array<ArrayBuffer> {
         if (
-            typeof input !== 'object' ||
+            typeof input !== "object" ||
             input === null ||
             !(input.plaintext instanceof Uint8Array) ||
             input.plaintext.byteLength > maximumLocalRecordPlaintextByteLength
         ) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
+                "InvalidInput",
                 `The local-record plaintext must contain at most ${maximumLocalRecordPlaintextByteLength} bytes.`,
             );
         }
         const activeLease = this.#requireActiveLease();
         const nonce = this.#randomBytes(
             localRecordNonceByteLength,
-            'local-record nonce',
+            "local-record nonce",
         );
         try {
             const envelope = this.#runCommand(
@@ -2072,13 +2439,13 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     nonce,
                     input.plaintext,
                 ),
-                'seal a local record',
-                'recordSeal',
+                "seal a local record",
+                "recordSeal",
             );
             if (envelope.byteLength === 0) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM kernel returned an empty local-record envelope.',
+                    "OwnedWorkerFailure",
+                    "The WASM kernel returned an empty local-record envelope.",
                 );
             }
 
@@ -2092,15 +2459,15 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         input: BrowserLocalRecordOpenInput,
     ): Uint8Array<ArrayBuffer> {
         if (
-            typeof input !== 'object' ||
+            typeof input !== "object" ||
             input === null ||
             !(input.envelope instanceof Uint8Array) ||
             input.envelope.byteLength === 0 ||
             input.envelope.byteLength > maximumCommandByteLength
         ) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The local-record envelope has an unsupported length.',
+                "InvalidInput",
+                "The local-record envelope has an unsupported length.",
             );
         }
         const activeLease = this.#requireActiveLease();
@@ -2112,8 +2479,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 encodeLocalRecordExpectedContext(input),
                 input.envelope,
             ),
-            'open a local record',
-            'recordOpen',
+            "open a local record",
+            "recordOpen",
         );
     }
 
@@ -2124,22 +2491,22 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             envelope.byteLength > maximumCommandByteLength
         ) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The local-record envelope has an unsupported length.',
+                "InvalidInput",
+                "The local-record envelope has an unsupported length.",
             );
         }
         const activeLease = this.#requireActiveLease();
         const envelopeHash = this.#runCommand(
             localStorageRootCommands.hashRecordEnvelope,
             this.#leaseCommandInput(activeLease, envelope),
-            'hash a canonical local-record envelope',
-            'recordHash',
+            "hash a canonical local-record envelope",
+            "recordHash",
         );
         if (envelopeHash.byteLength !== foundationHashByteLength) {
             envelopeHash.fill(0);
             throw new BrowserActionStorageCustodyError(
-                'OwnedWorkerFailure',
-                'The WASM kernel returned a malformed local-record envelope hash.',
+                "OwnedWorkerFailure",
+                "The WASM kernel returned a malformed local-record envelope hash.",
             );
         }
 
@@ -2152,26 +2519,26 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         this.#assertNoStagedLease();
         const capability = this.#randomBytes(
             capabilityByteLength,
-            'storage-root capability',
+            "storage-root capability",
         );
         if (capability.every((byte) => byte === 0)) {
             capability.fill(0);
             throw new BrowserActionStorageCustodyError(
-                'Unavailable',
-                'Secure randomness returned an invalid storage-root capability.',
+                "Unavailable",
+                "Secure randomness returned an invalid storage-root capability.",
             );
         }
         const root = this.#randomBytes(
             actionStorageRootByteLength,
-            'action storage root',
+            "action storage root",
         );
         let stageOutput: Uint8Array<ArrayBuffer> | undefined;
         try {
             stageOutput = this.#runCommand(
                 localStorageRootCommands.stageNew,
                 concatenateBytes(capability, encodeBinding(binding), root),
-                'stage a new local storage root',
-                'runtime',
+                "stage a new local storage root",
+                "runtime",
             );
             const staged = this.#readStageOutput(
                 stageOutput,
@@ -2209,12 +2576,12 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         const storedCommitment = copyExactBytes(
             input.state.storageRootCommitment,
             foundationHashByteLength,
-            'Stored storage-root commitment',
+            "Stored storage-root commitment",
         );
         if (!bytesEqual(storedCommitment, expectedCommitment)) {
             throw new BrowserActionStorageCustodyError(
-                'CommitmentMismatch',
-                'The stored storage-root commitment does not match the untrusted expected commitment.',
+                "CommitmentMismatch",
+                "The stored storage-root commitment does not match the untrusted expected commitment.",
             );
         }
         this.#assertCompatibleStagedCommitment(expectedCommitment);
@@ -2225,8 +2592,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             wrappedStorageRoot.byteLength > maximumWrappedStorageRootByteLength
         ) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidCanonicalMaterial',
-                'The device-wrapped storage-root envelope has an invalid length.',
+                "InvalidCanonicalMaterial",
+                "The device-wrapped storage-root envelope has an invalid length.",
             );
         }
         const decoded = this.#decodeDeviceEnvelope(
@@ -2250,7 +2617,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                                 decoded.canonicalAssociatedData,
                             ),
                             iv: arrayBufferFromBytes(decoded.nonce),
-                            name: 'AES-GCM',
+                            name: "AES-GCM",
                             tagLength: deviceWrappingTagByteLength * 8,
                         },
                         input.state.deviceKey,
@@ -2259,14 +2626,14 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 );
             } catch (error) {
                 throw new BrowserActionStorageCustodyError(
-                    'InvalidCanonicalMaterial',
-                    'The device-wrapped storage root could not be authenticated and opened.',
+                    "InvalidCanonicalMaterial",
+                    "The device-wrapped storage root could not be authenticated and opened.",
                     error,
                 );
             }
             if (openedRoot.byteLength !== actionStorageRootByteLength) {
                 throw new BrowserActionStorageCustodyError(
-                    'InvalidCanonicalMaterial',
+                    "InvalidCanonicalMaterial",
                     `The opened action storage root must contain exactly ${actionStorageRootByteLength} bytes.`,
                 );
             }
@@ -2280,8 +2647,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     expectedCommitment,
                     openedRoot,
                 ),
-                'stage an opened local storage root',
-                'open',
+                "stage an opened local storage root",
+                "open",
             );
             const staged = this.#readStageOutput(
                 stageOutput,
@@ -2290,8 +2657,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             );
             if (!bytesEqual(staged.commitment, expectedCommitment)) {
                 throw new BrowserActionStorageCustodyError(
-                    'CommitmentMismatch',
-                    'The opened storage root does not match the expected commitment.',
+                    "CommitmentMismatch",
+                    "The opened storage root does not match the expected commitment.",
                 );
             }
             this.#stagedLease = staged.lease;
@@ -2312,113 +2679,13 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         }
     }
 
-    async #stageRecoveryAndWrap(input: {
-        binding: BrowserActionStorageRootBinding;
-        caseInsensitiveRecoveryText: string;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-    }): Promise<WorkerPreparedRecoveryState> {
-        if (typeof input.caseInsensitiveRecoveryText !== 'string') {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'Recovery material must be text.',
-            );
-        }
-        const canonicalRecoveryText =
-            input.caseInsensitiveRecoveryText.toUpperCase();
-        const recoveryTextBytes = new TextEncoder().encode(
-            canonicalRecoveryText,
-        );
-        if (recoveryTextBytes.byteLength !== recoveryTextByteLength) {
-            recoveryTextBytes.fill(0);
-            throw new BrowserActionStorageCustodyError(
-                'InvalidCanonicalMaterial',
-                `Recovery material must encode to exactly ${recoveryTextByteLength} bytes.`,
-            );
-        }
-        const expectedCommitment = untrustedExpectedCommitmentBytes(
-            input.untrustedExpectedCommitment,
-        );
-        this.#assertCompatibleStagedCommitment(expectedCommitment);
-        const capability = this.#randomCapability();
-        let stageOutput: Uint8Array<ArrayBuffer> | undefined;
-        try {
-            this.#discardStaged();
-            stageOutput = this.#runCommand(
-                localStorageRootCommands.stageRecovery,
-                concatenateBytes(
-                    capability,
-                    encodeBinding(input.binding),
-                    expectedCommitment,
-                    recoveryTextBytes,
-                ),
-                'import a local storage recovery value',
-                'recoveryImport',
-            );
-            if (
-                stageOutput.byteLength !==
-                handleByteLength +
-                    foundationHashByteLength +
-                    recoveryTextByteLength
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM recovery import returned malformed output.',
-                );
-            }
-            const staged = this.#readStageOutput(
-                stageOutput.subarray(
-                    0,
-                    handleByteLength + foundationHashByteLength,
-                ),
-                capability,
-                input.binding,
-            );
-            if (!bytesEqual(staged.commitment, expectedCommitment)) {
-                throw new BrowserActionStorageCustodyError(
-                    'CommitmentMismatch',
-                    'The recovered storage root does not match the externally verified commitment.',
-                );
-            }
-            this.#stagedLease = staged.lease;
-            const returnedRecoveryText = new TextDecoder('utf-8', {
-                fatal: true,
-            }).decode(
-                stageOutput.subarray(
-                    handleByteLength + foundationHashByteLength,
-                ),
-            );
-            try {
-                const wrapped = await this.#wrapStagedRoot();
-
-                return Object.freeze({
-                    canonicalRecoveryText: returnedRecoveryText,
-                    ...wrapped,
-                    storageRootCommitment: staged.commitment,
-                });
-            } catch (error) {
-                return this.#discardAfterFailure(error);
-            }
-        } finally {
-            recoveryTextBytes.fill(0);
-            stageOutput?.fill(0);
-            if (this.#stagedLease?.capability !== capability) {
-                capability.fill(0);
-            }
-        }
-    }
-
-    #commitStaged(input: { mutationIdentifier: Uint8Array }): void {
+    #commitStaged(): void {
         const stagedLease = this.#requireStagedLease();
-        const mutationIdentifier = copyExactBytes(
-            input.mutationIdentifier,
-            mutationIdentifierByteLength,
-            'Storage mutation identifier',
-        );
         this.#runCommand(
             localStorageRootCommands.commit,
-            this.#leaseCommandInput(stagedLease, mutationIdentifier),
-            'commit a staged local storage root',
-            'runtime',
+            this.#leaseCommandInput(stagedLease),
+            "commit a staged local storage root",
+            "runtime",
         );
         this.#closeAllActionRandomness();
         this.#closeAllStateVerifierSessions();
@@ -2435,8 +2702,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         this.#runCommand(
             localStorageRootCommands.discard,
             this.#leaseCommandInput(stagedLease),
-            'discard a staged local storage root',
-            'runtime',
+            "discard a staged local storage root",
+            "runtime",
         );
         stagedLease.capability.fill(0);
         this.#stagedLease = undefined;
@@ -2452,91 +2719,11 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         this.#runCommand(
             localStorageRootCommands.destroy,
             this.#leaseCommandInput(activeLease),
-            'destroy an active local storage root',
-            'runtime',
+            "destroy an active local storage root",
+            "runtime",
         );
         activeLease.capability.fill(0);
         this.#activeLease = undefined;
-    }
-
-    #prepareRecovery(input: {
-        activeMutationIdentifier: Uint8Array;
-    }): LocalStorageRecoveryExportMaterial {
-        const activeLease = this.#requireActiveLease();
-        const mutationIdentifier = copyExactBytes(
-            input.activeMutationIdentifier,
-            mutationIdentifierByteLength,
-            'Active storage mutation identifier',
-        );
-        const output = this.#runCommand(
-            localStorageRootCommands.prepareRecovery,
-            this.#leaseCommandInput(activeLease, mutationIdentifier),
-            'prepare local storage recovery material',
-            'runtime',
-        );
-        try {
-            if (
-                output.byteLength !==
-                recoveryChecksumByteLength + recoveryTextByteLength
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM recovery export returned malformed output.',
-                );
-            }
-
-            return Object.freeze({
-                canonicalRecoveryText: new TextDecoder('utf-8', {
-                    fatal: true,
-                }).decode(output.subarray(recoveryChecksumByteLength)),
-                recoveryChecksum: output.slice(0, recoveryChecksumByteLength),
-            });
-        } finally {
-            output.fill(0);
-        }
-    }
-
-    #confirmRecovery(input: {
-        canonicalRecoveryText: string;
-        confirmedChecksum: Uint8Array;
-    }): void {
-        const activeLease = this.#requireActiveLease();
-        if (typeof input.canonicalRecoveryText !== 'string') {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'Canonical recovery material must be text.',
-            );
-        }
-        const recoveryTextBytes = new TextEncoder().encode(
-            input.canonicalRecoveryText,
-        );
-        if (recoveryTextBytes.byteLength !== recoveryTextByteLength) {
-            recoveryTextBytes.fill(0);
-            throw new BrowserActionStorageCustodyError(
-                'RecoveryConfirmationFailed',
-                'Canonical recovery material has the wrong length.',
-            );
-        }
-        const checksum = copyExactBytes(
-            input.confirmedChecksum,
-            recoveryChecksumByteLength,
-            'Confirmed recovery checksum',
-        );
-        try {
-            this.#runCommand(
-                localStorageRootCommands.confirmRecovery,
-                this.#leaseCommandInput(
-                    activeLease,
-                    recoveryTextBytes,
-                    checksum,
-                ),
-                'confirm local storage recovery material',
-                'recoveryConfirmation',
-            );
-        } finally {
-            recoveryTextBytes.fill(0);
-            checksum.fill(0);
-        }
     }
 
     async #wrapStagedRoot(): Promise<WorkerPreparedDeviceWrappingState> {
@@ -2544,37 +2731,37 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         const canonicalAssociatedData = this.#runCommand(
             localStorageRootCommands.associatedData,
             this.#leaseCommandInput(stagedLease),
-            'derive device-wrapping associated data',
-            'runtime',
+            "derive device-wrapping associated data",
+            "runtime",
         );
         const root = this.#runCommand(
             localStorageRootCommands.copyForDeviceWrap,
             this.#leaseCommandInput(stagedLease),
-            'copy a staged root for device wrapping',
-            'runtime',
+            "copy a staged root for device wrapping",
+            "runtime",
         );
         let combinedCiphertext: Uint8Array<ArrayBuffer> | undefined;
         try {
             if (root.byteLength !== actionStorageRootByteLength) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM registry returned a malformed action storage root.',
+                    "OwnedWorkerFailure",
+                    "The WASM registry returned a malformed action storage root.",
                 );
             }
             const generatedKey = await this.#cryptoProvider.subtle.generateKey(
-                { length: 256, name: 'AES-GCM' },
+                { length: 256, name: "AES-GCM" },
                 false,
-                ['encrypt', 'decrypt'],
+                ["encrypt", "decrypt"],
             );
-            if ('privateKey' in generatedKey) {
+            if ("privateKey" in generatedKey) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'WebCrypto returned a key pair for AES-GCM.',
+                    "OwnedWorkerFailure",
+                    "WebCrypto returned a key pair for AES-GCM.",
                 );
             }
             const nonce = this.#randomBytes(
                 deviceWrappingNonceByteLength,
-                'device-wrapping nonce',
+                "device-wrapping nonce",
             );
             combinedCiphertext = new Uint8Array(
                 await this.#cryptoProvider.subtle.encrypt(
@@ -2583,7 +2770,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                             canonicalAssociatedData,
                         ),
                         iv: arrayBufferFromBytes(nonce),
-                        name: 'AES-GCM',
+                        name: "AES-GCM",
                         tagLength: deviceWrappingTagByteLength * 8,
                     },
                     generatedKey,
@@ -2595,8 +2782,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 actionStorageRootByteLength + deviceWrappingTagByteLength
             ) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'WebCrypto returned a malformed device-wrapping ciphertext.',
+                    "OwnedWorkerFailure",
+                    "WebCrypto returned a malformed device-wrapping ciphertext.",
                 );
             }
             const wrappedStorageRoot = this.#runCommand(
@@ -2607,8 +2794,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     combinedCiphertext.subarray(0, actionStorageRootByteLength),
                     combinedCiphertext.subarray(actionStorageRootByteLength),
                 ),
-                'encode a device-wrapped storage-root envelope',
-                'runtime',
+                "encode a device-wrapped storage-root envelope",
+                "runtime",
             );
             if (
                 wrappedStorageRoot.byteLength === 0 ||
@@ -2617,8 +2804,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             ) {
                 wrappedStorageRoot.fill(0);
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM registry returned a malformed device-wrapped envelope.',
+                    "OwnedWorkerFailure",
+                    "The WASM registry returned a malformed device-wrapped envelope.",
                 );
             }
 
@@ -2646,8 +2833,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 expectedCommitment,
                 wrappedStorageRoot,
             ),
-            'decode a device-wrapped storage-root envelope',
-            'open',
+            "decode a device-wrapped storage-root envelope",
+            "open",
         );
         try {
             const associatedDataByteLength = decodeUnsigned32(output, 0);
@@ -2663,8 +2850,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                         fixedTrailingByteLength
             ) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM envelope decoder returned malformed output.',
+                    "OwnedWorkerFailure",
+                    "The WASM envelope decoder returned malformed output.",
                 );
             }
             let offset = wasm32WordByteLength;
@@ -2686,8 +2873,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             );
             if (offset !== output.byteLength) {
                 throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'The WASM envelope decoder returned trailing bytes.',
+                    "OwnedWorkerFailure",
+                    "The WASM envelope decoder returned trailing bytes.",
                 );
             }
 
@@ -2712,15 +2899,15 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     }> {
         if (output.byteLength !== handleByteLength + foundationHashByteLength) {
             throw new BrowserActionStorageCustodyError(
-                'OwnedWorkerFailure',
-                'The WASM storage-root stage command returned malformed output.',
+                "OwnedWorkerFailure",
+                "The WASM storage-root stage command returned malformed output.",
             );
         }
         const handle = decodeUnsigned32(output, 0);
         if (handle === 0) {
             throw new BrowserActionStorageCustodyError(
-                'OwnedWorkerFailure',
-                'The WASM storage-root stage command returned a zero handle.',
+                "OwnedWorkerFailure",
+                "The WASM storage-root stage command returned a zero handle.",
             );
         }
 
@@ -2746,8 +2933,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         if (input.byteLength > maximumCommandByteLength) {
             input.fill(0);
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The action-randomness command input exceeds its supported byte limit.',
+                "InvalidInput",
+                "The action-randomness command input exceeds its supported byte limit.",
             );
         }
         const context = this.#actionRandomnessContext;
@@ -2763,8 +2950,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                         inputPointer = context.allocate(input.byteLength);
                         if (inputPointer === 0) {
                             throw new BrowserActionStorageCustodyError(
-                                'OwnedWorkerFailure',
-                                'WASM could not allocate action-randomness input.',
+                                "OwnedWorkerFailure",
+                                "WASM could not allocate action-randomness input.",
                             );
                         }
                         new Uint8Array(
@@ -2778,8 +2965,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     );
                     if (metadataPointer === 0) {
                         throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'WASM could not allocate action-randomness metadata.',
+                            "OwnedWorkerFailure",
+                            "WASM could not allocate action-randomness metadata.",
                         );
                     }
                     outputPointer = context.command(
@@ -2802,8 +2989,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     if (status !== 0) {
                         if (outputPointer !== 0 || outputByteLength !== 0) {
                             throw new BrowserActionStorageCustodyError(
-                                'OwnedWorkerFailure',
-                                'The WASM action-randomness command returned output with an error status.',
+                                "OwnedWorkerFailure",
+                                "The WASM action-randomness command returned output with an error status.",
                             );
                         }
                         this.#throwCommandStatus(status, failureContext);
@@ -2815,8 +3002,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                             context.memory.buffer.byteLength
                     ) {
                         throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM action-randomness command returned invalid output metadata.',
+                            "OwnedWorkerFailure",
+                            "The WASM action-randomness command returned invalid output metadata.",
                         );
                     }
                     return outputByteLength === 0
@@ -2830,7 +3017,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     throw error instanceof BrowserActionStorageCustodyError
                         ? error
                         : new BrowserActionStorageCustodyError(
-                              'OwnedWorkerFailure',
+                              "OwnedWorkerFailure",
                               `The WASM kernel failed to ${operationName}.`,
                               error,
                           );
@@ -2877,8 +3064,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         if (input.byteLength > maximumCommandByteLength) {
             input.fill(0);
             throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The local storage-root command input exceeds its supported byte limit.',
+                "InvalidInput",
+                "The local storage-root command input exceeds its supported byte limit.",
             );
         }
 
@@ -2894,8 +3081,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                         inputPointer = this.#context.allocate(input.byteLength);
                         if (inputPointer === 0) {
                             throw new BrowserActionStorageCustodyError(
-                                'OwnedWorkerFailure',
-                                'WASM could not allocate local storage-root input.',
+                                "OwnedWorkerFailure",
+                                "WASM could not allocate local storage-root input.",
                             );
                         }
                         new Uint8Array(
@@ -2909,8 +3096,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     );
                     if (metadataPointer === 0) {
                         throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'WASM could not allocate local storage-root metadata.',
+                            "OwnedWorkerFailure",
+                            "WASM could not allocate local storage-root metadata.",
                         );
                     }
                     outputPointer = this.#context.command(
@@ -2930,8 +3117,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     if (status !== 0) {
                         if (outputPointer !== 0 || outputByteLength !== 0) {
                             throw new BrowserActionStorageCustodyError(
-                                'OwnedWorkerFailure',
-                                'The WASM local storage-root command returned output with an error status.',
+                                "OwnedWorkerFailure",
+                                "The WASM local storage-root command returned output with an error status.",
                             );
                         }
                         this.#throwCommandStatus(status, failureContext);
@@ -2941,8 +3128,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                         (outputByteLength === 0) !== (outputPointer === 0)
                     ) {
                         throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM local storage-root command returned invalid output metadata.',
+                            "OwnedWorkerFailure",
+                            "The WASM local storage-root command returned invalid output metadata.",
                         );
                     }
                     if (outputByteLength === 0) {
@@ -2958,7 +3145,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     throw error instanceof BrowserActionStorageCustodyError
                         ? error
                         : new BrowserActionStorageCustodyError(
-                              'OwnedWorkerFailure',
+                              "OwnedWorkerFailure",
                               `The WASM kernel failed to ${operationName}.`,
                               error,
                           );
@@ -2992,7 +3179,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         failureContext: CommandFailureContext,
     ): never {
         if (
-            failureContext === 'recordOpen' &&
+            failureContext === "recordOpen" &&
             (status === localStorageRootStatuses.wrongContext ||
                 status === localStorageRootStatuses.wrongHashOrRoot ||
                 status === localStorageRootStatuses.malformedEncoding ||
@@ -3000,8 +3187,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 status === localStorageRootStatuses.wrongTypeOrLength)
         ) {
             throw new BrowserActionStorageCustodyError(
-                'RecordAuthenticationFailed',
-                'The local record could not be authenticated for its expected context.',
+                "RecordAuthenticationFailed",
+                "The local record could not be authenticated for its expected context.",
             );
         }
         if (
@@ -3009,18 +3196,14 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             status === localStorageRootStatuses.wrongHashOrRoot
         ) {
             throw new BrowserActionStorageCustodyError(
-                failureContext === 'recoveryConfirmation'
-                    ? 'RecoveryConfirmationFailed'
-                    : 'CommitmentMismatch',
-                'The local storage-root material does not match its required binding or commitment.',
+                "CommitmentMismatch",
+                "The local storage-root material does not match its required binding or commitment.",
             );
         }
         if (status === localStorageRootStatuses.consumedState) {
             throw new BrowserActionStorageCustodyError(
-                failureContext === 'recoveryConfirmation'
-                    ? 'RecoveryConfirmationFailed'
-                    : 'InvalidState',
-                'The local storage-root operation refers to consumed or replaced state.',
+                "InvalidState",
+                "The local storage-root operation refers to consumed or replaced state.",
             );
         }
         if (
@@ -3029,18 +3212,16 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             status === localStorageRootStatuses.wrongTypeOrLength
         ) {
             throw new BrowserActionStorageCustodyError(
-                failureContext === 'recoveryConfirmation'
-                    ? 'RecoveryConfirmationFailed'
-                    : failureContext === 'runtime'
-                      ? 'OwnedWorkerFailure'
-                      : 'InvalidCanonicalMaterial',
-                'The local storage-root command refused malformed canonical material.',
+                failureContext === "runtime"
+                      ? "OwnedWorkerFailure"
+                      : "InvalidCanonicalMaterial",
+                "The local storage-root command refused malformed canonical material.",
             );
         }
         if (status === localStorageRootStatuses.outsideSupportedProfile) {
             throw new BrowserActionStorageCustodyError(
-                'Unavailable',
-                'The local storage-root material exceeds the supported runtime profile.',
+                "Unavailable",
+                "The local storage-root material exceeds the supported runtime profile.",
             );
         }
         if (
@@ -3048,19 +3229,19 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             status === localStorageRootStatuses.staleHandle
         ) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidState',
-                'The local storage-root registry refused an unavailable lease.',
+                "InvalidState",
+                "The local storage-root registry refused an unavailable lease.",
             );
         }
         if (status === localStorageRootStatuses.capabilityMismatch) {
             throw new BrowserActionStorageCustodyError(
-                'OwnedWorkerFailure',
-                'The local storage-root registry refused its opaque capability.',
+                "OwnedWorkerFailure",
+                "The local storage-root registry refused its opaque capability.",
             );
         }
 
         throw new BrowserActionStorageCustodyError(
-            'OwnedWorkerFailure',
+            "OwnedWorkerFailure",
             `The local storage-root command returned unknown status ${status}.`,
         );
     }
@@ -3079,13 +3260,13 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #randomCapability(): Uint8Array<ArrayBuffer> {
         const capability = this.#randomBytes(
             capabilityByteLength,
-            'storage-root capability',
+            "storage-root capability",
         );
         if (capability.every((byte) => byte === 0)) {
             capability.fill(0);
             throw new BrowserActionStorageCustodyError(
-                'Unavailable',
-                'Secure randomness returned an invalid storage-root capability.',
+                "Unavailable",
+                "Secure randomness returned an invalid storage-root capability.",
             );
         }
 
@@ -3099,7 +3280,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         } catch (error) {
             bytes.fill(0);
             throw new BrowserActionStorageCustodyError(
-                'Unavailable',
+                "Unavailable",
                 `Secure randomness is unavailable for the ${label}.`,
                 error,
             );
@@ -3111,8 +3292,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #assertNoStagedLease(): void {
         if (this.#stagedLease !== undefined) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidState',
-                'A local storage root is already staged in this worker.',
+                "InvalidState",
+                "A local storage root is already staged in this worker.",
             );
         }
     }
@@ -3126,8 +3307,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             )
         ) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidState',
-                'A different local storage root is already staged in this worker.',
+                "InvalidState",
+                "A different local storage root is already staged in this worker.",
             );
         }
     }
@@ -3135,8 +3316,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #requireStagedLease(): RootLease {
         if (this.#stagedLease === undefined) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidState',
-                'No local storage root is staged in this worker.',
+                "InvalidState",
+                "No local storage root is staged in this worker.",
             );
         }
 
@@ -3146,8 +3327,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #requireActiveLease(): RootLease {
         if (this.#activeLease === undefined) {
             throw new BrowserActionStorageCustodyError(
-                'InvalidState',
-                'No local storage root is active in this worker.',
+                "InvalidState",
+                "No local storage root is active in this worker.",
             );
         }
 
@@ -3159,8 +3340,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             this.#discardStaged();
         } catch (cleanupFailure) {
             throw new BrowserActionStorageCustodyError(
-                'OwnedWorkerFailure',
-                'The local storage-root operation failed and staged-root cleanup also failed.',
+                "OwnedWorkerFailure",
+                "The local storage-root operation failed and staged-root cleanup also failed.",
                 [originalFailure, cleanupFailure],
             );
         }
@@ -3206,20 +3387,8 @@ class DeferredWasmBrowserActionStorageWorkerKernel implements BrowserActionStora
         return (await this.#workerKernel).stageDeviceWrappingStateOpen(input);
     }
 
-    public async stageRecoveryValueImportAndDeviceWrapping(input: {
-        binding: BrowserActionStorageRootBinding;
-        caseInsensitiveRecoveryText: string;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-    }): Promise<WorkerPreparedRecoveryState> {
-        return (
-            await this.#workerKernel
-        ).stageRecoveryValueImportAndDeviceWrapping(input);
-    }
-
-    public async commitStagedActionStorageRoot(input: {
-        mutationIdentifier: Uint8Array;
-    }): Promise<void> {
-        return (await this.#workerKernel).commitStagedActionStorageRoot(input);
+    public async commitStagedActionStorageRoot(): Promise<void> {
+        return (await this.#workerKernel).commitStagedActionStorageRoot();
     }
 
     public async discardStagedActionStorageRoot(): Promise<void> {
@@ -3228,19 +3397,6 @@ class DeferredWasmBrowserActionStorageWorkerKernel implements BrowserActionStora
 
     public async destroyActiveActionStorageRoot(): Promise<void> {
         return (await this.#workerKernel).destroyActiveActionStorageRoot();
-    }
-
-    public async prepareRecoveryExport(input: {
-        activeMutationIdentifier: Uint8Array;
-    }): Promise<LocalStorageRecoveryExportMaterial> {
-        return (await this.#workerKernel).prepareRecoveryExport(input);
-    }
-
-    public async confirmRecoveryChecksum(input: {
-        canonicalRecoveryText: string;
-        confirmedChecksum: Uint8Array;
-    }): Promise<void> {
-        return (await this.#workerKernel).confirmRecoveryChecksum(input);
     }
 
     public async deriveActiveLocalRecordIdentifier(
@@ -3289,12 +3445,6 @@ class DeferredWasmBrowserActionStorageWorkerKernel implements BrowserActionStora
         return (await this.#workerKernel).verifyActionRandomnessReservation(
             input,
         );
-    }
-
-    public async verifyActionStateRecovery(
-        input: BrowserActionStateRecoveryVerificationInput,
-    ): Promise<VerificationResult<string>> {
-        return (await this.#workerKernel).verifyActionStateRecovery(input);
     }
 
     public async releaseActionStateObject(identifier: string): Promise<void> {
@@ -3346,12 +3496,12 @@ const resolveWorkerCryptoProvider = (): Crypto => {
     const resolvedCryptoProvider = globalThis.crypto;
     if (
         resolvedCryptoProvider === undefined ||
-        typeof resolvedCryptoProvider.getRandomValues !== 'function' ||
+        typeof resolvedCryptoProvider.getRandomValues !== "function" ||
         resolvedCryptoProvider.subtle === undefined
     ) {
         throw new BrowserActionStorageCustodyError(
-            'Unavailable',
-            'WebCrypto is required for local storage-root custody.',
+            "Unavailable",
+            "WebCrypto is required for local storage-root custody.",
         );
     }
 
@@ -3365,8 +3515,8 @@ const createWorkerKernelFromLoadedKernel = (input: {
     const context = resolveLocalStorageRootKernelContext(input.kernel);
     if (context === undefined) {
         throw new BrowserActionStorageCustodyError(
-            'Unavailable',
-            'The loaded WASM kernel does not expose the local storage-root runtime.',
+            "Unavailable",
+            "The loaded WASM kernel does not expose the local storage-root runtime.",
         );
     }
     const actionRandomnessContext = resolveActionRandomnessKernelContext(
@@ -3374,8 +3524,8 @@ const createWorkerKernelFromLoadedKernel = (input: {
     );
     if (actionRandomnessContext === undefined) {
         throw new BrowserActionStorageCustodyError(
-            'Unavailable',
-            'The loaded WASM kernel does not expose action-randomness custody.',
+            "Unavailable",
+            "The loaded WASM kernel does not expose action-randomness custody.",
         );
     }
 
@@ -3406,6 +3556,12 @@ const createWorkerKernelFromLoadedKernel = (input: {
             Promise.resolve().then(() =>
                 workerKernel.openClosedSetupMailboxRandomness(operationInput),
             ),
+        openStructuredCommitmentOpenings: (operationInput) =>
+            Promise.resolve().then(() =>
+                workerKernel.openClosedStructuredCommitmentOpenings(
+                    operationInput,
+                ),
+            ),
         openSealed: (operationInput) =>
             workerKernel.openSealedActionRandomness(operationInput),
     });
@@ -3416,10 +3572,10 @@ const createWorkerKernelFromLoadedKernel = (input: {
 const isKernelPromise = (
     kernel: TranscriptCoreKernel | PromiseLike<TranscriptCoreKernel>,
 ): kernel is PromiseLike<TranscriptCoreKernel> =>
-    typeof kernel === 'object' &&
+    typeof kernel === "object" &&
     kernel !== null &&
-    'then' in kernel &&
-    typeof kernel.then === 'function';
+    "then" in kernel &&
+    typeof kernel.then === "function";
 
 /**
  * Creates the worker-owned storage-root kernel. Passing the loader promise lets
@@ -3472,6 +3628,11 @@ export const createWasmBrowserActionStorageWorkerKernel = (input: {
                 await resolvedWorkerKernel,
                 operationInput,
             ),
+        openStructuredCommitmentOpenings: async (operationInput) =>
+            openClosedWorkerStructuredCommitmentOpenings(
+                await resolvedWorkerKernel,
+                operationInput,
+            ),
         openSealed: async (operationInput) =>
             openSealedWorkerActionRandomness(
                 await resolvedWorkerKernel,
@@ -3488,8 +3649,8 @@ const requireWorkerActionRandomnessRunner = (
     const runner = workerActionRandomnessKernelRunners.get(workerKernel);
     if (runner === undefined) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'The action storage worker does not belong to this WASM runtime.',
+            "InvalidInput",
+            "The action storage worker does not belong to this WASM runtime.",
         );
     }
     return runner;
@@ -3521,15 +3682,30 @@ export const openClosedWorkerSetupMailboxRandomness = (
     workerKernel: BrowserActionStorageWorkerKernel,
     input: WorkerSetupMailboxRandomnessInput,
 ): Promise<ClosedWorkerSetupMailboxRandomnessOperations> => {
-    if (typeof globalThis.document !== 'undefined') {
+    if (typeof globalThis.document !== "undefined") {
         throw new BrowserActionStorageCustodyError(
-            'Unavailable',
-            'Setup-mailbox randomness may only be consumed inside the dedicated custody worker.',
+            "Unavailable",
+            "Setup-mailbox randomness may only be consumed inside the dedicated custody worker.",
         );
     }
     return requireWorkerActionRandomnessRunner(
         workerKernel,
     ).openSetupMailboxRandomness(input);
+};
+
+export const openClosedWorkerStructuredCommitmentOpenings = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+    input: WorkerStructuredCommitmentOpeningInput,
+): Promise<ClosedWorkerStructuredCommitmentOpeningOperations> => {
+    if (typeof globalThis.document !== "undefined") {
+        throw new BrowserActionStorageCustodyError(
+            "Unavailable",
+            "Structured-commitment openings may only be consumed inside the dedicated custody worker.",
+        );
+    }
+    return requireWorkerActionRandomnessRunner(
+        workerKernel,
+    ).openStructuredCommitmentOpenings(input);
 };
 
 const runTerminalSetupCheckpointKernelCommand = async (
@@ -3541,8 +3717,8 @@ const runTerminalSetupCheckpointKernelCommand = async (
         terminalSetupCheckpointKernelCommandRunners.get(workerKernel);
     if (runner === undefined) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'The action storage worker does not belong to this WASM runtime.',
+            "InvalidInput",
+            "The action storage worker does not belong to this WASM runtime.",
         );
     }
 
@@ -3558,8 +3734,8 @@ const sampleTerminalSetupCheckpointEntropy = async (
         terminalSetupCheckpointKernelCommandRunners.get(workerKernel);
     if (runner === undefined) {
         throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'The action storage worker does not belong to this WASM runtime.',
+            "InvalidInput",
+            "The action storage worker does not belong to this WASM runtime.",
         );
     }
 

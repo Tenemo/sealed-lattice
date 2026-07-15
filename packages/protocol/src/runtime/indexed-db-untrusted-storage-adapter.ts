@@ -73,7 +73,6 @@ type StoredDeviceWrappingState = Readonly<{
     formatVersion: number;
     mutationIdentifier: Uint8Array;
     recordKind: string;
-    recoveryValueExported: boolean;
     storageRootCommitment: Uint8Array;
     wrappedStorageRoot: Uint8Array;
 }>;
@@ -216,7 +215,6 @@ const copyDeviceWrappingStateForWrite = (
             formatVersion: deviceWrappingRecordFormatVersion,
             mutationIdentifier: copy.mutationIdentifier,
             recordKind: deviceWrappingRecordKind,
-            recoveryValueExported: copy.recoveryValueExported,
             storageRootCommitment: copy.storageRootCommitment,
             wrappedStorageRoot: copy.wrappedStorageRoot,
         };

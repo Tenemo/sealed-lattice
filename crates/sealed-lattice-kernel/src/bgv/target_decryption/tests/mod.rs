@@ -138,8 +138,6 @@ fn accepted_setup_package_base() -> Value {
                 "setupContextHash": setup_context_hash,
                 "rosterPosition": roster_position,
                 "trusteeIdentity": trustee_identity,
-                "recoveryEpoch": 0,
-                "deviceEpoch": 0,
                 "signingPublicKeyHash": signing_public_key_hash,
                 "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
             });
@@ -157,8 +155,6 @@ fn accepted_setup_package_base() -> Value {
             json!({
                 "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
                 "trusteeIdentity": trustee_identity,
-                "recoveryEpoch": 0,
-                "deviceEpoch": 0,
                 "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
                 "signatureEnvelope": signature_envelope,
             })
@@ -197,14 +193,6 @@ fn build_accepted_setup_fixture() -> AcceptedSetupFixture {
         aggregate_opening_material_by_root: aggregate_threshold_commitment_setup_output
             .aggregate_opening_material_by_root,
     }
-}
-
-fn target_share_profile(_setup_package: &Value) -> Value {
-    json!({
-        "objectType": "TargetDecryptionShareProfile",
-        "minimumSharesForInterpolation": 2,
-        "decryptionShareQuorum": 2,
-    })
 }
 
 fn level_zero_ciphertext(key: &DevelopmentBgvKey, slots: &[u64], seed: &str) -> Ciphertext {
@@ -320,7 +308,8 @@ fn aggregate_threshold_commitment_set(
             roster_position,
         })
         .collect::<Vec<_>>();
-    let decryption_threshold = participants.len() / 3 + 1;
+    let decryption_threshold = decryption_threshold_for_roster_length(participants.len())
+        .expect("setup decryption threshold");
     let evaluator_key = target_decryption_evaluator_key();
     let rns_limb_count = CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1;
     let mut recipient_records = Vec::with_capacity(participants.len() * rns_limb_count);
@@ -341,7 +330,6 @@ fn aggregate_threshold_commitment_set(
         .expect("target share limbs");
         let mut aggregate_opening_credentials = Vec::with_capacity(rns_limb_count);
         for (rns_limb_index, share_values) in share_by_limb.iter().enumerate() {
-            let rns_prime = DATA_PRIMES[rns_limb_index];
             let aggregate_commitment_message_values = aggregate_opening_values(share_values);
             let aggregate_material_seed_hex =
                 fixture_aggregate_material_seed_hex(participant.roster_position, rns_limb_index);
@@ -349,9 +337,7 @@ fn aggregate_threshold_commitment_set(
                 setup_context_hash: &setup_context_hashes.setup_context_hash,
                 participant,
                 rns_limb_index,
-                rns_prime,
                 aggregate_commitment_message_values: &aggregate_commitment_message_values,
-                message_coefficient_bound: rns_prime,
                 aggregate_material_seed_hex: &aggregate_material_seed_hex,
             })
             .expect("aggregate opening computation");
@@ -366,12 +352,6 @@ fn aggregate_threshold_commitment_set(
                 "aggregate opening roots must be unique"
             );
             aggregate_opening_credentials.push(json!({
-                "objectType": "LocalTrusteeVssPublicAggregateOpeningCredential",
-                "recipientIdentity": participant.trustee_identity.as_str(),
-                "recipientRosterPosition": participant.roster_position,
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": rns_prime,
-                "aggregateCommitmentRoot": computation.commitment_root.clone(),
                 "aggregateOpeningRoot": computation.opening_root.clone(),
                 "aggregateMaterialSeedHex": aggregate_material_seed_hex,
             }));
@@ -383,7 +363,6 @@ fn aggregate_threshold_commitment_set(
             }));
         }
         local_aggregate_opening_handoffs.push(json!({
-            "trusteeIdentity": participant.trustee_identity.as_str(),
             "trusteeRosterPosition": participant.roster_position,
             "aggregateOpeningCredentials": aggregate_opening_credentials,
         }));
@@ -406,7 +385,6 @@ fn aggregate_threshold_commitment_set(
             participant_count: participants.len(),
             trustee_identities: &trustee_identities,
             rns_limb_count,
-            ring_degree: POLYNOMIAL_DEGREE,
         },
     )
     .expect("aggregate threshold commitment set root");
@@ -508,7 +486,6 @@ fn generate_share_from_fresh_local_witness(
     accepted_record: &Value,
     target_ciphertext_binding: &Value,
     target_ciphertexts: &Value,
-    target_share_profile: &Value,
     trustee_identity: &str,
 ) -> Value {
     let local_target_share_witness_value = local_target_share_witness(
@@ -516,7 +493,6 @@ fn generate_share_from_fresh_local_witness(
         accepted_record,
         target_ciphertext_binding,
         target_ciphertexts,
-        target_share_profile,
         trustee_identity,
     );
 
@@ -525,7 +501,6 @@ fn generate_share_from_fresh_local_witness(
         accepted_record,
         target_ciphertext_binding,
         target_ciphertexts,
-        target_share_profile,
         &local_target_share_witness_value,
         trustee_identity,
     )
@@ -536,10 +511,13 @@ fn generate_local_share(
     accepted_record: &Value,
     target_ciphertext_binding: &Value,
     target_ciphertexts: &Value,
-    target_share_profile: &Value,
     local_target_share_witness_value: &Value,
     trustee_identity: &str,
 ) -> Value {
+    let trustee_roster_position = TARGET_DECRYPTION_FIXTURE_TRUSTEES
+        .iter()
+        .position(|candidate| *candidate == trustee_identity)
+        .expect("target-decryption fixture trustee");
     with_staged_aggregate_opening_material(local_target_share_witness_value, || {
         generate_bgv_target_decryption_share_from_local_share_request(&json!({
             "setupPackage": setup_package,
@@ -547,8 +525,7 @@ fn generate_local_share(
             "targetAcceptedRecord": accepted_record,
             "targetCiphertextBinding": target_ciphertext_binding,
             "targetCiphertexts": target_ciphertexts,
-            "targetShareProfile": target_share_profile,
-            "trusteeIdentity": trustee_identity,
+            "trusteeRosterPosition": trustee_roster_position,
         }))
         .expect("local witness share")
     })
@@ -559,7 +536,6 @@ struct TargetShareProofStatementInput<'a> {
     accepted_record: &'a Value,
     target_ciphertext_binding: &'a Value,
     target_ciphertexts: &'a Value,
-    target_share_profile: &'a Value,
     local_target_share_witness_value: &'a Value,
     target_decryption_share: &'a Value,
     trustee_identity: &'a str,
@@ -568,6 +544,10 @@ struct TargetShareProofStatementInput<'a> {
 fn derive_share_proof_statement(
     input: TargetShareProofStatementInput<'_>,
 ) -> CanonicalResult<Value> {
+    let trustee_roster_position = TARGET_DECRYPTION_FIXTURE_TRUSTEES
+        .iter()
+        .position(|candidate| *candidate == input.trustee_identity)
+        .expect("target-decryption fixture trustee");
     with_staged_aggregate_opening_material(input.local_target_share_witness_value, || {
         derive_bgv_target_decryption_share_proof_statement_from_request(&json!({
             "setupPackage": input.setup_package,
@@ -575,8 +555,7 @@ fn derive_share_proof_statement(
             "targetAcceptedRecord": input.accepted_record,
             "targetCiphertextBinding": input.target_ciphertext_binding,
             "targetCiphertexts": input.target_ciphertexts,
-            "targetShareProfile": input.target_share_profile,
-            "trusteeIdentity": input.trustee_identity,
+            "trusteeRosterPosition": trustee_roster_position,
             "targetDecryptionShare": input.target_decryption_share,
         }))
     })
@@ -587,7 +566,6 @@ struct TargetShareProofStatementBindingInput<'a> {
     accepted_record: &'a Value,
     target_ciphertext_binding: &'a Value,
     target_ciphertexts: &'a Value,
-    target_share_profile: &'a Value,
     target_decryption_share: &'a Value,
     proof_statement: &'a Value,
 }
@@ -600,7 +578,6 @@ fn verify_share_proof_statement_binding(
         "targetAcceptedRecord": input.accepted_record,
         "targetCiphertextBinding": input.target_ciphertext_binding,
         "targetCiphertexts": input.target_ciphertexts,
-        "targetShareProfile": input.target_share_profile,
         "targetDecryptionShare": input.target_decryption_share,
         "proofStatement": input.proof_statement,
     }))
@@ -625,7 +602,6 @@ fn local_target_share_witness(
     accepted_record: &Value,
     target_ciphertext_binding: &Value,
     target_ciphertexts: &Value,
-    _target_share_profile: &Value,
     trustee_identity: &str,
 ) -> Value {
     let setup_binding = read_setup_binding(setup_package).expect("setup binding");
@@ -645,7 +621,7 @@ fn local_target_share_witness(
     let aggregate_opening_handoff = accepted_setup_fixture()
         .local_aggregate_opening_handoffs
         .iter()
-        .find(|handoff| handoff["trusteeIdentity"] == participant.trustee_identity)
+        .find(|handoff| handoff["trusteeRosterPosition"] == participant.roster_position)
         .expect("setup-produced local aggregate opening handoff");
     assert_eq!(
         aggregate_opening_handoff["trusteeRosterPosition"], participant.roster_position,
@@ -832,7 +808,6 @@ fn staged_target_result_release(
     accepted_record: &Value,
     target_ciphertext_binding: &Value,
     target_ciphertexts: &Value,
-    target_share_profile_value: &Value,
     target_share_proofs: Vec<Value>,
     release_verification_id: &str,
 ) -> CanonicalResult<Value> {
@@ -842,7 +817,6 @@ fn staged_target_result_release(
         "targetAcceptedRecord": accepted_record,
         "targetCiphertextBinding": target_ciphertext_binding,
         "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile_value,
     }))?;
     for target_share_proof in target_share_proofs {
         absorb_bgv_target_decryption_result_release_share_for_test(&json!({

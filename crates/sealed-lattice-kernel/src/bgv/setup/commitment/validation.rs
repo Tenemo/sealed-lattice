@@ -119,8 +119,8 @@ pub(super) fn signed_message_coefficient_magnitude_bound(
 }
 
 #[cfg(test)]
-pub(super) fn validate_randomness_by_column(
-    randomness_by_column: &[Vec<i128>],
+pub(super) fn validate_randomness_by_commitment_limb(
+    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
     infinity_bound: i128,
     ring_degree: usize,
 ) -> CanonicalResult<()> {
@@ -129,15 +129,50 @@ pub(super) fn validate_randomness_by_column(
             "commitment randomness bound must be non-negative",
         ));
     }
-    validate_randomness_shape(randomness_by_column, ring_degree)?;
-    for randomness_column in randomness_by_column {
-        if randomness_column
-            .iter()
-            .any(|coefficient| coefficient.abs() > infinity_bound)
+    validate_randomness_shape(randomness_by_commitment_limb, ring_degree)?;
+    for randomness_by_column in randomness_by_commitment_limb {
+        for randomness_column in randomness_by_column {
+            if randomness_column
+                .iter()
+                .any(|coefficient| coefficient.unsigned_abs() > infinity_bound as u128)
+            {
+                return Err(invalid_commitment_input(
+                    "commitment randomness coefficient exceeds the opening bound",
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub(super) fn validate_fresh_randomness_by_commitment_limb(
+    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
+    ring_degree: usize,
+) -> CanonicalResult<()> {
+    validate_randomness_shape(randomness_by_commitment_limb, ring_degree)?;
+    for randomness_by_column in randomness_by_commitment_limb {
+        for (randomness_column_index, randomness_column) in randomness_by_column.iter().enumerate()
         {
-            return Err(invalid_commitment_input(
-                "commitment randomness coefficient exceeds the opening bound",
-            ));
+            let coefficient_bound = setup_commitment_randomness_coefficient_bound(
+                randomness_column_index,
+            )
+            .ok_or_else(|| {
+                invalid_commitment_input(
+                    "commitment randomness column is outside the selected profile",
+                )
+            })?;
+            if randomness_column
+                .iter()
+                .any(|coefficient| coefficient.unsigned_abs() > coefficient_bound as u128)
+            {
+                let distribution_purpose =
+                    setup_commitment_randomness_distribution_purpose(randomness_column_index)
+                        .expect("a selected randomness column has a distribution purpose");
+                return Err(invalid_commitment_input(format!(
+                    "commitment randomness column exceeds distribution purpose {distribution_purpose} support"
+                )));
+            }
         }
     }
 
@@ -145,21 +180,29 @@ pub(super) fn validate_randomness_by_column(
 }
 
 pub(super) fn validate_randomness_shape(
-    randomness_by_column: &[Vec<i128>],
+    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
     ring_degree: usize,
 ) -> CanonicalResult<()> {
-    if randomness_by_column.len() != SETUP_COMMITMENT_RANDOMNESS_WIDTH {
+    if randomness_by_commitment_limb.len() != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "commitment opening must contain the selected randomness width",
+            "commitment opening must contain one independent randomness tape per commitment modulus limb",
         ));
     }
-    for randomness_column in randomness_by_column {
-        if randomness_column.len() != ring_degree {
+    for randomness_by_column in randomness_by_commitment_limb {
+        if randomness_by_column.len() != SETUP_COMMITMENT_RANDOMNESS_WIDTH {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "commitment randomness column coefficient count must match the ring degree",
+                "commitment limb opening must contain the selected randomness width",
             ));
+        }
+        for randomness_column in randomness_by_column {
+            if randomness_column.len() != ring_degree {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "commitment randomness column coefficient count must match the ring degree",
+                ));
+            }
         }
     }
 
@@ -192,17 +235,11 @@ pub(super) fn validate_ring_degree(ring_degree: usize) -> CanonicalResult<()> {
 }
 
 pub(super) fn validate_matrix_coordinate(
-    source_rns_limb_index: usize,
     commitment_modulus_index: usize,
     matrix_row_index: usize,
     randomness_column_index: usize,
     ring_coefficient_position: usize,
 ) -> CanonicalResult<()> {
-    if source_rns_limb_index >= DATA_PRIMES.len() {
-        return Err(invalid_commitment_input(
-            "commitment matrix source RNS limb is outside Q_share",
-        ));
-    }
     if !SETUP_COMMITMENT_MODULUS_LIMB_INDICES.contains(&commitment_modulus_index) {
         return Err(invalid_commitment_input(
             "commitment matrix modulus limb is outside the commitment parameters",

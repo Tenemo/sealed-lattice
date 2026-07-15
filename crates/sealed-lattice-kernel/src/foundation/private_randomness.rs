@@ -20,6 +20,7 @@ pub const PERSISTENT_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0401;
 pub const ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0402;
 pub const ORDINARY_PROOF_COIN_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0403;
 pub const RANDOM_CURSOR_SCHEMA_IDENTIFIER: u16 = 0x1804;
+pub const SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x120d;
 
 pub const ACTION_RANDOMNESS_ROOT_BYTE_LENGTH: usize = 64;
 pub const PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
@@ -27,6 +28,7 @@ pub const PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH: usize = 64;
 pub const PRIVATE_PROOF_SALT_PURPOSE: u16 = 0xfffe;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
+const SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_VERSION: u16 = 2;
 const ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH: usize = 192;
 const ACTION_RANDOMNESS_COMMITMENT_PREIMAGE_BYTE_LENGTH: usize = 64;
 const PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH: usize = 64;
@@ -53,9 +55,8 @@ const PERSISTENT_PROOF_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/proof/per
 const ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/proof/ordinary-attempt/v1";
 const TARGET_RELEASE_ATTEMPT_CUSTOMIZATION: &[u8] = b"sealed-lattice/target-release/attempt/v1";
 const APPLICATION_SLOT_HASH_DOMAIN: &str = "sealed-lattice/proof/application-slot/v1";
-const APPLICATION_STATEMENT_HASH_DOMAIN: &str = "sealed-lattice/proof/application-statement/v1";
-const RELATION_PLAN_VARIANT_HASH_DOMAIN: &str = "sealed-lattice/proof/relation-plan-variant/v1";
-const PRIVATE_PROOF_COIN_CONTEXT_HASH_DOMAIN: &str = "sealed-lattice/proof/private-coin-context/v1";
+const SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_HASH_DOMAIN: &str =
+    "sealed-lattice/setup/structured-commitment-opening-context/v2";
 
 const RESET_SAFE_PROOF_FAMILIES: [u16; 8] = [
     0x2110,
@@ -313,6 +314,128 @@ impl ActionRandomnessDerivationInput {
     }
 }
 
+/// One reset-safe structured-commitment opening polynomial coordinate.
+///
+/// The action-randomness derivation input already binds the suite, ceremony,
+/// action, and source participant. This context binds every remaining
+/// coordinate that distinguishes one opening polynomial from another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SetupStructuredCommitmentOpeningContext {
+    source_setup_intent_object_hash: Hash512,
+    source_rns_limb_index: u16,
+    shamir_coefficient_index: u16,
+    commitment_data_prime_index: u16,
+    distribution_purpose: u16,
+    component_ordinal: u16,
+}
+
+impl SetupStructuredCommitmentOpeningContext {
+    pub fn new(
+        source_setup_intent_object_hash: Hash512,
+        source_rns_limb_index: u16,
+        shamir_coefficient_index: u16,
+        commitment_data_prime_index: u16,
+        distribution_purpose: u16,
+        component_ordinal: u16,
+    ) -> SchemaResult<Self> {
+        let component_is_assigned = match distribution_purpose {
+            11 => component_ordinal < 2,
+            12 => component_ordinal < 1,
+            _ => false,
+        };
+        if !component_is_assigned {
+            return Err(schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "structured-commitment opening purpose or component is not assigned",
+            ));
+        }
+        Ok(Self {
+            source_setup_intent_object_hash,
+            source_rns_limb_index,
+            shamir_coefficient_index,
+            commitment_data_prime_index,
+            distribution_purpose,
+            component_ordinal,
+        })
+    }
+
+    pub const fn source_setup_intent_object_hash(self) -> Hash512 {
+        self.source_setup_intent_object_hash
+    }
+
+    pub const fn source_rns_limb_index(self) -> u16 {
+        self.source_rns_limb_index
+    }
+
+    pub const fn shamir_coefficient_index(self) -> u16 {
+        self.shamir_coefficient_index
+    }
+
+    pub const fn commitment_data_prime_index(self) -> u16 {
+        self.commitment_data_prime_index
+    }
+
+    pub const fn distribution_purpose(self) -> u16 {
+        self.distribution_purpose
+    }
+
+    pub const fn component_ordinal(self) -> u16 {
+        self.component_ordinal
+    }
+
+    fn canonical_tuple(self) -> CanonicalTuple {
+        CanonicalTuple::new(
+            SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
+            SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::hash512(self.source_setup_intent_object_hash.into_bytes()),
+                CanonicalItem::unsigned16(self.source_rns_limb_index),
+                CanonicalItem::unsigned16(self.shamir_coefficient_index),
+                CanonicalItem::unsigned16(self.commitment_data_prime_index),
+                CanonicalItem::unsigned16(self.distribution_purpose),
+                CanonicalItem::unsigned16(self.component_ordinal),
+            ],
+        )
+    }
+
+    pub fn encode(self) -> SchemaResult<Vec<u8>> {
+        Ok(self.canonical_tuple().encode()?)
+    }
+
+    pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
+        let tuple = CanonicalTuple::decode(bytes, limits)?;
+        if tuple.schema_identifier != SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER
+            || tuple.items.len() != 6
+        {
+            return Err(schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "structured-commitment opening context has the wrong schema or item count",
+            ));
+        }
+        if tuple.schema_version != SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_VERSION {
+            return Err(schema_error(
+                RefusalReason::UnsupportedVersionOrSuite,
+                "structured-commitment opening context version is unsupported",
+            ));
+        }
+        Self::new(
+            read_hash(&tuple.items[0])?,
+            read_u16(&tuple.items[1])?,
+            read_u16(&tuple.items[2])?,
+            read_u16(&tuple.items[3])?,
+            read_u16(&tuple.items[4])?,
+            read_u16(&tuple.items[5])?,
+        )
+    }
+
+    pub fn hash(self) -> SchemaResult<Hash512> {
+        Ok(hash512(
+            SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_HASH_DOMAIN,
+            &[CanonicalItem::variable_bytes(self.encode()?)?],
+        )?)
+    }
+}
+
 pub struct ActionRandomnessRoot {
     root: Zeroizing<[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]>,
 }
@@ -407,9 +530,7 @@ impl ActionPrivateRandomness {
             SETUP_ACTION_RANDOMNESS_AUTHORIZATION_DOMAIN,
             &[
                 CanonicalItem::hash512(self.derivation_input.suite_identifier.into_bytes()),
-                CanonicalItem::hash512(
-                    self.derivation_input.ceremony_context_hash.into_bytes(),
-                ),
+                CanonicalItem::hash512(self.derivation_input.ceremony_context_hash.into_bytes()),
                 CanonicalItem::hash512(self.derivation_input.action_context_hash.into_bytes()),
                 CanonicalItem::hash512(roster_hash.into_bytes()),
                 CanonicalItem::participant_identity(
@@ -1362,43 +1483,6 @@ impl PrivateRandomCursor {
     }
 }
 
-pub fn derive_application_statement_hash(
-    canonical_application_statement_bytes: &[u8],
-) -> SchemaResult<Hash512> {
-    Ok(hash512(
-        APPLICATION_STATEMENT_HASH_DOMAIN,
-        &[CanonicalItem::variable_bytes(
-            canonical_application_statement_bytes,
-        )?],
-    )?)
-}
-
-pub fn derive_relation_plan_variant_hash(
-    canonical_relation_plan_variant_bytes: &[u8],
-) -> SchemaResult<Hash512> {
-    Ok(hash512(
-        RELATION_PLAN_VARIANT_HASH_DOMAIN,
-        &[CanonicalItem::variable_bytes(
-            canonical_relation_plan_variant_bytes,
-        )?],
-    )?)
-}
-
-pub fn derive_proof_coin_context_hash(
-    application_slot_hash: Hash512,
-    application_statement_hash: Hash512,
-    relation_plan_variant_hash: Hash512,
-) -> SchemaResult<Hash512> {
-    Ok(hash512(
-        PRIVATE_PROOF_COIN_CONTEXT_HASH_DOMAIN,
-        &[
-            CanonicalItem::hash512(application_slot_hash.into_bytes()),
-            CanonicalItem::hash512(application_statement_hash.into_bytes()),
-            CanonicalItem::hash512(relation_plan_variant_hash.into_bytes()),
-        ],
-    )?)
-}
-
 fn require_attempt_class(
     domain: PrivateRandomnessDomain,
     attempt_identifier: PrivateRandomnessAttemptIdentifier,
@@ -1715,6 +1799,80 @@ mod tests {
     }
 
     #[test]
+    fn structured_commitment_opening_context_is_canonical_and_binds_every_coordinate() {
+        let limits = CanonicalDecodeLimits::default();
+        let baseline = SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 3, 1, 11, 1)
+            .expect("assigned structured-commitment opening context");
+        let encoded = baseline.encode().expect("opening context encodes");
+        assert_eq!(
+            SetupStructuredCommitmentOpeningContext::decode(&encoded, &limits)
+                .expect("opening context decodes"),
+            baseline,
+        );
+        assert_eq!(baseline.source_setup_intent_object_hash(), hash(0x91));
+        assert_eq!(baseline.source_rns_limb_index(), 2);
+        assert_eq!(baseline.shamir_coefficient_index(), 3);
+        assert_eq!(baseline.commitment_data_prime_index(), 1);
+        assert_eq!(baseline.distribution_purpose(), 11);
+        assert_eq!(baseline.component_ordinal(), 1);
+
+        let baseline_hash = baseline.hash().expect("opening context hashes");
+        for changed in [
+            SetupStructuredCommitmentOpeningContext::new(hash(0x92), 2, 3, 1, 11, 1),
+            SetupStructuredCommitmentOpeningContext::new(hash(0x91), 1, 3, 1, 11, 1),
+            SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 2, 1, 11, 1),
+            SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 3, 2, 11, 1),
+            SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 3, 1, 12, 0),
+            SetupStructuredCommitmentOpeningContext::new(hash(0x91), 2, 3, 1, 11, 0),
+        ] {
+            assert_ne!(
+                changed
+                    .expect("changed opening context remains assigned")
+                    .hash()
+                    .expect("changed opening context hashes"),
+                baseline_hash,
+            );
+        }
+
+        for (purpose, component_ordinal) in [(10, 0), (13, 0), (11, 2), (12, 1)] {
+            assert_eq!(
+                SetupStructuredCommitmentOpeningContext::new(
+                    hash(0x91),
+                    2,
+                    3,
+                    1,
+                    purpose,
+                    component_ordinal,
+                )
+                .expect_err("unassigned purpose or component refuses")
+                .refusal_reason,
+                RefusalReason::WrongTypeOrLength,
+            );
+        }
+
+        let version_one = CanonicalTuple::new(
+            SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
+            1,
+            vec![
+                CanonicalItem::hash512(hash(0x91).into_bytes()),
+                CanonicalItem::unsigned16(2),
+                CanonicalItem::unsigned16(3),
+                CanonicalItem::unsigned16(1),
+                CanonicalItem::unsigned16(11),
+                CanonicalItem::unsigned16(1),
+            ],
+        )
+        .encode()
+        .expect("version-one tuple encodes");
+        assert_eq!(
+            SetupStructuredCommitmentOpeningContext::decode(&version_one, &limits)
+                .expect_err("incompatible version-one context refuses")
+                .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite,
+        );
+    }
+
+    #[test]
     fn key_hierarchy_is_deterministic_and_bound_to_every_action_input() {
         let first = action_randomness();
         let second = action_randomness();
@@ -1791,9 +1949,7 @@ mod tests {
                 CanonicalItem::hash512(hash(0x33).into_bytes()),
                 CanonicalItem::hash512(roster_hash.into_bytes()),
                 CanonicalItem::participant_identity(participant_identity().into_bytes()),
-                CanonicalItem::hash512(
-                    randomness.action_randomness_commitment().into_bytes(),
-                ),
+                CanonicalItem::hash512(randomness.action_randomness_commitment().into_bytes()),
             ],
         )
         .expect("authorization tuple hashes");
@@ -2223,38 +2379,6 @@ mod tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn proof_hashes_bind_each_canonical_layer_and_keep_domains_separate() {
-        let slot_hash = persistent_slot().hash().expect("slot hash");
-        let same_canonical_bytes = b"same canonical bytes";
-        let application_statement_hash =
-            derive_application_statement_hash(same_canonical_bytes).expect("statement hash");
-        let relation_plan_variant_hash =
-            derive_relation_plan_variant_hash(same_canonical_bytes).expect("plan hash");
-        assert_ne!(application_statement_hash, relation_plan_variant_hash);
-
-        let context_hash = derive_proof_coin_context_hash(
-            slot_hash,
-            application_statement_hash,
-            relation_plan_variant_hash,
-        )
-        .expect("proof coin context hash");
-        for changed_context_hash in [
-            derive_proof_coin_context_hash(
-                hash(0x90),
-                application_statement_hash,
-                relation_plan_variant_hash,
-            )
-            .expect("changed slot context"),
-            derive_proof_coin_context_hash(slot_hash, hash(0x91), relation_plan_variant_hash)
-                .expect("changed statement context"),
-            derive_proof_coin_context_hash(slot_hash, application_statement_hash, hash(0x92))
-                .expect("changed plan context"),
-        ] {
-            assert_ne!(context_hash, changed_context_hash);
-        }
     }
 
     #[test]

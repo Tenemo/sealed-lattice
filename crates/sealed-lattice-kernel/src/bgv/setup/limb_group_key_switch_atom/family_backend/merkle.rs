@@ -22,6 +22,7 @@ const LEAF_DOMAIN: &str = "sealed-lattice/proof/merkle/leaf/v1";
 
 const APPLICATION_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1216;
 const TREE_ORDINAL: u16 = 0x7000;
+const STREAMING_WORD_BATCH_SIZE: usize = 16;
 
 const fn merkle_context() -> SetupMerkleContext {
     SetupMerkleContext::new(APPLICATION_STATEMENT_SCHEMA_IDENTIFIER, TREE_ORDINAL)
@@ -95,9 +96,14 @@ impl StreamingLeafHasher {
     }
 
     pub(super) fn absorb_value_words(&mut self, words: &[u64]) {
-        for word in words {
-            self.inner.absorb_raw(&word.to_le_bytes());
-            self.absorbed_row_byte_length += 8;
+        let mut bytes = [0_u8; STREAMING_WORD_BATCH_SIZE * 8];
+        for word_batch in words.chunks(STREAMING_WORD_BATCH_SIZE) {
+            for (word_bytes, word) in bytes.chunks_exact_mut(8).zip(word_batch) {
+                word_bytes.copy_from_slice(&word.to_le_bytes());
+            }
+            let byte_length = word_batch.len() * 8;
+            self.inner.absorb_raw(&bytes[..byte_length]);
+            self.absorbed_row_byte_length += byte_length;
         }
     }
 
@@ -157,6 +163,53 @@ mod tests {
     fn opened_leaf_set(leaves: &[MerkleDigest], indices: &[usize]) -> Vec<(usize, MerkleDigest)> {
         consistent_sorted_leaves(indices.iter().map(|index| (*index, leaves[*index])))
             .expect("consistent leaves")
+    }
+
+    #[test]
+    fn batched_streaming_leaf_hash_matches_canonical_leaf_hash_across_batch_boundaries() {
+        let salt = [0x5a_u8; 32];
+        for word_count in [0_usize, 1, 13, 16, 17, 33] {
+            let words = (0..word_count)
+                .map(|index| {
+                    (index as u64)
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407)
+                })
+                .collect::<Vec<_>>();
+            let mut streaming =
+                StreamingLeafHasher::new(7 + word_count, &salt, (word_count * 8) as u64);
+            streaming.absorb_value_words(&words);
+            assert_eq!(
+                streaming.finalize(),
+                leaf_hash(7 + word_count, &salt, &words),
+                "streamed absorption must preserve bytes for {word_count} words"
+            );
+        }
+    }
+
+    #[test]
+    fn batched_streaming_leaf_hash_is_independent_of_production_call_partitions() {
+        let salt = [0xa5_u8; 32];
+        let words = (0..33_u64)
+            .map(|index| {
+                index
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407)
+            })
+            .collect::<Vec<_>>();
+        let expected = leaf_hash(19, &salt, &words);
+
+        for words_per_call in [1_usize, 7, 13, 16, 17] {
+            let mut streaming = StreamingLeafHasher::new(19, &salt, (words.len() * 8) as u64);
+            for partition in words.chunks(words_per_call) {
+                streaming.absorb_value_words(partition);
+            }
+            assert_eq!(
+                streaming.finalize(),
+                expected,
+                "streamed hashing must preserve bytes with {words_per_call} words per call"
+            );
+        }
     }
 
     #[test]

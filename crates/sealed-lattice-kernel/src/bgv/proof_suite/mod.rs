@@ -13,7 +13,7 @@ mod polynomial;
 mod profile;
 mod prover;
 mod relation_plan;
-mod security;
+mod setup_public_polynomial;
 mod transcript;
 mod verifier;
 mod zero_knowledge;
@@ -23,11 +23,10 @@ pub(crate) use body::{
     ProofBodyError, ProofBodyLayout, ProofTreeCatalogEntry, ProofTreeCatalogInput,
     ProofTreeCatalogSource, ProofTreeOpening, RelationProofTreeInput, StatementOwnedProofTreeInput,
     build_complete_proof_tree_catalog, decode_proof_body_prefix,
-    maximum_verifier_tree_hash_equation_count,
 };
 pub(crate) use committed_material::{
-    CommittedMaterialError, CommittedMaterialProfile, CommittedMaterialTree,
-    CommittedMaterialTreeInput,
+    CommittedMaterialBoundOpeningProvider, CommittedMaterialError, CommittedMaterialProfile,
+    CommittedMaterialTree, CommittedMaterialTreeInput,
 };
 pub(crate) use decoder::{BoundedProofDecoder, ProofByteSource, ProofDecodeError};
 pub(crate) use domain::{
@@ -101,29 +100,33 @@ pub(crate) use prover::{
 };
 pub(crate) use relation_plan::{
     BallotValidityRelationPlanInput, CollectivePublicKeyAggregatePlanInput,
-    CommittedMaterialRelationPlanInput, CompiledRelationPlan, EvaluatorKeyAggregateEntryPlanInput,
-    EvaluatorKeyAggregatePlanInput, EvaluatorKeyAggregateVariantInput,
-    GaloisKeyShareRelationPlanInput, PublicAggregateRelationGeometry,
-    PublicKeyShareRelationPlanInput, RelationApplicationChallengeAssignment,
-    RelationChallengeDescriptor, RelationChallengeEpochCatalog,
-    RelationChallengeEpochPrecedingMessage, RelationChallengeModulusSelector,
-    RelationChallengeRole, RelationChallengeSampling, RelationConstraintEvaluation,
-    RelationPlanCheckContext, RelationPlanError, RelationPlanVariant,
+    CommittedMaterialRelationPlanInput, CompiledRelationPlan, CompiledTargetReleaseRelation,
+    EvaluatorKeyAggregateEntryPlanInput, EvaluatorKeyAggregatePlanInput,
+    EvaluatorKeyAggregateVariantInput, GaloisKeyShareRelationPlanInput,
+    PublicAggregateRelationGeometry, PublicKeyShareRelationPlanInput,
+    RelationApplicationChallengeAssignment, RelationChallengeDescriptor,
+    RelationChallengeEpochCatalog, RelationChallengeEpochPrecedingMessage,
+    RelationChallengeModulusSelector, RelationChallengeRole, RelationChallengeSampling,
+    RelationConstraintEvaluation, RelationPlanCheckContext, RelationPlanError, RelationPlanVariant,
     RelinearizationRoundOneRelationPlanInput, RelinearizationRoundTwoRelationPlanInput,
     ResolvedRelationChallengeSampling, ResolvedSuiteModulus, RkgRoundOneAggregatePlanInput,
     RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput, SuiteModulusReference,
-    TrusteeEvaluationKeyDecompositionBlock, TrusteeEvaluationKeyRelationGeometry,
-    compile_aggregate_threshold_share_relation_plan, compile_ballot_validity_relation_plan,
-    compile_collective_public_key_aggregate_relation_plan,
+    TargetReleaseCapabilityError, TargetReleaseModulusWitness, TargetReleaseRelationPlanInput,
+    TargetReleaseRoleWitness, TargetReleaseVerifiedColumnEvaluator, TargetReleaseWitness,
+    TargetReleaseWitnessError, TrusteeEvaluationKeyDecompositionBlock,
+    TrusteeEvaluationKeyRelationGeometry, VerifiedTargetReleaseModulusInput,
+    VerifiedTargetReleaseProof, compile_aggregate_threshold_share_relation_plan,
+    compile_ballot_validity_relation_plan, compile_collective_public_key_aggregate_relation_plan,
     compile_evaluator_key_aggregate_relation_plan, compile_galois_key_share_relation_plan,
     compile_public_key_share_relation_plan, compile_relinearization_round_one_relation_plan,
     compile_relinearization_round_two_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
-    compile_same_secret_relation_plan, compile_vss_share_linkage_relation_plan,
+    compile_same_secret_relation_plan, compile_target_release_relation,
+    compile_target_release_relation_plan, compile_vss_share_linkage_relation_plan,
 };
-pub(crate) use security::{
-    ProofSecurityError, ProofSecurityEventInput, ProofSecurityProbabilityInput,
-    ProofSecurityScenarioBounds, ProofSecurityScenarioInput, ProofSecurityVariantSelector,
-    validate_first_profile_security,
+pub(crate) use setup_public_polynomial::{
+    SetupPublicPolynomialBoundOpeningProvider, SetupPublicPolynomialContext,
+    SetupPublicPolynomialError, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
+    SetupPublicPolynomialTreeInput,
 };
 pub(crate) use transcript::{
     CanonicalProofTranscript, CanonicalTranscriptEngine, CommonProofApplicationChallengeGroup,
@@ -131,8 +134,8 @@ pub(crate) use transcript::{
     CommonProofRound, CommonProofTranscript, CommonProofTranscriptSchedule, TranscriptError,
 };
 pub(crate) use verifier::{
-    CommonProofVerificationInput, CommonProofVerifierError, VerifiedRelationColumnEvaluator,
-    VerifiedStatementOwnedTree, verify_common_proof,
+    CommonProofVerificationInput, CommonProofVerifierError, VerifiedCommonProof,
+    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, verify_common_proof,
 };
 pub(crate) use zero_knowledge::validate_zero_knowledge_mask_image;
 

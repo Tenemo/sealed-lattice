@@ -110,7 +110,7 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
         );
         constraint_index += 1;
     };
-    let trinary_constraint = |value: &Domain::Value| {
+    let ternary_constraint = |value: &Domain::Value| {
         let cube = domain.value_mul(&domain.value_mul(value, value), value);
         domain.value_sub(&cube, value)
     };
@@ -125,7 +125,7 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
             for half in 0..TRACE_SPLIT {
                 let randomness = column_values
                     [layout.physical_private_vss_randomness(randomness_position, half)];
-                absorb(&trinary_constraint(&randomness), &mut accumulated);
+                absorb(&ternary_constraint(&randomness), &mut accumulated);
             }
         }
         for mask_column in 0..layout.mask_column_count {
@@ -139,7 +139,7 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
 
     for half in 0..TRACE_SPLIT {
         let secret = column_values[layout.physical_secret(half)];
-        absorb(&trinary_constraint(&secret), &mut accumulated);
+        absorb(&ternary_constraint(&secret), &mut accumulated);
     }
     for error_position in 0..layout.total_error_columns {
         for half in 0..TRACE_SPLIT {
@@ -177,7 +177,7 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
             for half in 0..TRACE_SPLIT {
                 let randomness =
                     column_values[layout.physical_linkage_randomness(randomness_position, half)];
-                absorb(&trinary_constraint(&randomness), &mut accumulated);
+                absorb(&ternary_constraint(&randomness), &mut accumulated);
             }
         }
     }
@@ -220,12 +220,8 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                 let alpha_value = &consistency_alpha[claim_alpha_index];
                 claim_alpha_index += 1;
                 for half in 0..TRACE_SPLIT {
-                    let witness_value = if consistency_vector == 0 {
-                        column_values[layout.physical_private_vss_carry(half)]
-                    } else {
-                        column_values
-                            [layout.physical_private_vss_randomness(consistency_vector - 1, half)]
-                    };
+                    debug_assert_eq!(consistency_vector, 0);
+                    let witness_value = column_values[layout.physical_private_vss_carry(half)];
                     let product =
                         domain.value_mul(&publics.consistency[repetition][half], &witness_value);
                     accumulated =

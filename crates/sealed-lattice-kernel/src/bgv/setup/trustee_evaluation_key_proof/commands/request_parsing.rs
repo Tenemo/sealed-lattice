@@ -1,7 +1,7 @@
 use super::super::invalid_succinct_setup_proof;
 use super::super::relation::{
-    SameSecretLinkageStatement, SetupProofStatement, SuccinctSetupProofContext,
-    SuccinctSetupProofFamilyShape, TrusteeEvaluationKeyStatement,
+    EvaluationKeyShareDescriptor, SameSecretLinkageStatement, SetupProofStatement,
+    SuccinctSetupProofContext, SuccinctSetupProofFamilyShape, TrusteeEvaluationKeyStatement,
 };
 use super::decoding::{read_string, read_u64};
 use super::target_decryption_parsing::key_descriptor_from_value;
@@ -37,8 +37,6 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn statement_from_reques
     let context_value = request
         .get("context")
         .ok_or_else(|| invalid_succinct_setup_proof("context must be present"))?;
-    let ring_degree = usize::try_from(read_u64(request, "ringDegree")?)
-        .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit usize"))?;
     let key_values = request
         .get("keys")
         .and_then(Value::as_array)
@@ -47,6 +45,7 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn statement_from_reques
         .iter()
         .map(|key_value| key_descriptor_from_value(key_value, request))
         .collect::<CanonicalResult<Vec<_>>>()?;
+    let ring_degree = statement_ring_degree(&keys)?;
     // The key kinds decide the family, and the family decides which labeled
     // binding roots the context must carry.
     let shape = SuccinctSetupProofFamilyShape::from_key_kinds(
@@ -72,13 +71,25 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn statement_from_reques
     Ok(statement)
 }
 
+fn statement_ring_degree(keys: &[EvaluationKeyShareDescriptor]) -> CanonicalResult<usize> {
+    keys.first()
+        .and_then(|key| key.component_b_by_digit.first())
+        .and_then(|digit| digit.first())
+        .map(Vec::len)
+        .filter(|ring_degree| *ring_degree > 0)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "key component material must contain a non-empty coefficient vector",
+            )
+        })
+}
+
 fn proof_context_from_value(
     context_value: &Value,
     shape: SuccinctSetupProofFamilyShape,
 ) -> CanonicalResult<SuccinctSetupProofContext> {
     Ok(SuccinctSetupProofContext {
         setup_context_hash: read_string(context_value, "setupContextHash")?.to_string(),
-        trustee_identity: read_string(context_value, "trusteeIdentity")?.to_string(),
         trustee_roster_position: read_u64(context_value, "trusteeRosterPosition")?,
         binding_roots: shape
             .binding_labels()

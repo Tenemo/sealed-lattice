@@ -81,8 +81,8 @@ fn generate_bgv_target_decryption_share_proof_with_context(
         target_accepted,
         target_ciphertexts,
     } = context;
-    let trustee_identity = required_string_field(request, "trusteeIdentity")?;
-    let participant = read_target_decryption_participant(&setup_binding, trustee_identity)?;
+    let trustee_roster_position = usize_field(request, "trusteeRosterPosition")?;
+    let participant = read_target_decryption_participant(&setup_binding, trustee_roster_position)?;
     let local_witness = read_local_target_decryption_share_witness(
         value_at_path(request, &["localTargetShareWitness"])?,
         &setup_binding,
@@ -141,8 +141,8 @@ pub(crate) fn generate_bgv_target_decryption_share_from_local_share_request(
         target_accepted,
         target_ciphertexts,
     } = TargetDecryptionRequestContext::parse(request)?;
-    let trustee_identity = required_string_field(request, "trusteeIdentity")?;
-    let participant = read_target_decryption_participant(&setup_binding, trustee_identity)?;
+    let trustee_roster_position = usize_field(request, "trusteeRosterPosition")?;
+    let participant = read_target_decryption_participant(&setup_binding, trustee_roster_position)?;
     let local_witness = read_local_target_decryption_share_witness(
         value_at_path(request, &["localTargetShareWitness"])?,
         &setup_binding,
@@ -171,8 +171,8 @@ pub(crate) fn derive_bgv_target_decryption_share_proof_statement_from_request(
         target_accepted,
         target_ciphertexts,
     } = TargetDecryptionRequestContext::parse(request)?;
-    let trustee_identity = required_string_field(request, "trusteeIdentity")?;
-    let participant = read_target_decryption_participant(&setup_binding, trustee_identity)?;
+    let trustee_roster_position = usize_field(request, "trusteeRosterPosition")?;
+    let participant = read_target_decryption_participant(&setup_binding, trustee_roster_position)?;
 
     derive_target_decryption_share_proof_statement(
         &setup_binding,
@@ -193,8 +193,8 @@ pub(crate) fn verify_bgv_target_decryption_share_proof_statement_binding_from_re
         target_ciphertexts,
     } = TargetDecryptionRequestContext::parse(request)?;
     let proof_statement = value_at_path(request, &["proofStatement"])?;
-    let trustee_identity = string_at_path(proof_statement, &["trusteeIdentity"])?;
-    let participant = read_target_decryption_participant(&setup_binding, trustee_identity)?;
+    let trustee_roster_position = usize_at_path(proof_statement, &["trusteeRosterPosition"])?;
+    let participant = read_target_decryption_participant(&setup_binding, trustee_roster_position)?;
 
     verify_target_decryption_share_proof_statement_binding(
         &setup_binding,
@@ -219,17 +219,11 @@ pub(crate) fn begin_bgv_target_decryption_result_release_for_test(
         value_at_path(request, &["targetCiphertextBinding"])?,
         &target_accepted,
     )?;
-    let target_share_profile = read_target_share_profile(
-        value_at_path(request, &["targetShareProfile"])?,
-        &setup_binding,
-    )?;
-
     begin_target_decryption_result_release(TargetDecryptionResultReleaseBeginInput {
         release_verification_id: required_string_field(request, "releaseVerificationId")?,
         setup_binding: &setup_binding,
         target_accepted: &target_accepted,
         target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile,
     })
 }
 
@@ -252,16 +246,16 @@ pub(crate) fn finish_bgv_target_decryption_result_release_for_test(
 
 fn read_target_decryption_participant<'a>(
     setup_binding: &'a SetupBinding,
-    trustee_identity: &str,
+    trustee_roster_position: usize,
 ) -> CanonicalResult<&'a ParticipantBinding> {
     setup_binding
         .participants
-        .iter()
-        .find(|candidate| candidate.trustee_identity == trustee_identity)
+        .get(trustee_roster_position)
+        .filter(|candidate| candidate.roster_position == trustee_roster_position)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "target decryption trusteeIdentity is not part of the setup roster",
+                "target decryption trustee roster position is not part of the setup roster",
             )
         })
 }

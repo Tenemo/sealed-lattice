@@ -91,12 +91,7 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         let evaluator_replay_record_hash = direct_ballot_evaluator_replay_record_hash(
             DirectBallotEvaluatorReplayRecordHashInput {
                 setup_package,
-                aggregate_ciphertext_root: &aggregate_ciphertext_root,
                 ballot_count,
-                top_count: *top_count,
-                score_domain_max,
-                working_level: context.working_level(),
-                target_layout_hash: &target_layout_root,
                 target_ciphertext_hash: &target_ciphertext_hash,
             },
         )?;
@@ -179,12 +174,7 @@ pub(crate) fn direct_ballot_plaintext_target_slots(
 
 pub(super) struct DirectBallotEvaluatorReplayRecordHashInput<'a> {
     setup_package: &'a Value,
-    aggregate_ciphertext_root: &'a str,
     ballot_count: usize,
-    top_count: usize,
-    score_domain_max: u64,
-    working_level: usize,
-    target_layout_hash: &'a str,
     target_ciphertext_hash: &'a str,
 }
 
@@ -194,12 +184,7 @@ pub(super) fn direct_ballot_evaluator_replay_record_hash(
     derive_canonical_object_hash(&json!({
         "objectType": "EvaluatorReplayRecord",
         "setupPackageHash": setup_package_hash(input.setup_package)?,
-        "aggregateCiphertextRoot": input.aggregate_ciphertext_root,
         "ballotCount": input.ballot_count,
-        "topCount": input.top_count,
-        "scoreDomainMax": input.score_domain_max,
-        "workingLevel": input.working_level,
-        "targetLayoutHash": input.target_layout_hash,
         "targetCiphertextHash": input.target_ciphertext_hash,
     }))
 }

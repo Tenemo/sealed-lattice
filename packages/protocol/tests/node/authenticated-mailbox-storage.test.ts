@@ -53,7 +53,6 @@ const carrier = (byte = 0xa1) => ({
         0x04,
         0x05,
     ]),
-    envelopeHash: hashHex(byte),
 });
 
 const arrayBufferFrom = (bytes: Uint8Array): ArrayBuffer => {
@@ -248,9 +247,9 @@ describe('Browser-local authenticated mailbox storage', () => {
             producerSlot: slot,
         });
         expect(cachedLease.disposition).toBe('cached');
-        await expect(cachedLease.cachedCarrier()).resolves.toEqual(
-            signedCarrier,
-        );
+        await expect(cachedLease.cachedCarrier()).resolves.toEqual({
+            canonicalEnvelopeBytes: signedCarrier.canonicalEnvelopeBytes,
+        });
         expect(
             new Uint8Array(
                 (await cachedLease.pullChunk({
@@ -391,9 +390,10 @@ describe('Browser-local authenticated mailbox storage', () => {
                 }),
             ),
         );
-        await expect(outboundLease.commit(carrier(0xa2))).rejects.toMatchObject(
-            { code: 'ResourceLimit' },
-        );
+        const uncommittedCarrier = carrier(0xa2);
+        await expect(
+            outboundLease.commit(uncommittedCarrier),
+        ).rejects.toMatchObject({ code: 'ResourceLimit' });
         await Promise.all(
             outboundBlockingTransactions.map((transaction) =>
                 transaction.abort(),
@@ -593,7 +593,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         await expect(
             storage.inboundSlotAuthority.reserve({
                 canonicalEnvelopeBytes: new Uint8Array([0x99]),
-                envelopeHash: signedCarrier.envelopeHash,
                 producerSlot: slot,
             }),
         ).resolves.toEqual({
@@ -616,17 +615,6 @@ describe('Browser-local authenticated mailbox storage', () => {
         await expect(
             storage.inboundSlotAuthority.reserve({
                 canonicalEnvelopeBytes: new Uint8Array([0x10, 0x20]),
-                envelopeHash: signedCarrier.envelopeHash,
-                producerSlot: slot,
-            }),
-        ).resolves.toEqual({
-            isValid: false,
-            refusalReason: 'equivocation',
-        });
-        await expect(
-            storage.inboundSlotAuthority.reserve({
-                canonicalEnvelopeBytes: signedCarrier.canonicalEnvelopeBytes,
-                envelopeHash: hashHex(0xb2),
                 producerSlot: slot,
             }),
         ).resolves.toEqual({

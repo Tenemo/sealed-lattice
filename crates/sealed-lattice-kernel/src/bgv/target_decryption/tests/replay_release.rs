@@ -158,21 +158,19 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
             crate::bgv::evaluator::engine::ciphertext_canonical_bytes_hex(&target.target_order)
                 .expect("target order hex"),
     });
-    let target_share_profile_value = target_share_profile(&setup_package);
     let setup_binding = read_setup_binding(&setup_package).expect("setup binding");
-    let target_share_profile_binding =
-        read_target_share_profile(&target_share_profile_value, &setup_binding)
-            .expect("target share profile");
-    let quorum = target_share_profile_binding.decryption_share_quorum;
+    let required_share_count =
+        decryption_threshold_for_roster_length(setup_binding.participants.len())
+            .expect("target decryption share threshold");
     phase("generating the proof-backed share quorum with real succinct proofs");
-    let mut target_share_proofs = Vec::with_capacity(quorum);
+    let mut target_share_proofs = Vec::with_capacity(required_share_count);
     let selected_participants = setup_binding
         .participants
         .iter()
         .step_by(2)
-        .take(quorum)
+        .take(required_share_count)
         .collect::<Vec<_>>();
-    assert_eq!(selected_participants.len(), quorum);
+    assert_eq!(selected_participants.len(), required_share_count);
     for participant in selected_participants {
         let trustee_identity = participant.trustee_identity.as_str();
         let local_target_share_witness_value = local_target_share_witness(
@@ -180,7 +178,6 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
             &accepted,
             &target_ciphertext_binding,
             &target_ciphertexts,
-            &target_share_profile_value,
             trustee_identity,
         );
         let target_share_proof =
@@ -191,7 +188,7 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
                     "targetAcceptedRecord": accepted,
                     "targetCiphertextBinding": target_ciphertext_binding,
                     "targetCiphertexts": target_ciphertexts,
-                    "trusteeIdentity": trustee_identity,
+                    "trusteeRosterPosition": participant.roster_position,
                     "proofRandomnessSeedHex": hash512_hex(
                         "sealed-lattice/tests/replay-release-proof-randomness-seed",
                         &[trustee_identity.as_bytes()],
@@ -210,7 +207,6 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
         &accepted,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile_value,
         target_share_proofs,
         release_verification_id,
     )

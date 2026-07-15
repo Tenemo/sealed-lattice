@@ -693,3 +693,45 @@ fn generated_plan_checker_rejects_rotated_factor_and_opening_catalog_tampering()
         Err(RelationPlanError::InvalidOpening)
     );
 }
+
+#[test]
+fn application_extractor_rejects_semantic_witness_first_committed_after_challenge() {
+    let context = committed_material_check_context();
+    let input = committed_material_input();
+    let mut plan = compile_vss_share_linkage_relation_plan(&input, &context)
+        .expect("exact VSS share-linkage relation plan");
+    let semantic_prover_columns = plan.plan.variants[0]
+        .ordered_semantic_cells
+        .iter()
+        .filter_map(|cell| {
+            matches!(
+                plan.plan.variants[0].ordered_columns[cell.column_ordinal as usize].origin,
+                RelationColumnOrigin::Prover
+            )
+            .then_some(cell.column_ordinal)
+        })
+        .collect::<BTreeSet<_>>();
+    let base_tree_role = plan.plan.variants[0]
+        .ordered_trees
+        .iter_mut()
+        .find_map(|tree| match tree {
+            RelationTreeDescriptor::ProofCreated {
+                proof_tree_role,
+                ordered_column_ordinals,
+            } if *proof_tree_role == 1
+                && ordered_column_ordinals
+                    .iter()
+                    .any(|column_ordinal| semantic_prover_columns.contains(column_ordinal)) =>
+            {
+                Some(proof_tree_role)
+            }
+            _ => None,
+        })
+        .expect("the secret relation has a base tree containing semantic witness columns");
+    *base_tree_role = 2;
+
+    assert_eq!(
+        plan.check(&context),
+        Err(RelationPlanError::InvalidConstraint),
+    );
+}

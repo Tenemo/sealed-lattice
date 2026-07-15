@@ -2,8 +2,7 @@ use std::sync::OnceLock;
 
 #[cfg(test)]
 use crate::bgv::{
-    base_conversion::lift_plaintext_coefficients_to_basis,
-    parameters::{BgvBasisKind, bgv_parameters_hash},
+    base_conversion::lift_plaintext_coefficients_to_basis, parameters::BgvBasisKind,
     rns::RnsPolynomial,
 };
 use crate::{
@@ -36,7 +35,6 @@ pub(crate) fn encode_batch_plaintext_slots(
         &coefficients_mod_plaintext,
         BgvBasisKind::Data,
         target_level,
-        bgv_parameters_hash()?,
     )?;
 
     Ok(EncodedBatchPlaintext {
@@ -185,7 +183,6 @@ mod tests {
             ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
             parameters::{
                 BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, ROOT_PARAMETERS,
-                bgv_parameters_hash,
             },
         },
         encoding::CanonicalErrorCode,
@@ -205,7 +202,7 @@ mod tests {
         let decoded = decode_batch_plaintext_polynomial(&encoded.polynomial).expect("decode");
 
         assert_eq!(decoded, slots);
-        assert_eq!(encoded.polynomial.moduli, vec![DATA_PRIMES[0]]);
+        assert_eq!(encoded.polynomial.residues_by_modulus.len(), 1);
     }
 
     #[test]
@@ -244,13 +241,9 @@ mod tests {
                 .iter()
                 .map(|natural_transform_index| natural_transform[*natural_transform_index])
                 .collect::<Vec<_>>();
-            let polynomial = lift_plaintext_coefficients_to_basis(
-                &coefficients,
-                BgvBasisKind::Data,
-                1,
-                bgv_parameters_hash().expect("parameter hash"),
-            )
-            .expect("lift coefficients");
+            let polynomial =
+                lift_plaintext_coefficients_to_basis(&coefficients, BgvBasisKind::Data, 1)
+                    .expect("lift coefficients");
             let decoded =
                 decode_batch_plaintext_polynomial(&polynomial).expect("decode coefficients");
 
@@ -329,7 +322,7 @@ mod tests {
             let decoded = decode_batch_plaintext_polynomial(&encoded.polynomial).expect("decode");
 
             assert_eq!(decoded, slots);
-            assert_eq!(encoded.polynomial.moduli, DATA_PRIMES[..=1].to_vec());
+            assert_eq!(encoded.polynomial.residues_by_modulus.len(), 2);
         }
     }
 

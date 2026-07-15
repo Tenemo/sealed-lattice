@@ -1,11 +1,10 @@
 use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
-use super::*;
 use super::super::{
-    field::ProofBaseFieldElement,
+    CommonProofTranscript, PROOF_BASE_FIELD_MODULUS, field::ProofBaseFieldElement,
     merkle::CanonicalProofMerkleTree,
-    CommonProofTranscript, PROOF_BASE_FIELD_MODULUS,
 };
+use super::*;
 
 #[derive(Clone)]
 struct EncodedTreeOpening {
@@ -106,14 +105,10 @@ fn canonical_tree_value_list(values: &[ProofTreeValue]) -> CanonicalItem {
         .copied()
         .map(canonical_tree_value)
         .collect::<Vec<_>>();
-    CanonicalItem::homogeneous_list(element_type, &items)
-        .expect("tree-value list is canonical")
+    CanonicalItem::homogeneous_list(element_type, &items).expect("tree-value list is canonical")
 }
 
-fn common_leaf(
-    entry: &ProofTreeCatalogEntry,
-    leaf_index: u64,
-) -> ProofOraclePhasePairLeaf {
+fn common_leaf(entry: &ProofTreeCatalogEntry, leaf_index: u64) -> ProofOraclePhasePairLeaf {
     let context = entry
         .common_context()
         .expect("common test entry has a common context");
@@ -132,23 +127,15 @@ fn common_leaf(
                 let value = first_seed + offset + column_index as u64 * 7;
                 match value_kind {
                     TreeValueKind::Base => ProofTreeValue::Base(base_value(value)),
-                    TreeValueKind::Extension => {
-                        ProofTreeValue::Extension(extension_value(value))
-                    }
+                    TreeValueKind::Extension => ProofTreeValue::Extension(extension_value(value)),
                 }
             })
             .collect::<Vec<_>>()
     };
     let salt = (context.leaf_visibility() == ProofLeafVisibility::SecretBearing)
         .then_some([entry.tree_catalog_index() as u8 + leaf_index as u8 + 1; 48]);
-    ProofOraclePhasePairLeaf::new(
-        context,
-        leaf_index,
-        salt,
-        values(0),
-        values(43),
-    )
-    .expect("test common leaf is valid")
+    ProofOraclePhasePairLeaf::new(context, leaf_index, salt, values(0), values(43))
+        .expect("test common leaf is valid")
 }
 
 fn common_tree_opening(entry: &ProofTreeCatalogEntry) -> EncodedTreeOpening {
@@ -187,14 +174,10 @@ fn statement_leaf_bytes(
     value_seed: u64,
 ) -> Vec<u8> {
     let first_values = (0..row_width)
-        .map(|column_index| {
-            ProofTreeValue::Base(base_value(value_seed + column_index as u64))
-        })
+        .map(|column_index| ProofTreeValue::Base(base_value(value_seed + column_index as u64)))
         .collect::<Vec<_>>();
     let opposite_values = (0..row_width)
-        .map(|column_index| {
-            ProofTreeValue::Base(base_value(value_seed + 31 + column_index as u64))
-        })
+        .map(|column_index| ProofTreeValue::Base(base_value(value_seed + 31 + column_index as u64)))
         .collect::<Vec<_>>();
     let mut items = vec![
         CanonicalItem::hash512(context_hash),
@@ -243,14 +226,8 @@ fn statement_tree_opening(
         .iter()
         .map(|bytes| hash_canonical_leaf(leaf_hash_domain, bytes).expect("leaf hashes"))
         .collect::<Vec<_>>();
-    let root = statement_owned_node_digest(
-        &construction,
-        1,
-        0,
-        leaf_digests[0],
-        leaf_digests[1],
-    )
-    .expect("statement node hashes");
+    let root = statement_owned_node_digest(&construction, 1, 0, leaf_digests[0], leaf_digests[1])
+        .expect("statement node hashes");
     EncodedTreeOpening {
         root,
         opened_leaf_bytes: vec![leaf_bytes[0].clone()],
@@ -275,10 +252,7 @@ fn canonical_extension_list_bytes(values: &[ProofChallengeExtensionElement]) -> 
         .to_vec()
 }
 
-fn canonical_opening_record(
-    tree_catalog_index: u16,
-    opened_leaf_bytes: &[Vec<u8>],
-) -> Vec<u8> {
+fn canonical_opening_record(tree_catalog_index: u16, opened_leaf_bytes: &[Vec<u8>]) -> Vec<u8> {
     let leaves = opened_leaf_bytes
         .iter()
         .map(|bytes| CanonicalItem::variable_bytes(bytes).expect("opened leaf is bounded"))
@@ -296,10 +270,7 @@ fn canonical_opening_record(
     .expect("opening record encodes")
 }
 
-fn canonical_frontier(
-    tree_catalog_index: u16,
-    frontier: &[ParsedAuthenticationNode],
-) -> Vec<u8> {
+fn canonical_frontier(tree_catalog_index: u16, frontier: &[ParsedAuthenticationNode]) -> Vec<u8> {
     let nodes = frontier
         .iter()
         .map(|node| {
@@ -336,28 +307,31 @@ fn encode_body(
 ) -> Vec<u8> {
     assert_eq!(layout.catalog.entries.len(), tree_openings.len());
     let mut bytes = Vec::new();
-    let append_roots = |bytes: &mut Vec<u8>,
-                        predicate: &dyn Fn(ProofTreeCatalogSource) -> bool| {
+    let append_roots = |bytes: &mut Vec<u8>, predicate: &dyn Fn(ProofTreeCatalogSource) -> bool| {
         for (entry, opening) in layout.catalog.entries.iter().zip(tree_openings) {
             if predicate(entry.source) {
                 bytes.extend_from_slice(&opening.root);
             }
         }
     };
-    append_roots(
-        &mut bytes,
-        &|source| matches!(source, ProofTreeCatalogSource::RelationProofCreated {
-            tree_role: ProofTreeRole::BaseOracle,
-            ..
-        }),
-    );
-    append_roots(
-        &mut bytes,
-        &|source| matches!(source, ProofTreeCatalogSource::RelationProofCreated {
-            tree_role: ProofTreeRole::AuxiliaryOracle,
-            ..
-        }),
-    );
+    append_roots(&mut bytes, &|source| {
+        matches!(
+            source,
+            ProofTreeCatalogSource::RelationProofCreated {
+                tree_role: ProofTreeRole::BaseOracle,
+                ..
+            }
+        )
+    });
+    append_roots(&mut bytes, &|source| {
+        matches!(
+            source,
+            ProofTreeCatalogSource::RelationProofCreated {
+                tree_role: ProofTreeRole::AuxiliaryOracle,
+                ..
+            }
+        )
+    });
     append_roots(&mut bytes, &|source| {
         matches!(source, ProofTreeCatalogSource::QuotientComponent { .. })
     });
@@ -396,14 +370,8 @@ fn query_opening_absorber(
         1,
         1,
     );
-    let mut transcript = CommonProofTranscript::new(
-        1,
-        [0x11; 64],
-        0x1216,
-        &[0x22; 96],
-        schedule,
-    )
-    .expect("test transcript starts");
+    let mut transcript = CommonProofTranscript::new(1, [0x11; 64], 0x1216, &[0x22; 96], schedule)
+        .expect("test transcript starts");
     transcript
         .sample_composition_challenge(0)
         .expect("composition challenge derives");
@@ -471,9 +439,9 @@ fn simple_public_body() -> (
         catalog_input(
             2,
             vec![RelationProofTreeInput::ProofCreated {
-            tree_role: ProofTreeRole::BaseOracle,
-            row_width: 2,
-            leaf_visibility: ProofLeafVisibility::Public,
+                tree_role: ProofTreeRole::BaseOracle,
+                row_width: 2,
+                leaf_visibility: ProofLeafVisibility::Public,
             }],
         ),
         &schedule,
@@ -514,16 +482,17 @@ fn decoder_accepts_exact_public_body_and_streams_one_opening_at_a_time() {
         .query_section_byte_length()
         .expect("query section length derives");
     let (mut transcript, mut absorber) = query_opening_absorber(query_section_byte_length);
-    let decoded = pending.decode_query_section(&[0], &mut absorber, |opening| {
-        assert_eq!(opening.leaves().len(), 1);
-        assert_eq!(opening.leaves()[0].leaf_index(), 0);
-        observed_openings.push((
-            opening.catalog_entry().tree_catalog_index(),
-            opening.leaves()[0].first_point_values().len(),
-        ));
-        Ok(())
-    })
-    .expect("canonical public body decodes");
+    let decoded = pending
+        .decode_query_section(&[0], &mut absorber, |opening| {
+            assert_eq!(opening.leaves().len(), 1);
+            assert_eq!(opening.leaves()[0].leaf_index(), 0);
+            observed_openings.push((
+                opening.catalog_entry().tree_catalog_index(),
+                opening.leaves()[0].first_point_values().len(),
+            ));
+            Ok(())
+        })
+        .expect("canonical public body decodes");
     transcript
         .finish_query_openings(absorber)
         .expect("streamed query bytes finish");
@@ -612,11 +581,12 @@ fn catalog_and_decoder_enforce_secret_root_order_and_leaf_grammar() {
         .expect("secret prefix decodes");
     let (mut transcript, mut absorber) =
         query_opening_absorber(pending.query_section_byte_length().unwrap());
-    pending.decode_query_section(&[0], &mut absorber, |opening| {
-        opened_catalog_indexes.push(opening.catalog_entry().tree_catalog_index());
-        Ok(())
-    })
-    .expect("secret body decodes");
+    pending
+        .decode_query_section(&[0], &mut absorber, |opening| {
+            opened_catalog_indexes.push(opening.catalog_entry().tree_catalog_index());
+            Ok(())
+        })
+        .expect("secret body decodes");
     transcript
         .finish_query_openings(absorber)
         .expect("streamed query bytes finish");
@@ -696,11 +666,12 @@ fn statement_owned_material_and_setup_trees_use_their_exact_leaf_and_node_equati
         .expect("bound prefix decodes");
     let (mut transcript, mut absorber) =
         query_opening_absorber(pending.query_section_byte_length().unwrap());
-    pending.decode_query_section(&[0], &mut absorber, |opening| {
-        observed_widths.push(opening.leaves()[0].first_point_values().len());
-        Ok(())
-    })
-    .expect("statement-owned openings authenticate");
+    pending
+        .decode_query_section(&[0], &mut absorber, |opening| {
+            observed_widths.push(opening.leaves()[0].first_point_values().len());
+            Ok(())
+        })
+        .expect("statement-owned openings authenticate");
     transcript
         .finish_query_openings(absorber)
         .expect("streamed query bytes finish");
@@ -745,15 +716,11 @@ fn layout_deduplicates_fri_collisions_without_changing_global_catalog_indexes() 
         .collect::<Vec<_>>();
     assert_eq!(fri_entries.len(), 2);
     assert_eq!(
-        layout
-            .opened_leaf_indexes(fri_entries[0], &[1, 5])
-            .unwrap(),
+        layout.opened_leaf_indexes(fri_entries[0], &[1, 5]).unwrap(),
         [1]
     );
     assert_eq!(
-        layout
-            .opened_leaf_indexes(fri_entries[1], &[1, 5])
-            .unwrap(),
+        layout.opened_leaf_indexes(fri_entries[1], &[1, 5]).unwrap(),
         [1]
     );
     assert_eq!(fri_entries[0].tree_catalog_index(), 2);
@@ -897,71 +864,5 @@ fn decoder_rejects_wrong_roots_indices_lengths_noncanonical_fields_and_trailing_
     assert_eq!(
         decode_complete_body(&trailing, &layout),
         Err(ProofBodyError::Decode(ProofDecodeError::TrailingBytes))
-    );
-}
-
-#[test]
-fn verifier_tree_hash_budget_is_derived_from_catalog_geometry() {
-    assert_eq!(maximum_merkle_opening_hash_equation_count(8, 1), Ok(4));
-    assert_eq!(maximum_merkle_opening_hash_equation_count(8, 3), Ok(9));
-    assert_eq!(
-        maximum_merkle_opening_hash_equation_count(8, 0),
-        Err(ProofBodyError::InvalidCatalog),
-    );
-
-    let public_schedule = transcript_schedule(
-        CommonProofPrivacyMode::PublicOnly,
-        vec![0],
-        Vec::new(),
-        1,
-        1,
-        1,
-        2,
-        4,
-    );
-    let public_catalog = build_complete_proof_tree_catalog(
-        catalog_input(
-            8,
-            vec![RelationProofTreeInput::ProofCreated {
-                tree_role: ProofTreeRole::BaseOracle,
-                row_width: 1,
-                leaf_visibility: ProofLeafVisibility::Public,
-            }],
-        ),
-        &public_schedule,
-    )
-    .expect("the public tree catalog derives");
-    assert_eq!(
-        maximum_verifier_tree_hash_equation_count(&public_catalog, 2),
-        Ok(13),
-    );
-
-    let bound_schedule = transcript_schedule(
-        CommonProofPrivacyMode::PublicOnly,
-        Vec::new(),
-        Vec::new(),
-        1,
-        1,
-        1,
-        2,
-        4,
-    );
-    let bound_catalog = build_complete_proof_tree_catalog(
-        catalog_input(
-            8,
-            vec![RelationProofTreeInput::BoundPublic(
-                StatementOwnedProofTreeInput::SetupPolynomial {
-                    public_polynomial_context_hash: [0x71; 64],
-                    row_width: 1,
-                    expected_root: [0x72; 64],
-                },
-            )],
-        ),
-        &bound_schedule,
-    )
-    .expect("the bound tree catalog derives");
-    assert_eq!(
-        maximum_verifier_tree_hash_equation_count(&bound_catalog, 2),
-        Ok(19),
     );
 }

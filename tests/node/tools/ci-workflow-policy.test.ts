@@ -26,11 +26,6 @@ describe('CI workflow policy', () => {
         expect(ciWorkflow).toMatch(/^ {4}routine:\r?$/mu);
         expect(ciWorkflow).toContain('run: pnpm run test:node:built');
         expect(ciWorkflow).toContain('run: pnpm run test:browser:built');
-        expect(ciWorkflow).not.toMatch(
-            /^ {4}(?:static-build|node|browser):\r?$/gmu,
-        );
-        expect(ciWorkflow).not.toContain('    node-kernel-heavy:');
-        expect(ciWorkflow).not.toContain('test:node:kernel:heavy');
     });
 
     it('keeps ten-participant accepted-setup evidence out of pull request CI', async () => {

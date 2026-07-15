@@ -2,11 +2,10 @@ use super::{
     ProofChallengeExtensionElement,
     merkle::{leaf_hash, node_hash},
     transcript::{
-        CanonicalProofTranscript, CanonicalTranscriptEngine,
-        CommonProofApplicationChallengeGroup, CommonProofChallenge, CommonProofPrivacyMode,
-        CommonProofTranscript, CommonProofTranscriptSchedule, DistinctQuerySamplingError,
-        TranscriptError, sample_distinct_query_positions_from_values,
-        sample_distinct_query_positions_with_blocks,
+        CanonicalProofTranscript, CanonicalTranscriptEngine, CommonProofApplicationChallengeGroup,
+        CommonProofChallenge, CommonProofPrivacyMode, CommonProofTranscript,
+        CommonProofTranscriptSchedule, DistinctQuerySamplingError, TranscriptError,
+        sample_distinct_query_positions_from_values, sample_distinct_query_positions_with_blocks,
     },
 };
 
@@ -15,9 +14,7 @@ fn transcript_extension_value(value: u64) -> ProofChallengeExtensionElement {
         .expect("small transcript test value is canonical")
 }
 
-fn common_proof_schedule(
-    privacy_mode: CommonProofPrivacyMode,
-) -> CommonProofTranscriptSchedule {
+fn common_proof_schedule(privacy_mode: CommonProofPrivacyMode) -> CommonProofTranscriptSchedule {
     CommonProofTranscriptSchedule::new(
         vec![0, 2],
         vec![
@@ -75,14 +72,10 @@ fn common_proof_transcript_enforces_the_exact_round_chain() {
         .absorb_base_root(2, [0x02; 64])
         .expect("second base root is in order");
     let theta = transcript
-        .sample_application_challenge_group(CommonProofChallenge::Theta {
-            modulus_ordinal: 0,
-        })
+        .sample_application_challenge_group(CommonProofChallenge::Theta { modulus_ordinal: 0 })
         .expect("theta derives");
     let alpha = transcript
-        .sample_application_challenge_group(CommonProofChallenge::Alpha {
-            modulus_ordinal: 0,
-        })
+        .sample_application_challenge_group(CommonProofChallenge::Alpha { modulus_ordinal: 0 })
         .expect("alpha derives");
     assert_eq!(theta.len(), 3);
     assert_eq!(alpha.len(), 3);
@@ -191,25 +184,31 @@ fn public_common_proof_transcript_rejects_a_secret_mode_round() {
     transcript.absorb_base_root(0, [1; 64]).expect("root zero");
     transcript.absorb_base_root(2, [2; 64]).expect("root two");
     transcript
-        .sample_application_challenge_group(CommonProofChallenge::Theta {
-            modulus_ordinal: 0,
-        })
+        .sample_application_challenge_group(CommonProofChallenge::Theta { modulus_ordinal: 0 })
         .expect("theta");
     transcript
-        .sample_application_challenge_group(CommonProofChallenge::Alpha {
-            modulus_ordinal: 0,
-        })
+        .sample_application_challenge_group(CommonProofChallenge::Alpha { modulus_ordinal: 0 })
         .expect("alpha");
-    transcript.absorb_auxiliary_root(1, [3; 64]).expect("auxiliary root");
+    transcript
+        .absorb_auxiliary_root(1, [3; 64])
+        .expect("auxiliary root");
     for constraint_ordinal in 0..2 {
         transcript
             .sample_composition_challenge(constraint_ordinal)
             .expect("composition");
     }
-    transcript.absorb_quotient_root(0, [4; 64]).expect("quotient zero");
-    transcript.absorb_quotient_root(1, [5; 64]).expect("quotient one");
-    transcript.sample_deep_point(0, |_| false).expect("DEEP zero");
-    transcript.sample_deep_point(1, |_| false).expect("DEEP one");
+    transcript
+        .absorb_quotient_root(0, [4; 64])
+        .expect("quotient zero");
+    transcript
+        .absorb_quotient_root(1, [5; 64])
+        .expect("quotient one");
+    transcript
+        .sample_deep_point(0, |_| false)
+        .expect("DEEP zero");
+    transcript
+        .sample_deep_point(1, |_| false)
+        .expect("DEEP one");
     transcript
         .absorb_deep_values(b"canonical-deep-values")
         .expect("DEEP values");

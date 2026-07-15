@@ -3,7 +3,7 @@ import type { CollectiveBgvSetupContext } from '#packages/protocol/src/index';
 
 // Per-suite namespaces keep deterministic fixture hashes isolated.
 
-export type SetupFixtureHash = (label: string) => string;
+type SetupFixtureHash = (label: string) => string;
 
 type VssOpeningRandomByteSource = (byteLength: number) => Uint8Array;
 

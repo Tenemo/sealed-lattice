@@ -4,13 +4,11 @@ use super::*;
 fn private_flooding_seed_controls_only_private_noise_and_its_commitment() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
     let first_witness = local_target_share_witness(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
         "trustee-1",
     );
     let mut second_witness = first_witness.clone();
@@ -21,7 +19,6 @@ fn private_flooding_seed_controls_only_private_noise_and_its_commitment() {
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
         &first_witness,
         "trustee-1",
     );
@@ -30,7 +27,6 @@ fn private_flooding_seed_controls_only_private_noise_and_its_commitment() {
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
         &first_witness,
         "trustee-1",
     );
@@ -39,7 +35,6 @@ fn private_flooding_seed_controls_only_private_noise_and_its_commitment() {
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
         &second_witness,
         "trustee-1",
     );
@@ -52,7 +47,6 @@ fn private_flooding_seed_controls_only_private_noise_and_its_commitment() {
         accepted_record: &accepted_record,
         target_ciphertext_binding: &target_ciphertext_binding,
         target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile,
         local_target_share_witness_value: &first_witness,
         target_decryption_share: &first_share,
         trustee_identity: "trustee-1",
@@ -63,7 +57,6 @@ fn private_flooding_seed_controls_only_private_noise_and_its_commitment() {
         accepted_record: &accepted_record,
         target_ciphertext_binding: &target_ciphertext_binding,
         target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile,
         local_target_share_witness_value: &second_witness,
         target_decryption_share: &second_share,
         trustee_identity: "trustee-1",
@@ -86,13 +79,11 @@ fn private_flooding_seed_controls_only_private_noise_and_its_commitment() {
 fn private_flooding_seed_must_be_full_lowercase_hex() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
     let witness = local_target_share_witness(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
         "trustee-1",
     );
 
@@ -106,8 +97,7 @@ fn private_flooding_seed_must_be_full_lowercase_hex() {
                 "targetAcceptedRecord": accepted_record,
                 "targetCiphertextBinding": target_ciphertext_binding,
                 "targetCiphertexts": target_ciphertexts,
-                "targetShareProfile": target_share_profile,
-                "trusteeIdentity": "trustee-1",
+                "trusteeRosterPosition": 0,
             }))
         })
         .expect_err("malformed private flooding seed must reject");
@@ -120,13 +110,11 @@ fn private_flooding_seed_must_be_full_lowercase_hex() {
 fn target_share_generation_rejects_wrong_target_record() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
     let local_target_share_witness_value = local_target_share_witness(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
         "trustee-2",
     );
     let mut wrong_record = accepted_record.clone();
@@ -139,8 +127,7 @@ fn target_share_generation_rejects_wrong_target_record() {
             "targetAcceptedRecord": wrong_record,
             "targetCiphertextBinding": target_ciphertext_binding,
             "targetCiphertexts": target_ciphertexts,
-            "targetShareProfile": target_share_profile,
-            "trusteeIdentity": "trustee-2",
+            "trusteeRosterPosition": 1,
         }))
         .is_err()
     );
@@ -150,13 +137,11 @@ fn target_share_generation_rejects_wrong_target_record() {
 fn target_decryption_rejects_noncanonical_target_ciphertext_level() {
     let (setup_package, accepted_record, target_ciphertext_binding, mut target_ciphertexts) =
         target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
     let local_target_share_witness_value = local_target_share_witness(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
         "trustee-1",
     );
     let evaluator_key = target_decryption_evaluator_key();
@@ -185,8 +170,7 @@ fn target_decryption_rejects_noncanonical_target_ciphertext_level() {
         "targetAcceptedRecord": accepted_record.clone(),
         "targetCiphertextBinding": target_ciphertext_binding.clone(),
         "targetCiphertexts": target_ciphertexts.clone(),
-        "targetShareProfile": target_share_profile.clone(),
-        "trusteeIdentity": "trustee-1",
+        "trusteeRosterPosition": 0,
     }));
 
     let error = result.expect_err("noncanonical target ciphertext level must be refused");
@@ -204,22 +188,16 @@ fn target_decryption_rejects_noncanonical_target_ciphertext_level() {
 fn target_share_generation_uses_the_setup_aggregate_opening_handoff() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
     let local_witness = local_target_share_witness(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
         "trustee-2",
     );
     let first_credential = &local_witness["aggregateOpening"]["aggregateOpeningCredentials"][0];
     let accepted_record_for_trustee = &setup_package["vssPublicAggregateThresholdCommitmentSet"]["recipientRecords"]
         [CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1];
-    assert_eq!(
-        first_credential["aggregateCommitmentRoot"],
-        accepted_record_for_trustee["aggregateCommitmentRoot"]
-    );
     assert_eq!(
         first_credential["aggregateOpeningRoot"],
         accepted_record_for_trustee["aggregateOpeningRoot"]
@@ -230,7 +208,6 @@ fn target_share_generation_uses_the_setup_aggregate_opening_handoff() {
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
         &local_witness,
         "trustee-2",
     );
@@ -240,13 +217,11 @@ fn target_share_generation_uses_the_setup_aggregate_opening_handoff() {
 fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
     let local_witness = local_target_share_witness(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
         "trustee-1",
     );
 
@@ -260,8 +235,7 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
             "targetAcceptedRecord": accepted_record.clone(),
             "targetCiphertextBinding": target_ciphertext_binding.clone(),
             "targetCiphertexts": target_ciphertexts.clone(),
-            "targetShareProfile": target_share_profile.clone(),
-            "trusteeIdentity": "trustee-1",
+            "trusteeRosterPosition": 0,
         }))
     })
     .expect_err("a changed aggregate material seed must be refused");
@@ -290,8 +264,7 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
                 "targetAcceptedRecord": accepted_record.clone(),
                 "targetCiphertextBinding": target_ciphertext_binding.clone(),
                 "targetCiphertexts": target_ciphertexts.clone(),
-                "targetShareProfile": target_share_profile.clone(),
-                "trusteeIdentity": "trustee-1",
+                "trusteeRosterPosition": 0,
             }))
         },
     )
@@ -302,11 +275,10 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     let mut merkle_root_tampered_setup_package = setup_package;
     let aggregate_record = &mut merkle_root_tampered_setup_package["vssPublicAggregateThresholdCommitmentSet"]
         ["recipientRecords"][0];
-    let material_root_hex =
-        aggregate_record["commitment"]["commitmentFields"][0]["materialRootHex"]
-            .as_str()
-            .expect("aggregate material root")
-            .to_string();
+    let material_root_hex = aggregate_record["commitment"]["materialRootHex"]
+        .as_str()
+        .expect("aggregate material root")
+        .to_string();
     let replacement_prefix = if material_root_hex.starts_with("00") {
         "01"
     } else {
@@ -314,8 +286,7 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     };
     let mut tampered_material_root_hex = material_root_hex;
     tampered_material_root_hex.replace_range(0..2, replacement_prefix);
-    aggregate_record["commitment"]["commitmentFields"][0]["materialRootHex"] =
-        json!(tampered_material_root_hex);
+    aggregate_record["commitment"]["materialRootHex"] = json!(tampered_material_root_hex);
     aggregate_record["aggregateCommitmentRoot"] = json!(
         derive_canonical_object_hash(&aggregate_record["commitment"])
             .expect("tampered aggregate commitment root")
@@ -340,8 +311,7 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
                 "targetAcceptedRecord": accepted_record,
                 "targetCiphertextBinding": target_ciphertext_binding,
                 "targetCiphertexts": target_ciphertexts,
-                "targetShareProfile": target_share_profile,
-                "trusteeIdentity": "trustee-1",
+                "trusteeRosterPosition": 0,
             }))
         })
         .expect_err("a changed aggregate Merkle root must be refused");

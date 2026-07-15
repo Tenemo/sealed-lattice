@@ -13,8 +13,6 @@ pub(super) struct LocalTargetDecryptionShareWitness {
 }
 
 pub(super) struct AggregateOpeningCredentialBinding {
-    pub(super) limb_index: usize,
-    pub(super) rns_prime: u64,
     pub(super) aggregate_commitment_root: String,
     pub(super) aggregate_opening_root: String,
     pub(super) aggregate_commitment_message_values: Vec<u64>,
@@ -22,15 +20,10 @@ pub(super) struct AggregateOpeningCredentialBinding {
 }
 
 pub(super) struct TargetDecryptionFloodingNoiseOpening {
-    pub(super) role: String,
-    pub(super) rns_limb_index: usize,
-    pub(super) rns_prime: u64,
     pub(super) coefficients: Vec<i64>,
 }
 
 struct TargetDecryptionSmudgingCommitmentOpening {
-    rns_limb_index: usize,
-    rns_prime: u64,
     message_coefficients: Vec<u64>,
     material_seed_hex: String,
     commitment_context: Value,
@@ -77,10 +70,8 @@ pub(super) fn generate_target_decryption_share_from_secret_share(
 
     Ok(json!({
         "objectType": "BgvTargetDecryptionShare",
-        "setupPackageHash": setup_binding.setup_package_hash,
-        "trusteeIdentity": participant.trustee_identity,
+        "trusteeRosterPosition": participant.roster_position,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetCiphertextHash": target_ciphertexts.target_ciphertext_hash,
         "sharePayload": payload,
     }))
 }

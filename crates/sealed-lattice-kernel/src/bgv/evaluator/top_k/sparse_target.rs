@@ -21,10 +21,12 @@ pub(crate) fn project_packed_sparse_target_from_rank_evaluation(
     if top_count == option_count {
         let normalized_ranks = normalize_scaling(&rank_evaluation.packed_ranks)?;
         let encrypted_zero = scalar_mul(&normalized_ranks, 0)?;
+        let target_id = add_plaintext_coefficients(&encrypted_zero, &id_selector)?;
+        let target_order = add_plaintext_coefficients(&normalized_ranks, &option_slot_mask)?;
 
         return Ok(EncryptedSparseTarget {
-            target_id: add_plaintext_coefficients(&encrypted_zero, &id_selector)?,
-            target_order: add_plaintext_coefficients(&normalized_ranks, &option_slot_mask)?,
+            target_id: modulus_switch_to(&target_id, CANONICAL_TARGET_CIPHERTEXT_LEVEL)?,
+            target_order: modulus_switch_to(&target_order, CANONICAL_TARGET_CIPHERTEXT_LEVEL)?,
         });
     }
 
@@ -35,8 +37,11 @@ pub(crate) fn project_packed_sparse_target_from_rank_evaluation(
         top_count,
     )?;
 
+    let target_id = plaintext_mul(&normalize_scaling(&indicators)?, &id_selector)?;
+    let target_order = plaintext_mul(&normalize_scaling(&order_values)?, &option_slot_mask)?;
+
     Ok(EncryptedSparseTarget {
-        target_id: plaintext_mul(&normalize_scaling(&indicators)?, &id_selector)?,
-        target_order: plaintext_mul(&normalize_scaling(&order_values)?, &option_slot_mask)?,
+        target_id: modulus_switch_to(&target_id, CANONICAL_TARGET_CIPHERTEXT_LEVEL)?,
+        target_order: modulus_switch_to(&target_order, CANONICAL_TARGET_CIPHERTEXT_LEVEL)?,
     })
 }

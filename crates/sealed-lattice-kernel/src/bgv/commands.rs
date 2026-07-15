@@ -78,13 +78,13 @@ mod tests {
                 converted_plaintext_root.clone(),
             ],
             vec![
-                "0458603681ec68148da1b1e60edc083d253134d67c524db90255131ea5a79557f0aadc44a3bcbe59ee04fca388be4f08b2e532dc69dbc7dd52bc28fcdf123b65",
-                "bb3962ea8e686cf9d5b4d5e5682709494faea0b2ddd76d71e2c48d52ca9157a1184aa93fa97fd89b5f130b10ffde70444c75b818c1a651bd080f5c73f6fa11fd",
-                "2a25c79eba3e7ee884d925e57712792d1999125a62f36d854dae310dc5bf8a29a1f5d918af401b5bbb790333faeb176e8574d5c537efd34abb75e741f0348611",
-                "56e08e7becd3fa35a12a2fbd10469fb49ff066953450892b20a4b02625324d7f38034ec0a9a0eedd5a764bd146bca19ab9b505669b60812c34446562ab03d35d",
+                "83babe666cc9e134ee31f1b3e64edf063302ff16b5c599292ba71d2d7270e8fc91067456eb09ffb69e63ff4064321099cdc09adbdaed57ac75102a7bcaa7c18d",
+                "87b57a9fbed546496f5bef0adbb919b560249c84fe33c2ace3e71aa380faed69a9b14904f16be2216cb334a86990bcdf6674711fc5c52996d0cba85596123f27",
+                "07ae82a666292ddd08bea917e2a05374938ef8b2d2b4c0410f5d534f42d4516bf9f200bb9b20f62d5b77bac7512a7f271f26312289d2ca402ca55533b15a241e",
+                "0679d66690be7acd670b06bbf57b13c3cc342add3f147f2450ac8804f92623327b63e72ee3e993f8cb9a17950d3a9bc3cb655c740fc67b8c4d46efec3888d66f",
             ]
         );
-        assert_eq!(converted.moduli.len(), 2);
+        assert_eq!(converted.residues_by_modulus.len(), 2);
         assert_ne!(source_plaintext_root, converted_plaintext_root);
     }
 }

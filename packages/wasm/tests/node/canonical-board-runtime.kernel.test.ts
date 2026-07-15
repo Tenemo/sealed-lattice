@@ -24,7 +24,6 @@ const boardConfiguration = (
     canonicalRosterBytes: vector.canonicalRosterBytes,
     ceremonyContextHash: vector.ceremonyContextHash,
     maximumBallotAttemptsPerParticipant: 4,
-    maximumRecoveryTransitionsPerStateKey: 2,
     maximumRetainedCanonicalCarrierByteLength:
         foundationProfile.maximumCopiedBufferByteLength,
     maximumRetainedTranscriptObjects: 32,

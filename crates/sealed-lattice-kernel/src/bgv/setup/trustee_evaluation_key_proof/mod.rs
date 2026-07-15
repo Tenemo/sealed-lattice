@@ -45,7 +45,9 @@ pub(in crate::bgv::setup) use relation::{
     build_same_secret_linkage_atom_field_forms,
 };
 #[cfg(test)]
-pub(in crate::bgv::setup) use relation::{KeyBearingWitness, SameSecretLinkageWitness};
+pub(in crate::bgv::setup) use relation::{
+    KeyBearingWitness, SameSecretLinkageWitness, generate_development_trustee_instance,
+};
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 
 #[cfg(test)]

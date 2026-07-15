@@ -26,7 +26,6 @@ pub(super) struct ReconstructedSameSecretBridgeProofVerification<'a> {
     pub(super) threshold_degree: usize,
     pub(super) ring_degree: usize,
     pub(super) source_constant_commitment_values: &'a [Value],
-    pub(super) trustee_identity: &'a str,
 }
 
 pub(in crate::bgv::setup) struct AuthoritativeSameSecretBridgeTarget<'a> {
@@ -38,7 +37,6 @@ pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
     expected_position: usize,
     q_share_rns_limb_count: usize,
     threshold_degree: usize,
-    ring_degree: usize,
 ) -> CanonicalResult<Vec<AuthoritativeSameSecretBridgeTarget<'a>>> {
     let source_records = array_at_path(coefficient_commitment_set, &["sourceTrusteeRecords"])?;
     let source_record = source_records.get(expected_position).ok_or_else(|| {
@@ -84,45 +82,8 @@ pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
                     "authoritative VSS coefficient commitment is missing for a bridge target limb",
                 )
             })?;
-            let canonical_prime = DATA_PRIMES.get(rns_limb_index).copied().ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "same-secret bridge qShareRnsLimbCount exceeds the available Q_share primes",
-                )
-            })?;
-            let coefficient_commitment_root =
-                super::super::vss_commitment::vss_public_commitment_body_root(record)?;
             let commitment_body = record;
-            compare_required_string(
-                string_at_path(commitment_body, &["objectType"])?,
-                "VssCommittedMaterialCommitment",
-                "authoritative bridge target commitment body objectType",
-            )?;
-            compare_required_string(
-                string_at_path(commitment_body, &["commitmentRole"])?,
-                "coefficient",
-                "authoritative bridge target commitment role",
-            )?;
-            compare_required_u64(
-                unsigned_at_path(commitment_body, &["rnsLimbIndex"])?,
-                rns_limb_index as u64,
-                "authoritative bridge target commitment body rnsLimbIndex",
-            )?;
-            compare_required_u64(
-                unsigned_at_path(commitment_body, &["rnsPrime"])?,
-                canonical_prime,
-                "authoritative bridge target commitment body rnsPrime",
-            )?;
-            compare_required_u64(
-                unsigned_at_path(commitment_body, &["ringDegree"])?,
-                ring_degree as u64,
-                "authoritative bridge target commitment ringDegree",
-            )?;
-            compare_required_string(
-                &derive_canonical_object_hash(commitment_body)?,
-                &coefficient_commitment_root,
-                "authoritative bridge target commitment body root",
-            )?;
+            super::super::vss_commitment::vss_public_commitment_body_root(commitment_body)?;
 
             Ok(AuthoritativeSameSecretBridgeTarget { commitment_body })
         })
@@ -174,7 +135,6 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
             threshold_degree,
             ring_degree,
             source_constant_commitment_values: &source_constant_commitments.commitment_values,
-            trustee_identity,
         },
     )
 }
@@ -187,7 +147,6 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
         input.expected_position,
         input.q_share_rns_limb_count,
         input.threshold_degree,
-        input.ring_degree,
     )?;
     let target_constant_commitments = authoritative_targets
         .iter()
@@ -197,7 +156,6 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
     Ok(json!({
         "context": {
             "setupContextHash": input.statement_set.setup_context_hash,
-            "trusteeIdentity": input.trustee_identity,
             "trusteeRosterPosition": input.expected_position,
         },
         "ringDegree": input.ring_degree,

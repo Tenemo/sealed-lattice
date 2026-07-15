@@ -78,7 +78,6 @@ export type TrusteeEvaluationKeyStatementKey = Readonly<{
 
 type TrusteeEvaluationKeyStatementContext = Readonly<{
     readonly setupContextHash: ProtocolHash;
-    readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly evaluatorKeyScheduleRoot: ProtocolHash;
 }>;
@@ -91,7 +90,6 @@ type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
 export type TrusteeEvaluationKeyProofGenerator = (
     input: Readonly<{
         readonly context: TrusteeEvaluationKeyStatementContext;
-        readonly ringDegree: number;
         readonly keys: readonly TrusteeEvaluationKeyStatementKey[];
         readonly sameSecretLinkage: Readonly<{
             readonly publicMatrixSeedHash: ProtocolHash;
@@ -99,7 +97,7 @@ export type TrusteeEvaluationKeyProofGenerator = (
         }>;
         readonly secretCoefficients: readonly number[];
         readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
-        readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+        readonly openingRandomnessBySourceLimbAndCommitmentLimb: readonly (readonly (readonly (readonly number[])[])[])[];
         readonly proofRandomnessSeedHex: string;
     }>,
 ) => Promise<TrusteeEvaluationKeyProofGenerationOutput>;
@@ -108,7 +106,7 @@ export type TrusteeEvaluationKeyWitnessInput = Readonly<{
     readonly trusteeRosterPosition: number;
     readonly secretCoefficients: readonly number[];
     readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
-    readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+    readonly openingRandomnessBySourceLimbAndCommitmentLimb: readonly (readonly (readonly (readonly number[])[])[])[];
 }>;
 
 export type TransportedEvaluationKeyShareProofMaterialSet =
@@ -138,7 +136,6 @@ export type BinaryChunkedEvaluationKeyShareMaterialTransport = Readonly<{
 export type EvaluationKeyShareMaterialTransportInput = Readonly<{
     readonly trusteeReferences: readonly EvaluationKeyTrusteeReference[];
     readonly qSharePrimes: readonly number[];
-    readonly ringDegree: number;
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
     readonly relinearizationRoundOneContributions: readonly Readonly<{
         readonly trusteeRosterPosition: number;

@@ -10,7 +10,7 @@ pub(in super::super::super) fn vss_public_coefficient_commitment_set_object(
         .as_str()
         .expect("public matrix seed hash");
     let participant_count = participant_count_from_package(package);
-    let threshold_degree = participant_count / 3 + 1;
+    let threshold_degree = decryption_threshold_for_participant_count(participant_count);
     let source_trustee_records = (0..participant_count)
         .map(|source_trustee_roster_position| {
             vss_public_source_coefficient_record(

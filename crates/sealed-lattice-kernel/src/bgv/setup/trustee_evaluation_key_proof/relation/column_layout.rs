@@ -61,7 +61,7 @@ impl LimbColumnLayout {
         let ring_degree = base_ring_degree;
         let consistency_repetitions = family_shape.consistency_repetitions();
         let consistency_vector_count = match family_shape {
-            SuccinctSetupProofFamilyShape::PrivateVssShare => 1 + private_vss_randomness_columns,
+            SuccinctSetupProofFamilyShape::PrivateVssShare => 1,
             SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
                 1 + total_error_columns
                     + if linkage_randomness_columns > 0 {
@@ -134,7 +134,7 @@ impl LimbColumnLayout {
 
     pub(crate) fn consistency_vector_count(&self) -> usize {
         if self.private_vss_active() {
-            1 + self.private_vss_randomness_columns
+            1
         } else {
             1 + self.total_error_columns + self.linkage_logical_columns()
         }

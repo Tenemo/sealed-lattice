@@ -3,7 +3,6 @@ import { browserActionStorageCustodyErrorCodes } from '@sealed-lattice/types';
 import {
     copyActionProofAttemptBinding,
     copyActionRandomnessReservationVerificationInput,
-    copyActionStateRecoveryVerificationInput,
     copyActionStateReservationVerificationInput,
     copyActionStateVerifierSessionInput,
     copyCreateAndSealActionRandomnessInput,
@@ -21,7 +20,6 @@ import {
     type BrowserActionProofAttemptBinding,
     type BrowserActionRandomnessRecordContext,
     type BrowserActionRandomnessReservationVerificationInput,
-    type BrowserActionStateRecoveryVerificationInput,
     type BrowserActionStateReservationVerificationInput,
     type BrowserActionStateVerifierSessionInput,
     type BrowserOpenedActionRandomnessSession,
@@ -36,8 +34,6 @@ import {
     type BrowserLocalRecordOpenInput,
     type BrowserLocalRecordSealInput,
     type UntrustedExpectedStorageRootCommitment,
-    type BrowserRecoveryExportChallenge,
-    type BrowserRecoveryExportConfirmation,
     type VerificationResult,
 } from './browser-action-storage-custody.js';
 import {
@@ -53,10 +49,6 @@ import {
 } from './web-lock-owned-untrusted-storage-transaction-store.js';
 
 const mutationIdentifierByteLength = 32;
-const recoveryChecksumByteLength = 16;
-const recoveryTextLength = 708;
-const recoveryTextPattern = /^[A-Z2-7]{708}$/u;
-const preparationIdentifierPattern = /^[0-9a-f]{64}$/u;
 const storageRootCommitmentByteLength = 64;
 const maximumDatabaseNameLength = 256;
 const maximumNamespaceLength = 64;
@@ -72,12 +64,9 @@ type BrowserActionStorageCustodyWorkerConfiguration = Readonly<{
 }>;
 
 type CustodyWorkerCommand =
-    | 'begin-recovery-export'
-    | 'cancel-recovery-export'
     | 'close-action-randomness'
     | 'close-state-verifier-session'
     | 'close'
-    | 'confirm-recovery-export'
     | 'current-snapshot'
     | 'delete'
     | 'derive-record-identifier'
@@ -91,10 +80,8 @@ type CustodyWorkerCommand =
     | 'open-record'
     | 'open-custody'
     | 'open-root'
-    | 'recover'
     | 'release-state-object'
     | 'seal-record'
-    | 'verify-state-recovery'
     | 'verify-state-reservation'
     | 'verify-action-randomness-reservation';
 
@@ -256,10 +243,8 @@ const copySnapshot = (value: unknown): BrowserDeviceWrappingSnapshot => {
         !isPlainRecord(value) ||
         !hasRequiredKeys(value, [
             'mutationIdentifier',
-            'recoveryValueExported',
             'storageRootCommitment',
-        ]) ||
-        typeof value.recoveryValueExported !== 'boolean'
+        ])
     ) {
         throw new BrowserActionStorageCustodyError(
             'InvalidInput',
@@ -273,7 +258,6 @@ const copySnapshot = (value: unknown): BrowserDeviceWrappingSnapshot => {
             mutationIdentifierByteLength,
             'Custody mutation identifier',
         ),
-        recoveryValueExported: value.recoveryValueExported,
         storageRootCommitment: copyBytes(
             value.storageRootCommitment,
             storageRootCommitmentByteLength,
@@ -313,90 +297,6 @@ const copyOptionalSnapshot = (
     value: unknown,
 ): BrowserDeviceWrappingSnapshot | undefined =>
     value === undefined ? undefined : copySnapshot(value);
-
-const copyRecoveryText = (
-    value: unknown,
-    requireCanonicalCase: boolean,
-): string => {
-    if (typeof value !== 'string') {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'Recovery material must be text.',
-        );
-    }
-    const canonicalRecoveryText = value.toUpperCase();
-    if (
-        value.length !== recoveryTextLength ||
-        !recoveryTextPattern.test(canonicalRecoveryText) ||
-        (requireCanonicalCase && value !== canonicalRecoveryText)
-    ) {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            `Recovery material must contain exactly ${recoveryTextLength} base32 characters in the required case.`,
-        );
-    }
-
-    return requireCanonicalCase ? canonicalRecoveryText : value;
-};
-
-const copyPreparationIdentifier = (value: unknown): string => {
-    if (
-        typeof value !== 'string' ||
-        !preparationIdentifierPattern.test(value)
-    ) {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'Recovery preparation identifier is malformed.',
-        );
-    }
-
-    return value;
-};
-
-const copyChallenge = (value: unknown): BrowserRecoveryExportChallenge => {
-    if (
-        !isPlainRecord(value) ||
-        !hasRequiredKeys(value, ['preparationIdentifier', 'recoveryChecksum'])
-    ) {
-        throw new BrowserActionStorageCustodyError(
-            'OwnedWorkerFailure',
-            'The owned worker returned a malformed recovery challenge.',
-        );
-    }
-
-    return Object.freeze({
-        preparationIdentifier: copyPreparationIdentifier(
-            value.preparationIdentifier,
-        ),
-        recoveryChecksum: copyBytes(
-            value.recoveryChecksum,
-            recoveryChecksumByteLength,
-            'Recovery checksum',
-        ),
-    });
-};
-
-const copyConfirmation = (
-    value: unknown,
-): BrowserRecoveryExportConfirmation => {
-    if (
-        !isPlainRecord(value) ||
-        !hasRequiredKeys(value, ['canonicalRecoveryText', 'snapshot'])
-    ) {
-        throw new BrowserActionStorageCustodyError(
-            'OwnedWorkerFailure',
-            'The owned worker returned a malformed recovery confirmation.',
-        );
-    }
-
-    return Object.freeze({
-        canonicalRecoveryText: copyRecoveryText(
-            value.canonicalRecoveryText,
-            true,
-        ),
-        snapshot: copySnapshot(value.snapshot),
-    });
-};
 
 const validateVoidResult = (value: unknown): undefined => {
     if (value !== undefined) {
@@ -530,12 +430,9 @@ const isCustodyWorkerResponse = (
 };
 
 const custodyWorkerCommands: readonly CustodyWorkerCommand[] = [
-    'begin-recovery-export',
-    'cancel-recovery-export',
     'close-action-randomness',
     'close-state-verifier-session',
     'close',
-    'confirm-recovery-export',
     'current-snapshot',
     'delete',
     'derive-record-identifier',
@@ -549,11 +446,9 @@ const custodyWorkerCommands: readonly CustodyWorkerCommand[] = [
     'open-record',
     'open-custody',
     'open-root',
-    'recover',
     'release-state-object',
     'seal-record',
     'verify-action-randomness-reservation',
-    'verify-state-recovery',
     'verify-state-reservation',
 ];
 
@@ -676,78 +571,6 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
         );
     }
 
-    public beginRecoveryExport(input: {
-        expectedSnapshot: BrowserDeviceWrappingSnapshot;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-    }): Promise<BrowserRecoveryExportChallenge> {
-        return this.#queueValidatedOperation(
-            () => copyBoundSnapshotInput(input),
-            (copiedInput) =>
-                this.#sendRequest(
-                    'begin-recovery-export',
-                    copiedInput,
-                    copyChallenge,
-                ),
-        );
-    }
-
-    public confirmRecoveryExport(input: {
-        preparationIdentifier: string;
-        confirmedChecksum: Uint8Array;
-    }): Promise<BrowserRecoveryExportConfirmation> {
-        return this.#queueValidatedOperation(
-            () => ({
-                confirmedChecksum: copyBytes(
-                    input.confirmedChecksum,
-                    recoveryChecksumByteLength,
-                    'Confirmed recovery checksum',
-                ),
-                preparationIdentifier: copyPreparationIdentifier(
-                    input.preparationIdentifier,
-                ),
-            }),
-            (copiedInput) =>
-                this.#sendRequest(
-                    'confirm-recovery-export',
-                    copiedInput,
-                    copyConfirmation,
-                ),
-        );
-    }
-
-    public cancelRecoveryExport(preparationIdentifier: string): Promise<void> {
-        return this.#queueValidatedOperation(
-            () => copyPreparationIdentifier(preparationIdentifier),
-            (copiedIdentifier) =>
-                this.#sendRequest(
-                    'cancel-recovery-export',
-                    copiedIdentifier,
-                    validateVoidResult,
-                ),
-        );
-    }
-
-    public recover(input: {
-        caseInsensitiveRecoveryText: string;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-        expectedSnapshot?: BrowserDeviceWrappingSnapshot;
-    }): Promise<BrowserDeviceWrappingSnapshot> {
-        return this.#queueValidatedOperation(
-            () => ({
-                caseInsensitiveRecoveryText: copyRecoveryText(
-                    input.caseInsensitiveRecoveryText,
-                    false,
-                ),
-                untrustedExpectedCommitment: copyUntrustedExpectedCommitment(
-                    input.untrustedExpectedCommitment,
-                ),
-                expectedSnapshot: copyOptionalSnapshot(input.expectedSnapshot),
-            }),
-            (copiedInput) =>
-                this.#sendRequest('recover', copiedInput, copySnapshot),
-        );
-    }
-
     public deriveLocalRecordIdentifier(
         input: BrowserLocalRecordIdentifierInput,
     ): Promise<Uint8Array> {
@@ -859,20 +682,6 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
             (copiedInput) =>
                 this.#sendRequest(
                     'verify-action-randomness-reservation',
-                    copiedInput,
-                    copyWorkerIdentifierVerificationResult,
-                ),
-        );
-    }
-
-    public verifyActionStateRecovery(
-        input: BrowserActionStateRecoveryVerificationInput,
-    ): Promise<VerificationResult<string>> {
-        return this.#queueValidatedOperation(
-            () => copyActionStateRecoveryVerificationInput(input),
-            (copiedInput) =>
-                this.#sendRequest(
-                    'verify-state-recovery',
                     copiedInput,
                     copyWorkerIdentifierVerificationResult,
                 ),
@@ -1209,17 +1018,11 @@ export const openBrowserActionStorageCustodyWorker = async (input: {
         await client.open(input.configuration);
 
         return Object.freeze({
-            beginRecoveryExport: (recoveryExportInput) =>
-                client.beginRecoveryExport(recoveryExportInput),
-            cancelRecoveryExport: (preparationIdentifier) =>
-                client.cancelRecoveryExport(preparationIdentifier),
             closeActionRandomness: (identifier) =>
                 client.closeActionRandomness(identifier),
             closeActionStateVerifierSession: (identifier) =>
                 client.closeActionStateVerifierSession(identifier),
             close: () => client.close(),
-            confirmRecoveryExport: (confirmationInput) =>
-                client.confirmRecoveryExport(confirmationInput),
             currentSnapshot: () => client.currentSnapshot(),
             createAndSealActionRandomness: (operationInput) =>
                 client.createAndSealActionRandomness(operationInput),
@@ -1241,13 +1044,10 @@ export const openBrowserActionStorageCustodyWorker = async (input: {
                 client.openIntoOwnedWorker(openInput),
             openSealedActionRandomness: (operationInput) =>
                 client.openSealedActionRandomness(operationInput),
-            recover: (recoveryInput) => client.recover(recoveryInput),
             releaseActionStateObject: (identifier) =>
                 client.releaseActionStateObject(identifier),
             sealLocalRecord: (recordInput) =>
                 client.sealLocalRecord(recordInput),
-            verifyActionStateRecovery: (verificationInput) =>
-                client.verifyActionStateRecovery(verificationInput),
             verifyActionStateReservation: (verificationInput) =>
                 client.verifyActionStateReservation(verificationInput),
             verifyActionRandomnessReservation: (verificationInput) =>
@@ -1271,7 +1071,6 @@ const copyHostCommandInput = (
         case 'close':
             return validateVoidResult(input);
         case 'open-root':
-        case 'begin-recovery-export':
             return copyBoundSnapshotInput(input);
         case 'derive-record-identifier':
             return copyLocalRecordIdentifierInput(input);
@@ -1281,8 +1080,6 @@ const copyHostCommandInput = (
             return copyActionStateReservationVerificationInput(input);
         case 'verify-action-randomness-reservation':
             return copyActionRandomnessReservationVerificationInput(input);
-        case 'verify-state-recovery':
-            return copyActionStateRecoveryVerificationInput(input);
         case 'release-state-object':
             return copyOpaqueWorkerIdentifier(input, 'State object identifier');
         case 'close-state-verifier-session':
@@ -1315,59 +1112,6 @@ const copyHostCommandInput = (
             });
         case 'delete':
             return copySnapshot(input);
-        case 'cancel-recovery-export':
-            return copyPreparationIdentifier(input);
-        case 'confirm-recovery-export': {
-            if (
-                !isPlainRecord(input) ||
-                !hasRequiredKeys(input, [
-                    'confirmedChecksum',
-                    'preparationIdentifier',
-                ])
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'Recovery confirmation worker input is malformed.',
-                );
-            }
-
-            return {
-                confirmedChecksum: copyBytes(
-                    input.confirmedChecksum,
-                    recoveryChecksumByteLength,
-                    'Confirmed recovery checksum',
-                ),
-                preparationIdentifier: copyPreparationIdentifier(
-                    input.preparationIdentifier,
-                ),
-            };
-        }
-        case 'recover': {
-            if (
-                !isPlainRecord(input) ||
-                !hasRequiredKeys(input, [
-                    'caseInsensitiveRecoveryText',
-                    'untrustedExpectedCommitment',
-                    'expectedSnapshot',
-                ])
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'Recovery worker input is malformed.',
-                );
-            }
-
-            return {
-                caseInsensitiveRecoveryText: copyRecoveryText(
-                    input.caseInsensitiveRecoveryText,
-                    false,
-                ),
-                untrustedExpectedCommitment: copyUntrustedExpectedCommitment(
-                    input.untrustedExpectedCommitment,
-                ),
-                expectedSnapshot: copyOptionalSnapshot(input.expectedSnapshot),
-            };
-        }
     }
 };
 
@@ -1378,7 +1122,6 @@ const copyHostCommandResult = (
     switch (command) {
         case 'open-custody':
         case 'open-root':
-        case 'cancel-recovery-export':
         case 'close-action-randomness':
         case 'close-state-verifier-session':
         case 'release-state-object':
@@ -1395,7 +1138,6 @@ const copyHostCommandResult = (
             });
         case 'open-state-verifier-session':
         case 'verify-action-randomness-reservation':
-        case 'verify-state-recovery':
         case 'verify-state-reservation':
             return copyWorkerIdentifierVerificationResult(result);
         case 'create-and-seal-action-randomness':
@@ -1419,14 +1161,8 @@ const copyHostCommandResult = (
             });
         case 'initialize':
             return copySnapshot(result);
-        case 'recover':
-            return copySnapshot(result);
         case 'current-snapshot':
             return copyOptionalSnapshot(result);
-        case 'begin-recovery-export':
-            return copyChallenge(result);
-        case 'confirm-recovery-export':
-            return copyConfirmation(result);
     }
 };
 
@@ -1665,30 +1401,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                         untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
                     },
                 );
-            case 'begin-recovery-export':
-                return custody().beginRecoveryExport(
-                    copiedInput as {
-                        expectedSnapshot: BrowserDeviceWrappingSnapshot;
-                        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-                    },
-                );
-            case 'confirm-recovery-export':
-                return custody().confirmRecoveryExport(
-                    copiedInput as {
-                        confirmedChecksum: Uint8Array;
-                        preparationIdentifier: string;
-                    },
-                );
-            case 'cancel-recovery-export':
-                return custody().cancelRecoveryExport(copiedInput as string);
-            case 'recover':
-                return custody().recover(
-                    copiedInput as {
-                        caseInsensitiveRecoveryText: string;
-                        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-                        expectedSnapshot?: BrowserDeviceWrappingSnapshot;
-                    },
-                );
             case 'derive-record-identifier':
                 return custody().deriveLocalRecordIdentifier(
                     copiedInput as BrowserLocalRecordIdentifierInput,
@@ -1716,10 +1428,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
             case 'verify-action-randomness-reservation':
                 return custody().verifyActionRandomnessReservation(
                     copiedInput as BrowserActionRandomnessReservationVerificationInput,
-                );
-            case 'verify-state-recovery':
-                return custody().verifyActionStateRecovery(
-                    copiedInput as BrowserActionStateRecoveryVerificationInput,
                 );
             case 'release-state-object':
                 return custody().releaseActionStateObject(

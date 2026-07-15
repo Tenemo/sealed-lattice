@@ -802,13 +802,11 @@ export const createTrusteeEvaluationKeyProofs = async (
                 setupContextHash: deriveCollectiveBgvSetupContextHash(
                     input.setupContext,
                 ),
-                trusteeIdentity: trusteeReference.trusteeIdentity,
                 trusteeRosterPosition: trusteeReference.trusteeRosterPosition,
                 evaluatorKeyScheduleRoot: deriveEvaluatorKeyScheduleRoot(
                     input.evaluatorKeySchedule,
                 ),
             },
-            ringDegree,
             keys: statementKeys,
             sameSecretLinkage: {
                 publicMatrixSeedHash:
@@ -817,7 +815,8 @@ export const createTrusteeEvaluationKeyProofs = async (
             },
             secretCoefficients: witness.secretCoefficients,
             errorCoefficientsByKey: witness.errorCoefficientsByKey,
-            openingRandomnessByLimb: witness.openingRandomnessByLimb,
+            openingRandomnessBySourceLimbAndCommitmentLimb:
+                witness.openingRandomnessBySourceLimbAndCommitmentLimb,
             proofRandomnessSeedHex,
         });
         assertProtocolHash(

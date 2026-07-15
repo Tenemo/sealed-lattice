@@ -29,18 +29,6 @@ pub(in crate::bgv::setup) fn vss_share_linkage_commitment_from_value(
             expected.field_name
         )));
     }
-    if read_string(value, "commitmentRole")? != expected.role
-        || read_u64(value, "rnsLimbIndex")? != expected.rns_limb_index as u64
-        || read_u64(value, "rnsPrime")? != expected.rns_prime
-        || read_u64(value, "ringDegree")?
-            != u64::try_from(expected.ring_degree)
-                .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit u64"))?
-    {
-        return Err(invalid_succinct_setup_proof(format!(
-            "{} metadata must match the share-linkage statement",
-            expected.field_name
-        )));
-    }
     let commitment_context_hash = read_string(value, "commitmentContextHash")?.to_string();
     validate_hash_string(
         &commitment_context_hash,
@@ -81,9 +69,6 @@ pub(super) fn key_descriptor_from_value(
     };
     let level = usize::try_from(read_u64(key_value, "level")?)
         .map_err(|_| invalid_succinct_setup_proof("level does not fit usize"))?;
-    let expected_digit_count = level
-        .checked_add(1)
-        .ok_or_else(|| invalid_succinct_setup_proof("key digit count overflowed"))?;
     let component_b_by_digit = match (
         key_value.get("componentBByDigit"),
         key_value.get("componentMaterialBytesHex"),
@@ -92,9 +77,6 @@ pub(super) fn key_descriptor_from_value(
         (None, Some(_)) => decode_component_material_bytes(
             &read_hex_bytes(key_value, "componentMaterialBytesHex")?,
             level,
-            expected_digit_count,
-            usize::try_from(read_u64(request, "ringDegree")?)
-                .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit usize"))?,
         )?,
         _ => {
             return Err(invalid_succinct_setup_proof(

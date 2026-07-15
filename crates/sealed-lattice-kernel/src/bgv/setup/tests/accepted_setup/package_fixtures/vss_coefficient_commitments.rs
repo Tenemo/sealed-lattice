@@ -1,7 +1,8 @@
 use super::*;
+use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn vss_coefficient_commitments_object(
+pub(super) fn vss_coefficient_commitment_components(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
@@ -10,7 +11,7 @@ pub(super) fn vss_coefficient_commitments_object(
     public_matrix_seed_hash: &str,
     ring_degree: usize,
     participant_count: u64,
-) -> (serde_json::Value, serde_json::Value) {
+) -> VssMaterialPackageComponents {
     let setup_context_hash =
         crate::bgv::setup::accepted_setup::setup_context_hash(&serde_json::json!({
             "ceremonyId": ceremony_id,
@@ -21,13 +22,15 @@ pub(super) fn vss_coefficient_commitments_object(
             "participantCount": participant_count,
         }))
         .expect("setup context hash");
-    let decryption_threshold = participant_count / 3 + 1;
+    let decryption_threshold = decryption_threshold_for_participant_count(participant_count);
     let mut source_trustee_records = Vec::new();
+    let mut public_source_trustee_records = Vec::new();
     let mut coefficient_commitment_material = Vec::new();
 
     for source_trustee_roster_position in 0..participant_count {
         let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
         let mut coefficient_commitment_roots = Vec::new();
+        let mut public_coefficient_commitments = Vec::new();
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
             for shamir_coefficient_index in 0..decryption_threshold {
                 let coefficient_message = accepted_vss_coefficient_message_fixture(
@@ -57,8 +60,10 @@ pub(super) fn vss_coefficient_commitments_object(
                 )
                 .expect("setup commitment");
                 let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
+                let full_commitment = setup_commitment_full_value(&commitment);
                 coefficient_commitment_roots.push(commitment_root);
-                coefficient_commitment_material.push(setup_commitment_full_value(&commitment));
+                coefficient_commitment_material.push(full_commitment.clone());
+                public_coefficient_commitments.push(full_commitment);
             }
         }
 
@@ -68,6 +73,10 @@ pub(super) fn vss_coefficient_commitments_object(
             "coefficientCommitmentRoots": coefficient_commitment_roots,
         });
         source_trustee_records.push(source_trustee_record);
+        public_source_trustee_records.push(serde_json::json!({
+            "objectType": "VssPublicSourceCoefficientCommitments",
+            "coefficientCommitments": public_coefficient_commitments,
+        }));
     }
 
     let commitment_set = serde_json::json!({
@@ -86,7 +95,16 @@ pub(super) fn vss_coefficient_commitments_object(
         "ringDegree": ring_degree,
         "coefficientCommitments": coefficient_commitment_material,
     });
-    (commitment_set, material_set)
+    let public_commitment_set = serde_json::json!({
+        "objectType": "VssPublicCoefficientCommitmentSet",
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "sourceTrusteeRecords": public_source_trustee_records,
+    });
+    VssMaterialPackageComponents {
+        vss_coefficient_commitments: commitment_set,
+        vss_coefficient_commitment_material: material_set,
+        vss_public_coefficient_commitments: public_commitment_set,
+    }
 }
 
 pub(in super::super) fn accepted_vss_coefficient_message_fixture(
@@ -139,22 +157,28 @@ pub(in super::super) fn accepted_vss_randomness_fixture(
     rns_limb_index: usize,
     shamir_coefficient_index: u64,
     ring_degree: usize,
-) -> Vec<Vec<i128>> {
-    (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-        .map(|randomness_column_index| {
-            (0..ring_degree)
-                .map(|coefficient_position| {
-                    match (source_trustee_roster_position as usize
-                        + rns_limb_index
-                        + shamir_coefficient_index as usize
-                        + randomness_column_index
-                        + coefficient_position)
-                        % 3
-                    {
-                        0 => -1,
-                        1 => 0,
-                        _ => 1,
-                    }
+) -> Vec<Vec<Vec<i128>>> {
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+        .iter()
+        .enumerate()
+        .map(|(commitment_limb_position, _)| {
+            (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+                .map(|randomness_column_index| {
+                    (0..ring_degree)
+                        .map(|coefficient_position| {
+                            let support_position = source_trustee_roster_position as usize
+                                + rns_limb_index
+                                + shamir_coefficient_index as usize
+                                + commitment_limb_position
+                                + randomness_column_index
+                                + coefficient_position;
+                            match support_position % 3 {
+                                0 => -1,
+                                1 => 0,
+                                _ => 1,
+                            }
+                        })
+                        .collect()
                 })
                 .collect()
         })

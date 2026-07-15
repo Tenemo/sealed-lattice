@@ -238,8 +238,6 @@ fn verify_common_randomness_reveal_record(
 struct CommonRandomnessParticipantBinding {
     roster_position: u64,
     trustee_identity: String,
-    recovery_epoch: u64,
-    device_epoch: u64,
 }
 
 fn verify_common_randomness_participant_record_shape(
@@ -283,8 +281,6 @@ fn verify_common_randomness_participant_record_shape(
     Ok(CommonRandomnessParticipantBinding {
         roster_position,
         trustee_identity: registration.trustee_identity.clone(),
-        recovery_epoch: registration.recovery_epoch,
-        device_epoch: registration.device_epoch,
     })
 }
 
@@ -298,8 +294,6 @@ fn common_randomness_commit_payload_value(
         "setupContextHash": setup_context_hash(setup_context)?,
         "trusteeIdentity": participant.trustee_identity.as_str(),
         "rosterPosition": participant.roster_position,
-        "recoveryEpoch": participant.recovery_epoch,
-        "deviceEpoch": participant.device_epoch,
         "revealHash": reveal_hash,
     }))
 }
@@ -314,8 +308,6 @@ fn common_randomness_reveal_payload_value(
         "setupContextHash": setup_context_hash(setup_context)?,
         "trusteeIdentity": participant.trustee_identity.as_str(),
         "rosterPosition": participant.roster_position,
-        "recoveryEpoch": participant.recovery_epoch,
-        "deviceEpoch": participant.device_epoch,
         "revealHex": reveal_hex,
     }))
 }

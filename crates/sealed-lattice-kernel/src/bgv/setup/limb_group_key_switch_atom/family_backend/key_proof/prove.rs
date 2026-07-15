@@ -2,6 +2,113 @@ use super::columns::*;
 use super::constraints::*;
 use super::*;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use std::{
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    time::Instant,
+};
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+const KEY_PROVER_PHASE_COUNT: usize = 8;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+static KEY_PROVER_TIMING_ENABLED: AtomicBool = AtomicBool::new(false);
+#[cfg(all(test, not(target_arch = "wasm32")))]
+static KEY_PROVER_PHASE_NANOSECONDS: [AtomicU64; KEY_PROVER_PHASE_COUNT] =
+    [const { AtomicU64::new(0) }; KEY_PROVER_PHASE_COUNT];
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[derive(Clone, Copy)]
+enum KeyProverPhase {
+    DomainAndPlan,
+    BaseAndMaterialCommitments,
+    AuxiliaryRound,
+    ConstraintComposition,
+    QuotientCommitment,
+    Combination,
+    Fri,
+    Openings,
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+impl KeyProverPhase {
+    const ALL: [Self; KEY_PROVER_PHASE_COUNT] = [
+        Self::DomainAndPlan,
+        Self::BaseAndMaterialCommitments,
+        Self::AuxiliaryRound,
+        Self::ConstraintComposition,
+        Self::QuotientCommitment,
+        Self::Combination,
+        Self::Fri,
+        Self::Openings,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::DomainAndPlan => "domain and plan",
+            Self::BaseAndMaterialCommitments => "base and material commitments",
+            Self::AuxiliaryRound => "auxiliary round",
+            Self::ConstraintComposition => "constraint composition",
+            Self::QuotientCommitment => "quotient commitment",
+            Self::Combination => "combination",
+            Self::Fri => "FRI",
+            Self::Openings => "openings",
+        }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+struct KeyProverPhaseTimer {
+    phase: KeyProverPhase,
+    started: Option<Instant>,
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+impl KeyProverPhaseTimer {
+    fn start(phase: KeyProverPhase) -> Self {
+        Self {
+            phase,
+            started: KEY_PROVER_TIMING_ENABLED
+                .load(Ordering::SeqCst)
+                .then(Instant::now),
+        }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+impl Drop for KeyProverPhaseTimer {
+    fn drop(&mut self) {
+        let Some(started) = self.started else {
+            return;
+        };
+        let elapsed = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+        KEY_PROVER_PHASE_NANOSECONDS[self.phase as usize].fetch_add(elapsed, Ordering::SeqCst);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(in super::super) fn begin_key_prover_phase_timing() {
+    KEY_PROVER_TIMING_ENABLED.store(false, Ordering::SeqCst);
+    for elapsed in &KEY_PROVER_PHASE_NANOSECONDS {
+        elapsed.store(0, Ordering::SeqCst);
+    }
+    KEY_PROVER_TIMING_ENABLED.store(true, Ordering::SeqCst);
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(in super::super) fn finish_key_prover_phase_timing() -> Vec<(&'static str, f64)> {
+    KEY_PROVER_TIMING_ENABLED.store(false, Ordering::SeqCst);
+    KeyProverPhase::ALL
+        .into_iter()
+        .map(|phase| {
+            (
+                phase.label(),
+                KEY_PROVER_PHASE_NANOSECONDS[phase as usize].load(Ordering::SeqCst) as f64
+                    / 1_000_000.0,
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 pub(in super::super) fn prove_round_one_key_fri<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
@@ -46,6 +153,38 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
     proof_parameters: &KeyFriProofParameters,
     private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
+    let negacyclic_domain = NegacyclicDomain::new(parameters, ring_degree)?;
+    prove_key_fri_with_negacyclic_domain(
+        parameters,
+        ring_degree,
+        &negacyclic_domain,
+        public,
+        source,
+        secret,
+        digits,
+        linkage_inputs,
+        statement_binding,
+        schedule_index,
+        proof_parameters,
+        private_randomness,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in super::super) fn prove_key_fri_with_negacyclic_domain<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ring_degree: usize,
+    negacyclic_domain: &NegacyclicDomain<'_, LIMB_COUNT>,
+    public: &KeyPublic<LIMB_COUNT>,
+    source: &KeySource<LIMB_COUNT>,
+    secret: &[i64],
+    digits: &[DigitWitness],
+    linkage_inputs: Option<(&linkage::LinkageStatement<'_>, &linkage::LinkageWitness<'_>)>,
+    statement_binding: &[u8; 64],
+    schedule_index: u64,
+    proof_parameters: &KeyFriProofParameters,
+    private_randomness: &mut PrivateProofRandomness,
+) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     let component_b: Vec<&[[u64; LIMB_COUNT]]> = public
         .digits
         .iter()
@@ -54,6 +193,7 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
     prove_key_fri_streamed(
         parameters,
         ring_degree,
+        negacyclic_domain,
         public,
         source,
         secret,
@@ -88,9 +228,11 @@ pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
     proof_parameters: &KeyFriProofParameters,
     private_randomness: &mut PrivateProofRandomness,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
+    let negacyclic_domain = NegacyclicDomain::new(parameters, ring_degree)?;
     prove_key_fri_streamed(
         parameters,
         ring_degree,
+        &negacyclic_domain,
         public,
         source,
         secret,
@@ -104,18 +246,38 @@ pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
     )
 }
 
-// The streamed prover: commit, sumcheck/support, combination, and opening
-// passes each regenerate exactly the columns they consume from the
-// deterministic `KeyColumnPlan`, so peak memory is bounded by one coset
+pub(super) fn accumulate_weighted_coefficients<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    combined_coefficients: &mut [[u64; LIMB_COUNT]],
+    weight: &[u64; LIMB_COUNT],
+    coefficients: &[[u64; LIMB_COUNT]],
+    starting_degree: usize,
+) {
+    let ending_degree = starting_degree + coefficients.len();
+    debug_assert!(ending_degree <= combined_coefficients.len());
+    for (combined_coefficient, coefficient) in combined_coefficients[starting_degree..ending_degree]
+        .iter_mut()
+        .zip(coefficients)
+    {
+        *combined_coefficient = parameters.add(
+            combined_coefficient,
+            &parameters.multiply(weight, coefficient),
+        );
+    }
+}
+
+// The streamed prover commits and opens exactly the columns regenerated from
+// the deterministic `KeyColumnPlan`, so peak memory is bounded by one coset
 // codeword plus one incremental leaf-hash state per coset position - never the
 // full column set (at the full profile the retained column set alone is
-// gigabytes). The regeneration trades roughly two extra coset LDEs per column
-// for that bound; the transcript, challenge order, and deterministic salt/mask
-// stream are unchanged from the one-shot shape.
+// gigabytes). The FRI combination is formed in coefficient space and extended
+// once, avoiding a separate low-degree extension for every column. Transcript,
+// challenge order, and deterministic salt/mask streams remain unchanged.
 #[allow(clippy::too_many_arguments)]
 fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     ring_degree: usize,
+    negacyclic: &NegacyclicDomain<'_, LIMB_COUNT>,
     public: &KeyPublic<LIMB_COUNT>,
     source: &KeySource<LIMB_COUNT>,
     secret: &[i64],
@@ -130,12 +292,13 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     if public.digits.len() != digits.len() || digits.is_empty() {
         return Err(invalid_key("digit public and witness counts must match"));
     }
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let domain_and_plan_timer = KeyProverPhaseTimer::start(KeyProverPhase::DomainAndPlan);
     let layout = layout(ring_degree)?;
     let digit_count = digits.len();
-    let trace_domain = CyclicDomain::new(parameters, layout.trace_size)?;
-    let coset_domain = CyclicDomain::new(parameters, layout.coset_size)?;
+    let trace_domain = CyclicDomain::for_interpolation(parameters, layout.trace_size)?;
+    let coset_domain = CyclicDomain::for_evaluation(parameters, layout.coset_size)?;
     let offset = coset_offset(parameters);
-    let negacyclic = NegacyclicDomain::new(parameters, ring_degree)?;
     let table_count = carry_range_lookup::table_count(ring_degree);
 
     let mut plan = KeyColumnPlan::new(
@@ -150,6 +313,12 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     )?;
     let base_count = plan.base_column_count();
     let material_count = material_column_count(digit_count);
+    let mut codeword = vec![parameters.zero(); layout.coset_size];
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    drop(domain_and_plan_timer);
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let base_and_material_timer =
+        KeyProverPhaseTimer::start(KeyProverPhase::BaseAndMaterialCommitments);
 
     // Round 1 (streamed): witness columns plus the carry-range multiplicity
     // columns, committed one codeword at a time.
@@ -157,7 +326,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         StreamedColumnCommitmentBuilder::begin(layout.coset_size, base_count, private_randomness)?;
     for column in 0..base_count {
         let coefficients = plan.base_column_coefficients(parameters, &trace_domain, column);
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
+        coset_evaluate_coefficients_into(&coset_domain, &offset, &coefficients, &mut codeword);
         base_builder.absorb_column(&codeword)?;
     }
     let base_commitment = base_builder.finalize()?;
@@ -171,10 +340,14 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     )?;
     for digit in 0..material_count {
         let coefficients = plan.material_column_coefficients(parameters, &trace_domain, digit);
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
+        coset_evaluate_coefficients_into(&coset_domain, &offset, &coefficients, &mut codeword);
         material_builder.absorb_column(&codeword)?;
     }
     let material_commitment = material_builder.finalize()?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    drop(base_and_material_timer);
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let auxiliary_round_timer = KeyProverPhaseTimer::start(KeyProverPhase::AuxiliaryRound);
 
     let mut transcript = Transcript::new(PROTOCOL_LABEL);
     transcript.absorb("key-statement-binding", statement_binding);
@@ -211,10 +384,11 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         StreamedColumnCommitmentBuilder::begin(layout.coset_size, aux_count, private_randomness)?;
     for column in 0..aux_count {
         let coefficients = plan.aux_column_coefficients(parameters, &trace_domain, column)?;
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
+        coset_evaluate_coefficients_into(&coset_domain, &offset, &coefficients, &mut codeword);
         aux_builder.absorb_column(&codeword)?;
     }
     let aux_commitment = aux_builder.finalize()?;
+    drop(codeword);
     transcript.absorb_digest("key-aux-root", &aux_commitment.root());
     transcript.absorb_field_elements("key-lookup-terminal", &[lookup_terminal]);
     transcript.absorb_field_elements("key-table-terminals", &table_terminals);
@@ -239,6 +413,11 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         "key-support-alpha",
         support_constraint_count(ring_degree, digit_count, plan.linkage_layout()),
     );
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    drop(auxiliary_round_timer);
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let constraint_composition_timer =
+        KeyProverPhaseTimer::start(KeyProverPhase::ConstraintComposition);
 
     // Sumcheck: f = Ls*S + sum_j (Le_j*E_j + Lc_j*C_j) plus the batched logUp
     // fraction sums, whose target folds in the committed terminals. The
@@ -247,7 +426,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let mut f = vec![parameters.zero()];
     let (secret_form, atom_target) = accumulate_forms(
         parameters,
-        &negacyclic,
+        negacyclic,
         ring_degree,
         public,
         source,
@@ -346,10 +525,15 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         };
         fold_form(&forms.secret_form, COLUMN_SECRET)?;
         fold_form(&forms.negative_form, linkage_start_base + linkage::LINK_NEG)?;
-        for (randomness_index, form) in forms.randomness_forms.iter().enumerate() {
+        for (randomness_position, form) in forms.randomness_forms.iter().enumerate() {
+            let commitment_limb_position = randomness_position
+                / crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH;
+            let randomness_column = randomness_position
+                % crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH;
             fold_form(
                 form,
-                linkage_start_base + linkage::link_randomness(randomness_index),
+                linkage_start_base
+                    + linkage::link_randomness(commitment_limb_position, randomness_column),
             )?;
         }
         for (chunk, form) in forms.carry_chunk_forms.iter().enumerate() {
@@ -559,30 +743,37 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
                 &polynomial::subtract(parameters, &negative_indicator, &one),
             ),
         );
-        // The five BDLOP opening-randomness columns are genuinely ternary:
-        // square = randomness^2 and randomness * (square - 1) = 0.
-        for randomness_column in 0..crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH
+        // Every commitment field has an independent all-ternary opening tape.
+        // Both purposes bind a square column, then enforce the same exact
+        // ternary support polynomial.
+        for commitment_limb_position in
+            0..crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
         {
-            let randomness = base_poly(linkage::link_randomness(randomness_column));
-            let randomness_square = base_poly(linkage::link_randomness_square(randomness_column));
-            fold_constraint(
-                &mut v,
-                &mut alpha_index,
-                polynomial::subtract(
-                    parameters,
-                    &randomness_square,
-                    &polynomial::multiply_via_ntt(parameters, &randomness, &randomness),
-                ),
-            );
-            fold_constraint(
-                &mut v,
-                &mut alpha_index,
-                polynomial::multiply_via_ntt(
-                    parameters,
-                    &randomness,
-                    &polynomial::subtract(parameters, &randomness_square, &one),
-                ),
-            );
+            for randomness_column in
+                0..crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH
+            {
+                let randomness = base_poly(linkage::link_randomness(
+                    commitment_limb_position,
+                    randomness_column,
+                ));
+                let randomness_square = base_poly(linkage::link_randomness_square(
+                    commitment_limb_position,
+                    randomness_column,
+                ));
+                fold_constraint(
+                    &mut v,
+                    &mut alpha_index,
+                    polynomial::subtract(
+                        parameters,
+                        &randomness_square,
+                        &polynomial::multiply_via_ntt(parameters, &randomness, &randomness),
+                    ),
+                );
+                let square_minus_one = polynomial::subtract(parameters, &randomness_square, &one);
+                let support_polynomial =
+                    polynomial::multiply_via_ntt(parameters, &randomness, &square_minus_one);
+                fold_constraint(&mut v, &mut alpha_index, support_polynomial);
+            }
         }
         // Each quotient chunk is reconstructed from committed binary columns.
         let two = parameters.unsigned_word_to_element(2);
@@ -637,17 +828,26 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     // (three short vectors) so the combination and opening passes can
     // regenerate their codewords.
     let quotient_coefficients = [q_sc, g, q_support];
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    drop(constraint_composition_timer);
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let quotient_commitment_timer = KeyProverPhaseTimer::start(KeyProverPhase::QuotientCommitment);
     let mut quotient_builder = StreamedColumnCommitmentBuilder::begin(
         layout.coset_size,
         QUOTIENT_COLUMN_COUNT,
         private_randomness,
     )?;
+    let mut codeword = vec![parameters.zero(); layout.coset_size];
     for coefficients in &quotient_coefficients {
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, coefficients);
+        coset_evaluate_coefficients_into(&coset_domain, &offset, coefficients, &mut codeword);
         quotient_builder.absorb_column(&codeword)?;
     }
     let quotient_commitment = quotient_builder.finalize()?;
     transcript.absorb_digest("key-quotient-root", &quotient_commitment.root());
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    drop(quotient_commitment_timer);
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let combination_timer = KeyProverPhaseTimer::start(KeyProverPhase::Combination);
 
     let weights = transcript.challenge_field_elements(
         parameters,
@@ -655,72 +855,94 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         base_count + material_count + aux_count + QUOTIENT_COLUMN_COUNT + 1,
     );
 
-    // Combination pass: the weighted sum of every committed column's codeword,
-    // regenerating one codeword at a time, in the fixed order base + material +
-    // aux + quotient (mirrored in the verifier's weight indexing).
-    let mut combination = vec![parameters.zero(); layout.coset_size];
-    let accumulate = |combination: &mut Vec<[u64; LIMB_COUNT]>,
-                      weight: &[u64; LIMB_COUNT],
-                      codeword: &[[u64; LIMB_COUNT]]| {
-        for (slot, value) in combination.iter_mut().zip(codeword.iter()) {
-            *slot = parameters.add(slot, &parameters.multiply(weight, value));
-        }
-    };
+    // Combination pass: form the weighted coefficient sum in the fixed order
+    // base + material + aux + quotient, then perform its coset extension once.
+    // Linearity makes this byte-identical to weighting the separately extended
+    // codewords while removing one full transform per input column.
+    codeword.fill(parameters.zero());
     let mut weight_index = 0;
     for column in 0..base_count {
         let coefficients = plan.base_column_coefficients(parameters, &trace_domain, column);
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
-        accumulate(&mut combination, &weights[weight_index], &codeword);
+        accumulate_weighted_coefficients(
+            parameters,
+            &mut codeword,
+            &weights[weight_index],
+            &coefficients,
+            0,
+        );
         weight_index += 1;
     }
     for digit in 0..material_count {
         let coefficients = plan.material_column_coefficients(parameters, &trace_domain, digit);
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
-        accumulate(&mut combination, &weights[weight_index], &codeword);
+        accumulate_weighted_coefficients(
+            parameters,
+            &mut codeword,
+            &weights[weight_index],
+            &coefficients,
+            0,
+        );
         weight_index += 1;
     }
     for column in 0..aux_count {
         let coefficients = plan.aux_column_coefficients(parameters, &trace_domain, column)?;
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
-        accumulate(&mut combination, &weights[weight_index], &codeword);
+        accumulate_weighted_coefficients(
+            parameters,
+            &mut codeword,
+            &weights[weight_index],
+            &coefficients,
+            0,
+        );
         weight_index += 1;
     }
     for coefficients in &quotient_coefficients {
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, coefficients);
-        accumulate(&mut combination, &weights[weight_index], &codeword);
+        accumulate_weighted_coefficients(
+            parameters,
+            &mut codeword,
+            &weights[weight_index],
+            coefficients,
+            0,
+        );
         weight_index += 1;
     }
     // g degree adjustment (sumcheck soundness): re-enter g shifted by
     // x^{trace_size + 1} so the combined FRI bound forces deg(g) <=
     // trace_size - 2. See `g_degree_adjustment_shift`. The shifted codeword is
-    // derived from g's coefficients (prepending the shift as zero coefficients)
-    // and is not committed or opened; the verifier reconstructs its value from
-    // the opened g column, so this adds no proof bytes.
+    // derived from g's coefficients and is not committed or opened; the
+    // verifier reconstructs its value from the opened g column, so this adds no
+    // proof bytes.
     let g_shift = g_degree_adjustment_shift(layout.trace_size);
-    let mut shifted_g_coefficients = vec![parameters.zero(); g_shift];
-    shifted_g_coefficients.extend_from_slice(&quotient_coefficients[QUOTIENT_G]);
-    let shifted_g_codeword =
-        coset_evaluate_coefficients(&coset_domain, &offset, &shifted_g_coefficients);
-    accumulate(
-        &mut combination,
+    accumulate_weighted_coefficients(
+        parameters,
+        &mut codeword,
         &weights[weight_index],
-        &shifted_g_codeword,
+        &quotient_coefficients[QUOTIENT_G],
+        g_shift,
     );
+    weight_index += 1;
+    debug_assert_eq!(weight_index, weights.len());
+    coset_evaluate_coefficients_in_place(&coset_domain, &offset, &mut codeword);
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    drop(combination_timer);
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let fri_timer = KeyProverPhaseTimer::start(KeyProverPhase::Fri);
 
     let fri_commitment = fri_commit(
         parameters,
         &mut transcript,
-        &combination,
+        &codeword,
         &offset,
         private_randomness,
     )?;
-    drop(combination);
     let query_positions = transcript.challenge_positions(
         "key-query",
         layout.coset_size,
         proof_parameters.query_count,
     );
     let fri = fri_answer(&fri_commitment, &query_positions);
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    drop(fri_timer);
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    let openings_timer = KeyProverPhaseTimer::start(KeyProverPhase::Openings);
 
     // Opening pass: regenerate each column's codeword once more and collect the
     // values at the sorted unique opened positions.
@@ -735,7 +957,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let mut base_rows_values = vec![Vec::with_capacity(base_count); sorted.len()];
     for column in 0..base_count {
         let coefficients = plan.base_column_coefficients(parameters, &trace_domain, column);
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
+        coset_evaluate_coefficients_into(&coset_domain, &offset, &coefficients, &mut codeword);
         for (row, &index) in base_rows_values.iter_mut().zip(sorted.iter()) {
             row.push(codeword[index]);
         }
@@ -743,7 +965,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let mut material_rows_values = vec![Vec::with_capacity(material_count); sorted.len()];
     for digit in 0..material_count {
         let coefficients = plan.material_column_coefficients(parameters, &trace_domain, digit);
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
+        coset_evaluate_coefficients_into(&coset_domain, &offset, &coefficients, &mut codeword);
         for (row, &index) in material_rows_values.iter_mut().zip(sorted.iter()) {
             row.push(codeword[index]);
         }
@@ -751,14 +973,14 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let mut aux_rows_values = vec![Vec::with_capacity(aux_count); sorted.len()];
     for column in 0..aux_count {
         let coefficients = plan.aux_column_coefficients(parameters, &trace_domain, column)?;
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
+        coset_evaluate_coefficients_into(&coset_domain, &offset, &coefficients, &mut codeword);
         for (row, &index) in aux_rows_values.iter_mut().zip(sorted.iter()) {
             row.push(codeword[index]);
         }
     }
     let mut quotient_rows_values = vec![Vec::with_capacity(QUOTIENT_COLUMN_COUNT); sorted.len()];
     for coefficients in &quotient_coefficients {
-        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, coefficients);
+        coset_evaluate_coefficients_into(&coset_domain, &offset, coefficients, &mut codeword);
         for (row, &index) in quotient_rows_values.iter_mut().zip(sorted.iter()) {
             row.push(codeword[index]);
         }
@@ -767,6 +989,8 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let material_opening = material_commitment.open_rows(&sorted, material_rows_values)?;
     let aux_opening = aux_commitment.open_rows(&sorted, aux_rows_values)?;
     let quotient_opening = quotient_commitment.open_rows(&sorted, quotient_rows_values)?;
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    drop(openings_timer);
 
     Ok(KeyFriProof {
         base_root: base_commitment.root(),

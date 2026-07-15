@@ -1,6 +1,6 @@
 use super::committed_material::{
-    CommittedMaterialPlanBuilder, CommittedMaterialRelationPlanInput, IntegerTerm,
-    MaterialRootUse, root_path,
+    CommittedMaterialPlanBuilder, CommittedMaterialRelationPlanInput, IntegerTerm, MaterialRootUse,
+    root_path,
 };
 use super::{CompiledRelationPlan, RelationPlanCheckContext, RelationPlanError};
 

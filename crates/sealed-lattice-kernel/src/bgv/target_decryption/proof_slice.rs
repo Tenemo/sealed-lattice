@@ -50,12 +50,12 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_verifi
     let mut bound_material_seeds =
         Vec::with_capacity(active_limb_count * (1 + TARGET_DECRYPTION_SMUDGING_ROLES.len()));
     for target_rns_limb_index in 0..active_limb_count {
-        let Some(target_rns_prime) = DATA_PRIMES.get(target_rns_limb_index).copied() else {
+        if DATA_PRIMES.get(target_rns_limb_index).is_none() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
                 "target proof slice limb is outside the selected BGV basis",
             ));
-        };
+        }
         let aggregate_opening = local_witness
             .active_credential_bindings
             .get(target_rns_limb_index)
@@ -65,14 +65,6 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_verifi
                     "local target-decryption witness is missing the requested aggregate opening",
                 )
             })?;
-        if aggregate_opening.limb_index != target_rns_limb_index
-            || aggregate_opening.rns_prime != target_rns_prime
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "target proof slice aggregate opening does not match the selected limb",
-            ));
-        }
         target_statement_aggregate_binding(
             input.proof_statement,
             target_rns_limb_index,
@@ -87,14 +79,12 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_verifi
         bound_material_seeds.push(aggregate_opening.aggregate_material_seed_hex.clone());
         for target_role in TARGET_DECRYPTION_SMUDGING_ROLES {
             let flooding_noise_opening = target_decryption_flooding_noise_proof_opening_for_slice(
-                input.setup_binding,
                 input.target_accepted,
                 input.participant,
                 &local_witness.private_flooding_seed_hex,
                 &local_witness.flooding_noise_openings,
                 target_role,
                 target_rns_limb_index,
-                target_rns_prime,
             )?;
             message_vectors.push(u64_coefficients_to_i64(
                 &flooding_noise_opening.message_coefficients,
@@ -202,7 +192,6 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
             }));
         }
         limb_statements.push(json!({
-            "targetRnsLimbIndex": target_rns_limb_index,
             "aggregateOpeningRoot": aggregate_opening_root,
             "aggregateCommitment": aggregate_commitment,
             "targetRoleStatements": role_statements,
@@ -212,16 +201,13 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
     Ok(json!({
         "context": {
             "setupContextHash": input.setup_binding.setup_context_hash,
-            "trusteeIdentity": input.participant.trustee_identity,
             "trusteeRosterPosition": input.participant.roster_position,
             "targetShareProofStatementRoot": proof_statement_root,
         },
-        "ringDegree": POLYNOMIAL_DEGREE,
         "targetDecryptionShare": {
             "targetShareProofStatementRoot": proof_statement_root,
             "publicMatrixSeedHash": input.setup_binding.public_matrix_seed_hash,
             "participantCount": input.setup_binding.participants.len(),
-            "trusteeIdentity": input.participant.trustee_identity,
             "trusteeRosterPosition": input.participant.roster_position,
             "activeCredentialBindingRoot": active_credential_binding_root,
             "targetRnsLimbStatements": limb_statements,
@@ -257,18 +243,14 @@ fn target_statement_aggregate_binding<'a>(
             "target proof statement is missing the requested aggregate binding",
         )
     })?;
-    compare_unsigned_field(
-        binding,
-        "rnsLimbIndex",
-        target_rns_limb_index as u64,
-        "target proof slice aggregate binding limb",
-    )?;
-    compare_hash_field(
-        binding,
-        "aggregateCommitmentRoot",
-        aggregate_commitment_root,
-        "target proof slice aggregate binding root",
-    )?;
+    let bound_commitment_root =
+        derive_canonical_object_hash(value_at_path(binding, &["aggregateCommitment"])?)?;
+    if bound_commitment_root != aggregate_commitment_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "target proof slice aggregate commitment does not match the selected opening",
+        ));
+    }
     compare_hash_field(
         binding,
         "aggregateOpeningRoot",

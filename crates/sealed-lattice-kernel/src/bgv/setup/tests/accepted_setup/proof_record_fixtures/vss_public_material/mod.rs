@@ -168,7 +168,7 @@ fn structural_same_secret_source_commitments(
             "participantCount": participant_count,
         }))
         .expect("structural VSS setup context hash");
-    let threshold_degree = participant_count / 3 + 1;
+    let threshold_degree = decryption_threshold_for_participant_count(participant_count);
     let mut source_trustee_records = Vec::new();
     let mut coefficient_commitments = Vec::new();
 
@@ -251,8 +251,8 @@ pub(in super::super) struct CompactAggregateThresholdProofFixture {
         Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
 }
 
-pub(in super::super) fn compact_aggregate_threshold_proof_fixture(
-) -> CompactAggregateThresholdProofFixture {
+pub(in super::super) fn compact_aggregate_threshold_proof_fixture()
+-> CompactAggregateThresholdProofFixture {
     let mut package = minimal_collective_setup_package_for_participant_count(3);
     let ring_degree = vss_commitment_ring_degree_from_fixture_package(&package);
     package["vssPublicCoefficientCommitmentSet"] =
@@ -280,6 +280,6 @@ pub(in super::super) fn compact_aggregate_threshold_proof_fixture(
 }
 
 pub(in super::super) use finalized_package::{
-    finalize_collective_setup_package, FinalizedCollectiveSetupPackageFixture,
+    FinalizedCollectiveSetupPackageFixture, finalize_collective_setup_package,
 };
 pub(in super::super) use transport::descriptor_backed_vss_proof_material_fixture;

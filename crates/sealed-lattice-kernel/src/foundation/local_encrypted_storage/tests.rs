@@ -146,96 +146,6 @@ fn storage_root_commitment_binds_the_root_and_every_context_field() {
 }
 
 #[test]
-fn recovery_round_trips_canonical_base32_and_rejects_mutated_bound_values() {
-    let root = test_storage_root();
-    let recovery = root.recovery_value().expect("recovery value");
-    let encoded = recovery.encode().expect("recovery value encodes");
-    assert_eq!(encoded.len(), RECOVERY_VALUE_CANONICAL_BYTE_LENGTH);
-
-    let canonical = recovery
-        .to_canonical_base32()
-        .expect("recovery value has canonical base32");
-    assert_eq!(canonical.len(), RECOVERY_VALUE_BASE32_CHARACTER_LENGTH);
-    assert!(!canonical.contains('='));
-    let ingress = CanonicalLocalStorageRecoveryIngress::decode(
-        &canonical.to_ascii_lowercase(),
-        &CanonicalDecodeLimits::default(),
-    )
-    .expect("case-insensitive ingress accepts lowercase");
-    assert_eq!(ingress.canonical_base32(), canonical.as_str());
-    let recovered = expect_valid(
-        ingress
-            .into_recovery_value()
-            .recover(test_binding(), root.storage_root_commitment_payload()),
-    );
-    assert_eq!(
-        recovered.storage_root_commitment(),
-        root.storage_root_commitment()
-    );
-
-    for invalid in [
-        canonical[..canonical.len() - 1].to_owned(),
-        format!("{}=", &canonical[..canonical.len() - 1]),
-        format!(" {}", &canonical[..canonical.len() - 1]),
-    ] {
-        assert!(
-            CanonicalLocalStorageRecoveryIngress::decode(
-                &invalid,
-                &CanonicalDecodeLimits::default()
-            )
-            .is_err()
-        );
-    }
-
-    for (index, item) in [
-        (5, CanonicalItem::hash512(test_hash(0x61).into_bytes())),
-        (
-            6,
-            CanonicalItem::fixed_bytes([0x62; ACTION_STORAGE_ROOT_BYTE_LENGTH])
-                .expect("fixed root item"),
-        ),
-        (
-            7,
-            CanonicalItem::fixed_bytes([0x63; RECOVERY_CHECKSUM_BYTE_LENGTH])
-                .expect("fixed checksum item"),
-        ),
-    ] {
-        assert_schema_refused(
-            LocalStorageRecoveryValue::decode(
-                &replace_tuple_item(&encoded, index, item),
-                &CanonicalDecodeLimits::default(),
-            ),
-            RefusalReason::WrongHashOrRoot,
-        );
-    }
-}
-
-#[test]
-fn recovery_requires_the_expected_context_and_verified_commitment() {
-    let root = test_storage_root();
-    let encoded = root
-        .recovery_value()
-        .expect("recovery value")
-        .encode()
-        .expect("recovery value encodes");
-    let decode = || {
-        LocalStorageRecoveryValue::decode(&encoded, &CanonicalDecodeLimits::default())
-            .expect("recovery value decodes")
-    };
-    assert_refused(
-        decode().recover(alternate_binding(), root.storage_root_commitment_payload()),
-        RefusalReason::WrongContext,
-    );
-    assert_refused(
-        decode().recover(
-            test_binding(),
-            StorageRootCommitmentPayload::new(test_hash(0x77)),
-        ),
-        RefusalReason::WrongHashOrRoot,
-    );
-}
-
-#[test]
 fn device_wrapping_schemas_round_trip_and_recompute_opened_roots() {
     let root = test_storage_root();
     let associated_data = root.device_wrapping_associated_data();
@@ -304,11 +214,6 @@ fn local_storage_schemas_apply_their_own_decode_limits() {
     for result in [
         StorageRootCommitmentPayload::decode(
             &[0; STORAGE_ROOT_COMMITMENT_PAYLOAD_MAXIMUM_BYTE_LENGTH + 1],
-            &limits,
-        )
-        .map(|_| ()),
-        LocalStorageRecoveryValue::decode(
-            &vec![0; RECOVERY_VALUE_CANONICAL_BYTE_LENGTH + 1],
             &limits,
         )
         .map(|_| ()),
@@ -535,7 +440,6 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             action_randomness_commitment,
             identifier_input: test_checkpoint_identifier_input(&source_digests),
             record_version: 0,
-            creation_recovery_epoch: 4,
             predecessor_record_hash: None,
             nonce: [0xd4; LOCAL_RECORD_NONCE_BYTE_LENGTH],
             plaintext,
@@ -547,7 +451,6 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             action_randomness_commitment,
             test_checkpoint_identifier_input(&source_digests),
             0,
-            4,
             None,
             &envelope,
         ))
@@ -569,7 +472,6 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             test_hash(0xd5),
             test_checkpoint_identifier_input(&source_digests),
             0,
-            4,
             None,
             &envelope,
         ),
@@ -581,26 +483,12 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             action_randomness_commitment,
             test_checkpoint_identifier_input(&alternate_source_digests),
             0,
-            4,
             None,
             &envelope,
         ),
         RefusalReason::WrongContext,
     );
 
-    let mut mutated_authenticator = envelope.clone();
-    mutated_authenticator.record_authenticator[0] ^= 1;
-    assert_refused(
-        root.open_local_record(
-            action_randomness_commitment,
-            test_checkpoint_identifier_input(&source_digests),
-            0,
-            4,
-            None,
-            &mutated_authenticator,
-        ),
-        RefusalReason::WrongHashOrRoot,
-    );
     let mut mutated_ciphertext = envelope.clone();
     mutated_ciphertext.ciphertext[3] ^= 1;
     assert_refused(
@@ -608,7 +496,6 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             action_randomness_commitment,
             test_checkpoint_identifier_input(&source_digests),
             0,
-            4,
             None,
             &mutated_ciphertext,
         ),
@@ -621,7 +508,6 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             action_randomness_commitment,
             test_checkpoint_identifier_input(&source_digests),
             0,
-            4,
             None,
             &mutated_tag,
         ),
@@ -638,7 +524,6 @@ fn record_versions_derive_distinct_keys_and_enforce_predecessors_and_size_caps()
             action_randomness_commitment: test_hash(0xe2),
             identifier_input: test_checkpoint_identifier_input(&source_digests),
             record_version: 0,
-            creation_recovery_epoch: 0,
             predecessor_record_hash: None,
             nonce: [0xe3; LOCAL_RECORD_NONCE_BYTE_LENGTH],
             plaintext: b"same plaintext",
@@ -650,7 +535,6 @@ fn record_versions_derive_distinct_keys_and_enforce_predecessors_and_size_caps()
             action_randomness_commitment: test_hash(0xe2),
             identifier_input: test_checkpoint_identifier_input(&source_digests),
             record_version: 1,
-            creation_recovery_epoch: 0,
             predecessor_record_hash: Some(predecessor_hash),
             nonce: [0xe3; LOCAL_RECORD_NONCE_BYTE_LENGTH],
             plaintext: b"same plaintext",
@@ -665,7 +549,6 @@ fn record_versions_derive_distinct_keys_and_enforce_predecessors_and_size_caps()
             action_randomness_commitment: test_hash(0xe2),
             identifier_input: test_checkpoint_identifier_input(&source_digests),
             record_version: 2,
-            creation_recovery_epoch: 0,
             predecessor_record_hash: Some(version_one.envelope_hash().expect("predecessor hash")),
             nonce: [0xe4; LOCAL_RECORD_NONCE_BYTE_LENGTH],
             plaintext: &oversized_plaintext,

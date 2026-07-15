@@ -84,6 +84,9 @@ const INTEGER_LIFT_FULL_RING_NEGACYCLIC_PRODUCT_SCHEMA_IDENTIFIER: u16 = 0x2249;
 const INTEGER_LIFT_REVERSED_COLUMN_BINDING_SCHEMA_IDENTIFIER: u16 = 0x224a;
 const COEFFICIENT_LOCAL_RESIDUAL_SCHEMA_IDENTIFIER: u16 = 0x224b;
 const COEFFICIENT_LOCAL_IDENTITY_BATCH_SCHEMA_IDENTIFIER: u16 = 0x224c;
+const NEGACYCLIC_AUTOMORPHISM_MAPPING_SOURCE_SCHEMA_IDENTIFIER: u16 = 0x224d;
+const INTEGER_LIFT_NEGACYCLIC_AUTOMORPHISM_PERMUTATION_SCHEMA_IDENTIFIER: u16 = 0x224e;
+const RADIX_DECOMPOSED_VERIFIER_SOURCE_SCHEMA_IDENTIFIER: u16 = 0x224f;
 const SCHEMA_VERSION: u16 = 1;
 const RELATION_PLAN_HASH_DOMAIN: &str = "sealed-lattice/proof/relation-plan/v1";
 const RELATION_PLAN_VARIANT_HASH_DOMAIN: &str = "sealed-lattice/proof/relation-plan-variant/v1";
@@ -337,6 +340,14 @@ impl RelationSelectorPathStep {
         }
     }
 
+    pub(crate) const fn step_kind(self) -> SelectorPathStepKind {
+        self.step_kind
+    }
+
+    pub(crate) const fn argument(self) -> u64 {
+        self.argument
+    }
+
     fn canonical_tuple(self) -> CanonicalTuple {
         CanonicalTuple::new(
             SELECTOR_PATH_STEP_SCHEMA_IDENTIFIER,
@@ -386,9 +397,43 @@ pub(crate) enum RelationVerifierSource {
     SamplerOutput {
         public_sampler_ordinal: u32,
     },
+    NegacyclicAutomorphismMapping {
+        ring_degree: u64,
+        galois_element: u64,
+    },
+    /// A plan-owned, deterministic view of a canonical residue source.  It
+    /// emits one fixed radix digit of `scale * residue` for every source
+    /// element.  The wrapped source remains the sole protocol-facing source;
+    /// callers cannot supply an independently interpreted limb stream.
+    RadixDecomposition {
+        source: Box<RelationVerifierSource>,
+        modulus_reference: SuiteModulusReference,
+        scale: u64,
+        radix: u64,
+        digit_ordinal: u16,
+        digit_count: u16,
+    },
 }
 
 impl RelationVerifierSource {
+    pub(crate) fn application_statement_scalar_hash_path(
+        &self,
+    ) -> Option<&[RelationSelectorPathStep]> {
+        match self {
+            Self::ApplicationStatement {
+                value_path,
+                value_layout,
+            } if value_layout.element_kind == RelationElementKind::Hash512
+                && value_layout.residue_modulus.is_none()
+                && value_layout.shape.is_empty()
+                && value_layout.embedding_kind == RelationEmbeddingKind::None =>
+            {
+                Some(value_path)
+            }
+            _ => None,
+        }
+    }
+
     fn value_layout<'source>(
         &'source self,
         samplers: &'source [RelationPublicSamplerDescriptor],
@@ -420,6 +465,25 @@ impl RelationVerifierSource {
                     sampler.output_modulus,
                     sampler.output_count,
                 ))
+            }
+            Self::NegacyclicAutomorphismMapping { ring_degree, .. } => Ok(RelationValueLayout {
+                element_kind: RelationElementKind::BaseField,
+                residue_modulus: None,
+                shape: vec![
+                    ring_degree
+                        .checked_mul(3)
+                        .ok_or(RelationPlanError::CountOverflow)?,
+                ],
+                embedding_kind: RelationEmbeddingKind::Identity,
+            }),
+            Self::RadixDecomposition { source, .. } => {
+                let source_layout = source.value_layout(samplers, sources)?;
+                Ok(RelationValueLayout {
+                    element_kind: RelationElementKind::BaseField,
+                    residue_modulus: None,
+                    shape: source_layout.shape,
+                    embedding_kind: RelationEmbeddingKind::Identity,
+                })
             }
         }
     }
@@ -483,6 +547,36 @@ impl RelationVerifierSource {
             } => (
                 SAMPLER_OUTPUT_SOURCE_SCHEMA_IDENTIFIER,
                 vec![CanonicalItem::unsigned32(*public_sampler_ordinal)],
+            ),
+            Self::NegacyclicAutomorphismMapping {
+                ring_degree,
+                galois_element,
+            } => (
+                NEGACYCLIC_AUTOMORPHISM_MAPPING_SOURCE_SCHEMA_IDENTIFIER,
+                vec![
+                    CanonicalItem::unsigned64(*ring_degree),
+                    CanonicalItem::unsigned64(*galois_element),
+                ],
+            ),
+            Self::RadixDecomposition {
+                source,
+                modulus_reference,
+                scale,
+                radix,
+                digit_ordinal,
+                digit_count,
+            } => (
+                RADIX_DECOMPOSED_VERIFIER_SOURCE_SCHEMA_IDENTIFIER,
+                vec![
+                    CanonicalItem::nested_tuple(&source.canonical_tuple()?)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::nested_tuple(&modulus_reference.canonical_tuple())
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::unsigned64(*scale),
+                    CanonicalItem::unsigned64(*radix),
+                    CanonicalItem::unsigned16(*digit_ordinal),
+                    CanonicalItem::unsigned16(*digit_count),
+                ],
             ),
         };
         Ok(CanonicalTuple::new(
@@ -551,8 +645,201 @@ impl RelationVerifierSource {
                 value_layout.validate()
             }
             Self::SamplerOutput { .. } => Ok(()),
+            Self::NegacyclicAutomorphismMapping {
+                ring_degree,
+                galois_element,
+            } => validate_negacyclic_automorphism(*ring_degree, *galois_element),
+            Self::RadixDecomposition {
+                source,
+                modulus_reference,
+                scale,
+                radix,
+                digit_ordinal,
+                digit_count,
+            } => {
+                source.validate_shape()?;
+                let layout = source.value_layout(&[], &[])?;
+                if *scale == 0
+                    || *radix < 2
+                    || *digit_count == 0
+                    || *digit_ordinal >= *digit_count
+                    || layout.element_kind != RelationElementKind::Residue
+                    || layout.residue_modulus != Some(*modulus_reference)
+                    || layout.embedding_kind != RelationEmbeddingKind::LeastNonnegative
+                {
+                    return Err(RelationPlanError::InvalidSource);
+                }
+                Ok(())
+            }
         }
     }
+}
+
+pub(crate) fn radix_decompose_scaled_residues(
+    residues: &[u64],
+    modulus: u64,
+    scale: u64,
+    radix: u64,
+    digit_ordinal: u16,
+    digit_count: u16,
+) -> Result<Vec<u64>, RelationPlanError> {
+    if modulus < 3 || scale == 0 || radix < 2 || digit_count == 0 || digit_ordinal >= digit_count {
+        return Err(RelationPlanError::InvalidSource);
+    }
+    let maximum_scaled = u128::from(modulus - 1)
+        .checked_mul(u128::from(scale))
+        .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+    let capacity = (0..digit_count).try_fold(1_u128, |capacity, _| {
+        capacity
+            .checked_mul(u128::from(radix))
+            .ok_or(RelationPlanError::IntegerBoundOverflow)
+    })?;
+    if maximum_scaled >= capacity {
+        return Err(RelationPlanError::IntegerBoundOverflow);
+    }
+    let divisor = (0..digit_ordinal).try_fold(1_u128, |divisor, _| {
+        divisor
+            .checked_mul(u128::from(radix))
+            .ok_or(RelationPlanError::IntegerBoundOverflow)
+    })?;
+    residues
+        .iter()
+        .copied()
+        .map(|residue| {
+            if residue >= modulus {
+                return Err(RelationPlanError::InvalidSource);
+            }
+            Ok(u64::try_from(
+                (u128::from(residue) * u128::from(scale) / divisor) % u128::from(radix),
+            )
+            .map_err(|_| RelationPlanError::IntegerBoundOverflow)?)
+        })
+        .collect()
+}
+
+fn validate_negacyclic_automorphism(
+    ring_degree: u64,
+    galois_element: u64,
+) -> Result<(), RelationPlanError> {
+    let automorphism_modulus = ring_degree
+        .checked_mul(2)
+        .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+    if ring_degree < 4
+        || !ring_degree.is_power_of_two()
+        || galois_element <= 1
+        || galois_element >= automorphism_modulus
+        || galois_element.is_multiple_of(2)
+    {
+        Err(RelationPlanError::InvalidDomain)
+    } else {
+        Ok(())
+    }
+}
+
+/// Returns the six row-major half-ring sequences used by the exact compact
+/// automorphism permutation check. The verifier recomputes these values from
+/// the suite-bound ring degree and Galois element; they are never witness data.
+pub(crate) fn negacyclic_automorphism_mapping_values(
+    ring_degree: u64,
+    galois_element: u64,
+) -> Result<Vec<u64>, RelationPlanError> {
+    validate_negacyclic_automorphism(ring_degree, galois_element)?;
+    let half_ring_degree = ring_degree / 2;
+    let automorphism_modulus = u128::from(ring_degree) * 2;
+    let capacity = usize::try_from(
+        ring_degree
+            .checked_mul(3)
+            .ok_or(RelationPlanError::CountOverflow)?,
+    )
+    .map_err(|_| RelationPlanError::CountOverflow)?;
+    let mut mapped_low_positions = Vec::with_capacity(
+        usize::try_from(half_ring_degree).map_err(|_| RelationPlanError::CountOverflow)?,
+    );
+    let mut low_negation_bits = Vec::with_capacity(mapped_low_positions.capacity());
+    let mut mapped_high_positions = Vec::with_capacity(mapped_low_positions.capacity());
+    let mut high_negation_bits = Vec::with_capacity(mapped_low_positions.capacity());
+    let mut target_low_positions = Vec::with_capacity(mapped_low_positions.capacity());
+    let mut target_high_positions = Vec::with_capacity(mapped_low_positions.capacity());
+    for row_ordinal in 0..half_ring_degree {
+        for (source_position, mapped_positions, negation_bits) in [
+            (
+                row_ordinal,
+                &mut mapped_low_positions,
+                &mut low_negation_bits,
+            ),
+            (
+                half_ring_degree
+                    .checked_add(row_ordinal)
+                    .ok_or(RelationPlanError::CountOverflow)?,
+                &mut mapped_high_positions,
+                &mut high_negation_bits,
+            ),
+        ] {
+            let mapped_exponent =
+                (u128::from(galois_element) * u128::from(source_position)) % automorphism_modulus;
+            let negated = mapped_exponent >= u128::from(ring_degree);
+            let mapped_position = mapped_exponent % u128::from(ring_degree);
+            mapped_positions.push(
+                u64::try_from(mapped_position).map_err(|_| RelationPlanError::CountOverflow)?,
+            );
+            negation_bits.push(u64::from(negated));
+        }
+        target_low_positions.push(row_ordinal);
+        target_high_positions.push(
+            half_ring_degree
+                .checked_add(row_ordinal)
+                .ok_or(RelationPlanError::CountOverflow)?,
+        );
+    }
+    let mut values = Vec::with_capacity(capacity);
+    values.extend(mapped_low_positions);
+    values.extend(low_negation_bits);
+    values.extend(mapped_high_positions);
+    values.extend(high_negation_bits);
+    values.extend(target_low_positions);
+    values.extend(target_high_positions);
+    Ok(values)
+}
+
+/// Independently evaluates `X -> X^g` in `Z[X]/(X^N + 1)` for semantic
+/// equivalence tests and witness construction. This does not use the compiled
+/// constraint programs or their accumulator implementation.
+pub(crate) fn apply_negacyclic_automorphism(
+    coefficients: &[i64],
+    galois_element: u64,
+) -> Result<Vec<i64>, RelationPlanError> {
+    let ring_degree =
+        u64::try_from(coefficients.len()).map_err(|_| RelationPlanError::CountOverflow)?;
+    validate_negacyclic_automorphism(ring_degree, galois_element)?;
+    let automorphism_modulus = u128::from(ring_degree) * 2;
+    let mut output = vec![0_i64; coefficients.len()];
+    for (source_position, coefficient) in coefficients.iter().copied().enumerate() {
+        let mapped_exponent = (u128::from(galois_element)
+            * u128::try_from(source_position).map_err(|_| RelationPlanError::CountOverflow)?)
+            % automorphism_modulus;
+        let mapped_position = usize::try_from(mapped_exponent % u128::from(ring_degree))
+            .map_err(|_| RelationPlanError::CountOverflow)?;
+        output[mapped_position] = if mapped_exponent >= u128::from(ring_degree) {
+            coefficient
+                .checked_neg()
+                .ok_or(RelationPlanError::IntegerBoundOverflow)?
+        } else {
+            coefficient
+        };
+    }
+    Ok(output)
+}
+
+pub(crate) fn negacyclic_automorphism_semantics_match(
+    source_coefficients: &[i64],
+    target_coefficients: &[i64],
+    galois_element: u64,
+) -> Result<bool, RelationPlanError> {
+    if source_coefficients.len() != target_coefficients.len() {
+        return Ok(false);
+    }
+    apply_negacyclic_automorphism(source_coefficients, galois_element)
+        .map(|expected| expected == target_coefficients)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1977,6 +2264,59 @@ impl RelationIntegerLiftReversedColumnBindingDescriptor {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor {
+    pub(crate) galois_element: u64,
+    pub(crate) mapping_verifier_source_ordinal: u32,
+    pub(crate) source_low_column_ordinal: u32,
+    pub(crate) source_high_column_ordinal: u32,
+    pub(crate) target_low_column_ordinal: u32,
+    pub(crate) target_high_column_ordinal: u32,
+    pub(crate) mapped_low_position_column_ordinal: u32,
+    pub(crate) low_negation_bit_column_ordinal: u32,
+    pub(crate) mapped_high_position_column_ordinal: u32,
+    pub(crate) high_negation_bit_column_ordinal: u32,
+    pub(crate) target_low_position_column_ordinal: u32,
+    pub(crate) target_high_position_column_ordinal: u32,
+    pub(crate) source_product_before_column_ordinal: u32,
+    pub(crate) source_low_product_column_ordinal: u32,
+    pub(crate) target_product_before_column_ordinal: u32,
+    pub(crate) target_low_product_column_ordinal: u32,
+}
+
+impl RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor {
+    fn canonical_tuple(&self) -> CanonicalTuple {
+        CanonicalTuple::new(
+            INTEGER_LIFT_NEGACYCLIC_AUTOMORPHISM_PERMUTATION_SCHEMA_IDENTIFIER,
+            SCHEMA_VERSION,
+            vec![
+                CanonicalItem::unsigned64(self.galois_element),
+                CanonicalItem::unsigned32(self.mapping_verifier_source_ordinal),
+                CanonicalItem::unsigned32(self.source_low_column_ordinal),
+                CanonicalItem::unsigned32(self.source_high_column_ordinal),
+                CanonicalItem::unsigned32(self.target_low_column_ordinal),
+                CanonicalItem::unsigned32(self.target_high_column_ordinal),
+                CanonicalItem::unsigned32(self.mapped_low_position_column_ordinal),
+                CanonicalItem::unsigned32(self.low_negation_bit_column_ordinal),
+                CanonicalItem::unsigned32(self.mapped_high_position_column_ordinal),
+                CanonicalItem::unsigned32(self.high_negation_bit_column_ordinal),
+                CanonicalItem::unsigned32(self.target_low_position_column_ordinal),
+                CanonicalItem::unsigned32(self.target_high_position_column_ordinal),
+                CanonicalItem::unsigned32(self.source_product_before_column_ordinal),
+                CanonicalItem::unsigned32(self.source_low_product_column_ordinal),
+                CanonicalItem::unsigned32(self.target_product_before_column_ordinal),
+                CanonicalItem::unsigned32(self.target_low_product_column_ordinal),
+            ],
+        )
+    }
+
+    fn canonical_bytes(&self) -> Result<Vec<u8>, RelationPlanError> {
+        self.canonical_tuple()
+            .encode()
+            .map_err(canonical_encoding_error)
+    }
+}
+
 impl RelationIntegerLiftConvolutionProductDescriptor {
     fn canonical_tuple(&self) -> CanonicalTuple {
         CanonicalTuple::new(
@@ -2056,6 +2396,8 @@ pub(crate) struct RelationIntegerLiftBatchDescriptor {
     pub(crate) challenge_ordinal: u16,
     pub(crate) ordered_reversed_column_bindings:
         Vec<RelationIntegerLiftReversedColumnBindingDescriptor>,
+    pub(crate) ordered_negacyclic_automorphism_permutations:
+        Vec<RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor>,
     pub(crate) ordered_components: Vec<RelationIntegerLiftComponentDescriptor>,
 }
 
@@ -2066,6 +2408,12 @@ impl RelationIntegerLiftBatchDescriptor {
 
     pub(crate) const fn challenge_ordinal(&self) -> u16 {
         self.challenge_ordinal
+    }
+
+    pub(crate) fn negacyclic_automorphism_permutations(
+        &self,
+    ) -> &[RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor] {
+        &self.ordered_negacyclic_automorphism_permutations
     }
 
     fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
@@ -2080,6 +2428,13 @@ impl RelationIntegerLiftBatchDescriptor {
                     self.ordered_reversed_column_bindings
                         .iter()
                         .map(RelationIntegerLiftReversedColumnBindingDescriptor::canonical_tuple),
+                )?,
+                canonical_nested_list(
+                    self.ordered_negacyclic_automorphism_permutations
+                        .iter()
+                        .map(
+                            RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor::canonical_tuple,
+                        ),
                 )?,
                 canonical_nested_list(
                     self.ordered_components
@@ -2232,6 +2587,18 @@ impl RelationIntegerLiftBatchDescriptor {
         )?;
 
         let mut programs = Vec::new();
+        for permutation in &self.ordered_negacyclic_automorphism_permutations {
+            programs.extend(
+                integer_lift_negacyclic_automorphism_permutation_constraint_programs(
+                    permutation,
+                    &theta_expression,
+                    point_zero.clone(),
+                    point_last.clone(),
+                    except_last.clone(),
+                    trace_domain_size,
+                )?,
+            );
+        }
         for binding in &self.ordered_reversed_column_bindings {
             programs.extend(integer_lift_reversed_column_binding_constraint_programs(
                 binding,
@@ -2272,6 +2639,174 @@ impl RelationIntegerLiftBatchDescriptor {
         }
         Ok(programs)
     }
+}
+
+fn negacyclic_automorphism_encoded_source_expression(
+    position_column_ordinal: u32,
+    negation_bit_column_ordinal: u32,
+    value_column_ordinal: u32,
+) -> Vec<RelationExpressionInstruction> {
+    let tagged_position = multiply_integer_lift_expressions(
+        integer_lift_column_expression(position_column_ordinal, false, 0),
+        vec![RelationExpressionInstruction::BaseFieldConstant(3)],
+    );
+    let signed_value = subtract_integer_lift_expressions(
+        integer_lift_column_expression(value_column_ordinal, false, 0),
+        multiply_integer_lift_expressions(
+            multiply_integer_lift_expressions(
+                integer_lift_column_expression(negation_bit_column_ordinal, false, 0),
+                vec![RelationExpressionInstruction::BaseFieldConstant(2)],
+            ),
+            integer_lift_column_expression(value_column_ordinal, false, 0),
+        ),
+    );
+    add_integer_lift_expressions(
+        add_integer_lift_expressions(
+            tagged_position,
+            vec![RelationExpressionInstruction::BaseFieldConstant(1)],
+        ),
+        signed_value,
+    )
+}
+
+fn negacyclic_automorphism_encoded_target_expression(
+    position_column_ordinal: u32,
+    value_column_ordinal: u32,
+) -> Vec<RelationExpressionInstruction> {
+    add_integer_lift_expressions(
+        add_integer_lift_expressions(
+            multiply_integer_lift_expressions(
+                integer_lift_column_expression(position_column_ordinal, false, 0),
+                vec![RelationExpressionInstruction::BaseFieldConstant(3)],
+            ),
+            vec![RelationExpressionInstruction::BaseFieldConstant(1)],
+        ),
+        integer_lift_column_expression(value_column_ordinal, false, 0),
+    )
+}
+
+fn negacyclic_automorphism_product_factor_expression(
+    theta_expression: &[RelationExpressionInstruction],
+    encoded_value_expression: Vec<RelationExpressionInstruction>,
+) -> Vec<RelationExpressionInstruction> {
+    subtract_integer_lift_expressions(theta_expression.to_vec(), encoded_value_expression)
+}
+
+fn integer_lift_negacyclic_automorphism_permutation_constraint_programs(
+    descriptor: &RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor,
+    theta_expression: &[RelationExpressionInstruction],
+    point_zero: Vec<RelationExpressionInstruction>,
+    point_last: Vec<RelationExpressionInstruction>,
+    except_last: Vec<RelationExpressionInstruction>,
+    trace_domain_size: u64,
+) -> Result<Vec<RelationIntegerLiftConstraintProgram>, RelationPlanError> {
+    if trace_domain_size == 0 {
+        return Err(RelationPlanError::InvalidDomain);
+    }
+    let source_low_factor = negacyclic_automorphism_product_factor_expression(
+        theta_expression,
+        negacyclic_automorphism_encoded_source_expression(
+            descriptor.mapped_low_position_column_ordinal,
+            descriptor.low_negation_bit_column_ordinal,
+            descriptor.source_low_column_ordinal,
+        ),
+    );
+    let source_high_factor = negacyclic_automorphism_product_factor_expression(
+        theta_expression,
+        negacyclic_automorphism_encoded_source_expression(
+            descriptor.mapped_high_position_column_ordinal,
+            descriptor.high_negation_bit_column_ordinal,
+            descriptor.source_high_column_ordinal,
+        ),
+    );
+    let target_low_factor = negacyclic_automorphism_product_factor_expression(
+        theta_expression,
+        negacyclic_automorphism_encoded_target_expression(
+            descriptor.target_low_position_column_ordinal,
+            descriptor.target_low_column_ordinal,
+        ),
+    );
+    let target_high_factor = negacyclic_automorphism_product_factor_expression(
+        theta_expression,
+        negacyclic_automorphism_encoded_target_expression(
+            descriptor.target_high_position_column_ordinal,
+            descriptor.target_high_column_ordinal,
+        ),
+    );
+    let source_before = descriptor.source_product_before_column_ordinal;
+    let source_low_product = descriptor.source_low_product_column_ordinal;
+    let target_before = descriptor.target_product_before_column_ordinal;
+    let target_low_product = descriptor.target_low_product_column_ordinal;
+    let one = vec![RelationExpressionInstruction::BaseFieldConstant(1)];
+    Ok(vec![
+        RelationIntegerLiftConstraintProgram {
+            numerator_postfix_expression: subtract_integer_lift_expressions(
+                integer_lift_column_expression(source_before, false, 0),
+                one.clone(),
+            ),
+            zeroifier_postfix_expression: point_zero.clone(),
+        },
+        RelationIntegerLiftConstraintProgram {
+            numerator_postfix_expression: subtract_integer_lift_expressions(
+                integer_lift_column_expression(target_before, false, 0),
+                one,
+            ),
+            zeroifier_postfix_expression: point_zero,
+        },
+        RelationIntegerLiftConstraintProgram {
+            numerator_postfix_expression: subtract_integer_lift_expressions(
+                integer_lift_column_expression(source_low_product, false, 0),
+                multiply_integer_lift_expressions(
+                    integer_lift_column_expression(source_before, false, 0),
+                    source_low_factor,
+                ),
+            ),
+            zeroifier_postfix_expression: full_trace_zeroifier_expression(trace_domain_size),
+        },
+        RelationIntegerLiftConstraintProgram {
+            numerator_postfix_expression: subtract_integer_lift_expressions(
+                integer_lift_column_expression(target_low_product, false, 0),
+                multiply_integer_lift_expressions(
+                    integer_lift_column_expression(target_before, false, 0),
+                    target_low_factor,
+                ),
+            ),
+            zeroifier_postfix_expression: full_trace_zeroifier_expression(trace_domain_size),
+        },
+        RelationIntegerLiftConstraintProgram {
+            numerator_postfix_expression: subtract_integer_lift_expressions(
+                integer_lift_column_expression(source_before, false, 1),
+                multiply_integer_lift_expressions(
+                    integer_lift_column_expression(source_low_product, false, 0),
+                    source_high_factor.clone(),
+                ),
+            ),
+            zeroifier_postfix_expression: except_last.clone(),
+        },
+        RelationIntegerLiftConstraintProgram {
+            numerator_postfix_expression: subtract_integer_lift_expressions(
+                integer_lift_column_expression(target_before, false, 1),
+                multiply_integer_lift_expressions(
+                    integer_lift_column_expression(target_low_product, false, 0),
+                    target_high_factor.clone(),
+                ),
+            ),
+            zeroifier_postfix_expression: except_last,
+        },
+        RelationIntegerLiftConstraintProgram {
+            numerator_postfix_expression: subtract_integer_lift_expressions(
+                multiply_integer_lift_expressions(
+                    integer_lift_column_expression(source_low_product, false, 0),
+                    source_high_factor,
+                ),
+                multiply_integer_lift_expressions(
+                    integer_lift_column_expression(target_low_product, false, 0),
+                    target_high_factor,
+                ),
+            ),
+            zeroifier_postfix_expression: point_last,
+        },
+    ])
 }
 
 fn integer_lift_reversed_column_binding_constraint_programs(
@@ -3155,6 +3690,10 @@ impl RelationPlanVariant {
         &self.ordered_columns
     }
 
+    pub(crate) fn verifier_source(&self, ordinal: u32) -> Option<&RelationVerifierSource> {
+        self.ordered_verifier_sources.get(ordinal as usize)
+    }
+
     pub(crate) fn ordered_trees(&self) -> &[RelationTreeDescriptor] {
         &self.ordered_trees
     }
@@ -3179,6 +3718,160 @@ impl RelationPlanVariant {
 
     pub(crate) fn ordered_masks(&self) -> &[RelationMaskDescriptor] {
         &self.ordered_masks
+    }
+
+    /// Degree of the cross-multiplied DEEP identity used after the quotient
+    /// roots are fixed. The bound is derived from the checked expression
+    /// programs and canonical quotient decomposition; it is an input to the
+    /// round-by-round application theorem, not a proof-body assertion.
+    pub(crate) fn application_deep_identity_degree_bound(
+        &self,
+        context: &RelationPlanCheckContext,
+    ) -> Result<u64, RelationPlanError> {
+        let mut distinct_zeroifier_degrees = BTreeMap::<Vec<u8>, u64>::new();
+        let mut numerator_and_zeroifier_degrees = Vec::new();
+        for constraint in &self.ordered_constraints {
+            let numerator = check_expression(
+                &constraint.numerator_postfix_expression,
+                self,
+                context,
+                false,
+            )?;
+            let zeroifier = check_expression(
+                &constraint.zeroifier_postfix_expression,
+                self,
+                context,
+                true,
+            )?;
+            let zeroifier_key = canonical_nested_list(
+                constraint
+                    .zeroifier_postfix_expression
+                    .iter()
+                    .map(RelationExpressionInstruction::canonical_tuple)
+                    .collect::<Result<Vec<_>, _>>()?,
+            )?
+            .canonical_bytes()
+            .to_vec();
+            distinct_zeroifier_degrees
+                .entry(zeroifier_key)
+                .or_insert(zeroifier.degree);
+            numerator_and_zeroifier_degrees.push((numerator.degree, zeroifier.degree));
+        }
+        let total_zeroifier_degree = distinct_zeroifier_degrees
+            .values()
+            .try_fold(0_u64, |total, degree| total.checked_add(*degree))
+            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
+        let quotient_component_degree = u64::from(
+            context
+                .quotient_component_degree_bound_exclusive
+                .checked_sub(1)
+                .ok_or(RelationPlanError::DegreeBoundExceeded)?,
+        );
+        let quotient_degree = u64::from(
+            context
+                .quotient_component_count
+                .checked_sub(1)
+                .ok_or(RelationPlanError::DegreeBoundExceeded)?,
+        )
+        .checked_mul(self.quotient_decomposition_stride(context)?)
+        .and_then(|degree| degree.checked_add(quotient_component_degree))
+        .ok_or(RelationPlanError::DegreeBoundExceeded)?;
+        let quotient_term_degree = quotient_degree
+            .checked_add(total_zeroifier_degree)
+            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
+        numerator_and_zeroifier_degrees.into_iter().try_fold(
+            quotient_term_degree,
+            |maximum_degree, (numerator_degree, zeroifier_degree)| {
+                let term_degree = numerator_degree
+                    .checked_add(total_zeroifier_degree)
+                    .and_then(|degree| degree.checked_sub(zeroifier_degree))
+                    .ok_or(RelationPlanError::DegreeBoundExceeded)?;
+                Ok(maximum_degree.max(term_degree))
+            },
+        )
+    }
+
+    /// Conservative cardinality of the values rejected while sampling the
+    /// last DEEP center. Rotations and Frobenius maps are bijections, so a
+    /// union bound over their inverse images covers trace roots, the evaluation
+    /// coset, every checked zeroifier root, and collisions with earlier centers.
+    pub(crate) fn application_deep_forbidden_candidate_count_bound(
+        &self,
+        context: &RelationPlanCheckContext,
+    ) -> Result<BigUint, RelationPlanError> {
+        let mut distinct_zeroifier_degrees = BTreeMap::<Vec<u8>, u64>::new();
+        for constraint in &self.ordered_constraints {
+            let zeroifier = check_expression(
+                &constraint.zeroifier_postfix_expression,
+                self,
+                context,
+                true,
+            )?;
+            let zeroifier_key = canonical_nested_list(
+                constraint
+                    .zeroifier_postfix_expression
+                    .iter()
+                    .map(RelationExpressionInstruction::canonical_tuple)
+                    .collect::<Result<Vec<_>, _>>()?,
+            )?
+            .canonical_bytes()
+            .to_vec();
+            distinct_zeroifier_degrees
+                .entry(zeroifier_key)
+                .or_insert(zeroifier.degree);
+        }
+        let total_zeroifier_degree = distinct_zeroifier_degrees
+            .values()
+            .try_fold(0_u64, |total, degree| total.checked_add(*degree))
+            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
+        let opening_point_count_per_center = u64::try_from(
+            self.ordered_opening_points
+                .iter()
+                .filter(|point| point.deep_point_ordinal == 0)
+                .count(),
+        )
+        .map_err(|_| RelationPlanError::CountOverflow)?;
+        if opening_point_count_per_center == 0 {
+            return Err(RelationPlanError::InvalidOpening);
+        }
+        let excluded_per_translated_point = self
+            .trace_domain_size
+            .checked_add(self.evaluation_domain_size)
+            .and_then(|count| count.checked_add(total_zeroifier_degree))
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let prior_center_count = u64::from(
+            context
+                .deep_point_count
+                .checked_sub(1)
+                .ok_or(RelationPlanError::InvalidOpening)?,
+        );
+        let mut non_full_degree_element_bound = BigUint::zero();
+        for proper_subfield_degree in 1..context.challenge_extension_degree {
+            if context
+                .challenge_extension_degree
+                .is_multiple_of(proper_subfield_degree)
+            {
+                non_full_degree_element_bound += BigUint::from(context.base_field_modulus)
+                    .pow(u32::from(proper_subfield_degree));
+            }
+        }
+        let opening_point_count = BigUint::from(opening_point_count_per_center);
+        let extension_degree = BigUint::from(context.challenge_extension_degree);
+        let prior_orbit_collision_bound = &opening_point_count
+            * &opening_point_count
+            * BigUint::from(prior_center_count)
+            * &extension_degree;
+        let current_orbit_collision_pair_count = opening_point_count_per_center
+            .checked_mul(opening_point_count_per_center.saturating_sub(1))
+            .and_then(|count| count.checked_div(2))
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let current_orbit_collision_bound =
+            BigUint::from(current_orbit_collision_pair_count) * &extension_degree;
+        Ok(BigUint::one()
+            + &opening_point_count * BigUint::from(excluded_per_translated_point)
+            + &opening_point_count * non_full_degree_element_bound
+            + prior_orbit_collision_bound
+            + current_orbit_collision_bound)
     }
 
     fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
@@ -3783,6 +4476,12 @@ impl RelationPlanCheckContext {
     }
 }
 
+#[derive(Default)]
+struct ApplicationExtractorPhaseColumns {
+    derived_base_columns: BTreeSet<u32>,
+    derived_auxiliary_columns: BTreeSet<u32>,
+}
+
 struct RelationPlanChecker<'context> {
     context: &'context RelationPlanCheckContext,
 }
@@ -3885,7 +4584,12 @@ impl<'context> RelationPlanChecker<'context> {
             variant,
             &semantic_bounds,
         )?;
-        self.check_integer_lift_batches(variant, &semantic_bounds)?;
+        let extractor_phase_columns = self.check_integer_lift_batches(
+            application_statement_schema_identifier,
+            variant,
+            &semantic_bounds,
+        )?;
+        self.check_application_extractor_phase_ownership(variant, &extractor_phase_columns)?;
         self.check_openings(variant)?;
         self.check_masks(variant)?;
         super::validate_zero_knowledge_mask_image(variant, self.context)?;
@@ -4016,6 +4720,12 @@ impl<'context> RelationPlanChecker<'context> {
             {
                 used.insert(modulus);
             }
+            if let RelationVerifierSource::RadixDecomposition {
+                modulus_reference, ..
+            } = source
+            {
+                used.insert(*modulus_reference);
+            }
         }
         for sampler in &variant.ordered_public_samplers {
             used.insert(sampler.output_modulus);
@@ -4117,6 +4827,35 @@ impl<'context> RelationPlanChecker<'context> {
         }
         for source in &variant.ordered_verifier_sources {
             source.validate_shape()?;
+            if let RelationVerifierSource::RadixDecomposition {
+                modulus_reference,
+                scale,
+                radix,
+                digit_count,
+                ..
+            } = source
+            {
+                let modulus = self.context.resolved_modulus(*modulus_reference)?;
+                let maximum_scaled = u128::from(modulus - 1)
+                    .checked_mul(u128::from(*scale))
+                    .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+                let capacity = (0..*digit_count).try_fold(1_u128, |capacity, _| {
+                    capacity
+                        .checked_mul(u128::from(*radix))
+                        .ok_or(RelationPlanError::IntegerBoundOverflow)
+                })?;
+                if maximum_scaled >= capacity
+                    || (*digit_count > 1
+                        && maximum_scaled
+                            < (0..(*digit_count - 1)).try_fold(1_u128, |capacity, _| {
+                                capacity
+                                    .checked_mul(u128::from(*radix))
+                                    .ok_or(RelationPlanError::IntegerBoundOverflow)
+                            })?)
+                {
+                    return Err(RelationPlanError::InvalidSource);
+                }
+            }
         }
         if !variant
             .ordered_public_samplers
@@ -5157,11 +5896,12 @@ impl<'context> RelationPlanChecker<'context> {
 
     fn check_integer_lift_batches(
         &self,
+        application_statement_schema_identifier: u16,
         variant: &RelationPlanVariant,
         semantic_bounds: &BTreeMap<u32, SignedIntegerInterval>,
-    ) -> Result<(), RelationPlanError> {
+    ) -> Result<ApplicationExtractorPhaseColumns, RelationPlanError> {
         if variant.ordered_integer_lift_batches.is_empty() {
-            return Ok(());
+            return Ok(ApplicationExtractorPhaseColumns::default());
         }
         let canonical_batch_bytes = variant
             .ordered_integer_lift_batches
@@ -5183,7 +5923,10 @@ impl<'context> RelationPlanChecker<'context> {
         let mut challenge_ordinals_by_modulus =
             BTreeMap::<SuiteModulusReference, BTreeSet<u16>>::new();
         let mut descriptor_auxiliary_columns = BTreeSet::new();
+        let mut derived_base_columns = BTreeSet::new();
         let mut matched_constraint_ordinals = BTreeSet::new();
+        let mut automorphism_permutation_coordinates = BTreeSet::new();
+        let mut automorphism_semantics = None;
 
         for batch in &variant.ordered_integer_lift_batches {
             let modulus_ordinal = u16::try_from(
@@ -5232,6 +5975,7 @@ impl<'context> RelationPlanChecker<'context> {
                     &tree_roles_by_column,
                     &explicitly_certified_columns,
                 )?;
+                derived_base_columns.insert(binding.reversed_column_ordinal);
                 integer_lift_column_interval(
                     binding.source_column_ordinal,
                     variant,
@@ -5264,6 +6008,155 @@ impl<'context> RelationPlanChecker<'context> {
                     if !descriptor_auxiliary_columns.insert(auxiliary_column) {
                         return Err(RelationPlanError::DuplicateItem);
                     }
+                }
+            }
+
+            let automorphism_permutation_bytes = batch
+                .ordered_negacyclic_automorphism_permutations
+                .iter()
+                .map(
+                    RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor::canonical_bytes,
+                )
+                .collect::<Result<Vec<_>, _>>()?;
+            if automorphism_permutation_bytes.len() > 1
+                || (!automorphism_permutation_bytes.is_empty()
+                    && !strictly_sorted_unique(&automorphism_permutation_bytes))
+            {
+                return Err(RelationPlanError::NonCanonicalOrder);
+            }
+            for permutation in &batch.ordered_negacyclic_automorphism_permutations {
+                if application_statement_schema_identifier != 0x1217
+                    || variant.ordered_non_native_moduli.first().copied()
+                        != Some(batch.modulus_reference)
+                    || !automorphism_permutation_coordinates
+                        .insert((batch.modulus_reference, batch.challenge_ordinal))
+                {
+                    return Err(RelationPlanError::InvalidConstraint);
+                }
+                let ring_degree = variant
+                    .trace_domain_size
+                    .checked_mul(2)
+                    .ok_or(RelationPlanError::CountOverflow)?;
+                validate_negacyclic_automorphism(ring_degree, permutation.galois_element)?;
+                match variant
+                    .ordered_verifier_sources
+                    .get(permutation.mapping_verifier_source_ordinal as usize)
+                {
+                    Some(RelationVerifierSource::NegacyclicAutomorphismMapping {
+                        ring_degree: source_ring_degree,
+                        galois_element,
+                    }) if *source_ring_degree == ring_degree
+                        && *galois_element == permutation.galois_element => {}
+                    _ => return Err(RelationPlanError::InvalidSource),
+                }
+
+                let semantic_columns = [
+                    permutation.source_low_column_ordinal,
+                    permutation.source_high_column_ordinal,
+                    permutation.target_low_column_ordinal,
+                    permutation.target_high_column_ordinal,
+                ];
+                for column_ordinal in semantic_columns {
+                    integer_lift_require_pre_challenge_column(
+                        column_ordinal,
+                        variant,
+                        &tree_roles_by_column,
+                    )?;
+                    let column = variant
+                        .ordered_columns
+                        .get(column_ordinal as usize)
+                        .ok_or(RelationPlanError::InvalidColumn)?;
+                    if !matches!(column.origin, RelationColumnOrigin::Prover)
+                        || integer_lift_column_interval(
+                            column_ordinal,
+                            variant,
+                            semantic_bounds,
+                            &explicitly_certified_columns,
+                            self.context,
+                        )? != SignedIntegerInterval::new(-1, 1)
+                    {
+                        return Err(RelationPlanError::InvalidSemanticCell);
+                    }
+                }
+
+                let mapping_columns = [
+                    permutation.mapped_low_position_column_ordinal,
+                    permutation.low_negation_bit_column_ordinal,
+                    permutation.mapped_high_position_column_ordinal,
+                    permutation.high_negation_bit_column_ordinal,
+                    permutation.target_low_position_column_ordinal,
+                    permutation.target_high_position_column_ordinal,
+                ];
+                for (sequence_ordinal, column_ordinal) in
+                    mapping_columns.iter().copied().enumerate()
+                {
+                    integer_lift_require_pre_challenge_column(
+                        column_ordinal,
+                        variant,
+                        &tree_roles_by_column,
+                    )?;
+                    let expected_first_element_index = u64::try_from(sequence_ordinal)
+                        .map_err(|_| RelationPlanError::CountOverflow)?
+                        .checked_mul(variant.trace_domain_size)
+                        .ok_or(RelationPlanError::CountOverflow)?;
+                    let column = variant
+                        .ordered_columns
+                        .get(column_ordinal as usize)
+                        .ok_or(RelationPlanError::InvalidColumn)?;
+                    if !matches!(
+                        column.origin,
+                        RelationColumnOrigin::VerifierSequence {
+                            verifier_source_ordinal,
+                            first_logical_element_index,
+                            logical_element_stride: 1,
+                        } if verifier_source_ordinal
+                            == permutation.mapping_verifier_source_ordinal
+                            && first_logical_element_index == expected_first_element_index
+                    ) || column.value_type != RelationColumnValueType::BaseField
+                        || column.source_degree_bound_exclusive != variant.trace_domain_size
+                        || column.canonical_residue_modulus.is_some()
+                    {
+                        return Err(RelationPlanError::InvalidColumn);
+                    }
+                }
+
+                let accumulator_columns = [
+                    permutation.source_product_before_column_ordinal,
+                    permutation.source_low_product_column_ordinal,
+                    permutation.target_product_before_column_ordinal,
+                    permutation.target_low_product_column_ordinal,
+                ];
+                for column_ordinal in accumulator_columns {
+                    integer_lift_require_auxiliary_column(
+                        column_ordinal,
+                        variant,
+                        &tree_roles_by_column,
+                        &explicitly_certified_columns,
+                    )?;
+                    if !descriptor_auxiliary_columns.insert(column_ordinal) {
+                        return Err(RelationPlanError::DuplicateItem);
+                    }
+                }
+                let all_columns = semantic_columns
+                    .into_iter()
+                    .chain(mapping_columns)
+                    .chain(accumulator_columns)
+                    .collect::<BTreeSet<_>>();
+                if all_columns.len() != 14 {
+                    return Err(RelationPlanError::DuplicateItem);
+                }
+                let current_semantics = (
+                    permutation.galois_element,
+                    permutation.mapping_verifier_source_ordinal,
+                    semantic_columns,
+                    mapping_columns,
+                );
+                match automorphism_semantics {
+                    Some(existing) if existing != current_semantics => {
+                        return Err(RelationPlanError::InvalidConstraint);
+                    }
+                    None => automorphism_semantics = Some(current_semantics),
+                    _ => {}
                 }
             }
             let mut used_reversed_bindings = BTreeSet::new();
@@ -5614,6 +6507,88 @@ impl<'context> RelationPlanChecker<'context> {
             .any(|ordinals| ordinals != &expected_challenge_ordinals)
         {
             return Err(RelationPlanError::InvalidChallengeCatalog);
+        }
+        let expected_automorphism_permutation_coordinates =
+            if application_statement_schema_identifier == 0x1217 {
+                let modulus_reference = variant
+                    .ordered_non_native_moduli
+                    .first()
+                    .copied()
+                    .ok_or(RelationPlanError::MissingModulus)?;
+                expected_challenge_ordinals
+                    .iter()
+                    .copied()
+                    .map(|challenge_ordinal| (modulus_reference, challenge_ordinal))
+                    .collect()
+            } else {
+                BTreeSet::new()
+            };
+        if automorphism_permutation_coordinates != expected_automorphism_permutation_coordinates
+            || (application_statement_schema_identifier == 0x1217)
+                != automorphism_semantics.is_some()
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        Ok(ApplicationExtractorPhaseColumns {
+            derived_base_columns,
+            derived_auxiliary_columns: descriptor_auxiliary_columns,
+        })
+    }
+
+    /// Ensures the first application oracle contains every essential witness
+    /// value. Later application oracles may contain only columns whose values
+    /// are determined by the checked integer-lift grammar and the preceding
+    /// public challenge. This is the phase boundary used by the application
+    /// knowledge extractor: it never relies on a witness first supplied after
+    /// a verifier challenge.
+    fn check_application_extractor_phase_ownership(
+        &self,
+        variant: &RelationPlanVariant,
+        phase_columns: &ApplicationExtractorPhaseColumns,
+    ) -> Result<(), RelationPlanError> {
+        let tree_roles_by_column = integer_lift_tree_roles_by_column(variant)?;
+        let semantic_prover_columns = variant
+            .ordered_semantic_cells
+            .iter()
+            .filter_map(|cell| {
+                variant
+                    .ordered_columns
+                    .get(cell.column_ordinal as usize)
+                    .is_some_and(|column| matches!(column.origin, RelationColumnOrigin::Prover))
+                    .then_some(cell.column_ordinal)
+            })
+            .collect::<BTreeSet<_>>();
+
+        for semantic_column in &semantic_prover_columns {
+            if tree_roles_by_column.get(semantic_column) != Some(&Some(1)) {
+                return Err(RelationPlanError::InvalidConstraint);
+            }
+        }
+
+        let mut observed_auxiliary_columns = BTreeSet::new();
+        for (column_index, column) in variant.ordered_columns.iter().enumerate() {
+            let column_ordinal =
+                u32::try_from(column_index).map_err(|_| RelationPlanError::CountOverflow)?;
+            let tree_role = tree_roles_by_column
+                .get(&column_ordinal)
+                .copied()
+                .ok_or(RelationPlanError::MissingRoot)?;
+            match (tree_role, &column.origin) {
+                (Some(1), RelationColumnOrigin::Prover)
+                    if !semantic_prover_columns.contains(&column_ordinal)
+                        && !phase_columns.derived_base_columns.contains(&column_ordinal) =>
+                {
+                    return Err(RelationPlanError::InvalidConstraint);
+                }
+                (Some(2), RelationColumnOrigin::Prover) => {
+                    observed_auxiliary_columns.insert(column_ordinal);
+                }
+                (Some(2), _) => return Err(RelationPlanError::InvalidConstraint),
+                _ => {}
+            }
+        }
+        if observed_auxiliary_columns != phase_columns.derived_auxiliary_columns {
+            return Err(RelationPlanError::InvalidConstraint);
         }
         Ok(())
     }
@@ -5981,17 +6956,26 @@ fn integer_lift_column_interval(
             verifier_source_ordinal,
             ..
         } => {
+            let source = variant
+                .ordered_verifier_sources
+                .get(verifier_source_ordinal as usize)
+                .ok_or(RelationPlanError::InvalidSource)?;
+            if let RelationVerifierSource::RadixDecomposition { radix, .. } = source {
+                if column.canonical_residue_modulus.is_some() {
+                    return Err(RelationPlanError::InvalidSemanticCell);
+                }
+                return SignedIntegerInterval::from_bigints(
+                    BigInt::zero(),
+                    BigInt::from(radix - 1),
+                );
+            }
             let modulus_reference = column
                 .canonical_residue_modulus
                 .ok_or(RelationPlanError::InvalidSemanticCell)?;
-            let layout = variant
-                .ordered_verifier_sources
-                .get(verifier_source_ordinal as usize)
-                .ok_or(RelationPlanError::InvalidSource)?
-                .value_layout(
-                    &variant.ordered_public_samplers,
-                    &variant.ordered_verifier_sources,
-                )?;
+            let layout = source.value_layout(
+                &variant.ordered_public_samplers,
+                &variant.ordered_verifier_sources,
+            )?;
             if layout.element_kind != RelationElementKind::Residue
                 || layout.residue_modulus != Some(modulus_reference)
             {
@@ -7756,6 +8740,7 @@ mod key_relation;
 mod public_aggregate;
 mod public_key_share;
 mod same_secret_anchor;
+mod target_release;
 mod trustee_evaluation_key;
 mod vss_share_linkage;
 
@@ -7777,6 +8762,13 @@ pub(crate) use public_aggregate::{
 };
 pub(crate) use public_key_share::compile_public_key_share_relation_plan;
 pub(crate) use same_secret_anchor::compile_same_secret_relation_plan;
+pub(crate) use target_release::{
+    CompiledTargetReleaseRelation, TargetReleaseCapabilityError, TargetReleaseModulusWitness,
+    TargetReleaseRelationPlanInput, TargetReleaseRoleWitness, TargetReleaseVerifiedColumnEvaluator,
+    TargetReleaseWitness, TargetReleaseWitnessError, VerifiedTargetReleaseModulusInput,
+    VerifiedTargetReleaseProof, compile_target_release_relation,
+    compile_target_release_relation_plan, target_release_radix_semantics_match,
+};
 pub(crate) use trustee_evaluation_key::{
     GaloisKeyShareRelationPlanInput, RelinearizationRoundOneRelationPlanInput,
     RelinearizationRoundTwoRelationPlanInput, TrusteeEvaluationKeyDecompositionBlock,

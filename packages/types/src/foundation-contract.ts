@@ -1,4 +1,4 @@
-import type { ProtocolHash } from './protocol-hash.js';
+import type { ProtocolHash } from "./protocol-hash.js";
 
 /** Canonical numeric encodings for refusal reasons. Zero and unassigned values refuse. */
 export const refusalReasonCodes = Object.freeze({
@@ -31,11 +31,60 @@ export type VerificationResult<VerifiedValue> =
           readonly refusalReason: RefusalReason;
       };
 
+/** Canonical payload assignments for the shared authenticated mailbox. */
+export type MailboxPayloadType = 2;
+
+/** Canonical public inputs that bind one authenticated-mailbox key schedule. */
+export type MailboxKeyScheduleInput = Readonly<{
+    readonly suiteId: ProtocolHash;
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly actionContextHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly sourceParticipantId: string;
+    readonly recipientParticipantId: string;
+    readonly producerSequence: string;
+    readonly envelopeAttemptIdentifierHex: string;
+    readonly payloadType: MailboxPayloadType;
+    readonly statementHash: ProtocolHash;
+    readonly orderedMaterialRoots: readonly ProtocolHash[];
+}>;
+
+/** Canonical associated data authenticated by one mailbox envelope. */
+export type MailboxAssociatedData = MailboxKeyScheduleInput;
+
+/** The reset-safe setup uniqueness slot before attempt and ciphertext derivation. */
+export type SetupMailboxSlot = Omit<
+    MailboxKeyScheduleInput,
+    "envelopeAttemptIdentifierHex"
+>;
+
+/** Canonical streamed ciphertext commitment carried by a mailbox envelope. */
+export type MailboxCiphertextDescriptor = Readonly<{
+    readonly totalByteLength: string;
+    readonly orderedChunkDigests: readonly ProtocolHash[];
+    readonly fullObjectDigest: ProtocolHash;
+}>;
+
+/** Canonical mailbox envelope fields covered by its source signature. */
+export type UnsignedMailboxEnvelope = Readonly<{
+    readonly associatedData: MailboxAssociatedData;
+    readonly kemCiphertextHex: string;
+    readonly ciphertextDescriptor: MailboxCiphertextDescriptor;
+    readonly gcmTagHex: string;
+}>;
+
+/** Canonical signed mailbox envelope. */
+export type SignedMailboxEnvelope = Readonly<
+    UnsignedMailboxEnvelope & {
+        readonly sourceSignatureHex: string;
+    }
+>;
+
 declare const participantIdentityBrand: unique symbol;
 
 /** A lowercase canonical participant identity derived from a roster ML-DSA-65 verification key. */
 export type ParticipantIdentity = ProtocolHash & {
-    readonly [participantIdentityBrand]: 'ParticipantIdentity';
+    readonly [participantIdentityBrand]: "ParticipantIdentity";
 };
 
 const participantIdentityPattern = /^[0-9a-f]{128}$/u;
@@ -43,7 +92,7 @@ const participantIdentityPattern = /^[0-9a-f]{128}$/u;
 export const isParticipantIdentity = (
     value: unknown,
 ): value is ParticipantIdentity =>
-    typeof value === 'string' && participantIdentityPattern.test(value);
+    typeof value === "string" && participantIdentityPattern.test(value);
 
 /** Parses the sole canonical string representation of a participant identity. */
 export const parseParticipantIdentity = (
@@ -51,7 +100,7 @@ export const parseParticipantIdentity = (
 ): ParticipantIdentity => {
     if (!isParticipantIdentity(value)) {
         throw new TypeError(
-            'participant identity must contain exactly 128 lowercase hexadecimal characters.',
+            "participant identity must contain exactly 128 lowercase hexadecimal characters.",
         );
     }
 
@@ -60,31 +109,19 @@ export const parseParticipantIdentity = (
 
 /** Fixed public parameters of the first supported foundation profile. */
 export const foundationProfile = Object.freeze({
-    protocolName: 'sealed-lattice',
-    protocolVersion: 1,
     participantCount: 10,
-    activeFaultBound: 3,
-    reconstructionThreshold: 4,
-    finalityQuorum: 7,
-    stateWitnessQuorum: 7,
-    optionCount: 20,
-    minimumScore: 1,
-    maximumScore: 10,
     maximumIdentifierByteLength: 128,
     streamChunkByteLength: 1_048_576,
+    maximumCanonicalStreamByteLength: 2_147_483_648,
     maximumCopiedBufferByteLength: 1_572_864,
     maximumWasmMemoryByteLength: 402_653_184,
 } as const);
 
 /** Fixed capability-kind assignments for non-forking state authorization. */
 export const stateCapabilityKinds = Object.freeze({
-    ballotCandidateList: 1,
     finalitySignature: 2,
     targetRelease: 3,
     setupActionRandomnessRoot: 4,
-    setupPublicSeedBranch: 5,
-    setupDealerSetBranch: 6,
-    setupRkgRoundOneBranch: 7,
     setupTerminalPackage: 8,
 } as const);
 
@@ -92,9 +129,8 @@ export type StateCapabilityKind =
     (typeof stateCapabilityKinds)[keyof typeof stateCapabilityKinds];
 
 export const stateIntentKinds = Object.freeze({
-    output: 'output',
-    recovery: 'recovery',
-    reservation: 'reservation',
+    output: "output",
+    reservation: "reservation",
 } as const);
 
 export type StateIntentKind =

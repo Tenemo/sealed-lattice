@@ -160,10 +160,7 @@ impl ProofFriQueryVerifier {
         Ok(())
     }
 
-    pub(crate) fn finish_query(
-        &self,
-        state: ProofFriQueryState,
-    ) -> Result<(), ProofFriError> {
+    pub(crate) fn finish_query(&self, state: ProofFriQueryState) -> Result<(), ProofFriError> {
         if state.next_nonterminal_layer_ordinal != self.nonterminal_layer_count() {
             return Err(ProofFriError::InvalidLayerOpening);
         }
@@ -204,10 +201,7 @@ impl ProofFriQueryVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bgv::proof_suite::{
-        ProofBaseFieldElement,
-        polynomial::fold_extension_evaluations,
-    };
+    use crate::bgv::proof_suite::{ProofBaseFieldElement, polynomial::fold_extension_evaluations};
 
     fn extension(value: u64) -> ProofChallengeExtensionElement {
         ProofChallengeExtensionElement::from_base(
@@ -233,7 +227,13 @@ mod tests {
                 *challenge,
             )
             .expect("valid fold");
-            domains.push(domains.last().expect("domain").folded().expect("folded domain"));
+            domains.push(
+                domains
+                    .last()
+                    .expect("domain")
+                    .folded()
+                    .expect("folded domain"),
+            );
             evaluation_layers.push(next);
         }
         let mut terminal_coefficients = domains
@@ -244,13 +244,9 @@ mod tests {
             )
             .expect("terminal interpolation");
         terminal_coefficients.resize(8, ProofChallengeExtensionElement::ZERO);
-        let verifier = ProofFriQueryVerifier::new(
-            initial_domain,
-            challenges,
-            terminal_coefficients,
-            8,
-        )
-        .expect("valid verifier schedule");
+        let verifier =
+            ProofFriQueryVerifier::new(initial_domain, challenges, terminal_coefficients, 8)
+                .expect("valid verifier schedule");
 
         for representative in [0_usize, 7, 17, 31] {
             let initial_half = evaluation_layers[0].len() / 2;
@@ -282,8 +278,8 @@ mod tests {
         let initial = domain
             .evaluate_extension_polynomial(&[extension(2), extension(7)])
             .expect("initial evaluations");
-        let first_fold = fold_extension_evaluations(&initial, domain, challenges[0])
-            .expect("first fold");
+        let first_fold =
+            fold_extension_evaluations(&initial, domain, challenges[0]).expect("first fold");
         let folded_domain = domain.folded().expect("folded domain");
         let terminal = fold_extension_evaluations(&first_fold, folded_domain, challenges[1])
             .expect("terminal evaluations");
@@ -293,13 +289,9 @@ mod tests {
             .interpolate_extension_polynomial(&terminal)
             .expect("terminal coefficients");
         terminal_coefficients.resize(4, ProofChallengeExtensionElement::ZERO);
-        let verifier = ProofFriQueryVerifier::new(
-            domain,
-            challenges,
-            terminal_coefficients.clone(),
-            4,
-        )
-        .expect("verifier");
+        let verifier =
+            ProofFriQueryVerifier::new(domain, challenges, terminal_coefficients.clone(), 4)
+                .expect("verifier");
         let representative = 3_usize;
         let initial_pair = OpenedFriLayerPair::new(
             initial[representative],

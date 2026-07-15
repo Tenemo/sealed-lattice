@@ -23,10 +23,9 @@ use crate::{
 
 // The evaluator context owns the development key set and the evaluation keys
 // needed by homomorphic multiplication and rotation. One relinearization key
-// at the working level serves every reachable level: the CRT-idempotent
-// gadget makes the lower-level key a literal sub-matrix, and the key-switch
-// path slices the active window from the ciphertext level. Rotation keys are
-// held per Galois element at their schedule level and truncate the same way.
+// at the working level serves every reachable level: lower levels retain the
+// active data-prime block prefix and the complete special basis. Rotation keys
+// are held per Galois element at their schedule level and project the same way.
 pub(crate) struct EvaluatorContext {
     key: DevelopmentBgvKey,
     working_level: usize,

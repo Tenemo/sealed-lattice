@@ -6,34 +6,33 @@
 //! canonical query section is hashed while the same first read is decoded and
 //! algebraically checked.
 
-use crate::foundation::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalTuple,
-};
+use crate::foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple};
+use crate::hashing::hash_framed_parts_512;
 
+use super::field::ProofChallengeExtensionElement;
+use super::relation_plan::{
+    BoundTreeConstructionKind, RelationColumnOrigin, RelationColumnValueType,
+    RelationOpeningSourceClass, RelationPlanVariant, RelationSelectorPathStep,
+    RelationTreeDescriptor, SelectorPathStepKind, SuiteModulusReference,
+};
 use super::{
-    CompleteProofTreeCatalog, CommonProofPrivacyMode,
-    CommonProofTranscript, CompiledRelationPlan, OpenedFriLayerPair,
-    ProofBodyError, ProofBodyLayout, ProofByteSource,
-    ProofEvaluationDomain, ProofFriError, ProofFriQueryState,
-    ProofFriQueryVerifier, ProofLeafVisibility, ProofOpeningClaimEvaluation,
-    ProofOpeningError, ProofPolynomialError, ProofProfileError,
-    ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeOpening,
+    CommittedMaterialTree, CommonProofPrivacyMode, CommonProofTranscript, CompiledRelationPlan,
+    CompleteProofTreeCatalog, OpenedFriLayerPair, ProofBodyError, ProofBodyLayout, ProofByteSource,
+    ProofEvaluationDomain, ProofFriError, ProofFriQueryState, ProofFriQueryVerifier,
+    ProofLeafVisibility, ProofOpeningClaimEvaluation, ProofOpeningError, ProofPolynomialError,
+    ProofProfileError, ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeOpening,
     ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
-    RelationPlanCheckContext, RelationPlanError, RelationProofTreeInput,
+    RelationPlanCheckContext, RelationPlanError, RelationProofTreeInput, SetupPublicPolynomialTree,
     StatementOwnedProofTreeInput, TranscriptError, ValidatedRelationPlanArtifact,
     build_complete_proof_tree_catalog, decode_proof_body_prefix,
     evaluate_normalized_opening_claim_pair,
-};
-use super::field::ProofChallengeExtensionElement;
-use super::relation_plan::{
-    BoundTreeConstructionKind, RelationColumnOrigin,
-    RelationColumnValueType, RelationOpeningSourceClass, RelationPlanVariant,
-    RelationTreeDescriptor, SuiteModulusReference,
 };
 
 const PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER: u16 = 0x0102;
 const PROOF_OBJECT_HEADER_SCHEMA_VERSION: u16 = 1;
 const SELECTED_PROOF_FIELD_INDEX: u16 = 0;
+const VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN: &str =
+    "sealed-lattice/common-proof/verified-application-statement/v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CommonProofVerifierError {
@@ -96,6 +95,40 @@ impl From<ProofFriError> for CommonProofVerifierError {
     }
 }
 
+/// Opaque evidence minted only after the complete generated verifier accepts.
+/// It binds the exact suite, protocol version, application statement, and
+/// selected relation-plan variant. Family code consumes this capability
+/// instead of accepting a proof byte string or a caller-supplied verdict.
+pub(crate) struct VerifiedCommonProof {
+    application_statement_schema_identifier: u16,
+    application_statement_hash: [u8; 64],
+    relation_plan_variant_hash: [u8; 64],
+    schedule_position: Option<u32>,
+    top_count: Option<u16>,
+}
+
+impl VerifiedCommonProof {
+    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
+        self.application_statement_schema_identifier
+    }
+
+    pub(crate) const fn application_statement_hash(&self) -> [u8; 64] {
+        self.application_statement_hash
+    }
+
+    pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; 64] {
+        self.relation_plan_variant_hash
+    }
+
+    pub(crate) const fn schedule_position(&self) -> Option<u32> {
+        self.schedule_position
+    }
+
+    pub(crate) const fn top_count(&self) -> Option<u16> {
+        self.top_count
+    }
+}
+
 /// One statement-owned tree already resolved from the verified application
 /// inputs.  The source ordinal and relation-tree ordinal prevent a caller from
 /// substituting another otherwise well-formed root.
@@ -108,20 +141,41 @@ pub(crate) struct VerifiedStatementOwnedTree {
 }
 
 impl VerifiedStatementOwnedTree {
-    /// Constructs the proof-side capability only after the owning application
-    /// has canonically decoded the complete source, recomputed its tree root,
-    /// and derived this exact column layout. Raw statement roots and proof
-    /// openings are not sufficient inputs to this constructor.
-    pub(crate) fn from_verified_canonical_source(
+    pub(crate) fn from_committed_material_tree(
         ordered_tree_ordinal: u32,
         expected_root_source_ordinal: u32,
-        tree: StatementOwnedProofTreeInput,
+        tree: &CommittedMaterialTree,
         ordered_canonical_residue_moduli: Vec<Option<SuiteModulusReference>>,
     ) -> Self {
         Self {
             ordered_tree_ordinal,
             expected_root_source_ordinal,
-            tree,
+            tree: StatementOwnedProofTreeInput::CommittedMaterial {
+                material_context_hash: tree.material_context_hash(),
+                expected_root: tree.root(),
+            },
+            ordered_canonical_residue_moduli,
+        }
+    }
+
+    /// Constructs the verifier-owned tree input only from canonical source
+    /// coefficients that the public-polynomial tree implementation already
+    /// evaluated and hashed. There is deliberately no constructor accepting a
+    /// separately claimed setup-polynomial root.
+    pub(crate) fn from_setup_public_polynomial_tree(
+        ordered_tree_ordinal: u32,
+        expected_root_source_ordinal: u32,
+        tree: &SetupPublicPolynomialTree,
+        ordered_canonical_residue_moduli: Vec<Option<SuiteModulusReference>>,
+    ) -> Self {
+        Self {
+            ordered_tree_ordinal,
+            expected_root_source_ordinal,
+            tree: StatementOwnedProofTreeInput::SetupPolynomial {
+                public_polynomial_context_hash: tree.public_polynomial_context_hash(),
+                row_width: tree.row_width(),
+                expected_root: tree.root(),
+            },
             ordered_canonical_residue_moduli,
         }
     }
@@ -130,10 +184,7 @@ impl VerifiedStatementOwnedTree {
 /// Inputs that have already crossed their family-specific trust boundaries.
 /// The application wrapper owns statement/source resolution; proof bytes never
 /// supply any value in this structure.
-pub(crate) struct CommonProofVerificationInput<
-    'input,
-    Source: ProofByteSource + ?Sized,
-> {
+pub(crate) struct CommonProofVerificationInput<'input, Source: ProofByteSource + ?Sized> {
     pub(crate) protocol_version: u16,
     pub(crate) suite_identifier: [u8; 64],
     pub(crate) canonical_application_statement_bytes: &'input [u8],
@@ -153,9 +204,7 @@ struct ProofBodyByteSource<'source, Source: ProofByteSource + ?Sized> {
     body_byte_length: usize,
 }
 
-impl<Source: ProofByteSource + ?Sized> ProofByteSource
-    for ProofBodyByteSource<'_, Source>
-{
+impl<Source: ProofByteSource + ?Sized> ProofByteSource for ProofBodyByteSource<'_, Source> {
     fn byte_length(&self) -> usize {
         self.body_byte_length
     }
@@ -184,16 +233,12 @@ fn verify_and_slice_proof_header<'source, Source: ProofByteSource + ?Sized>(
         return Err(ProofBodyError::Decode(super::ProofDecodeError::EmptyProof).into());
     }
     if declared_proof_byte_length > proof_byte_ceiling {
-        return Err(ProofBodyError::Decode(
-            super::ProofDecodeError::ProofByteCeilingExceeded,
-        )
-        .into());
+        return Err(
+            ProofBodyError::Decode(super::ProofDecodeError::ProofByteCeilingExceeded).into(),
+        );
     }
     if source.byte_length() != declared_proof_byte_length {
-        return Err(ProofBodyError::Decode(
-            super::ProofDecodeError::DeclaredLengthMismatch,
-        )
-        .into());
+        return Err(ProofBodyError::Decode(super::ProofDecodeError::DeclaredLengthMismatch).into());
     }
     let body_byte_length = declared_proof_byte_length
         .checked_sub(expected_header.len())
@@ -262,7 +307,7 @@ pub(crate) trait VerifiedRelationColumnEvaluator {
 pub(crate) fn verify_common_proof<Source, ColumnEvaluator>(
     input: CommonProofVerificationInput<'_, Source>,
     evaluate_verified_column: &mut ColumnEvaluator,
-) -> Result<(), CommonProofVerifierError>
+) -> Result<VerifiedCommonProof, CommonProofVerifierError>
 where
     Source: ProofByteSource + ?Sized,
     ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
@@ -273,19 +318,20 @@ where
     )?;
     let application_statement = decode_application_statement(
         input.canonical_application_statement_bytes,
-        input.relation_plan.application_statement_schema_identifier(),
+        input
+            .relation_plan
+            .application_statement_schema_identifier(),
     )?;
     let canonical_proof_object_header_bytes = CanonicalTuple::new(
         PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
         PROOF_OBJECT_HEADER_SCHEMA_VERSION,
-        vec![CanonicalItem::variable_bytes(
-            input.canonical_application_statement_bytes,
-        )
-        .map_err(|_| CommonProofVerifierError::CanonicalEncoding)?],
+        vec![
+            CanonicalItem::variable_bytes(input.canonical_application_statement_bytes)
+                .map_err(|_| CommonProofVerifierError::CanonicalEncoding)?,
+        ],
     )
     .encode()
     .map_err(|_| CommonProofVerifierError::CanonicalEncoding)?;
-    drop(application_statement);
     let proof_body_source = verify_and_slice_proof_header(
         input.proof_source,
         input.declared_proof_byte_length,
@@ -300,8 +346,7 @@ where
     let variant = input
         .relation_plan
         .select_variant(input.schedule_position, input.top_count)?;
-    let transcript_schedule =
-        variant.common_proof_transcript_schedule(input.relation_context)?;
+    let transcript_schedule = variant.common_proof_transcript_schedule(input.relation_context)?;
     let evaluation_domain = ProofEvaluationDomain::new(
         usize::try_from(variant.evaluation_domain_size())
             .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
@@ -313,15 +358,12 @@ where
         return Err(CommonProofVerifierError::InvalidTreeLayout);
     }
 
-    let relation_trees = derive_relation_tree_inputs(
-        variant,
-        input.statement_owned_trees,
-    )?;
+    let relation_trees =
+        derive_relation_tree_inputs(variant, &application_statement, input.statement_owned_trees)?;
     let catalog = build_complete_proof_tree_catalog(
         ProofTreeCatalogInput {
             suite_identifier: input.suite_identifier,
-            canonical_proof_object_header_bytes:
-                canonical_proof_object_header_bytes.clone(),
+            canonical_proof_object_header_bytes: canonical_proof_object_header_bytes.clone(),
             application_statement_schema_identifier: input
                 .relation_plan
                 .application_statement_schema_identifier(),
@@ -346,7 +388,9 @@ where
     let mut transcript = CommonProofTranscript::new(
         input.protocol_version,
         input.suite_identifier,
-        input.relation_plan.application_statement_schema_identifier(),
+        input
+            .relation_plan
+            .application_statement_schema_identifier(),
         &canonical_proof_object_header_bytes,
         transcript_schedule.clone(),
     )?;
@@ -400,27 +444,16 @@ where
             transcript_schedule.composition_challenge_count(),
         ))
         .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-    for constraint_ordinal in
-        0..transcript_schedule.composition_challenge_count()
-    {
-        composition_challenges.push(
-            transcript.sample_composition_challenge(constraint_ordinal)?,
-        );
+    for constraint_ordinal in 0..transcript_schedule.composition_challenge_count() {
+        composition_challenges.push(transcript.sample_composition_challenge(constraint_ordinal)?);
     }
 
     for component_ordinal in 0..transcript_schedule.quotient_component_count() {
         transcript.absorb_quotient_root(
             component_ordinal,
-            catalog_root(
-                layout.catalog(),
-                pending.tree_roots(),
-                |source| {
-                    source
-                        == ProofTreeCatalogSource::QuotientComponent {
-                            component_ordinal,
-                        }
-                },
-            )?,
+            catalog_root(layout.catalog(), pending.tree_roots(), |source| {
+                source == ProofTreeCatalogSource::QuotientComponent { component_ordinal }
+            })?,
         )?;
     }
 
@@ -449,8 +482,7 @@ where
         }
         deep_points.push(sampled?);
     }
-    let opening_points =
-        variant.derive_opening_points(input.relation_context, &deep_points)?;
+    let opening_points = variant.derive_opening_points(input.relation_context, &deep_points)?;
     verify_statement_derived_deep_values(
         variant,
         &opening_points,
@@ -466,9 +498,7 @@ where
     )?;
     transcript.absorb_deep_evaluations(pending.deep_evaluations())?;
 
-    if transcript_schedule.privacy_mode()
-        == CommonProofPrivacyMode::SecretBearing
-    {
+    if transcript_schedule.privacy_mode() == CommonProofPrivacyMode::SecretBearing {
         transcript.absorb_opening_batch_mask_root(catalog_root(
             layout.catalog(),
             pending.tree_roots(),
@@ -478,14 +508,10 @@ where
 
     let mut opening_batch_coefficients = Vec::new();
     opening_batch_coefficients
-        .try_reserve_exact(usize::from(
-            transcript_schedule.opening_claim_count(),
-        ))
+        .try_reserve_exact(usize::from(transcript_schedule.opening_claim_count()))
         .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
     for claim_ordinal in 0..transcript_schedule.opening_claim_count() {
-        opening_batch_coefficients.push(
-            transcript.sample_opening_batch_challenge(claim_ordinal)?,
-        );
+        opening_batch_coefficients.push(transcript.sample_opening_batch_challenge(claim_ordinal)?);
     }
 
     let mut fri_fold_challenges = Vec::new();
@@ -493,33 +519,20 @@ where
         .try_reserve_exact(usize::from(transcript_schedule.fri_fold_count()))
         .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
     for fold_ordinal in 0..transcript_schedule.fri_fold_count() {
-        fri_fold_challenges.push(
-            transcript.sample_fri_fold_challenge(fold_ordinal)?,
-        );
+        fri_fold_challenges.push(transcript.sample_fri_fold_challenge(fold_ordinal)?);
         if fold_ordinal + 1 < transcript_schedule.fri_fold_count() {
             transcript.absorb_fri_layer_root(
                 fold_ordinal,
-                catalog_root(
-                    layout.catalog(),
-                    pending.tree_roots(),
-                    |source| {
-                        source
-                            == ProofTreeCatalogSource::NonterminalFriLayer {
-                                fold_ordinal,
-                            }
-                    },
-                )?,
+                catalog_root(layout.catalog(), pending.tree_roots(), |source| {
+                    source == ProofTreeCatalogSource::NonterminalFriLayer { fold_ordinal }
+                })?,
             )?;
         }
     }
-    transcript.absorb_fri_terminal_coefficients(
-        pending.terminal_coefficients(),
-    )?;
+    transcript.absorb_fri_terminal_coefficients(pending.terminal_coefficients())?;
 
-    let mut sampled_query_representatives =
-        transcript.sample_query_representatives()?;
-    let sorted_query_representatives =
-        transcript.sorted_query_representatives()?;
+    let mut sampled_query_representatives = transcript.sample_query_representatives()?;
+    let sorted_query_representatives = transcript.sorted_query_representatives()?;
     sampled_query_representatives.sort_unstable();
     if sampled_query_representatives != sorted_query_representatives {
         return Err(CommonProofVerifierError::InvalidTreeLayout);
@@ -552,9 +565,8 @@ where
         fri_verifier,
         evaluate_verified_column,
     )?;
-    let mut query_opening_absorber = transcript.begin_query_openings(
-        pending.query_section_byte_length()?,
-    )?;
+    let mut query_opening_absorber =
+        transcript.begin_query_openings(pending.query_section_byte_length()?)?;
     let mut query_verification_error = None;
     let decode_result = pending.decode_query_section(
         &sorted_query_representatives,
@@ -574,18 +586,35 @@ where
     workspace.finish()?;
     transcript.finish_query_openings(query_opening_absorber)?;
     transcript.finish()?;
-    Ok(())
+    let application_statement_schema_identifier = input
+        .relation_plan
+        .application_statement_schema_identifier();
+    let protocol_version_bytes = input.protocol_version.to_le_bytes();
+    let application_statement_schema_identifier_bytes =
+        application_statement_schema_identifier.to_le_bytes();
+    Ok(VerifiedCommonProof {
+        application_statement_schema_identifier,
+        application_statement_hash: hash_framed_parts_512(
+            VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN,
+            &[
+                &protocol_version_bytes,
+                &input.suite_identifier,
+                &application_statement_schema_identifier_bytes,
+                input.canonical_application_statement_bytes,
+            ],
+        ),
+        relation_plan_variant_hash: variant.canonical_hash()?,
+        schedule_position: input.schedule_position,
+        top_count: input.top_count,
+    })
 }
 
 fn decode_application_statement(
     canonical_bytes: &[u8],
     expected_schema_identifier: u16,
 ) -> Result<CanonicalTuple, CommonProofVerifierError> {
-    let statement = CanonicalTuple::decode(
-        canonical_bytes,
-        &CanonicalDecodeLimits::default(),
-    )
-    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    let statement = CanonicalTuple::decode(canonical_bytes, &CanonicalDecodeLimits::default())
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
     if statement.schema_identifier != expected_schema_identifier
         || statement.schema_version != PROOF_OBJECT_HEADER_SCHEMA_VERSION
         || statement
@@ -600,6 +629,7 @@ fn decode_application_statement(
 
 fn derive_relation_tree_inputs(
     variant: &RelationPlanVariant,
+    application_statement: &CanonicalTuple,
     statement_owned_trees: &[VerifiedStatementOwnedTree],
 ) -> Result<Vec<RelationProofTreeInput>, CommonProofVerifierError> {
     let mut inputs = Vec::new();
@@ -609,8 +639,8 @@ fn derive_relation_tree_inputs(
     let mut consumed_statement_trees = vec![false; statement_owned_trees.len()];
 
     for (tree_index, tree) in variant.ordered_trees().iter().enumerate() {
-        let ordered_tree_ordinal = u32::try_from(tree_index)
-            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
+        let ordered_tree_ordinal =
+            u32::try_from(tree_index).map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
         match tree {
             RelationTreeDescriptor::ProofCreated {
                 proof_tree_role,
@@ -621,27 +651,19 @@ fn derive_relation_tree_inputs(
                     2 => ProofTreeRole::AuxiliaryOracle,
                     _ => return Err(CommonProofVerifierError::InvalidTreeLayout),
                 };
-                let leaf_visibility = if ordered_column_ordinals.iter().any(
-                    |column_ordinal| {
-                        usize::try_from(*column_ordinal)
-                            .ok()
-                            .and_then(|column_index| {
-                                variant.ordered_columns().get(column_index)
-                            })
-                            .is_some_and(|column| {
-                                matches!(column.origin(), RelationColumnOrigin::Prover)
-                            })
-                    },
-                ) {
+                let leaf_visibility = if ordered_column_ordinals.iter().any(|column_ordinal| {
+                    usize::try_from(*column_ordinal)
+                        .ok()
+                        .and_then(|column_index| variant.ordered_columns().get(column_index))
+                        .is_some_and(|column| {
+                            matches!(column.origin(), RelationColumnOrigin::Prover)
+                        })
+                }) {
                     ProofLeafVisibility::SecretBearing
                 } else {
                     ProofLeafVisibility::Public
                 };
-                validate_tree_columns(
-                    variant,
-                    ordered_column_ordinals,
-                    None,
-                )?;
+                validate_tree_columns(variant, ordered_column_ordinals, None)?;
                 inputs.push(RelationProofTreeInput::ProofCreated {
                     tree_role,
                     row_width: u32::try_from(ordered_column_ordinals.len())
@@ -665,8 +687,7 @@ fn derive_relation_tree_inputs(
                     .enumerate()
                     .filter(|(_, input)| {
                         input.ordered_tree_ordinal == ordered_tree_ordinal
-                            && input.expected_root_source_ordinal
-                                == *expected_root_source_ordinal
+                            && input.expected_root_source_ordinal == *expected_root_source_ordinal
                     });
                 let (input_index, input) = matches
                     .next()
@@ -691,24 +712,33 @@ fn derive_relation_tree_inputs(
                         BoundTreeConstructionKind::CommittedMaterial,
                     ) => expected_row_width == 4,
                     (
-                        StatementOwnedProofTreeInput::SetupPolynomial {
-                            row_width, ..
-                        },
+                        StatementOwnedProofTreeInput::SetupPolynomial { row_width, .. },
                         BoundTreeConstructionKind::SetupPolynomial,
-                    ) => usize::try_from(*row_width)
-                        .is_ok_and(|width| width == expected_row_width),
+                    ) => usize::try_from(*row_width).is_ok_and(|width| width == expected_row_width),
                     _ => false,
                 };
                 if !construction_matches
-                    || input.ordered_canonical_residue_moduli
-                        != expected_canonical_residue_moduli
+                    || input.ordered_canonical_residue_moduli != expected_canonical_residue_moduli
                 {
                     return Err(CommonProofVerifierError::InvalidBoundTree);
                 }
+                let value_path = variant
+                    .verifier_source(*expected_root_source_ordinal)
+                    .and_then(|source| source.application_statement_scalar_hash_path())
+                    .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+                let expected_statement_root =
+                    select_application_statement_hash(application_statement, value_path)?;
+                let supplied_root = match &input.tree {
+                    StatementOwnedProofTreeInput::CommittedMaterial { expected_root, .. }
+                    | StatementOwnedProofTreeInput::SetupPolynomial { expected_root, .. } => {
+                        *expected_root
+                    }
+                };
+                if supplied_root != expected_statement_root {
+                    return Err(CommonProofVerifierError::InvalidBoundTree);
+                }
                 consumed_statement_trees[input_index] = true;
-                inputs.push(RelationProofTreeInput::BoundPublic(
-                    input.tree.clone(),
-                ));
+                inputs.push(RelationProofTreeInput::BoundPublic(input.tree.clone()));
             }
         }
     }
@@ -716,6 +746,172 @@ fn derive_relation_tree_inputs(
         return Err(CommonProofVerifierError::InvalidBoundTree);
     }
     Ok(inputs)
+}
+
+enum SelectedApplicationStatementValue {
+    Tuple(CanonicalTuple),
+    Item(CanonicalItem),
+}
+
+fn select_application_statement_hash(
+    application_statement: &CanonicalTuple,
+    value_path: &[RelationSelectorPathStep],
+) -> Result<[u8; 64], CommonProofVerifierError> {
+    if value_path.is_empty() {
+        return Err(CommonProofVerifierError::InvalidBoundTree);
+    }
+    let mut selected = SelectedApplicationStatementValue::Tuple(application_statement.clone());
+    for step in value_path {
+        selected = match step.step_kind() {
+            SelectorPathStepKind::TupleField => {
+                let tuple = match selected {
+                    SelectedApplicationStatementValue::Tuple(tuple) => tuple,
+                    SelectedApplicationStatementValue::Item(item)
+                        if item.item_type() == CanonicalItemType::NestedTuple =>
+                    {
+                        CanonicalTuple::decode(
+                            item.canonical_bytes(),
+                            &CanonicalDecodeLimits::default(),
+                        )
+                        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?
+                    }
+                    SelectedApplicationStatementValue::Item(_) => {
+                        return Err(CommonProofVerifierError::InvalidBoundTree);
+                    }
+                };
+                SelectedApplicationStatementValue::Item(
+                    tuple
+                        .items
+                        .get(
+                            usize::try_from(step.argument())
+                                .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+                        )
+                        .cloned()
+                        .ok_or(CommonProofVerifierError::InvalidBoundTree)?,
+                )
+            }
+            SelectorPathStepKind::LiteralListIndex => {
+                let SelectedApplicationStatementValue::Item(item) = selected else {
+                    return Err(CommonProofVerifierError::InvalidBoundTree);
+                };
+                SelectedApplicationStatementValue::Item(select_homogeneous_list_item(
+                    &item,
+                    usize::try_from(step.argument())
+                        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+                )?)
+            }
+            _ => return Err(CommonProofVerifierError::InvalidBoundTree),
+        };
+    }
+    let SelectedApplicationStatementValue::Item(item) = selected else {
+        return Err(CommonProofVerifierError::InvalidBoundTree);
+    };
+    if item.item_type() != CanonicalItemType::Hash512 || item.canonical_bytes().len() != 64 {
+        return Err(CommonProofVerifierError::InvalidBoundTree);
+    }
+    item.canonical_bytes()
+        .try_into()
+        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)
+}
+
+fn select_homogeneous_list_item(
+    list: &CanonicalItem,
+    selected_index: usize,
+) -> Result<CanonicalItem, CommonProofVerifierError> {
+    if list.item_type() != CanonicalItemType::HomogeneousList {
+        return Err(CommonProofVerifierError::InvalidBoundTree);
+    }
+    let bytes = list.canonical_bytes();
+    if bytes.len() < 6 {
+        return Err(CommonProofVerifierError::InvalidBoundTree);
+    }
+    let element_type =
+        CanonicalItemType::from_canonical_code(u16::from_le_bytes([bytes[0], bytes[1]]))
+            .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+    let element_count =
+        usize::try_from(u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]))
+            .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+    if selected_index >= element_count {
+        return Err(CommonProofVerifierError::InvalidBoundTree);
+    }
+    let payload = &bytes[6..];
+    let selected_bytes = match element_type {
+        CanonicalItemType::Hash512 => {
+            let expected_byte_length = element_count
+                .checked_mul(64)
+                .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+            if payload.len() != expected_byte_length {
+                return Err(CommonProofVerifierError::InvalidBoundTree);
+            }
+            let start = selected_index
+                .checked_mul(64)
+                .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+            let end = start
+                .checked_add(64)
+                .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+            payload
+                .get(start..end)
+                .ok_or(CommonProofVerifierError::InvalidBoundTree)?
+        }
+        CanonicalItemType::NestedTuple => {
+            let mut offset = 0_usize;
+            let mut selected_range = None;
+            for element_index in 0..element_count {
+                let tuple_byte_length = encoded_tuple_byte_length(
+                    payload
+                        .get(offset..)
+                        .ok_or(CommonProofVerifierError::InvalidBoundTree)?,
+                )?;
+                let next_offset = offset
+                    .checked_add(tuple_byte_length)
+                    .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+                if element_index == selected_index {
+                    selected_range = Some((offset, next_offset));
+                }
+                offset = next_offset;
+            }
+            if offset != payload.len() {
+                return Err(CommonProofVerifierError::InvalidBoundTree);
+            }
+            let (start, end) = selected_range.ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+            payload
+                .get(start..end)
+                .ok_or(CommonProofVerifierError::InvalidBoundTree)?
+        }
+        _ => return Err(CommonProofVerifierError::InvalidBoundTree),
+    };
+    CanonicalItem::from_canonical_bytes(
+        element_type,
+        selected_bytes.to_vec(),
+        &CanonicalDecodeLimits::default(),
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidBoundTree)
+}
+
+fn encoded_tuple_byte_length(bytes: &[u8]) -> Result<usize, CommonProofVerifierError> {
+    if bytes.len() < 8 {
+        return Err(CommonProofVerifierError::InvalidBoundTree);
+    }
+    let item_count = usize::try_from(u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]))
+        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+    let mut offset = 8_usize;
+    for _ in 0..item_count {
+        let header = bytes
+            .get(offset..offset + 6)
+            .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+        CanonicalItemType::from_canonical_code(u16::from_le_bytes([header[0], header[1]]))
+            .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+        let value_byte_length = usize::try_from(u32::from_le_bytes([
+            header[2], header[3], header[4], header[5],
+        ]))
+        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+        offset = offset
+            .checked_add(6)
+            .and_then(|value| value.checked_add(value_byte_length))
+            .filter(|value| *value <= bytes.len())
+            .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+    }
+    Ok(offset)
 }
 
 fn validate_tree_columns(
@@ -743,8 +939,7 @@ fn validate_tree_columns(
                 },
                 Some(expected),
             ) if *expected_root_source_ordinal == expected => {}
-            (RelationColumnOrigin::BoundTree { .. }, _)
-            | (_, Some(_)) => {
+            (RelationColumnOrigin::BoundTree { .. }, _) | (_, Some(_)) => {
                 return Err(CommonProofVerifierError::InvalidTreeLayout);
             }
             (_, None) => {}
@@ -816,9 +1011,7 @@ where
     if deep_evaluations.len() != variant.ordered_opening_claims().len() {
         return Err(CommonProofVerifierError::InvalidOpeningClaim);
     }
-    for (claim_ordinal, claim) in
-        variant.ordered_opening_claims().iter().copied().enumerate()
-    {
+    for (claim_ordinal, claim) in variant.ordered_opening_claims().iter().copied().enumerate() {
         if claim.source_class() != RelationOpeningSourceClass::TreeColumn {
             continue;
         }
@@ -831,13 +1024,14 @@ where
             .ordered_columns()
             .get(column_index)
             .ok_or(CommonProofVerifierError::InvalidOpeningClaim)?;
-        if !matches!(column.origin(), RelationColumnOrigin::VerifierSequence { .. }) {
+        if !matches!(
+            column.origin(),
+            RelationColumnOrigin::VerifierSequence { .. }
+        ) {
             continue;
         }
-        let opening_point_index = usize::try_from(
-            claim.opening_point_ordinal(),
-        )
-        .map_err(|_| CommonProofVerifierError::InvalidOpeningClaim)?;
+        let opening_point_index = usize::try_from(claim.opening_point_ordinal())
+            .map_err(|_| CommonProofVerifierError::InvalidOpeningClaim)?;
         let point = opening_points
             .get(opening_point_index)
             .copied()
@@ -874,15 +1068,16 @@ fn build_runtime_claim_groups(
         return Err(CommonProofVerifierError::InvalidOpeningClaim);
     }
     let mut groups = vec![Vec::new(); catalog.entries().len()];
-    for (claim_ordinal, claim) in
-        variant.ordered_opening_claims().iter().copied().enumerate()
-    {
+    for (claim_ordinal, claim) in variant.ordered_opening_claims().iter().copied().enumerate() {
         let (catalog_index, column_position) = match claim.source_class() {
             RelationOpeningSourceClass::TreeColumn => {
                 let tree_index = usize::try_from(claim.source_ordinal())
                     .map_err(|_| CommonProofVerifierError::InvalidOpeningClaim)?;
                 if !matches!(
-                    catalog.entries().get(tree_index).map(|entry| entry.source()),
+                    catalog
+                        .entries()
+                        .get(tree_index)
+                        .map(|entry| entry.source()),
                     Some(
                         ProofTreeCatalogSource::RelationProofCreated { .. }
                             | ProofTreeCatalogSource::RelationBoundPublic
@@ -919,10 +1114,7 @@ fn build_runtime_claim_groups(
                     .map_err(|_| CommonProofVerifierError::InvalidOpeningClaim)?;
                 (
                     catalog_index_for_source(catalog, |source| {
-                        source
-                            == ProofTreeCatalogSource::QuotientComponent {
-                                component_ordinal,
-                            }
+                        source == ProofTreeCatalogSource::QuotientComponent { component_ordinal }
                     })?,
                     None,
                 )
@@ -939,10 +1131,8 @@ fn build_runtime_claim_groups(
                 )
             }
         };
-        let opening_point_index = usize::try_from(
-            claim.opening_point_ordinal(),
-        )
-        .map_err(|_| CommonProofVerifierError::InvalidOpeningClaim)?;
+        let opening_point_index = usize::try_from(claim.opening_point_ordinal())
+            .map_err(|_| CommonProofVerifierError::InvalidOpeningClaim)?;
         let opening_point = opening_points
             .get(opening_point_index)
             .copied()
@@ -952,8 +1142,7 @@ fn build_runtime_claim_groups(
             .ok_or(CommonProofVerifierError::InvalidOpeningClaim)?
             .push(RuntimeOpeningClaim {
                 column_position,
-                source_degree_bound_exclusive: claim
-                    .source_degree_bound_exclusive(),
+                source_degree_bound_exclusive: claim.source_degree_bound_exclusive(),
                 opening_point,
                 opened_value: deep_evaluations[claim_ordinal],
                 batching_coefficient: batching_coefficients[claim_ordinal],
@@ -981,12 +1170,7 @@ fn catalog_index_for_source(
     Ok(index)
 }
 
-struct QueryVerificationWorkspace<
-    'relation,
-    'queries,
-    'evaluator,
-    ColumnEvaluator: ?Sized,
-> {
+struct QueryVerificationWorkspace<'relation, 'queries, 'evaluator, ColumnEvaluator: ?Sized> {
     variant: &'relation RelationPlanVariant,
     catalog: &'relation CompleteProofTreeCatalog,
     evaluation_domain: ProofEvaluationDomain,
@@ -1013,9 +1197,7 @@ where
         fri_verifier: ProofFriQueryVerifier,
         evaluate_verified_column: &'evaluator mut ColumnEvaluator,
     ) -> Result<Self, CommonProofVerifierError> {
-        if query_representatives.is_empty()
-            || claim_groups.len() != catalog.entries().len()
-        {
+        if query_representatives.is_empty() || claim_groups.len() != catalog.entries().len() {
             return Err(CommonProofVerifierError::InvalidTreeLayout);
         }
         Ok(QueryVerificationWorkspace {
@@ -1042,12 +1224,9 @@ where
         &mut self,
         opening: ProofTreeOpening<'_>,
     ) -> Result<(), CommonProofVerifierError> {
-        let catalog_index = usize::from(
-            opening.catalog_entry().tree_catalog_index(),
-        );
+        let catalog_index = usize::from(opening.catalog_entry().tree_catalog_index());
         if catalog_index != self.next_catalog_index
-            || self.catalog.entries().get(catalog_index)
-                != Some(opening.catalog_entry())
+            || self.catalog.entries().get(catalog_index) != Some(opening.catalog_entry())
         {
             return Err(CommonProofVerifierError::InvalidTreeLayout);
         }
@@ -1057,24 +1236,13 @@ where
                 self.consume_relation_tree(catalog_index, opening.leaves())?;
             }
             ProofTreeCatalogSource::QuotientComponent { .. } => {
-                self.consume_single_extension_tree(
-                    catalog_index,
-                    opening.leaves(),
-                    false,
-                )?;
+                self.consume_single_extension_tree(catalog_index, opening.leaves(), false)?;
             }
             ProofTreeCatalogSource::OpeningBatchMask => {
-                self.consume_single_extension_tree(
-                    catalog_index,
-                    opening.leaves(),
-                    true,
-                )?;
+                self.consume_single_extension_tree(catalog_index, opening.leaves(), true)?;
             }
             ProofTreeCatalogSource::NonterminalFriLayer { fold_ordinal } => {
-                self.consume_fri_tree(
-                    usize::from(fold_ordinal),
-                    opening.leaves(),
-                )?;
+                self.consume_fri_tree(usize::from(fold_ordinal), opening.leaves())?;
             }
         }
         self.next_catalog_index += 1;
@@ -1097,8 +1265,7 @@ where
             .get(catalog_index)
             .ok_or(CommonProofVerifierError::InvalidOpeningClaim)?;
 
-        for (query_index, representative) in
-            self.query_representatives.iter().copied().enumerate()
+        for (query_index, representative) in self.query_representatives.iter().copied().enumerate()
         {
             let leaf = leaf_for_index(leaves, representative)?;
             if leaf.first_point_values().len() != columns.len()
@@ -1110,9 +1277,7 @@ where
                 usize::try_from(representative)
                     .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
             )?;
-            for (column_position, column_ordinal) in
-                columns.iter().copied().enumerate()
-            {
+            for (column_position, column_ordinal) in columns.iter().copied().enumerate() {
                 let column_index = usize::try_from(column_ordinal)
                     .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
                 let column = self
@@ -1120,11 +1285,7 @@ where
                     .ordered_columns()
                     .get(column_index)
                     .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
-                let pair = opened_pair(
-                    leaf,
-                    column_position,
-                    column.value_type(),
-                )?;
+                let pair = opened_pair(leaf, column_position, column.value_type())?;
                 if matches!(
                     column.origin(),
                     RelationColumnOrigin::VerifierSequence { .. }
@@ -1136,13 +1297,9 @@ where
                             self.evaluation_domain,
                             representative,
                         )
-                        .ok_or(
-                            CommonProofVerifierError::MissingVerifiedColumnValue,
-                        )?;
+                        .ok_or(CommonProofVerifierError::MissingVerifiedColumnValue)?;
                     if pair != expected_pair {
-                        return Err(
-                            CommonProofVerifierError::VerifiedColumnMismatch,
-                        );
+                        return Err(CommonProofVerifierError::VerifiedColumnMismatch);
                     }
                 }
             }
@@ -1160,11 +1317,7 @@ where
                     .ordered_columns()
                     .get(column_index)
                     .ok_or(CommonProofVerifierError::InvalidOpeningClaim)?;
-                let source_pair = opened_pair(
-                    leaf,
-                    column_position,
-                    column.value_type(),
-                )?;
+                let source_pair = opened_pair(leaf, column_position, column.value_type())?;
                 add_opening_claim(
                     self.variant.opening_degree_bound_exclusive(),
                     evaluation_point,
@@ -1187,20 +1340,13 @@ where
             .claim_groups
             .get(catalog_index)
             .ok_or(CommonProofVerifierError::InvalidOpeningClaim)?;
-        for (query_index, representative) in
-            self.query_representatives.iter().copied().enumerate()
+        for (query_index, representative) in self.query_representatives.iter().copied().enumerate()
         {
             let leaf = leaf_for_index(leaves, representative)?;
-            let source_pair = opened_pair(
-                leaf,
-                0,
-                RelationColumnValueType::ChallengeExtension,
-            )?;
+            let source_pair = opened_pair(leaf, 0, RelationColumnValueType::ChallengeExtension)?;
             if add_direct_pair {
-                self.accumulated_initial_pairs[query_index] = add_pairs(
-                    self.accumulated_initial_pairs[query_index],
-                    source_pair,
-                );
+                self.accumulated_initial_pairs[query_index] =
+                    add_pairs(self.accumulated_initial_pairs[query_index], source_pair);
             }
             let evaluation_point = self.evaluation_domain.point(
                 usize::try_from(representative)
@@ -1253,16 +1399,9 @@ where
             .zip(self.query_representatives.iter().copied())
         {
             let leaf = leaf_for_index(leaves, representative % leaf_count)?;
-            let next_pair = opened_pair(
-                leaf,
-                0,
-                RelationColumnValueType::ChallengeExtension,
-            )?;
-            self.fri_verifier.verify_nonterminal_layer(
-                state,
-                fold_ordinal,
-                next_pair,
-            )?;
+            let next_pair = opened_pair(leaf, 0, RelationColumnValueType::ChallengeExtension)?;
+            self.fri_verifier
+                .verify_nonterminal_layer(state, fold_ordinal, next_pair)?;
         }
         Ok(())
     }
@@ -1332,10 +1471,9 @@ fn opened_pair(
         (ProofTreeValue::Base(value), RelationColumnValueType::BaseField) => {
             Ok(ProofChallengeExtensionElement::from_base(value))
         }
-        (
-            ProofTreeValue::Extension(value),
-            RelationColumnValueType::ChallengeExtension,
-        ) => Ok(value),
+        (ProofTreeValue::Extension(value), RelationColumnValueType::ChallengeExtension) => {
+            Ok(value)
+        }
         _ => Err(CommonProofVerifierError::InvalidTreeLayout),
     };
     Ok(OpenedFriLayerPair::new(convert(first)?, convert(opposite)?))
@@ -1363,10 +1501,7 @@ fn add_opening_claim(
     Ok(())
 }
 
-fn add_pairs(
-    left: OpenedFriLayerPair,
-    right: OpenedFriLayerPair,
-) -> OpenedFriLayerPair {
+fn add_pairs(left: OpenedFriLayerPair, right: OpenedFriLayerPair) -> OpenedFriLayerPair {
     OpenedFriLayerPair::new(
         left.first().add(right.first()),
         left.opposite().add(right.opposite()),
@@ -1427,15 +1562,13 @@ mod tests {
     fn proof_header_preflight_enforces_declared_and_profile_lengths() {
         let proof = b"headerbody".to_vec();
         assert_eq!(
-            verify_and_slice_proof_header(&proof, proof.len() - 1, proof.len(), b"header")
-                .err(),
+            verify_and_slice_proof_header(&proof, proof.len() - 1, proof.len(), b"header").err(),
             Some(CommonProofVerifierError::Body(ProofBodyError::Decode(
                 super::super::ProofDecodeError::DeclaredLengthMismatch,
             ))),
         );
         assert_eq!(
-            verify_and_slice_proof_header(&proof, proof.len(), proof.len() - 1, b"header")
-                .err(),
+            verify_and_slice_proof_header(&proof, proof.len(), proof.len() - 1, b"header").err(),
             Some(CommonProofVerifierError::Body(ProofBodyError::Decode(
                 super::super::ProofDecodeError::ProofByteCeilingExceeded,
             ))),

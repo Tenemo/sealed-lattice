@@ -1,5 +1,5 @@
-import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
+import { deriveCanonicalObjectHash } from "@sealed-lattice/crypto";
+import type { ProtocolHash } from "@sealed-lattice/types";
 
 import {
     type SetupCommitmentValue,
@@ -7,28 +7,28 @@ import {
     type VssSourceTrusteeCoefficientCommitmentContributionInput,
     type VssSourceTrusteeCoefficientCommitmentRecord,
     type VssSourceTrusteeOpeningMaterial,
-} from './constants-and-types.js';
+} from "./constants-and-types.js";
 import {
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
-} from './encoding.js';
+} from "./encoding.js";
 import {
     openingCoordinateKey,
     openingStateByCoordinate,
-} from './opening-state.js';
+} from "./opening-state.js";
 
 const validateCommitmentCommonInput = (
     input: VssSourceTrusteeCoefficientCommitmentContributionInput,
 ): void => {
-    assertProtocolHash(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
-    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
+    assertProtocolHash(input.publicMatrixSeedHash, "publicMatrixSeedHash");
+    assertPositiveSafeInteger(input.ringDegree, "ringDegree");
     assertPositiveSafeInteger(
         input.setupContext.participantCount,
-        'setupContext.participantCount',
+        "setupContext.participantCount",
     );
-    assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
+    assertPositiveSafeInteger(input.thresholdDegree, "thresholdDegree");
     input.qSharePrimes.forEach((qSharePrime, rnsLimbIndex) => {
         assertPositiveSafeInteger(
             qSharePrime,
@@ -44,18 +44,18 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
     const sourceTrusteeState = input.sourceTrusteeOpeningState;
     assertNonEmptyString(
         sourceTrusteeState.sourceTrusteeIdentity,
-        'sourceTrusteeIdentity',
+        "sourceTrusteeIdentity",
     );
     assertNonNegativeSafeInteger(
         sourceTrusteeState.sourceTrusteeRosterPosition,
-        'sourceTrusteeRosterPosition',
+        "sourceTrusteeRosterPosition",
     );
     if (
         sourceTrusteeState.sourceTrusteeRosterPosition >=
         input.setupContext.participantCount
     ) {
         throw new Error(
-            'sourceTrusteeRosterPosition must be inside the accepted participant count.',
+            "sourceTrusteeRosterPosition must be inside the accepted participant count.",
         );
     }
     const openingsByCoordinate = openingStateByCoordinate(
@@ -78,17 +78,26 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
             );
             if (openingState === undefined) {
                 throw new Error(
-                    'source trustee coefficientOpenings must cover every declared coordinate.',
+                    "source trustee coefficientOpenings must cover every declared coordinate.",
                 );
             }
-            const commitmentComputation = input.setupCommitmentComputer({
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                sourceRnsLimbIndex: rnsLimbIndex,
-                shamirCoefficientIndex,
-                messageCoefficients: openingState.coefficientMessage,
-                randomnessByColumn: openingState.randomnessByColumn,
-                ringDegree: input.ringDegree,
-            });
+            const commitmentComputation =
+                input.structuredCommitmentOpenings.computeCommitment({
+                    capability: openingState.openingCapability,
+                    messageCoefficients: openingState.coefficientMessage,
+                    publicMatrixSeedHash: input.publicMatrixSeedHash,
+                });
+            if (
+                commitmentComputation.commitment.sourceRnsLimbIndex !==
+                    rnsLimbIndex ||
+                commitmentComputation.commitment.shamirCoefficientIndex !==
+                    shamirCoefficientIndex ||
+                commitmentComputation.commitment.ringDegree !== input.ringDegree
+            ) {
+                throw new Error(
+                    "worker-owned opening computation returned a commitment for the wrong coordinate.",
+                );
+            }
             const commitmentRoot = deriveCanonicalObjectHash(
                 commitmentComputation.commitment,
             );
@@ -101,7 +110,7 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
         }
     });
     const sourceTrusteeRecord = {
-        objectType: 'VssSourceTrusteeCoefficientCommitments',
+        objectType: "VssSourceTrusteeCoefficientCommitments",
         sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
         coefficientCommitmentRoots,
     } as const satisfies VssSourceTrusteeCoefficientCommitmentRecord;

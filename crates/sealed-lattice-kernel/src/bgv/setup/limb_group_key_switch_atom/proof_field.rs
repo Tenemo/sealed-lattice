@@ -271,21 +271,27 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
     }
 
     /// Exponentiation by a little-endian limb exponent, in Montgomery form.
+    /// All callers use public exponents (domain sizes, fixed roots, or the
+    /// public modulus for inversion), so work stops at the highest set bit
+    /// instead of squaring through zero high limbs.
     pub(crate) fn power(
         &self,
         base: &[u64; LIMB_COUNT],
         exponent: &[u64; LIMB_COUNT],
     ) -> [u64; LIMB_COUNT] {
         let mut result = self.one();
+        let Some(highest_nonzero_limb) = exponent.iter().rposition(|limb| *limb != 0) else {
+            return result;
+        };
+        let bit_length = highest_nonzero_limb * 64
+            + (64 - exponent[highest_nonzero_limb].leading_zeros() as usize);
         let mut running = *base;
-        for exponent_limb in exponent {
-            let mut bits = *exponent_limb;
-            for _ in 0..64 {
-                if bits & 1 == 1 {
-                    result = self.multiply(&result, &running);
-                }
+        for bit_index in 0..bit_length {
+            if exponent[bit_index / 64] & (1_u64 << (bit_index % 64)) != 0 {
+                result = self.multiply(&result, &running);
+            }
+            if bit_index + 1 < bit_length {
                 running = self.multiply(&running, &running);
-                bits >>= 1;
             }
         }
         result
@@ -438,6 +444,38 @@ mod tests {
     fn multiplication_matches_bigint_reference() {
         check_multiplication_against_bigint(&sixteen_limb_group_field_parameters());
         check_multiplication_against_bigint(&eight_limb_group_field_parameters());
+    }
+
+    fn check_power_against_bigint<const LIMB_COUNT: usize>(
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ) {
+        let modulus = to_biguint(&parameters.modulus);
+        let raw_base = BigUint::from(0x1234_5678_9abc_def1_u64) % &modulus;
+        let base = parameters.raw_value_to_element(&from_biguint(&raw_base));
+        let mut exponents = vec![[0_u64; LIMB_COUNT]];
+        for small_exponent in [1_u64, 2, 65_536, 131_073] {
+            let mut exponent = [0_u64; LIMB_COUNT];
+            exponent[0] = small_exponent;
+            exponents.push(exponent);
+        }
+        if LIMB_COUNT > 1 {
+            let mut cross_limb_exponent = [0_u64; LIMB_COUNT];
+            cross_limb_exponent[0] = 7;
+            cross_limb_exponent[1] = 1;
+            exponents.push(cross_limb_exponent);
+        }
+
+        for exponent in exponents {
+            let expected = raw_base.modpow(&to_biguint(&exponent), &modulus);
+            let observed = parameters.to_raw_value(&parameters.power(&base, &exponent));
+            assert_eq!(to_biguint(&observed), expected);
+        }
+    }
+
+    #[test]
+    fn public_exponentiation_matches_bigint_across_zero_small_and_cross_limb_exponents() {
+        check_power_against_bigint(&sixteen_limb_group_field_parameters());
+        check_power_against_bigint(&eight_limb_group_field_parameters());
     }
 
     fn check_field_axioms<const LIMB_COUNT: usize>(parameters: &ProofFieldParameters<LIMB_COUNT>) {

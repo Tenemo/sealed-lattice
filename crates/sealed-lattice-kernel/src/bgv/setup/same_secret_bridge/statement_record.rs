@@ -22,7 +22,6 @@ pub(super) fn verify_statement_record(
         input.expected_position,
         input.q_share_rns_limb_count,
         input.threshold_degree,
-        input.ring_degree,
     )?;
     Ok(())
 }

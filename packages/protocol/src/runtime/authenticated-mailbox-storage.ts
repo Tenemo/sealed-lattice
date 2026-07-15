@@ -6,7 +6,11 @@ import type {
     AuthenticatedMailboxProducerSlot,
     AuthenticatedMailboxStagingBoundary,
 } from '@sealed-lattice/crypto';
-import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    isProtocolHash,
+    type ProtocolHash,
+} from '@sealed-lattice/types';
 
 import {
     bytesEqual,
@@ -26,10 +30,8 @@ import type {
 const textEncoder = new TextEncoder();
 const fatalTextDecoder = new TextDecoder('utf-8', { fatal: true });
 const recordVersion = 1;
-const maximumMailboxCiphertextByteLength = 2_147_483_648;
 const maximumAesGcmRandomNonceInvocationCount = 0x1_0000_0000;
 const maximumUnsigned64 = 0xffff_ffff_ffff_ffffn;
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const participantIdentityPattern = /^[0-9a-f]{128}$/u;
 const canonicalUnsignedDecimalPattern = /^(?:0|[1-9][0-9]*)$/u;
 const publicationIdentifierPattern = /^[0-9a-f]{64}$/u;
@@ -124,7 +126,6 @@ type StoredChunkDescriptor = Readonly<{
 type StoredOutboundManifest = Readonly<{
     canonicalEnvelopeHex: string;
     chunkDescriptors: readonly StoredChunkDescriptor[];
-    envelopeHash: ProtocolHash;
     plaintextByteLength: number;
     producerSlot: StoredProducerSlot;
     publicationIdentifier: string;
@@ -141,7 +142,6 @@ type StoredStagingManifest = Readonly<{
 
 type StoredInboundSlot = Readonly<{
     canonicalEnvelopeHex: string;
-    envelopeHash: ProtocolHash;
     producerSlot: StoredProducerSlot;
     recordVersion: number;
 }>;
@@ -194,7 +194,10 @@ const validateLimits = (
         limits.transactionLifetimeMilliseconds,
         'transactionLifetimeMilliseconds',
     );
-    if (limits.maximumMailboxByteLength > maximumMailboxCiphertextByteLength) {
+    if (
+        limits.maximumMailboxByteLength >
+        foundationProfile.maximumCanonicalStreamByteLength
+    ) {
         throw new AuthenticatedMailboxStorageError(
             'InvalidConfiguration',
             'maximumMailboxByteLength exceeds the supported mailbox profile.',
@@ -263,7 +266,7 @@ const decodeCanonicalJson = (bytes: Uint8Array): unknown => {
 };
 
 const requireProtocolHash = (value: unknown, label: string): ProtocolHash => {
-    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
+    if (!isProtocolHash(value)) {
         throw new AuthenticatedMailboxStorageError(
             'InvalidInput',
             `${label} must be a canonical 64-byte protocol hash.`,
@@ -654,7 +657,6 @@ const decodeOutboundManifest = (
         !hasExactKeys(value, [
             'canonicalEnvelopeHex',
             'chunkDescriptors',
-            'envelopeHash',
             'plaintextByteLength',
             'producerSlot',
             'publicationIdentifier',
@@ -680,7 +682,6 @@ const decodeOutboundManifest = (
             limits.maximumCarrierByteLength,
         ),
         chunkDescriptors,
-        envelopeHash: requireProtocolHash(value.envelopeHash, 'envelopeHash'),
         plaintextByteLength: value.plaintextByteLength,
         producerSlot: decodeProducerSlot(value.producerSlot),
         publicationIdentifier: requirePublicationIdentifier(
@@ -695,7 +696,6 @@ const encodeOutboundManifest = (manifest: StoredOutboundManifest): Uint8Array =>
     encodeCanonicalJson({
         canonicalEnvelopeHex: manifest.canonicalEnvelopeHex,
         chunkDescriptors: manifest.chunkDescriptors,
-        envelopeHash: manifest.envelopeHash,
         plaintextByteLength: manifest.plaintextByteLength,
         producerSlot: manifest.producerSlot,
         publicationIdentifier: manifest.publicationIdentifier,
@@ -759,7 +759,6 @@ const decodeInboundSlot = (
         !isRecord(value) ||
         !hasExactKeys(value, [
             'canonicalEnvelopeHex',
-            'envelopeHash',
             'producerSlot',
             'recordVersion',
         ]) ||
@@ -776,7 +775,6 @@ const decodeInboundSlot = (
             value.canonicalEnvelopeHex,
             limits.maximumCarrierByteLength,
         ),
-        envelopeHash: requireProtocolHash(value.envelopeHash, 'envelopeHash'),
         producerSlot: decodeProducerSlot(value.producerSlot),
         recordVersion,
     });
@@ -785,7 +783,6 @@ const decodeInboundSlot = (
 const encodeInboundSlot = (slot: StoredInboundSlot): Uint8Array =>
     encodeCanonicalJson({
         canonicalEnvelopeHex: slot.canonicalEnvelopeHex,
-        envelopeHash: slot.envelopeHash,
         producerSlot: slot.producerSlot,
         recordVersion,
     });
@@ -817,17 +814,12 @@ const carriersEqual = (
     left: AuthenticatedMailboxCarrier,
     right: AuthenticatedMailboxCarrier,
 ): boolean =>
-    left.envelopeHash === right.envelopeHash &&
     bytesEqual(left.canonicalEnvelopeBytes, right.canonicalEnvelopeBytes);
 
 const copyCarrier = (
     carrier: AuthenticatedMailboxCarrier,
     limits: AuthenticatedMailboxStorageLimits,
 ): AuthenticatedMailboxCarrier => {
-    const envelopeHash = requireProtocolHash(
-        carrier.envelopeHash,
-        'carrier.envelopeHash',
-    );
     if (
         !ArrayBuffer.isView(carrier.canonicalEnvelopeBytes) ||
         Object.prototype.toString.call(carrier.canonicalEnvelopeBytes) !==
@@ -844,7 +836,6 @@ const copyCarrier = (
 
     return Object.freeze({
         canonicalEnvelopeBytes: carrier.canonicalEnvelopeBytes.slice(),
-        envelopeHash,
     });
 };
 
@@ -853,7 +844,6 @@ const carrierFromManifest = (
 ): AuthenticatedMailboxCarrier =>
     Object.freeze({
         canonicalEnvelopeBytes: hexToBytes(manifest.canonicalEnvelopeHex),
-        envelopeHash: manifest.envelopeHash,
     });
 
 const closeTransactionAfterFailure = async (
@@ -887,13 +877,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
     });
     const issuedIdentifiers = new Set<string>();
     const activeOutboundSlots = new Map<string, number>();
-    const activeInboundSlots = new Map<
-        string,
-        Readonly<{
-            canonicalEnvelopeBytes: Uint8Array;
-            envelopeHash: ProtocolHash;
-        }>
-    >();
+    const activeInboundSlots = new Map<string, AuthenticatedMailboxCarrier>();
     const activeStagingEnvelopes = new Set<ProtocolHash>();
 
     const writeRecord = async (input: {
@@ -1190,7 +1174,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                                 Object.freeze({
                                     canonicalEnvelopeBytes:
                                         carrier.canonicalEnvelopeBytes.slice(),
-                                    envelopeHash: carrier.envelopeHash,
                                 }),
                             ),
                         stageChunk: () =>
@@ -1466,7 +1449,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                             chunkDescriptors: Object.freeze([
                                 ...chunkDescriptors,
                             ]),
-                            envelopeHash: carrier.envelopeHash,
                             plaintextByteLength,
                             producerSlot,
                             publicationIdentifier,
@@ -1621,7 +1603,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
         Object.freeze({
             reserve: async ({
                 canonicalEnvelopeBytes: untrustedCanonicalEnvelopeBytes,
-                envelopeHash: untrustedEnvelopeHash,
                 producerSlot: untrustedProducerSlot,
             }) => {
                 try {
@@ -1637,7 +1618,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                         {
                             canonicalEnvelopeBytes:
                                 untrustedCanonicalEnvelopeBytes,
-                            envelopeHash: untrustedEnvelopeHash,
                         },
                         limits,
                     );
@@ -1686,7 +1666,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                             canonicalEnvelopeBytes: hexToBytes(
                                 opened.record.canonicalEnvelopeHex,
                             ),
-                            envelopeHash: opened.record.envelopeHash,
                         });
                         const identical = carriersEqual(storedCarrier, carrier);
                         storedCarrier.canonicalEnvelopeBytes.fill(0);
@@ -1714,7 +1693,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                         Object.freeze({
                             canonicalEnvelopeBytes:
                                 carrier.canonicalEnvelopeBytes.slice(),
-                            envelopeHash: carrier.envelopeHash,
                         }),
                     );
                     let state:
@@ -1762,7 +1740,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                                         canonicalEnvelopeHex: bytesToHex(
                                             carrier.canonicalEnvelopeBytes,
                                         ),
-                                        envelopeHash: carrier.envelopeHash,
                                         producerSlot,
                                         recordVersion,
                                     });
@@ -1792,8 +1769,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                                             });
                                         state =
                                             observed !== undefined &&
-                                            observed.record.envelopeHash ===
-                                                storedSlot.envelopeHash &&
                                             observed.record
                                                 .canonicalEnvelopeHex ===
                                                 storedSlot.canonicalEnvelopeHex &&
@@ -1817,8 +1792,6 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                                         });
                                         if (
                                             reread === undefined ||
-                                            reread.record.envelopeHash !==
-                                                storedSlot.envelopeHash ||
                                             reread.record
                                                 .canonicalEnvelopeHex !==
                                                 storedSlot.canonicalEnvelopeHex

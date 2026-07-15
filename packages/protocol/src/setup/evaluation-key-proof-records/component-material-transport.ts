@@ -80,6 +80,7 @@ const trusteeIdentityForContribution = (
 type ValidatedComponentMaterial = Readonly<{
     readonly componentVectorsLittleEndianHexByDigitAndLimb: readonly string[];
     readonly componentVectorRoot: ProtocolHash;
+    readonly ringDegree: number;
     readonly totalByteLength: number;
 }>;
 
@@ -89,11 +90,9 @@ const validatedEvaluationKeyShareComponentMaterial = (
     keySwitchSeedHex: string,
     keySwitchComponentVectorsLittleEndianHexByDigitAndLimb: readonly string[],
     level: number,
-    ringDegree: number,
     qSharePrimes: readonly number[],
 ): ValidatedComponentMaterial => {
     assertNonNegativeSafeInteger(level, 'level');
-    assertPositiveSafeInteger(ringDegree, 'ringDegree');
     const digitCount = level + 1;
     if (digitCount > qSharePrimes.length) {
         throw new Error(
@@ -112,6 +111,18 @@ const validatedEvaluationKeyShareComponentMaterial = (
             'evaluation-key component material must contain one vector per scheduled digit and RNS limb.',
         );
     }
+    const firstComponentVectorHex: unknown = componentVectorValues[0];
+    if (
+        typeof firstComponentVectorHex !== 'string' ||
+        firstComponentVectorHex.length === 0 ||
+        firstComponentVectorHex.length % 16 !== 0
+    ) {
+        throw new TypeError(
+            'keySwitchComponentVectorsLittleEndianHexByDigitAndLimb.0.0 must encode complete 64-bit coefficients.',
+        );
+    }
+    const ringDegree = firstComponentVectorHex.length / 16;
+    assertPositiveSafeInteger(ringDegree, 'derived ringDegree');
     const canonicalComponentVectorsLittleEndianHexByDigitAndLimb: string[] = [];
     for (let digitIndex = 0; digitIndex < digitCount; digitIndex += 1) {
         for (
@@ -151,7 +162,6 @@ const validatedEvaluationKeyShareComponentMaterial = (
         keySwitchDomain,
         keySwitchSeedHex,
         level,
-        ringDegree,
         canonicalComponentVectorsLittleEndianHexByDigitAndLimb,
     );
     const totalByteLength =
@@ -169,12 +179,12 @@ const validatedEvaluationKeyShareComponentMaterial = (
         componentVectorsLittleEndianHexByDigitAndLimb:
             canonicalComponentVectorsLittleEndianHexByDigitAndLimb,
         componentVectorRoot,
+        ringDegree,
         totalByteLength,
     };
 };
 
 const evaluationKeyShareComponentMaterialSegments = function* (
-    ringDegree: number,
     validatedMaterial: ValidatedComponentMaterial,
 ): Generator<Uint8Array> {
     const header = new Uint8Array(evaluationKeyShareComponentMaterialMagic);
@@ -186,7 +196,7 @@ const evaluationKeyShareComponentMaterialSegments = function* (
             coefficientsLeHex,
             'evaluation-key component coefficientsLeHex',
         );
-        if (coefficientBytes.byteLength !== ringDegree * 8) {
+        if (coefficientBytes.byteLength !== validatedMaterial.ringDegree * 8) {
             throw new Error(
                 'evaluation-key component coefficient bytes must match ringDegree.',
             );
@@ -271,7 +281,6 @@ const sequentialChunkPull = (
 const transportEvaluationKeyShareComponentMaterial = async (
     workItem: EvaluationKeyShareTransportWorkItem,
     writeComponentMaterial: EvaluationKeyShareMaterialTransportInput['writeEvaluationKeyShareComponentMaterial'],
-    ringDegree: number,
     qSharePrimes: readonly number[],
 ): Promise<
     Readonly<{
@@ -285,13 +294,11 @@ const transportEvaluationKeyShareComponentMaterial = async (
         workItem.keySwitchSeedHex,
         workItem.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
         workItem.level,
-        ringDegree,
         qSharePrimes,
     );
     const keySwitchComponentMaterialRoot =
         evaluationKeyShareComponentMaterialReferenceRoot(
             workItem.proofFamily,
-            ringDegree,
             validatedMaterial.componentVectorRoot,
             workItem.keySwitchDomain,
             workItem.keySwitchSeedHex,
@@ -303,10 +310,7 @@ const transportEvaluationKeyShareComponentMaterial = async (
         keySwitchComponentMaterialRoot,
         proofFamily: workItem.proofFamily,
         pullChunk: sequentialChunkPull(
-            evaluationKeyShareComponentMaterialSegments(
-                ringDegree,
-                validatedMaterial,
-            ),
+            evaluationKeyShareComponentMaterialSegments(validatedMaterial),
             validatedMaterial.totalByteLength,
         ),
         totalByteLength: validatedMaterial.totalByteLength,
@@ -388,7 +392,6 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = async (
             `qSharePrimes.${String(rnsLimbIndex)}`,
         );
     });
-    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
     const identities = trusteeIdentityByRosterPosition(input.trusteeReferences);
     const canonicalTrusteeRosterPositions = [...identities.keys()].sort(
         (left, right) => left - right,
@@ -412,7 +415,6 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = async (
             await transportEvaluationKeyShareComponentMaterial(
                 workItem,
                 input.writeEvaluationKeyShareComponentMaterial,
-                input.ringDegree,
                 input.qSharePrimes,
             );
         const componentMaterialRoot =

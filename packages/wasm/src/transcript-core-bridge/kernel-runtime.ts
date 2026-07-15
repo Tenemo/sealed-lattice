@@ -568,6 +568,11 @@ type NumberExportName =
     | 'sealed_lattice_board_verifier_describe'
     | 'sealed_lattice_board_verifier_release'
     | 'sealed_lattice_board_verifier_verify_unordered'
+    | 'sealed_lattice_finality_verifier_begin'
+    | 'sealed_lattice_finality_verifier_cancel'
+    | 'sealed_lattice_finality_verifier_describe'
+    | 'sealed_lattice_finality_verifier_release'
+    | 'sealed_lattice_finality_verifier_verify'
     | 'sealed_lattice_canonical_stream_absorb_chunk'
     | 'sealed_lattice_canonical_stream_begin_verifier'
     | 'sealed_lattice_canonical_stream_begin_writer'
@@ -593,9 +598,7 @@ type NumberExportName =
     | 'sealed_lattice_state_verifier_release'
     | 'sealed_lattice_state_verifier_finish_output'
     | 'sealed_lattice_state_verifier_prepare_output'
-    | 'sealed_lattice_state_verifier_prepare_recovery'
     | 'sealed_lattice_state_verifier_prepare_reservation'
-    | 'sealed_lattice_state_verifier_verify_recovery'
     | 'sealed_lattice_state_verifier_verify_reservation'
     | 'sealed_lattice_transcript_core_command_with_length';
 

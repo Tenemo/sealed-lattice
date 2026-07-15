@@ -4,7 +4,6 @@ import {
     type BrowserActionProofAttemptBinding,
     type BrowserActionRandomnessRecordContext,
     type BrowserActionRandomnessReservationVerificationInput,
-    type BrowserActionStateRecoveryVerificationInput,
     type BrowserActionStateReservationVerificationInput,
     type BrowserActionStateVerifierSessionInput,
     type BrowserOpenedActionRandomnessSession,
@@ -25,7 +24,6 @@ import {
 import {
     copyActionProofAttemptBinding,
     copyActionRandomnessReservationVerificationInput,
-    copyActionStateRecoveryVerificationInput,
     copyActionStateReservationVerificationInput,
     copyActionStateVerifierSessionInput,
     copyCreateAndSealActionRandomnessInput,
@@ -40,8 +38,6 @@ import {
 import type {
     BrowserActionStorageCustody,
     BrowserDeviceWrappingSnapshot,
-    BrowserRecoveryExportChallenge,
-    BrowserRecoveryExportConfirmation,
 } from './browser-action-storage-custody.js';
 import {
     copyLocalRecordBytes,
@@ -52,22 +48,16 @@ import {
 
 export type {
     BrowserActionStorageWorkerKernel,
-    LocalStorageRecoveryExportMaterial,
     WorkerPreparedDeviceWrappingState,
-    WorkerPreparedRecoveryState,
 } from '@sealed-lattice/types';
 
 const deviceWrappingMutationIdentifierByteLength = 32;
 const foundationHashByteLength = 64;
 const maximumWrappedStorageRootByteLength = 492;
-const recoveryChecksumByteLength = 16;
-const recoveryTextLength = 708;
-const recoveryTextPattern = /^[A-Z2-7]{708}$/u;
 
 export type BrowserDeviceWrappingState = Readonly<{
     deviceKey: CryptoKey;
     mutationIdentifier: Uint8Array;
-    recoveryValueExported: boolean;
     storageRootCommitment: Uint8Array;
     wrappedStorageRoot: Uint8Array;
 }>;
@@ -82,13 +72,6 @@ export type BrowserDeviceWrappingStateStorage = Readonly<{
     compareAndSwapState(
         mutation: BrowserDeviceWrappingStateMutation,
     ): Promise<boolean>;
-}>;
-
-type PendingRecoveryExport = Readonly<{
-    canonicalRecoveryText: string;
-    preparationIdentifier: string;
-    recoveryChecksum: Uint8Array;
-    state: BrowserDeviceWrappingState;
 }>;
 
 const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
@@ -244,12 +227,6 @@ export const copyBrowserDeviceWrappingState = (
             `Wrapped storage-root envelope must contain 1 through ${maximumWrappedStorageRootByteLength} bytes.`,
         );
     }
-    if (typeof state.recoveryValueExported !== 'boolean') {
-        throw new BrowserActionStorageCustodyError(
-            errorCode,
-            'Device-wrapping recovery export marker must be a boolean.',
-        );
-    }
     const storageRootCommitment = copyBytes(
         state.storageRootCommitment,
         foundationHashByteLength,
@@ -260,7 +237,6 @@ export const copyBrowserDeviceWrappingState = (
     return Object.freeze({
         deviceKey: state.deviceKey,
         mutationIdentifier,
-        recoveryValueExported: state.recoveryValueExported,
         storageRootCommitment,
         wrappedStorageRoot,
     });
@@ -309,13 +285,6 @@ const copySnapshot = (
             'Device custody snapshot must be an object.',
         );
     }
-    if (typeof snapshot.recoveryValueExported !== 'boolean') {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'Device custody snapshot recovery marker must be a boolean.',
-        );
-    }
-
     return Object.freeze({
         mutationIdentifier: copyBytes(
             snapshot.mutationIdentifier,
@@ -323,7 +292,6 @@ const copySnapshot = (
             'InvalidInput',
             'Device custody snapshot mutation identifier',
         ),
-        recoveryValueExported: snapshot.recoveryValueExported,
         storageRootCommitment: copyBytes(
             snapshot.storageRootCommitment,
             foundationHashByteLength,
@@ -338,7 +306,6 @@ const snapshotFromState = (
 ): BrowserDeviceWrappingSnapshot =>
     Object.freeze({
         mutationIdentifier: state.mutationIdentifier.slice(),
-        recoveryValueExported: state.recoveryValueExported,
         storageRootCommitment: state.storageRootCommitment.slice(),
     });
 
@@ -346,7 +313,6 @@ const stateMatchesSnapshot = (
     state: BrowserDeviceWrappingState,
     snapshot: BrowserDeviceWrappingSnapshot,
 ): boolean =>
-    state.recoveryValueExported === snapshot.recoveryValueExported &&
     bytesEqual(state.mutationIdentifier, snapshot.mutationIdentifier) &&
     bytesEqual(state.storageRootCommitment, snapshot.storageRootCommitment);
 
@@ -381,30 +347,6 @@ const normalizeInputError = (error: unknown): Error =>
               error,
           );
 
-const assertRecoveryText = (caseInsensitiveRecoveryText: string): string => {
-    if (typeof caseInsensitiveRecoveryText !== 'string') {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'Recovery material must be text.',
-        );
-    }
-    const canonicalRecoveryText = caseInsensitiveRecoveryText.toUpperCase();
-    if (
-        canonicalRecoveryText.length !== recoveryTextLength ||
-        !recoveryTextPattern.test(canonicalRecoveryText)
-    ) {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            `Recovery material must contain exactly ${recoveryTextLength} base32 characters without separators or padding.`,
-        );
-    }
-
-    return canonicalRecoveryText;
-};
-
-const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
 class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCustody {
     readonly #assertExclusiveOwnership: () => void;
     readonly #binding: BrowserActionStorageRootBinding;
@@ -416,7 +358,6 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
     #closing = false;
     #closePromise: Promise<void> | undefined;
     #operationTail: Promise<void> = Promise.resolve();
-    #pendingRecoveryExport: PendingRecoveryExport | undefined;
 
     public constructor(input: {
         assertExclusiveOwnership: () => void;
@@ -447,7 +388,7 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
             if (this.#expectedStorageRootCommitment !== undefined) {
                 throw new BrowserActionStorageCustodyError(
                     'CommitmentRequired',
-                    'Fresh initialization is forbidden after an expected storage-root commitment is known; recover the committed root instead.',
+                    'Fresh initialization is forbidden after an expected storage-root commitment is known.',
                 );
             }
             const preparedState = await this.#workerCall(
@@ -460,16 +401,12 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
             let stateWasPublished = false;
             try {
                 const copiedPreparedState = copyPreparedState(preparedState);
-                const replacement = this.#makeState({
-                    ...copiedPreparedState,
-                    recoveryValueExported: false,
-                });
+                const replacement = this.#makeState(copiedPreparedState);
                 await this.#compareAndSwapOrConflict({
                     expectedMutationIdentifier: undefined,
                     replacement,
                 });
                 stateWasPublished = true;
-                this.#clearPendingRecoveryExport();
 
                 return snapshotFromState(replacement);
             } catch (error) {
@@ -513,312 +450,6 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         });
     }
 
-    public beginRecoveryExport(input: {
-        expectedSnapshot: BrowserDeviceWrappingSnapshot;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-    }): Promise<BrowserRecoveryExportChallenge> {
-        let copiedSnapshot: BrowserDeviceWrappingSnapshot;
-        let copiedCommitment: UntrustedExpectedStorageRootCommitment;
-        try {
-            copiedSnapshot = copySnapshot(input.expectedSnapshot);
-            copiedCommitment = copyUntrustedExpectedCommitment(
-                input.untrustedExpectedCommitment,
-            );
-        } catch (error) {
-            return Promise.reject(normalizeInputError(error));
-        }
-
-        return this.#runOperation(async () => {
-            const state = await this.#readExpectedState(copiedSnapshot);
-            if (state.recoveryValueExported) {
-                throw new BrowserActionStorageCustodyError(
-                    'RecoveryAlreadyExported',
-                    'The recovery value for this custody state was already exported.',
-                );
-            }
-            await this.#activateState(state, copiedCommitment);
-            const exportMaterial = await this.#workerCall(
-                () =>
-                    this.#workerKernel.prepareRecoveryExport({
-                        activeMutationIdentifier:
-                            state.mutationIdentifier.slice(),
-                    }),
-                'Preparing browser recovery export failed inside the owned worker.',
-            );
-            const canonicalRecoveryText = assertRecoveryText(
-                exportMaterial.canonicalRecoveryText,
-            );
-            if (
-                exportMaterial.canonicalRecoveryText !== canonicalRecoveryText
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidCanonicalMaterial',
-                    'The owned worker returned non-canonical recovery text.',
-                );
-            }
-            const recoveryChecksum = copyBytes(
-                exportMaterial.recoveryChecksum,
-                recoveryChecksumByteLength,
-                'InvalidState',
-                'Recovery checksum',
-            );
-            this.#clearPendingRecoveryExport();
-            const preparationIdentifier = bytesToHex(
-                this.#randomBytes(deviceWrappingMutationIdentifierByteLength),
-            );
-            this.#pendingRecoveryExport = {
-                canonicalRecoveryText,
-                preparationIdentifier,
-                recoveryChecksum,
-                state,
-            };
-
-            return Object.freeze({
-                preparationIdentifier,
-                recoveryChecksum: recoveryChecksum.slice(),
-            });
-        });
-    }
-
-    public confirmRecoveryExport(input: {
-        preparationIdentifier: string;
-        confirmedChecksum: Uint8Array;
-    }): Promise<BrowserRecoveryExportConfirmation> {
-        if (
-            typeof input !== 'object' ||
-            input === null ||
-            typeof input.preparationIdentifier !== 'string'
-        ) {
-            return Promise.reject(
-                new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'Recovery export confirmation is malformed.',
-                ),
-            );
-        }
-        let confirmedChecksum: Uint8Array;
-        try {
-            confirmedChecksum = copyBytes(
-                input.confirmedChecksum,
-                recoveryChecksumByteLength,
-                'InvalidInput',
-                'Confirmed recovery checksum',
-            );
-        } catch (error) {
-            return Promise.reject(normalizeInputError(error));
-        }
-        const preparationIdentifier = input.preparationIdentifier;
-
-        return this.#runOperation(async () => {
-            const pendingExport = this.#pendingRecoveryExport;
-            if (
-                preparationIdentifier !== pendingExport?.preparationIdentifier
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'RecoveryConfirmationFailed',
-                    'No matching recovery export preparation is pending.',
-                );
-            }
-            try {
-                await this.#workerCall(
-                    () =>
-                        this.#workerKernel.confirmRecoveryChecksum({
-                            canonicalRecoveryText:
-                                pendingExport.canonicalRecoveryText,
-                            confirmedChecksum,
-                        }),
-                    'Recovery checksum confirmation failed inside the owned worker.',
-                    'RecoveryConfirmationFailed',
-                );
-                const currentState = await this.#readExpectedState(
-                    snapshotFromState(pendingExport.state),
-                );
-                const replacement = this.#makeState({
-                    deviceKey: currentState.deviceKey,
-                    recoveryValueExported: true,
-                    storageRootCommitment: currentState.storageRootCommitment,
-                    wrappedStorageRoot: currentState.wrappedStorageRoot,
-                });
-                await this.#workerCall(
-                    () =>
-                        this.#workerKernel.stageDeviceWrappingStateOpen({
-                            binding: copyStorageRootBinding(this.#binding),
-                            untrustedExpectedCommitment:
-                                this.#expectedCommitmentForState(replacement),
-                            state: {
-                                deviceKey: replacement.deviceKey,
-                                storageRootCommitment:
-                                    replacement.storageRootCommitment.slice(),
-                                wrappedStorageRoot:
-                                    replacement.wrappedStorageRoot.slice(),
-                            },
-                        }),
-                    'Reopening the browser action-storage root before recovery publication failed inside the owned worker.',
-                );
-                let stateWasPublished = false;
-                try {
-                    await this.#compareAndSwapOrConflict({
-                        expectedMutationIdentifier:
-                            currentState.mutationIdentifier,
-                        replacement,
-                    });
-                    stateWasPublished = true;
-                    await this.#commitStagedRootForPublishedState(replacement);
-                } catch (error) {
-                    await this.#cleanRootAfterFailedPublication(
-                        stateWasPublished,
-                        error,
-                    );
-                    throw error;
-                }
-                const confirmation = Object.freeze({
-                    canonicalRecoveryText: pendingExport.canonicalRecoveryText,
-                    snapshot: snapshotFromState(replacement),
-                });
-                this.#clearPendingRecoveryExport();
-
-                return confirmation;
-            } catch (error) {
-                if (
-                    isBrowserActionStorageCustodyError(error) &&
-                    error.code === 'RecoveryConfirmationFailed'
-                ) {
-                    throw error;
-                }
-                throw error;
-            }
-        });
-    }
-
-    public cancelRecoveryExport(preparationIdentifier: string): Promise<void> {
-        if (typeof preparationIdentifier !== 'string') {
-            return Promise.reject(
-                new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'Recovery export preparation identifier must be text.',
-                ),
-            );
-        }
-
-        return this.#runOperation(() => {
-            if (
-                this.#pendingRecoveryExport?.preparationIdentifier !==
-                preparationIdentifier
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'RecoveryConfirmationFailed',
-                    'No matching recovery export preparation is pending.',
-                );
-            }
-            this.#clearPendingRecoveryExport();
-
-            return Promise.resolve();
-        });
-    }
-
-    public recover(input: {
-        caseInsensitiveRecoveryText: string;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-        expectedSnapshot?: BrowserDeviceWrappingSnapshot;
-    }): Promise<BrowserDeviceWrappingSnapshot> {
-        if (typeof input !== 'object' || input === null) {
-            return Promise.reject(
-                new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'Recovery input must be an object.',
-                ),
-            );
-        }
-        let canonicalRecoveryText: string;
-        let untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-        let expectedSnapshot: BrowserDeviceWrappingSnapshot | undefined;
-        try {
-            canonicalRecoveryText = assertRecoveryText(
-                input.caseInsensitiveRecoveryText,
-            );
-            untrustedExpectedCommitment = copyUntrustedExpectedCommitment(
-                input.untrustedExpectedCommitment,
-            );
-            expectedSnapshot =
-                input.expectedSnapshot === undefined
-                    ? undefined
-                    : copySnapshot(input.expectedSnapshot);
-        } catch (error) {
-            return Promise.reject(normalizeInputError(error));
-        }
-
-        return this.#runOperation(async () => {
-            if (this.#expectedStorageRootCommitment !== undefined) {
-                this.#assertCommitmentMatches(
-                    this.#expectedStorageRootCommitment,
-                    untrustedExpectedCommitment.storageRootCommitment,
-                );
-            }
-            const currentState = await this.#readState();
-            if (
-                expectedSnapshot === undefined
-                    ? currentState !== undefined
-                    : currentState === undefined ||
-                      !stateMatchesSnapshot(currentState, expectedSnapshot)
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'Conflict',
-                    'Browser action-storage custody changed before recovery.',
-                );
-            }
-            const preparedState = await this.#workerCall(
-                () =>
-                    this.#workerKernel.stageRecoveryValueImportAndDeviceWrapping(
-                        {
-                            binding: copyStorageRootBinding(this.#binding),
-                            caseInsensitiveRecoveryText: canonicalRecoveryText,
-                            untrustedExpectedCommitment,
-                        },
-                    ),
-                'Importing browser recovery material failed inside the owned worker.',
-            );
-            let stateWasPublished = false;
-            try {
-                if (
-                    preparedState.canonicalRecoveryText !==
-                    canonicalRecoveryText
-                ) {
-                    throw new BrowserActionStorageCustodyError(
-                        'InvalidCanonicalMaterial',
-                        'The owned worker returned different canonical recovery text.',
-                    );
-                }
-                const copiedPreparedState = copyPreparedState(preparedState);
-                this.#assertCommitmentMatches(
-                    copiedPreparedState.storageRootCommitment,
-                    untrustedExpectedCommitment.storageRootCommitment,
-                );
-                const replacement = this.#makeState({
-                    ...copiedPreparedState,
-                    recoveryValueExported: true,
-                });
-                await this.#compareAndSwapOrConflict({
-                    expectedMutationIdentifier:
-                        currentState?.mutationIdentifier,
-                    replacement,
-                });
-                stateWasPublished = true;
-                await this.#commitStagedRootForPublishedState(replacement);
-                this.#expectedStorageRootCommitment =
-                    untrustedExpectedCommitment.storageRootCommitment.slice();
-                this.#clearPendingRecoveryExport();
-
-                return snapshotFromState(replacement);
-            } catch (error) {
-                await this.#cleanRootAfterFailedPublication(
-                    stateWasPublished,
-                    error,
-                );
-                throw error;
-            }
-        });
-    }
-
     public delete(
         expectedSnapshot: BrowserDeviceWrappingSnapshot,
     ): Promise<void> {
@@ -832,7 +463,6 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         return this.#runOperation(async () => {
             const state = await this.#readExpectedState(copiedSnapshot);
             await this.#destroyActiveAndStagedRoots();
-            this.#clearPendingRecoveryExport();
             await this.#compareAndSwapOrConflict({
                 expectedMutationIdentifier: state.mutationIdentifier,
                 replacement: undefined,
@@ -1016,29 +646,6 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         );
     }
 
-    public verifyActionStateRecovery(
-        input: BrowserActionStateRecoveryVerificationInput,
-    ): Promise<VerificationResult<string>> {
-        let copiedInput: BrowserActionStateRecoveryVerificationInput;
-        try {
-            copiedInput = copyActionStateRecoveryVerificationInput(input);
-        } catch (error) {
-            return Promise.reject(normalizeInputError(error));
-        }
-
-        return this.#runOperation(async () =>
-            copyWorkerIdentifierVerificationResult(
-                await this.#workerCall(
-                    () =>
-                        this.#workerKernel.verifyActionStateRecovery(
-                            copiedInput,
-                        ),
-                    'Verifying an action state recovery failed inside the owned worker.',
-                ),
-            ),
-        );
-    }
-
     public releaseActionStateObject(identifier: string): Promise<void> {
         let copiedIdentifier: string;
         try {
@@ -1209,7 +816,6 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         }
         this.#closing = true;
         this.#closePromise = this.#enqueue(async () => {
-            this.#clearPendingRecoveryExport();
             await this.#destroyActiveAndStagedRoots();
             this.#closed = true;
         });
@@ -1281,7 +887,7 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         if (state === undefined) {
             throw new BrowserActionStorageCustodyError(
                 'Unavailable',
-                'The committed browser action-storage root is not present locally; recovery material is required.',
+                'The committed browser action-storage root is not present on this device.',
             );
         }
         if (!stateMatchesSnapshot(state, expectedSnapshot)) {
@@ -1296,15 +902,16 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
 
     #makeState(input: {
         deviceKey: CryptoKey;
-        recoveryValueExported: boolean;
         storageRootCommitment: Uint8Array;
         wrappedStorageRoot: Uint8Array;
     }): BrowserDeviceWrappingState {
         return copyBrowserDeviceWrappingState({
-            ...input,
+            deviceKey: input.deviceKey,
             mutationIdentifier: this.#randomBytes(
                 deviceWrappingMutationIdentifierByteLength,
             ),
+            storageRootCommitment: input.storageRootCommitment,
+            wrappedStorageRoot: input.wrappedStorageRoot,
         });
     }
 
@@ -1391,26 +998,6 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         }
     }
 
-    #expectedCommitmentForState(
-        state: BrowserDeviceWrappingState,
-    ): UntrustedExpectedStorageRootCommitment {
-        const expectedCommitment = this.#expectedStorageRootCommitment;
-        if (expectedCommitment === undefined) {
-            throw new BrowserActionStorageCustodyError(
-                'CommitmentRequired',
-                'An expected storage-root commitment is required before opening local custody.',
-            );
-        }
-        this.#assertCommitmentMatches(
-            state.storageRootCommitment,
-            expectedCommitment,
-        );
-
-        return Object.freeze({
-            storageRootCommitment: expectedCommitment.slice(),
-        });
-    }
-
     async #commitStagedRootForPublishedState(
         expectedState: BrowserDeviceWrappingState,
     ): Promise<void> {
@@ -1421,8 +1008,6 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
                 publishedState.mutationIdentifier,
                 expectedState.mutationIdentifier,
             ) ||
-            publishedState.recoveryValueExported !==
-                expectedState.recoveryValueExported ||
             !bytesEqual(
                 publishedState.storageRootCommitment,
                 expectedState.storageRootCommitment,
@@ -1435,10 +1020,7 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         }
         await this.#workerCall(
             () =>
-                this.#workerKernel.commitStagedActionStorageRoot({
-                    mutationIdentifier:
-                        publishedState.mutationIdentifier.slice(),
-                }),
+                this.#workerKernel.commitStagedActionStorageRoot(),
             'Activating the browser action-storage root failed inside the owned worker.',
         );
     }
@@ -1497,9 +1079,6 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
     async #workerCall<Result>(
         operation: () => Promise<Result>,
         message: string,
-        failureCode:
-            | 'OwnedWorkerFailure'
-            | 'RecoveryConfirmationFailed' = 'OwnedWorkerFailure',
     ): Promise<Result> {
         try {
             return await operation();
@@ -1507,16 +1086,11 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
             throw isBrowserActionStorageCustodyError(error)
                 ? error
                 : new BrowserActionStorageCustodyError(
-                      failureCode,
+                      'OwnedWorkerFailure',
                       message,
                       error,
                   );
         }
-    }
-
-    #clearPendingRecoveryExport(): void {
-        this.#pendingRecoveryExport?.recoveryChecksum.fill(0);
-        this.#pendingRecoveryExport = undefined;
     }
 }
 

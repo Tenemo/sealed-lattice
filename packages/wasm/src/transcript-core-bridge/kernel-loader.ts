@@ -1,10 +1,12 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { registerCanonicalBoardKernelContext } from '../canonical-board-runtime.js';
+import { registerFinalityVerifierKernelContext } from '../finality-verifier-runtime.js';
 import { registerStateVerifierKernelContext } from '../state-verifier-runtime.js';
 
 import type {
     BgvCollectiveSetupParametersDescription,
+    BgvLatticeAnchorCommitmentComputation,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvRnsParametersDescription,
     BgvVssCommittedMaterialCommitmentComputation,
@@ -20,7 +22,6 @@ import type {
     EncodedPrivateRandomCursor,
     EncodedSignedMailboxEnvelope,
     EncodedStreamDescriptor,
-    CanonicalFoundationValueValidation,
     TranscriptCoreKernel,
 } from './kernel-contracts.js';
 import type { TranscriptCoreKernelLoaderOptions } from './kernel-runtime.js';
@@ -33,7 +34,7 @@ import {
     createCachedKernelLoader,
     createPublishedSdkKernelBindings,
 } from './published-sdk-kernel-loader.js';
-import { registerKernelContexts } from './register-kernel-contexts.js';
+import { registerPrivateKernelContexts } from './register-private-kernel-contexts.js';
 
 export const createTranscriptCoreKernelLoader = (
     transcriptCoreKernelUrl: URL,
@@ -84,6 +85,26 @@ export const createTranscriptCoreKernelLoader = (
             exports,
             'sealed_lattice_board_verifier_verify_unordered',
         );
+        const finalityVerifierBegin = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_finality_verifier_begin',
+        );
+        const finalityVerifierCancel = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_finality_verifier_cancel',
+        );
+        const finalityVerifierDescribe = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_finality_verifier_describe',
+        );
+        const finalityVerifierRelease = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_finality_verifier_release',
+        );
+        const finalityVerifierVerify = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_finality_verifier_verify',
+        );
         const stateVerifierBegin = resolveOptionalNumberExport(
             exports,
             'sealed_lattice_state_verifier_begin',
@@ -116,17 +137,9 @@ export const createTranscriptCoreKernelLoader = (
             exports,
             'sealed_lattice_state_verifier_prepare_output',
         );
-        const stateVerifierPrepareRecovery = resolveOptionalNumberExport(
-            exports,
-            'sealed_lattice_state_verifier_prepare_recovery',
-        );
         const stateVerifierPrepareReservation = resolveOptionalNumberExport(
             exports,
             'sealed_lattice_state_verifier_prepare_reservation',
-        );
-        const stateVerifierVerifyRecovery = resolveOptionalNumberExport(
-            exports,
-            'sealed_lattice_state_verifier_verify_recovery',
         );
         const stateVerifierVerifyReservation = resolveOptionalNumberExport(
             exports,
@@ -141,34 +154,16 @@ export const createTranscriptCoreKernelLoader = (
                     command: 'DeriveCanonicalObjectHash',
                     value: input.value,
                 }).canonicalObjectHash,
-            validateCanonicalFoundationValue: (input) =>
-                executeCommand<CanonicalFoundationValueValidation>({
-                    command: 'ValidateCanonicalFoundationValue',
-                    ...input,
-                }),
             decodeProofApplicationBinding: (input) =>
                 executeCommand<DecodedProofApplicationBinding>({
                     command: 'DecodeProofApplicationBinding',
                     canonicalBytesHex: input.canonicalBytesHex,
                 }),
-            deriveCeremonyContextHash: (value): ProtocolHash =>
-                executeCommand<{
-                    readonly ceremonyContextHash: ProtocolHash;
-                }>({
-                    command: 'DeriveCeremonyContextHash',
-                    value,
-                }).ceremonyContextHash,
-            deriveActionContextHash: (value): ProtocolHash =>
-                executeCommand<{
-                    readonly actionContextHash: ProtocolHash;
-                }>({
-                    command: 'DeriveActionContextHash',
-                    value,
-                }).actionContextHash,
-            encodeMailboxKeyScheduleInput: (value) =>
+            encodeMailboxKeyScheduleInput: (input) =>
                 executeCommand<EncodedMailboxKeyScheduleInput>({
                     command: 'EncodeMailboxKeyScheduleInput',
-                    value,
+                    kemCiphertextHex: input.kemCiphertextHex,
+                    value: input.value,
                 }),
             decodeMailboxKeyScheduleInput: (input) =>
                 executeCommand<DecodedMailboxKeyScheduleInput>({
@@ -222,13 +217,6 @@ export const createTranscriptCoreKernelLoader = (
                     command: 'DecodeSignedMailboxEnvelope',
                     canonicalBytesHex: input.canonicalBytesHex,
                 }),
-            deriveMailboxKemCiphertextHash: (input): ProtocolHash =>
-                executeCommand<{
-                    readonly kemCiphertextHash: ProtocolHash;
-                }>({
-                    command: 'DeriveMailboxKemCiphertextHash',
-                    kemCiphertextHex: input.kemCiphertextHex,
-                }).kemCiphertextHash,
             deriveMailboxEnvelopeHash: (value): ProtocolHash =>
                 executeCommand<{
                     readonly envelopeHash: ProtocolHash;
@@ -257,7 +245,6 @@ export const createTranscriptCoreKernelLoader = (
                         {
                             command: 'GenerateTrusteeEvaluationKeyProof',
                             context: input.context,
-                            ringDegree: input.ringDegree,
                             keys: input.keys,
                             sameSecretBridge: input.sameSecretBridge,
                             secretCoefficients: input.secretCoefficients,
@@ -273,15 +260,28 @@ export const createTranscriptCoreKernelLoader = (
                 return executeCommand<BgvTrusteeEvaluationKeyProofGeneration>({
                     command: 'GenerateTrusteeEvaluationKeyProof',
                     context: input.context,
-                    ringDegree: input.ringDegree,
                     keys: input.keys,
                     sameSecretLinkage: input.sameSecretLinkage,
                     secretCoefficients: input.secretCoefficients,
                     errorCoefficientsByKey: input.errorCoefficientsByKey,
-                    openingRandomnessByLimb: input.openingRandomnessByLimb,
+                    openingRandomnessBySourceLimbAndCommitmentLimb:
+                        input.openingRandomnessBySourceLimbAndCommitmentLimb,
                     proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                 });
             },
+            computeLatticeAnchorCommitmentFromOpening: (
+                input,
+            ): BgvLatticeAnchorCommitmentComputation =>
+                executeCommand<BgvLatticeAnchorCommitmentComputation>({
+                    command: 'ComputeLatticeAnchorCommitmentFromOpening',
+                    publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    commitmentDataPrimeIndex:
+                        input.commitmentDataPrimeIndex,
+                    secretContributionCoefficients:
+                        input.secretContributionCoefficients,
+                    openingPolynomials: input.openingPolynomials,
+                    ringDegree: input.ringDegree,
+                }),
             computeSetupCommitmentFromOpening: (
                 input,
             ): BgvSetupCommitmentOpeningComputation =>
@@ -291,7 +291,8 @@ export const createTranscriptCoreKernelLoader = (
                     sourceRnsLimbIndex: input.sourceRnsLimbIndex,
                     shamirCoefficientIndex: input.shamirCoefficientIndex,
                     messageCoefficients: input.messageCoefficients,
-                    randomnessByColumn: input.randomnessByColumn,
+                    randomnessByCommitmentLimb:
+                        input.randomnessByCommitmentLimb,
                     ringDegree: input.ringDegree,
                 }),
             computeVssCommittedMaterialCommitment: (
@@ -302,12 +303,11 @@ export const createTranscriptCoreKernelLoader = (
                     commitmentRole: input.commitmentRole,
                     commitmentContext: input.commitmentContext,
                     rnsLimbIndex: input.rnsLimbIndex,
-                    ringDegree: input.ringDegree,
                     messageCoefficients: input.messageCoefficients,
                     materialSeedHex: input.materialSeedHex,
                 }),
         };
-        registerKernelContexts(kernel, runtime);
+        registerPrivateKernelContexts(kernel, runtime);
         if (localStorageRootCommand !== undefined) {
             registerLocalStorageRootKernelContext(kernel, {
                 allocate,
@@ -341,6 +341,25 @@ export const createTranscriptCoreKernelLoader = (
             });
         }
         if (
+            finalityVerifierBegin !== undefined &&
+            finalityVerifierCancel !== undefined &&
+            finalityVerifierDescribe !== undefined &&
+            finalityVerifierRelease !== undefined &&
+            finalityVerifierVerify !== undefined
+        ) {
+            registerFinalityVerifierKernelContext(kernel, {
+                allocate,
+                begin: finalityVerifierBegin,
+                cancel: finalityVerifierCancel,
+                deallocate,
+                describe: finalityVerifierDescribe,
+                memory,
+                release: finalityVerifierRelease,
+                runExclusive: runExclusiveKernelOperation,
+                verify: finalityVerifierVerify,
+            });
+        }
+        if (
             stateVerifierBegin !== undefined &&
             stateVerifierCancel !== undefined &&
             stateVerifierCertifyIntent !== undefined &&
@@ -349,9 +368,7 @@ export const createTranscriptCoreKernelLoader = (
             stateVerifierRelease !== undefined &&
             stateVerifierFinishOutput !== undefined &&
             stateVerifierPrepareOutput !== undefined &&
-            stateVerifierPrepareRecovery !== undefined &&
             stateVerifierPrepareReservation !== undefined &&
-            stateVerifierVerifyRecovery !== undefined &&
             stateVerifierVerifyReservation !== undefined
         ) {
             registerStateVerifierKernelContext(kernel, {
@@ -367,9 +384,7 @@ export const createTranscriptCoreKernelLoader = (
                 runExclusive: runExclusiveKernelOperation,
                 finishOutput: stateVerifierFinishOutput,
                 prepareOutput: stateVerifierPrepareOutput,
-                prepareRecovery: stateVerifierPrepareRecovery,
                 prepareReservation: stateVerifierPrepareReservation,
-                verifyRecovery: stateVerifierVerifyRecovery,
                 verifyReservation: stateVerifierVerifyReservation,
             });
         }

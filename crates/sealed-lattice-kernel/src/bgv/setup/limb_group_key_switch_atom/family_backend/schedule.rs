@@ -18,7 +18,8 @@ use super::super::limb_group_statement::LimbGroupContext;
 use super::super::negacyclic_transform::NegacyclicDomain;
 use super::super::proof_field::{ProofFieldParameters, sixteen_limb_group_field_parameters};
 use super::key_proof::{
-    KeyFriProofParameters, LinkageStatement, LinkageWitness, prove_key_fri, verify_key_fri,
+    KeyFriProofParameters, LinkageStatement, LinkageWitness, key_fri_proof_decoding_shape,
+    prove_key_fri_with_negacyclic_domain, verify_key_fri_with_negacyclic_domain,
 };
 use super::private_randomness::PrivateProofRandomness;
 use super::proof_codec::{decode_key_proof, encode_key_proof};
@@ -230,18 +231,22 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
         ));
     }
     let linkage_randomness = witness
-        .opening_randomness_by_limb()
+        .opening_randomness_by_source_limb_and_commitment_limb()
         .first()
         .ok_or_else(|| {
             invalid_schedule("the linkage witness requires the first target's opening randomness")
         })?;
     let linkage_witness = LinkageWitness {
         negative_indicator: witness.negative_indicator_coefficients(),
-        randomness_by_column: linkage_randomness,
+        randomness_by_commitment_limb: linkage_randomness,
     };
     let parameters = sixteen_limb_group_field_parameters();
     let statement_hash = statement.statement_hash();
     let ring_degree = statement.ring_degree;
+    // These immutable tables depend only on the field and ring degree. Share
+    // them across every scheduled atom instead of rebuilding and retaining two
+    // copies per concurrently active bridge/prover.
+    let negacyclic_domain = NegacyclicDomain::new(&parameters, ring_degree)?;
     let proof_parameters = KeyFriProofParameters {
         query_count: SCHEDULE_QUERY_COUNT,
         mask_degree: schedule_mask_degree(ring_degree),
@@ -261,6 +266,7 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
                 statement_hash: &statement_hash,
                 proof_randomness_seed_hex,
                 ring_degree,
+                negacyclic_domain: &negacyclic_domain,
                 key: &statement.keys()[scheduled_proof.key_index],
                 scheduled: scheduled_proof,
                 proof_index,
@@ -306,6 +312,7 @@ struct ProveOneKey<'a, const LIMB_COUNT: usize> {
     statement_hash: &'a [u8; 64],
     proof_randomness_seed_hex: &'a str,
     ring_degree: usize,
+    negacyclic_domain: &'a NegacyclicDomain<'a, LIMB_COUNT>,
     key: &'a EvaluationKeyShareDescriptor,
     scheduled: &'a ScheduledProof,
     proof_index: usize,
@@ -322,7 +329,6 @@ fn prove_one_key<const LIMB_COUNT: usize>(
     let group_primes = &DATA_PRIMES[input.scheduled.group_start_limb
         ..input.scheduled.group_start_limb + input.scheduled.group_limb_count];
     let group = LimbGroupContext::new(input.parameters, group_primes)?;
-    let domain = NegacyclicDomain::new(input.parameters, input.ring_degree)?;
     let public_sample_by_digit =
         group_public_samples(input.key, input.scheduled, input.ring_degree);
     let component_b_by_digit = group_component_slice(input.key, input.scheduled);
@@ -330,7 +336,7 @@ fn prove_one_key<const LIMB_COUNT: usize>(
         input.parameters,
         BridgeKeyMaterialInput {
             group: &group,
-            domain: &domain,
+            domain: input.negacyclic_domain,
             component_b_by_digit: &component_b_by_digit,
             public_sample_by_digit: &public_sample_by_digit,
             secret_coefficients: input.secret,
@@ -345,9 +351,10 @@ fn prove_one_key<const LIMB_COUNT: usize>(
         input.proof_randomness_seed_hex,
         input.proof_index,
     );
-    let proof = prove_key_fri(
+    let proof = prove_key_fri_with_negacyclic_domain(
         input.parameters,
         input.ring_degree,
+        input.negacyclic_domain,
         &bridged.public,
         &bridged.source,
         input.secret,
@@ -389,12 +396,14 @@ fn copy_schedule_proof_bytes(
 
 pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
     statement: &TrusteeEvaluationKeyStatement,
-    proof_bytes: &(impl ProofByteSource + Sync + ?Sized),
+    proof_bytes: &(impl ProofByteSource + ?Sized),
 ) -> CanonicalResult<()> {
     let linkage_statement = linkage_statement(statement)?;
     let parameters = sixteen_limb_group_field_parameters();
     let statement_hash = statement.statement_hash();
     let ring_degree = statement.ring_degree;
+    // Public bridging and proof verification use the same immutable domain.
+    let negacyclic_domain = NegacyclicDomain::new(&parameters, ring_degree)?;
     let proof_parameters = KeyFriProofParameters {
         query_count: SCHEDULE_QUERY_COUNT,
         mask_degree: schedule_mask_degree(ring_degree),
@@ -456,14 +465,13 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
             let group_primes = &DATA_PRIMES[scheduled_proof.group_start_limb
                 ..scheduled_proof.group_start_limb + scheduled_proof.group_limb_count];
             let limb_group = LimbGroupContext::new(&parameters, group_primes)?;
-            let domain = NegacyclicDomain::new(&parameters, ring_degree)?;
             let public_sample_by_digit = group_public_samples(key, scheduled_proof, ring_degree);
             let component_b_by_digit = group_component_slice(key, scheduled_proof);
             let (public, source) = bridge_key_public(
                 &parameters,
                 BridgeKeyPublicInput {
                     group: &limb_group,
-                    domain: &domain,
+                    domain: &negacyclic_domain,
                     component_b_by_digit: &component_b_by_digit,
                     public_sample_by_digit: &public_sample_by_digit,
                     kind: bridged_kind(key)?,
@@ -471,10 +479,17 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
                     group_start_limb: scheduled_proof.group_start_limb,
                 },
             )?;
-            let proof = decode_key_proof(&parameters, bytes)?;
-            let accepted = verify_key_fri(
+            let decoding_shape = key_fri_proof_decoding_shape(
+                ring_degree,
+                public.digits.len(),
+                true,
+                proof_parameters.query_count,
+            )?;
+            let proof = decode_key_proof(&parameters, bytes, &decoding_shape)?;
+            let accepted = verify_key_fri_with_negacyclic_domain(
                 &parameters,
                 ring_degree,
+                &negacyclic_domain,
                 &public,
                 &source,
                 &proof,

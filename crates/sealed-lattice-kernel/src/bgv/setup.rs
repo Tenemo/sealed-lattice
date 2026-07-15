@@ -28,7 +28,10 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) use accepted_setup::accepted_setup_participant_roster_from_package;
-pub(in crate::bgv) use accepted_setup::derive_collective_setup_package_hash;
+pub(in crate::bgv) use accepted_setup::{
+    decryption_threshold_for_participant_count, decryption_threshold_for_roster_length,
+    derive_collective_setup_package_hash,
+};
 pub(crate) use accepted_setup::{
     describe_collective_bgv_setup_parameters,
     describe_collective_bgv_setup_parameters_for_participant_count,
@@ -63,7 +66,15 @@ pub(crate) use canonical_stream_transport::{
     read_bgv_canonical_material_chunk, retain_generated_canonical_proof_material,
     take_verified_canonical_proof_material_bytes,
 };
-pub(crate) use commitment::compute_setup_commitment_from_opening_request;
+pub(crate) use commitment::{
+    LatticeAnchorCommitment, SETUP_COMMITMENT_HIDING_ERROR_WIDTH,
+    SETUP_COMMITMENT_HIDING_SECRET_WIDTH, SETUP_COMMITMENT_MODULE_RANK,
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+    compute_lattice_anchor_commitment_from_opening_request,
+    compute_lattice_anchor_commitment_from_typed_opening,
+    compute_setup_commitment_from_opening_request, compute_setup_commitment_from_typed_opening,
+    lattice_anchor_commitment_canonical_bytes, parse_lattice_anchor_commitment_canonical_bytes,
+};
 pub(crate) use private_vss::verify_private_vss_share_envelope_from_request;
 #[cfg(test)]
 pub(in crate::bgv::setup) use same_secret_bridge::{
@@ -75,6 +86,8 @@ pub(crate) use same_secret_bridge::{
     verify_vss_same_secret_bridge_statement_set_request,
 };
 pub(crate) use setup_proof::ProofByteSource;
+#[cfg(test)]
+pub(crate) use setup_proof::authenticate_setup_proof_material_stream_for_test;
 #[cfg(test)]
 pub(in crate::bgv) use trustee_evaluation_key_proof::target_decryption_interpolation_denominator_clearing_factor;
 #[cfg(test)]

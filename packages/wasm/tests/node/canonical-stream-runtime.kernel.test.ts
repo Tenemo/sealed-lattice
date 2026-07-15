@@ -18,8 +18,6 @@ import {
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
-const maximumCanonicalStreamByteLength = 2_147_483_648;
-
 const createBytes = (
     byteLength: number,
     seed = 19,
@@ -394,16 +392,18 @@ describe('Canonical stream real-WASM runtime', () => {
 
         const exactMaximum = runtime.openWriter({
             streamDomain: canonicalStreamDomains.evaluatorKeyStore,
-            totalByteLength: maximumCanonicalStreamByteLength,
+            totalByteLength: foundationProfile.maximumCanonicalStreamByteLength,
         });
         expect(exactMaximum.chunkCount).toBe(
-            maximumCanonicalStreamByteLength / 1_048_576,
+            foundationProfile.maximumCanonicalStreamByteLength /
+                foundationProfile.streamChunkByteLength,
         );
         exactMaximum.cancel();
         expect(() =>
             runtime.openWriter({
                 streamDomain: canonicalStreamDomains.evaluatorKeyStore,
-                totalByteLength: maximumCanonicalStreamByteLength + 1,
+                totalByteLength:
+                    foundationProfile.maximumCanonicalStreamByteLength + 1,
             }),
         ).toThrowError(CanonicalStreamResourceError);
     });

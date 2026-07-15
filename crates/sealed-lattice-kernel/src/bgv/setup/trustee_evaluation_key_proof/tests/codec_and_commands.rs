@@ -107,12 +107,13 @@ fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
     );
 
     let mut wrong_randomness_request = generate_request.clone();
-    wrong_randomness_request["openingRandomnessByLimb"][0][0][0] =
-        serde_json::json!(if witness.opening_randomness_by_limb()[0][0][0] == 1 {
+    wrong_randomness_request["openingRandomnessBySourceLimbAndCommitmentLimb"][0][0][0][0] = serde_json::json!(
+        if witness.opening_randomness_by_source_limb_and_commitment_limb()[0][0][0][0] == 1 {
             0
         } else {
             1
-        });
+        }
+    );
     assert!(
         super::generate_trustee_evaluation_key_proof_from_request(&wrong_randomness_request)
             .is_err(),

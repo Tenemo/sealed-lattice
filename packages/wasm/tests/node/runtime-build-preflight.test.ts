@@ -168,7 +168,6 @@ const operationProfileForRandomUse = (
     );
     const boundary = canonicalTuple(
         0x1807,
-        canonicalItem(0x04, unsigned32LittleEndian(0)),
         unsigned16Item(0x1610),
         nestedTupleListItem([randomUse]),
     );
@@ -218,7 +217,7 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
     );
     const suiteRecordBytes = canonicalTuple(
         0x0118,
-        ...Array.from({ length: 26 }, () => unsigned16Item(1)),
+        ...Array.from({ length: 19 }, () => unsigned16Item(1)),
         nestedTupleListItem(artifactReferences),
     );
     const suiteIdentifier = deriveHash(

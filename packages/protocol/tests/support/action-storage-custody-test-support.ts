@@ -1,18 +1,10 @@
 import type {
-    BrowserActionStorageCustody,
     BrowserActionStorageRootBinding,
     UntrustedExpectedStorageRootCommitment,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody';
 import {
-    copyBrowserDeviceWrappingState,
-    createBrowserActionStorageCustodyForOwnedWorker,
-    type BrowserDeviceWrappingState,
-    type BrowserDeviceWrappingStateMutation,
-    type BrowserDeviceWrappingStateStorage,
     BrowserActionStorageWorkerKernel,
-    LocalStorageRecoveryExportMaterial,
     WorkerPreparedDeviceWrappingState,
-    WorkerPreparedRecoveryState,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody-internal';
 import type {
     BrowserLocalRecordIdentifierInput,
@@ -22,7 +14,6 @@ import type {
 
 export const testActionStorageRootByteLength = 48;
 export const testDeviceWrappingTagByteLength = 16;
-export const testRecoveryText = 'A'.repeat(708);
 
 const associatedDataByteLength = 64 * 5;
 const nonceByteLength = 12;
@@ -88,14 +79,12 @@ const concatenateTestBytes = (...values: readonly Uint8Array[]): Uint8Array => {
 
 export class TestActionStorageWorkerKernel implements BrowserActionStorageWorkerKernel {
     readonly #actionStorageRoot: Uint8Array;
-    readonly #checksum = createTestBytes(16, 201);
     readonly #cryptoProvider: Crypto;
     #activeMutationIdentifier: Uint8Array | undefined;
     #activeRoot: Uint8Array | undefined;
     #lastDeviceKey: CryptoKey | undefined;
     #lastEnvelopeNonce: Uint8Array | undefined;
     #stagedRoot: Uint8Array | undefined;
-    public importCallCount = 0;
 
     public constructor(input: {
         actionStorageRoot: Uint8Array;
@@ -225,39 +214,7 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         this.#lastEnvelopeNonce = envelope.nonce.slice();
     }
 
-    public async stageRecoveryValueImportAndDeviceWrapping(input: {
-        binding: BrowserActionStorageRootBinding;
-        caseInsensitiveRecoveryText: string;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-    }): Promise<WorkerPreparedRecoveryState> {
-        this.importCallCount += 1;
-        if (
-            input.caseInsensitiveRecoveryText.toUpperCase() !== testRecoveryText
-        ) {
-            throw new Error('Wrong test recovery text.');
-        }
-        const preparedState = await this.createAndStageDeviceWrappingState({
-            binding: input.binding,
-        });
-        if (
-            !testBytesEqual(
-                preparedState.storageRootCommitment,
-                input.untrustedExpectedCommitment.storageRootCommitment,
-            )
-        ) {
-            await this.discardStagedActionStorageRoot();
-            throw new Error('Wrong untrusted expected test commitment.');
-        }
-
-        return {
-            canonicalRecoveryText: testRecoveryText,
-            ...preparedState,
-        };
-    }
-
-    public commitStagedActionStorageRoot(input: {
-        mutationIdentifier: Uint8Array;
-    }): Promise<void> {
+    public commitStagedActionStorageRoot(): Promise<void> {
         if (
             this.#stagedRoot === undefined ||
             input.mutationIdentifier.byteLength !== 32
@@ -287,44 +244,6 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         this.#activeMutationIdentifier?.fill(0);
         this.#activeRoot = undefined;
         this.#activeMutationIdentifier = undefined;
-
-        return Promise.resolve();
-    }
-
-    public prepareRecoveryExport(input: {
-        activeMutationIdentifier: Uint8Array;
-    }): Promise<LocalStorageRecoveryExportMaterial> {
-        if (
-            !this.retainedRootMatchesExpected() ||
-            this.#activeMutationIdentifier === undefined ||
-            !testBytesEqual(
-                this.#activeMutationIdentifier,
-                input.activeMutationIdentifier,
-            )
-        ) {
-            return Promise.reject(
-                new Error(
-                    'No accepted version-bound test storage root is active.',
-                ),
-            );
-        }
-
-        return Promise.resolve({
-            canonicalRecoveryText: testRecoveryText,
-            recoveryChecksum: this.#checksum.slice(),
-        });
-    }
-
-    public confirmRecoveryChecksum(input: {
-        canonicalRecoveryText: string;
-        confirmedChecksum: Uint8Array;
-    }): Promise<void> {
-        if (
-            input.canonicalRecoveryText !== testRecoveryText ||
-            !testBytesEqual(input.confirmedChecksum, this.#checksum)
-        ) {
-            return Promise.reject(new Error('Wrong test recovery checksum.'));
-        }
 
         return Promise.resolve();
     }
@@ -425,7 +344,6 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
     ): ReturnType<
         BrowserActionStorageWorkerKernel['openActionStateVerifierSession']
     > {
-        void input;
         return Promise.reject(
             new Error('The test worker does not implement state verification.'),
         );
@@ -450,19 +368,6 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         >[0],
     ): ReturnType<
         BrowserActionStorageWorkerKernel['verifyActionRandomnessReservation']
-    > {
-        void input;
-        return Promise.reject(
-            new Error('The test worker does not implement state verification.'),
-        );
-    }
-
-    public verifyActionStateRecovery(
-        input: Parameters<
-            BrowserActionStorageWorkerKernel['verifyActionStateRecovery']
-        >[0],
-    ): ReturnType<
-        BrowserActionStorageWorkerKernel['verifyActionStateRecovery']
     > {
         void input;
         return Promise.reject(
@@ -551,10 +456,6 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         return Promise.reject(
             new Error('The test worker does not implement action randomness.'),
         );
-    }
-
-    public checksum(): Uint8Array {
-        return this.#checksum.slice();
     }
 
     public activeRootPresent(): boolean {
@@ -757,63 +658,3 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         return digest;
     }
 }
-
-class InMemoryDeviceWrappingStateStorage implements BrowserDeviceWrappingStateStorage {
-    #state: BrowserDeviceWrappingState | undefined;
-
-    public readState(): Promise<BrowserDeviceWrappingState | undefined> {
-        return Promise.resolve(
-            this.#state === undefined
-                ? undefined
-                : copyBrowserDeviceWrappingState(this.#state),
-        );
-    }
-
-    public compareAndSwapState(
-        mutation: BrowserDeviceWrappingStateMutation,
-    ): Promise<boolean> {
-        const matches =
-            mutation.expectedMutationIdentifier === undefined
-                ? this.#state === undefined
-                : this.#state !== undefined &&
-                  testBytesEqual(
-                      this.#state.mutationIdentifier,
-                      mutation.expectedMutationIdentifier,
-                  );
-        if (!matches) {
-            return Promise.resolve(false);
-        }
-        this.#state =
-            mutation.replacement === undefined
-                ? undefined
-                : copyBrowserDeviceWrappingState(mutation.replacement);
-
-        return Promise.resolve(true);
-    }
-}
-
-export const createActiveTestActionStorageCustody = async (input: {
-    readonly actionStorageRoot: Uint8Array;
-    readonly binding: BrowserActionStorageRootBinding;
-    readonly cryptoProvider: Crypto;
-}): Promise<BrowserActionStorageCustody> => {
-    const custody = createBrowserActionStorageCustodyForOwnedWorker({
-        assertExclusiveOwnership: () => undefined,
-        binding: input.binding,
-        cryptoProvider: input.cryptoProvider,
-        storage: new InMemoryDeviceWrappingStateStorage(),
-        workerKernel: new TestActionStorageWorkerKernel({
-            actionStorageRoot: input.actionStorageRoot,
-            cryptoProvider: input.cryptoProvider,
-        }),
-    });
-    const snapshot = await custody.initialize();
-    await custody.openIntoOwnedWorker({
-        expectedSnapshot: snapshot,
-        untrustedExpectedCommitment: {
-            storageRootCommitment: snapshot.storageRootCommitment,
-        },
-    });
-
-    return custody;
-};

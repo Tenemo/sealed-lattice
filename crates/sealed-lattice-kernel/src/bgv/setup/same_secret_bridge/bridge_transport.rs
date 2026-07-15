@@ -34,16 +34,3 @@ pub(super) fn resolve_same_secret_bridge_proof_bytes(
     )?;
     Ok(proof_bytes)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bridge_proof_reference_reads_the_proof_bytes_hash() {
-        let proof_bytes_hash = "3".repeat(128);
-        let validated = validate_same_secret_bridge_proof_reference(&proof_bytes_hash)
-            .expect("same-secret bridge proof reference is accepted");
-        assert_eq!(validated.proof_bytes_hash, proof_bytes_hash);
-    }
-}

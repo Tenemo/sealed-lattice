@@ -2,7 +2,6 @@ import type {
     BrowserActionProofAttemptBinding,
     BrowserActionRandomnessRecordContext,
     BrowserActionRandomnessReservationVerificationInput,
-    BrowserActionStateRecoveryVerificationInput,
     BrowserActionStateReservationVerificationInput,
     BrowserActionStateVerifierSessionInput,
     BrowserOpenedActionRandomnessSession,
@@ -23,7 +22,6 @@ export type {
     BrowserActionProofAttemptBinding,
     BrowserActionRandomnessRecordContext,
     BrowserActionRandomnessReservationVerificationInput,
-    BrowserActionStateRecoveryVerificationInput,
     BrowserActionStateReservationVerificationInput,
     BrowserActionStateVerifierSessionInput,
     BrowserOpenedActionRandomnessSession,
@@ -43,26 +41,14 @@ export type {
  */
 export type BrowserDeviceWrappingSnapshot = Readonly<{
     mutationIdentifier: Uint8Array;
-    recoveryValueExported: boolean;
     storageRootCommitment: Uint8Array;
-}>;
-
-export type BrowserRecoveryExportChallenge = Readonly<{
-    preparationIdentifier: string;
-    recoveryChecksum: Uint8Array;
-}>;
-
-export type BrowserRecoveryExportConfirmation = Readonly<{
-    canonicalRecoveryText: string;
-    snapshot: BrowserDeviceWrappingSnapshot;
 }>;
 
 /**
  * Structured-clone-safe custody commands exposed by the owned worker. The
- * main thread receives mutation metadata, explicitly confirmed recovery
- * material, and the local-record plaintext or envelope bytes it explicitly
- * requests. Device keys, wrapped root envelopes, plaintext roots, and root
- * handles never occur in this contract.
+ * main thread receives mutation metadata and the local-record plaintext or
+ * envelope bytes it explicitly requests. Device keys, wrapped root envelopes,
+ * plaintext roots, and root handles never occur in this contract.
  */
 export type BrowserActionStorageCustody = Readonly<{
     /**
@@ -75,20 +61,6 @@ export type BrowserActionStorageCustody = Readonly<{
         expectedSnapshot: BrowserDeviceWrappingSnapshot;
         untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<void>;
-    beginRecoveryExport(input: {
-        expectedSnapshot: BrowserDeviceWrappingSnapshot;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-    }): Promise<BrowserRecoveryExportChallenge>;
-    confirmRecoveryExport(input: {
-        preparationIdentifier: string;
-        confirmedChecksum: Uint8Array;
-    }): Promise<BrowserRecoveryExportConfirmation>;
-    cancelRecoveryExport(preparationIdentifier: string): Promise<void>;
-    recover(input: {
-        caseInsensitiveRecoveryText: string;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-        expectedSnapshot?: BrowserDeviceWrappingSnapshot;
-    }): Promise<BrowserDeviceWrappingSnapshot>;
     deriveLocalRecordIdentifier(
         input: BrowserLocalRecordIdentifierInput,
     ): Promise<Uint8Array>;
@@ -103,9 +75,6 @@ export type BrowserActionStorageCustody = Readonly<{
     ): Promise<VerificationResult<string>>;
     verifyActionRandomnessReservation(
         input: BrowserActionRandomnessReservationVerificationInput,
-    ): Promise<VerificationResult<string>>;
-    verifyActionStateRecovery(
-        input: BrowserActionStateRecoveryVerificationInput,
     ): Promise<VerificationResult<string>>;
     releaseActionStateObject(identifier: string): Promise<void>;
     closeActionStateVerifierSession(identifier: string): Promise<void>;

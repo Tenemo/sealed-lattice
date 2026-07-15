@@ -1,6 +1,6 @@
 # Protocol package
 
-This package contains deterministic protocol-development helpers for transcript rules, canonical selection, poll validation, structural threshold-count calculation, roster and manifest checks, recovery freshness, setup artifact construction, and target-bound decryption transport.
+This package contains deterministic protocol-development helpers for transcript rules, canonical selection, poll validation, structural threshold-count calculation, roster and manifest checks, recovery freshness, setup artifact construction, and browser-local durable-state coordination.
 
 These helpers validate their documented inputs and recompute local bindings, but they do not establish a complete ceremony or certify parameter security, supported-phone runtime behavior, or participant acceptance. The participant-facing verification components that exist cross the Rust/WASM kernel and the public SDK boundaries described in the root documentation.
 

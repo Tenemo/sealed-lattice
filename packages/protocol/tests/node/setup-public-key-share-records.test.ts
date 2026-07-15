@@ -315,7 +315,6 @@ describe('public-key share builders', () => {
             deriveCanonicalObjectHash({
                 objectType: materialSetWithoutRoot.objectType,
                 setupContextHash,
-                ringDegree,
                 publicMatrixSeedHash: materialSetInput.publicMatrixSeedHash,
                 publicKeyShareSetRoot,
                 publicKeyShareMaterialRoots: logicalMaterialRootReferences,

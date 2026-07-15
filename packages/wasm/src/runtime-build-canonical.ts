@@ -46,7 +46,6 @@ export type CheckpointRandomUseProfile = Readonly<{
 
 export type CheckpointBoundaryProfile = Readonly<{
     orderedRandomUses: readonly CheckpointRandomUseProfile[];
-    safeBoundaryOrdinal: number;
     stateSchemaIdentifier: number;
 }>;
 
@@ -243,19 +242,6 @@ const readUnsigned16Item = (
         );
     }
     return unsigned16(value, 0);
-};
-
-const readUnsigned32Item = (
-    tuple: CanonicalTupleView,
-    itemIndex: number,
-): number => {
-    const value = requiredItem(tuple, itemIndex, canonicalItemTypes.unsigned32);
-    if (value.byteLength !== 4) {
-        return fail(
-            'A canonical unsigned-32 runtime item has the wrong length.',
-        );
-    }
-    return unsigned32(value, 0);
 };
 
 const readUnsigned64Item = (
@@ -517,17 +503,17 @@ const parseCheckpointBoundary = (
 ): CheckpointBoundaryProfile => {
     if (
         tuple.schemaIdentifier !== checkpointBoundaryProfileSchemaIdentifier ||
-        tuple.items.length !== 3
+        tuple.items.length !== 2
     ) {
         return fail(
             'A checkpoint boundary profile has the wrong schema or shape.',
         );
     }
-    const stateSchemaIdentifier = readUnsigned16Item(tuple, 1);
+    const stateSchemaIdentifier = readUnsigned16Item(tuple, 0);
     if (stateSchemaIdentifier === 0) {
         return fail('A checkpoint boundary must name a state schema.');
     }
-    const orderedRandomUses = readNestedTupleList(tuple, 2).map(
+    const orderedRandomUses = readNestedTupleList(tuple, 1).map(
         parseCheckpointRandomUse,
     );
     for (let index = 1; index < orderedRandomUses.length; index += 1) {
@@ -545,7 +531,6 @@ const parseCheckpointBoundary = (
     }
     return Object.freeze({
         orderedRandomUses: Object.freeze(orderedRandomUses),
-        safeBoundaryOrdinal: readUnsigned32Item(tuple, 0),
         stateSchemaIdentifier,
     });
 };
@@ -568,11 +553,6 @@ const parseRuntimeOperationProfile = (
     if (operationKind === 0 || safeBoundaries.length === 0) {
         return fail('A runtime operation profile is empty or unassigned.');
     }
-    safeBoundaries.forEach((boundary, expectedOrdinal) => {
-        if (boundary.safeBoundaryOrdinal !== expectedOrdinal) {
-            fail('Checkpoint boundaries are not contiguous from zero.');
-        }
-    });
     return Object.freeze({
         operationKind,
         safeBoundaries: Object.freeze(safeBoundaries),
@@ -693,9 +673,9 @@ export const decodeSuiteArtifactReferences = (
     const tuple = parseCanonicalTuple(
         canonicalSuiteRecordBytes,
         suiteRecordSchemaIdentifier,
-        27,
+        20,
     );
-    const references = readNestedTupleList(tuple, 26).map((referenceTuple) => {
+    const references = readNestedTupleList(tuple, 19).map((referenceTuple) => {
         if (
             referenceTuple.schemaIdentifier !==
                 suiteArtifactReferenceSchemaIdentifier ||

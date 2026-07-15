@@ -1,8 +1,7 @@
-use super::schemas::{read_hash, require_header, SchemaResult};
+use super::schemas::{SchemaResult, read_hash, require_header};
 use super::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    FoundationSchemaError, Hash512, ProofApplicationSlot, RefusalReason,
-    StreamDescriptor, hash_foundation_tuple_512,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FoundationSchemaError,
+    Hash512, ProofApplicationSlot, RefusalReason, StreamDescriptor, hash_foundation_tuple_512,
 };
 
 pub const PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER: u16 = 0x0102;
@@ -116,18 +115,12 @@ impl ProofApplicationBinding {
         let tuple = CanonicalTuple::decode(bytes, limits)?;
         require_header(&tuple, PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, 3)?;
         let application_slot_tuple = read_nested_tuple(&tuple.items[0], limits)?;
-        let application_slot = ProofApplicationSlot::decode(
-            &application_slot_tuple.encode()?,
-            limits,
-        )?;
+        let application_slot =
+            ProofApplicationSlot::decode(&application_slot_tuple.encode()?, limits)?;
         let proof_header_hash = read_hash(&tuple.items[1])?;
         let stream_descriptor_tuple = read_nested_tuple(&tuple.items[2], limits)?;
         let proof_stream_descriptor = StreamDescriptor::from_tuple(&stream_descriptor_tuple)?;
-        Self::new(
-            application_slot,
-            proof_header_hash,
-            proof_stream_descriptor,
-        )
+        Self::new(application_slot, proof_header_hash, proof_stream_descriptor)
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
@@ -165,13 +158,11 @@ impl ProofApplicationSlotCeilings {
         selected_relinearization_position_count: u32,
         selected_galois_position_count: u32,
         maximum_candidate_packages_per_action: u32,
-        maximum_target_share_submissions: u16,
     ) -> SchemaResult<Self> {
         if roster_size == 0
             || selected_relinearization_position_count == 0
             || selected_galois_position_count == 0
             || maximum_candidate_packages_per_action == 0
-            || maximum_target_share_submissions == 0
         {
             return Err(schema_error(
                 RefusalReason::OutsideSupportedProfile,
@@ -198,15 +189,16 @@ impl ProofApplicationSlotCeilings {
             family_ceiling(0x1217, galois_trustee_slot_count),
             family_ceiling(0x1218, 1),
             family_ceiling(0x1302, maximum_candidate_packages_per_action),
-            family_ceiling(0x1621, u32::from(maximum_target_share_submissions)),
+            family_ceiling(0x1621, roster_size),
         ];
-        let total_application_slot_ceiling = ordered_family_ceilings
-            .iter()
-            .try_fold(0_u32, |total, family| {
-                total
-                    .checked_add(family.application_slot_ceiling)
-                    .ok_or_else(slot_count_overflow)
-            })?;
+        let total_application_slot_ceiling =
+            ordered_family_ceilings
+                .iter()
+                .try_fold(0_u32, |total, family| {
+                    total
+                        .checked_add(family.application_slot_ceiling)
+                        .ok_or_else(slot_count_overflow)
+                })?;
         Ok(Self {
             ordered_family_ceilings,
             total_application_slot_ceiling,
@@ -221,10 +213,7 @@ impl ProofApplicationSlotCeilings {
         self.total_application_slot_ceiling
     }
 
-    pub fn family_ceiling(
-        &self,
-        application_statement_schema_identifier: u16,
-    ) -> Option<u32> {
+    pub fn family_ceiling(&self, application_statement_schema_identifier: u16) -> Option<u32> {
         self.ordered_family_ceilings
             .iter()
             .find(|family| {
@@ -304,13 +293,9 @@ mod tests {
     use super::*;
 
     fn application_statement() -> Vec<u8> {
-        CanonicalTuple::new(
-            0x2110,
-            1,
-            vec![CanonicalItem::unsigned16(7)],
-        )
-        .encode()
-        .expect("application statement encodes")
+        CanonicalTuple::new(0x2110, 1, vec![CanonicalItem::unsigned16(7)])
+            .encode()
+            .expect("application statement encodes")
     }
 
     fn application_slot() -> ProofApplicationSlot {
@@ -336,8 +321,7 @@ mod tests {
         .expect("proof header is valid");
         let header_bytes = header.encode().expect("proof header encodes");
         assert_eq!(
-            ProofObjectHeader::decode(&header_bytes, &limits)
-                .expect("proof header decodes"),
+            ProofObjectHeader::decode(&header_bytes, &limits).expect("proof header decodes"),
             header
         );
 
@@ -363,17 +347,12 @@ mod tests {
     #[test]
     fn proof_header_rejects_a_noncanonical_or_wrongly_typed_statement() {
         let limits = CanonicalDecodeLimits::default();
-        assert!(
-            ProofObjectHeader::from_canonical_application_statement(vec![], &limits).is_err()
-        );
+        assert!(ProofObjectHeader::from_canonical_application_statement(vec![], &limits).is_err());
 
         let malformed_statement = vec![0_u8; 8];
         assert!(
-            ProofObjectHeader::from_canonical_application_statement(
-                malformed_statement,
-                &limits,
-            )
-            .is_err()
+            ProofObjectHeader::from_canonical_application_statement(malformed_statement, &limits,)
+                .is_err()
         );
 
         let wrong_item = CanonicalTuple::new(
@@ -388,8 +367,8 @@ mod tests {
 
     #[test]
     fn family_slot_ceilings_follow_the_complete_action_equation() {
-        let ceilings = ProofApplicationSlotCeilings::derive(5, 3, 4, 17, 8)
-            .expect("slot ceilings derive");
+        let ceilings =
+            ProofApplicationSlotCeilings::derive(5, 3, 4, 17).expect("slot ceilings derive");
         let expected = [
             (0x2110, 5),
             (0x2111, 5),
@@ -402,28 +381,19 @@ mod tests {
             (0x1217, 20),
             (0x1218, 1),
             (0x1302, 17),
-            (0x1621, 8),
+            (0x1621, 5),
         ];
         for (family, ceiling) in expected {
             assert_eq!(ceilings.family_ceiling(family), Some(ceiling));
         }
-        assert_eq!(ceilings.total_application_slot_ceiling(), 100);
+        assert_eq!(ceilings.total_application_slot_ceiling(), 97);
         assert_eq!(ceilings.family_ceiling(0xffff), None);
     }
 
     #[test]
     fn family_slot_ceilings_reject_zero_and_overflow() {
-        assert!(ProofApplicationSlotCeilings::derive(0, 1, 1, 1, 1).is_err());
-        assert!(ProofApplicationSlotCeilings::derive(1, 0, 1, 1, 1).is_err());
-        assert!(
-            ProofApplicationSlotCeilings::derive(
-                u16::MAX,
-                u32::MAX,
-                1,
-                1,
-                1,
-            )
-            .is_err()
-        );
+        assert!(ProofApplicationSlotCeilings::derive(0, 1, 1, 1).is_err());
+        assert!(ProofApplicationSlotCeilings::derive(1, 0, 1, 1).is_err());
+        assert!(ProofApplicationSlotCeilings::derive(u16::MAX, u32::MAX, 1, 1).is_err());
     }
 }

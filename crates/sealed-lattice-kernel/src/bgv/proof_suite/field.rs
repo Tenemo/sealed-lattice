@@ -211,8 +211,7 @@ impl ProofChallengeExtensionElement {
         // dividing by that norm avoids a wide p^5 - 2 exponent.
         let mut conjugate_product = Self::ONE;
         for conjugate_index in 1..PROOF_CHALLENGE_EXTENSION_DEGREE {
-            conjugate_product =
-                conjugate_product.multiply(self.frobenius(conjugate_index as u16));
+            conjugate_product = conjugate_product.multiply(self.frobenius(conjugate_index as u16));
         }
         let norm = self.multiply(conjugate_product);
         if norm.coordinates[1..]

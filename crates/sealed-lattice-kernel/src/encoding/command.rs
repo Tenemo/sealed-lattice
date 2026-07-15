@@ -8,10 +8,7 @@ use crate::hashing::derive_canonical_object_hash;
 #[serde(tag = "command")]
 enum TranscriptCoreCommand {
     DeriveCanonicalObjectHash,
-    ValidateCanonicalFoundationValue,
     DecodeProofApplicationBinding,
-    DeriveCeremonyContextHash,
-    DeriveActionContextHash,
     EncodeMailboxKeyScheduleInput,
     DecodeMailboxKeyScheduleInput,
     EncodeMailboxAssociatedData,
@@ -20,7 +17,6 @@ enum TranscriptCoreCommand {
     DecodeStreamDescriptor,
     EncodeSignedMailboxEnvelope,
     DecodeSignedMailboxEnvelope,
-    DeriveMailboxKemCiphertextHash,
     DeriveMailboxEnvelopeHash,
     DeriveSetupMailboxSlotHash,
     EncodePrivateRandomCursor,
@@ -30,6 +26,7 @@ enum TranscriptCoreCommand {
     VerifyCollectiveBgvSetup,
     VerifyPrivateVssShareEnvelope,
     GenerateTrusteeEvaluationKeyProof,
+    ComputeLatticeAnchorCommitmentFromOpening,
     ComputeSetupCommitmentFromOpening,
     ComputeVssCommittedMaterialCommitment,
 }
@@ -69,17 +66,8 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
                 "canonicalObjectHash": derive_canonical_object_hash(value)?,
             }))
         }
-        TranscriptCoreCommand::ValidateCanonicalFoundationValue => {
-            super::foundation_command::validate_canonical_foundation_value(&request)
-        }
         TranscriptCoreCommand::DecodeProofApplicationBinding => {
             super::foundation_command::decode_proof_application_binding(&request)
-        }
-        TranscriptCoreCommand::DeriveCeremonyContextHash => {
-            super::foundation_command::derive_ceremony_context_hash(&request)
-        }
-        TranscriptCoreCommand::DeriveActionContextHash => {
-            super::foundation_command::derive_action_context_hash(&request)
         }
         TranscriptCoreCommand::EncodeMailboxKeyScheduleInput => {
             super::mailbox_command::encode_mailbox_key_schedule_input(&request)
@@ -105,9 +93,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         TranscriptCoreCommand::DecodeSignedMailboxEnvelope => {
             super::mailbox_command::decode_signed_mailbox_envelope(&request)
         }
-        TranscriptCoreCommand::DeriveMailboxKemCiphertextHash => {
-            super::mailbox_command::derive_mailbox_kem_ciphertext_hash_command(&request)
-        }
         TranscriptCoreCommand::DeriveMailboxEnvelopeHash => {
             super::mailbox_command::derive_mailbox_envelope_hash_command(&request)
         }
@@ -128,6 +113,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
+        | TranscriptCoreCommand::ComputeLatticeAnchorCommitmentFromOpening
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment => {
             run_bgv_command(command, &request)
@@ -174,6 +160,9 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof => {
             crate::bgv::setup::generate_trustee_evaluation_key_proof_from_request(request)
+        }
+        TranscriptCoreCommand::ComputeLatticeAnchorCommitmentFromOpening => {
+            crate::bgv::setup::compute_lattice_anchor_commitment_from_opening_request(request)
         }
         TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
             crate::bgv::setup::compute_setup_commitment_from_opening_request(request)

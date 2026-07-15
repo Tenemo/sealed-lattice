@@ -1,7 +1,6 @@
 use super::*;
 use crate::bgv::setup_helpers::{
-    compare_required_string, compare_required_u64, is_lowercase_protocol_hash,
-    read_positive_u64_at_path, read_positive_usize_at_path,
+    compare_required_string, is_lowercase_protocol_hash, read_positive_usize_at_path,
 };
 
 pub(in crate::bgv::setup) const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
@@ -99,7 +98,6 @@ pub(crate) struct VssPublicCoefficientCommitmentSetContext<'a> {
     pub(crate) trustee_identities: &'a [String],
     pub(crate) rns_limb_count: usize,
     pub(crate) threshold_degree: usize,
-    pub(crate) ring_degree: usize,
 }
 
 pub(crate) struct VssPublicRecipientShareCommitmentSetContext<'a> {
@@ -108,7 +106,6 @@ pub(crate) struct VssPublicRecipientShareCommitmentSetContext<'a> {
     pub(crate) participant_count: usize,
     pub(crate) trustee_identities: &'a [String],
     pub(crate) rns_limb_count: usize,
-    pub(crate) ring_degree: usize,
 }
 
 pub(crate) struct VssPublicAggregateThresholdCommitmentSetContext<'a> {
@@ -117,7 +114,6 @@ pub(crate) struct VssPublicAggregateThresholdCommitmentSetContext<'a> {
     pub(crate) participant_count: usize,
     pub(crate) trustee_identities: &'a [String],
     pub(crate) rns_limb_count: usize,
-    pub(crate) ring_degree: usize,
 }
 
 pub(crate) fn verify_vss_public_coefficient_commitment_set(
@@ -165,7 +161,6 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set(
                 source_trustee_roster_position,
                 expected_coefficient_count,
                 threshold_degree: context.threshold_degree,
-                ring_degree: context.ring_degree,
             },
         )?);
     }
@@ -224,7 +219,6 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set(
                 source_trustee_roster_position,
                 expected_recipient_share_count,
                 rns_limb_count: context.rns_limb_count,
-                ring_degree: context.ring_degree,
             },
         )?);
     }
@@ -280,7 +274,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set(
                 recipient_identity: &context.trustee_identities
                     [recipient_record_index / context.rns_limb_count],
                 expected_rns_limb_index: recipient_record_index % context.rns_limb_count,
-                ring_degree: context.ring_degree,
             },
         )?);
     }

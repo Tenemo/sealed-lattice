@@ -7,8 +7,6 @@ const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV2";
 pub(super) fn decode_component_material_bytes(
     material_bytes: &[u8],
     expected_level: usize,
-    expected_digit_count: usize,
-    expected_ring_degree: usize,
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     let read_word = |cursor: &mut usize| -> CanonicalResult<u64> {
         let end = cursor
@@ -34,11 +32,36 @@ pub(super) fn decode_component_material_bytes(
     let limb_count = expected_level
         .checked_add(1)
         .ok_or_else(|| invalid_succinct_setup_proof("component material limb count overflowed"))?;
-    let digit_count = expected_digit_count;
-    let ring_degree = expected_ring_degree;
-    if digit_count != limb_count || limb_count > DATA_PRIMES.len() || ring_degree == 0 {
+    let digit_count = limb_count;
+    if limb_count > DATA_PRIMES.len() {
         return Err(invalid_succinct_setup_proof(
             "component material shape does not match the key descriptor level",
+        ));
+    }
+    let payload_byte_length = material_bytes
+        .len()
+        .checked_sub(cursor)
+        .ok_or_else(|| invalid_succinct_setup_proof("component material ended unexpectedly"))?;
+    if !payload_byte_length.is_multiple_of(8) {
+        return Err(invalid_succinct_setup_proof(
+            "component material payload must contain complete coefficient words",
+        ));
+    }
+    let coefficient_vector_count = digit_count
+        .checked_mul(limb_count)
+        .ok_or_else(|| invalid_succinct_setup_proof("component material shape overflowed"))?;
+    let coefficient_word_count = payload_byte_length / 8;
+    if coefficient_vector_count == 0
+        || !coefficient_word_count.is_multiple_of(coefficient_vector_count)
+    {
+        return Err(invalid_succinct_setup_proof(
+            "component material payload does not match the key descriptor level",
+        ));
+    }
+    let ring_degree = coefficient_word_count / coefficient_vector_count;
+    if ring_degree == 0 {
+        return Err(invalid_succinct_setup_proof(
+            "component material coefficient vectors must be non-empty",
         ));
     }
     let mut component_b_by_digit = Vec::with_capacity(digit_count);
@@ -232,6 +255,54 @@ pub(super) fn read_i64_matrix(
                                     "{field_name} coefficients must be signed integers"
                                 ))
                             })
+                        })
+                        .collect()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+pub(super) fn read_i64_matrix4(
+    value: &Value,
+    field_name: &str,
+) -> CanonicalResult<Vec<Vec<Vec<Vec<i64>>>>> {
+    value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_succinct_setup_proof(format!("{field_name} must be an array")))?
+        .iter()
+        .map(|outer| {
+            let matrices = outer.as_array().ok_or_else(|| {
+                invalid_succinct_setup_proof(format!(
+                    "{field_name} entries must be arrays of matrices"
+                ))
+            })?;
+            matrices
+                .iter()
+                .map(|matrix| {
+                    let rows = matrix.as_array().ok_or_else(|| {
+                        invalid_succinct_setup_proof(format!(
+                            "{field_name} matrix entries must be arrays"
+                        ))
+                    })?;
+                    rows.iter()
+                        .map(|row| {
+                            let coefficients = row.as_array().ok_or_else(|| {
+                                invalid_succinct_setup_proof(format!(
+                                    "{field_name} rows must be coefficient arrays"
+                                ))
+                            })?;
+                            coefficients
+                                .iter()
+                                .map(|entry| {
+                                    entry.as_i64().ok_or_else(|| {
+                                        invalid_succinct_setup_proof(format!(
+                                            "{field_name} coefficients must be signed integers"
+                                        ))
+                                    })
+                                })
+                                .collect()
                         })
                         .collect()
                 })

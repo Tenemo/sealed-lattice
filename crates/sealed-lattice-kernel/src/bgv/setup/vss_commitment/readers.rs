@@ -3,14 +3,7 @@ use super::*;
 pub(super) fn read_vss_public_message_coefficients(
     value: &Value,
     field_name: &str,
-    ring_degree: usize,
-    message_coefficient_bound: u64,
 ) -> CanonicalResult<Vec<u64>> {
-    if message_coefficient_bound == 0 {
-        return Err(invalid_vss_public_input(
-            "messageCoefficientBound must be positive",
-        ));
-    }
     let coefficients = value
         .get(field_name)
         .and_then(Value::as_array)
@@ -20,12 +13,6 @@ pub(super) fn read_vss_public_message_coefficients(
                 format!("{field_name} must be an array"),
             )
         })?;
-    if coefficients.len() != ring_degree {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            format!("{field_name} length must match ringDegree"),
-        ));
-    }
     coefficients
         .iter()
         .enumerate()
@@ -36,15 +23,6 @@ pub(super) fn read_vss_public_message_coefficients(
                     format!("{field_name}.{coefficient_index} must be a non-negative integer"),
                 )
             })?;
-            if value >= message_coefficient_bound {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "{field_name}.{coefficient_index} must be below messageCoefficientBound"
-                    ),
-                ));
-            }
-
             Ok(value)
         })
         .collect()

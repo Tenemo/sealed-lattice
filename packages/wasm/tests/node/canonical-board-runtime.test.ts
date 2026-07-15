@@ -16,7 +16,6 @@ const configuration = (): CanonicalBoardVerifierConfiguration => ({
     canonicalRosterBytes: Uint8Array.of(0xaa, 0xbb),
     ceremonyContextHash: new Uint8Array(64).fill(0x22),
     maximumBallotAttemptsPerParticipant: 4,
-    maximumRecoveryTransitionsPerStateKey: 4,
     maximumRetainedCanonicalCarrierByteLength: 1_048_576,
     maximumRetainedTranscriptObjects: 32,
     maximumUnorderedCarriersPerBatch: 8,

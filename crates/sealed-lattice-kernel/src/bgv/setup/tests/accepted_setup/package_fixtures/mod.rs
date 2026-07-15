@@ -24,6 +24,7 @@ const DEVELOPMENT_RING_DEGREE: usize = 128;
 struct VssMaterialPackageComponents {
     vss_coefficient_commitments: serde_json::Value,
     vss_coefficient_commitment_material: serde_json::Value,
+    vss_public_coefficient_commitments: serde_json::Value,
 }
 
 struct CollectiveSetupPackageFixture {
@@ -288,8 +289,6 @@ fn build_collective_setup_package_fixture_parts(
                 "setupContextHash": setup_context_hash,
                 "trusteeIdentity": trustee_identity,
                 "rosterPosition": roster_position,
-                "recoveryEpoch": 0,
-                "deviceEpoch": 0,
                 "signingPublicKeyHash": signing_public_key_hash,
                 "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
             });
@@ -308,8 +307,6 @@ fn build_collective_setup_package_fixture_parts(
             serde_json::json!({
                 "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
                 "trusteeIdentity": trustee_identity,
-                "recoveryEpoch": 0,
-                "deviceEpoch": 0,
                 "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
                 "signatureEnvelope": signature_envelope,
             })
@@ -330,23 +327,16 @@ fn build_collective_setup_package_fixture_parts(
     let public_matrix_seed_hash = common_randomness["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    let vss_components = {
-        let (vss_coefficient_commitments, vss_coefficient_commitment_material) =
-            vss_coefficient_commitments_object(
-                ceremony_id,
-                &manifest_hash,
-                &roster_hash,
-                setup_parameters_hash,
-                setup_epoch,
-                public_matrix_seed_hash,
-                vss_material_ring_degree,
-                participant_count,
-            );
-        VssMaterialPackageComponents {
-            vss_coefficient_commitments,
-            vss_coefficient_commitment_material,
-        }
-    };
+    let vss_components = vss_coefficient_commitment_components(
+        ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        setup_parameters_hash,
+        setup_epoch,
+        public_matrix_seed_hash,
+        vss_material_ring_degree,
+        participant_count,
+    );
     let vss_coefficient_commitments = vss_components.vss_coefficient_commitments.clone();
     let vss_coefficient_commitment_material =
         vss_components.vss_coefficient_commitment_material.clone();
@@ -359,7 +349,7 @@ fn build_collective_setup_package_fixture_parts(
         setup_parameters_hash,
         setup_epoch,
         &private_vss_envelope_commitments,
-        &vss_coefficient_commitments,
+        &vss_components.vss_public_coefficient_commitments,
         participant_count,
     );
     let public_key_shares = public_key_shares_object(participant_count);
@@ -481,6 +471,20 @@ fn build_collective_public_key_bearing_collective_setup_package()
         verification_request: public_key_share_fixture.verification_request,
         proof_binding_leases,
     }
+}
+
+#[test]
+fn pre_finalized_setup_fixture_builds_every_vss_share_acceptance() {
+    let package =
+        minimal_collective_setup_package_for_participant_count(MINIMUM_SUPPORTED_PARTICIPANT_COUNT);
+    let acceptance_records = package["vssShareAcceptances"]["acceptanceRecords"]
+        .as_array()
+        .expect("VSS share acceptance records");
+    let expected_acceptance_count =
+        usize::try_from(MINIMUM_SUPPORTED_PARTICIPANT_COUNT * MINIMUM_SUPPORTED_PARTICIPANT_COUNT)
+            .expect("minimum fixture acceptance count fits usize");
+
+    assert_eq!(acceptance_records.len(), expected_acceptance_count);
 }
 
 mod common_randomness;

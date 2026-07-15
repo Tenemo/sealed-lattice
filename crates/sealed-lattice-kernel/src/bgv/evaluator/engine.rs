@@ -9,7 +9,7 @@ use crate::{
         evaluator::prg::DeterministicSampler,
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
         ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
-        parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
+        parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE},
         rns::RnsPolynomial,
         serialization::{BgvObjectKind, ciphertext_root, serialize_bgv_object},
     },

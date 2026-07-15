@@ -73,8 +73,6 @@ type VssShareVerificationPayloadFields = Readonly<{
     readonly sourceTrusteeCommitmentRoot: ProtocolHash;
     readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
     readonly privateEnvelopeHash: ProtocolHash;
-    readonly recoveryEpoch: number;
-    readonly deviceEpoch: number;
 }>;
 
 const shareVerificationPayloadFields = (
@@ -118,15 +116,6 @@ const shareVerificationPayloadFields = (
             'setupIntent must contain the envelope recipient registration at the recipient roster position.',
         );
     }
-    assertNonNegativeSafeInteger(
-        recipientRegistration.recoveryEpoch,
-        'recipientRegistration.recoveryEpoch',
-    );
-    assertNonNegativeSafeInteger(
-        recipientRegistration.deviceEpoch,
-        'recipientRegistration.deviceEpoch',
-    );
-
     const sourceCommitment =
         input.vssPublicCoefficientCommitmentSet.sourceTrusteeRecords[
             envelopeReference.sourceTrusteeRosterPosition
@@ -159,8 +148,6 @@ const shareVerificationPayloadFields = (
         privateVssEnvelopeCommitmentRoot:
             input.privateVssEnvelopeCommitmentRoot,
         privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
-        recoveryEpoch: recipientRegistration.recoveryEpoch,
-        deviceEpoch: recipientRegistration.deviceEpoch,
     };
 };
 

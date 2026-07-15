@@ -15,17 +15,17 @@ pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis";
 pub(crate) const EXTENDED_BASIS_ID: &str = "sealed-lattice-bgv-rns-extended-basis";
 pub(crate) const SPECIAL_BASIS_ID: &str = "sealed-lattice-bgv-rns-special-basis";
 
-mod root_parameters;
 mod parameter_generation;
+mod root_parameters;
 
-pub(crate) use root_parameters::{
-    BgvBasisKind, DATA_PRIMES, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIME,
-    root_parameters_for_modulus,
-};
 pub(crate) use parameter_generation::{
     ParameterGenerationError, regenerate_supported_data_root_parameters,
     validate_supported_algebraic_parameters, verify_data_root_parameters,
     verify_ntt_root_parameters,
+};
+pub(crate) use root_parameters::{
+    BgvBasisKind, DATA_PRIMES, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIME,
+    root_parameters_for_modulus,
 };
 // The single canonical identity for the fixed BGV parameter set. It binds the
 // ring arithmetic and the fixed score and batch layout used by the protocol.

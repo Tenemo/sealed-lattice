@@ -14,7 +14,7 @@
 //! FRI layer check the batched congruence and support compositions.
 
 pub(crate) mod atom_reduction;
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod bench;
 pub(crate) mod carry_range_lookup;
 pub(crate) mod column_commitment;

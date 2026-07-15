@@ -193,8 +193,8 @@ fn vss_public_material_preserves_structure_and_requires_common_proofs() {
     );
 
     let mut wrong_source_coordinate_request = bridge_request.clone();
-    wrong_source_coordinate_request["statementSet"]["statementRecords"][0]
-        ["sourceConstantCoefficientCommitments"][0]["sourceRnsLimbIndex"] = serde_json::json!(1);
+    wrong_source_coordinate_request["statementSet"]["statementRecords"][0]["sourceConstantCoefficientCommitments"]
+        [0]["sourceRnsLimbIndex"] = serde_json::json!(1);
     assert!(
         crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(
             &wrong_source_coordinate_request,
@@ -218,8 +218,8 @@ fn vss_public_material_preserves_structure_and_requires_common_proofs() {
     );
 
     let mut wrong_source_root_request = bridge_request;
-    wrong_source_root_request["vssCoefficientCommitments"]["sourceTrusteeRecords"][0]
-        ["coefficientCommitmentRoots"][0] = serde_json::json!("0".repeat(128));
+    wrong_source_root_request["vssCoefficientCommitments"]["sourceTrusteeRecords"][0]["coefficientCommitmentRoots"]
+        [0] = serde_json::json!("0".repeat(128));
     assert!(
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &wrong_source_root_request,

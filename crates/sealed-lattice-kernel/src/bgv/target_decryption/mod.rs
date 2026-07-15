@@ -76,9 +76,11 @@ use crate::{
         serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object},
         setup::{
             TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND,
-            TARGET_DECRYPTION_SHARE_PROOF_FAMILY, VssPublicAggregateThresholdCommitmentSetContext,
+            VssPublicAggregateThresholdCommitmentSetContext,
             accepted_setup_participant_roster_from_package,
-            collective_bgv_setup_context_hashes_from_package, derive_collective_setup_package_hash,
+            collective_bgv_setup_context_hashes_from_package,
+            decryption_threshold_for_participant_count, decryption_threshold_for_roster_length,
+            derive_collective_setup_package_hash,
             target_decryption_interpolation_denominator_clearing_factor,
             verify_vss_public_aggregate_threshold_commitment_set,
         },
@@ -116,13 +118,6 @@ const TARGET_DECRYPTION_FLOODING_NOISE_COMMITMENT_MATERIAL_SEED_DOMAIN: &str =
 const TARGET_DECRYPTION_FLOODING_NOISE_COMMITMENT_ROLE: &str = "target-decryption-flooding-noise";
 #[cfg(test)]
 const TARGET_DECRYPTION_SMUDGING_ROLES: [&str; 2] = ["targetId", "targetOrder"];
-
-#[cfg(test)]
-#[derive(Clone)]
-struct TargetShareProfile {
-    minimum_shares_for_interpolation: usize,
-    decryption_share_quorum: usize,
-}
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -166,7 +161,6 @@ struct AggregateThresholdCommitmentSetBinding {
 #[cfg(test)]
 #[derive(Clone)]
 struct AggregateThresholdCommitmentRecordBinding {
-    rns_prime: u64,
     aggregate_commitment_root: String,
     aggregate_opening_root: String,
     aggregate_commitment: Value,
@@ -184,9 +178,6 @@ struct TargetAcceptedBinding {
 struct TargetCiphertextPair {
     target_id: Ciphertext,
     target_order: Ciphertext,
-    target_id_root: String,
-    target_order_root: String,
-    target_ciphertext_hash: String,
     top_count: usize,
 }
 

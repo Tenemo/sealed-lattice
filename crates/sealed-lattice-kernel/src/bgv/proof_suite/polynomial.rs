@@ -4,8 +4,8 @@
 //! so the same code path is available to native Rust and `wasm32`.
 
 use super::{
-    PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
-    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofFieldError,
+    PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement,
+    ProofChallengeExtensionElement, ProofFieldError,
 };
 
 const PROOF_BASE_FIELD_TWO_ADICITY: u32 = 32;
@@ -34,10 +34,7 @@ pub(crate) struct ProofEvaluationDomain {
 }
 
 impl ProofEvaluationDomain {
-    pub(crate) fn new(
-        size: usize,
-        coset_offset: u64,
-    ) -> Result<Self, ProofPolynomialError> {
+    pub(crate) fn new(size: usize, coset_offset: u64) -> Result<Self, ProofPolynomialError> {
         Self::with_offset(size, coset_offset, false)
     }
 
@@ -60,16 +57,15 @@ impl ProofEvaluationDomain {
         let root_exponent = 1_u64
             .checked_shl(PROOF_BASE_FIELD_TWO_ADICITY - logarithmic_size)
             .ok_or(ProofPolynomialError::InvalidDomainSize)?;
-        let maximum_generator = ProofBaseFieldElement::from_canonical(
-            PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
-        )?;
+        let maximum_generator =
+            ProofBaseFieldElement::from_canonical(PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR)?;
         let generator = maximum_generator.power(root_exponent);
         let offset = ProofBaseFieldElement::from_canonical(coset_offset)?;
         if offset == ProofBaseFieldElement::ZERO
             || (!allow_subgroup
-                && offset.power(
-                u64::try_from(size).map_err(|_| ProofPolynomialError::SizeOverflow)?,
-            ) == ProofBaseFieldElement::ONE)
+                && offset
+                    .power(u64::try_from(size).map_err(|_| ProofPolynomialError::SizeOverflow)?)
+                    == ProofBaseFieldElement::ONE)
         {
             return Err(ProofPolynomialError::InvalidCosetOffset);
         }
@@ -200,12 +196,10 @@ pub(crate) fn evaluate_extension_at(
     coefficients: &[ProofChallengeExtensionElement],
     point: ProofChallengeExtensionElement,
 ) -> ProofChallengeExtensionElement {
-    coefficients
-        .iter()
-        .rev()
-        .fold(ProofChallengeExtensionElement::ZERO, |accumulated, coefficient| {
-            accumulated.multiply(point).add(*coefficient)
-        })
+    coefficients.iter().rev().fold(
+        ProofChallengeExtensionElement::ZERO,
+        |accumulated, coefficient| accumulated.multiply(point).add(*coefficient),
+    )
 }
 
 pub(crate) fn divide_extension_polynomial_by_linear(
@@ -274,13 +268,7 @@ pub(crate) fn fold_extension_pair(
     challenge: ProofChallengeExtensionElement,
 ) -> Result<ProofChallengeExtensionElement, ProofPolynomialError> {
     let inverse_two = ProofBaseFieldElement::from_canonical(2)?.inverse()?;
-    fold_extension_pair_with_inverse_two(
-        positive,
-        negative,
-        point,
-        challenge,
-        inverse_two,
-    )
+    fold_extension_pair_with_inverse_two(positive, negative, point, challenge, inverse_two)
 }
 
 fn fold_extension_pair_with_inverse_two(
@@ -292,9 +280,7 @@ fn fold_extension_pair_with_inverse_two(
 ) -> Result<ProofChallengeExtensionElement, ProofPolynomialError> {
     let inverse_two_point = point.inverse()?.multiply(inverse_two);
     let even = positive.add(negative).multiply_base(inverse_two);
-    let odd = positive
-        .subtract(negative)
-        .multiply_base(inverse_two_point);
+    let odd = positive.subtract(negative).multiply_base(inverse_two_point);
     Ok(even.add(challenge.multiply(odd)))
 }
 
@@ -368,8 +354,7 @@ fn radix_two_extension_transform(
             let mut twiddle = ProofBaseFieldElement::ONE;
             for offset in 0..block_size / 2 {
                 let left = values[block_start + offset];
-                let right = values[block_start + offset + block_size / 2]
-                    .multiply_base(twiddle);
+                let right = values[block_start + offset + block_size / 2].multiply_base(twiddle);
                 values[block_start + offset] = left.add(right);
                 values[block_start + offset + block_size / 2] = left.subtract(right);
                 twiddle = twiddle.multiply(twiddle_step);
@@ -402,9 +387,7 @@ fn bit_reverse_permute<Value>(values: &mut [Value]) {
 }
 
 fn trim_trailing_base_zeroes(coefficients: &mut Vec<ProofBaseFieldElement>) {
-    while coefficients.len() > 1
-        && coefficients.last() == Some(&ProofBaseFieldElement::ZERO)
-    {
+    while coefficients.len() > 1 && coefficients.last() == Some(&ProofBaseFieldElement::ZERO) {
         coefficients.pop();
     }
 }
@@ -481,23 +464,21 @@ mod tests {
             extension([7, 1, 0, 2, 0]),
             extension([1, 0, 0, 0, 1]),
         ];
-        let (quotient, remainder) =
-            divide_extension_polynomial_by_linear(&coefficients, point)
-                .expect("division by a monic linear polynomial");
+        let (quotient, remainder) = divide_extension_polynomial_by_linear(&coefficients, point)
+            .expect("division by a monic linear polynomial");
         assert_eq!(remainder, evaluate_extension_at(&coefficients, point));
 
-        let recovered = quotient
-            .iter()
-            .copied()
-            .enumerate()
-            .fold(vec![remainder], |mut product, (index, coefficient)| {
+        let recovered = quotient.iter().copied().enumerate().fold(
+            vec![remainder],
+            |mut product, (index, coefficient)| {
                 if product.len() <= index + 1 {
                     product.resize(index + 2, ProofChallengeExtensionElement::ZERO);
                 }
                 product[index] = product[index].subtract(coefficient.multiply(point));
                 product[index + 1] = product[index + 1].add(coefficient);
                 product
-            });
+            },
+        );
         assert_eq!(recovered, coefficients);
     }
 
@@ -512,8 +493,8 @@ mod tests {
         let evaluations = domain
             .evaluate_extension_polynomial(&coefficients)
             .expect("extension evaluation");
-        let folded = fold_extension_evaluations(&evaluations, domain, challenge)
-            .expect("valid FRI fold");
+        let folded =
+            fold_extension_evaluations(&evaluations, domain, challenge).expect("valid FRI fold");
 
         let folded_coefficients = (0..coefficients.len().div_ceil(2))
             .map(|index| {

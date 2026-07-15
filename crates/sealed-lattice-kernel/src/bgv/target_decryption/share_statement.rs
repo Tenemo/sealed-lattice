@@ -81,19 +81,19 @@ fn target_decryption_share_proof_statement_value(
     let credential_bindings = local_witness
         .active_credential_bindings
         .iter()
-        .map(|binding| {
+        .enumerate()
+        .map(|(limb_index, binding)| {
             let accepted_record = accepted_aggregate_set
                 .recipient_records
                 .get(participant.roster_position)
-                .and_then(|limb_records| limb_records.get(binding.limb_index))
+                .and_then(|limb_records| limb_records.get(limb_index))
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
                         "accepted aggregate threshold commitment set is missing the active recipient limb",
                     )
                 })?;
-            if accepted_record.rns_prime != binding.rns_prime
-                || accepted_record.aggregate_commitment_root != binding.aggregate_commitment_root
+            if accepted_record.aggregate_commitment_root != binding.aggregate_commitment_root
                 || accepted_record.aggregate_opening_root != binding.aggregate_opening_root
             {
                 return Err(CanonicalError::new(
@@ -102,10 +102,6 @@ fn target_decryption_share_proof_statement_value(
                 ));
             }
             Ok(json!({
-                "objectType": "TargetDecryptionAggregateOpeningCredentialBinding",
-                "rnsLimbIndex": binding.limb_index,
-                "rnsPrime": binding.rns_prime,
-                "aggregateCommitmentRoot": binding.aggregate_commitment_root,
                 "aggregateOpeningRoot": binding.aggregate_opening_root,
                 "aggregateCommitment": accepted_record.aggregate_commitment.clone(),
             }))
@@ -113,7 +109,6 @@ fn target_decryption_share_proof_statement_value(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let smudging_commitment_set =
         target_decryption_smudging_commitment_set_from_flooding_noise_openings(
-            setup_binding,
             target_accepted,
             target_ciphertexts,
             participant,
@@ -123,14 +118,8 @@ fn target_decryption_share_proof_statement_value(
 
     Ok(json!({
         "objectType": "BgvTargetDecryptionShareProofStatement",
-        "setupPackageHash": setup_binding.setup_package_hash,
-        "trusteeIdentity": participant.trustee_identity,
-        "rosterPosition": participant.roster_position,
+        "trusteeRosterPosition": participant.roster_position,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetIdRoot": target_ciphertexts.target_id_root,
-        "targetOrderRoot": target_ciphertexts.target_order_root,
-        "targetCiphertextLevel": target_ciphertexts.target_id.level,
         "targetDecryptionShareHash": target_decryption_share_hash(target_decryption_share)?,
         "smudgingCommitmentSet": smudging_commitment_set,
         "aggregateOpeningCredentials": credential_bindings,
@@ -142,14 +131,8 @@ pub(super) fn target_decryption_share_proof_statement_root_preimage(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": string_at_path(proof_statement, &["objectType"])?,
-        "setupPackageHash": hash_at_path(proof_statement, &["setupPackageHash"])?,
-        "trusteeIdentity": string_at_path(proof_statement, &["trusteeIdentity"])?,
-        "rosterPosition": unsigned_at_path(proof_statement, &["rosterPosition"])?,
+        "trusteeRosterPosition": unsigned_at_path(proof_statement, &["trusteeRosterPosition"])?,
         "targetAcceptedRecordHash": hash_at_path(proof_statement, &["targetAcceptedRecordHash"])?,
-        "targetCiphertextHash": hash_at_path(proof_statement, &["targetCiphertextHash"])?,
-        "targetIdRoot": hash_at_path(proof_statement, &["targetIdRoot"])?,
-        "targetOrderRoot": hash_at_path(proof_statement, &["targetOrderRoot"])?,
-        "targetCiphertextLevel": unsigned_at_path(proof_statement, &["targetCiphertextLevel"])?,
         "targetDecryptionShareHash": hash_at_path(proof_statement, &["targetDecryptionShareHash"])?,
         "smudgingCommitmentSet": value_at_path(proof_statement, &["smudgingCommitmentSet"])?,
         "aggregateOpeningCredentials": array_at_path(proof_statement, &["aggregateOpeningCredentials"])?,
@@ -198,21 +181,8 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
     let target_decryption_share_hash = target_decryption_share_hash(target_decryption_share)?;
     for (field_name, expected) in [
         (
-            "setupPackageHash",
-            setup_binding.setup_package_hash.as_str(),
-        ),
-        (
             "targetAcceptedRecordHash",
             target_accepted.target_accepted_record_hash.as_str(),
-        ),
-        (
-            "targetCiphertextHash",
-            target_ciphertexts.target_ciphertext_hash.as_str(),
-        ),
-        ("targetIdRoot", target_ciphertexts.target_id_root.as_str()),
-        (
-            "targetOrderRoot",
-            target_ciphertexts.target_order_root.as_str(),
         ),
         (
             "targetDecryptionShareHash",
@@ -226,23 +196,11 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
             "target decryption share proof statement",
         )?;
     }
-    compare_string_field(
-        proof_statement,
-        "trusteeIdentity",
-        &participant.trustee_identity,
-        "target decryption share proof statement trustee",
-    )?;
     compare_unsigned_field(
         proof_statement,
-        "rosterPosition",
+        "trusteeRosterPosition",
         participant.roster_position as u64,
         "target decryption share proof statement roster position",
-    )?;
-    compare_unsigned_field(
-        proof_statement,
-        "targetCiphertextLevel",
-        target_ciphertexts.target_id.level as u64,
-        "target decryption share proof statement ciphertext level",
     )?;
     validate_aggregate_opening_statement_binding(
         proof_statement,
@@ -252,7 +210,6 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
     )?;
     validate_target_decryption_smudging_commitment_set(
         value_at_path(proof_statement, &["smudgingCommitmentSet"])?,
-        setup_binding,
         target_accepted,
         target_ciphertexts,
         participant,
@@ -261,7 +218,6 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
 
 fn validate_target_decryption_smudging_commitment_set(
     commitment_set: &Value,
-    setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
     participant: &ParticipantBinding,
@@ -291,15 +247,13 @@ fn validate_target_decryption_smudging_commitment_set(
     }
     let mut record_index = 0_usize;
     for role in TARGET_DECRYPTION_SMUDGING_ROLES {
-        for (rns_limb_index, &rns_prime) in DATA_PRIMES.iter().enumerate().take(active_limb_count) {
+        for rns_limb_index in 0..active_limb_count {
             validate_smudging_commitment_record(
                 &records[record_index],
-                setup_binding,
                 target_accepted,
                 participant,
                 role,
                 rns_limb_index,
-                rns_prime,
             )?;
             record_index += 1;
         }
@@ -319,12 +273,10 @@ pub(super) fn target_decryption_smudging_commitment_set_root(
 
 fn validate_smudging_commitment_record(
     record: &Value,
-    setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     participant: &ParticipantBinding,
     role: &str,
     expected_limb_index: usize,
-    expected_rns_prime: u64,
 ) -> CanonicalResult<()> {
     if string_at_path(record, &["objectType"])? != "TargetDecryptionSmudgingCommitment" {
         return Err(CanonicalError::new(
@@ -335,63 +287,33 @@ fn validate_smudging_commitment_record(
     let commitment = value_at_path(record, &["commitment"])?;
     validate_smudging_commitment_shape(
         commitment,
-        setup_binding,
         target_accepted,
         participant,
         role,
         expected_limb_index,
-        expected_rns_prime,
     )?;
     Ok(())
 }
 
 fn validate_smudging_commitment_shape(
     commitment: &Value,
-    setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     participant: &ParticipantBinding,
     role: &str,
     expected_limb_index: usize,
-    expected_rns_prime: u64,
 ) -> CanonicalResult<()> {
     crate::bgv::setup::validate_standalone_vss_committed_material_commitment(
         commitment,
         "target decryption smudging commitment",
     )?;
-    compare_string_field(
-        commitment,
-        "commitmentRole",
-        TARGET_DECRYPTION_FLOODING_NOISE_COMMITMENT_ROLE,
-        "target decryption smudging commitment role",
-    )?;
-    compare_unsigned_field(
-        commitment,
-        "rnsLimbIndex",
-        expected_limb_index as u64,
-        "target decryption smudging commitment limb",
-    )?;
-    compare_unsigned_field(
-        commitment,
-        "rnsPrime",
-        expected_rns_prime,
-        "target decryption smudging commitment prime",
-    )?;
-    compare_unsigned_field(
-        commitment,
-        "ringDegree",
-        POLYNOMIAL_DEGREE as u64,
-        "target decryption smudging commitment ring degree",
-    )?;
     compare_hash_field(
         commitment,
         "commitmentContextHash",
         &target_decryption_flooding_noise_commitment_context_hash(
-            setup_binding,
             target_accepted,
             participant,
             role,
             expected_limb_index,
-            expected_rns_prime,
         )?,
         "target decryption flooding-noise commitment context",
     )?;
@@ -420,32 +342,6 @@ fn validate_aggregate_opening_statement_binding(
         ));
     }
     for (limb_index, credential_binding) in credential_bindings.iter().enumerate() {
-        if string_at_path(credential_binding, &["objectType"])?
-            != "TargetDecryptionAggregateOpeningCredentialBinding"
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "target decryption aggregate credential binding must be TargetDecryptionAggregateOpeningCredentialBinding version 1",
-            ));
-        }
-        compare_unsigned_field(
-            credential_binding,
-            "rnsLimbIndex",
-            limb_index as u64,
-            "target decryption aggregate credential binding limb",
-        )?;
-        let Some(expected_prime) = DATA_PRIMES.get(limb_index).copied() else {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "target decryption aggregate credential binding limb is outside the selected BGV basis",
-            ));
-        };
-        compare_unsigned_field(
-            credential_binding,
-            "rnsPrime",
-            expected_prime,
-            "target decryption aggregate credential binding prime",
-        )?;
         let accepted_record = accepted_aggregate_set
             .recipient_records
             .get(participant.roster_position)
@@ -456,18 +352,6 @@ fn validate_aggregate_opening_statement_binding(
                     "accepted aggregate threshold commitment set is missing the active recipient limb",
                 )
             })?;
-        if accepted_record.rns_prime != expected_prime {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "accepted aggregate threshold commitment RNS prime does not match the active target limb",
-            ));
-        }
-        compare_hash_field(
-            credential_binding,
-            "aggregateCommitmentRoot",
-            &accepted_record.aggregate_commitment_root,
-            "target decryption aggregate credential binding accepted aggregate commitment record",
-        )?;
         compare_hash_field(
             credential_binding,
             "aggregateOpeningRoot",
@@ -478,24 +362,6 @@ fn validate_aggregate_opening_statement_binding(
         crate::bgv::setup::validate_standalone_vss_committed_material_commitment(
             aggregate_commitment,
             "public VSS commitment",
-        )?;
-        compare_string_field(
-            aggregate_commitment,
-            "commitmentRole",
-            "aggregate-threshold-share",
-            "target decryption aggregate credential binding commitment role",
-        )?;
-        compare_unsigned_field(
-            aggregate_commitment,
-            "rnsLimbIndex",
-            limb_index as u64,
-            "target decryption aggregate credential binding commitment limb",
-        )?;
-        compare_unsigned_field(
-            aggregate_commitment,
-            "rnsPrime",
-            expected_prime,
-            "target decryption aggregate credential binding commitment prime",
         )?;
         let aggregate_commitment_root = derive_canonical_object_hash(aggregate_commitment)?;
         if aggregate_commitment_root != accepted_record.aggregate_commitment_root {

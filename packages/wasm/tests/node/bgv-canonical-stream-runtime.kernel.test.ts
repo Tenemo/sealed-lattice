@@ -8,6 +8,7 @@ import {
 import {
     canonicalStreamDomains,
     CanonicalStreamCancellationError,
+    CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
     openCanonicalStreamWorkerRuntime,
@@ -85,6 +86,33 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
 
     beforeEach(async () => {
         kernel = await loadFreshTranscriptCoreKernel();
+    });
+
+    it('rejects an accepted-setup session owned by another kernel', async () => {
+        const otherKernel = await loadFreshTranscriptCoreKernel();
+        const otherKernelSession = otherKernel.beginAcceptedSetupSession();
+
+        expect(() =>
+            openBgvCanonicalStreamRuntime({
+                acceptedSetupSession: otherKernelSession,
+                kernel,
+            }),
+        ).toThrowError(CanonicalStreamInternalError);
+        expect(
+            otherKernelSession.verifyCollectiveBgvSetup({ setupPackage: {} }),
+        ).toEqual({
+            isValid: false,
+            refusalReason: 'outsideSupportedProfile',
+        });
+
+        const matchingSession = kernel.beginAcceptedSetupSession();
+        expect(() =>
+            openBgvCanonicalStreamRuntime({
+                acceptedSetupSession: matchingSession,
+                kernel,
+            }),
+        ).not.toThrow();
+        matchingSession.cancel();
     });
 
     it('retains setup proof bytes only after canonical terminal authentication', async () => {

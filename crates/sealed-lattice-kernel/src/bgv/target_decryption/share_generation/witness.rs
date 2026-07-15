@@ -18,9 +18,7 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
     let private_flooding_seed_hex =
         string_at_path(witness, &["privateFloodingSeedHex"])?.to_string();
     let flooding_noise_openings = target_decryption_flooding_noise_openings(
-        setup_binding,
         target_accepted,
-        target_ciphertexts,
         participant,
         &private_flooding_seed_hex,
     )?;
@@ -40,52 +38,22 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
             "accepted aggregate threshold commitment set does not cover every active target limb",
         ));
     }
-    let mut secret_share_by_limb: Vec<Option<Vec<u64>>> = vec![None; active_limb_count];
-    let mut active_credential_bindings: Vec<Option<AggregateOpeningCredentialBinding>> =
-        (0..active_limb_count).map(|_| None).collect();
-    for credential in array_at_path(opening, &["aggregateOpeningCredentials"])? {
-        if string_at_path(credential, &["objectType"])?
-            != "LocalTrusteeVssPublicAggregateOpeningCredential"
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "aggregate opening credentials must be LocalTrusteeVssPublicAggregateOpeningCredential version 1",
-            ));
-        }
-        compare_string_field(
-            credential,
-            "recipientIdentity",
-            &participant.trustee_identity,
-            "aggregate opening credential recipient identity",
-        )?;
-        compare_unsigned_field(
-            credential,
-            "recipientRosterPosition",
-            participant.roster_position as u64,
-            "aggregate opening credential recipient roster position",
-        )?;
-        let limb_index = usize_at_path(credential, &["rnsLimbIndex"])?;
+    let credentials = array_at_path(opening, &["aggregateOpeningCredentials"])?;
+    if credentials.len() != active_limb_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "local target-decryption share witness must include one aggregate opening credential per active limb",
+        ));
+    }
+    let mut secret_share_by_limb = Vec::with_capacity(active_limb_count);
+    let mut active_credential_bindings = Vec::with_capacity(active_limb_count);
+    for (limb_index, credential) in credentials.iter().enumerate() {
         let Some(expected_modulus) = DATA_PRIMES.get(limb_index).copied() else {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
                 "aggregate opening credential limb is outside the selected BGV basis",
             ));
         };
-        compare_unsigned_field(
-            credential,
-            "rnsPrime",
-            expected_modulus,
-            "aggregate opening credential rnsPrime",
-        )?;
-        if limb_index >= active_limb_count {
-            continue;
-        }
-        if secret_share_by_limb[limb_index].is_some() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "local target-decryption share witness contains duplicate active limbs",
-            ));
-        }
 
         let verified_credential =
             verify_aggregate_opening_credential(AggregateOpeningCheckInput {
@@ -95,7 +63,7 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
                 rns_limb_index: limb_index,
                 rns_prime: expected_modulus,
             })?;
-        secret_share_by_limb[limb_index] = Some(verified_credential.aggregate_share_values.clone());
+        secret_share_by_limb.push(verified_credential.aggregate_share_values.clone());
         let accepted_record = aggregate_threshold_commitment_set
             .recipient_records
             .get(participant.roster_position)
@@ -106,12 +74,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
                     "accepted aggregate threshold commitment set is missing the active recipient limb",
                 )
             })?;
-        if accepted_record.rns_prime != expected_modulus {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "accepted aggregate threshold commitment RNS prime does not match the active target limb",
-            ));
-        }
         if accepted_record.aggregate_commitment_root != verified_credential.commitment_root {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
@@ -124,9 +86,7 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
                 "local target-decryption aggregate opening root does not match the accepted aggregate commitment record",
             ));
         }
-        active_credential_bindings[limb_index] = Some(AggregateOpeningCredentialBinding {
-            limb_index,
-            rns_prime: expected_modulus,
+        active_credential_bindings.push(AggregateOpeningCredentialBinding {
             aggregate_commitment_root: verified_credential.commitment_root,
             aggregate_opening_root: verified_credential.opening_root,
             aggregate_commitment_message_values: verified_credential
@@ -134,35 +94,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
             aggregate_material_seed_hex: verified_credential.aggregate_material_seed_hex,
         });
     }
-
-    let secret_share_by_limb = secret_share_by_limb
-        .into_iter()
-        .enumerate()
-        .map(|(limb_index, coefficients)| {
-            coefficients.ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    format!(
-                        "local target-decryption share witness is missing active limb {limb_index}"
-                    ),
-                )
-            })
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let active_credential_bindings = active_credential_bindings
-        .into_iter()
-        .enumerate()
-        .map(|(limb_index, binding)| {
-            binding.ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    format!(
-                        "local target-decryption share witness is missing active credential binding {limb_index}"
-                    ),
-                )
-            })
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
 
     Ok(LocalTargetDecryptionShareWitness {
         secret_share_by_limb,

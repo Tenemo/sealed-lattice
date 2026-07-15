@@ -54,7 +54,6 @@ export const evaluationKeyShareComponentVectorRoot = (
     keySwitchDomain: string,
     keySwitchSeedHex: string,
     level: number,
-    ringDegree: number,
     componentVectorsLittleEndianHexByDigitAndLimb: readonly string[],
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
@@ -63,13 +62,11 @@ export const evaluationKeyShareComponentVectorRoot = (
         keySwitchDomain,
         keySwitchSeedHex,
         level,
-        ringDegree,
         componentVectorsLittleEndianHexByDigitAndLimb,
     });
 
 export const evaluationKeyShareComponentMaterialReferenceRoot = (
     proofFamily: EvaluationKeyShareProofFamily,
-    ringDegree: number,
     keySwitchComponentVectorRoot: ProtocolHash,
     keySwitchDomain: string,
     keySwitchSeedHex: string,
@@ -85,6 +82,5 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
         keySwitchDomain,
         keySwitchSeedHex,
         level,
-        ringDegree,
         keySwitchComponentVectorRoot,
     });

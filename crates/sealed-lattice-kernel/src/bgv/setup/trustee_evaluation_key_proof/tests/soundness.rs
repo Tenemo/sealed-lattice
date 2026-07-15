@@ -272,11 +272,11 @@ fn private_vss_statement_rejects_noncanonical_context_and_hash_fields() {
 
 // Private-VSS message (Shamir coefficient) columns are committed witnesses
 // covered by the opening lincheck, but they carry no cross-field consistency
-// claim. Only carry and opening-randomness columns are claimed, so the
-// consistency set is exactly the logical set minus the message columns. This
-// bounds the disclosed smudging leakage to the carry-driven figure. If the
-// consistency set includes message columns, the leakage accounting and mask
-// sizing both regress, so pin the shape.
+// claim. Only the carry is shared across commitment fields. Opening randomness
+// is independently sampled for each commitment field and is bound locally by
+// the corresponding opening relation and ternary constraints. The message
+// columns remain covered by the opening lincheck without a cross-field
+// consistency claim.
 #[test]
 fn private_vss_consistency_set_excludes_committed_message_columns() {
     let statement = private_vss_statement_for_context_tests();
@@ -299,26 +299,22 @@ fn private_vss_consistency_set_excludes_committed_message_columns() {
         layout.private_vss_coefficient_columns + 1 + layout.private_vss_randomness_columns
     );
 
-    // The consistency-claimed set is only carry + randomness; the message
-    // columns are excluded.
+    // The carry is the only cross-field consistency claim. Equating opening
+    // randomness here would collapse the independent commitment-field tapes.
     assert_eq!(
         layout.consistency_vector_count(),
-        1 + layout.private_vss_randomness_columns,
-        "the consistency set must be the carry plus the opening-randomness columns only"
+        1,
+        "the consistency set must contain only the shared carry"
     );
     assert_eq!(
         layout.private_vss_logical_columns() - layout.consistency_vector_count(),
-        layout.private_vss_coefficient_columns,
-        "exactly the message columns are committed without a consistency assertion"
+        layout.private_vss_coefficient_columns + layout.private_vss_randomness_columns,
+        "message and field-local opening columns are committed without a cross-field equality assertion"
     );
     // The carry must stay in the consistency set: carry consistency plus the
     // public range-checked share pin the polynomial evaluation per recipient.
     // Exactly one non-randomness consistency vector (the carry) must remain.
-    assert_eq!(
-        layout.consistency_vector_count() - layout.private_vss_randomness_columns,
-        1,
-        "the carry must remain the one non-randomness consistency vector"
-    );
+    assert_eq!(layout.consistency_vector_count(), 1);
 
     // The published claim count, which sizes the masks and the alpha challenges,
     // tracks the reduced consistency set, not the full logical set.

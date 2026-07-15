@@ -1,35 +1,40 @@
-import { bytesToHex } from '@noble/hashes/utils.js';
-import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
-import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
-import { foundationProfile } from '@sealed-lattice/types';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { bytesToHex } from "@noble/hashes/utils.js";
+import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
+import {
+    foundationProfile,
+    type SetupMailboxSlot,
+} from "@sealed-lattice/types";
+import { beforeAll, describe, expect, it } from "vitest";
 
-import { encapsulateResetSafeSetupMailbox } from '#packages/crypto/src/browser-local-key-provider';
+import {
+    encapsulateResetSafeSetupMailbox,
+    signResetSafeSetupMailboxEnvelope,
+} from "#packages/crypto/src/browser-local-key-provider";
 import {
     createBrowserLocalMailboxOperations,
     createBrowserLocalSigningOperations,
-} from '#packages/crypto/tests/support/browser-local-key-operations';
-import { openBrowserLocalActionCryptographicProvider } from '#packages/protocol/src/index';
+} from "#packages/crypto/tests/support/browser-local-key-operations";
+import { openBrowserLocalActionCryptographicProvider } from "#packages/protocol/src/index";
 import {
     createWasmBrowserActionStorageWorkerKernel,
     loadFreshTranscriptCoreKernel,
     type TranscriptCoreKernel,
-} from '#packages/wasm/src/index';
-import { stateCapabilityKinds } from '#packages/wasm/src/state-verifier-runtime';
-import { actionRandomnessTestVector } from '#packages/wasm/tests/action-randomness-test-vectors';
+} from "#packages/wasm/src/index";
+import { stateCapabilityKinds } from "#packages/wasm/src/state-verifier-runtime";
 import {
     createStateVerifierTestVector,
     deriveSetupActionRandomnessAuthorization,
-} from '#packages/wasm/tests/state-verifier-test-vectors';
+} from "#packages/wasm/tests/state-verifier-test-vectors";
 
-describe('Browser-local action cryptographic provider', () => {
+describe("Browser-local action cryptographic provider", () => {
     let kernel: TranscriptCoreKernel;
 
     beforeAll(async () => {
         kernel = await loadFreshTranscriptCoreKernel();
     });
 
-    it('consumes worker-held commitment-authorized ML-KEM input without exposing it', async () => {
+    it("consumes worker-held commitment-authorized ML-KEM input without exposing it", async () => {
         const signingSeed = new Uint8Array(ml_dsa65.lengths.seed!);
         signingSeed[0] = 1;
         signingSeed[signingSeed.byteLength - 1] =
@@ -60,11 +65,8 @@ describe('Browser-local action cryptographic provider', () => {
                 suiteId: baseStateVector.suiteIdentifier,
             },
         });
-        await workerKernel.commitStagedActionStorageRoot({
-            mutationIdentifier: new Uint8Array(32).fill(0x73),
-        });
+        await workerKernel.commitStagedActionStorageRoot();
         const created = await workerKernel.createAndSealActionRandomness({
-            creationRecoveryEpoch: 0n,
             recordVersion: 0n,
         });
         const stateVector = createStateVerifierTestVector({
@@ -77,7 +79,6 @@ describe('Browser-local action cryptographic provider', () => {
         const openedStateSession =
             await workerKernel.openActionStateVerifierSession({
                 canonicalRosterBytes: stateVector.canonicalRosterBytes,
-                maximumRecoveryTransitionsPerStateKey: 2,
             });
         if (!openedStateSession.isValid) {
             throw new Error(openedStateSession.refusalReason);
@@ -88,7 +89,7 @@ describe('Browser-local action cryptographic provider', () => {
                 stateCapabilityKinds.setupActionRandomnessRoot,
         );
         if (rootReservationVector === undefined) {
-            throw new Error('Missing action-randomness reservation vector.');
+            throw new Error("Missing action-randomness reservation vector.");
         }
         const rootReservation =
             await workerKernel.verifyActionRandomnessReservation({
@@ -113,10 +114,12 @@ describe('Browser-local action cryptographic provider', () => {
             stateReservationIdentifier: rootReservation.value,
             workerKernel,
         });
-        const setupMailboxSlot = Object.freeze({
-            ...actionRandomnessTestVector.setupMailbox.setupMailboxSlot,
+        const setupMailboxSlot: SetupMailboxSlot = Object.freeze({
             actionContextHash: bytesToHex(stateVector.actionContextHash),
             ceremonyContextHash: bytesToHex(stateVector.ceremonyContextHash),
+            orderedMaterialRoots: Object.freeze(["77".repeat(64)]),
+            payloadType: 2,
+            producerSequence: "7",
             recipientParticipantId: bytesToHex(
                 stateVector.witnessParticipantIdentity,
             ),
@@ -124,6 +127,7 @@ describe('Browser-local action cryptographic provider', () => {
             sourceParticipantId: bytesToHex(
                 stateVector.subjectParticipantIdentity,
             ),
+            statementHash: "66".repeat(64),
             suiteId: bytesToHex(stateVector.suiteIdentifier),
         });
         const setupMailboxSlotHash =
@@ -143,8 +147,8 @@ describe('Browser-local action cryptographic provider', () => {
             wrongRecipientFailure = error;
         }
         expect(wrongRecipientFailure).toMatchObject({
-            code: 'KeyMismatch',
-            name: 'BrowserLocalKeyProviderError',
+            code: "KeyMismatch",
+            name: "BrowserLocalKeyProviderError",
         });
 
         const firstEncapsulation = encapsulateResetSafeSetupMailbox({
@@ -179,12 +183,57 @@ describe('Browser-local action cryptographic provider', () => {
         expect(replayedEncapsulation.sharedSecret).toEqual(
             firstEncapsulation.sharedSecret,
         );
+        const envelopeHash = "a7".repeat(64);
+        const firstSignature = signResetSafeSetupMailboxEnvelope({
+            envelopeHash,
+            setupMailboxSlot,
+            setupMailboxSlotHash,
+            signingCapability: provider.externalKeyProvider.signingCapability,
+            sourceVerificationKey: signingKeyPair.publicKey,
+        });
+        expect(
+            ml_dsa65.verify(
+                firstSignature,
+                new Uint8Array(64).fill(0xa7),
+                signingKeyPair.publicKey,
+                {
+                    context: new TextEncoder().encode(
+                        "sealed-lattice/mailbox-signature/v1",
+                    ),
+                },
+            ),
+        ).toBe(true);
+        const replayedSignature = signResetSafeSetupMailboxEnvelope({
+            envelopeHash,
+            setupMailboxSlot,
+            setupMailboxSlotHash,
+            signingCapability: provider.externalKeyProvider.signingCapability,
+            sourceVerificationKey: signingKeyPair.publicKey,
+        });
+        expect(replayedSignature).toEqual(firstSignature);
+        expect(() =>
+            signResetSafeSetupMailboxEnvelope({
+                envelopeHash: "b8".repeat(64),
+                setupMailboxSlot,
+                setupMailboxSlotHash,
+                signingCapability:
+                    provider.externalKeyProvider.signingCapability,
+                sourceVerificationKey: signingKeyPair.publicKey,
+            }),
+        ).toThrowError(
+            expect.objectContaining({
+                code: "Equivocation",
+                refusalReason: "equivocation",
+            }),
+        );
         firstEncapsulation.envelopeAttemptIdentifier.fill(0);
         firstEncapsulation.ciphertext.fill(0);
         firstEncapsulation.sharedSecret.fill(0);
         replayedEncapsulation.envelopeAttemptIdentifier.fill(0);
         replayedEncapsulation.ciphertext.fill(0);
         replayedEncapsulation.sharedSecret.fill(0);
+        firstSignature.fill(0);
+        replayedSignature.fill(0);
         await provider.close();
         await provider.close();
         await workerKernel.closeActionStateVerifierSession(

@@ -3,23 +3,13 @@ import {
     derivePollSpecHash as derivePollSpecHashInternal,
     validatePollSpec as validatePollSpecInternal,
 } from '@sealed-lattice/protocol';
-import type {
-    SetupProofMaterialStream as ProtocolSetupProofMaterialStream,
-    SetupProofMaterialStreamSet as ProtocolSetupProofMaterialStreamSet,
-    PublicKeyShareMaterialStream as ProtocolPublicKeyShareMaterialStream,
-    EvaluationKeyShareComponentMaterialStream as ProtocolEvaluationKeyShareComponentMaterialStream,
-    TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
-    TransportedVssShareLinkageProofMaterialSet as ProtocolTransportedVssShareLinkageProofMaterialSet,
-    TransportedSameSecretBridgeProofMaterialSet as ProtocolTransportedSameSecretBridgeProofMaterialSet,
-    TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
-    SetupPackage as ProtocolSetupPackage,
-    CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput,
-} from '@sealed-lattice/protocol';
-import type {
-    PollSpecInput,
-    PollSpecValidation,
-    ProtocolHash,
-    VerificationResult,
+import type { CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput } from '@sealed-lattice/protocol';
+import {
+    isProtocolHash,
+    type PollSpecInput,
+    type PollSpecValidation,
+    type ProtocolHash,
+    type VerificationResult,
 } from '@sealed-lattice/types';
 
 import { loadFreshTranscriptCoreKernel } from './kernel.js';
@@ -30,13 +20,11 @@ import {
     snapshotSetupPackageVerificationInput,
 } from './setup-verification-input.js';
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
-
 function assertProtocolHash(
     value: unknown,
     fieldName: string,
 ): asserts value is ProtocolHash {
-    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
+    if (!isProtocolHash(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
     }
 }
@@ -49,16 +37,13 @@ const assertSetupPackageVerificationBindings = (
 };
 
 export type {
-    CanonicalSignedRootObject,
     PollSpec,
     PollSpecInput,
     PollSpecValidation,
     PollSpecValidationError,
     PollSpecValidationErrorCode,
     ProtocolHash,
-    ProtocolSignatureEnvelope,
     RefusalReason,
-    SignedObjectType,
     SmallRosterPolicy,
     VerificationResult,
 } from '@sealed-lattice/types';
@@ -69,6 +54,19 @@ export type CollectiveBgvSetupContext = Readonly<{
     readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
     readonly participantCount: number;
+}>;
+
+export type SetupMaterialStream = Readonly<{
+    readonly descriptorBytes: Uint8Array;
+    readonly pullChunk: (input: {
+        readonly abortSignal?: AbortSignal;
+        readonly chunkIndex: number;
+        readonly expectedByteLength: number;
+    }) => Promise<ArrayBuffer | undefined>;
+}>;
+
+export type SetupProofMaterialStreamSet = Readonly<{
+    readonly proofMaterialStreams: readonly SetupMaterialStream[];
 }>;
 
 export type VerifyPrivateVssShareInput = Readonly<{
@@ -85,34 +83,20 @@ export type PrivateVssShareVerification = VerificationResult<{
     readonly privateEnvelopeHash: ProtocolHash;
 }>;
 
-export type SetupPackage = ProtocolSetupPackage;
 export type CollectiveBgvSetupRosterEntryInput =
     ProtocolCollectiveBgvSetupRosterEntryInput;
 
-export type PublicKeyShareMaterialStream = ProtocolPublicKeyShareMaterialStream;
-export type TransportedPublicKeyShareProofMaterialSet =
-    ProtocolTransportedPublicKeyShareProofMaterialSet;
-export type TransportedVssShareLinkageProofMaterialSet =
-    ProtocolTransportedVssShareLinkageProofMaterialSet;
-export type TransportedSameSecretBridgeProofMaterialSet =
-    ProtocolTransportedSameSecretBridgeProofMaterialSet;
-export type TransportedEvaluationKeyShareProofMaterialSet =
-    ProtocolTransportedEvaluationKeyShareProofMaterialSet;
-export type EvaluationKeyShareComponentMaterialStream =
-    ProtocolEvaluationKeyShareComponentMaterialStream;
-export type SetupProofMaterialStream = ProtocolSetupProofMaterialStream;
-export type SetupProofMaterialStreamSet = ProtocolSetupProofMaterialStreamSet;
 export type VerifySetupPackageInput = Readonly<{
     readonly setupPackage: unknown;
     readonly expectedSetupPackageHash?: ProtocolHash;
     readonly expectedManifestHash: ProtocolHash;
     readonly expectedRosterHash: ProtocolHash;
-    readonly publicKeyShareMaterialStream: PublicKeyShareMaterialStream;
-    readonly transportedPublicKeyShareProofMaterial: TransportedPublicKeyShareProofMaterialSet;
-    readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
-    readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
-    readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
-    readonly evaluationKeyShareComponentMaterialStreams: readonly EvaluationKeyShareComponentMaterialStream[];
+    readonly publicKeyShareMaterialStream: SetupMaterialStream;
+    readonly transportedPublicKeyShareProofMaterial: SetupProofMaterialStreamSet;
+    readonly transportedVssShareLinkageProofMaterial: SetupProofMaterialStreamSet;
+    readonly transportedSameSecretBridgeProofMaterial: SetupProofMaterialStreamSet;
+    readonly transportedEvaluationKeyShareProofMaterial: SetupProofMaterialStreamSet;
+    readonly evaluationKeyShareComponentMaterialStreams: readonly SetupMaterialStream[];
 }>;
 
 export type SetupPackageVerification = VerificationResult<void>;

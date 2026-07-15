@@ -147,10 +147,9 @@ export const createCanonicalTestRosterBytes = (
         mailboxEncapsulationKey: Uint8Array;
     }>[],
 ): Uint8Array => {
-    const rosterEntries = entries.map((entry, rosterPosition) =>
+    const rosterEntries = entries.map((entry) =>
         canonicalTuple(
             0x0114,
-            unsigned16Item(rosterPosition),
             canonicalItem(0x01, entry.signingVerificationKey),
             canonicalItem(0x01, entry.mailboxEncapsulationKey),
         ),

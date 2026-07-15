@@ -6,8 +6,6 @@ use crate::bgv::evaluator::{
     key_switch::{KEY_SWITCH_SAMPLE_DOMAIN, PLAINTEXT_MODULUS_I64},
     prg::DeterministicSampler,
 };
-use crate::bgv::setup::sharing::canonical_trustee_point;
-
 mod column_layout;
 mod constraint_kernels;
 mod family_shape_and_validation;

@@ -10,8 +10,6 @@ pub(super) struct SetupIntentTrusteeRegistration {
     pub(super) trustee_identity: String,
     pub(super) signing_public_key_hash: String,
     pub(super) private_vss_mailbox_public_key_hash: String,
-    pub(super) recovery_epoch: u64,
-    pub(super) device_epoch: u64,
 }
 
 pub(super) type SetupIntentTrusteeRegistrationMap = BTreeMap<u64, SetupIntentTrusteeRegistration>;
@@ -179,28 +177,6 @@ fn verify_setup_intent_registration(
             format!("{REGISTRATION_PATH}.trusteeIdentity"),
         )?));
     }
-    let Some(recovery_epoch) = registration_value
-        .get("recoveryEpoch")
-        .and_then(Value::as_u64)
-    else {
-        return Ok(Err(setup_intent_refusal(
-            crate::foundation::RefusalReason::MissingPrerequisite,
-            "setupIntentTrusteeEpochMissing",
-            "setup-intent trustee registration must bind recoveryEpoch",
-            format!("{REGISTRATION_PATH}.recoveryEpoch"),
-        )?));
-    };
-    let Some(device_epoch) = registration_value
-        .get("deviceEpoch")
-        .and_then(Value::as_u64)
-    else {
-        return Ok(Err(setup_intent_refusal(
-            crate::foundation::RefusalReason::MissingPrerequisite,
-            "setupIntentTrusteeEpochMissing",
-            "setup-intent trustee registration must bind deviceEpoch",
-            format!("{REGISTRATION_PATH}.deviceEpoch"),
-        )?));
-    };
     let Some(signing_public_key_hash) = signature_envelope
         .get("publicKeyHash")
         .and_then(Value::as_str)
@@ -237,8 +213,6 @@ fn verify_setup_intent_registration(
         "setupContextHash": setup_context_hash(setup_context)?,
         "trusteeIdentity": trustee_identity,
         "rosterPosition": roster_position,
-        "recoveryEpoch": recovery_epoch,
-        "deviceEpoch": device_epoch,
         "signingPublicKeyHash": signing_public_key_hash,
         "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
     });
@@ -264,8 +238,6 @@ fn verify_setup_intent_registration(
         trustee_identity: trustee_identity.to_string(),
         signing_public_key_hash: signing_public_key_hash.to_string(),
         private_vss_mailbox_public_key_hash: private_vss_mailbox_public_key_hash.to_string(),
-        recovery_epoch,
-        device_epoch,
     }))
 }
 
@@ -319,8 +291,6 @@ pub(super) fn setup_intent_trustee_registrations_from_package(
                 "privateVssMailboxPublicKeyHash",
             )?
             .to_string(),
-            recovery_epoch: value_u64(registration_value, "recoveryEpoch")?,
-            device_epoch: value_u64(registration_value, "deviceEpoch")?,
         };
         registrations.insert(roster_position, registration);
     }

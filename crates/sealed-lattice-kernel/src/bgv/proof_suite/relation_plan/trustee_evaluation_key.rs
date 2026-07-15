@@ -1,9 +1,12 @@
 use std::collections::BTreeSet;
 
+use crate::bgv::setup::{SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES};
+
 use super::key_relation::{
     BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
     ReversibleShiftedSmallVector, SplitIntegerVector, TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE,
-    TrusteeKeyRelationGeometryInput, relinearization_common_reference_source,
+    TrusteeKeyRelationGeometryInput, galois_common_reference_source,
+    negacyclic_automorphism_mapping_source, relinearization_common_reference_source,
     statement_root_source, trustee_bdlop_matrix_source,
 };
 use super::{
@@ -13,12 +16,14 @@ use super::{
 
 const RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1214;
 const RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1216;
+const GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1217;
 const ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL: u64 = 4;
 const ROUND_ONE_LEFT_ROOT_FIELD_ORDINAL: u64 = 5;
 const ROUND_ONE_RIGHT_ROOT_FIELD_ORDINAL: u64 = 6;
 const AGGREGATE_ROUND_ONE_LEFT_ROOT_FIELD_ORDINAL: u64 = 7;
 const AGGREGATE_ROUND_ONE_RIGHT_ROOT_FIELD_ORDINAL: u64 = 8;
 const ROUND_TWO_ROOT_FIELD_ORDINAL: u64 = 9;
+const GALOIS_KEY_SHARE_ROOT_FIELD_ORDINAL: u64 = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TrusteeEvaluationKeyDecompositionBlock {
@@ -79,7 +84,7 @@ impl TrusteeEvaluationKeyRelationGeometry {
             || self.plaintext_modulus.is_multiple_of(2)
             || self.decomposition_blocks.is_empty()
             || self.commitment_data_modulus_indices.is_empty()
-            || self.commitment_module_rank == 0
+            || usize::from(self.commitment_module_rank) != SETUP_COMMITMENT_MODULE_RANK
             || self.first_mask_purpose == 0
             || self.first_mask_purpose >= 0xff00
         {
@@ -162,7 +167,13 @@ impl TrusteeEvaluationKeyRelationGeometry {
             return Err(RelationPlanError::NonCanonicalOrder);
         }
 
-        if !super::strictly_sorted_unique(&self.commitment_data_modulus_indices)
+        let expected_commitment_data_modulus_indices = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+            .iter()
+            .copied()
+            .map(|index| u16::try_from(index).map_err(|_| RelationPlanError::CountOverflow))
+            .collect::<Result<Vec<_>, _>>()?;
+        if self.commitment_data_modulus_indices != expected_commitment_data_modulus_indices
+            || !super::strictly_sorted_unique(&self.commitment_data_modulus_indices)
             || self
                 .commitment_data_modulus_indices
                 .iter()
@@ -333,10 +344,9 @@ fn validate_quotient_capacity(
     }
 }
 
-fn append_relation_sources(
+fn append_anchor_relation_sources(
     sources: &mut Vec<(KeyVerifierSourceKey, RelationVerifierSource)>,
     geometry: &TrusteeEvaluationKeyRelationGeometry,
-    schedule_position: u32,
 ) -> Result<(), RelationPlanError> {
     let rank = usize::from(geometry.commitment_module_rank);
     for (root_ordinal, data_modulus_index) in geometry
@@ -370,6 +380,15 @@ fn append_relation_sources(
             ));
         }
     }
+    Ok(())
+}
+
+fn append_relation_sources(
+    sources: &mut Vec<(KeyVerifierSourceKey, RelationVerifierSource)>,
+    geometry: &TrusteeEvaluationKeyRelationGeometry,
+    schedule_position: u32,
+) -> Result<(), RelationPlanError> {
+    append_anchor_relation_sources(sources, geometry)?;
     let ordered_modulus_references = geometry.ordered_modulus_references()?;
     for decomposition_block_index in 0..geometry.decomposition_blocks.len() {
         for modulus_reference in ordered_modulus_references.iter().copied() {
@@ -382,6 +401,32 @@ fn append_relation_sources(
             ));
         }
     }
+    Ok(())
+}
+
+fn append_galois_relation_sources(
+    sources: &mut Vec<(KeyVerifierSourceKey, RelationVerifierSource)>,
+    geometry: &TrusteeEvaluationKeyRelationGeometry,
+    schedule_position: u32,
+    galois_element: u64,
+) -> Result<(), RelationPlanError> {
+    append_anchor_relation_sources(sources, geometry)?;
+    let ordered_modulus_references = geometry.ordered_modulus_references()?;
+    for decomposition_block_index in 0..geometry.decomposition_blocks.len() {
+        for modulus_reference in ordered_modulus_references.iter().copied() {
+            sources.push(galois_common_reference_source(
+                geometry.ring_degree,
+                schedule_position,
+                u16::try_from(decomposition_block_index)
+                    .map_err(|_| RelationPlanError::CountOverflow)?,
+                modulus_reference,
+            ));
+        }
+    }
+    sources.push(negacyclic_automorphism_mapping_source(
+        geometry.ring_degree,
+        galois_element,
+    ));
     Ok(())
 }
 
@@ -523,6 +568,64 @@ fn add_round_two_relations(
                     secret,
                     ephemeral_secret,
                     &round_two_error,
+                    quotient,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_galois_relations(
+    builder: &mut KeyRelationPlanBuilder<'_>,
+    geometry: &TrusteeEvaluationKeyRelationGeometry,
+    schedule_position: u32,
+    galois_key_share_rows: &[SplitIntegerVector],
+    secret: &ReversibleShiftedSmallVector,
+    automorphed_secret: &super::key_relation::ShiftedSmallVector,
+    check_context: &RelationPlanCheckContext,
+) -> Result<(), RelationPlanError> {
+    let ordered_modulus_references = geometry.ordered_modulus_references()?;
+    let expected_row_count = geometry
+        .decomposition_blocks
+        .len()
+        .checked_mul(ordered_modulus_references.len())
+        .ok_or(RelationPlanError::CountOverflow)?;
+    if galois_key_share_rows.len() != expected_row_count {
+        return Err(RelationPlanError::InvalidRoot);
+    }
+    for decomposition_block_index in 0..geometry.decomposition_blocks.len() {
+        let error = builder.add_signed_eta_two_vector()?;
+        for (limb_ordinal, modulus_reference) in
+            ordered_modulus_references.iter().copied().enumerate()
+        {
+            let row_ordinal = decomposition_block_index
+                .checked_mul(ordered_modulus_references.len())
+                .and_then(|start| start.checked_add(limb_ordinal))
+                .ok_or(RelationPlanError::CountOverflow)?;
+            let common_reference = builder.add_split_verifier_vector(
+                &KeyVerifierSourceKey::GaloisCommonReference {
+                    schedule_position,
+                    decomposition_block_index: u16::try_from(decomposition_block_index)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    modulus_reference,
+                },
+                modulus_reference,
+            )?;
+            let quotient = builder.add_trustee_radix_three_quotient_witness()?;
+            let gadget_coefficient =
+                geometry.gadget_coefficient(decomposition_block_index, modulus_reference)?;
+            for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
+                builder.add_galois_key_equation(
+                    modulus_reference,
+                    challenge_ordinal,
+                    &galois_key_share_rows[row_ordinal],
+                    common_reference,
+                    secret,
+                    automorphed_secret,
+                    &error,
+                    gadget_coefficient,
                     quotient,
                 )?;
             }
@@ -752,12 +855,53 @@ pub(crate) fn compile_galois_key_share_relation_plan(
     {
         return Err(RelationPlanError::InvalidDomain);
     }
-
-    // The current expression grammar has no exact compact permutation for
-    // X -> X^g in Z[X]/(X^N + 1). Expanding the automorphism into additive
-    // trace rotations exceeds the production zero-knowledge mask-image bound,
-    // so emitting a weaker coefficient-local or unbound identity is forbidden.
-    Err(RelationPlanError::MissingExactNegacyclicLowering)
+    let mut sources = vec![statement_root_source(
+        GALOIS_KEY_SHARE_ROOT_FIELD_ORDINAL,
+        None,
+    )];
+    append_galois_relation_sources(
+        &mut sources,
+        &input.geometry,
+        input.schedule_position,
+        input.galois_element,
+    )?;
+    let geometry = input
+        .geometry
+        .key_relation_geometry(input.schedule_position)?;
+    let mut builder = KeyRelationPlanBuilder::new(
+        GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        &geometry,
+        check_context,
+        sources,
+    )?;
+    let secret = builder.add_reversible_signed_ternary_vector()?;
+    let automorphed_secret = builder.add_signed_ternary_vector()?;
+    builder.add_negacyclic_automorphism_permutation(
+        &KeyVerifierSourceKey::NegacyclicAutomorphismMapping {
+            ring_degree: input.geometry.ring_degree,
+            galois_element: input.galois_element,
+        },
+        input.galois_element,
+        &secret,
+        &automorphed_secret,
+    )?;
+    let galois_key_share_rows = add_statement_root_rows(
+        &mut builder,
+        &input.geometry,
+        GALOIS_KEY_SHARE_ROOT_FIELD_ORDINAL,
+        BoundPolynomialRootUse::Output,
+    )?;
+    add_galois_relations(
+        &mut builder,
+        &input.geometry,
+        input.schedule_position,
+        &galois_key_share_rows,
+        &secret,
+        &automorphed_secret,
+        check_context,
+    )?;
+    add_anchor_relations(&mut builder, &input.geometry, &secret, check_context)?;
+    builder.finish()
 }
 
 #[cfg(test)]
@@ -776,7 +920,8 @@ mod tests {
     use super::super::{
         ModulusCatalog, RelationBoundCertificate, RelationEmbeddingKind,
         RelationIntegerLiftCoefficient, RelationVerifierSource, ResolvedSuiteModulus,
-        SignedIntegerInterval,
+        SignedIntegerInterval, apply_negacyclic_automorphism,
+        negacyclic_automorphism_mapping_values, negacyclic_automorphism_semantics_match,
     };
     use super::*;
     use crate::bgv::parameters::{DATA_PRIMES, SPECIAL_PRIME};
@@ -784,7 +929,7 @@ mod tests {
     fn check_context() -> RelationPlanCheckContext {
         let mut context = key_relation_check_context(true);
         context.resolved_moduli.insert(
-            2,
+            3,
             ResolvedSuiteModulus::new(SuiteModulusReference::special(0), SPECIAL_PRIME),
         );
         context
@@ -796,13 +941,13 @@ mod tests {
             evaluation_domain_size: TEST_EVALUATION_DOMAIN_SIZE,
             opening_degree_bound_exclusive: TEST_OPENING_DEGREE_BOUND_EXCLUSIVE,
             public_polynomial_column_degree_bound_exclusive: TEST_RING_DEGREE,
-            data_moduli: vec![DATA_PRIMES[0], DATA_PRIMES[1]],
+            data_moduli: vec![DATA_PRIMES[0], DATA_PRIMES[1], DATA_PRIMES[2]],
             special_moduli: vec![SPECIAL_PRIME],
             plaintext_modulus: 257,
             decomposition_blocks: vec![TrusteeEvaluationKeyDecompositionBlock {
-                data_modulus_indices: vec![0, 1],
+                data_modulus_indices: vec![0, 1, 2],
             }],
-            commitment_data_modulus_indices: vec![0, 1],
+            commitment_data_modulus_indices: vec![0, 1, 2],
             commitment_module_rank: 1,
             first_mask_purpose: 100,
         }
@@ -1025,31 +1170,84 @@ mod tests {
         );
 
         let mut unsupported_anchor_rank = round_one_input();
-        unsupported_anchor_rank.geometry.ring_degree = 32_768;
-        unsupported_anchor_rank.geometry.commitment_module_rank = 3;
+        unsupported_anchor_rank.geometry.commitment_module_rank = 2;
         assert_eq!(
             compile_relinearization_round_one_relation_plan(&unsupported_anchor_rank, &context,),
-            Err(RelationPlanError::IntegerBoundOverflow)
+            Err(RelationPlanError::InvalidDomain)
         );
     }
 
     #[test]
-    fn galois_relation_validates_the_automorphism_then_fails_closed() {
+    fn galois_relation_uses_the_exact_compact_automorphism_permutation() {
         let context = check_context();
         let input = GaloisKeyShareRelationPlanInput {
             schedule_position: 4,
             galois_element: 3,
             geometry: geometry(),
         };
+        let plan = compile_galois_key_share_relation_plan(&input, &context)
+            .expect("exact Galois-key-share relation plan");
         assert_eq!(
-            compile_galois_key_share_relation_plan(&input, &context),
-            Err(RelationPlanError::MissingExactNegacyclicLowering)
+            plan.application_statement_schema_identifier(),
+            GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
         );
+        let variant = plan
+            .select_variant(Some(input.schedule_position), None)
+            .expect("scheduled Galois-key-share variant");
+        for batch in &variant.ordered_integer_lift_batches {
+            assert_eq!(
+                batch.ordered_negacyclic_automorphism_permutations.len(),
+                usize::from(batch.modulus_reference == SuiteModulusReference::data(0))
+            );
+        }
+        let mapping_source_count = variant
+            .ordered_verifier_sources
+            .iter()
+            .filter(|source| {
+                matches!(
+                    source,
+                    RelationVerifierSource::NegacyclicAutomorphismMapping {
+                        ring_degree: TEST_RING_DEGREE,
+                        galois_element: 3,
+                    }
+                )
+            })
+            .count();
+        assert_eq!(mapping_source_count, 1);
+
         let mut even_automorphism = input;
         even_automorphism.galois_element = 4;
         assert_eq!(
             compile_galois_key_share_relation_plan(&even_automorphism, &context,),
             Err(RelationPlanError::InvalidDomain)
+        );
+    }
+
+    #[test]
+    fn negacyclic_automorphism_semantics_match_an_independent_coefficient_oracle() {
+        let mapping = negacyclic_automorphism_mapping_values(8, 3)
+            .expect("deterministic automorphism mapping");
+        assert_eq!(
+            mapping,
+            vec![
+                0, 3, 6, 1, 0, 0, 0, 1, 4, 7, 2, 5, 1, 1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7,
+            ]
+        );
+        let source = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let expected = vec![1, -4, 7, 2, -5, 8, 3, -6];
+        assert_eq!(
+            apply_negacyclic_automorphism(&source, 3).expect("coefficient automorphism"),
+            expected
+        );
+        assert!(
+            negacyclic_automorphism_semantics_match(&source, &expected, 3)
+                .expect("matching automorphism")
+        );
+        let mut mutated = expected;
+        mutated[5] += 1;
+        assert!(
+            !negacyclic_automorphism_semantics_match(&source, &mutated, 3)
+                .expect("mutated automorphism")
         );
     }
 }

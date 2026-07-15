@@ -33,6 +33,7 @@ use super::super::accepted_setup::{
     public_key_share_coefficient_vector_hash, verify_collective_bgv_setup_intent_for_test,
     verify_collective_bgv_setup_package,
 };
+use super::super::decryption_threshold_for_participant_count;
 use super::super::sampling::{dense_public_residues, negacyclic_product_mod};
 use super::super::setup_proof::{
     authenticate_setup_proof_material_stream_for_test,

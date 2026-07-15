@@ -56,14 +56,14 @@ fn vss_aggregate_threshold_proof_record(
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    let coefficient_source_records = package["vssPublicCoefficientCommitmentSet"]
-        ["sourceTrusteeRecords"]
-        .as_array()
-        .expect("VSS coefficient source records");
-    let recipient_source_records = package["vssPublicRecipientShareCommitmentSet"]
-        ["sourceTrusteeRecords"]
-        .as_array()
-        .expect("VSS recipient-share source records");
+    let coefficient_source_records =
+        package["vssPublicCoefficientCommitmentSet"]["sourceTrusteeRecords"]
+            .as_array()
+            .expect("VSS coefficient source records");
+    let recipient_source_records =
+        package["vssPublicRecipientShareCommitmentSet"]["sourceTrusteeRecords"]
+            .as_array()
+            .expect("VSS recipient-share source records");
     let aggregate_record_index = usize::try_from(recipient_roster_position)
         .expect("recipient roster position fits usize")
         .checked_mul(DATA_PRIMES.len())

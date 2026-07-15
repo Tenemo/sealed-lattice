@@ -72,19 +72,11 @@ type VerificationRecord =
     | Awaited<ReturnType<typeof createVssShareAcceptanceRecord>>
     | Awaited<ReturnType<typeof createVssShareComplaintRecord>>;
 
-const setupIntent = (
-    recipientRosterPosition: number,
-    recoveryEpoch: number,
-    deviceEpoch: number,
-): AcceptanceRecordInput['setupIntent'] => ({
+const setupIntent = (): AcceptanceRecordInput['setupIntent'] => ({
     objectType: 'CollectiveBgvSetupIntent',
     trusteeRegistrations: [0, 1].map((rosterPosition) => ({
         objectType: 'CollectiveBgvSetupIntentTrusteeRegistration' as const,
         trusteeIdentity: `trustee-${String(rosterPosition)}`,
-        recoveryEpoch:
-            rosterPosition === recipientRosterPosition ? recoveryEpoch : 0,
-        deviceEpoch:
-            rosterPosition === recipientRosterPosition ? deviceEpoch : 0,
         privateVssMailboxPublicKeyHash: fixtureHash(
             `mailbox-key-${String(rosterPosition)}`,
         ),
@@ -119,15 +111,9 @@ const acceptanceRecordInput = (
     signer: FixtureSigner,
     sourceTrusteeRosterPosition = 0,
     recipientRosterPosition = 0,
-    recoveryEpoch = 0,
-    deviceEpoch = 0,
 ): AcceptanceRecordInput => ({
     setupContext,
-    setupIntent: setupIntent(
-        recipientRosterPosition,
-        recoveryEpoch,
-        deviceEpoch,
-    ),
+    setupIntent: setupIntent(),
     vssPublicCoefficientCommitmentSet: vssPublicCoefficientCommitmentSet(),
     privateVssEnvelopeCommitmentRoot,
     envelopeReference: envelopeReference(
@@ -172,8 +158,6 @@ const shareVerificationPayloadFields = (input: AcceptanceRecordInput) => {
         privateVssEnvelopeCommitmentRoot:
             input.privateVssEnvelopeCommitmentRoot,
         privateEnvelopeHash: input.envelopeReference.privateEnvelopeHash,
-        recoveryEpoch: recipientRegistration.recoveryEpoch,
-        deviceEpoch: recipientRegistration.deviceEpoch,
     };
 };
 
@@ -194,10 +178,10 @@ const expectReturnedTrusteeSignature = (
 describe('VSS share verification record builders', () => {
     it('creates a signed acceptance record and deterministic acceptance set', async () => {
         const signer = createSigner('recipient-acceptance-positive');
-        const firstInput = acceptanceRecordInput(signer, 1, 0, 2, 3);
+        const firstInput = acceptanceRecordInput(signer, 1, 0);
         const firstRecord = await createVssShareAcceptanceRecord(firstInput);
         const secondRecord = await createVssShareAcceptanceRecord(
-            acceptanceRecordInput(signer, 0, 0, 2, 3),
+            acceptanceRecordInput(signer, 0, 0),
         );
         const expectedAcceptanceRoot = deriveCanonicalObjectHash({
             objectType: 'VssShareAcceptance',
@@ -235,7 +219,7 @@ describe('VSS share verification record builders', () => {
 
     it('creates a recipient-signed complaint bound to the share context', async () => {
         const signer = createSigner('recipient-complaint-positive');
-        const input = acceptanceRecordInput(signer, 0, 1, 4, 5);
+        const input = acceptanceRecordInput(signer, 0, 1);
         const complaintRecord = await createVssShareComplaintRecord(input);
         const expectedComplaintRoot = deriveCanonicalObjectHash({
             objectType: 'VssShareComplaint',
@@ -246,17 +230,6 @@ describe('VSS share verification record builders', () => {
             complaintRecord,
             signer,
             expectedComplaintRoot,
-        );
-    });
-
-    it('rejects a negative recovery epoch before signing', async () => {
-        const signer = createSigner('negative-recovery-epoch');
-        await expect(
-            createVssShareAcceptanceRecord({
-                ...acceptanceRecordInput(signer, 0, 0, -1),
-            }),
-        ).rejects.toThrow(
-            /recipientRegistration.recoveryEpoch must be a non-negative safe integer/u,
         );
     });
 });

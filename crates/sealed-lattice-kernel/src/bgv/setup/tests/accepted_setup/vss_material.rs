@@ -111,8 +111,6 @@ fn install_signed_vss_complaint(package: &mut serde_json::Value) {
         "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
         "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
         "privateEnvelopeHash": private_envelope_hash,
-        "recoveryEpoch": 0,
-        "deviceEpoch": 0,
     });
     let complaint_root =
         derive_canonical_object_hash(&complaint_payload).expect("VSS complaint root");

@@ -22,9 +22,9 @@ impl ProofRandomnessAssignment {
     }
 }
 
-// These are the operative mask-purpose allocations consumed by the existing
-// proof families. The ranges preserve the former deterministic allocations
-// without retaining an unfinished relation-plan compiler or candidate suite.
+// These are the operative mask-purpose allocations consumed by the generated
+// secret-bearing relation plans. Public-only families are intentionally absent:
+// they allocate neither private masks nor a private proof-salt stream.
 const PROOF_RANDOMNESS_ASSIGNMENTS: [ProofRandomnessAssignment; PROOF_RANDOMNESS_ASSIGNMENT_COUNT] = [
     ProofRandomnessAssignment {
         family_schema_identifier: 0x1211,
@@ -146,7 +146,16 @@ mod tests {
             ));
         }
 
-        assert!(!common_proof_randomness_purpose_is_assigned(0x1213, 1));
+        for public_only_family in [0x1213, 0x1215, 0x1218] {
+            assert!(!common_proof_randomness_purpose_is_assigned(
+                public_only_family,
+                PRIVATE_PROOF_SALT_PURPOSE,
+            ));
+            assert!(!common_proof_randomness_purpose_is_assigned(
+                public_only_family,
+                1,
+            ));
+        }
         assert!(!common_proof_randomness_purpose_is_assigned(0xffff, 1));
         assert!(!common_proof_randomness_purpose_is_assigned(0x1211, 3));
         assert!(!common_proof_randomness_purpose_is_assigned(0x1217, 41));

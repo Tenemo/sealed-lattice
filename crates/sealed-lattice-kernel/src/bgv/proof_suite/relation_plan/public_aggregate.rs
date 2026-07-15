@@ -149,13 +149,8 @@ pub(crate) fn compile_collective_public_key_aggregate_relation_plan(
         ordered_moduli: input.ordered_component_moduli.clone(),
         constraint_role_coordinates: vec![0],
     };
-    let variant = compile_public_aggregate_variant(
-        &input.geometry,
-        None,
-        None,
-        &[component],
-        context,
-    )?;
+    let variant =
+        compile_public_aggregate_variant(&input.geometry, None, None, &[component], context)?;
     finish_plan(
         COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
         vec![variant],
@@ -197,10 +192,7 @@ pub(crate) fn compile_rkg_round_one_aggregate_relation_plan(
                         .collect::<Result<Vec<_>, _>>()?,
                     aggregate_root_path: root_field_path(3),
                     ordered_moduli: variant.ordered_left_component_moduli.clone(),
-                    constraint_role_coordinates: vec![
-                        u64::from(variant.schedule_position),
-                        0,
-                    ],
+                    constraint_role_coordinates: vec![u64::from(variant.schedule_position), 0],
                 },
                 AggregateComponent {
                     source_root_paths: (0..participant_count)
@@ -211,10 +203,7 @@ pub(crate) fn compile_rkg_round_one_aggregate_relation_plan(
                         .collect::<Result<Vec<_>, _>>()?,
                     aggregate_root_path: root_field_path(4),
                     ordered_moduli: variant.ordered_right_component_moduli.clone(),
-                    constraint_role_coordinates: vec![
-                        u64::from(variant.schedule_position),
-                        1,
-                    ],
+                    constraint_role_coordinates: vec![u64::from(variant.schedule_position), 1],
                 },
             ];
             compile_public_aggregate_variant(
@@ -411,36 +400,27 @@ fn compile_public_aggregate_variant(
                 .and_then(|columns| columns.get(modulus_ordinal))
                 .copied()
                 .ok_or(RelationPlanError::InvalidColumn)?;
-            let difference_expression = aggregate_difference_expression(
-                &source_column_ordinals,
-                aggregate_column_ordinal,
-            )?;
+            let difference_expression =
+                aggregate_difference_expression(&source_column_ordinals, aggregate_column_ordinal)?;
             let factor_expressions = (0..geometry.participant_count)
                 .map(|multiple| {
-                    aggregate_factor_expression(
-                        &difference_expression,
-                        modulus_reference,
-                        multiple,
-                    )
+                    aggregate_factor_expression(&difference_expression, modulus_reference, multiple)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let mut role_coordinates = component.constraint_role_coordinates.clone();
             role_coordinates.push(
-                u64::try_from(component_ordinal)
-                    .map_err(|_| RelationPlanError::CountOverflow)?,
+                u64::try_from(component_ordinal).map_err(|_| RelationPlanError::CountOverflow)?,
             );
             role_coordinates.push(
-                u64::try_from(modulus_ordinal)
-                    .map_err(|_| RelationPlanError::CountOverflow)?,
+                u64::try_from(modulus_ordinal).map_err(|_| RelationPlanError::CountOverflow)?,
             );
             ordered_constraints.push(RelationConstraintDescriptor {
                 constraint_role: AGGREGATE_CONSTRAINT_ROLE,
                 role_coordinates,
-                numerator_postfix_expression:
-                    ordered_injective_integer_factor_product_expression(&factor_expressions)?,
-                zeroifier_postfix_expression: full_trace_zeroifier_expression(
-                    geometry.ring_degree,
-                ),
+                numerator_postfix_expression: ordered_injective_integer_factor_product_expression(
+                    &factor_expressions,
+                )?,
+                zeroifier_postfix_expression: full_trace_zeroifier_expression(geometry.ring_degree),
                 enforce_proof_base_field_no_wrap: false,
                 ordered_injective_integer_factor_expressions: factor_expressions,
             });
@@ -457,8 +437,8 @@ fn compile_public_aggregate_variant(
         .collect::<Vec<_>>();
     let mut ordered_opening_claims = Vec::new();
     for (tree_ordinal, tree) in ordered_trees.iter().enumerate() {
-        let tree_ordinal = u32::try_from(tree_ordinal)
-            .map_err(|_| RelationPlanError::CountOverflow)?;
+        let tree_ordinal =
+            u32::try_from(tree_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
         for column_ordinal in tree.ordered_column_ordinals() {
             for opening_point_ordinal in 0..ordered_opening_points.len() {
                 ordered_opening_claims.push(RelationOpeningClaimDescriptor {
@@ -481,8 +461,7 @@ fn compile_public_aggregate_variant(
                 column_ordinal: None,
                 opening_point_ordinal: u32::try_from(opening_point_ordinal)
                     .map_err(|_| RelationPlanError::CountOverflow)?,
-                source_degree_bound_exclusive: context
-                    .quotient_component_degree_bound_exclusive,
+                source_degree_bound_exclusive: context.quotient_component_degree_bound_exclusive,
             });
         }
     }
@@ -570,8 +549,8 @@ fn ordered_root_sources(
     let mut source_ordinals = BTreeMap::new();
     let mut ordered_sources = Vec::with_capacity(entries.len());
     for (_, path, source) in entries {
-        let ordinal = u32::try_from(ordered_sources.len())
-            .map_err(|_| RelationPlanError::CountOverflow)?;
+        let ordinal =
+            u32::try_from(ordered_sources.len()).map_err(|_| RelationPlanError::CountOverflow)?;
         source_ordinals.insert(path, ordinal);
         ordered_sources.push(source);
     }
@@ -683,17 +662,15 @@ fn literal_list_index(ordinal: usize) -> Option<RelationSelectorPathStep> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bgv::proof_suite::{
-        ProofBaseFieldElement, ProofChallengeExtensionElement,
-    };
+    use crate::bgv::proof_suite::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 
     fn check_context() -> RelationPlanCheckContext {
         let evaluation_domain_size = 128_u64;
         let maximum_two_adic_order = 1_u64 << 32;
         RelationPlanCheckContext {
             base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
-            challenge_extension_degree:
-                crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
+            challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
+                as u16,
             evaluation_blowup_factor: 2,
             evaluation_domain_generator: modular_power(
                 crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
@@ -750,7 +727,10 @@ mod tests {
                 && column.canonical_residue_modulus.is_some()
         }));
         assert!(variant.ordered_constraints.iter().all(|constraint| {
-            constraint.ordered_injective_integer_factor_expressions.len() == 3
+            constraint
+                .ordered_injective_integer_factor_expressions
+                .len()
+                == 3
                 && !constraint.enforce_proof_base_field_no_wrap
         }));
     }
@@ -781,13 +761,11 @@ mod tests {
                 conjugate_index: 0,
             },
         ];
-        let evaluation_generator = ProofBaseFieldElement::from_canonical(
-            context.evaluation_domain_generator,
-        )
-        .expect("the test context has a canonical evaluation generator");
-        let trace_generator = evaluation_generator.power(
-            variant.evaluation_domain_size / variant.trace_domain_size,
-        );
+        let evaluation_generator =
+            ProofBaseFieldElement::from_canonical(context.evaluation_domain_generator)
+                .expect("the test context has a canonical evaluation generator");
+        let trace_generator =
+            evaluation_generator.power(variant.evaluation_domain_size / variant.trace_domain_size);
         let trace_generator_inverse = trace_generator
             .inverse()
             .expect("the trace generator is nonzero");
@@ -795,15 +773,10 @@ mod tests {
         let (prior_point, translated_candidate) = (2..128_u64)
             .find_map(|coordinate| {
                 let prior_point = ProofChallengeExtensionElement::from_canonical_coordinates([
-                    coordinate,
-                    1,
-                    0,
-                    0,
-                    0,
+                    coordinate, 1, 0, 0, 0,
                 ])
                 .ok()?;
-                let translated_candidate =
-                    prior_point.multiply_base(trace_generator_inverse);
+                let translated_candidate = prior_point.multiply_base(trace_generator_inverse);
                 (translated_candidate != prior_point
                     && variant
                         .deep_point_candidate_is_forbidden(
@@ -878,21 +851,13 @@ mod tests {
                 ordered_variants: vec![
                     RkgRoundOneAggregateVariantInput {
                         schedule_position: 2,
-                        ordered_left_component_moduli: vec![
-                            SuiteModulusReference::data(0),
-                        ],
-                        ordered_right_component_moduli: vec![
-                            SuiteModulusReference::special(0),
-                        ],
+                        ordered_left_component_moduli: vec![SuiteModulusReference::data(0)],
+                        ordered_right_component_moduli: vec![SuiteModulusReference::special(0)],
                     },
                     RkgRoundOneAggregateVariantInput {
                         schedule_position: 7,
-                        ordered_left_component_moduli: vec![
-                            SuiteModulusReference::data(0),
-                        ],
-                        ordered_right_component_moduli: vec![
-                            SuiteModulusReference::special(0),
-                        ],
+                        ordered_left_component_moduli: vec![SuiteModulusReference::data(0)],
+                        ordered_right_component_moduli: vec![SuiteModulusReference::special(0)],
                     },
                 ],
             },
@@ -910,15 +875,11 @@ mod tests {
                 ordered_entries: vec![
                     EvaluatorKeyAggregateEntryPlanInput {
                         schedule_position: 3,
-                        ordered_runtime_component_moduli: vec![
-                            SuiteModulusReference::data(0),
-                        ],
+                        ordered_runtime_component_moduli: vec![SuiteModulusReference::data(0)],
                     },
                     EvaluatorKeyAggregateEntryPlanInput {
                         schedule_position: 1,
-                        ordered_runtime_component_moduli: vec![
-                            SuiteModulusReference::special(0),
-                        ],
+                        ordered_runtime_component_moduli: vec![SuiteModulusReference::special(0)],
                     },
                 ],
             })

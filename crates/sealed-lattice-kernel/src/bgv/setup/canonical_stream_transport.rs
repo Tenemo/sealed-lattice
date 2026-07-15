@@ -1235,9 +1235,6 @@ pub(crate) fn begin_bgv_canonical_material_reader(
         .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
     let total_byte_length = u32::try_from(material.len())
         .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
-    let chunk_count = u32::try_from(material.chunk_count())
-        .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)?;
-
     let mut registry = lock_registry()?;
     registry.refuse_overlapping_transaction()?;
     let handle = registry.take_material_reader_handle()?;
@@ -1252,7 +1249,6 @@ pub(crate) fn begin_bgv_canonical_material_reader(
     Ok(CanonicalStreamRuntimeBegin {
         handle,
         total_byte_length,
-        chunk_count,
     })
 }
 

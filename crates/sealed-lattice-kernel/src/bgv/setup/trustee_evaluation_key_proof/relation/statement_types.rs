@@ -51,9 +51,7 @@ pub(crate) struct SameSecretLinkageStatement {
 pub(crate) struct PrivateVssShareStatement {
     pub(crate) public_matrix_seed_hash: String,
     pub(crate) private_envelope_aad_hash: String,
-    pub(crate) source_trustee_identity: String,
     pub(crate) source_trustee_roster_position: u64,
-    pub(crate) recipient_identity: String,
     pub(crate) recipient_roster_position: u64,
     pub(crate) source_trustee_commitment_root: String,
     pub(crate) source_rns_limb_index: usize,
@@ -71,7 +69,6 @@ pub(crate) struct VssShareLinkageCommitment {
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct SuccinctSetupProofContext {
     pub(crate) setup_context_hash: String,
-    pub(crate) trustee_identity: String,
     pub(crate) trustee_roster_position: u64,
     pub(crate) binding_roots: Vec<String>,
 }
@@ -106,13 +103,13 @@ pub(crate) struct KeyBearingWitness {
 
 pub(crate) struct SameSecretLinkageWitness {
     pub(crate) negative_indicator_coefficients: Vec<i64>,
-    pub(crate) opening_randomness_by_limb: Vec<Vec<Vec<i64>>>,
+    pub(crate) opening_randomness_by_source_limb_and_commitment_limb: Vec<Vec<Vec<Vec<i64>>>>,
 }
 
 pub(crate) enum TrusteeEvaluationKeyWitness {
     PrivateVssShare {
         coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
-        opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
+        opening_randomness_by_shamir_index_and_commitment_limb: Vec<Vec<Vec<Vec<i64>>>>,
         carry_witnesses: Vec<i64>,
     },
     TrusteeEvaluationKey {
@@ -214,18 +211,26 @@ impl TrusteeEvaluationKeyWitness {
         }
     }
 
-    pub(crate) fn opening_randomness_by_limb(&self) -> &[Vec<Vec<i64>>] {
+    pub(crate) fn opening_randomness_by_source_limb_and_commitment_limb(
+        &self,
+    ) -> &[Vec<Vec<Vec<i64>>>] {
         match self {
             Self::PrivateVssShare { .. } => &[],
-            Self::TrusteeEvaluationKey { linkage, .. } => &linkage.opening_randomness_by_limb,
+            Self::TrusteeEvaluationKey { linkage, .. } => {
+                &linkage.opening_randomness_by_source_limb_and_commitment_limb
+            }
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn opening_randomness_by_limb_mut(&mut self) -> &mut [Vec<Vec<i64>>] {
+    pub(crate) fn opening_randomness_by_source_limb_and_commitment_limb_mut(
+        &mut self,
+    ) -> &mut [Vec<Vec<Vec<i64>>>] {
         match self {
             Self::PrivateVssShare { .. } => &mut [],
-            Self::TrusteeEvaluationKey { linkage, .. } => &mut linkage.opening_randomness_by_limb,
+            Self::TrusteeEvaluationKey { linkage, .. } => {
+                &mut linkage.opening_randomness_by_source_limb_and_commitment_limb
+            }
         }
     }
 
@@ -239,12 +244,14 @@ impl TrusteeEvaluationKeyWitness {
         }
     }
 
-    pub(crate) fn private_vss_opening_randomness_by_shamir_index(&self) -> &[Vec<Vec<i64>>] {
+    pub(crate) fn private_vss_opening_randomness_by_shamir_index_and_commitment_limb(
+        &self,
+    ) -> &[Vec<Vec<Vec<i64>>>] {
         match self {
             Self::PrivateVssShare {
-                opening_randomness_by_shamir_index,
+                opening_randomness_by_shamir_index_and_commitment_limb,
                 ..
-            } => opening_randomness_by_shamir_index,
+            } => opening_randomness_by_shamir_index_and_commitment_limb,
             Self::TrusteeEvaluationKey { .. } => &[],
         }
     }

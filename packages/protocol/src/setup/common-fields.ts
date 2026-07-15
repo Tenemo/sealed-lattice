@@ -1,7 +1,5 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
-
-import { protocolHashPattern } from '../common/verification-helpers.js';
+import { isProtocolHash, type ProtocolHash } from '@sealed-lattice/types';
 
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
@@ -11,7 +9,7 @@ export const assertProtocolHash = (
     value: unknown,
     fieldName: string,
 ): ProtocolHash => {
-    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
+    if (!isProtocolHash(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
     }
 

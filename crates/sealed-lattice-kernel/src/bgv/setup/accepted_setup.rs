@@ -139,8 +139,30 @@ pub(super) struct AcceptedRosterParameters {
 
 /// q_dec = floor(n / 3) + 1. Setup, ballot release, and finality use the full
 /// roster (= n).
-pub(super) const fn decryption_threshold_for_participant_count(participant_count: u64) -> u64 {
+pub(in crate::bgv) const fn decryption_threshold_for_participant_count(
+    participant_count: u64,
+) -> u64 {
     participant_count / 3 + 1
+}
+
+pub(in crate::bgv) fn decryption_threshold_for_roster_length(
+    participant_count: usize,
+) -> CanonicalResult<usize> {
+    let participant_count = u64::try_from(participant_count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "the setup participant count does not fit u64",
+        )
+    })?;
+    usize::try_from(decryption_threshold_for_participant_count(
+        participant_count,
+    ))
+    .map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "the setup decryption threshold does not fit usize",
+        )
+    })
 }
 
 pub(super) const fn participant_count_is_supported(participant_count: u64) -> bool {

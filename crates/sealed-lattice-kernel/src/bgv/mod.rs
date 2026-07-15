@@ -23,6 +23,7 @@ mod encoding;
     )
 )]
 pub(crate) mod evaluator;
+pub(crate) mod key_switch_topology;
 mod modular_arithmetic;
 mod ntt;
 mod rns;

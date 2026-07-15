@@ -6,6 +6,12 @@ use fips203::{
 };
 use zeroize::Zeroizing;
 
+use crate::bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE};
+use crate::bgv::setup::{
+    SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, compute_setup_commitment_from_typed_opening,
+};
+
 use super::local_storage_runtime::{
     LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH, open_action_randomness_root,
     seal_action_randomness_root,
@@ -16,48 +22,86 @@ use super::state_runtime::{
 };
 use super::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionPrivateRandomness, ActionRandomnessDerivationInput,
-    ActionRandomnessRoot, CanonicalDecodeLimits, Hash512, LOCAL_RECORD_NONCE_BYTE_LENGTH,
-    LocalStorageBinding, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH,
+    ActionRandomnessRoot, CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512,
+    LOCAL_RECORD_NONCE_BYTE_LENGTH, LocalStorageBinding, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH,
     ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH, OrdinaryProofCoinInput, ParticipantIdentity,
     PersistentProofCoinInput, PrivateRandomnessDomain, ProofApplicationSlot, RefusalReason, Roster,
-    StateCapabilityKind,
+    SetupStructuredCommitmentOpeningContext, StateCapabilityKind,
 };
 
 const COMMAND_OPEN: u32 = 1;
 const COMMAND_CLOSE: u32 = 2;
 const COMMAND_SETUP_MAILBOX_ENCAPSULATE: u32 = 3;
-const COMMAND_PERSISTENT_PROOF_ATTEMPT: u32 = 5;
-const COMMAND_ORDINARY_PROOF_ATTEMPT: u32 = 6;
-const COMMAND_TARGET_RELEASE_ATTEMPT: u32 = 7;
-const COMMAND_FRESH_BALLOT_ATTEMPT: u32 = 8;
-const COMMAND_CREATE_AND_SEAL: u32 = 9;
-const COMMAND_OPEN_SEALED: u32 = 10;
-const COMMAND_SETUP_ACTION_RANDOMNESS_AUTHORIZATION: u32 = 11;
-const COMMAND_VALIDATE_SETUP_MAILBOX_SOURCE_KEYS: u32 = 12;
+const COMMAND_PERSISTENT_PROOF_ATTEMPT: u32 = 4;
+const COMMAND_ORDINARY_PROOF_ATTEMPT: u32 = 5;
+const COMMAND_TARGET_RELEASE_ATTEMPT: u32 = 6;
+const COMMAND_FRESH_BALLOT_ATTEMPT: u32 = 7;
+const COMMAND_CREATE_AND_SEAL: u32 = 8;
+const COMMAND_OPEN_SEALED: u32 = 9;
+const COMMAND_SETUP_ACTION_RANDOMNESS_AUTHORIZATION: u32 = 10;
+const COMMAND_VALIDATE_SETUP_MAILBOX_SOURCE_KEYS: u32 = 11;
+const COMMAND_SETUP_MAILBOX_SIGNATURE_HEDGE: u32 = 12;
+const COMMAND_CREATE_STRUCTURED_COMMITMENT_OPENING: u32 = 13;
+const COMMAND_RELEASE_STRUCTURED_COMMITMENT_OPENING: u32 = 14;
+const COMMAND_COMPUTE_STRUCTURED_COMMITMENT: u32 = 15;
 
 const HANDLE_BYTE_LENGTH: usize = 4;
 const HASH_BYTE_LENGTH: usize = 64;
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const MAXIMUM_ACTIVE_SESSION_COUNT: usize = 256;
+const MAXIMUM_RETAINED_STRUCTURED_COMMITMENT_OPENING_COUNT: usize = 256;
+const MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
 
 pub(crate) const ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT: u32 = 0x0001_0000;
 pub(crate) const ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE: u32 = 0x0001_0001;
 
 type RuntimeResult<Value> = Result<Value, u32>;
 
-struct ValidatedSetupMailboxRoster {
+struct ValidatedSetupRoster {
     mailbox_encapsulation_keys: Vec<(
         ParticipantIdentity,
         [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
     )>,
+    participant_identities: Vec<ParticipantIdentity>,
     roster_hash: Hash512,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct StructuredCommitmentOpeningSlot {
+    source_setup_intent_object_hash: Hash512,
+    source_rns_limb_index: u16,
+    shamir_coefficient_index: u16,
+    commitment_data_prime_index: u16,
+}
+
+struct RetainedStructuredCommitmentOpening {
+    hiding_secret_polynomials: Vec<Zeroizing<Vec<i8>>>,
+    hiding_error_polynomials: Vec<Zeroizing<Vec<i8>>>,
+    opening_handle: u32,
+}
+
+impl RetainedStructuredCommitmentOpening {
+    fn has_expected_shape(&self) -> bool {
+        self.hiding_secret_polynomials.len() == SETUP_COMMITMENT_HIDING_SECRET_WIDTH
+            && self.hiding_error_polynomials.len() == SETUP_COMMITMENT_HIDING_ERROR_WIDTH
+            && self
+                .hiding_secret_polynomials
+                .iter()
+                .chain(&self.hiding_error_polynomials)
+                .all(|polynomial| polynomial.len() == POLYNOMIAL_DEGREE)
+    }
 }
 
 #[derive(Default)]
 struct ActionRandomnessRegistry {
     next_handle: u32,
+    next_structured_commitment_opening_handle: u32,
     sessions: HashMap<u32, ActionPrivateRandomness>,
-    setup_mailbox_rosters: HashMap<u32, ValidatedSetupMailboxRoster>,
+    setup_rosters: HashMap<u32, ValidatedSetupRoster>,
+    structured_commitment_opening_locations: HashMap<u32, (u32, StructuredCommitmentOpeningSlot)>,
+    structured_commitment_openings:
+        HashMap<u32, HashMap<StructuredCommitmentOpeningSlot, RetainedStructuredCommitmentOpening>>,
+    structured_commitment_setup_intent_hashes: HashMap<u32, Hash512>,
 }
 
 impl ActionRandomnessRegistry {
@@ -86,20 +130,28 @@ impl ActionRandomnessRegistry {
             .map(|_| ())
             .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE);
         if closed.is_ok() {
-            self.setup_mailbox_rosters.remove(&handle);
+            self.setup_rosters.remove(&handle);
+            self.structured_commitment_setup_intent_hashes
+                .remove(&handle);
+            if let Some(openings) = self.structured_commitment_openings.remove(&handle) {
+                for opening in openings.values() {
+                    self.structured_commitment_opening_locations
+                        .remove(&opening.opening_handle);
+                }
+            }
         }
         closed
     }
 
-    fn retain_setup_mailbox_roster(
+    fn retain_setup_roster(
         &mut self,
         handle: u32,
-        roster: ValidatedSetupMailboxRoster,
+        roster: ValidatedSetupRoster,
     ) -> RuntimeResult<()> {
         if !self.sessions.contains_key(&handle) {
             return Err(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE);
         }
-        self.setup_mailbox_rosters.insert(handle, roster);
+        self.setup_rosters.insert(handle, roster);
         Ok(())
     }
 
@@ -110,7 +162,7 @@ impl ActionRandomnessRegistry {
         recipient_participant_identity: ParticipantIdentity,
     ) -> RuntimeResult<[u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH]> {
         let roster = self
-            .setup_mailbox_rosters
+            .setup_rosters
             .get(&handle)
             .ok_or(RefusalReason::WrongContext.canonical_code() as u32)?;
         if roster.roster_hash != roster_hash {
@@ -123,6 +175,171 @@ impl ActionRandomnessRegistry {
                 (*participant_identity == recipient_participant_identity).then_some(*key)
             })
             .ok_or(RefusalReason::WrongContext.canonical_code() as u32)
+    }
+
+    fn setup_source_matches_roster_position(
+        &self,
+        handle: u32,
+        roster_hash: Hash512,
+        source_roster_position: u16,
+        expected_source_identity: ParticipantIdentity,
+    ) -> RuntimeResult<()> {
+        let roster = self
+            .setup_rosters
+            .get(&handle)
+            .ok_or(RefusalReason::MissingPrerequisite.canonical_code() as u32)?;
+        if roster.roster_hash != roster_hash {
+            return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
+        }
+        if roster
+            .participant_identities
+            .get(usize::from(source_roster_position))
+            != Some(&expected_source_identity)
+        {
+            return Err(RefusalReason::WrongContext.canonical_code() as u32);
+        }
+        Ok(())
+    }
+
+    fn retain_structured_commitment_opening(
+        &mut self,
+        action_randomness_handle: u32,
+        slot: StructuredCommitmentOpeningSlot,
+        mut opening: RetainedStructuredCommitmentOpening,
+    ) -> RuntimeResult<u32> {
+        if !self.sessions.contains_key(&action_randomness_handle) {
+            return Err(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE);
+        }
+        if let Some(pinned_hash) = self
+            .structured_commitment_setup_intent_hashes
+            .get(&action_randomness_handle)
+        {
+            if *pinned_hash != slot.source_setup_intent_object_hash {
+                return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
+            }
+        } else {
+            self.structured_commitment_setup_intent_hashes.insert(
+                action_randomness_handle,
+                slot.source_setup_intent_object_hash,
+            );
+        }
+        if let Some(retained) = self
+            .structured_commitment_openings
+            .get(&action_randomness_handle)
+            .and_then(|openings| openings.get(&slot))
+        {
+            if !retained.has_expected_shape() {
+                return Err(RefusalReason::ConsumedState.canonical_code() as u32);
+            }
+            return Ok(retained.opening_handle);
+        }
+        if self.structured_commitment_opening_locations.len()
+            >= MAXIMUM_RETAINED_STRUCTURED_COMMITMENT_OPENING_COUNT
+        {
+            return Err(ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT);
+        }
+        self.next_structured_commitment_opening_handle = self
+            .next_structured_commitment_opening_handle
+            .checked_add(1)
+            .ok_or(ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT)?;
+        opening.opening_handle = self.next_structured_commitment_opening_handle;
+        self.structured_commitment_opening_locations
+            .insert(opening.opening_handle, (action_randomness_handle, slot));
+        self.structured_commitment_openings
+            .entry(action_randomness_handle)
+            .or_default()
+            .insert(slot, opening);
+        Ok(self.next_structured_commitment_opening_handle)
+    }
+
+    fn existing_structured_commitment_opening_handles(
+        &self,
+        action_randomness_handle: u32,
+        slots: &[StructuredCommitmentOpeningSlot],
+    ) -> RuntimeResult<Vec<Option<u32>>> {
+        if !self.sessions.contains_key(&action_randomness_handle) {
+            return Err(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE);
+        }
+        let Some(first_slot) = slots.first() else {
+            return Err(RefusalReason::MissingPrerequisite.canonical_code() as u32);
+        };
+        if slots.iter().any(|slot| {
+            slot.source_setup_intent_object_hash != first_slot.source_setup_intent_object_hash
+        }) || self
+            .structured_commitment_setup_intent_hashes
+            .get(&action_randomness_handle)
+            .is_some_and(|pinned_hash| *pinned_hash != first_slot.source_setup_intent_object_hash)
+        {
+            return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
+        }
+        let mut handles = Vec::with_capacity(slots.len());
+        let mut fresh_opening_count = 0usize;
+        for slot in slots {
+            if let Some(retained) = self
+                .structured_commitment_openings
+                .get(&action_randomness_handle)
+                .and_then(|openings| openings.get(slot))
+            {
+                if !retained.has_expected_shape() {
+                    return Err(RefusalReason::ConsumedState.canonical_code() as u32);
+                }
+                handles.push(Some(retained.opening_handle));
+            } else {
+                fresh_opening_count = fresh_opening_count
+                    .checked_add(1)
+                    .ok_or(ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT)?;
+                handles.push(None);
+            }
+        }
+        if self
+            .structured_commitment_opening_locations
+            .len()
+            .checked_add(fresh_opening_count)
+            .map_or(true, |opening_count| {
+                opening_count > MAXIMUM_RETAINED_STRUCTURED_COMMITMENT_OPENING_COUNT
+            })
+            || self
+                .next_structured_commitment_opening_handle
+                .checked_add(
+                    u32::try_from(fresh_opening_count)
+                        .map_err(|_| ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT)?,
+                )
+                .is_none()
+        {
+            return Err(ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT);
+        }
+        Ok(handles)
+    }
+
+    fn release_structured_commitment_opening(
+        &mut self,
+        action_randomness_handle: u32,
+        opening_handle: u32,
+    ) -> RuntimeResult<()> {
+        let Some((owner_handle, slot)) = self
+            .structured_commitment_opening_locations
+            .get(&opening_handle)
+            .copied()
+        else {
+            return Err(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE);
+        };
+        if owner_handle != action_randomness_handle {
+            return Err(RefusalReason::WrongContext.canonical_code() as u32);
+        }
+        self.structured_commitment_opening_locations
+            .remove(&opening_handle);
+        let openings = self
+            .structured_commitment_openings
+            .get_mut(&action_randomness_handle)
+            .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE)?;
+        openings
+            .remove(&slot)
+            .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE)?;
+        if openings.is_empty() {
+            self.structured_commitment_openings
+                .remove(&action_randomness_handle);
+        }
+        Ok(())
     }
 }
 
@@ -190,6 +407,12 @@ pub(crate) fn run_action_randomness_command(command: u32, input: &[u8]) -> Runti
         COMMAND_OPEN => open(input),
         COMMAND_CLOSE => close(input),
         COMMAND_SETUP_MAILBOX_ENCAPSULATE => setup_mailbox_encapsulate(input),
+        COMMAND_SETUP_MAILBOX_SIGNATURE_HEDGE => setup_mailbox_signature_hedge(input),
+        COMMAND_CREATE_STRUCTURED_COMMITMENT_OPENING => create_structured_commitment_opening(input),
+        COMMAND_RELEASE_STRUCTURED_COMMITMENT_OPENING => {
+            release_structured_commitment_opening(input)
+        }
+        COMMAND_COMPUTE_STRUCTURED_COMMITMENT => compute_structured_commitment(input),
         COMMAND_PERSISTENT_PROOF_ATTEMPT => persistent_proof_attempt(input),
         COMMAND_ORDINARY_PROOF_ATTEMPT => ordinary_proof_attempt(input),
         COMMAND_TARGET_RELEASE_ATTEMPT => target_release_attempt(input),
@@ -228,7 +451,6 @@ fn create_and_seal(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let root = Zeroizing::new(reader.read_array::<ACTION_RANDOMNESS_ROOT_BYTE_LENGTH>()?);
     let derivation_input = read_derivation_input(&mut reader)?;
     let record_version = reader.read_u64()?;
-    let creation_recovery_epoch = reader.read_u64()?;
     let predecessor_record_hash = read_optional_hash(&mut reader)?;
     let nonce = reader.read_array::<LOCAL_RECORD_NONCE_BYTE_LENGTH>()?;
     reader.finish()?;
@@ -249,7 +471,6 @@ fn create_and_seal(input: &[u8]) -> RuntimeResult<Vec<u8>> {
             binding,
             commitment,
             record_version,
-            creation_recovery_epoch,
             predecessor_record_hash,
             nonce,
             randomness.root(),
@@ -329,8 +550,10 @@ fn validate_setup_mailbox_source_keys(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         let expected_participant_identity = randomness.derivation_input().participant_identity();
         let mut source_keys_match = false;
         let mut mailbox_encapsulation_keys = Vec::with_capacity(roster.entries.len());
+        let mut participant_identities = Vec::with_capacity(roster.entries.len());
         for entry in &roster.entries {
             let participant_identity = entry.participant_identity().map_err(schema_status)?;
+            participant_identities.push(participant_identity);
             mailbox_encapsulation_keys
                 .push((participant_identity, entry.mailbox_encapsulation_key));
             if participant_identity == expected_participant_identity {
@@ -342,10 +565,11 @@ fn validate_setup_mailbox_source_keys(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         if !source_keys_match {
             return Err(RefusalReason::WrongContext.canonical_code() as u32);
         }
-        registry.retain_setup_mailbox_roster(
+        registry.retain_setup_roster(
             handle,
-            ValidatedSetupMailboxRoster {
+            ValidatedSetupRoster {
                 mailbox_encapsulation_keys,
+                participant_identities,
                 roster_hash,
             },
         )?;
@@ -360,7 +584,6 @@ fn open_sealed(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let expected_commitment = Hash512::from_bytes(reader.read_array()?);
     let derivation_input = read_derivation_input(&mut reader)?;
     let record_version = reader.read_u64()?;
-    let creation_recovery_epoch = reader.read_u64()?;
     let predecessor_record_hash = read_optional_hash(&mut reader)?;
     let canonical_envelope = reader.read_remaining();
     let root = open_action_randomness_root(
@@ -369,7 +592,6 @@ fn open_sealed(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         storage_binding(derivation_input),
         expected_commitment,
         record_version,
-        creation_recovery_epoch,
         predecessor_record_hash,
         canonical_envelope,
     )?;
@@ -455,6 +677,321 @@ fn setup_mailbox_encapsulate(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         output.extend_from_slice(&ciphertext);
         output.extend_from_slice(shared_secret.as_ref());
         Ok(output)
+    })
+}
+
+fn setup_mailbox_signature_hedge(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let handle = reader.read_u32()?;
+    let reservation_binding = read_verified_reservation_binding(&mut reader)?;
+    let roster_hash = Hash512::from_bytes(reader.read_array()?);
+    let envelope_hash = Hash512::from_bytes(reader.read_array()?);
+    reader.finish()?;
+    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let randomness = registry.get(handle)?;
+        require_matching_setup_action_randomness_reservation(
+            randomness,
+            reservation_binding,
+            roster_hash,
+        )?;
+        let retained_roster = registry
+            .setup_rosters
+            .get(&handle)
+            .ok_or(RefusalReason::MissingPrerequisite.canonical_code() as u32)?;
+        if retained_roster.roster_hash != roster_hash {
+            return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
+        }
+
+        let attempt_identifier = randomness.setup_attempt_identifier();
+        let mut signature_hedge_stream = randomness
+            .begin_stream(
+                PrivateRandomnessDomain::setup_mailbox(3).map_err(schema_status)?,
+                envelope_hash,
+                attempt_identifier,
+            )
+            .map_err(schema_status)?;
+        let mut signature_hedge = Zeroizing::new([0u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]);
+        signature_hedge_stream
+            .fill_bytes(signature_hedge.as_mut())
+            .map_err(schema_status)?;
+        Ok(signature_hedge.as_ref().to_vec())
+    })
+}
+
+fn create_structured_commitment_opening(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let action_randomness_handle = reader.read_u32()?;
+    let reservation_binding = read_verified_reservation_binding(&mut reader)?;
+    let roster_hash = Hash512::from_bytes(reader.read_array()?);
+    let source_roster_position = reader.read_u16()?;
+    let source_setup_intent_object_hash = Hash512::from_bytes(reader.read_array()?);
+    let source_rns_limb_index = reader.read_u16()?;
+    let shamir_coefficient_index = reader.read_u16()?;
+    reader.finish()?;
+
+    let source_rns_limb_position = usize::from(source_rns_limb_index);
+    if source_rns_limb_position >= DATA_PRIMES.len()
+        || shamir_coefficient_index >= FOUNDATION_PROFILE.reconstruction_threshold
+    {
+        return Err(RefusalReason::WrongTypeOrLength.canonical_code() as u32);
+    }
+    let slots = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+        .iter()
+        .copied()
+        .map(|commitment_data_prime_index| {
+            Ok(StructuredCommitmentOpeningSlot {
+                source_setup_intent_object_hash,
+                source_rns_limb_index,
+                shamir_coefficient_index,
+                commitment_data_prime_index: u16::try_from(commitment_data_prime_index)
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile.canonical_code() as u32)?,
+            })
+        })
+        .collect::<RuntimeResult<Vec<_>>>()?;
+
+    let existing_handles = ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let randomness = registry.get(action_randomness_handle)?;
+        require_matching_setup_action_randomness_reservation(
+            randomness,
+            reservation_binding,
+            roster_hash,
+        )?;
+        registry.setup_source_matches_roster_position(
+            action_randomness_handle,
+            roster_hash,
+            source_roster_position,
+            randomness.derivation_input().participant_identity(),
+        )?;
+        registry.existing_structured_commitment_opening_handles(action_randomness_handle, &slots)
+    })?;
+    if existing_handles.iter().all(Option::is_some) {
+        let mut output = Vec::with_capacity(HANDLE_BYTE_LENGTH * existing_handles.len());
+        for existing_handle in existing_handles {
+            let handle =
+                existing_handle.ok_or(RefusalReason::ConsumedState.canonical_code() as u32)?;
+            output.extend_from_slice(&handle.to_le_bytes());
+        }
+        return Ok(output);
+    }
+
+    let fresh_openings = ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let randomness = registry.get(action_randomness_handle)?;
+        slots
+            .iter()
+            .copied()
+            .zip(existing_handles.iter())
+            .filter_map(|(slot, existing_handle)| existing_handle.is_none().then_some(slot))
+            .map(|slot| {
+                Ok((
+                    slot,
+                    derive_structured_commitment_opening(randomness, slot)?,
+                ))
+            })
+            .collect::<RuntimeResult<Vec<_>>>()
+    })?;
+    let fresh_handles = ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        fresh_openings
+            .into_iter()
+            .map(|(slot, opening)| {
+                registry.retain_structured_commitment_opening(
+                    action_randomness_handle,
+                    slot,
+                    opening,
+                )
+            })
+            .collect::<RuntimeResult<Vec<_>>>()
+    })?;
+    let mut fresh_handle_iterator = fresh_handles.into_iter();
+    let mut output = Vec::with_capacity(HANDLE_BYTE_LENGTH * existing_handles.len());
+    for existing_handle in existing_handles {
+        let handle = match existing_handle {
+            Some(handle) => handle,
+            None => fresh_handle_iterator
+                .next()
+                .ok_or(RefusalReason::ConsumedState.canonical_code() as u32)?,
+        };
+        output.extend_from_slice(&handle.to_le_bytes());
+    }
+    if fresh_handle_iterator.next().is_some() {
+        return Err(RefusalReason::ConsumedState.canonical_code() as u32);
+    }
+    Ok(output)
+}
+
+fn release_structured_commitment_opening(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let action_randomness_handle = reader.read_u32()?;
+    let opening_handle = reader.read_u32()?;
+    reader.finish()?;
+    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .release_structured_commitment_opening(action_randomness_handle, opening_handle)
+    })?;
+    Ok(Vec::new())
+}
+
+fn derive_structured_commitment_opening(
+    randomness: &ActionPrivateRandomness,
+    slot: StructuredCommitmentOpeningSlot,
+) -> RuntimeResult<RetainedStructuredCommitmentOpening> {
+    let attempt_identifier = randomness.setup_attempt_identifier();
+    let mut hiding_secret_polynomials = Vec::with_capacity(SETUP_COMMITMENT_HIDING_SECRET_WIDTH);
+    for component_ordinal in 0..SETUP_COMMITMENT_HIDING_SECRET_WIDTH {
+        let context = SetupStructuredCommitmentOpeningContext::new(
+            slot.source_setup_intent_object_hash,
+            slot.source_rns_limb_index,
+            slot.shamir_coefficient_index,
+            slot.commitment_data_prime_index,
+            11,
+            u16::try_from(component_ordinal).map_err(|_| malformed_status())?,
+        )
+        .map_err(schema_status)?;
+        let mut stream = randomness
+            .begin_stream(
+                PrivateRandomnessDomain::setup_suite_distribution(11).map_err(schema_status)?,
+                context.hash().map_err(schema_status)?,
+                attempt_identifier,
+            )
+            .map_err(schema_status)?;
+        let mut polynomial = Zeroizing::new(Vec::with_capacity(POLYNOMIAL_DEGREE));
+        for _ in 0..POLYNOMIAL_DEGREE {
+            polynomial.push(
+                stream
+                    .sample_centered_ternary(MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT)
+                    .map_err(schema_status)?,
+            );
+        }
+        hiding_secret_polynomials.push(polynomial);
+    }
+
+    let mut hiding_error_polynomials = Vec::with_capacity(SETUP_COMMITMENT_HIDING_ERROR_WIDTH);
+    for component_ordinal in 0..SETUP_COMMITMENT_HIDING_ERROR_WIDTH {
+        let context = SetupStructuredCommitmentOpeningContext::new(
+            slot.source_setup_intent_object_hash,
+            slot.source_rns_limb_index,
+            slot.shamir_coefficient_index,
+            slot.commitment_data_prime_index,
+            12,
+            u16::try_from(component_ordinal).map_err(|_| malformed_status())?,
+        )
+        .map_err(schema_status)?;
+        let mut stream = randomness
+            .begin_stream(
+                PrivateRandomnessDomain::setup_suite_distribution(12).map_err(schema_status)?,
+                context.hash().map_err(schema_status)?,
+                attempt_identifier,
+            )
+            .map_err(schema_status)?;
+        let mut polynomial = Zeroizing::new(Vec::with_capacity(POLYNOMIAL_DEGREE));
+        for _ in 0..POLYNOMIAL_DEGREE {
+            let coefficient = stream
+                .sample_centered_ternary(MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT)
+                .map_err(schema_status)?;
+            polynomial.push(
+                i8::try_from(coefficient).map_err(|_| {
+                    RefusalReason::InvalidArithmeticRelation.canonical_code() as u32
+                })?,
+            );
+        }
+        hiding_error_polynomials.push(polynomial);
+    }
+
+    Ok(RetainedStructuredCommitmentOpening {
+        hiding_secret_polynomials,
+        hiding_error_polynomials,
+        opening_handle: 0,
+    })
+}
+
+fn compute_structured_commitment(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let action_randomness_handle = reader.read_u32()?;
+    let public_matrix_seed_hash = Hash512::from_bytes(reader.read_array()?);
+    let mut opening_handles = [0_u32; SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()];
+    for opening_handle in &mut opening_handles {
+        *opening_handle = reader.read_u32()?;
+    }
+    let message_coefficient_count =
+        usize::try_from(reader.read_u32()?).map_err(|_| malformed_status())?;
+    if message_coefficient_count != POLYNOMIAL_DEGREE {
+        return Err(RefusalReason::WrongTypeOrLength.canonical_code() as u32);
+    }
+    let mut message_coefficients = Vec::with_capacity(message_coefficient_count);
+    for _ in 0..message_coefficient_count {
+        message_coefficients.push(u128::from(reader.read_u64()?));
+    }
+    reader.finish()?;
+
+    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        registry.get(action_randomness_handle)?;
+        let mut common_slot = None;
+        let mut randomness_by_commitment_limb =
+            Vec::with_capacity(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
+        for (commitment_limb_position, opening_handle) in
+            opening_handles.iter().copied().enumerate()
+        {
+            let (owner_handle, slot) = registry
+                .structured_commitment_opening_locations
+                .get(&opening_handle)
+                .copied()
+                .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE)?;
+            if owner_handle != action_randomness_handle
+                || usize::from(slot.commitment_data_prime_index)
+                    != SETUP_COMMITMENT_MODULUS_LIMB_INDICES[commitment_limb_position]
+            {
+                return Err(RefusalReason::WrongContext.canonical_code() as u32);
+            }
+            if let Some(expected_slot) = common_slot {
+                let expected_slot: StructuredCommitmentOpeningSlot = expected_slot;
+                if slot.source_setup_intent_object_hash
+                    != expected_slot.source_setup_intent_object_hash
+                    || slot.source_rns_limb_index != expected_slot.source_rns_limb_index
+                    || slot.shamir_coefficient_index != expected_slot.shamir_coefficient_index
+                {
+                    return Err(RefusalReason::WrongContext.canonical_code() as u32);
+                }
+            } else {
+                common_slot = Some(slot);
+            }
+            let retained = registry
+                .structured_commitment_openings
+                .get(&action_randomness_handle)
+                .and_then(|openings| openings.get(&slot))
+                .ok_or(ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE)?;
+            if !retained.has_expected_shape() {
+                return Err(RefusalReason::ConsumedState.canonical_code() as u32);
+            }
+            randomness_by_commitment_limb.push(
+                retained
+                    .hiding_secret_polynomials
+                    .iter()
+                    .chain(&retained.hiding_error_polynomials)
+                    .map(|polynomial| {
+                        polynomial
+                            .iter()
+                            .copied()
+                            .map(i128::from)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
+        let slot = common_slot.ok_or(RefusalReason::MissingPrerequisite.canonical_code() as u32)?;
+        let result = compute_setup_commitment_from_typed_opening(
+            &public_matrix_seed_hash.to_lowercase_hex(),
+            usize::from(slot.source_rns_limb_index),
+            u64::from(slot.shamir_coefficient_index),
+            &message_coefficients,
+            &randomness_by_commitment_limb,
+        )
+        .map_err(|_| RefusalReason::InvalidArithmeticRelation.canonical_code() as u32)?;
+        serde_json::to_vec(&result).map_err(|_| malformed_status())
     })
 }
 
@@ -632,9 +1169,9 @@ fn persistent_proof_reservation_kind(
     statement_schema_identifier: u16,
 ) -> RuntimeResult<StateCapabilityKind> {
     match statement_schema_identifier {
-        0x2110 => Ok(StateCapabilityKind::SetupPublicSeedBranch),
-        0x2111 | 0x1211 | 0x1212 | 0x1214 | 0x1217 => Ok(StateCapabilityKind::SetupDealerSetBranch),
-        0x1216 => Ok(StateCapabilityKind::SetupRkgRoundOneBranch),
+        0x2110 | 0x2111 | 0x1211 | 0x1212 | 0x1214 | 0x1216 | 0x1217 => {
+            Ok(StateCapabilityKind::SetupActionRandomnessRoot)
+        }
         0x1621 => Ok(StateCapabilityKind::TargetRelease),
         _ => Err(RefusalReason::WrongTypeOrLength.canonical_code() as u32),
     }
@@ -727,6 +1264,19 @@ mod tests {
         output
     }
 
+    fn fixed_action_randomness() -> ActionPrivateRandomness {
+        ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
+            [0x5a; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+        ))
+        .derive(ActionRandomnessDerivationInput::new(
+            Hash512::from_bytes([0x11; HASH_BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; HASH_BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; HASH_BYTE_LENGTH]),
+            ParticipantIdentity::from_bytes([0x44; HASH_BYTE_LENGTH]),
+        ))
+        .expect("fixed action randomness derives")
+    }
+
     #[test]
     fn runtime_keeps_action_keys_opaque_and_returns_only_the_commitment() {
         let opened = run_action_randomness_command(COMMAND_OPEN, &open_input())
@@ -798,6 +1348,70 @@ mod tests {
         assert_eq!(
             run_action_randomness_command(99, &[]),
             Err(malformed_status()),
+        );
+    }
+
+    #[test]
+    fn structured_commitment_opening_derivation_is_reset_safe_and_uses_exact_supports() {
+        let randomness = fixed_action_randomness();
+        let slot = StructuredCommitmentOpeningSlot {
+            source_setup_intent_object_hash: Hash512::from_bytes([0x71; HASH_BYTE_LENGTH]),
+            source_rns_limb_index: 4,
+            shamir_coefficient_index: 2,
+            commitment_data_prime_index: 1,
+        };
+        let first = derive_structured_commitment_opening(&randomness, slot)
+            .expect("first structured opening derives");
+        let replay = derive_structured_commitment_opening(&randomness, slot)
+            .expect("same structured opening re-derives after reset");
+
+        assert!(first.has_expected_shape());
+        assert_eq!(
+            first.hiding_secret_polynomials,
+            replay.hiding_secret_polynomials
+        );
+        assert_eq!(
+            first.hiding_error_polynomials,
+            replay.hiding_error_polynomials
+        );
+        assert!(
+            first
+                .hiding_secret_polynomials
+                .iter()
+                .flat_map(|polynomial| polynomial.iter())
+                .all(|coefficient| (-1..=1).contains(coefficient))
+        );
+        assert!(
+            first
+                .hiding_error_polynomials
+                .iter()
+                .flat_map(|polynomial| polynomial.iter())
+                .all(|coefficient| (-2..=2).contains(coefficient))
+        );
+        assert!(
+            first
+                .hiding_error_polynomials
+                .iter()
+                .flat_map(|polynomial| polynomial.iter())
+                .any(|coefficient| coefficient.unsigned_abs() == 2),
+            "eta-two output must not collapse to the legacy ternary profile",
+        );
+
+        let changed_prime = derive_structured_commitment_opening(
+            &randomness,
+            StructuredCommitmentOpeningSlot {
+                commitment_data_prime_index: 2,
+                ..slot
+            },
+        )
+        .expect("changed commitment-prime opening derives");
+        assert_ne!(
+            first.hiding_secret_polynomials,
+            changed_prime.hiding_secret_polynomials
+        );
+        assert_ne!(
+            first.hiding_error_polynomials,
+            changed_prime.hiding_error_polynomials
         );
     }
 

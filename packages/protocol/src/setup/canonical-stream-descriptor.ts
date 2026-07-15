@@ -1,9 +1,9 @@
 import { foundationProfile } from '@sealed-lattice/types';
 
-const maximumCanonicalStreamByteLength = 2_147_483_648;
 const canonicalHashByteLength = 64;
 const maximumCanonicalStreamChunkCount = Math.ceil(
-    maximumCanonicalStreamByteLength / foundationProfile.streamChunkByteLength,
+    foundationProfile.maximumCanonicalStreamByteLength /
+        foundationProfile.streamChunkByteLength,
 );
 const canonicalStreamDescriptorFixedByteLength = 104;
 const maximumCanonicalStreamDescriptorByteLength =

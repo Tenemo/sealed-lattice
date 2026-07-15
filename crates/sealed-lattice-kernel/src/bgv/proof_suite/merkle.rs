@@ -9,15 +9,13 @@ use crate::{
 };
 
 use super::{
-    PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement,
-    ProofChallengeExtensionElement,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofChallengeExtensionElement,
 };
 
 const MERKLE_LEAF_DOMAIN: &str = "sealed-lattice/proof/merkle/leaf/v1";
 const MERKLE_NODE_DOMAIN: &str = "sealed-lattice/proof/merkle/node/v1";
 const PROOF_TREE_CONTEXT_HASH_DOMAIN: &str = "sealed-lattice/proof/merkle/tree-context/v1";
-const PROOF_PHASE_PAIR_LEAF_HASH_DOMAIN: &str =
-    "sealed-lattice/proof/merkle/phase-pair-leaf/v1";
+const PROOF_PHASE_PAIR_LEAF_HASH_DOMAIN: &str = "sealed-lattice/proof/merkle/phase-pair-leaf/v1";
 
 const PROOF_MERKLE_TREE_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x0103;
 const PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER: u16 = 0x0104;
@@ -141,8 +139,7 @@ impl ProofMerkleTreeContext {
             return Err(ProofMerkleError::InvalidContext);
         }
         if tree_role == ProofTreeRole::OpeningBatchMask
-            && (tree_ordinal != 0
-                || leaf_visibility != ProofLeafVisibility::SecretBearing)
+            && (tree_ordinal != 0 || leaf_visibility != ProofLeafVisibility::SecretBearing)
         {
             return Err(ProofMerkleError::InvalidContext);
         }
@@ -266,7 +263,8 @@ impl ProofOraclePhasePairLeaf {
     ) -> Result<Self, ProofMerkleError> {
         if leaf_index >= context.domain_size / 2
             || first_point_values.len()
-                != usize::try_from(context.row_width).map_err(|_| ProofMerkleError::CountOverflow)?
+                != usize::try_from(context.row_width)
+                    .map_err(|_| ProofMerkleError::CountOverflow)?
             || opposite_point_values.len() != first_point_values.len()
             || first_point_values.is_empty()
             || secret_salt.is_some()
@@ -282,10 +280,12 @@ impl ProofOraclePhasePairLeaf {
         {
             return Err(ProofMerkleError::InvalidLeaf);
         }
-        if matches!(context.tree_role, ProofTreeRole::QuotientComponent
-            | ProofTreeRole::OpeningBatchMask
-            | ProofTreeRole::NonterminalFriLayer)
-            && expected_type != CanonicalItemType::ChallengeExtensionElement
+        if matches!(
+            context.tree_role,
+            ProofTreeRole::QuotientComponent
+                | ProofTreeRole::OpeningBatchMask
+                | ProofTreeRole::NonterminalFriLayer
+        ) && expected_type != CanonicalItemType::ChallengeExtensionElement
         {
             return Err(ProofMerkleError::InvalidLeaf);
         }
@@ -417,7 +417,10 @@ impl CanonicalProofMerkleTree {
             sorted_unique_leaf_indexes,
             self.context.leaf_count()?,
         )?;
-        let mut required = sorted_unique_leaf_indexes.iter().copied().collect::<BTreeSet<_>>();
+        let mut required = sorted_unique_leaf_indexes
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
         let mut frontier = Vec::new();
         for level in 0..self.levels.len() - 1 {
             let mut next = BTreeSet::new();
@@ -430,8 +433,8 @@ impl CanonicalProofMerkleTree {
                 if required.contains(&sibling) {
                     processed.insert(sibling);
                 } else {
-                    let sibling_index = usize::try_from(sibling)
-                        .map_err(|_| ProofMerkleError::CountOverflow)?;
+                    let sibling_index =
+                        usize::try_from(sibling).map_err(|_| ProofMerkleError::CountOverflow)?;
                     frontier.push(ProofAuthenticationNode::new(
                         u32::try_from(level).map_err(|_| ProofMerkleError::CountOverflow)?,
                         sibling,
@@ -497,20 +500,17 @@ pub(crate) fn verify_authentication_frontier(
                 frontier_offset += 1;
                 supplied.node_digest
             };
-            let own_digest = *current.get(&index).ok_or(ProofMerkleError::InvalidOpening)?;
+            let own_digest = *current
+                .get(&index)
+                .ok_or(ProofMerkleError::InvalidOpening)?;
             let (left, right) = if index & 1 == 0 {
                 (own_digest, sibling_digest)
             } else {
                 (sibling_digest, own_digest)
             };
             let parent_index = index / 2;
-            let parent_digest = proof_merkle_node_digest(
-                context_hash,
-                level + 1,
-                parent_index,
-                left,
-                right,
-            )?;
+            let parent_digest =
+                proof_merkle_node_digest(context_hash, level + 1, parent_index, left, right)?;
             if next.insert(parent_index, parent_digest).is_some() {
                 return Err(ProofMerkleError::InvalidOpening);
             }
@@ -668,7 +668,10 @@ mod canonical_tree_tests {
 
     #[test]
     fn canonical_frontier_verifies_sparse_and_collision_heavy_openings() {
-        for visibility in [ProofLeafVisibility::Public, ProofLeafVisibility::SecretBearing] {
+        for visibility in [
+            ProofLeafVisibility::Public,
+            ProofLeafVisibility::SecretBearing,
+        ] {
             let context = context(visibility);
             let leaves = leaves(&context, visibility);
             let tree = CanonicalProofMerkleTree::from_phase_pair_leaves(context.clone(), &leaves)
@@ -676,7 +679,12 @@ mod canonical_tree_tests {
             for indexes in [&[0_u64][..], &[0, 1, 6][..], &[1, 2, 3, 4, 5, 7][..]] {
                 let opened = indexes
                     .iter()
-                    .map(|index| (*index, leaves[*index as usize].digest().expect("leaf digest")))
+                    .map(|index| {
+                        (
+                            *index,
+                            leaves[*index as usize].digest().expect("leaf digest"),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let frontier = tree
                     .authentication_frontier(indexes)
@@ -688,12 +696,7 @@ mod canonical_tree_tests {
                     let mut changed = frontier.clone();
                     changed[0].node_digest[0] ^= 1;
                     assert_eq!(
-                        verify_authentication_frontier(
-                            &context,
-                            &opened,
-                            &changed,
-                            tree.root(),
-                        ),
+                        verify_authentication_frontier(&context, &opened, &changed, tree.root(),),
                         Err(ProofMerkleError::RootMismatch),
                     );
                 }

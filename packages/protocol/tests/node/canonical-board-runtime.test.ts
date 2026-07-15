@@ -100,7 +100,6 @@ const runtimeInput = (): CanonicalBoardRuntimeInput => ({
         canonicalRosterBytes: Uint8Array.of(1),
         ceremonyContextHash: new Uint8Array(64).fill(0x22),
         maximumBallotAttemptsPerParticipant: 8,
-        maximumRecoveryTransitionsPerStateKey: 4,
         maximumRetainedCanonicalCarrierByteLength: 1_048_576,
         maximumRetainedTranscriptObjects: 128,
         maximumUnorderedCarriersPerBatch: 32,

@@ -6,6 +6,37 @@ export {
 } from './runtime/untrusted-storage-transaction-store.js';
 export { createRuntimeRecordAuthenticatedRecoveryProtection } from './runtime/authenticated-runtime-record.js';
 export { openCanonicalBoardRuntime } from './runtime/canonical-board-runtime.js';
+export {
+    NamespaceFreshnessError,
+    openNamespaceFreshnessSubjectRuntime,
+    openNamespaceFreshnessWitnessService,
+} from './runtime/namespace-freshness-runtime.js';
+export type {
+    NamespaceFreshnessAcceptedCheckpointJournal,
+    NamespaceFreshnessActiveCapability,
+    NamespaceFreshnessCertificateTransport,
+    NamespaceFreshnessCheckpointDescription,
+    NamespaceFreshnessClosedWitnessSigner,
+    NamespaceFreshnessContext,
+    NamespaceFreshnessErrorCode,
+    NamespaceFreshnessLocalAuthority,
+    NamespaceFreshnessLocalHead,
+    NamespaceFreshnessPreparedCheckpoint,
+    NamespaceFreshnessRetirementReason,
+    NamespaceFreshnessSubjectRuntime,
+    NamespaceFreshnessSubjectState,
+    NamespaceFreshnessVerifiedCertificate,
+    NamespaceFreshnessVerifier,
+    NamespaceFreshnessWitnessCompareAndLockResult,
+    NamespaceFreshnessWitnessCoordinate,
+    NamespaceFreshnessWitnessService,
+    NamespaceFreshnessWitnessServiceState,
+    NamespaceFreshnessWitnessStore,
+    NamespaceFreshnessWitnessStoreSnapshot,
+    UntrustedNamespaceFreshnessCertificate,
+    VerifiedNamespaceFreshnessCertificate,
+    VerifiedNamespaceFreshnessCheckpoint,
+} from './runtime/namespace-freshness-runtime.js';
 export type {
     UntrustedStorageAdapter,
     UntrustedStorageAuthenticatedRecoveryProtection,
@@ -100,13 +131,8 @@ export {
     createRelinearizationKeyShareRounds,
     createTrusteeEvaluationKeyProofs,
 } from './setup/evaluation-key-proof-records.js';
-export { createEvaluatorKeySchedule } from './setup/evaluator-key-schedule.js';
 export { copyCanonicalStreamDescriptor } from './setup/canonical-stream-descriptor.js';
 export { createSetupPackageVerificationInput } from './setup/setup-package-assembly.js';
-export {
-    createBinaryChunkedSameSecretBridgeProofMaterialTransport,
-    createBinaryChunkedVssShareLinkageProofMaterialTransport,
-} from './setup/vss-commitments.js';
 export {
     createVssShareAcceptanceRecord,
     createVssShareAcceptanceSet,
@@ -116,7 +142,6 @@ export type {
     EvaluationKeyShareComponentMaterialStream,
     TransportedEvaluationKeyShareProofMaterialSet,
 } from './setup/evaluation-key-proof-records.js';
-export type { RequiredGaloisKeyScheduleEntry } from './setup/evaluator-key-schedule.js';
 export type {
     PublicKeyShareContributionInput,
     PublicKeyShareMaterialContributionInput,

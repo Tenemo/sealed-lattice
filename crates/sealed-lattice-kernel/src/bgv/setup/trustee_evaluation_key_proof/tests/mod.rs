@@ -140,7 +140,6 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
     TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             setup_context_hash: repeated_hash("11"),
-            trustee_identity: "trustee-0".to_string(),
             trustee_roster_position: 0,
             binding_roots: Vec::new(),
         },
@@ -148,9 +147,7 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
         proof: SetupProofStatement::PrivateVssShare(PrivateVssShareStatement {
             public_matrix_seed_hash: repeated_hash("66"),
             private_envelope_aad_hash,
-            source_trustee_identity: "trustee-0".to_string(),
             source_trustee_roster_position: 0,
-            recipient_identity: "trustee-2".to_string(),
             recipient_roster_position: 2,
             source_trustee_commitment_root,
             source_rns_limb_index: 0,
@@ -198,7 +195,6 @@ fn statement_request_value(
         .collect::<Vec<_>>();
     let mut context_value = serde_json::json!({
         "setupContextHash": statement.context.setup_context_hash,
-        "trusteeIdentity": statement.context.trustee_identity,
         "trusteeRosterPosition": statement.context.trustee_roster_position,
     });
     for (binding_label, binding_root) in statement
@@ -211,7 +207,6 @@ fn statement_request_value(
     }
     let mut request = serde_json::json!({
         "context": context_value,
-        "ringDegree": statement.ring_degree,
         "keys": keys,
     });
     if let Some(linkage) = statement.same_secret_linkage() {
@@ -235,9 +230,12 @@ fn proof_generation_request(
     let mut request = statement_request_value(statement);
     request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients());
     request["errorCoefficientsByKey"] = serde_json::json!(witness.error_coefficients_by_key());
-    if !witness.opening_randomness_by_limb().is_empty() {
-        request["openingRandomnessByLimb"] =
-            serde_json::json!(witness.opening_randomness_by_limb());
+    if !witness
+        .opening_randomness_by_source_limb_and_commitment_limb()
+        .is_empty()
+    {
+        request["openingRandomnessBySourceLimbAndCommitmentLimb"] =
+            serde_json::json!(witness.opening_randomness_by_source_limb_and_commitment_limb());
     }
     proof_randomness_fields(&mut request);
     request
@@ -251,8 +249,8 @@ fn zero_u64_vector() -> Vec<u64> {
     vec![0_u64; SMALL_RING_DEGREE]
 }
 
-fn zero_opening_randomness() -> Vec<Vec<i64>> {
-    vec![zero_i64_vector(); 5]
+fn zero_opening_randomness() -> Vec<Vec<Vec<i64>>> {
+    vec![vec![zero_i64_vector(); 5]; SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()]
 }
 
 fn zero_setup_commitment_value(
@@ -265,7 +263,6 @@ fn zero_setup_commitment_value(
 fn vector_context_base(binding_roots: serde_json::Value) -> serde_json::Value {
     let mut context = serde_json::json!({
         "setupContextHash": repeated_hash("10"),
-        "trusteeIdentity": "statement-vector-trustee",
         "trusteeRosterPosition": 0,
     });
     for (key, value) in binding_roots
@@ -340,7 +337,6 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
         "context": vector_context_base(serde_json::json!({
             "evaluatorKeyScheduleRoot": repeated_hash("34"),
         })),
-        "ringDegree": SMALL_RING_DEGREE,
         "keys": [{
             "proofFamily": "relinearization-round-one",
             "level": 2,
@@ -356,7 +352,7 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
         },
         "secretCoefficients": zero_i64_vector(),
         "errorCoefficientsByKey": [[zero_i64_vector(), zero_i64_vector(), zero_i64_vector()]],
-        "openingRandomnessByLimb": [zero_opening_randomness()],
+        "openingRandomnessBySourceLimbAndCommitmentLimb": [zero_opening_randomness()],
     });
     proof_randomness_fields(&mut request);
     request
@@ -400,14 +396,11 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
         "sourceTrusteeRosterPosition": 0,
         "sourceTrusteeCoefficientCommitmentRecord": source_record,
         "sourceTrusteeCoefficientCommitmentMaterialRecords": material_records,
-        "recipientIdentity": "statement-vector-recipient",
         "recipientRosterPosition": 2,
         "rnsLimbIndex": 0,
-        "rnsPrime": DATA_PRIMES[0],
-        "ringDegree": SMALL_RING_DEGREE,
         "shareValues": zero_u64_vector(),
         "coefficientMessagesByShamirIndex": vec![zero_u64_vector(); 4],
-        "openingRandomnessByShamirIndex": vec![vec![zero_i64_vector(); 5]; 4],
+        "openingRandomnessByShamirIndexAndCommitmentLimb": vec![zero_opening_randomness(); 4],
     });
     request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     request

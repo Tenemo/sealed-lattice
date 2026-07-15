@@ -270,10 +270,7 @@ pub(crate) trait ProofExternalMemory {
         bytes: &[u8],
     ) -> Result<(), Self::Error>;
 
-    fn seal_object(
-        &mut self,
-        object: ProofExternalMemoryObject,
-    ) -> Result<(), Self::Error>;
+    fn seal_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error>;
 
     fn read_object_bytes(
         &mut self,
@@ -282,10 +279,7 @@ pub(crate) trait ProofExternalMemory {
         destination: &mut [u8],
     ) -> Result<(), Self::Error>;
 
-    fn delete_object(
-        &mut self,
-        object: ProofExternalMemoryObject,
-    ) -> Result<(), Self::Error>;
+    fn delete_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error>;
 
     fn commit_transaction(&mut self) -> Result<(), Self::Error>;
 
@@ -417,9 +411,7 @@ impl ProofExternalMemoryTransactionRecorder {
         Self::default()
     }
 
-    pub(crate) fn take_yielded_request(
-        &mut self,
-    ) -> Option<ProofExternalMemoryTransactionRequest> {
+    pub(crate) fn take_yielded_request(&mut self) -> Option<ProofExternalMemoryTransactionRequest> {
         self.yielded_request.take()
     }
 
@@ -465,9 +457,7 @@ impl ProofExternalMemoryTransactionRecorder {
         }
         self.active_operations
             .try_reserve(1)
-            .map_err(|_| {
-                ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded
-            })?;
+            .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
         self.active_operations.push(operation);
         self.active_payload_byte_length = next_payload_byte_length;
         Ok(())
@@ -524,10 +514,7 @@ impl ProofExternalMemory for ProofExternalMemoryTransactionRecorder {
         })
     }
 
-    fn seal_object(
-        &mut self,
-        object: ProofExternalMemoryObject,
-    ) -> Result<(), Self::Error> {
+    fn seal_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
         self.record(ProofExternalMemoryTransactionOperation::Seal { object })
     }
 
@@ -547,10 +534,7 @@ impl ProofExternalMemory for ProofExternalMemoryTransactionRecorder {
         })
     }
 
-    fn delete_object(
-        &mut self,
-        object: ProofExternalMemoryObject,
-    ) -> Result<(), Self::Error> {
+    fn delete_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
         self.record(ProofExternalMemoryTransactionOperation::Delete { object })
     }
 
@@ -621,10 +605,12 @@ impl ProofExternalMemoryTransactionReplay {
         {
             return Err(ProofExternalMemoryTransactionAdapterError::InvalidReplay);
         }
-        let payload_byte_length = request.operations.iter().try_fold(
-            0_u64,
-            |total, operation| {
-                let operation_byte_length = match operation {
+        let payload_byte_length =
+            request
+                .operations
+                .iter()
+                .try_fold(0_u64, |total, operation| {
+                    let operation_byte_length = match operation {
                     ProofExternalMemoryTransactionOperation::Append { bytes, .. } => {
                         u64::try_from(bytes.len()).map_err(|_| {
                             ProofExternalMemoryTransactionAdapterError::PayloadByteLengthExceeded
@@ -635,11 +621,10 @@ impl ProofExternalMemoryTransactionReplay {
                     }
                     _ => 0,
                 };
-                total.checked_add(operation_byte_length).ok_or(
-                    ProofExternalMemoryTransactionAdapterError::PayloadByteLengthExceeded,
-                )
-            },
-        )?;
+                    total.checked_add(operation_byte_length).ok_or(
+                        ProofExternalMemoryTransactionAdapterError::PayloadByteLengthExceeded,
+                    )
+                })?;
         if payload_byte_length > request.maximum_payload_byte_length {
             return Err(ProofExternalMemoryTransactionAdapterError::PayloadByteLengthExceeded);
         }
@@ -729,10 +714,7 @@ impl ProofExternalMemory for ProofExternalMemoryTransactionReplay {
         })
     }
 
-    fn seal_object(
-        &mut self,
-        object: ProofExternalMemoryObject,
-    ) -> Result<(), Self::Error> {
+    fn seal_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
         self.accept(ProofExternalMemoryTransactionOperation::Seal { object })
     }
 
@@ -760,10 +742,7 @@ impl ProofExternalMemory for ProofExternalMemoryTransactionReplay {
         Ok(())
     }
 
-    fn delete_object(
-        &mut self,
-        object: ProofExternalMemoryObject,
-    ) -> Result<(), Self::Error> {
+    fn delete_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
         self.accept(ProofExternalMemoryTransactionOperation::Delete { object })
     }
 
@@ -864,9 +843,7 @@ pub(crate) struct ProofExternalMemoryExecutor {
 }
 
 impl ProofExternalMemoryExecutor {
-    pub(crate) fn new(
-        plan: ProofExternalMemoryPlan,
-    ) -> Result<Self, ProofExternalMemoryError> {
+    pub(crate) fn new(plan: ProofExternalMemoryPlan) -> Result<Self, ProofExternalMemoryError> {
         plan.validate()?;
         let states = plan
             .objects
@@ -951,8 +928,7 @@ impl ProofExternalMemoryExecutor {
             return Err(ProofExternalMemoryError::WrongOffsetOrLength.into());
         }
         let object_plan = self.object_plan(object)?;
-        if self.current_step < object_plan.issued_step
-            || self.current_step > object_plan.seal_step
+        if self.current_step < object_plan.issued_step || self.current_step > object_plan.seal_step
         {
             return Err(ProofExternalMemoryError::WrongStep.into());
         }
@@ -1006,9 +982,7 @@ impl ProofExternalMemoryExecutor {
         {
             return Err(ProofExternalMemoryError::Incomplete.into());
         }
-        self.run_mutating_transaction(storage, 0, |storage| {
-            storage.seal_object(object)
-        })?;
+        self.run_mutating_transaction(storage, 0, |storage| storage.seal_object(object))?;
         self.states
             .insert(object, ProofExternalMemoryObjectState::Sealed);
         Ok(())
@@ -1034,8 +1008,7 @@ impl ProofExternalMemoryExecutor {
             || self.current_step > object_plan.last_use_step
             || !matches!(
                 self.state(object)?,
-                ProofExternalMemoryObjectState::Sealed
-                    | ProofExternalMemoryObjectState::Claimed
+                ProofExternalMemoryObjectState::Sealed | ProofExternalMemoryObjectState::Claimed
             )
         {
             return Err(ProofExternalMemoryError::InvalidLifecycle.into());
@@ -1057,9 +1030,7 @@ impl ProofExternalMemoryExecutor {
         }
 
         self.begin_transaction(storage)?;
-        if let Err(operation_error) =
-            storage.read_object_bytes(object, offset, destination)
-        {
+        if let Err(operation_error) = storage.read_object_bytes(object, offset, destination) {
             return Err(abort_after_storage_error(storage, operation_error));
         }
         if let Err(error) = storage.commit_transaction() {
@@ -1102,8 +1073,7 @@ impl ProofExternalMemoryExecutor {
         for object in &due_for_deletion {
             if !matches!(
                 self.state(object.object)?,
-                ProofExternalMemoryObjectState::Sealed
-                    | ProofExternalMemoryObjectState::Claimed
+                ProofExternalMemoryObjectState::Sealed | ProofExternalMemoryObjectState::Claimed
             ) {
                 return Err(ProofExternalMemoryError::Incomplete.into());
             }
@@ -1141,9 +1111,10 @@ impl ProofExternalMemoryExecutor {
             .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
         if self.current_step == self.plan.step_count {
             if self.current_stored_byte_length != 0
-                || self.states.values().any(|state| {
-                    *state != ProofExternalMemoryObjectState::Consumed
-                })
+                || self
+                    .states
+                    .values()
+                    .any(|state| *state != ProofExternalMemoryObjectState::Consumed)
             {
                 return Err(ProofExternalMemoryError::Incomplete.into());
             }
@@ -1288,9 +1259,7 @@ impl ProofExternalMemoryExecutor {
         Storage: ProofExternalMemory,
         Operation: FnOnce(&mut Storage) -> Result<(), Storage::Error>,
     {
-        if payload_byte_length
-            > self.plan.maximum_transaction_payload_byte_length
-        {
+        if payload_byte_length > self.plan.maximum_transaction_payload_byte_length {
             return Err(ProofExternalMemoryError::ResourceLimitExceeded.into());
         }
         self.begin_transaction(storage)?;
@@ -1403,10 +1372,7 @@ mod tests {
             Ok(())
         }
 
-        fn seal_object(
-            &mut self,
-            object: ProofExternalMemoryObject,
-        ) -> Result<(), Self::Error> {
+        fn seal_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
             let object = self
                 .transaction
                 .as_mut()
@@ -1432,8 +1398,7 @@ mod tests {
                 .ok_or(TestStorageError::NoTransaction)?
                 .get(&object)
                 .ok_or(TestStorageError::Missing)?;
-            let offset = usize::try_from(offset)
-                .map_err(|_| TestStorageError::WrongLength)?;
+            let offset = usize::try_from(offset).map_err(|_| TestStorageError::WrongLength)?;
             let source = object
                 .bytes
                 .get(offset..offset + destination.len())
@@ -1442,10 +1407,7 @@ mod tests {
             Ok(())
         }
 
-        fn delete_object(
-            &mut self,
-            object: ProofExternalMemoryObject,
-        ) -> Result<(), Self::Error> {
+        fn delete_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
             self.transaction
                 .as_mut()
                 .ok_or(TestStorageError::NoTransaction)?
@@ -1506,31 +1468,42 @@ mod tests {
     fn executor_enforces_chunked_writes_random_reads_and_exact_last_use() {
         let first = ProofExternalMemoryObject::new(0);
         let second = ProofExternalMemoryObject::new(1);
-        let mut executor = ProofExternalMemoryExecutor::new(plan())
-            .expect("valid plan starts");
+        let mut executor = ProofExternalMemoryExecutor::new(plan()).expect("valid plan starts");
         let mut storage = TestStorage::default();
 
-        executor.begin_object(&mut storage, first).expect("first starts");
+        executor
+            .begin_object(&mut storage, first)
+            .expect("first starts");
         executor
             .append_object_bytes(&mut storage, first, &[1, 2, 3, 4])
             .expect("first chunk writes");
         executor
             .append_object_bytes(&mut storage, first, &[5, 6, 7, 8])
             .expect("second chunk writes");
-        executor.seal_object(&mut storage, first).expect("first seals");
-        executor.complete_step(&mut storage).expect("step zero completes");
+        executor
+            .seal_object(&mut storage, first)
+            .expect("first seals");
+        executor
+            .complete_step(&mut storage)
+            .expect("step zero completes");
 
-        executor.begin_object(&mut storage, second).expect("second starts");
+        executor
+            .begin_object(&mut storage, second)
+            .expect("second starts");
         executor
             .append_object_bytes(&mut storage, second, &[9, 10, 11, 12])
             .expect("second writes");
-        executor.seal_object(&mut storage, second).expect("second seals");
+        executor
+            .seal_object(&mut storage, second)
+            .expect("second seals");
         let mut suffix = [0_u8; 3];
         executor
             .read_object_bytes(&mut storage, first, 5, &mut suffix)
             .expect("random suffix read");
         assert_eq!(suffix, [6, 7, 8]);
-        executor.complete_step(&mut storage).expect("second is deleted");
+        executor
+            .complete_step(&mut storage)
+            .expect("second is deleted");
         assert!(!storage.committed.contains_key(&second));
         assert_eq!(
             storage.committed.get(&first).map(|entry| entry.protection),
@@ -1542,7 +1515,9 @@ mod tests {
             .read_object_bytes(&mut storage, first, 0, &mut prefix)
             .expect("first remains through last use");
         assert_eq!(prefix, [1, 2]);
-        executor.complete_step(&mut storage).expect("final deletion commits");
+        executor
+            .complete_step(&mut storage)
+            .expect("final deletion commits");
         let usage = executor.finish().expect("executor finishes");
         assert_eq!(usage.total_written_byte_length, 12);
         assert_eq!(usage.total_read_byte_length, 5);
@@ -1576,10 +1551,11 @@ mod tests {
         );
 
         let first = ProofExternalMemoryObject::new(0);
-        let mut executor = ProofExternalMemoryExecutor::new(plan())
-            .expect("valid plan starts");
+        let mut executor = ProofExternalMemoryExecutor::new(plan()).expect("valid plan starts");
         let mut storage = TestStorage::default();
-        executor.begin_object(&mut storage, first).expect("first starts");
+        executor
+            .begin_object(&mut storage, first)
+            .expect("first starts");
         executor
             .append_object_bytes(&mut storage, first, &[1, 2, 3, 4])
             .expect("partial write succeeds");
@@ -1624,8 +1600,7 @@ mod tests {
     #[test]
     fn browser_transaction_yield_and_exact_replay_change_state_only_after_replay() {
         let first = ProofExternalMemoryObject::new(0);
-        let mut executor = ProofExternalMemoryExecutor::new(plan())
-            .expect("valid plan starts");
+        let mut executor = ProofExternalMemoryExecutor::new(plan()).expect("valid plan starts");
         let mut recorder = ProofExternalMemoryTransactionRecorder::new();
 
         assert_eq!(
@@ -1712,11 +1687,8 @@ mod tests {
         let request = recorder
             .take_yielded_request()
             .expect("read transaction yielded");
-        let mut replay = ProofExternalMemoryTransactionReplay::new(
-            request,
-            vec![vec![1, 2, 3, 4]],
-        )
-        .expect("read response has the exact requested length");
+        let mut replay = ProofExternalMemoryTransactionReplay::new(request, vec![vec![1, 2, 3, 4]])
+            .expect("read response has the exact requested length");
         executor
             .read_object_bytes(&mut replay, first, 0, &mut destination)
             .expect("successful IndexedDB read replays");
@@ -1786,10 +1758,11 @@ mod tests {
     #[test]
     fn cancellation_transactionally_removes_secret_scratch() {
         let first = ProofExternalMemoryObject::new(0);
-        let mut executor = ProofExternalMemoryExecutor::new(plan())
-            .expect("valid plan starts");
+        let mut executor = ProofExternalMemoryExecutor::new(plan()).expect("valid plan starts");
         let mut storage = TestStorage::default();
-        executor.begin_object(&mut storage, first).expect("first starts");
+        executor
+            .begin_object(&mut storage, first)
+            .expect("first starts");
         executor
             .append_object_bytes(&mut storage, first, &[1, 2, 3, 4])
             .expect("partial secret scratch writes");

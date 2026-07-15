@@ -42,7 +42,6 @@ import {
     canonicalItem,
     canonicalTuple,
     emptyHomogeneousListItem,
-    emptyOptionalItem,
     foundationHash512,
     hashItem,
     presentOptionalItem,
@@ -68,7 +67,6 @@ const objectSignatureContext = new TextEncoder().encode(
 );
 const stateOutputIntentObjectType = 0x0052;
 const stateWitnessVoteObjectType = 0x0053;
-const stateRecoveryTransitionObjectType = 0x0054;
 
 const byteArraysEqual = (left: Uint8Array, right: Uint8Array): boolean =>
     left.byteLength === right.byteLength &&
@@ -122,11 +120,9 @@ const createSignedCarrier = (
     input: {
         objectType: number;
         payloadBytes: Uint8Array;
-        predecessorTransitionHash?: Uint8Array;
         producerParticipantIdentity: Uint8Array;
         producerRosterPosition: number;
         producerSequence: bigint;
-        recoveryEpoch: bigint;
         signatureHedge?: Uint8Array;
         signaturePurpose: string;
     },
@@ -143,10 +139,6 @@ const createSignedCarrier = (
             unsigned16Item(input.objectType),
             hashItem(vector.ceremonyContextHash),
             hashItem(vector.actionContextHash),
-            unsigned64Item(input.recoveryEpoch),
-            input.predecessorTransitionHash === undefined
-                ? emptyOptionalItem(0x06)
-                : presentOptionalItem(0x06, input.predecessorTransitionHash),
             presentOptionalItem(0x07, input.producerParticipantIdentity),
             unsigned64Item(input.producerSequence),
             emptyHomogeneousListItem(0x06),
@@ -185,23 +177,6 @@ const createSignedCarrier = (
     }
 };
 
-const createDroppingRecoveryIntentCarrier = (
-    vector: StateVerifierTestVector,
-): Uint8Array =>
-    createSignedCarrier(vector, {
-        objectType: stateRecoveryTransitionObjectType,
-        payloadBytes: canonicalTuple(
-            0x1614,
-            unsigned16Item(stateCapabilityKinds.targetRelease),
-            emptyOptionalItem(0x06),
-        ),
-        producerParticipantIdentity: vector.subjectParticipantIdentity,
-        producerRosterPosition: 0,
-        producerSequence: 1n,
-        recoveryEpoch: 0n,
-        signaturePurpose: 'state-recovery-transition',
-    }).canonicalCarrier;
-
 const createConflictingOutputIntent = (
     vector: StateVerifierTestVector,
 ): Readonly<{ canonicalCarrier: Uint8Array; exactOutputBytes: Uint8Array }> => {
@@ -224,7 +199,6 @@ const createConflictingOutputIntent = (
             producerParticipantIdentity: vector.subjectParticipantIdentity,
             producerRosterPosition: 0,
             producerSequence: 0n,
-            recoveryEpoch: 0n,
             signaturePurpose: 'state-output-intent',
         }).canonicalCarrier,
         exactOutputBytes,
@@ -245,7 +219,6 @@ const createHedgedReservationVoteCarriers = (
             producerParticipantIdentity: vector.witnessParticipantIdentity,
             producerRosterPosition: 1,
             producerSequence: 1n,
-            recoveryEpoch: 0n,
             signatureHedge: new Uint8Array(32).fill(hedgeByte),
             signaturePurpose: 'state-witness-vote',
         }).canonicalCarrier;
@@ -262,7 +235,6 @@ const openSession = (
                 actionContextHash: vector.actionContextHash,
                 canonicalRosterBytes: vector.canonicalRosterBytes,
                 ceremonyContextHash: vector.ceremonyContextHash,
-                maximumRecoveryTransitionsPerStateKey: 2,
                 suiteIdentifier: vector.suiteIdentifier,
             },
             kernel,
@@ -442,13 +414,6 @@ describe('durable state witness service', () => {
             | 'readSignedVoteCarrier'
         >();
         const { service } = await openService();
-        expect(Object.keys(service).sort()).toEqual([
-            'cacheExactOutput',
-            'cacheSignedVoteCarrier',
-            'compareAndLockIntent',
-            'readExactOutput',
-            'readSignedVoteCarrier',
-        ]);
 
         await expect(
             service.readSignedVoteCarrier({
@@ -668,126 +633,6 @@ describe('durable state witness service', () => {
                 verifiedIntentBinding: verifiedReservationBinding,
             }),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
-    });
-
-    it('preserves known locks across recovery and only fills missing locks from a verified recovery', async () => {
-        const verifiedOutput = verifyCertifiedOutput({
-            kernel,
-            session,
-            vector,
-        });
-        const preservingRecoveryIntent = requireValid(
-            session.verifyRecoveryIntent({
-                canonicalRecoveryTransitionCarrier:
-                    vector.recoveryPreservingOutput.canonicalIntentCarrier,
-                capabilityKind: stateCapabilityKinds.targetRelease,
-                preservedStateIntent: verifiedOutput,
-                subjectParticipantIdentity: vector.subjectParticipantIdentity,
-            }),
-        );
-        const preservingRecoveryBinding = requireValid(
-            session.durableBindingFor(preservingRecoveryIntent),
-        );
-        const droppingRecoveryIntent = requireValid(
-            session.verifyRecoveryIntent({
-                canonicalRecoveryTransitionCarrier:
-                    createDroppingRecoveryIntentCarrier(vector),
-                capabilityKind: stateCapabilityKinds.targetRelease,
-                subjectParticipantIdentity: vector.subjectParticipantIdentity,
-            }),
-        );
-        const droppingRecoveryBinding = requireValid(
-            session.durableBindingFor(droppingRecoveryIntent),
-        );
-
-        const { service } = await openService();
-        await service.compareAndLockIntent({
-            verifiedIntentBinding: verifiedReservationBinding,
-        });
-        await service.compareAndLockIntent({
-            verifiedIntentBinding: verifiedOutputBinding,
-        });
-        await expect(
-            service.compareAndLockIntent({
-                verifiedIntentBinding: droppingRecoveryBinding,
-            }),
-        ).rejects.toMatchObject({ code: 'Conflict' });
-        await service.compareAndLockIntent({
-            verifiedIntentBinding: preservingRecoveryBinding,
-        });
-        await service.compareAndLockIntent({
-            verifiedIntentBinding: preservingRecoveryBinding,
-        });
-        await expect(
-            service.compareAndLockIntent({
-                verifiedIntentBinding: droppingRecoveryBinding,
-            }),
-        ).rejects.toMatchObject({ code: 'Conflict' });
-
-        const { service: partiallyInformedService } = await openService();
-        await partiallyInformedService.compareAndLockIntent({
-            verifiedIntentBinding: verifiedReservationBinding,
-        });
-        await partiallyInformedService.compareAndLockIntent({
-            verifiedIntentBinding: preservingRecoveryBinding,
-        });
-        await expect(
-            partiallyInformedService.compareAndLockIntent({
-                verifiedIntentBinding: verifiedOutputBinding,
-            }),
-        ).rejects.toMatchObject({ code: 'Conflict' });
-
-        const { service: absentLockService } = await openService();
-        await absentLockService.compareAndLockIntent({
-            verifiedIntentBinding: droppingRecoveryBinding,
-        });
-        await absentLockService.compareAndLockIntent({
-            verifiedIntentBinding: droppingRecoveryBinding,
-        });
-    });
-
-    it('advances recovery transitions monotonically and refuses stale replay', async () => {
-        const firstRecovery = requireValid(
-            session.verifyRecovery({
-                canonicalRecoveryTransitionCarrier:
-                    vector.recoveryFirst.canonicalIntentCarrier,
-                canonicalStateCertificate:
-                    vector.recoveryFirst.canonicalStateCertificate,
-                capabilityKind: stateCapabilityKinds.finalitySignature,
-                subjectParticipantIdentity: vector.subjectParticipantIdentity,
-            }),
-        );
-        const firstRecoveryBinding = requireValid(
-            session.durableBindingFor(firstRecovery),
-        );
-        const secondRecoveryIntent = requireValid(
-            session.verifyRecoveryIntent({
-                canonicalRecoveryTransitionCarrier:
-                    vector.recoverySecond.canonicalIntentCarrier,
-                capabilityKind: stateCapabilityKinds.finalitySignature,
-                subjectParticipantIdentity: vector.subjectParticipantIdentity,
-                verifiedPredecessorRecovery: firstRecovery,
-            }),
-        );
-        const secondRecoveryBinding = requireValid(
-            session.durableBindingFor(secondRecoveryIntent),
-        );
-        const { service } = await openService();
-
-        await service.compareAndLockIntent({
-            verifiedIntentBinding: firstRecoveryBinding,
-        });
-        await service.compareAndLockIntent({
-            verifiedIntentBinding: secondRecoveryBinding,
-        });
-        await service.compareAndLockIntent({
-            verifiedIntentBinding: secondRecoveryBinding,
-        });
-        await expect(
-            service.compareAndLockIntent({
-                verifiedIntentBinding: firstRecoveryBinding,
-            }),
-        ).rejects.toMatchObject({ code: 'Conflict' });
     });
 
     it('authenticates the lock record before replay or transition', async () => {

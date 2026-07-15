@@ -95,12 +95,12 @@ pub(super) fn global_claim_integers(
     proof_randomness_seed_hex: &str,
 ) -> Vec<BigInt> {
     debug_assert!(statement.private_vss_share().is_some());
-    let mut signed_vectors = vec![witness.private_vss_carry_witnesses()];
-    for randomness_columns in witness.private_vss_opening_randomness_by_shamir_index() {
-        for column in randomness_columns {
-            signed_vectors.push(column);
-        }
-    }
+    // The carry is the only integer witness shared by all commitment fields.
+    // Independent commitment-limb opening tapes are proved against their
+    // ternary supports under purposes eleven and twelve and bound to their own
+    // field relation locally; equating their masked claims across fields would
+    // reintroduce the shared-opening construction.
+    let signed_vectors = vec![witness.private_vss_carry_witnesses()];
     let mut integers = Vec::with_capacity(signed_vectors.len() * consistency_vectors.len());
     for signed_vector in signed_vectors {
         for consistency_vector in consistency_vectors {

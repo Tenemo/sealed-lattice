@@ -57,10 +57,8 @@ impl CommittedMaterialRelationPlanInput {
             || self.trace_mask_degree_bound_exclusive == 0
             || self.trace_mask_degree_bound_exclusive > trace_domain_size
             || self.material_column_degree_bound_exclusive == 0
-            || self.material_column_degree_bound_exclusive
-                > self.opening_degree_bound_exclusive
-            || self.prover_column_degree_bound_exclusive()?
-                > self.opening_degree_bound_exclusive
+            || self.material_column_degree_bound_exclusive > self.opening_degree_bound_exclusive
+            || self.prover_column_degree_bound_exclusive()? > self.opening_degree_bound_exclusive
             || self.first_mask_purpose == 0
             || self.first_mask_purpose >= 0xff00
         {
@@ -126,8 +124,7 @@ pub(super) struct CommittedMaterialPlanBuilder<'context> {
     ordered_verifier_sources: Vec<RelationVerifierSource>,
     root_source_ordinals: Vec<u32>,
     ordered_columns: Vec<RelationColumnDescriptor>,
-    semantic_cells_by_column:
-        BTreeMap<u32, (SignedIntegerInterval, RelationBoundCertificate)>,
+    semantic_cells_by_column: BTreeMap<u32, (SignedIntegerInterval, RelationBoundCertificate)>,
     bound_trees: Vec<RelationTreeDescriptor>,
     base_tree_columns: Vec<u32>,
     ordered_constraints: Vec<RelationConstraintDescriptor>,
@@ -145,18 +142,14 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         root_paths: Vec<Vec<RelationSelectorPathStep>>,
     ) -> Result<Self, RelationPlanError> {
         let resolved = geometry.validate(context)?;
-        let (ordered_verifier_sources, root_source_ordinals) =
-            canonical_root_sources(root_paths)?;
+        let (ordered_verifier_sources, root_source_ordinals) = canonical_root_sources(root_paths)?;
         let mut used_rotations = BTreeSet::new();
         used_rotations.insert((false, 0));
         Ok(Self {
             application_statement_schema_identifier,
             geometry,
             context,
-            ordered_non_native_moduli: resolved
-                .iter()
-                .map(|(reference, _)| *reference)
-                .collect(),
+            ordered_non_native_moduli: resolved.iter().map(|(reference, _)| *reference).collect(),
             resolved_moduli: resolved.into_iter().map(|(_, modulus)| modulus).collect(),
             ordered_verifier_sources,
             root_source_ordinals,
@@ -221,9 +214,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         numerator_postfix_expression: Vec<RelationExpressionInstruction>,
         zeroifier_postfix_expression: Vec<RelationExpressionInstruction>,
         enforce_proof_base_field_no_wrap: bool,
-        ordered_injective_integer_factor_expressions: Vec<
-            Vec<RelationExpressionInstruction>,
-        >,
+        ordered_injective_integer_factor_expressions: Vec<Vec<RelationExpressionInstruction>>,
     ) -> Result<u32, RelationPlanError> {
         let ordinal = u32::try_from(self.ordered_constraints.len())
             .map_err(|_| RelationPlanError::CountOverflow)?;
@@ -281,8 +272,8 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
     }
 
     fn certify_trit_column(&mut self, column_ordinal: u32) -> Result<(), RelationPlanError> {
-        let constraint_ordinal = self
-            .add_full_trace_constraint(trinary_constraint_expression(column_ordinal), false)?;
+        let constraint_ordinal =
+            self.add_full_trace_constraint(trinary_constraint_expression(column_ordinal), false)?;
         self.insert_semantic_cell(
             column_ordinal,
             SignedIntegerInterval::new(0, 2),
@@ -291,8 +282,8 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
     }
 
     fn certify_binary_column(&mut self, column_ordinal: u32) -> Result<(), RelationPlanError> {
-        let constraint_ordinal = self
-            .add_full_trace_constraint(binary_constraint_expression(column_ordinal), false)?;
+        let constraint_ordinal =
+            self.add_full_trace_constraint(binary_constraint_expression(column_ordinal), false)?;
         self.insert_semantic_cell(
             column_ordinal,
             SignedIntegerInterval::new(0, 1),
@@ -349,10 +340,8 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             return Err(RelationPlanError::InvalidConstraint);
         }
         let target = self.push_prover_column()?;
-        let trits = self.add_trit_columns(minimum_unsigned_radix_digit_count(
-            maximum,
-            TRIT_RADIX,
-        )?)?;
+        let trits =
+            self.add_trit_columns(minimum_unsigned_radix_digit_count(maximum, TRIT_RADIX)?)?;
         self.certify_unsigned_recomposition(target, &trits)?;
         Ok(target)
     }
@@ -379,7 +368,12 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             .collect::<Result<Vec<_>, _>>()?;
         for digit_ordinal in 0..value_digits.len() {
             let mut terms = vec![integer_term_constant(maximum_digits[digit_ordinal], false)];
-            terms.push(integer_term_column(value_digits[digit_ordinal], false, 0, true));
+            terms.push(integer_term_column(
+                value_digits[digit_ordinal],
+                false,
+                0,
+                true,
+            ));
             if digit_ordinal > 0 {
                 terms.push(integer_term_column(
                     internal_borrows[digit_ordinal - 1],
@@ -443,9 +437,10 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         let mut message_digits_by_half = [[0_u32; 2]; 2];
         for half_ordinal in 0..2 {
             let low_digit_trits = self.add_trit_columns(MATERIAL_DIGIT_TRIT_COUNT)?;
-            let high_digit_trits = self.add_trit_columns(
-                minimum_unsigned_radix_digit_count(maximum_digits[1], TRIT_RADIX)?,
-            )?;
+            let high_digit_trits = self.add_trit_columns(minimum_unsigned_radix_digit_count(
+                maximum_digits[1],
+                TRIT_RADIX,
+            )?)?;
             let low_digit_column = bound_columns[half_ordinal];
             let high_digit_column = bound_columns[2 + half_ordinal];
             self.certify_unsigned_recomposition(low_digit_column, &low_digit_trits)?;
@@ -543,11 +538,9 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         target_half_ordinal: usize,
         relation_term_is_negative: bool,
     ) -> Result<(), RelationPlanError> {
-        for branch in monomial_action_branches(
-            self.geometry.ring_degree,
-            exponent,
-            target_half_ordinal,
-        )? {
+        for branch in
+            monomial_action_branches(self.geometry.ring_degree, exponent, target_half_ordinal)?
+        {
             let mut expression = self.message_integer_expression(
                 &message.message_digits_by_half[branch.source_half_ordinal],
                 branch.rotation_magnitude,
@@ -609,8 +602,8 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         if ordered_residuals.is_empty() {
             return Err(RelationPlanError::InvalidConstraint);
         }
-        let modulus_coordinate = u64::try_from(modulus_ordinal)
-            .map_err(|_| RelationPlanError::CountOverflow)?;
+        let modulus_coordinate =
+            u64::try_from(modulus_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
         let mut batch_expression = Vec::new();
         for (unit_ordinal, residual) in ordered_residuals.iter().enumerate() {
             batch_expression.push(RelationExpressionInstruction::TranscriptChallenge {
@@ -618,8 +611,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                 role_coordinates: vec![
                     modulus_coordinate,
                     u64::from(challenge_ordinal),
-                    u64::try_from(unit_ordinal)
-                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    u64::try_from(unit_ordinal).map_err(|_| RelationPlanError::CountOverflow)?,
                 ],
             });
             batch_expression.extend_from_slice(&residual.expression);
@@ -773,10 +765,12 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         if !strictly_sorted_unique(&roots) {
             return Err(RelationPlanError::InvalidZeroifier);
         }
-        Ok(vec![RelationExpressionInstruction::TraceDomainExceptRoots {
-            trace_domain_size: self.geometry.trace_domain_size()?,
-            ordered_excluded_roots: roots,
-        }])
+        Ok(vec![
+            RelationExpressionInstruction::TraceDomainExceptRoots {
+                trace_domain_size: self.geometry.trace_domain_size()?,
+                ordered_excluded_roots: roots,
+            },
+        ])
     }
 
     pub(super) fn finish(self) -> Result<CompiledRelationPlan, RelationPlanError> {
@@ -823,14 +817,14 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
 
         let ordered_opening_points = (0..self.context.deep_point_count)
             .flat_map(|deep_point_ordinal| {
-                used_rotations.iter().map(move |rotation| {
-                    RelationOpeningPointDescriptor {
+                used_rotations
+                    .iter()
+                    .map(move |rotation| RelationOpeningPointDescriptor {
                         deep_point_ordinal,
                         trace_rotation_is_negative: rotation.0,
                         trace_rotation_magnitude: rotation.1,
                         conjugate_index: 0,
-                    }
-                })
+                    })
             })
             .collect::<Vec<_>>();
         if ordered_opening_points.is_empty() {
@@ -926,9 +920,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                     target_class: RelationMaskTargetClass::Column,
                     target_ordinal: u32::try_from(column_ordinal)
                         .map_err(|_| RelationPlanError::CountOverflow)?,
-                    mask_degree_bound_exclusive: self
-                        .geometry
-                        .trace_mask_degree_bound_exclusive,
+                    mask_degree_bound_exclusive: self.geometry.trace_mask_degree_bound_exclusive,
                 });
                 next_mask_purpose = next_mask_purpose
                     .checked_add(1)
@@ -944,9 +936,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         let rounded_mask_degree = component_count
             .checked_add(1)
             .and_then(|count| {
-                count.checked_mul(u128::from(
-                    self.geometry.trace_mask_degree_bound_exclusive,
-                ))
+                count.checked_mul(u128::from(self.geometry.trace_mask_degree_bound_exclusive))
             })
             .and_then(|degree| degree.checked_add(component_count - 1))
             .ok_or(RelationPlanError::DegreeBoundExceeded)?
@@ -1000,9 +990,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                     proof_privacy_mode: ProofPrivacyMode::SecretBearing,
                     trace_domain_size: self.geometry.trace_domain_size()?,
                     evaluation_domain_size: self.geometry.evaluation_domain_size,
-                    opening_degree_bound_exclusive: self
-                        .geometry
-                        .opening_degree_bound_exclusive,
+                    opening_degree_bound_exclusive: self.geometry.opening_degree_bound_exclusive,
                     ordered_non_native_moduli: self.ordered_non_native_moduli,
                     ordered_verifier_sources: self.ordered_verifier_sources,
                     ordered_public_samplers: Vec::new(),
@@ -1052,10 +1040,8 @@ fn monomial_action_branches(
     for borrow_branch in 0..branch_count {
         let unwrapped_source_half = i64::try_from(target_half_ordinal)
             .map_err(|_| RelationPlanError::CountOverflow)?
-            - i64::try_from(source_half_offset)
-                .map_err(|_| RelationPlanError::CountOverflow)?
-            - i64::try_from(borrow_branch)
-                .map_err(|_| RelationPlanError::CountOverflow)?;
+            - i64::try_from(source_half_offset).map_err(|_| RelationPlanError::CountOverflow)?
+            - i64::try_from(borrow_branch).map_err(|_| RelationPlanError::CountOverflow)?;
         let crosses_ring_boundary = unwrapped_source_half < 0;
         let source_half_ordinal = usize::try_from(if crosses_ring_boundary {
             unwrapped_source_half + 2
@@ -1297,33 +1283,23 @@ mod tests {
                 .collect::<Vec<_>>();
             for exponent in 0..2 * ring_degree {
                 for target_half_ordinal in 0..2 {
-                    let branches = monomial_action_branches(
-                        ring_degree,
-                        exponent,
-                        target_half_ordinal,
-                    )
-                    .expect("valid split-half monomial action");
+                    let branches =
+                        monomial_action_branches(ring_degree, exponent, target_half_ordinal)
+                            .expect("valid split-half monomial action");
                     for target_row_ordinal in 0..trace_domain_size {
                         let active_branches = branches
                             .iter()
                             .copied()
                             .filter(|branch| {
-                                branch_is_active(
-                                    *branch,
-                                    target_row_ordinal,
-                                    trace_domain_size,
-                                )
+                                branch_is_active(*branch, target_row_ordinal, trace_domain_size)
                             })
                             .collect::<Vec<_>>();
                         assert_eq!(active_branches.len(), 1);
                         let branch = active_branches[0];
-                        let source_row_ordinal = (target_row_ordinal
-                            + branch.rotation_magnitude)
-                            % trace_domain_size;
-                        let source_coefficient_ordinal = u64::try_from(
-                            branch.source_half_ordinal,
-                        )
-                        .expect("half ordinal fits u64")
+                        let source_row_ordinal =
+                            (target_row_ordinal + branch.rotation_magnitude) % trace_domain_size;
+                        let source_coefficient_ordinal = u64::try_from(branch.source_half_ordinal)
+                            .expect("half ordinal fits u64")
                             * trace_domain_size
                             + source_row_ordinal;
                         let observed = if branch.negates_source {
@@ -1332,16 +1308,14 @@ mod tests {
                             source[source_coefficient_ordinal as usize]
                         };
 
-                        let target_coefficient_ordinal = u64::try_from(
-                            target_half_ordinal,
-                        )
-                        .expect("half ordinal fits u64")
+                        let target_coefficient_ordinal = u64::try_from(target_half_ordinal)
+                            .expect("half ordinal fits u64")
                             * trace_domain_size
                             + target_row_ordinal;
                         let reduced_exponent = exponent % (2 * ring_degree);
                         let unsigned_exponent = reduced_exponent % ring_degree;
-                        let unwrapped_source = i128::from(target_coefficient_ordinal)
-                            - i128::from(unsigned_exponent);
+                        let unwrapped_source =
+                            i128::from(target_coefficient_ordinal) - i128::from(unsigned_exponent);
                         let wraps_below_zero = unwrapped_source < 0;
                         let canonical_source = if wraps_below_zero {
                             unwrapped_source + i128::from(ring_degree)
@@ -1350,16 +1324,15 @@ mod tests {
                         };
                         let expected_is_negative =
                             (reduced_exponent >= ring_degree) ^ wraps_below_zero;
-                        let expected_source = source[usize::try_from(canonical_source)
-                            .expect("canonical source index")];
+                        let expected_source = source
+                            [usize::try_from(canonical_source).expect("canonical source index")];
                         let expected = if expected_is_negative {
                             -expected_source
                         } else {
                             expected_source
                         };
                         assert_eq!(
-                            observed,
-                            expected,
+                            observed, expected,
                             "ring degree {ring_degree}, exponent {exponent}, target coefficient {target_coefficient_ordinal}",
                         );
                     }

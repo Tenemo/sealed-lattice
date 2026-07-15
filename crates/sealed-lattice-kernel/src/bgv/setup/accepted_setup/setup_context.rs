@@ -141,7 +141,7 @@ pub(super) fn verify_context(
             vec![Refusal::new(
                 crate::foundation::RefusalReason::WrongHashOrRoot,
                 "setupParametersHashMismatch",
-                "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
+                "setupContext.setupParametersHash does not match the roster-derived collective BGV setup parameters",
                 "setupPackage.setupContext.setupParametersHash".to_string(),
             )],
         )));

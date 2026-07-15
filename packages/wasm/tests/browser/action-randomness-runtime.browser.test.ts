@@ -68,7 +68,6 @@ describe('Action-randomness real-WASM runtime in browsers', () => {
                 actionContextHash: stateVector.actionContextHash,
                 canonicalRosterBytes: stateVector.canonicalRosterBytes,
                 ceremonyContextHash: stateVector.ceremonyContextHash,
-                maximumRecoveryTransitionsPerStateKey: 2,
                 suiteIdentifier: stateVector.suiteIdentifier,
             },
             kernel,
@@ -94,7 +93,7 @@ describe('Action-randomness real-WASM runtime in browsers', () => {
         const dealerSetVector = stateVector.reservationOnly.find(
             (candidate) =>
                 candidate.capabilityKind ===
-                stateCapabilityKinds.setupDealerSetBranch,
+                stateCapabilityKinds.setupActionRandomnessRoot,
         );
         if (dealerSetVector === undefined) {
             throw new Error('Missing dealer-set reservation vector.');
@@ -104,7 +103,7 @@ describe('Action-randomness real-WASM runtime in browsers', () => {
                 dealerSetVector.certifiedIntent.canonicalIntentCarrier,
             canonicalStateCertificate:
                 dealerSetVector.certifiedIntent.canonicalStateCertificate,
-            capabilityKind: stateCapabilityKinds.setupDealerSetBranch,
+            capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
             expectedAuthorizationHash: stateVector.authorizationHash,
             subjectParticipantIdentity: stateVector.subjectParticipantIdentity,
         });

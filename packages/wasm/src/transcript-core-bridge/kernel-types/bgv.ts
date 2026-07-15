@@ -71,7 +71,6 @@ export type BgvTrusteeEvaluationKeyStatementKey =
 
 export type BgvSuccinctSetupProofContext = {
     readonly setupContextHash: ProtocolHash;
-    readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
 };
 
@@ -96,14 +95,16 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly proofBytesHash: ProtocolHash;
 };
 
+export type BgvLatticeAnchorCommitmentComputation = {
+    readonly canonicalCommitmentBytesHex: string;
+};
+
 type BgvSetupCommitmentValue = {
     readonly objectType: 'SetupCommitment';
     readonly sourceRnsLimbIndex: number;
     readonly shamirCoefficientIndex: number;
     readonly ringDegree: number;
     readonly commitmentLimbs: readonly {
-        readonly commitmentModulusIndex: number;
-        readonly modulus: number;
         readonly rows: readonly (readonly number[])[];
     }[];
 };

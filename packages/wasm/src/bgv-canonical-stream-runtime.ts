@@ -1,6 +1,9 @@
 import { foundationProfile } from '@sealed-lattice/types';
 
-import { beginAcceptedSetupCanonicalStream } from './accepted-setup-session-runtime.js';
+import {
+    beginAcceptedSetupCanonicalStream,
+    requireAcceptedSetupSessionKernelOwner,
+} from './accepted-setup-session-runtime.js';
 import {
     canonicalStreamDomains,
     canonicalStreamKernelContext,
@@ -9,6 +12,7 @@ import {
     CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
+    deriveCanonicalStreamChunkCount,
     openCanonicalStreamWorkerRuntime,
     type CanonicalStreamDomain,
     type CanonicalStreamChunkPull,
@@ -196,7 +200,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             descriptorPointer = this.#copyMetadataIntoWasm(
                 input.descriptorBytes,
             );
-            metadataPointer = this.#allocateMetadata(3);
+            metadataPointer = this.#allocateMetadata(2);
             handle = this.#context.runExclusive(
                 'BGV canonical stream begin',
                 () =>
@@ -209,14 +213,10 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                               input.descriptorBytes.byteLength,
                               metadataPointer,
                               metadataPointer + wasm32WordByteLength,
-                              metadataPointer + 2 * wasm32WordByteLength,
                           )
                         : beginAcceptedSetupCanonicalStream(
                               this.#acceptedSetupSession,
                               {
-                                  chunkCountPointer:
-                                      metadataPointer +
-                                      2 * wasm32WordByteLength,
                                   descriptorLength:
                                       input.descriptorBytes.byteLength,
                                   descriptorPointer,
@@ -229,16 +229,17 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                               },
                           ),
             );
-            const [status, totalByteLength, chunkCount] = this.#readWords(
+            const [status, totalByteLength] = this.#readWords(
                 metadataPointer,
-                3,
+                2,
             );
             this.#throwStatus(status);
-            if (handle === 0 || totalByteLength === 0 || chunkCount === 0) {
+            if (handle === 0 || totalByteLength === 0) {
                 throw new CanonicalStreamInternalError(
                     'The BGV canonical stream returned malformed begin metadata.',
                 );
             }
+            const chunkCount = deriveCanonicalStreamChunkCount(totalByteLength);
             if (
                 this.#context.memory.buffer.byteLength >
                 foundationProfile.maximumWasmMemoryByteLength - totalByteLength
@@ -271,7 +272,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             if (metadataPointer !== 0) {
                 this.#context.deallocate(
                     metadataPointer,
-                    3 * wasm32WordByteLength,
+                    2 * wasm32WordByteLength,
                 );
             }
         }
@@ -297,7 +298,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
         let writer: CanonicalStreamWriterLease | undefined;
         try {
             rootPointer = this.#copyMetadataIntoWasm(rootBytes);
-            metadataPointer = this.#allocateMetadata(3);
+            metadataPointer = this.#allocateMetadata(2);
             handle = this.#context.runExclusive(
                 'BGV canonical material reader begin',
                 () =>
@@ -307,28 +308,19 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                         rootBytes.byteLength,
                         metadataPointer,
                         metadataPointer + wasm32WordByteLength,
-                        metadataPointer + 2 * wasm32WordByteLength,
                     ),
             );
-            const [status, totalByteLength, chunkCount] = this.#readWords(
+            const [status, totalByteLength] = this.#readWords(
                 metadataPointer,
-                3,
+                2,
             );
             this.#throwStatus(status);
-            if (
-                handle === 0 ||
-                totalByteLength === 0 ||
-                chunkCount === 0 ||
-                chunkCount !==
-                    Math.ceil(
-                        totalByteLength /
-                            foundationProfile.streamChunkByteLength,
-                    )
-            ) {
+            if (handle === 0 || totalByteLength === 0) {
                 throw new CanonicalStreamInternalError(
                     'The BGV material reader returned malformed begin metadata.',
                 );
             }
+            const chunkCount = deriveCanonicalStreamChunkCount(totalByteLength);
             readerLease = {
                 chunkCount,
                 handle,
@@ -341,11 +333,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             writer = openCanonicalStreamWorkerRuntime({
                 kernel: this.#kernel,
             }).openWriter({ streamDomain, totalByteLength });
-            if (writer.chunkCount !== chunkCount) {
-                throw new CanonicalStreamInternalError(
-                    'The material reader and canonical writer disagree on chunk count.',
-                );
-            }
             for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
                 this.#throwIfCancelled(input.abortSignal);
                 const consumedByteLength =
@@ -456,7 +443,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             if (metadataPointer !== 0) {
                 this.#context.deallocate(
                     metadataPointer,
-                    3 * wasm32WordByteLength,
+                    2 * wasm32WordByteLength,
                 );
             }
         }
@@ -943,6 +930,12 @@ export const openBgvCanonicalStreamRuntime = (input: {
     if (context === undefined) {
         throw new CanonicalStreamInternalError(
             'The transcript-core kernel has no registered stream boundary.',
+        );
+    }
+    if (input.acceptedSetupSession !== undefined) {
+        requireAcceptedSetupSessionKernelOwner(
+            input.acceptedSetupSession,
+            input.kernel,
         );
     }
     return Object.freeze(

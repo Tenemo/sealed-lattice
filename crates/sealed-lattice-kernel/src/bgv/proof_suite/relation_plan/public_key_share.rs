@@ -1,10 +1,9 @@
-use super::*;
 use super::key_relation::{
-    BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder,
-    KeyVerifierSourceKey, PublicKeyShareRelationPlanInput,
-    public_key_common_reference_source, statement_root_source,
+    BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
+    PublicKeyShareRelationPlanInput, public_key_common_reference_source, statement_root_source,
 };
 use super::same_secret_anchor::{add_matrix_columns, append_matrix_sources};
+use super::*;
 
 const PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1212;
 const ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL: u64 = 3;
@@ -19,8 +18,11 @@ pub(crate) fn compile_public_key_share_relation_plan(
         PUBLIC_KEY_SHARE_ROOT_FIELD_ORDINAL,
         None,
     )];
-    for (root_ordinal, data_modulus_index) in
-        input.commitment_data_modulus_indices.iter().copied().enumerate()
+    for (root_ordinal, data_modulus_index) in input
+        .commitment_data_modulus_indices
+        .iter()
+        .copied()
+        .enumerate()
     {
         sources.push(statement_root_source(
             ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL,
@@ -57,8 +59,7 @@ pub(crate) fn compile_public_key_share_relation_plan(
         &data_modulus_references,
         BoundPolynomialRootUse::Output,
     )?;
-    for (limb_ordinal, data_modulus_index) in
-        input.data_modulus_indices.iter().copied().enumerate()
+    for (limb_ordinal, data_modulus_index) in input.data_modulus_indices.iter().copied().enumerate()
     {
         let modulus_reference = SuiteModulusReference::data(data_modulus_index);
         let common_reference = builder.add_split_verifier_vector(
@@ -78,8 +79,11 @@ pub(crate) fn compile_public_key_share_relation_plan(
             )?;
         }
     }
-    for (root_ordinal, data_modulus_index) in
-        input.commitment_data_modulus_indices.iter().copied().enumerate()
+    for (root_ordinal, data_modulus_index) in input
+        .commitment_data_modulus_indices
+        .iter()
+        .copied()
+        .enumerate()
     {
         // Prime-limb commitments use independent openings while sharing only
         // the bounded semantic secret proved by the cross-limb relation.
@@ -89,13 +93,11 @@ pub(crate) fn compile_public_key_share_relation_plan(
             &KeyVerifierSourceKey::StatementRoot {
                 field_ordinal: ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL,
                 list_ordinal: Some(
-                    u64::try_from(root_ordinal)
-                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    u64::try_from(root_ordinal).map_err(|_| RelationPlanError::CountOverflow)?,
                 ),
             },
             modulus_reference,
-            rank
-                .checked_add(1)
+            rank.checked_add(1)
                 .ok_or(RelationPlanError::CountOverflow)?,
             BoundPolynomialRootUse::Input,
         )?;
@@ -120,15 +122,12 @@ pub(crate) fn compile_public_key_share_relation_plan(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::same_secret_anchor::tests::{
-        TEST_EVALUATION_DOMAIN_SIZE, TEST_OPENING_DEGREE_BOUND_EXCLUSIVE,
-        TEST_RING_DEGREE, application_challenges, check_context, production_context,
-        proof_tree_width,
+        TEST_EVALUATION_DOMAIN_SIZE, TEST_OPENING_DEGREE_BOUND_EXCLUSIVE, TEST_RING_DEGREE,
+        application_challenges, check_context, production_context, proof_tree_width,
     };
-    use crate::bgv::proof_suite::{
-        field::{ProofBaseFieldElement, ProofChallengeExtensionElement},
-    };
+    use super::*;
+    use crate::bgv::proof_suite::field::{ProofBaseFieldElement, ProofChallengeExtensionElement};
 
     fn public_key_input() -> PublicKeyShareRelationPlanInput {
         PublicKeyShareRelationPlanInput {
@@ -136,8 +135,8 @@ mod tests {
             evaluation_domain_size: TEST_EVALUATION_DOMAIN_SIZE,
             opening_degree_bound_exclusive: TEST_OPENING_DEGREE_BOUND_EXCLUSIVE,
             public_polynomial_column_degree_bound_exclusive: TEST_RING_DEGREE,
-            data_modulus_indices: vec![0, 1],
-            commitment_data_modulus_indices: vec![0, 1],
+            data_modulus_indices: vec![0, 1, 2],
+            commitment_data_modulus_indices: vec![0, 1, 2],
             commitment_module_rank: 1,
             plaintext_modulus: 257,
             first_mask_purpose: 100,
@@ -158,12 +157,9 @@ mod tests {
                 .expect("evaluation point"),
         );
         let evaluations = variant
-            .evaluate_constraints_at_point(
-                &context,
-                evaluation_point,
-                &challenges,
-                |_, _, _| Ok(ProofChallengeExtensionElement::ZERO),
-            )
+            .evaluate_constraints_at_point(&context, evaluation_point, &challenges, |_, _, _| {
+                Ok(ProofChallengeExtensionElement::ZERO)
+            })
             .expect("every generated constraint is interpretable");
         assert_eq!(evaluations.len(), variant.ordered_constraints.len());
         assert_eq!(
@@ -200,27 +196,33 @@ mod tests {
             compile_public_key_share_relation_plan(&missing_data_limb, &context),
             Err(RelationPlanError::NonCanonicalOrder)
         );
+        let mut unsupported_commitment_rank = public_key_input();
+        unsupported_commitment_rank.commitment_module_rank = 2;
+        assert_eq!(
+            compile_public_key_share_relation_plan(&unsupported_commitment_rank, &context),
+            Err(RelationPlanError::InvalidDomain)
+        );
     }
 
     #[test]
-    fn public_key_share_current_production_profile_fails_closed_before_degree_fixed_point() {
+    fn public_key_share_production_profile_closes_the_degree_fixed_point() {
         let context = production_context(true);
-        assert_eq!(
-            compile_public_key_share_relation_plan(
-                &PublicKeyShareRelationPlanInput {
-                    ring_degree: 32_768,
-                    evaluation_domain_size: 262_144,
-                    opening_degree_bound_exclusive: 32_768,
-                    public_polynomial_column_degree_bound_exclusive: 16_384,
-                    data_modulus_indices: (0..17).collect(),
-                    commitment_data_modulus_indices: vec![0, 1, 2],
-                    commitment_module_rank: 2,
-                    plaintext_modulus: 65_537,
-                    first_mask_purpose: 100,
-                },
-                &context,
-            ),
-            Err(RelationPlanError::DegreeBoundExceeded),
-        );
+        let plan = compile_public_key_share_relation_plan(
+            &PublicKeyShareRelationPlanInput {
+                ring_degree: 32_768,
+                evaluation_domain_size: 524_288,
+                opening_degree_bound_exclusive: 65_536,
+                public_polynomial_column_degree_bound_exclusive: 16_384,
+                data_modulus_indices: (0..17).collect(),
+                commitment_data_modulus_indices: vec![0, 1, 2],
+                commitment_module_rank: 1,
+                plaintext_modulus: 65_537,
+                first_mask_purpose: 100,
+            },
+            &context,
+        )
+        .expect("production public-key-share relation plan");
+        plan.check(&context)
+            .expect("checked production public-key-share relation plan");
     }
 }

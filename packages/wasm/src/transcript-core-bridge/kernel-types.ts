@@ -1,8 +1,27 @@
-import type { CanonicalError, ProtocolHash } from '@sealed-lattice/types';
+import type {
+    CanonicalError,
+    MailboxAssociatedData,
+    MailboxCiphertextDescriptor,
+    MailboxKeyScheduleInput,
+    ProtocolHash,
+    SetupMailboxSlot,
+    SignedMailboxEnvelope,
+    UnsignedMailboxEnvelope,
+} from '@sealed-lattice/types';
+
+export type {
+    MailboxAssociatedData,
+    MailboxCiphertextDescriptor,
+    MailboxKeyScheduleInput,
+    SetupMailboxSlot,
+    SignedMailboxEnvelope,
+    UnsignedMailboxEnvelope,
+} from '@sealed-lattice/types';
 
 import type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
+    BgvLatticeAnchorCommitmentComputation,
     BgvPublicKeyShareStatementContext,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeySameSecretBridge,
@@ -18,6 +37,7 @@ import type {
 export type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
+    BgvLatticeAnchorCommitmentComputation,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
@@ -31,25 +51,6 @@ export type BgvCollectiveSetupVerificationInput = Readonly<{
     readonly expectedManifestHash?: ProtocolHash;
     readonly expectedRosterHash?: ProtocolHash;
 }>;
-
-export type MailboxPayloadType = 1 | 2;
-
-export type CanonicalFoundationValueValidation = Readonly<{
-    readonly schemaIdentifier: number;
-    readonly canonicalBytesHex: string;
-    readonly bindingHash?: ProtocolHash;
-}>;
-
-export type CanonicalFoundationValueValidationInput =
-    | Readonly<{
-          readonly schemaIdentifier: number;
-          readonly canonicalBytesHex: string;
-      }>
-    | Readonly<{
-          readonly schemaIdentifier: number;
-          readonly canonicalByteLength: number;
-          readonly canonicalByteChunksHex: readonly string[];
-      }>;
 
 export type DecodedProofApplicationBinding = Readonly<{
     readonly canonicalBytesHex: string;
@@ -67,65 +68,6 @@ export type DecodedProofApplicationBinding = Readonly<{
     readonly proofByteLength: string;
 }>;
 
-export type CeremonyContextInput = Readonly<{
-    readonly suiteId: ProtocolHash;
-    readonly manifestHash: ProtocolHash;
-    readonly rosterHash: ProtocolHash;
-    readonly ceremonyIdentifier: string;
-}>;
-
-export type ActionContextInput = Readonly<{
-    readonly ceremonyContextHash: ProtocolHash;
-    readonly actionIdentifier: string;
-    readonly actionDefinitionHash: ProtocolHash;
-    readonly boardPolicyHash: ProtocolHash;
-}>;
-
-export type MailboxKeyScheduleInput = Readonly<{
-    readonly suiteId: ProtocolHash;
-    readonly ceremonyContextHash: ProtocolHash;
-    readonly actionContextHash: ProtocolHash;
-    readonly rosterHash: ProtocolHash;
-    readonly sourceParticipantId: string;
-    readonly recipientParticipantId: string;
-    readonly producerSequence: string;
-    readonly envelopeAttemptIdentifierHex: string;
-    readonly payloadType: MailboxPayloadType;
-    readonly statementHash: ProtocolHash;
-    readonly orderedMaterialRoots: readonly ProtocolHash[];
-    readonly kemCiphertextHash: ProtocolHash;
-}>;
-
-export type MailboxAssociatedData = Readonly<
-    MailboxKeyScheduleInput & {
-        readonly plaintextByteLength: string;
-    }
->;
-
-export type SetupMailboxSlot = Omit<
-    MailboxKeyScheduleInput,
-    'envelopeAttemptIdentifierHex' | 'kemCiphertextHash'
->;
-
-export type MailboxCiphertextDescriptor = Readonly<{
-    readonly totalByteLength: string;
-    readonly orderedChunkDigests: readonly ProtocolHash[];
-    readonly fullObjectDigest: ProtocolHash;
-}>;
-
-export type UnsignedMailboxEnvelope = Readonly<{
-    readonly associatedData: MailboxAssociatedData;
-    readonly kemCiphertextHex: string;
-    readonly ciphertextDescriptor: MailboxCiphertextDescriptor;
-    readonly gcmTagHex: string;
-}>;
-
-export type SignedMailboxEnvelope = Readonly<
-    UnsignedMailboxEnvelope & {
-        readonly sourceSignatureHex: string;
-    }
->;
-
 export type EncodedMailboxKeyScheduleInput = Readonly<{
     readonly canonicalBytesHex: string;
     readonly hkdfExtractSaltHex: string;
@@ -133,17 +75,14 @@ export type EncodedMailboxKeyScheduleInput = Readonly<{
 
 export type DecodedMailboxKeyScheduleInput = Readonly<{
     readonly value: MailboxKeyScheduleInput;
-    readonly hkdfExtractSaltHex: string;
 }>;
 
 export type EncodedMailboxAssociatedData = Readonly<{
     readonly canonicalBytesHex: string;
-    readonly hkdfExtractSaltHex: string;
 }>;
 
 export type DecodedMailboxAssociatedData = Readonly<{
     readonly value: MailboxAssociatedData;
-    readonly hkdfExtractSaltHex: string;
 }>;
 
 export type EncodedStreamDescriptor = Readonly<{
@@ -202,7 +141,6 @@ type BgvPublicKeyShareStatementKey = Extract<
 
 type BgvTrusteeEvaluationKeyStatementCommonInput<Context, Key> = Readonly<{
     readonly context: Context;
-    readonly ringDegree: number;
     readonly keys: readonly Key[];
 }>;
 
@@ -243,7 +181,7 @@ type BgvTrusteeEvaluationKeyProofInput =
               { readonly statementFamily: 'trustee-evaluation-key' }
           > &
               BgvTrusteeEvaluationKeyProofCommonInput & {
-                  readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+                  readonly openingRandomnessBySourceLimbAndCommitmentLimb: readonly (readonly (readonly (readonly number[])[])[])[];
               }
       >
     | Readonly<
@@ -259,17 +197,13 @@ type BgvTrusteeEvaluationKeyProofInput =
 export type TranscriptCoreKernel = {
     beginAcceptedSetupSession(): AcceptedSetupSession;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
-    validateCanonicalFoundationValue(
-        input: CanonicalFoundationValueValidationInput,
-    ): CanonicalFoundationValueValidation;
     decodeProofApplicationBinding(input: {
         readonly canonicalBytesHex: string;
     }): DecodedProofApplicationBinding;
-    deriveCeremonyContextHash(value: CeremonyContextInput): ProtocolHash;
-    deriveActionContextHash(value: ActionContextInput): ProtocolHash;
-    encodeMailboxKeyScheduleInput(
-        value: MailboxKeyScheduleInput,
-    ): EncodedMailboxKeyScheduleInput;
+    encodeMailboxKeyScheduleInput(input: {
+        readonly kemCiphertextHex: string;
+        readonly value: MailboxKeyScheduleInput;
+    }): EncodedMailboxKeyScheduleInput;
     decodeMailboxKeyScheduleInput(input: {
         readonly canonicalBytesHex: string;
     }): DecodedMailboxKeyScheduleInput;
@@ -298,9 +232,6 @@ export type TranscriptCoreKernel = {
     decodeSignedMailboxEnvelope(input: {
         readonly canonicalBytesHex: string;
     }): DecodedSignedMailboxEnvelope;
-    deriveMailboxKemCiphertextHash(input: {
-        readonly kemCiphertextHex: string;
-    }): ProtocolHash;
     deriveMailboxEnvelopeHash(value: UnsignedMailboxEnvelope): ProtocolHash;
     describeBgvRnsParameters(): BgvRnsParametersDescription;
     describeCollectiveBgvSetupParameters(input?: {
@@ -317,19 +248,24 @@ export type TranscriptCoreKernel = {
     generateTrusteeEvaluationKeyProof(
         input: BgvTrusteeEvaluationKeyProofInput,
     ): BgvTrusteeEvaluationKeyProofGeneration;
+    computeLatticeAnchorCommitmentFromOpening(input: {
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly commitmentDataPrimeIndex: number;
+        readonly secretContributionCoefficients: readonly number[];
+        readonly openingPolynomials: readonly (readonly number[])[];
+    }): BgvLatticeAnchorCommitmentComputation;
     computeSetupCommitmentFromOpening(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceRnsLimbIndex: number;
         readonly shamirCoefficientIndex: number;
         readonly messageCoefficients: readonly number[];
-        readonly randomnessByColumn: readonly (readonly number[])[];
+        readonly randomnessByCommitmentLimb: readonly (readonly (readonly number[])[])[];
         readonly ringDegree: number;
     }): BgvSetupCommitmentOpeningComputation;
     computeVssCommittedMaterialCommitment(input: {
         readonly commitmentRole: string;
         readonly commitmentContext: Record<string, unknown>;
         readonly rnsLimbIndex: number;
-        readonly ringDegree: number;
         readonly messageCoefficients: readonly number[];
         readonly materialSeedHex: string;
     }): BgvVssCommittedMaterialCommitmentComputation;
@@ -366,23 +302,12 @@ type TranscriptCoreKernelCommand =
           'deriveCanonicalObjectHash'
       >
     | KernelCommandFromMethod<
-          'ValidateCanonicalFoundationValue',
-          'validateCanonicalFoundationValue'
-      >
-    | KernelCommandFromMethod<
           'DecodeProofApplicationBinding',
           'decodeProofApplicationBinding'
       >
     | Readonly<{
-          readonly command: 'DeriveCeremonyContextHash';
-          readonly value: CeremonyContextInput;
-      }>
-    | Readonly<{
-          readonly command: 'DeriveActionContextHash';
-          readonly value: ActionContextInput;
-      }>
-    | Readonly<{
           readonly command: 'EncodeMailboxKeyScheduleInput';
+          readonly kemCiphertextHex: string;
           readonly value: MailboxKeyScheduleInput;
       }>
     | KernelCommandFromMethod<
@@ -425,10 +350,6 @@ type TranscriptCoreKernelCommand =
           'DecodeSignedMailboxEnvelope',
           'decodeSignedMailboxEnvelope'
       >
-    | KernelCommandFromMethod<
-          'DeriveMailboxKemCiphertextHash',
-          'deriveMailboxKemCiphertextHash'
-      >
     | Readonly<{
           readonly command: 'DeriveMailboxEnvelopeHash';
           readonly value: UnsignedMailboxEnvelope;
@@ -452,6 +373,10 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'GenerateTrusteeEvaluationKeyProof',
           'generateTrusteeEvaluationKeyProof'
+      >
+    | KernelCommandFromMethod<
+          'ComputeLatticeAnchorCommitmentFromOpening',
+          'computeLatticeAnchorCommitmentFromOpening'
       >
     | KernelCommandFromMethod<
           'ComputeSetupCommitmentFromOpening',
@@ -481,7 +406,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         descriptorLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ) => number;
     sealed_lattice_accepted_setup_command_with_length?: (
         pointer: number,
@@ -509,7 +433,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         descriptorLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ) => number;
     sealed_lattice_bgv_canonical_stream_cancel?: (handle: number) => number;
     sealed_lattice_bgv_canonical_stream_finish?: (handle: number) => number;
@@ -519,7 +442,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         materialRootLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ) => number;
     sealed_lattice_bgv_canonical_material_reader_cancel?: (
         handle: number,
@@ -545,13 +467,11 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         descriptorLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ) => number;
     sealed_lattice_canonical_stream_begin_writer?: (
         streamDomain: number,
         totalByteLength: number,
         statusPointer: number,
-        chunkCountPointer: number,
     ) => number;
     sealed_lattice_canonical_stream_cancel?: (handle: number) => number;
     sealed_lattice_canonical_stream_finish_verifier?: (
@@ -668,6 +588,48 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         outputCapacity: number,
         statusPointer: number,
     ) => number;
+    sealed_lattice_finality_verifier_begin?: (
+        configurationPointer: number,
+        configurationLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_finality_verifier_cancel?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_finality_verifier_describe?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedFinalityHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_finality_verifier_release?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedFinalityHandle: number,
+    ) => number;
+    sealed_lattice_finality_verifier_verify?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedEvaluatorReplayHandle: number,
+        boardSessionHandle: number,
+        boardCapabilityPointer: number,
+        boardCapabilityLength: number,
+        verifiedFinalityObjectHandlesPointer: number,
+        verifiedFinalityObjectHandlesLength: number,
+        canonicalStatementPointer: number,
+        canonicalStatementLength: number,
+        canonicalCertificatePointer: number,
+        canonicalCertificateLength: number,
+        statusPointer: number,
+    ) => number;
     sealed_lattice_state_verifier_begin?: (
         configurationPointer: number,
         configurationLength: number,
@@ -734,19 +696,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         canonicalOutputIntentCarrierLength: number,
         statusPointer: number,
     ) => number;
-    sealed_lattice_state_verifier_prepare_recovery?: (
-        sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-        subjectParticipantIdentityPointer: number,
-        subjectParticipantIdentityLength: number,
-        capabilityKindCode: number,
-        predecessorRecoveryHandle: number,
-        preservedIntentHandle: number,
-        canonicalRecoveryTransitionCarrierPointer: number,
-        canonicalRecoveryTransitionCarrierLength: number,
-        statusPointer: number,
-    ) => number;
     sealed_lattice_state_verifier_prepare_reservation?: (
         sessionHandle: number,
         capabilityPointer: number,
@@ -754,26 +703,10 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         subjectParticipantIdentityPointer: number,
         subjectParticipantIdentityLength: number,
         capabilityKindCode: number,
-        predecessorRecoveryHandle: number,
         expectedAuthorizationHashPointer: number,
         expectedAuthorizationHashLength: number,
         canonicalReservationIntentCarrierPointer: number,
         canonicalReservationIntentCarrierLength: number,
-        statusPointer: number,
-    ) => number;
-    sealed_lattice_state_verifier_verify_recovery?: (
-        sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-        subjectParticipantIdentityPointer: number,
-        subjectParticipantIdentityLength: number,
-        capabilityKindCode: number,
-        predecessorRecoveryHandle: number,
-        preservedIntentHandle: number,
-        canonicalRecoveryTransitionCarrierPointer: number,
-        canonicalRecoveryTransitionCarrierLength: number,
-        canonicalStateCertificatePointer: number,
-        canonicalStateCertificateLength: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_state_verifier_verify_reservation?: (
@@ -783,7 +716,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         subjectParticipantIdentityPointer: number,
         subjectParticipantIdentityLength: number,
         capabilityKindCode: number,
-        predecessorRecoveryHandle: number,
         expectedAuthorizationHashPointer: number,
         expectedAuthorizationHashLength: number,
         canonicalReservationIntentCarrierPointer: number,

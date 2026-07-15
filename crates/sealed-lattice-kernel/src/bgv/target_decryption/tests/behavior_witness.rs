@@ -3,7 +3,8 @@ use super::*;
 #[test]
 fn ten_participant_factor_clears_every_authorized_subset_denominator() {
     let participant_count = 10_u64;
-    let minimum_shares_for_interpolation = participant_count / 3 + 1;
+    let minimum_shares_for_interpolation =
+        decryption_threshold_for_participant_count(participant_count);
     let denominator_clearing_factor =
         target_decryption_interpolation_denominator_clearing_factor(participant_count)
             .expect("ten-participant denominator-clearing factor");
@@ -39,11 +40,10 @@ fn ten_participant_factor_clears_every_authorized_subset_denominator() {
 fn private_flooding_noise_is_independent_across_trustees_and_consistent_across_rns_limbs() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
     let setup_binding = read_setup_binding(&setup_package).expect("setup binding");
-    let target_share_profile_binding =
-        read_target_share_profile(&target_share_profile_value, &setup_binding)
-            .expect("target share profile");
+    let required_share_count =
+        decryption_threshold_for_roster_length(setup_binding.participants.len())
+            .expect("target decryption share threshold");
     let target_accepted =
         read_target_accepted_binding(&accepted_record, &setup_binding).expect("target accepted");
     let target_ciphertext_pair = read_target_ciphertext_pair(
@@ -56,11 +56,11 @@ fn private_flooding_noise_is_independent_across_trustees_and_consistent_across_r
         .participants
         .iter()
         .step_by(2)
-        .take(target_share_profile_binding.minimum_shares_for_interpolation)
+        .take(required_share_count)
         .collect::<Vec<_>>();
     assert_eq!(
         selected_participants.len(),
-        target_share_profile_binding.minimum_shares_for_interpolation,
+        required_share_count,
         "fixture must include enough participants for interpolation"
     );
     assert!(
@@ -84,7 +84,6 @@ fn private_flooding_noise_is_independent_across_trustees_and_consistent_across_r
             &accepted_record,
             &target_ciphertext_binding,
             &target_ciphertexts,
-            &target_share_profile_value,
             &participant.trustee_identity,
         );
         let local_witness =
@@ -103,7 +102,6 @@ fn private_flooding_noise_is_independent_across_trustees_and_consistent_across_r
             &accepted_record,
             &target_ciphertext_binding,
             &target_ciphertexts,
-            &target_share_profile_value,
             &local_target_share_witness_value,
             &participant.trustee_identity,
         );
@@ -160,11 +158,10 @@ fn private_flooding_noise_is_independent_across_trustees_and_consistent_across_r
 fn target_decryption_quorum_release_recovers_target_slots() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
     let setup_binding = read_setup_binding(&setup_package).expect("setup binding");
-    let target_share_profile_binding =
-        read_target_share_profile(&target_share_profile_value, &setup_binding)
-            .expect("target share profile");
+    let required_share_count =
+        decryption_threshold_for_roster_length(setup_binding.participants.len())
+            .expect("target decryption share threshold");
     let target_accepted =
         read_target_accepted_binding(&accepted_record, &setup_binding).expect("target accepted");
     let target_ciphertext_pair = read_target_ciphertext_pair(
@@ -178,11 +175,11 @@ fn target_decryption_quorum_release_recovers_target_slots() {
         .participants
         .iter()
         .step_by(2)
-        .take(target_share_profile_binding.minimum_shares_for_interpolation)
+        .take(required_share_count)
         .collect::<Vec<_>>();
     assert_eq!(
         selected_participants.len(),
-        target_share_profile_binding.minimum_shares_for_interpolation,
+        required_share_count,
         "fixture must include enough participants for interpolation"
     );
     assert!(
@@ -200,7 +197,6 @@ fn target_decryption_quorum_release_recovers_target_slots() {
             &accepted_record,
             &target_ciphertext_binding,
             &target_ciphertexts,
-            &target_share_profile_value,
             &participant.trustee_identity,
         );
         let local_share = generate_local_share(
@@ -208,7 +204,6 @@ fn target_decryption_quorum_release_recovers_target_slots() {
             &accepted_record,
             &target_ciphertext_binding,
             &target_ciphertexts,
-            &target_share_profile_value,
             &local_target_share_witness_value,
             &participant.trustee_identity,
         );
@@ -234,10 +229,7 @@ fn target_decryption_quorum_release_recovers_target_slots() {
             .expect("target-order partials"),
         );
     }
-    assert_eq!(
-        target_id_partials_by_share.len(),
-        target_share_profile_binding.minimum_shares_for_interpolation
-    );
+    assert_eq!(target_id_partials_by_share.len(), required_share_count);
 
     let target_id_partial_refs = target_id_partials_by_share
         .iter()
@@ -304,27 +296,24 @@ fn target_decryption_quorum_release_recovers_target_slots() {
 fn target_result_release_requires_proof_backed_quorum() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
     let error = staged_target_result_release(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile_value,
         Vec::new(),
         "rust-target-release-empty",
     )
     .expect_err("target result release must require a quorum");
 
     assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
-    assert!(error.message.contains("share quorum"));
+    assert!(error.message.contains("share threshold"));
 
     let raw_share = generate_share_from_fresh_local_witness(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile_value,
         "trustee-1",
     );
     let error = staged_target_result_release(
@@ -332,7 +321,6 @@ fn target_result_release_requires_proof_backed_quorum() {
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile_value,
         vec![
             json!({ "targetDecryptionShare": raw_share.clone() }),
             json!({ "targetDecryptionShare": raw_share }),

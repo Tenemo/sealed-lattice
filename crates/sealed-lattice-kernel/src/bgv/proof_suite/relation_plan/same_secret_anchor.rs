@@ -1,9 +1,8 @@
-use super::*;
 use super::key_relation::{
-    BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder,
-    KeyVerifierSourceKey, SameSecretRelationPlanInput, SplitIntegerVector,
-    bdlop_matrix_source, statement_root_source,
+    BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
+    SameSecretRelationPlanInput, SplitIntegerVector, bdlop_matrix_source, statement_root_source,
 };
+use super::*;
 
 const SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1211;
 const DEGREE_ZERO_VSS_MATERIAL_ROOTS_FIELD_ORDINAL: u64 = 3;
@@ -21,8 +20,11 @@ pub(crate) fn compile_same_secret_relation_plan(
             Some(u64::try_from(root_ordinal).map_err(|_| RelationPlanError::CountOverflow)?),
         ));
     }
-    for (root_ordinal, data_modulus_index) in
-        input.commitment_data_modulus_indices.iter().copied().enumerate()
+    for (root_ordinal, data_modulus_index) in input
+        .commitment_data_modulus_indices
+        .iter()
+        .copied()
+        .enumerate()
     {
         sources.push(statement_root_source(
             ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL,
@@ -39,15 +41,17 @@ pub(crate) fn compile_same_secret_relation_plan(
     )?;
     let secret = builder.add_shifted_ternary_vector()?;
     let negative_indicator = builder.add_binary_vector()?;
-    for (root_ordinal, data_modulus_index) in
-        input.sharing_data_modulus_indices.iter().copied().enumerate()
+    for (root_ordinal, data_modulus_index) in input
+        .sharing_data_modulus_indices
+        .iter()
+        .copied()
+        .enumerate()
     {
         let material = builder.add_committed_material_root(
             &KeyVerifierSourceKey::StatementRoot {
                 field_ordinal: DEGREE_ZERO_VSS_MATERIAL_ROOTS_FIELD_ORDINAL,
                 list_ordinal: Some(
-                    u64::try_from(root_ordinal)
-                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    u64::try_from(root_ordinal).map_err(|_| RelationPlanError::CountOverflow)?,
                 ),
             },
             SuiteModulusReference::data(data_modulus_index),
@@ -59,8 +63,11 @@ pub(crate) fn compile_same_secret_relation_plan(
             SuiteModulusReference::data(data_modulus_index),
         )?;
     }
-    for (root_ordinal, data_modulus_index) in
-        input.commitment_data_modulus_indices.iter().copied().enumerate()
+    for (root_ordinal, data_modulus_index) in input
+        .commitment_data_modulus_indices
+        .iter()
+        .copied()
+        .enumerate()
     {
         // Every prime commitment limb owns an independent opening tape. Reusing
         // one short opening across CRT limbs creates a joint-view hiding gap
@@ -71,13 +78,11 @@ pub(crate) fn compile_same_secret_relation_plan(
             &KeyVerifierSourceKey::StatementRoot {
                 field_ordinal: ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL,
                 list_ordinal: Some(
-                    u64::try_from(root_ordinal)
-                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    u64::try_from(root_ordinal).map_err(|_| RelationPlanError::CountOverflow)?,
                 ),
             },
             modulus_reference,
-            rank
-                .checked_add(1)
+            rank.checked_add(1)
                 .ok_or(RelationPlanError::CountOverflow)?,
             BoundPolynomialRootUse::Output,
         )?;
@@ -113,8 +118,7 @@ pub(super) fn append_matrix_sources(
                 data_modulus_index,
                 1,
                 u16::try_from(row_ordinal).map_err(|_| RelationPlanError::CountOverflow)?,
-                u16::try_from(column_ordinal)
-                    .map_err(|_| RelationPlanError::CountOverflow)?,
+                u16::try_from(column_ordinal).map_err(|_| RelationPlanError::CountOverflow)?,
             ));
         }
     }
@@ -134,13 +138,7 @@ pub(super) fn add_matrix_columns(
     builder: &mut KeyRelationPlanBuilder<'_>,
     data_modulus_index: u16,
     rank: usize,
-) -> Result<
-    (
-        Vec<Vec<SplitIntegerVector>>,
-        Vec<SplitIntegerVector>,
-    ),
-    RelationPlanError,
-> {
+) -> Result<(Vec<Vec<SplitIntegerVector>>, Vec<SplitIntegerVector>), RelationPlanError> {
     let modulus_reference = SuiteModulusReference::data(data_modulus_index);
     let first_matrix = (0..rank)
         .map(|row_ordinal| {
@@ -194,13 +192,12 @@ pub(super) mod tests {
     pub(in super::super) const TEST_EVALUATION_DOMAIN_SIZE: u64 = 8_192;
     pub(in super::super) const TEST_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 4_096;
 
-    pub(in super::super) fn check_context(
-        include_plaintext: bool,
-    ) -> RelationPlanCheckContext {
+    pub(in super::super) fn check_context(include_plaintext: bool) -> RelationPlanCheckContext {
         let maximum_two_adic_order = 1_u64 << 32;
         let mut resolved_moduli = vec![
             ResolvedSuiteModulus::new(SuiteModulusReference::data(0), DATA_PRIMES[0]),
             ResolvedSuiteModulus::new(SuiteModulusReference::data(1), DATA_PRIMES[1]),
+            ResolvedSuiteModulus::new(SuiteModulusReference::data(2), DATA_PRIMES[2]),
         ];
         if include_plaintext {
             resolved_moduli.push(ResolvedSuiteModulus::new(
@@ -210,8 +207,8 @@ pub(super) mod tests {
         }
         RelationPlanCheckContext {
             base_field_modulus: PROOF_BASE_FIELD_MODULUS,
-            challenge_extension_degree:
-                crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
+            challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
+                as u16,
             evaluation_blowup_factor: 2,
             evaluation_domain_generator: modular_power(
                 PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
@@ -239,7 +236,7 @@ pub(super) mod tests {
             material_column_degree_bound_exclusive: 10,
             public_polynomial_column_degree_bound_exclusive: TEST_RING_DEGREE,
             sharing_data_modulus_indices: vec![0, 1],
-            commitment_data_modulus_indices: vec![0, 1],
+            commitment_data_modulus_indices: vec![0, 1, 2],
             commitment_module_rank: 1,
             first_mask_purpose: 100,
         }
@@ -264,17 +261,12 @@ pub(super) mod tests {
                     },
                     _ => return None,
                 };
-                let repetition_ordinal =
-                    u16::try_from(descriptor.role_coordinates[1]).ok()?;
+                let repetition_ordinal = u16::try_from(descriptor.role_coordinates[1]).ok()?;
                 if !seen_coordinates.insert((challenge, repetition_ordinal)) {
                     return None;
                 }
                 Some(
-                    RelationApplicationChallengeAssignment::new(
-                        challenge,
-                        repetition_ordinal,
-                        3,
-                    )
+                    RelationApplicationChallengeAssignment::new(challenge, repetition_ordinal, 3)
                         .expect("valid application challenge"),
                 )
             })
@@ -295,12 +287,9 @@ pub(super) mod tests {
                 .expect("evaluation point"),
         );
         let evaluations = variant
-            .evaluate_constraints_at_point(
-                &context,
-                evaluation_point,
-                &challenges,
-                |_, _, _| Ok(ProofChallengeExtensionElement::ZERO),
-            )
+            .evaluate_constraints_at_point(&context, evaluation_point, &challenges, |_, _, _| {
+                Ok(ProofChallengeExtensionElement::ZERO)
+            })
             .expect("every generated constraint is interpretable");
         assert_eq!(evaluations.len(), variant.ordered_constraints.len());
         assert_eq!(
@@ -331,18 +320,21 @@ pub(super) mod tests {
             compile_same_secret_relation_plan(&repeated_modulus, &context),
             Err(RelationPlanError::InvalidDomain)
         );
-        let mut insufficient_crt_binding = same_secret_input();
-        insufficient_crt_binding.commitment_data_modulus_indices = vec![0];
+        let mut incomplete_prime_local_profile = same_secret_input();
+        incomplete_prime_local_profile.commitment_data_modulus_indices = vec![0, 1];
         assert_eq!(
-            compile_same_secret_relation_plan(&insufficient_crt_binding, &context),
-            Err(RelationPlanError::NoWrapBoundViolated)
+            compile_same_secret_relation_plan(&incomplete_prime_local_profile, &context),
+            Err(RelationPlanError::NonCanonicalOrder)
+        );
+        let mut unsupported_commitment_rank = same_secret_input();
+        unsupported_commitment_rank.commitment_module_rank = 2;
+        assert_eq!(
+            compile_same_secret_relation_plan(&unsupported_commitment_rank, &context),
+            Err(RelationPlanError::InvalidDomain)
         );
     }
 
-    pub(in super::super) fn proof_tree_width(
-        variant: &RelationPlanVariant,
-        role: u16,
-    ) -> usize {
+    pub(in super::super) fn proof_tree_width(variant: &RelationPlanVariant, role: u16) -> usize {
         variant
             .ordered_trees
             .iter()
@@ -356,9 +348,7 @@ pub(super) mod tests {
             .expect("proof-created tree role")
     }
 
-    pub(in super::super) fn assert_integer_lift_phase_ownership(
-        variant: &RelationPlanVariant,
-    ) {
+    pub(in super::super) fn assert_integer_lift_phase_ownership(variant: &RelationPlanVariant) {
         let tree_roles = variant
             .ordered_trees
             .iter()
@@ -433,16 +423,13 @@ pub(super) mod tests {
     pub(in super::super) fn production_context(
         include_plaintext: bool,
     ) -> RelationPlanCheckContext {
-        let evaluation_domain_size = 262_144_u64;
+        let evaluation_domain_size = 524_288_u64;
         let mut resolved_moduli = DATA_PRIMES
             .iter()
             .copied()
             .enumerate()
             .map(|(index, modulus)| {
-                ResolvedSuiteModulus::new(
-                    SuiteModulusReference::data(index as u16),
-                    modulus,
-                )
+                ResolvedSuiteModulus::new(SuiteModulusReference::data(index as u16), modulus)
             })
             .collect::<Vec<_>>();
         if include_plaintext {
@@ -453,8 +440,8 @@ pub(super) mod tests {
         }
         RelationPlanCheckContext {
             base_field_modulus: PROOF_BASE_FIELD_MODULUS,
-            challenge_extension_degree:
-                crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
+            challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
+                as u16,
             evaluation_blowup_factor: 8,
             evaluation_domain_generator: modular_power(
                 PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
@@ -465,7 +452,7 @@ pub(super) mod tests {
             deep_point_count: 2,
             quotient_component_count: 8,
             quotient_component_degree_bound_exclusive: 32_768,
-            fri_fold_count: 7,
+            fri_fold_count: 8,
             final_polynomial_degree_bound_exclusive: 256,
             unique_query_count: 168,
             non_native_modular_identity_challenge_count: 7,
@@ -475,24 +462,24 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn same_secret_current_production_profile_fails_closed_before_degree_fixed_point() {
+    fn same_secret_production_profile_closes_the_degree_fixed_point() {
         let context = production_context(false);
-        assert_eq!(
-            compile_same_secret_relation_plan(
-                &SameSecretRelationPlanInput {
-                    ring_degree: 32_768,
-                    evaluation_domain_size: 262_144,
-                    opening_degree_bound_exclusive: 32_768,
-                    material_column_degree_bound_exclusive: 16_384,
-                    public_polynomial_column_degree_bound_exclusive: 16_384,
-                    sharing_data_modulus_indices: (0..17).collect(),
-                    commitment_data_modulus_indices: vec![0, 1, 2],
-                    commitment_module_rank: 2,
-                    first_mask_purpose: 100,
-                },
-                &context,
-            ),
-            Err(RelationPlanError::DegreeBoundExceeded),
-        );
+        let plan = compile_same_secret_relation_plan(
+            &SameSecretRelationPlanInput {
+                ring_degree: 32_768,
+                evaluation_domain_size: 524_288,
+                opening_degree_bound_exclusive: 65_536,
+                material_column_degree_bound_exclusive: 16_384,
+                public_polynomial_column_degree_bound_exclusive: 16_384,
+                sharing_data_modulus_indices: (0..17).collect(),
+                commitment_data_modulus_indices: vec![0, 1, 2],
+                commitment_module_rank: 1,
+                first_mask_purpose: 100,
+            },
+            &context,
+        )
+        .expect("production same-secret relation plan");
+        plan.check(&context)
+            .expect("checked production same-secret relation plan");
     }
 }

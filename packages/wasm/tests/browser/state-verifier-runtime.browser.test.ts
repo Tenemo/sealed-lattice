@@ -7,6 +7,7 @@ import {
 } from '#packages/wasm/src/canonical-stream-runtime';
 import { loadFreshTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
+    copyVerifiedStateDurableBinding,
     openStateVerifierSession,
     stateCapabilityKinds,
 } from '#packages/wasm/src/state-verifier-runtime';
@@ -30,7 +31,7 @@ const chunkBuffers = (bytes: Uint8Array): readonly ArrayBuffer[] => {
 };
 
 describe('State verifier real-WASM runtime in browsers', () => {
-    it('verifies streamed exact output and chained recovery with opaque handles', async () => {
+    it('verifies streamed exact output with opaque handles', async () => {
         const vector = createStateVerifierTestVector();
         const kernel = await loadFreshTranscriptCoreKernel();
         const openedSession = openStateVerifierSession({
@@ -38,7 +39,6 @@ describe('State verifier real-WASM runtime in browsers', () => {
                 actionContextHash: vector.actionContextHash,
                 canonicalRosterBytes: vector.canonicalRosterBytes,
                 ceremonyContextHash: vector.ceremonyContextHash,
-                maximumRecoveryTransitionsPerStateKey: 2,
                 suiteIdentifier: vector.suiteIdentifier,
             },
             kernel,
@@ -97,32 +97,20 @@ describe('State verifier real-WASM runtime in browsers', () => {
             if (!output.isValid) {
                 throw new Error(output.refusalReason);
             }
-            expect(Reflect.ownKeys(output.value)).toEqual([]);
-
-            const firstRecovery = session.verifyRecovery({
-                canonicalRecoveryTransitionCarrier:
-                    vector.recoveryFirst.canonicalIntentCarrier,
-                canonicalStateCertificate:
-                    vector.recoveryFirst.canonicalStateCertificate,
-                capabilityKind: stateCapabilityKinds.finalitySignature,
-                subjectParticipantIdentity: vector.subjectParticipantIdentity,
-            });
-            expect(firstRecovery.isValid).toBe(true);
-            if (!firstRecovery.isValid) {
-                throw new Error(firstRecovery.refusalReason);
+            const durableOutputBinding = session.durableBindingFor(
+                output.value,
+            );
+            expect(durableOutputBinding.isValid).toBe(true);
+            if (!durableOutputBinding.isValid) {
+                throw new Error(durableOutputBinding.refusalReason);
             }
             expect(
-                session.verifyRecovery({
-                    canonicalRecoveryTransitionCarrier:
-                        vector.recoverySecond.canonicalIntentCarrier,
-                    canonicalStateCertificate:
-                        vector.recoverySecond.canonicalStateCertificate,
-                    capabilityKind: stateCapabilityKinds.finalitySignature,
-                    subjectParticipantIdentity:
-                        vector.subjectParticipantIdentity,
-                    verifiedPredecessorRecovery: firstRecovery.value,
-                }).isValid,
-            ).toBe(true);
+                copyVerifiedStateDurableBinding(durableOutputBinding.value),
+            ).toMatchObject({
+                outputIntentObjectHash: vector.output.objectHash,
+                reservationIntentObjectHash: vector.reservation.objectHash,
+                witnessVoteSequence: 2n,
+            });
         } finally {
             session.cancel();
         }

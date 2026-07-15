@@ -7,8 +7,34 @@
 //! twiddles and post-scales by psi^{-i} / size. Twiddle tables are built
 //! once per domain so transform cost is measurable without setup noise.
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 use super::proof_field::ProofFieldParameters;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+
+#[cfg(not(target_arch = "wasm32"))]
+const PARALLEL_TRANSFORM_MINIMUM_SIZE: usize = 16_384;
+
+fn apply_butterfly_block<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    block_values: &mut [[u64; LIMB_COUNT]],
+    half_block: usize,
+    twiddles: &[[u64; LIMB_COUNT]],
+    twiddle_stride: usize,
+) {
+    let (even_values, odd_values) = block_values.split_at_mut(half_block);
+    for (offset, (even_value, odd_value)) in even_values
+        .iter_mut()
+        .zip(odd_values.iter_mut())
+        .enumerate()
+    {
+        let twisted = parameters.multiply(odd_value, &twiddles[offset * twiddle_stride]);
+        let even = *even_value;
+        *even_value = parameters.add(&even, &twisted);
+        *odd_value = parameters.subtract(&even, &twisted);
+    }
+}
 
 pub(super) fn radix_two_cyclic_transform_in_place<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
@@ -34,17 +60,38 @@ pub(super) fn radix_two_cyclic_transform_in_place<const LIMB_COUNT: usize>(
     while half_block < size {
         let block = half_block * 2;
         let twiddle_stride = size / block;
-        for block_start in (0..size).step_by(block) {
-            for offset in 0..half_block {
-                let twiddle = &twiddles[offset * twiddle_stride];
-                let even_index = block_start + offset;
-                let odd_index = even_index + half_block;
-                let twisted = parameters.multiply(&values[odd_index], twiddle);
-                let even = values[even_index];
-                values[even_index] = parameters.add(&even, &twisted);
-                values[odd_index] = parameters.subtract(&even, &twisted);
-            }
+        #[cfg(not(target_arch = "wasm32"))]
+        if size >= PARALLEL_TRANSFORM_MINIMUM_SIZE && rayon::current_num_threads() > 1 {
+            values.par_chunks_mut(block).for_each(|block_values| {
+                apply_butterfly_block(
+                    parameters,
+                    block_values,
+                    half_block,
+                    twiddles,
+                    twiddle_stride,
+                );
+            });
+        } else {
+            values.chunks_mut(block).for_each(|block_values| {
+                apply_butterfly_block(
+                    parameters,
+                    block_values,
+                    half_block,
+                    twiddles,
+                    twiddle_stride,
+                );
+            });
         }
+        #[cfg(target_arch = "wasm32")]
+        values.chunks_mut(block).for_each(|block_values| {
+            apply_butterfly_block(
+                parameters,
+                block_values,
+                half_block,
+                twiddles,
+                twiddle_stride,
+            );
+        });
         half_block = block;
     }
 }
@@ -76,9 +123,15 @@ impl<'a, const LIMB_COUNT: usize> NegacyclicDomain<'a, LIMB_COUNT> {
         let mut step_exponent = [0_u64; LIMB_COUNT];
         step_exponent[0] = (65_536 / (2 * size)) as u64;
         let psi = parameters.power(&root, &step_exponent);
-        let psi_inverse = parameters.inverse(&psi);
         let omega = parameters.multiply(&psi, &psi);
-        let omega_inverse = parameters.inverse(&omega);
+        // These are roots of known public orders, so x^(order - 1) is their
+        // inverse and avoids two full Fermat exponentiations per domain.
+        let mut psi_inverse_exponent = [0_u64; LIMB_COUNT];
+        psi_inverse_exponent[0] = (2 * size - 1) as u64;
+        let psi_inverse = parameters.power(&psi, &psi_inverse_exponent);
+        let mut omega_inverse_exponent = [0_u64; LIMB_COUNT];
+        omega_inverse_exponent[0] = (size - 1) as u64;
+        let omega_inverse = parameters.power(&omega, &omega_inverse_exponent);
         let size_inverse = parameters.inverse(&parameters.raw_value_to_element(&{
             let mut raw = [0_u64; LIMB_COUNT];
             raw[0] = size as u64;
@@ -209,6 +262,36 @@ mod tests {
             check_round_trip(&eight, size);
             check_round_trip(&single, size);
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn parallel_and_single_thread_transforms_are_identical() {
+        let parameters =
+            single_limb_field_parameters(2_305_843_009_214_414_849, 1_324_459_744_473_789_483);
+        let size = PARALLEL_TRANSFORM_MINIMUM_SIZE;
+        let domain = NegacyclicDomain::new(&parameters, size).expect("domain builds");
+        let original = deterministic_values(&parameters, size, 0x4a11);
+        let single_thread_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .expect("single-thread pool");
+        let parallel_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .expect("parallel pool");
+        let mut single_thread_values = original.clone();
+        single_thread_pool.install(|| domain.forward_in_place(&mut single_thread_values));
+        let mut parallel_values = original.clone();
+        parallel_pool.install(|| domain.forward_in_place(&mut parallel_values));
+        assert_eq!(
+            parallel_values, single_thread_values,
+            "parallel butterfly blocks must preserve the exact transform output"
+        );
+        single_thread_pool.install(|| domain.inverse_in_place(&mut single_thread_values));
+        parallel_pool.install(|| domain.inverse_in_place(&mut parallel_values));
+        assert_eq!(parallel_values, single_thread_values);
+        assert_eq!(parallel_values, original);
     }
 
     fn schoolbook_negacyclic<const LIMB_COUNT: usize>(

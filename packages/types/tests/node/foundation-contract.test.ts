@@ -2,12 +2,37 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
     isParticipantIdentity,
+    isProtocolHash,
     parseParticipantIdentity,
     type ParticipantIdentity,
     type ProtocolHash,
 } from '@sealed-lattice/types';
 
 describe('foundation contract', () => {
+    it('recognizes only canonical protocol hashes', () => {
+        for (const canonicalHash of [
+            '0'.repeat(128),
+            'f'.repeat(128),
+            '0123456789abcdef'.repeat(8),
+        ]) {
+            expect(isProtocolHash(canonicalHash)).toBe(true);
+        }
+
+        for (const invalidHash of [
+            '',
+            'a'.repeat(127),
+            'a'.repeat(129),
+            'A'.repeat(128),
+            ` ${'a'.repeat(128)}`,
+            `${'a'.repeat(128)}\n`,
+            0,
+            undefined,
+            {},
+        ]) {
+            expect(isProtocolHash(invalidHash)).toBe(false);
+        }
+    });
+
     it('parses only the canonical participant identity string form', () => {
         const canonicalIdentities = [
             '0'.repeat(128),

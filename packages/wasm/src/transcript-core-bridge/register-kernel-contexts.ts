@@ -1,7 +1,6 @@
 import { registerAcceptedSetupSessionKernelContext } from '../accepted-setup-session-runtime.js';
 import { registerCanonicalStreamKernelContext } from '../canonical-stream-runtime.js';
 
-import { registerActionRandomnessKernelContext } from './action-randomness-kernel-context.js';
 import type {
     BgvCollectiveSetupVerification,
     TranscriptCoreKernelContextOwner,
@@ -38,10 +37,6 @@ export const registerKernelContexts = (
     runtime: TranscriptCoreKernelCommandRuntime,
 ): void => {
     const { wasmExports } = runtime;
-    const actionRandomnessCommand = resolveOptionalNumberExport(
-        wasmExports,
-        'sealed_lattice_action_randomness_command',
-    );
     const acceptedSetupSessionBegin = resolveNumberExport(
         wasmExports,
         'sealed_lattice_accepted_setup_session_begin',
@@ -82,15 +77,6 @@ export const registerKernelContexts = (
         wasmExports,
         'sealed_lattice_canonical_stream_finish_writer',
     );
-    if (actionRandomnessCommand !== undefined) {
-        registerActionRandomnessKernelContext(kernel, {
-            allocate: runtime.allocate,
-            command: actionRandomnessCommand,
-            deallocate: runtime.deallocate,
-            memory: runtime.memory,
-            runExclusive: runtime.runExclusive,
-        });
-    }
     if (
         canonicalStreamAbsorbChunk !== undefined &&
         canonicalStreamBeginVerifier !== undefined &&
@@ -118,64 +104,12 @@ export const registerKernelContexts = (
                 wasmExports,
                 'sealed_lattice_bgv_canonical_stream_finish',
             ),
-            bgvMaterialReaderBegin: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_bgv_canonical_material_reader_begin',
-            ),
-            bgvMaterialReaderCancel: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_bgv_canonical_material_reader_cancel',
-            ),
-            bgvMaterialReaderFinish: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_bgv_canonical_material_reader_finish',
-            ),
-            bgvMaterialReaderReadChunk: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_bgv_canonical_material_reader_read_chunk',
-            ),
             beginVerifier: canonicalStreamBeginVerifier,
             beginWriter: canonicalStreamBeginWriter,
             cancel: canonicalStreamCancel,
             deallocate: runtime.deallocate,
             finishVerifier: canonicalStreamFinishVerifier,
             finishWriter: canonicalStreamFinishWriter,
-            mailboxGcmAuthenticateChunk: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_authenticate_chunk',
-            ),
-            mailboxGcmBeginEncryptor: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_begin_encryptor',
-            ),
-            mailboxGcmBeginVerifier: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_begin_verifier',
-            ),
-            mailboxGcmCancel: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_cancel',
-            ),
-            mailboxGcmDecryptChunk: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_decrypt_chunk',
-            ),
-            mailboxGcmEncryptChunk: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_encrypt_chunk',
-            ),
-            mailboxGcmFinishAuthentication: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_finish_authentication',
-            ),
-            mailboxGcmFinishDecryptor: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_finish_decryptor',
-            ),
-            mailboxGcmFinishEncryptor: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_finish_encryptor',
-            ),
             memory: runtime.memory,
             runExclusive: runtime.runExclusive,
         });

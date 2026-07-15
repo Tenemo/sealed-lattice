@@ -15,7 +15,6 @@ const mailboxGcmKeyByteLength = 32;
 const mailboxGcmNonceByteLength = 12;
 const mailboxGcmTagByteLength = 16;
 const maximumMailboxAssociatedDataByteLength = 65_536;
-const maximumMailboxCiphertextByteLength = 2_147_483_648;
 const runtimeInternalFailureStatus = 0xffff_ffff;
 const runtimeInvalidSessionStatus = 0xffff_fffe;
 const wasm32WordByteLength = 4;
@@ -120,7 +119,7 @@ const requireTotalByteLength = (value: number): number => {
     if (!Number.isSafeInteger(value) || value <= 0) {
         throw new CanonicalStreamRefusalError('wrongTypeOrLength');
     }
-    if (value > maximumMailboxCiphertextByteLength) {
+    if (value > foundationProfile.maximumCanonicalStreamByteLength) {
         throw new CanonicalStreamResourceError(
             'The mailbox ciphertext exceeds the canonical stream profile.',
         );

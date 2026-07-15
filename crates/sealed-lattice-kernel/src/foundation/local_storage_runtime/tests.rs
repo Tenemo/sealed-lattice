@@ -67,7 +67,6 @@ fn checkpoint_manifest_identifier_context() -> Vec<u8> {
     .concat()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn record_request_input(
     handle: u32,
     capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
@@ -75,7 +74,6 @@ fn record_request_input(
     record_type: LocalRecordType,
     identifier_context: &[u8],
     record_version: u64,
-    creation_recovery_epoch: u64,
     predecessor_record_hash: Option<&[u8; HASH_BYTE_LENGTH]>,
 ) -> Vec<u8> {
     let mut input = Vec::new();
@@ -90,7 +88,6 @@ fn record_request_input(
     );
     input.extend_from_slice(identifier_context);
     input.extend_from_slice(&record_version.to_le_bytes());
-    input.extend_from_slice(&creation_recovery_epoch.to_le_bytes());
     match predecessor_record_hash {
         None => input.push(0),
         Some(predecessor) => {
@@ -102,7 +99,7 @@ fn record_request_input(
 }
 
 #[test]
-fn root_registry_runs_wrapping_recovery_and_cleanup_without_exporting_an_unbounded_surface() {
+fn root_registry_runs_device_wrapping_and_cleanup_without_exporting_root_bytes() {
     reset_registry();
     let capability = test_capability(3);
     let binding = test_binding(17);
@@ -169,43 +166,11 @@ fn root_registry_runs_wrapping_recovery_and_cleanup_without_exporting_an_unbound
         [nonce.as_slice(), ciphertext.as_slice(), tag.as_slice()].concat()
     );
 
-    let mutation_identifier = [0x94_u8; MUTATION_IDENTIFIER_BYTE_LENGTH];
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-        &[
-            handle.to_le_bytes().as_slice(),
-            capability.as_slice(),
-            mutation_identifier.as_slice(),
-        ]
-        .concat(),
+        &lease_input(handle, &capability),
     )
     .expect("commit");
-    let recovery_export = run_local_storage_root_command(
-        LOCAL_STORAGE_ROOT_COMMAND_PREPARE_RECOVERY,
-        &[
-            handle.to_le_bytes().as_slice(),
-            capability.as_slice(),
-            mutation_identifier.as_slice(),
-        ]
-        .concat(),
-    )
-    .expect("prepare recovery");
-    assert_eq!(
-        recovery_export.len(),
-        RECOVERY_CHECKSUM_BYTE_LENGTH + RECOVERY_TEXT_BYTE_LENGTH
-    );
-    let (checksum, recovery_text) = recovery_export.split_at(RECOVERY_CHECKSUM_BYTE_LENGTH);
-    run_local_storage_root_command(
-        LOCAL_STORAGE_ROOT_COMMAND_CONFIRM_RECOVERY,
-        &[
-            handle.to_le_bytes().as_slice(),
-            capability.as_slice(),
-            recovery_text,
-            checksum,
-        ]
-        .concat(),
-    )
-    .expect("confirm recovery");
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_DESTROY,
         &lease_input(handle, &capability),
@@ -213,39 +178,10 @@ fn root_registry_runs_wrapping_recovery_and_cleanup_without_exporting_an_unbound
     .expect("destroy");
     assert_eq!(
         run_local_storage_root_command(
-            LOCAL_STORAGE_ROOT_COMMAND_PREPARE_RECOVERY,
-            &[
-                handle.to_le_bytes().as_slice(),
-                capability.as_slice(),
-                mutation_identifier.as_slice(),
-            ]
-            .concat(),
+            LOCAL_STORAGE_ROOT_COMMAND_ASSOCIATED_DATA,
+            &lease_input(handle, &capability),
         ),
         Err(LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE)
-    );
-
-    let recovery_capability = test_capability(139);
-    let recovered = run_local_storage_root_command(
-        LOCAL_STORAGE_ROOT_COMMAND_STAGE_RECOVERY,
-        &[
-            recovery_capability.as_slice(),
-            binding.as_slice(),
-            commitment.as_slice(),
-            recovery_text,
-        ]
-        .concat(),
-    )
-    .expect("stage recovery");
-    let (recovered_handle, recovered_commitment) = stage_output(&recovered[..68]);
-    assert_eq!(recovered_commitment, commitment);
-    assert_eq!(&recovered[68..], recovery_text);
-    assert_eq!(
-        run_local_storage_root_command(
-            LOCAL_STORAGE_ROOT_COMMAND_COPY_FOR_DEVICE_WRAP,
-            &lease_input(recovered_handle, &recovery_capability),
-        )
-        .expect("copy recovered root"),
-        root
     );
     reset_registry();
 }
@@ -355,17 +291,10 @@ fn forged_or_stale_mutations_cannot_clear_legitimate_root_leases() {
     )
     .expect("legitimate root stages");
     let (handle, _) = stage_output(&staged);
-    let mutation_identifier = [0x79; MUTATION_IDENTIFIER_BYTE_LENGTH];
-
     assert_eq!(
         run_local_storage_root_command(
             LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-            &[
-                handle.to_le_bytes().as_slice(),
-                test_capability(83).as_slice(),
-                mutation_identifier.as_slice(),
-            ]
-            .concat(),
+            &lease_input(handle, &test_capability(83)),
         ),
         Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH)
     );
@@ -384,12 +313,7 @@ fn forged_or_stale_mutations_cannot_clear_legitimate_root_leases() {
 
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-        &[
-            handle.to_le_bytes().as_slice(),
-            capability.as_slice(),
-            mutation_identifier.as_slice(),
-        ]
-        .concat(),
+        &lease_input(handle, &capability),
     )
     .expect("legitimate root commits");
     assert_eq!(
@@ -400,13 +324,8 @@ fn forged_or_stale_mutations_cannot_clear_legitimate_root_leases() {
         Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH)
     );
     run_local_storage_root_command(
-        LOCAL_STORAGE_ROOT_COMMAND_PREPARE_RECOVERY,
-        &[
-            handle.to_le_bytes().as_slice(),
-            capability.as_slice(),
-            mutation_identifier.as_slice(),
-        ]
-        .concat(),
+        LOCAL_STORAGE_ROOT_COMMAND_ASSOCIATED_DATA,
+        &lease_input(handle, &capability),
     )
     .expect("failed forged destruction retains the legitimate active root");
     reset_registry();
@@ -425,12 +344,7 @@ fn active_root_commands_derive_seal_open_hash_and_enforce_one_seal_per_record_ve
     let (handle, _) = stage_output(&staged);
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-        &[
-            handle.to_le_bytes().as_slice(),
-            capability.as_slice(),
-            [0xb1; MUTATION_IDENTIFIER_BYTE_LENGTH].as_slice(),
-        ]
-        .concat(),
+        &lease_input(handle, &capability),
     )
     .expect("root commits");
 
@@ -458,7 +372,6 @@ fn active_root_commands_derive_seal_open_hash_and_enforce_one_seal_per_record_ve
         LocalRecordType::CheckpointManifest,
         &identifier_context,
         0,
-        5,
         None,
     );
     let nonce = [0xb3; 12];
@@ -521,7 +434,6 @@ fn active_root_commands_derive_seal_open_hash_and_enforce_one_seal_per_record_ve
         LocalRecordType::CheckpointManifest,
         &identifier_context,
         0,
-        5,
         None,
     );
     assert_eq!(
@@ -546,12 +458,7 @@ fn record_commands_refuse_invalid_types_contexts_and_version_predecessor_pairs()
     let (handle, _) = stage_output(&staged);
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-        &[
-            handle.to_le_bytes().as_slice(),
-            capability.as_slice(),
-            [0xc1; MUTATION_IDENTIFIER_BYTE_LENGTH].as_slice(),
-        ]
-        .concat(),
+        &lease_input(handle, &capability),
     )
     .expect("root commits");
 
@@ -589,7 +496,6 @@ fn record_commands_refuse_invalid_types_contexts_and_version_predecessor_pairs()
         LocalRecordType::CheckpointManifest,
         &checkpoint_manifest_identifier_context(),
         1,
-        0,
         None,
     );
     assert_eq!(
@@ -619,12 +525,7 @@ fn active_root_seal_budgets_refuse_the_first_invocation_or_byte_beyond_the_ceili
     let (handle, _) = stage_output(&staged);
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-        &[
-            handle.to_le_bytes().as_slice(),
-            capability.as_slice(),
-            [0xd1; MUTATION_IDENTIFIER_BYTE_LENGTH].as_slice(),
-        ]
-        .concat(),
+        &lease_input(handle, &capability),
     )
     .expect("root commits");
     ROOT_REGISTRY.with(|registry| {
@@ -641,7 +542,6 @@ fn active_root_seal_budgets_refuse_the_first_invocation_or_byte_beyond_the_ceili
         &action_randomness_commitment,
         LocalRecordType::ProofAttempt,
         &[0xd3; HASH_BYTE_LENGTH],
-        0,
         0,
         None,
     );
@@ -661,7 +561,6 @@ fn active_root_seal_budgets_refuse_the_first_invocation_or_byte_beyond_the_ceili
         &action_randomness_commitment,
         LocalRecordType::ProofAttempt,
         &[0xd5; HASH_BYTE_LENGTH],
-        0,
         0,
         None,
     );
@@ -692,7 +591,6 @@ fn active_root_seal_budgets_refuse_the_first_invocation_or_byte_beyond_the_ceili
         LocalRecordType::ProofAttempt,
         &[0xd7; HASH_BYTE_LENGTH],
         0,
-        0,
         None,
     );
     run_local_storage_root_command(
@@ -711,7 +609,6 @@ fn active_root_seal_budgets_refuse_the_first_invocation_or_byte_beyond_the_ceili
         &action_randomness_commitment,
         LocalRecordType::ProofAttempt,
         &[0xd9; HASH_BYTE_LENGTH],
-        0,
         0,
         None,
     );

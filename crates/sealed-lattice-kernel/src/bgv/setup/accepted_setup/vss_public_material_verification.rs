@@ -119,30 +119,17 @@ fn verify_vss_public_material_binding(
         .get("setupContext")
         .ok_or_else(|| public_material_error("VSS public material requires setup context"))?;
     compare_setup_context_binding(setup_context, statement, "VSS share-linkage statement")?;
-    compare_setup_context_participant_count(
-        setup_context,
-        &statement_verification,
-        "VSS share-linkage statement",
-    )?;
-    compare_setup_context_threshold_degree(
-        setup_context,
-        &statement_verification,
-        "VSS share-linkage statement",
-    )?;
-    let _ring_degree = usize::try_from(unsigned_at_path(&statement_verification, &["ringDegree"])?)
-        .map_err(|_| public_material_error("VSS share-linkage ring degree does not fit usize"))?;
-
     let common_randomness = setup_package
         .get("commonRandomness")
         .ok_or_else(|| public_material_error("VSS public material requires common randomness"))?;
     let accepted_public_matrix_seed_hash =
         hash_at_path(common_randomness, &["publicMatrixSeedHash"])?;
     compare_required_string(
-        hash_at_path(&statement_verification, &["publicMatrixSeedHash"])?,
+        &statement_verification.public_matrix_seed_hash,
         accepted_public_matrix_seed_hash,
         "VSS share-linkage statement publicMatrixSeedHash",
     )?;
-    compare_complete_q_share_limb_count(&statement_verification, "VSS share-linkage statement")?;
+    let _ring_degree = statement_verification.ring_degree;
     let _ = proof_binding_session;
     Err(CanonicalError::new(
         CanonicalErrorCode::InvalidProtocolObject,

@@ -38,8 +38,6 @@ pub(super) fn common_randomness_object(
             "setupContextHash": &setup_context_hash,
             "trusteeIdentity": trustee_identity.clone(),
             "rosterPosition": roster_position,
-            "recoveryEpoch": 0,
-            "deviceEpoch": 0,
             "revealHex": reveal_hex,
         });
         let reveal_hash = derive_canonical_object_hash(&reveal_payload).expect("reveal hash");
@@ -65,8 +63,6 @@ pub(super) fn common_randomness_object(
             "setupContextHash": &setup_context_hash,
             "trusteeIdentity": trustee_identity.as_str(),
             "rosterPosition": roster_position,
-            "recoveryEpoch": 0,
-            "deviceEpoch": 0,
             "revealHash": reveal_hash.as_str(),
         });
         let commit_hash = derive_canonical_object_hash(&commit_payload).expect("commit hash");

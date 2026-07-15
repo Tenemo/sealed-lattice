@@ -88,7 +88,6 @@ pub(in super::super) fn evaluation_key_share_fixture_material(
         &key_switch_domain,
         key_switch_seed_hex,
         level,
-        ring_degree,
         &component_b_by_digit,
     );
 
@@ -115,7 +114,6 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
         usize::try_from(level).expect("component material level fits usize"),
         &fixture_material.component_vector_root,
         derived_binding,
-        ring_degree,
     )
     .expect("evaluation-key component material reference root");
     let material_bytes = encode_evaluation_key_share_component_material(
@@ -317,7 +315,6 @@ fn evaluation_key_component_vector_root(
     key_switch_domain: &str,
     key_switch_seed_hex: &str,
     level: usize,
-    ring_degree: usize,
     component_b_by_digit: &[Vec<Vec<u64>>],
 ) -> String {
     let component_vectors_little_endian_hex_by_digit_and_limb = component_b_by_digit
@@ -333,7 +330,6 @@ fn evaluation_key_component_vector_root(
         key_switch_domain,
         key_switch_seed_hex,
         level,
-        ring_degree,
         &component_vectors_little_endian_hex_by_digit_and_limb,
     )
     .expect("evaluation-key component vector root")

@@ -128,7 +128,6 @@ pub(in super::super) fn verify_public_key_share_material_set(
     let root_input = json!({
         "objectType": PUBLIC_KEY_SHARE_MATERIAL_SET_OBJECT_TYPE,
         "setupContextHash": setup_context_hash(setup_context)?,
-        "ringDegree": ring_degree,
         "publicMatrixSeedHash": common_binding.public_matrix_seed_hash.as_str(),
         "publicKeyShareSetRoot": public_key_share_set_root,
         "publicKeyShareMaterialRoots": material_root_references,

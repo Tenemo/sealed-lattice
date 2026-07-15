@@ -7,20 +7,17 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use super::board_ingestion::{
-    CanonicalBoardLimits, CanonicalBoardVerifier,
-    MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT, VerifiedTranscriptObject,
+    CanonicalBoardLimits, CanonicalBoardVerifier, MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT,
+    VerifiedTranscriptObject,
 };
-use super::{
-    CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, RefusalReason, Roster,
-};
+use super::{CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, RefusalReason, Roster};
 
 pub(crate) const BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH: usize = 32;
 pub(crate) const VERIFIED_TRANSCRIPT_OBJECT_DESCRIPTION_BYTE_LENGTH: usize =
     2 + 2 + Hash512::BYTE_LENGTH;
 
 const BOARD_VERIFIER_CONFIGURATION_VERSION: u16 = 1;
-const FIXED_CONFIGURATION_BYTE_LENGTH: usize =
-    2 + 3 * Hash512::BYTE_LENGTH + 8 + 8 + 8 + 4 + 4 + 4;
+const FIXED_CONFIGURATION_BYTE_LENGTH: usize = 2 + 3 * Hash512::BYTE_LENGTH + 8 + 8 + 4 + 4 + 4;
 
 type RuntimeResult<Value> = Result<Value, u32>;
 
@@ -88,11 +85,9 @@ impl BoardVerifierRuntimeRegistry {
         capability: &[u8],
         canonical_carriers: &[Vec<u8>],
     ) -> RuntimeResult<Vec<u8>> {
-        preflight_handle_range(
-            self.next_verified_object_handle,
-            canonical_carriers.len(),
-        )?;
-        let session = require_active_session_mut(&mut self.active_session, session_handle, capability)?;
+        preflight_handle_range(self.next_verified_object_handle, canonical_carriers.len())?;
+        let session =
+            require_active_session_mut(&mut self.active_session, session_handle, capability)?;
         let batch = session
             .verifier
             .verify_unordered_carriers(canonical_carriers)
@@ -166,7 +161,8 @@ impl BoardVerifierRuntimeRegistry {
         capability: &[u8],
         verified_object_handle: u32,
     ) -> RuntimeResult<()> {
-        let session = require_active_session_mut(&mut self.active_session, session_handle, capability)?;
+        let session =
+            require_active_session_mut(&mut self.active_session, session_handle, capability)?;
         let object = session
             .verified_objects
             .remove(&verified_object_handle)
@@ -234,11 +230,7 @@ pub(crate) fn cached_board_carrier_byte_length(
     verified_object_handle: u32,
 ) -> RuntimeResult<usize> {
     with_runtime_registry(|registry| {
-        registry.cached_carrier_byte_length(
-            session_handle,
-            capability,
-            verified_object_handle,
-        )
+        registry.cached_carrier_byte_length(session_handle, capability, verified_object_handle)
     })
 }
 
@@ -259,6 +251,29 @@ pub(crate) fn cancel_board_verifier_session(
     with_runtime_registry(|registry| registry.cancel(session_handle, capability))
 }
 
+/// Resolves live board capabilities for another verifier inside this WASM
+/// instance. Callers receive verifier-owned values, never caller-provided
+/// carrier bytes promoted into capabilities.
+pub(crate) fn clone_verified_transcript_objects(
+    session_handle: u32,
+    capability: &[u8],
+    verified_object_handles: &[u32],
+) -> RuntimeResult<Vec<VerifiedTranscriptObject>> {
+    with_runtime_registry(|registry| {
+        let session = require_active_session(&registry.active_session, session_handle, capability)?;
+        verified_object_handles
+            .iter()
+            .map(|verified_object_handle| {
+                session
+                    .verified_objects
+                    .get(verified_object_handle)
+                    .cloned()
+                    .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))
+            })
+            .collect()
+    })
+}
+
 fn decode_configuration(bytes: &[u8]) -> RuntimeResult<BoardVerifierRuntimeConfiguration> {
     if bytes.len() < FIXED_CONFIGURATION_BYTE_LENGTH
         || bytes.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
@@ -274,7 +289,6 @@ fn decode_configuration(bytes: &[u8]) -> RuntimeResult<BoardVerifierRuntimeConfi
     let action_context_hash = Hash512::from_bytes(reader.read_array()?);
     let limits = CanonicalBoardLimits {
         maximum_ballot_attempts_per_participant: reader.read_u64()?,
-        maximum_recovery_transitions_per_state_key: reader.read_u64()?,
         maximum_retained_canonical_carrier_byte_length: reader.read_u64()?,
         maximum_unordered_carriers_per_batch: reader.read_u32()?,
         maximum_retained_transcript_objects: reader.read_u32()?,

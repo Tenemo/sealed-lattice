@@ -7,12 +7,10 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use super::{
-    CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, ParticipantIdentity, PreservedStateIntent,
-    RefusalReason, Roster, StateCapabilityKind, StateDurableBinding,
-    StateRecoveryIntentVerificationInput, StateRecoveryVerificationInput,
-    StateReservationIntentVerificationInput, StateReservationVerificationInput, StateVerifier,
-    VerifiedStateOutput, VerifiedStateOutputIntent, VerifiedStateRecovery,
-    VerifiedStateRecoveryIntent, VerifiedStateReservation, VerifiedStateReservationIntent,
+    CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, ParticipantIdentity, RefusalReason, Roster,
+    StateCapabilityKind, StateDurableBinding, StateReservationIntentVerificationInput,
+    StateReservationVerificationInput, StateVerifier, VerifiedStateOutput,
+    VerifiedStateOutputIntent, VerifiedStateReservation, VerifiedStateReservationIntent,
     canonical_stream::VerifiedCanonicalStreamSummary,
     finish_canonical_stream_verifier_with_summary,
 };
@@ -20,10 +18,10 @@ use super::{
 pub(crate) const STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH: usize = 32;
 const STATE_VERIFIER_IDENTITY_BYTE_LENGTH: usize = 64;
 const STATE_VERIFIER_HASH_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
-pub(crate) const STATE_DURABLE_BINDING_BYTE_LENGTH: usize = 674;
+pub(crate) const STATE_DURABLE_BINDING_BYTE_LENGTH: usize = 601;
 
 const STATE_VERIFIER_CONFIGURATION_VERSION: u16 = 1;
-const FIXED_CONFIGURATION_BYTE_LENGTH: usize = 2 + 3 * Hash512::BYTE_LENGTH + 2 + 4;
+const FIXED_CONFIGURATION_BYTE_LENGTH: usize = 2 + 3 * Hash512::BYTE_LENGTH + 4;
 const MAXIMUM_RETAINED_VERIFIED_STATE_OBJECT_COUNT: usize = 512;
 
 #[derive(Clone, Copy)]
@@ -35,16 +33,13 @@ pub(crate) struct VerifiedStateReservationRuntimeBinding {
 enum RuntimeVerifiedStateObject {
     ReservationIntent(VerifiedStateReservationIntent),
     OutputIntent(VerifiedStateOutputIntent),
-    RecoveryIntent(VerifiedStateRecoveryIntent),
     Reservation(VerifiedStateReservation),
     Output(VerifiedStateOutput),
-    Recovery(VerifiedStateRecovery),
 }
 
 enum CertifiedRuntimeStateObject {
     Reservation(VerifiedStateReservation),
     Output(VerifiedStateOutput),
-    Recovery(VerifiedStateRecovery),
 }
 
 struct StateVerifierRuntimeSession {
@@ -62,17 +57,6 @@ impl StateVerifierRuntimeSession {
         Ok(())
     }
 
-    fn predecessor_recovery(&self, handle: u32) -> RuntimeResult<Option<&VerifiedStateRecovery>> {
-        if handle == 0 {
-            return Ok(None);
-        }
-        match self.verified_objects.get(&handle) {
-            Some(RuntimeVerifiedStateObject::Recovery(recovery)) => Ok(Some(recovery)),
-            Some(_) => Err(refusal_status(RefusalReason::WrongTypeOrLength)),
-            None => Err(refusal_status(RefusalReason::ConsumedState)),
-        }
-    }
-
     fn reservation(&self, handle: u32) -> RuntimeResult<&VerifiedStateReservation> {
         match self.verified_objects.get(&handle) {
             Some(RuntimeVerifiedStateObject::Reservation(reservation)) => Ok(reservation),
@@ -87,37 +71,10 @@ impl StateVerifierRuntimeSession {
                 Ok(intent.durable_binding())
             }
             Some(RuntimeVerifiedStateObject::OutputIntent(intent)) => Ok(intent.durable_binding()),
-            Some(RuntimeVerifiedStateObject::RecoveryIntent(intent)) => {
-                Ok(intent.durable_binding())
-            }
             Some(RuntimeVerifiedStateObject::Reservation(reservation)) => {
                 Ok(reservation.durable_binding())
             }
             Some(RuntimeVerifiedStateObject::Output(output)) => Ok(output.durable_binding()),
-            Some(RuntimeVerifiedStateObject::Recovery(recovery)) => Ok(recovery.durable_binding()),
-            None => Err(refusal_status(RefusalReason::ConsumedState)),
-        }
-    }
-
-    fn preserved_intent(&self, handle: u32) -> RuntimeResult<Option<PreservedStateIntent<'_>>> {
-        if handle == 0 {
-            return Ok(None);
-        }
-        match self.verified_objects.get(&handle) {
-            Some(RuntimeVerifiedStateObject::Reservation(reservation)) => {
-                Ok(Some(PreservedStateIntent::Reservation(reservation)))
-            }
-            Some(RuntimeVerifiedStateObject::Output(output)) => {
-                Ok(Some(PreservedStateIntent::Output(output)))
-            }
-            Some(RuntimeVerifiedStateObject::Recovery(_)) => {
-                Err(refusal_status(RefusalReason::WrongTypeOrLength))
-            }
-            Some(
-                RuntimeVerifiedStateObject::ReservationIntent(_)
-                | RuntimeVerifiedStateObject::OutputIntent(_)
-                | RuntimeVerifiedStateObject::RecoveryIntent(_),
-            ) => Err(refusal_status(RefusalReason::WrongTypeOrLength)),
             None => Err(refusal_status(RefusalReason::ConsumedState)),
         }
     }
@@ -157,7 +114,6 @@ impl StateVerifierRuntimeRegistry {
             configuration.ceremony_context_hash,
             configuration.action_context_hash,
             &configuration.roster,
-            configuration.maximum_recovery_transitions_per_state_key,
             CanonicalDecodeLimits::default(),
         )
         .map_err(|error| refusal_status(error.refusal_reason))?;
@@ -178,7 +134,6 @@ impl StateVerifierRuntimeRegistry {
         capability: &[u8],
         subject_participant_id: ParticipantIdentity,
         capability_kind: StateCapabilityKind,
-        predecessor_recovery_handle: u32,
         expected_authorization_hash: Hash512,
         canonical_reservation_intent_carrier: &[u8],
         canonical_state_certificate: &[u8],
@@ -188,13 +143,11 @@ impl StateVerifierRuntimeRegistry {
         let verified_reservation = {
             let session = self.require_active_session(session_handle, capability)?;
             session.require_object_capacity()?;
-            let predecessor_recovery = session.predecessor_recovery(predecessor_recovery_handle)?;
             session
                 .verifier
                 .verify_reservation(StateReservationVerificationInput {
                     subject_participant_id,
                     capability_kind,
-                    verified_predecessor_recovery: predecessor_recovery,
                     expected_authorization_hash,
                     canonical_reservation_intent_carrier,
                     canonical_state_certificate,
@@ -219,7 +172,6 @@ impl StateVerifierRuntimeRegistry {
         capability: &[u8],
         subject_participant_id: ParticipantIdentity,
         capability_kind: StateCapabilityKind,
-        predecessor_recovery_handle: u32,
         expected_authorization_hash: Hash512,
         canonical_reservation_intent_carrier: &[u8],
     ) -> RuntimeResult<u32> {
@@ -227,13 +179,11 @@ impl StateVerifierRuntimeRegistry {
         let verified_intent = {
             let session = self.require_active_session(session_handle, capability)?;
             session.require_object_capacity()?;
-            let predecessor_recovery = session.predecessor_recovery(predecessor_recovery_handle)?;
             session
                 .verifier
                 .verify_reservation_intent(StateReservationIntentVerificationInput {
                     subject_participant_id,
                     capability_kind,
-                    verified_predecessor_recovery: predecessor_recovery,
                     expected_authorization_hash,
                     canonical_reservation_intent_carrier,
                 })
@@ -248,22 +198,6 @@ impl StateVerifierRuntimeRegistry {
                 RuntimeVerifiedStateObject::ReservationIntent(verified_intent),
             );
         Ok(object_handle)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn preflight_output(
-        &self,
-        session_handle: u32,
-        capability: &[u8],
-        verified_reservation_handle: u32,
-    ) -> RuntimeResult<()> {
-        let session = self.require_active_session(session_handle, capability)?;
-        session.require_object_capacity()?;
-        let reservation = session.reservation(verified_reservation_handle)?;
-        if !reservation.capability_kind().supports_exact_output() {
-            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
-        }
-        Ok(())
     }
 
     fn verify_output(
@@ -336,86 +270,6 @@ impl StateVerifierRuntimeRegistry {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn verify_recovery(
-        &mut self,
-        session_handle: u32,
-        capability: &[u8],
-        subject_participant_id: ParticipantIdentity,
-        capability_kind: StateCapabilityKind,
-        predecessor_recovery_handle: u32,
-        preserved_intent_handle: u32,
-        canonical_recovery_transition_carrier: &[u8],
-        canonical_state_certificate: &[u8],
-    ) -> RuntimeResult<u32> {
-        require_verification_input(canonical_recovery_transition_carrier, false)?;
-        require_verification_input(canonical_state_certificate, false)?;
-        let verified_recovery = {
-            let session = self.require_active_session(session_handle, capability)?;
-            session.require_object_capacity()?;
-            let predecessor_recovery = session.predecessor_recovery(predecessor_recovery_handle)?;
-            let preserved_state_intent = session.preserved_intent(preserved_intent_handle)?;
-            session
-                .verifier
-                .verify_recovery(StateRecoveryVerificationInput {
-                    subject_participant_id,
-                    capability_kind,
-                    verified_predecessor_recovery: predecessor_recovery,
-                    preserved_state_intent,
-                    canonical_recovery_transition_carrier,
-                    canonical_state_certificate,
-                })
-                .into_result()
-                .map_err(refusal_status)?
-        };
-        let object_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
-        self.require_active_session_mut(session_handle, capability)?
-            .verified_objects
-            .insert(
-                object_handle,
-                RuntimeVerifiedStateObject::Recovery(verified_recovery),
-            );
-        Ok(object_handle)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn verify_recovery_intent(
-        &mut self,
-        session_handle: u32,
-        capability: &[u8],
-        subject_participant_id: ParticipantIdentity,
-        capability_kind: StateCapabilityKind,
-        predecessor_recovery_handle: u32,
-        preserved_intent_handle: u32,
-        canonical_recovery_transition_carrier: &[u8],
-    ) -> RuntimeResult<u32> {
-        require_verification_input(canonical_recovery_transition_carrier, false)?;
-        let verified_intent = {
-            let session = self.require_active_session(session_handle, capability)?;
-            session.require_object_capacity()?;
-            let predecessor_recovery = session.predecessor_recovery(predecessor_recovery_handle)?;
-            let preserved_state_intent = session.preserved_intent(preserved_intent_handle)?;
-            session
-                .verifier
-                .verify_recovery_intent(StateRecoveryIntentVerificationInput {
-                    subject_participant_id,
-                    capability_kind,
-                    verified_predecessor_recovery: predecessor_recovery,
-                    preserved_state_intent,
-                    canonical_recovery_transition_carrier,
-                })
-                .into_result()
-                .map_err(refusal_status)?
-        };
-        let object_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
-        self.require_active_session_mut(session_handle, capability)?
-            .verified_objects
-            .insert(
-                object_handle,
-                RuntimeVerifiedStateObject::RecoveryIntent(verified_intent),
-            );
-        Ok(object_handle)
-    }
-
     fn certify_intent(
         &mut self,
         session_handle: u32,
@@ -440,12 +294,6 @@ impl StateVerifierRuntimeRegistry {
                     .into_result()
                     .map(CertifiedRuntimeStateObject::Output)
                     .map_err(refusal_status)?,
-                Some(RuntimeVerifiedStateObject::RecoveryIntent(intent)) => session
-                    .verifier
-                    .certify_recovery_intent(intent, canonical_state_certificate)
-                    .into_result()
-                    .map(CertifiedRuntimeStateObject::Recovery)
-                    .map_err(refusal_status)?,
                 Some(_) => return Err(refusal_status(RefusalReason::WrongTypeOrLength)),
                 None => return Err(refusal_status(RefusalReason::ConsumedState)),
             }
@@ -456,9 +304,6 @@ impl StateVerifierRuntimeRegistry {
                 RuntimeVerifiedStateObject::Reservation(value)
             }
             CertifiedRuntimeStateObject::Output(value) => RuntimeVerifiedStateObject::Output(value),
-            CertifiedRuntimeStateObject::Recovery(value) => {
-                RuntimeVerifiedStateObject::Recovery(value)
-            }
         };
         self.require_active_session_mut(session_handle, capability)?
             .verified_objects
@@ -495,15 +340,6 @@ impl StateVerifierRuntimeRegistry {
                     .into_result()
                     .map(CertifiedRuntimeStateObject::Output)
                     .map_err(refusal_status)?,
-                Some(RuntimeVerifiedStateObject::RecoveryIntent(intent)) => session
-                    .verifier
-                    .certify_recovery_intent_from_unordered_vote_carriers(
-                        intent,
-                        canonical_vote_carriers,
-                    )
-                    .into_result()
-                    .map(CertifiedRuntimeStateObject::Recovery)
-                    .map_err(refusal_status)?,
                 Some(_) => return Err(refusal_status(RefusalReason::WrongTypeOrLength)),
                 None => return Err(refusal_status(RefusalReason::ConsumedState)),
             }
@@ -514,9 +350,6 @@ impl StateVerifierRuntimeRegistry {
                 RuntimeVerifiedStateObject::Reservation(value)
             }
             CertifiedRuntimeStateObject::Output(value) => RuntimeVerifiedStateObject::Output(value),
-            CertifiedRuntimeStateObject::Recovery(value) => {
-                RuntimeVerifiedStateObject::Recovery(value)
-            }
         };
         self.require_active_session_mut(session_handle, capability)?
             .verified_objects
@@ -613,7 +446,6 @@ struct StateVerifierRuntimeConfiguration {
     suite_id: Hash512,
     ceremony_context_hash: Hash512,
     action_context_hash: Hash512,
-    maximum_recovery_transitions_per_state_key: u16,
     roster: Roster,
 }
 
@@ -699,7 +531,6 @@ pub(crate) fn verify_state_reservation(
     capability: &[u8],
     subject_participant_id: &[u8],
     capability_kind_code: u32,
-    predecessor_recovery_handle: u32,
     expected_authorization_hash: &[u8],
     canonical_reservation_intent_carrier: &[u8],
     canonical_state_certificate: &[u8],
@@ -713,7 +544,6 @@ pub(crate) fn verify_state_reservation(
             capability,
             subject_participant_id,
             capability_kind,
-            predecessor_recovery_handle,
             expected_authorization_hash,
             canonical_reservation_intent_carrier,
             canonical_state_certificate,
@@ -727,7 +557,6 @@ pub(crate) fn verify_state_reservation_intent(
     capability: &[u8],
     subject_participant_id: &[u8],
     capability_kind_code: u32,
-    predecessor_recovery_handle: u32,
     expected_authorization_hash: &[u8],
     canonical_reservation_intent_carrier: &[u8],
 ) -> RuntimeResult<u32> {
@@ -740,7 +569,6 @@ pub(crate) fn verify_state_reservation_intent(
             capability,
             subject_participant_id,
             capability_kind,
-            predecessor_recovery_handle,
             expected_authorization_hash,
             canonical_reservation_intent_carrier,
         )
@@ -756,11 +584,9 @@ pub(crate) fn finish_state_output_verification(
     canonical_output_intent_carrier: &[u8],
     canonical_state_certificate: &[u8],
 ) -> RuntimeResult<u32> {
-    require_verification_input(canonical_output_intent_carrier, false)?;
-    require_verification_input(canonical_state_certificate, false)?;
-    with_runtime_registry(|registry| {
-        registry.preflight_output(session_handle, capability, verified_reservation_handle)
-    })?;
+    // An atomic finish attempt owns the stream's terminal transition. Consume
+    // it before any state-side refusal so JavaScript can never release the
+    // stream authority while the kernel still retains the active session.
     let verified_stream = finish_canonical_stream_verifier_with_summary(stream_handle)?;
     with_runtime_registry(|registry| {
         registry.verify_output(
@@ -782,10 +608,8 @@ pub(crate) fn finish_state_output_intent_verification(
     verified_reservation_handle: u32,
     canonical_output_intent_carrier: &[u8],
 ) -> RuntimeResult<u32> {
-    require_verification_input(canonical_output_intent_carrier, false)?;
-    with_runtime_registry(|registry| {
-        registry.preflight_output(session_handle, capability, verified_reservation_handle)
-    })?;
+    // Keep the stream and state lease terminal boundaries identical to
+    // `finish_state_output_verification` above.
     let verified_stream = finish_canonical_stream_verifier_with_summary(stream_handle)?;
     with_runtime_registry(|registry| {
         registry.verify_output_intent(
@@ -799,57 +623,6 @@ pub(crate) fn finish_state_output_intent_verification(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_state_recovery(
-    session_handle: u32,
-    capability: &[u8],
-    subject_participant_id: &[u8],
-    capability_kind_code: u32,
-    predecessor_recovery_handle: u32,
-    preserved_intent_handle: u32,
-    canonical_recovery_transition_carrier: &[u8],
-    canonical_state_certificate: &[u8],
-) -> RuntimeResult<u32> {
-    let subject_participant_id = decode_participant_identity(subject_participant_id)?;
-    let capability_kind = decode_capability_kind(capability_kind_code)?;
-    with_runtime_registry(|registry| {
-        registry.verify_recovery(
-            session_handle,
-            capability,
-            subject_participant_id,
-            capability_kind,
-            predecessor_recovery_handle,
-            preserved_intent_handle,
-            canonical_recovery_transition_carrier,
-            canonical_state_certificate,
-        )
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_state_recovery_intent(
-    session_handle: u32,
-    capability: &[u8],
-    subject_participant_id: &[u8],
-    capability_kind_code: u32,
-    predecessor_recovery_handle: u32,
-    preserved_intent_handle: u32,
-    canonical_recovery_transition_carrier: &[u8],
-) -> RuntimeResult<u32> {
-    let subject_participant_id = decode_participant_identity(subject_participant_id)?;
-    let capability_kind = decode_capability_kind(capability_kind_code)?;
-    with_runtime_registry(|registry| {
-        registry.verify_recovery_intent(
-            session_handle,
-            capability,
-            subject_participant_id,
-            capability_kind,
-            predecessor_recovery_handle,
-            preserved_intent_handle,
-            canonical_recovery_transition_carrier,
-        )
-    })
-}
-
 pub(crate) fn certify_verified_state_intent(
     session_handle: u32,
     capability: &[u8],
@@ -899,11 +672,7 @@ pub(crate) fn verified_state_reservation_binding(
     verified_reservation_handle: u32,
 ) -> RuntimeResult<VerifiedStateReservationRuntimeBinding> {
     with_runtime_registry(|registry| {
-        registry.reservation_binding(
-            session_handle,
-            capability,
-            verified_reservation_handle,
-        )
+        registry.reservation_binding(session_handle, capability, verified_reservation_handle)
     })
 }
 
@@ -939,7 +708,6 @@ fn decode_configuration(
     let suite_id = Hash512::from_bytes(reader.read_array()?);
     let ceremony_context_hash = Hash512::from_bytes(reader.read_array()?);
     let action_context_hash = Hash512::from_bytes(reader.read_array()?);
-    let maximum_recovery_transitions_per_state_key = reader.read_u16()?;
     let roster_byte_length = usize::try_from(reader.read_u32()?)
         .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
     if roster_byte_length == 0 {
@@ -953,16 +721,13 @@ fn decode_configuration(
         suite_id,
         ceremony_context_hash,
         action_context_hash,
-        maximum_recovery_transitions_per_state_key,
         roster,
     })
 }
 
 fn encode_durable_binding(binding: StateDurableBinding) -> RuntimeResult<Vec<u8>> {
     const DURABLE_BINDING_VERSION: u16 = 1;
-    let witness_vote_sequence = binding
-        .witness_vote_sequence()
-        .map_err(|error| refusal_status(error.refusal_reason))?;
+    let witness_vote_sequence = binding.witness_vote_sequence();
     let mut output = Vec::with_capacity(STATE_DURABLE_BINDING_BYTE_LENGTH);
     output.extend_from_slice(&DURABLE_BINDING_VERSION.to_le_bytes());
     output.extend_from_slice(&binding.vote_kind().canonical_code().to_le_bytes());
@@ -973,9 +738,7 @@ fn encode_durable_binding(binding: StateDurableBinding) -> RuntimeResult<Vec<u8>
     output.extend_from_slice(binding.subject_participant_id().as_bytes());
     output.extend_from_slice(binding.state_key().as_bytes());
     output.extend_from_slice(binding.intent_object_hash().as_bytes());
-    output.extend_from_slice(&binding.subject_epoch().to_le_bytes());
     output.extend_from_slice(&witness_vote_sequence.to_le_bytes());
-    encode_optional_hash(&mut output, binding.predecessor_transition_hash());
     encode_optional_hash(&mut output, binding.reservation_intent_object_hash());
     encode_optional_hash(&mut output, binding.output_intent_object_hash());
     encode_optional_hash(&mut output, binding.exact_output_hash());
@@ -1122,7 +885,6 @@ mod tests {
                 let (mailbox_key, _) =
                     ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
                 RosterEntry {
-                    roster_position,
                     signing_verification_key: verification_key.into_bytes(),
                     mailbox_encapsulation_key: mailbox_key.into_bytes(),
                 }

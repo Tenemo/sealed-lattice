@@ -1,5 +1,4 @@
 import type { ActionRandomnessScope } from '../src/action-randomness-runtime.js';
-import type { SetupMailboxSlot } from '../src/index.js';
 
 export const actionRandomnessTestVector = Object.freeze({
     actionRandomnessCommitment:
@@ -32,23 +31,6 @@ export const actionRandomnessTestVector = Object.freeze({
         actionContextHash: '33'.repeat(64),
         participantId: '44'.repeat(64),
     }) satisfies ActionRandomnessScope,
-    setupMailbox: Object.freeze({
-        envelopeHash: 'b6'.repeat(64),
-        setupMailboxSlot: Object.freeze({
-            suiteId: '11'.repeat(64),
-            ceremonyContextHash: '22'.repeat(64),
-            actionContextHash: '33'.repeat(64),
-            rosterHash: '55'.repeat(64),
-            sourceParticipantId: '44'.repeat(64),
-            recipientParticipantId: '66'.repeat(64),
-            producerSequence: '7',
-            payloadType: 2,
-            statementHash: '77'.repeat(64),
-            orderedMaterialRoots: Object.freeze(['88'.repeat(64)]),
-        }) satisfies SetupMailboxSlot,
-        setupMailboxSlotHash:
-            '84f8b16a74b9c1c4270725abcb572e5cefd8b47e989c6a384d5e56407ba11a9a588f0e22882da5e62e6c0d0f11f155bc2169b165b358a40e1f19b10329a1c731',
-    }),
     targetRelease: Object.freeze({
         applicationSlotHash:
             'ae265abb8caf456bff90acdb2a656e3672038e204be379b8ec5735165b7c0f8d1d24e8da506beb3774ab1c6aba1b89960251d7b62b01888728f56be8d8df4d8a',

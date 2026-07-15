@@ -89,43 +89,6 @@ fn coefficient_commitment_set_derives_its_canonical_root() -> CanonicalResult<()
 }
 
 #[test]
-fn coefficient_commitment_set_rejects_a_rebound_noncanonical_rns_prime() -> CanonicalResult<()> {
-    let mut coefficient_set = coefficient_commitment_set()?;
-    let noncanonical_prime = DATA_PRIMES[1];
-    let coefficient_record =
-        &mut coefficient_set["sourceTrusteeRecords"][0]["coefficientCommitments"][0];
-    coefficient_record["rnsPrime"] = json!(noncanonical_prime);
-
-    let error = verify_vss_public_coefficient_commitment_set(
-        &coefficient_set,
-        &coefficient_commitment_set_context(&coefficient_set),
-    )
-    .expect_err("a rebound coefficient record using another limb's prime must reject");
-
-    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(error.message.contains("rnsPrime"));
-    Ok(())
-}
-
-#[test]
-fn coefficient_commitment_set_rejects_a_rebound_wrong_ring_degree() -> CanonicalResult<()> {
-    let mut coefficient_set = coefficient_commitment_set()?;
-    let coefficient_record =
-        &mut coefficient_set["sourceTrusteeRecords"][0]["coefficientCommitments"][0];
-    coefficient_record["ringDegree"] = json!(test_ring_degree() * 2);
-
-    let error = verify_vss_public_coefficient_commitment_set(
-        &coefficient_set,
-        &coefficient_commitment_set_context(&coefficient_set),
-    )
-    .expect_err("a rebound commitment using a different ring degree must reject");
-
-    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(error.message.contains("ringDegree"));
-    Ok(())
-}
-
-#[test]
 fn commitment_sets_reject_rebound_caller_selected_context_hashes() -> CanonicalResult<()> {
     let forged_context_hash = "a".repeat(128);
 
@@ -181,26 +144,6 @@ fn recipient_share_commitment_set_derives_its_canonical_root() -> CanonicalResul
 }
 
 #[test]
-fn recipient_share_commitment_set_rejects_a_rebound_noncanonical_rns_prime() -> CanonicalResult<()>
-{
-    let mut recipient_set = recipient_share_commitment_set()?;
-    let noncanonical_prime = DATA_PRIMES[1];
-    let recipient_share_record =
-        &mut recipient_set["sourceTrusteeRecords"][0]["recipientShareCommitments"][0];
-    recipient_share_record["rnsPrime"] = json!(noncanonical_prime);
-
-    let error = verify_vss_public_recipient_share_commitment_set(
-        &recipient_set,
-        &recipient_share_commitment_set_context(&recipient_set),
-    )
-    .expect_err("a rebound recipient-share record using another limb's prime must reject");
-
-    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(error.message.contains("rnsPrime"));
-    Ok(())
-}
-
-#[test]
 fn aggregate_threshold_commitment_set_derives_its_canonical_root() -> CanonicalResult<()> {
     let aggregate_set = aggregate_threshold_commitment_set()?;
     let verification = verify_vss_public_aggregate_threshold_commitment_set(
@@ -213,25 +156,6 @@ fn aggregate_threshold_commitment_set_derives_its_canonical_root() -> CanonicalR
         expected_aggregate_threshold_commitment_set_root(&aggregate_set)?
     );
 
-    Ok(())
-}
-
-#[test]
-fn aggregate_threshold_commitment_set_rejects_a_rebound_noncanonical_rns_prime()
--> CanonicalResult<()> {
-    let mut aggregate_set = aggregate_threshold_commitment_set()?;
-    let noncanonical_prime = DATA_PRIMES[1];
-    let aggregate_record = &mut aggregate_set["recipientRecords"][0];
-    aggregate_record["commitment"]["rnsPrime"] = json!(noncanonical_prime);
-
-    let error = verify_vss_public_aggregate_threshold_commitment_set(
-        &aggregate_set,
-        &aggregate_threshold_commitment_set_context(&aggregate_set),
-    )
-    .expect_err("a rebound aggregate-threshold record using another limb's prime must reject");
-
-    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(error.message.contains("rnsPrime"));
     Ok(())
 }
 
@@ -297,26 +221,28 @@ fn share_linkage_bindings_command_derives_commitment_roots() -> CanonicalResult<
     )?;
 
     assert_eq!(
-        verification["coefficientCommitmentRoot"],
+        verification.coefficient_commitment_root,
         expected_coefficient_commitment_set_root(&coefficient_set)?
     );
     assert_eq!(
-        verification["recipientShareCommitmentRoot"],
+        verification.recipient_share_commitment_root,
         expected_recipient_share_commitment_set_root(&recipient_set)?
     );
     assert_eq!(
-        verification["aggregateThresholdCommitmentRoot"],
+        verification.aggregate_threshold_commitment_root,
         expected_aggregate_threshold_commitment_set_root(&aggregate_set)?
     );
 
-    let missing_evidence_error = verify_vss_share_linkage_bindings_request(
+    let missing_evidence_error = match verify_vss_share_linkage_bindings_request(
         &json!({
             "command": "VerifyVssShareLinkageBindings",
             "statement": statement.clone(),
         }),
         test_trustee_identities(),
-    )
-    .expect_err("share-linkage statement verification must require evidence sets");
+    ) {
+        Ok(_) => panic!("share-linkage statement verification must require evidence sets"),
+        Err(error) => error,
+    };
     assert!(
         missing_evidence_error
             .to_string()
@@ -325,7 +251,7 @@ fn share_linkage_bindings_command_derives_commitment_roots() -> CanonicalResult<
     );
 
     let mut changed_aggregate_set = aggregate_set;
-    changed_aggregate_set["recipientRecords"][0]["commitment"]["commitmentFields"][0]["materialRootHex"] =
+    changed_aggregate_set["recipientRecords"][0]["commitment"]["materialRootHex"] =
         json!("8".repeat(128));
     let changed_verification = verify_vss_share_linkage_bindings_request(
         &json!({
@@ -338,12 +264,12 @@ fn share_linkage_bindings_command_derives_commitment_roots() -> CanonicalResult<
         test_trustee_identities(),
     )?;
     assert_eq!(
-        changed_verification["aggregateThresholdCommitmentRoot"],
+        changed_verification.aggregate_threshold_commitment_root,
         expected_aggregate_threshold_commitment_set_root(&changed_aggregate_set)?
     );
     assert_ne!(
-        changed_verification["aggregateThresholdCommitmentRoot"],
-        verification["aggregateThresholdCommitmentRoot"]
+        changed_verification.aggregate_threshold_commitment_root,
+        verification.aggregate_threshold_commitment_root
     );
 
     Ok(())
@@ -351,7 +277,7 @@ fn share_linkage_bindings_command_derives_commitment_roots() -> CanonicalResult<
 
 pub(in crate::bgv::setup) fn coefficient_commitment_set() -> CanonicalResult<serde_json::Value> {
     let mut source_trustee_records = Vec::new();
-    for source_trustee_roster_position in 0..2_usize {
+    for source_trustee_roster_position in 0..test_participant_count() {
         source_trustee_records.push(source_coefficient_record(source_trustee_roster_position)?);
     }
     Ok(json!({
@@ -389,7 +315,7 @@ fn source_coefficient_record(
 }
 
 fn test_participant_count() -> usize {
-    2
+    3
 }
 
 fn test_rns_limb_count() -> usize {
@@ -535,7 +461,6 @@ fn coefficient_commitment_set_context(
         trustee_identities: test_trustee_identities(),
         rns_limb_count: test_rns_limb_count(),
         threshold_degree: test_threshold_degree(),
-        ring_degree: test_ring_degree(),
     }
 }
 
@@ -550,7 +475,6 @@ fn recipient_share_commitment_set_context(
         participant_count: test_participant_count(),
         trustee_identities: test_trustee_identities(),
         rns_limb_count: test_rns_limb_count(),
-        ring_degree: test_ring_degree(),
     }
 }
 
@@ -565,7 +489,6 @@ fn aggregate_threshold_commitment_set_context(
         participant_count: test_participant_count(),
         trustee_identities: test_trustee_identities(),
         rns_limb_count: test_rns_limb_count(),
-        ring_degree: test_ring_degree(),
     }
 }
 

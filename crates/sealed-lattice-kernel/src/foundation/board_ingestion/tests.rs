@@ -31,11 +31,9 @@ impl BoardFixture {
             let mut signing_seed = [0_u8; 32];
             signing_seed[0] =
                 u8::try_from(roster_position + 1).expect("test roster position fits u8");
-            signing_seed[31] =
-                u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
-                    .expect("test reverse roster position fits u8");
-            let (verification_key, signing_key) =
-                ml_dsa_65::KG::keygen_from_seed(&signing_seed);
+            signing_seed[31] = u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                .expect("test reverse roster position fits u8");
+            let (verification_key, signing_key) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
             let mut mailbox_seed = [0x41_u8; 32];
             mailbox_seed[0] =
                 u8::try_from(roster_position + 1).expect("test roster position fits u8");
@@ -46,7 +44,6 @@ impl BoardFixture {
             let (mailbox_key, _) =
                 ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
             entries.push(RosterEntry {
-                roster_position,
                 signing_verification_key: verification_key.into_bytes(),
                 mailbox_encapsulation_key: mailbox_key.into_bytes(),
             });
@@ -85,7 +82,6 @@ impl BoardFixture {
             &self.roster,
             CanonicalBoardLimits {
                 maximum_ballot_attempts_per_participant: 4,
-                maximum_recovery_transitions_per_state_key: 4,
                 maximum_retained_canonical_carrier_byte_length,
                 maximum_unordered_carriers_per_batch: 128,
                 maximum_retained_transcript_objects: 512,
@@ -108,11 +104,7 @@ impl BoardFixture {
             object_type,
             ceremony_context_hash: self.ceremony_context_hash,
             action_context_hash: self.action_context_hash,
-            recovery_epoch: 0,
-            recovery_transition_hash: None,
-            producer_participant_id: Some(
-                self.participant_identities[producer_roster_position],
-            ),
+            producer_participant_id: Some(self.participant_identities[producer_roster_position]),
             producer_sequence,
             ordered_prerequisite_hashes,
             payload_bytes,
@@ -146,7 +138,9 @@ impl BoardFixture {
         let payload = CanonicalTuple::new(
             SETUP_INTENT_PAYLOAD_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
-            vec![CanonicalItem::hash512([commitment_byte; Hash512::BYTE_LENGTH])],
+            vec![CanonicalItem::hash512(
+                [commitment_byte; Hash512::BYTE_LENGTH],
+            )],
         )
         .encode()
         .expect("setup-intent payload encodes");
@@ -159,9 +153,8 @@ impl BoardFixture {
                 Vec::new(),
                 payload,
             ),
-            0x20_u8.wrapping_add(
-                u8::try_from(roster_position).expect("test roster position fits u8"),
-            ),
+            0x20_u8
+                .wrapping_add(u8::try_from(roster_position).expect("test roster position fits u8")),
         )
     }
 
@@ -170,24 +163,10 @@ impl BoardFixture {
         producer_roster_position: usize,
         setup_intent_hashes: Vec<Hash512>,
     ) -> Vec<u8> {
-        let recovery_envelope_hashes = (0..FOUNDATION_PROFILE.participant_count)
-            .map(|position| {
-                CanonicalItem::hash512(
-                    [u8::try_from(position + 1).expect("test position fits u8"); 64],
-                )
-            })
-            .collect::<Vec<_>>();
         let payload = CanonicalTuple::new(
             PUBLIC_RANDOMNESS_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::hash512([0x91; Hash512::BYTE_LENGTH]),
-                CanonicalItem::homogeneous_list(
-                    CanonicalItemType::Hash512,
-                    &recovery_envelope_hashes,
-                )
-                .expect("recovery-envelope hash list encodes"),
-            ],
+            vec![CanonicalItem::hash512([0x91; Hash512::BYTE_LENGTH])],
         )
         .encode()
         .expect("public-randomness commitment payload encodes");
@@ -212,7 +191,10 @@ impl BoardFixture {
         let payload = CanonicalTuple::new(
             BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
-            vec![test_stream_descriptor_item(0xc1), test_stream_descriptor_item(0xc2)],
+            vec![
+                test_stream_descriptor_item(0xc1),
+                test_stream_descriptor_item(0xc2),
+            ],
         )
         .encode()
         .expect("ballot-package payload encodes");
@@ -226,8 +208,7 @@ impl BoardFixture {
                 payload,
             ),
             0x60_u8.wrapping_add(
-                u8::try_from(producer_roster_position)
-                    .expect("test roster position fits u8"),
+                u8::try_from(producer_roster_position).expect("test roster position fits u8"),
             ),
         )
     }
@@ -236,10 +217,7 @@ impl BoardFixture {
 fn test_stream_descriptor_item(digest_byte: u8) -> CanonicalItem {
     let descriptor = StreamDescriptor::new(
         1,
-        vec![Hash512::from_bytes([
-            digest_byte;
-            Hash512::BYTE_LENGTH
-        ])],
+        vec![Hash512::from_bytes([digest_byte; Hash512::BYTE_LENGTH])],
         Hash512::from_bytes([digest_byte.wrapping_add(1); Hash512::BYTE_LENGTH]),
     )
     .expect("test stream descriptor is valid");
@@ -287,18 +265,13 @@ fn unordered_dependencies_and_semantic_replay_mint_one_cached_capability() {
     let retained_commitment = batch
         .objects()
         .iter()
-        .find(|object| {
-            object.object_type() == FoundationObjectType::PublicRandomnessCommitment
-        })
+        .find(|object| object.object_type() == FoundationObjectType::PublicRandomnessCommitment)
         .expect("commitment capability is present");
     assert_eq!(retained_commitment.canonical_carrier_bytes(), commitment);
 
-    let commitment_envelope = SignedCarrier::decode(
-        &commitment,
-        &CanonicalDecodeLimits::default(),
-    )
-    .expect("commitment decodes")
-    .envelope;
+    let commitment_envelope = SignedCarrier::decode(&commitment, &CanonicalDecodeLimits::default())
+        .expect("commitment decodes")
+        .envelope;
     let alternate_signature = fixture.sign_envelope(0, commitment_envelope, 0xd4);
     assert_ne!(alternate_signature, commitment);
     let replay = verifier
@@ -346,32 +319,24 @@ fn frozen_context_and_roster_key_bind_every_signed_carrier() {
     let fixture = BoardFixture::new();
     let mut verifier = fixture.verifier();
     let canonical = fixture.setup_intent(0, 0x21);
-    let envelope = SignedCarrier::decode(
-        &canonical,
-        &CanonicalDecodeLimits::default(),
-    )
-    .expect("canonical setup intent decodes")
-    .envelope;
+    let envelope = SignedCarrier::decode(&canonical, &CanonicalDecodeLimits::default())
+        .expect("canonical setup intent decodes")
+        .envelope;
 
     let mut wrong_suite = envelope.clone();
     wrong_suite.suite_id = Hash512::from_bytes([0x71; Hash512::BYTE_LENGTH]);
     let mut wrong_ceremony = envelope.clone();
-    wrong_ceremony.ceremony_context_hash =
-        Hash512::from_bytes([0x72; Hash512::BYTE_LENGTH]);
+    wrong_ceremony.ceremony_context_hash = Hash512::from_bytes([0x72; Hash512::BYTE_LENGTH]);
     let mut wrong_action = envelope.clone();
-    wrong_action.action_context_hash =
-        Hash512::from_bytes([0x73; Hash512::BYTE_LENGTH]);
-    for (context_index, context_envelope) in
-        [wrong_suite, wrong_ceremony, wrong_action]
-            .into_iter()
-            .enumerate()
+    wrong_action.action_context_hash = Hash512::from_bytes([0x73; Hash512::BYTE_LENGTH]);
+    for (context_index, context_envelope) in [wrong_suite, wrong_ceremony, wrong_action]
+        .into_iter()
+        .enumerate()
     {
         let context_carrier = fixture.sign_envelope(
             0,
             context_envelope,
-            0xa0_u8.wrapping_add(
-                u8::try_from(context_index).expect("test context index fits u8"),
-            ),
+            0xa0_u8.wrapping_add(u8::try_from(context_index).expect("test context index fits u8")),
         );
         assert_eq!(
             verifier
@@ -421,8 +386,7 @@ fn typed_prerequisite_order_is_roster_derived_and_failure_is_atomic() {
         RefusalReason::WrongContext
     );
 
-    let correct_commitment =
-        fixture.public_randomness_commitment(0, setup_intent_hashes);
+    let correct_commitment = fixture.public_randomness_commitment(0, setup_intent_hashes);
     let mut correct_batch = vec![correct_commitment];
     correct_batch.extend(setup_intents);
     assert_eq!(
@@ -439,12 +403,9 @@ fn typed_prerequisite_order_is_roster_derived_and_failure_is_atomic() {
 #[test]
 fn deterministic_unsigned_objects_resolve_typed_dependencies() {
     let fixture = BoardFixture::new();
-    let verified_setup_source_hash =
-        Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]);
+    let verified_setup_source_hash = Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]);
     let ballots = (0..usize::from(FOUNDATION_PROFILE.participant_count))
-        .map(|roster_position| {
-            fixture.ballot_package(roster_position, verified_setup_source_hash)
-        })
+        .map(|roster_position| fixture.ballot_package(roster_position, verified_setup_source_hash))
         .collect::<Vec<_>>();
     let ballot_hashes = ballots
         .iter()
@@ -460,11 +421,8 @@ fn deterministic_unsigned_objects_resolve_typed_dependencies() {
         vec![
             CanonicalItem::hash512(verified_setup_source_hash.into_bytes()),
             CanonicalItem::hash512([0x52; Hash512::BYTE_LENGTH]),
-            CanonicalItem::homogeneous_list(
-                CanonicalItemType::Hash512,
-                &selected_ballots,
-            )
-            .expect("selected-ballot hash list encodes"),
+            CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &selected_ballots)
+                .expect("selected-ballot hash list encodes"),
             test_stream_descriptor_item(0xc3),
         ],
     )
@@ -475,8 +433,6 @@ fn deterministic_unsigned_objects_resolve_typed_dependencies() {
         object_type: FoundationObjectType::Aggregate,
         ceremony_context_hash: fixture.ceremony_context_hash,
         action_context_hash: fixture.action_context_hash,
-        recovery_epoch: 0,
-        recovery_transition_hash: None,
         producer_participant_id: None,
         producer_sequence: 0,
         ordered_prerequisite_hashes: Vec::new(),
@@ -489,7 +445,7 @@ fn deterministic_unsigned_objects_resolve_typed_dependencies() {
         .encode()
         .expect("unsigned aggregate envelope encodes");
     let replay_payload = CanonicalTuple::new(
-        EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER,
+        super::super::schemas::EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER,
         FOUNDATION_SCHEMA_VERSION,
         vec![
             CanonicalItem::hash512(verified_setup_source_hash.into_bytes()),
@@ -505,8 +461,6 @@ fn deterministic_unsigned_objects_resolve_typed_dependencies() {
         object_type: FoundationObjectType::EvaluatorReplay,
         ceremony_context_hash: fixture.ceremony_context_hash,
         action_context_hash: fixture.action_context_hash,
-        recovery_epoch: 0,
-        recovery_transition_hash: None,
         producer_participant_id: None,
         producer_sequence: 0,
         ordered_prerequisite_hashes: Vec::new(),
@@ -531,12 +485,18 @@ fn deterministic_unsigned_objects_resolve_typed_dependencies() {
             .count(),
         usize::from(FOUNDATION_PROFILE.participant_count)
     );
-    assert!(batch.objects().iter().any(|object| {
-        object.object_type() == FoundationObjectType::Aggregate
-    }));
-    assert!(batch.objects().iter().any(|object| {
-        object.object_type() == FoundationObjectType::EvaluatorReplay
-    }));
+    assert!(
+        batch
+            .objects()
+            .iter()
+            .any(|object| { object.object_type() == FoundationObjectType::Aggregate })
+    );
+    assert!(
+        batch
+            .objects()
+            .iter()
+            .any(|object| { object.object_type() == FoundationObjectType::EvaluatorReplay })
+    );
 
     let unsigned_setup_intent = SignedCarrier::decode(
         &fixture.setup_intent(0, 0xd1),
@@ -567,11 +527,9 @@ fn unsupported_family_and_payload_versions_refuse_before_acceptance() {
     future_carrier_tuple.schema_version = FOUNDATION_SCHEMA_VERSION + 1;
     assert_eq!(
         verifier
-            .verify_unordered_carriers(&[
-                future_carrier_tuple
-                    .encode()
-                    .expect("future carrier version encodes"),
-            ])
+            .verify_unordered_carriers(&[future_carrier_tuple
+                .encode()
+                .expect("future carrier version encodes"),])
             .into_result()
             .expect_err("unsupported carrier version refuses"),
         RefusalReason::UnsupportedVersionOrSuite
@@ -579,9 +537,8 @@ fn unsupported_family_and_payload_versions_refuse_before_acceptance() {
     let envelope_bytes = carrier_tuple.items[0]
         .variable_value_bytes()
         .expect("carrier contains variable envelope bytes");
-    let envelope_tuple =
-        CanonicalTuple::decode(envelope_bytes, &CanonicalDecodeLimits::default())
-            .expect("test envelope tuple decodes");
+    let envelope_tuple = CanonicalTuple::decode(envelope_bytes, &CanonicalDecodeLimits::default())
+        .expect("test envelope tuple decodes");
     let mut future_envelope_tuple = envelope_tuple.clone();
     future_envelope_tuple.schema_version = FOUNDATION_SCHEMA_VERSION + 1;
     let future_envelope_carrier = CanonicalTuple::new(
@@ -662,7 +619,7 @@ fn witness_slots_resolve_from_typed_intents_independent_of_arrival_order() {
     let fixture = BoardFixture::new();
     let mut verifier = fixture.verifier();
     let reservation_payload = StateReservationIntentPayload {
-        capability_kind: StateCapabilityKind::BallotCandidateList,
+        capability_kind: StateCapabilityKind::FinalitySignature,
         authorization_hash: Hash512::from_bytes([0xa1; Hash512::BYTE_LENGTH]),
     }
     .encode()
@@ -728,106 +685,14 @@ fn witness_slots_resolve_from_typed_intents_independent_of_arrival_order() {
 }
 
 #[test]
-fn recovered_state_objects_require_the_typed_predecessor_transition() {
-    let fixture = BoardFixture::new();
-    let initial_reservation_payload = StateReservationIntentPayload {
-        capability_kind: StateCapabilityKind::BallotCandidateList,
-        authorization_hash: Hash512::from_bytes([0xa0; Hash512::BYTE_LENGTH]),
-    }
-    .encode()
-    .expect("initial reservation payload encodes");
-    let initial_reservation = fixture.sign_envelope(
-        0,
-        fixture.envelope(
-            0,
-            FoundationObjectType::StateReservation,
-            0,
-            Vec::new(),
-            initial_reservation_payload,
-        ),
-        0x90,
-    );
-    let initial_reservation_hash = carrier_object_hash(&initial_reservation);
-    let transition_payload = StateRecoveryTransitionPayload {
-        capability_kind: StateCapabilityKind::BallotCandidateList,
-        preserved_latest_intent_object_hash: Some(initial_reservation_hash),
-    }
-    .encode()
-    .expect("recovery payload encodes");
-    let transition = fixture.sign_envelope(
-        0,
-        fixture.envelope(
-            0,
-            FoundationObjectType::RecoveryTransition,
-            1,
-            Vec::new(),
-            transition_payload,
-        ),
-        0x91,
-    );
-    let transition_hash = carrier_object_hash(&transition);
-    let reservation_payload = StateReservationIntentPayload {
-        capability_kind: StateCapabilityKind::BallotCandidateList,
-        authorization_hash: Hash512::from_bytes([0xb1; Hash512::BYTE_LENGTH]),
-    }
-    .encode()
-    .expect("reservation payload encodes");
-    let mut recovered_reservation_envelope = fixture.envelope(
-        0,
-        FoundationObjectType::StateReservation,
-        0,
-        Vec::new(),
-        reservation_payload.clone(),
-    );
-    recovered_reservation_envelope.recovery_epoch = 1;
-    recovered_reservation_envelope.recovery_transition_hash = Some(transition_hash);
-    let recovered_reservation =
-        fixture.sign_envelope(0, recovered_reservation_envelope, 0x92);
-
-    let mut verifier = fixture.verifier();
-    verifier
-        .verify_unordered_carriers(&[initial_reservation])
-        .into_result()
-        .expect("initial reservation verifies");
-    let batch = verifier
-        .verify_unordered_carriers(&[recovered_reservation, transition])
-        .into_result()
-        .expect("a recovered epoch has its own state-key-scoped reservation slot");
-    assert_eq!(batch.objects().len(), 2);
-
-    let mut missing_predecessor_envelope = fixture.envelope(
-        0,
-        FoundationObjectType::StateReservation,
-        0,
-        Vec::new(),
-        reservation_payload,
-    );
-    missing_predecessor_envelope.recovery_epoch = 1;
-    missing_predecessor_envelope.recovery_transition_hash = Some(Hash512::from_bytes(
-        [0xee; Hash512::BYTE_LENGTH],
-    ));
-    let missing_predecessor =
-        fixture.sign_envelope(0, missing_predecessor_envelope, 0x93);
-    assert_eq!(
-        fixture
-            .verifier()
-            .verify_unordered_carriers(&[missing_predecessor])
-            .into_result()
-            .expect_err("an arbitrary recovery hash is not a predecessor capability"),
-        RefusalReason::MissingPrerequisite
-    );
-}
-
-#[test]
 fn retained_carrier_limit_is_exact_and_semantic_replay_costs_no_extra_bytes() {
     let fixture = BoardFixture::new();
     let first = fixture.setup_intent(0, 0x41);
     let second = fixture.setup_intent(1, 0x42);
     let maximum_retained_canonical_carrier_byte_length =
         u64::try_from(first.len()).expect("test carrier length fits u64");
-    let mut verifier = fixture.verifier_with_retained_carrier_limit(
-        maximum_retained_canonical_carrier_byte_length,
-    );
+    let mut verifier = fixture
+        .verifier_with_retained_carrier_limit(maximum_retained_canonical_carrier_byte_length);
 
     verifier
         .verify_unordered_carriers(&[first.clone()])

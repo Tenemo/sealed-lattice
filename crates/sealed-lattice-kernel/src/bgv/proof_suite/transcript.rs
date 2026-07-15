@@ -5,23 +5,18 @@ use num_traits::One;
 
 use crate::foundation::{
     CanonicalItem, CanonicalItemType, Hash512, StreamingFoundationHashError,
-    StreamingFoundationTupleHash512, fill_foundation_tuple_xof,
-    hash_foundation_tuple_512,
+    StreamingFoundationTupleHash512, fill_foundation_tuple_xof, hash_foundation_tuple_512,
 };
 
 use super::field::{
-    PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE,
-    ProofChallengeExtensionElement,
+    PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, ProofChallengeExtensionElement,
 };
 
 const TRANSCRIPT_INITIAL_DOMAIN: &str = "sealed-lattice/proof/transcript/v1";
 const TRANSCRIPT_ABSORB_DOMAIN: &str = "sealed-lattice/proof/transcript/absorb/v1";
 const TRANSCRIPT_SQUEEZE_DOMAIN: &str = "sealed-lattice/proof/transcript/squeeze/v1";
 
-fn transcript_hash(
-    domain: &str,
-    items: Vec<CanonicalItem>,
-) -> Result<[u8; 64], TranscriptError> {
+fn transcript_hash(domain: &str, items: Vec<CanonicalItem>) -> Result<[u8; 64], TranscriptError> {
     hash_foundation_tuple_512(domain, &items)
         .map(|digest| digest.into_bytes())
         .map_err(|_| TranscriptError::CanonicalEncoding)
@@ -319,10 +314,7 @@ impl CanonicalProofTranscript {
             CanonicalItem::variable_bytes(canonical_round_message_bytes.to_vec())
                 .map_err(|_| TranscriptError::CanonicalEncoding)?,
         );
-        self.state = transcript_hash(
-            TRANSCRIPT_ABSORB_DOMAIN,
-            response_items,
-        )?;
+        self.state = transcript_hash(TRANSCRIPT_ABSORB_DOMAIN, response_items)?;
         self.pending_common_challenge = None;
         Ok(())
     }
@@ -386,8 +378,8 @@ impl CanonicalProofTranscript {
         round: CommonProofRound,
         values: &[ProofChallengeExtensionElement],
     ) -> Result<(), TranscriptError> {
-        let value_count = u32::try_from(values.len())
-            .map_err(|_| TranscriptError::InvalidCommonProofMessage)?;
+        let value_count =
+            u32::try_from(values.len()).map_err(|_| TranscriptError::InvalidCommonProofMessage)?;
         let value_byte_length = PROOF_CHALLENGE_EXTENSION_DEGREE
             .checked_mul(8)
             .ok_or(TranscriptError::InvalidCommonProofMessage)?;
@@ -397,12 +389,14 @@ impl CanonicalProofTranscript {
             .and_then(|length| length.checked_add(6))
             .ok_or(TranscriptError::InvalidCommonProofMessage)?;
         let mut absorber = self.begin_streamed_common_round(round, message_byte_length)?;
-        absorber.streaming_hash.absorb(
-            &CanonicalItemType::ChallengeExtensionElement
-                .canonical_code()
-                .to_le_bytes(),
-        )
-        .map_err(transcript_streaming_hash_error)?;
+        absorber
+            .streaming_hash
+            .absorb(
+                &CanonicalItemType::ChallengeExtensionElement
+                    .canonical_code()
+                    .to_le_bytes(),
+            )
+            .map_err(transcript_streaming_hash_error)?;
         absorber
             .streaming_hash
             .absorb(&value_count.to_le_bytes())
@@ -514,9 +508,7 @@ impl CanonicalProofTranscript {
         if let Some(pending) = &self.pending_common_challenge {
             return Ok(CommonResponseContext {
                 challenge_seed: pending.candidate_seed,
-                canonical_challenge_output_bytes: Some(
-                    pending.canonical_output_bytes.clone(),
-                ),
+                canonical_challenge_output_bytes: Some(pending.canonical_output_bytes.clone()),
             });
         }
         let virtual_challenge_tag = format!("{round_tag}/response-binding");
@@ -541,9 +533,7 @@ struct CommonResponseContext {
     canonical_challenge_output_bytes: Option<Vec<u8>>,
 }
 
-fn transcript_streaming_hash_error(
-    _error: StreamingFoundationHashError,
-) -> TranscriptError {
+fn transcript_streaming_hash_error(_error: StreamingFoundationHashError) -> TranscriptError {
     TranscriptError::InvalidCommonProofMessage
 }
 
@@ -626,24 +616,12 @@ impl CommonProofRound {
 /// Closed Fiat-Shamir challenge tags for the common transparent proof.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum CommonProofChallenge {
-    Theta {
-        modulus_ordinal: u16,
-    },
-    Alpha {
-        modulus_ordinal: u16,
-    },
-    Composition {
-        constraint_ordinal: u16,
-    },
-    DeepPoint {
-        point_ordinal: u16,
-    },
-    OpeningBatch {
-        claim_ordinal: u16,
-    },
-    FriFold {
-        fold_ordinal: u16,
-    },
+    Theta { modulus_ordinal: u16 },
+    Alpha { modulus_ordinal: u16 },
+    Composition { constraint_ordinal: u16 },
+    DeepPoint { point_ordinal: u16 },
+    OpeningBatch { claim_ordinal: u16 },
+    FriFold { fold_ordinal: u16 },
     QueryVector,
 }
 
@@ -651,12 +629,12 @@ impl CommonProofChallenge {
     fn tag(self, application_statement_schema_identifier: u16) -> String {
         let prefix = format!("proof/{application_statement_schema_identifier:04x}");
         match self {
-            Self::Theta {
-                modulus_ordinal,
-            } => format!("{prefix}/theta-vector/{modulus_ordinal:04x}"),
-            Self::Alpha {
-                modulus_ordinal,
-            } => format!("{prefix}/alpha-vector/{modulus_ordinal:04x}"),
+            Self::Theta { modulus_ordinal } => {
+                format!("{prefix}/theta-vector/{modulus_ordinal:04x}")
+            }
+            Self::Alpha { modulus_ordinal } => {
+                format!("{prefix}/alpha-vector/{modulus_ordinal:04x}")
+            }
             Self::Composition { constraint_ordinal } => {
                 format!("{prefix}/composition/{constraint_ordinal:04x}")
             }
@@ -796,8 +774,7 @@ impl CommonProofTranscriptSchedule {
                         || entry.modulus <= 1
                         || entry.modulus >= PROOF_BASE_FIELD_MODULUS
                         || entry.coordinate_count == 0
-                        || BigUint::from(entry.modulus)
-                            .pow(u32::from(entry.coordinate_count))
+                        || BigUint::from(entry.modulus).pow(u32::from(entry.coordinate_count))
                             >= (BigUint::one() << 512_usize)
                 })
             || self.composition_challenge_count == 0
@@ -872,9 +849,7 @@ impl CommonProofTranscriptSchedule {
     /// includes every rejection-sampling expansion block. It deliberately
     /// excludes Merkle authentication, whose cost is derived from the checked
     /// tree catalog and opening geometry.
-    pub(crate) fn maximum_transcript_hash_query_count(
-        &self,
-    ) -> Result<u64, TranscriptError> {
+    pub(crate) fn maximum_transcript_hash_query_count(&self) -> Result<u64, TranscriptError> {
         self.validate()?;
         let mut counter = TranscriptHashQueryCounter::new();
 
@@ -991,8 +966,7 @@ fn maximum_product_residue_challenge_hash_count(
 ) -> Result<u64, TranscriptError> {
     if modulus <= 1
         || coordinate_count == 0
-        || BigUint::from(modulus).pow(u32::from(coordinate_count))
-            >= (BigUint::one() << 512_usize)
+        || BigUint::from(modulus).pow(u32::from(coordinate_count)) >= (BigUint::one() << 512_usize)
         || maximum_candidate_draws == 0
     {
         return Err(TranscriptError::InvalidChallengeModulus);
@@ -1086,9 +1060,7 @@ impl CommonProofTranscript {
         let CommonProofProgress::BaseRoots(next_index) = self.progress else {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         };
-        if self.schedule.ordered_base_tree_ordinals.get(next_index)
-            != Some(&tree_ordinal)
-        {
+        if self.schedule.ordered_base_tree_ordinals.get(next_index) != Some(&tree_ordinal) {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         }
         self.transcript
@@ -1146,15 +1118,16 @@ impl CommonProofTranscript {
         let CommonProofProgress::AuxiliaryRoots(next_index) = self.progress else {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         };
-        if self.schedule.ordered_auxiliary_tree_ordinals.get(next_index)
+        if self
+            .schedule
+            .ordered_auxiliary_tree_ordinals
+            .get(next_index)
             != Some(&tree_ordinal)
         {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         }
-        self.transcript.absorb_common_round(
-            CommonProofRound::AuxiliaryRoot { tree_ordinal },
-            &root,
-        )?;
+        self.transcript
+            .absorb_common_round(CommonProofRound::AuxiliaryRoot { tree_ordinal }, &root)?;
         self.progress = CommonProofProgress::AuxiliaryRoots(next_index + 1);
         self.skip_empty_prefix_phases();
         Ok(())
@@ -1188,10 +1161,8 @@ impl CommonProofTranscript {
         if next_ordinal != component_ordinal {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         }
-        self.transcript.absorb_common_round(
-            CommonProofRound::QuotientRoot { component_ordinal },
-            &root,
-        )?;
+        self.transcript
+            .absorb_common_round(CommonProofRound::QuotientRoot { component_ordinal }, &root)?;
         self.progress = CommonProofProgress::QuotientRoots(next_ordinal + 1);
         self.skip_empty_prefix_phases();
         Ok(())
@@ -1236,17 +1207,11 @@ impl CommonProofTranscript {
         {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         }
-        self.transcript.absorb_common_round(
-            CommonProofRound::DeepValues,
-            canonical_deep_values_bytes,
-        )?;
+        self.transcript
+            .absorb_common_round(CommonProofRound::DeepValues, canonical_deep_values_bytes)?;
         self.progress = match self.schedule.privacy_mode {
-            CommonProofPrivacyMode::PublicOnly => {
-                CommonProofProgress::OpeningBatchChallenges(0)
-            }
-            CommonProofPrivacyMode::SecretBearing => {
-                CommonProofProgress::OpeningBatchMaskRoot
-            }
+            CommonProofPrivacyMode::PublicOnly => CommonProofProgress::OpeningBatchChallenges(0),
+            CommonProofPrivacyMode::SecretBearing => CommonProofProgress::OpeningBatchMaskRoot,
         };
         self.skip_empty_prefix_phases();
         Ok(())
@@ -1261,17 +1226,11 @@ impl CommonProofTranscript {
         {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         }
-        self.transcript.absorb_common_extension_value_list(
-            CommonProofRound::DeepValues,
-            deep_evaluations,
-        )?;
+        self.transcript
+            .absorb_common_extension_value_list(CommonProofRound::DeepValues, deep_evaluations)?;
         self.progress = match self.schedule.privacy_mode {
-            CommonProofPrivacyMode::PublicOnly => {
-                CommonProofProgress::OpeningBatchChallenges(0)
-            }
-            CommonProofPrivacyMode::SecretBearing => {
-                CommonProofProgress::OpeningBatchMaskRoot
-            }
+            CommonProofPrivacyMode::PublicOnly => CommonProofProgress::OpeningBatchChallenges(0),
+            CommonProofPrivacyMode::SecretBearing => CommonProofProgress::OpeningBatchMaskRoot,
         };
         self.skip_empty_prefix_phases();
         Ok(())
@@ -1284,10 +1243,8 @@ impl CommonProofTranscript {
         if self.progress != CommonProofProgress::OpeningBatchMaskRoot {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         }
-        self.transcript.absorb_common_round(
-            CommonProofRound::OpeningBatchMaskRoot,
-            &root,
-        )?;
+        self.transcript
+            .absorb_common_round(CommonProofRound::OpeningBatchMaskRoot, &root)?;
         self.progress = CommonProofProgress::OpeningBatchChallenges(0);
         self.skip_empty_prefix_phases();
         Ok(())
@@ -1303,10 +1260,10 @@ impl CommonProofTranscript {
         if next_ordinal != claim_ordinal {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
-        let sampled = self.sample_extension(
-            CommonProofChallenge::OpeningBatch { claim_ordinal },
-            |_| false,
-        )?;
+        let sampled = self
+            .sample_extension(CommonProofChallenge::OpeningBatch { claim_ordinal }, |_| {
+                false
+            })?;
         self.progress = CommonProofProgress::OpeningBatchChallenges(next_ordinal + 1);
         self.skip_empty_prefix_phases();
         Ok(sampled)
@@ -1322,10 +1279,8 @@ impl CommonProofTranscript {
         if next_ordinal != fold_ordinal {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
-        let sampled = self.sample_extension(
-            CommonProofChallenge::FriFold { fold_ordinal },
-            |_| false,
-        )?;
+        let sampled =
+            self.sample_extension(CommonProofChallenge::FriFold { fold_ordinal }, |_| false)?;
         self.progress = if fold_ordinal + 1 < self.schedule.fri_fold_count {
             CommonProofProgress::FriLayerRoot(fold_ordinal)
         } else {
@@ -1345,10 +1300,8 @@ impl CommonProofTranscript {
         if next_ordinal != fold_ordinal {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         }
-        self.transcript.absorb_common_round(
-            CommonProofRound::FriLayerRoot { fold_ordinal },
-            &root,
-        )?;
+        self.transcript
+            .absorb_common_round(CommonProofRound::FriLayerRoot { fold_ordinal }, &root)?;
         self.progress = CommonProofProgress::FriFoldChallenge(fold_ordinal + 1);
         Ok(())
     }
@@ -1397,9 +1350,7 @@ impl CommonProofTranscript {
     /// fixed-width candidate maps uniformly; duplicate candidates are retried
     /// inside this one message. Conditional on the checked draw ceiling not
     /// being exhausted, the result is uniform without replacement.
-    pub(crate) fn sample_query_representatives(
-        &mut self,
-    ) -> Result<Vec<u64>, TranscriptError> {
+    pub(crate) fn sample_query_representatives(&mut self) -> Result<Vec<u64>, TranscriptError> {
         let CommonProofProgress::QueryRepresentatives(next_ordinal) = self.progress else {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         };
@@ -1426,10 +1377,7 @@ impl CommonProofTranscript {
             .ok_or(TranscriptError::ChallengeCounterOverflow)?;
         let (stream, verifier_randomness) = self
             .transcript
-            .begin_common_xof_challenge(
-                CommonProofChallenge::QueryVector,
-                random_byte_length,
-            )?;
+            .begin_common_xof_challenge(CommonProofChallenge::QueryVector, random_byte_length)?;
         let mut selected = BTreeSet::new();
         let mut randomness_offset = 0_usize;
         for _ in 0..self.schedule.unique_query_count {
@@ -1443,18 +1391,16 @@ impl CommonProofTranscript {
                     .ok_or(TranscriptError::ChallengeCounterOverflow)?;
                 randomness_offset = candidate_end;
                 let mut canonical_candidate = [0_u8; std::mem::size_of::<u64>()];
-                canonical_candidate[..candidate_byte_length]
-                    .copy_from_slice(candidate_bytes);
-                let candidate = u64::from_le_bytes(canonical_candidate)
-                    % self.schedule.query_orbit_count;
+                canonical_candidate[..candidate_byte_length].copy_from_slice(candidate_bytes);
+                let candidate =
+                    u64::from_le_bytes(canonical_candidate) % self.schedule.query_orbit_count;
                 if selected.insert(candidate) {
                     accepted = Some(candidate);
                     break;
                 }
             }
-            self.accepted_query_representatives.push(
-                accepted.ok_or(TranscriptError::CommonChallengeDrawsExhausted)?,
-            );
+            self.accepted_query_representatives
+                .push(accepted.ok_or(TranscriptError::CommonChallengeDrawsExhausted)?);
         }
         let mut canonical_output_bytes = Vec::new();
         canonical_output_bytes
@@ -1470,9 +1416,7 @@ impl CommonProofTranscript {
         }
         self.transcript
             .finish_common_challenge(stream, canonical_output_bytes)?;
-        self.progress = CommonProofProgress::QueryRepresentatives(
-            self.schedule.unique_query_count,
-        );
+        self.progress = CommonProofProgress::QueryRepresentatives(self.schedule.unique_query_count);
         self.skip_empty_prefix_phases();
         Ok(self.accepted_query_representatives.clone())
     }
@@ -1494,8 +1438,7 @@ impl CommonProofTranscript {
         &mut self,
         canonical_query_openings_bytes: &[u8],
     ) -> Result<(), TranscriptError> {
-        let mut absorber =
-            self.begin_query_openings(canonical_query_openings_bytes.len())?;
+        let mut absorber = self.begin_query_openings(canonical_query_openings_bytes.len())?;
         absorber.absorb(canonical_query_openings_bytes)?;
         self.finish_query_openings(absorber)
     }
@@ -1581,10 +1524,7 @@ impl CommonProofTranscript {
                     CommonProofProgress::ApplicationChallenges(0)
                 }
                 CommonProofProgress::ApplicationChallenges(next)
-                    if next == self
-                        .schedule
-                        .ordered_application_challenge_groups
-                        .len() =>
+                    if next == self.schedule.ordered_application_challenge_groups.len() =>
                 {
                     CommonProofProgress::AuxiliaryRoots(0)
                 }
@@ -1603,9 +1543,7 @@ impl CommonProofTranscript {
                 {
                     CommonProofProgress::DeepPoints(0)
                 }
-                CommonProofProgress::DeepPoints(next)
-                    if next == self.schedule.deep_point_count =>
-                {
+                CommonProofProgress::DeepPoints(next) if next == self.schedule.deep_point_count => {
                     CommonProofProgress::DeepValues
                 }
                 CommonProofProgress::OpeningBatchChallenges(next)
@@ -1658,8 +1596,7 @@ impl CommonChallengeStream {
         if product_cardinality >= sample_space {
             return Err(TranscriptError::InvalidChallengeModulus);
         }
-        let acceptance_limit = (&sample_space / &product_cardinality)
-            * &product_cardinality;
+        let acceptance_limit = (&sample_space / &product_cardinality) * &product_cardinality;
         for draw_ordinal in 0..maximum_candidate_draws {
             let candidate = BigUint::from_bytes_le(&self.current_candidate_seed);
             if candidate < acceptance_limit {
@@ -1700,8 +1637,7 @@ impl CommonChallengeStream {
                 .map_err(|_| TranscriptError::InvalidChallengeModulus)?,
         );
         let sample_space = BigUint::one() << 512_usize;
-        let acceptance_limit = (&sample_space / &extension_cardinality)
-            * &extension_cardinality;
+        let acceptance_limit = (&sample_space / &extension_cardinality) * &extension_cardinality;
         let candidate = BigUint::from_bytes_le(&self.current_candidate_seed);
         if candidate >= acceptance_limit {
             return Ok(None);
@@ -1843,8 +1779,7 @@ mod common_challenge_chain_tests {
     #[test]
     fn rejected_candidate_advances_the_alternating_hash_chain() {
         let initial_seed = [0x5a; 64];
-        let mut stream =
-            CommonChallengeStream::new(initial_seed, "test-rejection".to_owned());
+        let mut stream = CommonChallengeStream::new(initial_seed, "test-rejection".to_owned());
 
         stream
             .reject_current_candidate()
@@ -1886,10 +1821,16 @@ mod common_challenge_chain_tests {
             .expect("theta output is recorded");
 
         first
-            .absorb_common_round(CommonProofRound::AuxiliaryRoot { tree_ordinal: 0 }, &[7; 64])
+            .absorb_common_round(
+                CommonProofRound::AuxiliaryRoot { tree_ordinal: 0 },
+                &[7; 64],
+            )
             .expect("the first response is bound to the pending challenge");
         second
-            .absorb_common_round(CommonProofRound::AuxiliaryRoot { tree_ordinal: 0 }, &[7; 64])
+            .absorb_common_round(
+                CommonProofRound::AuxiliaryRoot { tree_ordinal: 0 },
+                &[7; 64],
+            )
             .expect("the second response is bound to the pending challenge");
 
         assert_ne!(first.state, second.state);
@@ -1909,7 +1850,10 @@ mod common_challenge_chain_tests {
             .begin_common_xof_challenge(CommonProofChallenge::QueryVector, 4_096)
             .expect("the repeated extended verifier message derives");
 
-        assert_eq!(first_stream.current_candidate_seed, second_stream.current_candidate_seed);
+        assert_eq!(
+            first_stream.current_candidate_seed,
+            second_stream.current_candidate_seed
+        );
         assert_eq!(first_randomness, second_randomness);
         assert_eq!(first_randomness.len(), 4_096);
         assert!(first_randomness.iter().any(|byte| *byte != 0));
@@ -1999,8 +1943,7 @@ mod common_challenge_chain_tests {
 
     #[test]
     fn product_residue_sampler_rejects_an_oversized_product_space() {
-        let mut stream =
-            CommonChallengeStream::new([0_u8; 64], "test-product".to_owned());
+        let mut stream = CommonChallengeStream::new([0_u8; 64], "test-product".to_owned());
 
         assert_eq!(
             stream.sample_residue_vector(2, 512, 1),
@@ -2012,13 +1955,10 @@ mod common_challenge_chain_tests {
     fn extension_sampler_rejects_the_first_out_of_range_candidate() {
         let modulus = BigUint::from(PROOF_BASE_FIELD_MODULUS);
         let extension_cardinality = modulus.pow(
-            u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
-                .expect("the extension degree fits u32"),
+            u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE).expect("the extension degree fits u32"),
         );
-        let sample_space = BigUint::from(1_u8)
-            << (PROOF_CHALLENGE_EXTENSION_DEGREE * 64);
-        let acceptance_limit = (&sample_space / &extension_cardinality)
-            * extension_cardinality;
+        let sample_space = BigUint::from(1_u8) << (PROOF_CHALLENGE_EXTENSION_DEGREE * 64);
+        let acceptance_limit = (&sample_space / &extension_cardinality) * extension_cardinality;
         let encoded = acceptance_limit.to_bytes_le();
         let mut block = [0_u8; 64];
         block[..encoded.len()].copy_from_slice(&encoded);

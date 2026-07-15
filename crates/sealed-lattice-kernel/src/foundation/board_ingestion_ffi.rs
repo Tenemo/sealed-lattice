@@ -1,12 +1,12 @@
 use core::{ptr, slice};
 
+use super::RefusalReason;
 use super::board_ingestion_runtime::{
     BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, begin_board_verifier_session,
-    cached_board_carrier_byte_length, cancel_board_verifier_session,
-    copy_cached_board_carrier, describe_verified_transcript_object,
-    release_verified_transcript_object, verify_unordered_board_carriers,
+    cached_board_carrier_byte_length, cancel_board_verifier_session, copy_cached_board_carrier,
+    describe_verified_transcript_object, release_verified_transcript_object,
+    verify_unordered_board_carriers,
 };
-use super::RefusalReason;
 
 const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
     refusal_reason.canonical_code() as u32
@@ -70,10 +70,7 @@ unsafe fn write_exact_output(
 ) -> u32 {
     match result {
         Ok(output) => {
-            if output.is_empty()
-                || output.len() != output_byte_length
-                || output_pointer.is_null()
-            {
+            if output.is_empty() || output.len() != output_byte_length || output_pointer.is_null() {
                 return refusal_status(RefusalReason::WrongTypeOrLength);
             }
             unsafe {
@@ -97,13 +94,10 @@ pub unsafe extern "C" fn sealed_lattice_board_verifier_begin(
     capability_byte_length: usize,
     status_pointer: *mut u32,
 ) -> u32 {
-    let configuration =
-        unsafe { input_bytes(configuration_pointer, configuration_byte_length) };
+    let configuration = unsafe { input_bytes(configuration_pointer, configuration_byte_length) };
     let capability = unsafe { input_bytes(capability_pointer, capability_byte_length) };
-    let Ok(capability): Result<
-        [u8; BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
-        _,
-    > = capability.try_into()
+    let Ok(capability): Result<[u8; BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH], _> =
+        capability.try_into()
     else {
         unsafe {
             write_status(
@@ -155,9 +149,9 @@ pub unsafe extern "C" fn sealed_lattice_board_verifier_verify_unordered(
         .and_then(|bytes| usize::try_from(u32::from_le_bytes(bytes)).ok())
         .and_then(|count| count.checked_mul(4))
         .and_then(|byte_length| byte_length.checked_add(4));
-    if required_output_capacity.is_none_or(|required| {
-        required > output_capacity || output_pointer.is_null()
-    }) {
+    if required_output_capacity
+        .is_none_or(|required| required > output_capacity || output_pointer.is_null())
+    {
         unsafe {
             write_status(
                 status_pointer,
@@ -193,11 +187,7 @@ pub unsafe extern "C" fn sealed_lattice_board_verifier_describe(
     let capability = unsafe { input_bytes(capability_pointer, capability_byte_length) };
     unsafe {
         write_exact_output(
-            describe_verified_transcript_object(
-                session_handle,
-                capability,
-                verified_object_handle,
-            ),
+            describe_verified_transcript_object(session_handle, capability, verified_object_handle),
             output_pointer,
             output_byte_length,
         )
@@ -282,6 +272,5 @@ pub unsafe extern "C" fn sealed_lattice_board_verifier_cancel(
     capability_byte_length: usize,
 ) -> u32 {
     let capability = unsafe { input_bytes(capability_pointer, capability_byte_length) };
-    cancel_board_verifier_session(session_handle, capability)
-        .map_or_else(|status| status, |()| 0)
+    cancel_board_verifier_session(session_handle, capability).map_or_else(|status| status, |()| 0)
 }

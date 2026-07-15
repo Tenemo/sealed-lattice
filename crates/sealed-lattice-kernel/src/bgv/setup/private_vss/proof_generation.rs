@@ -105,14 +105,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     )?
     .map_err(private_vss_refusal_to_error)?;
 
-    let recipient_identity = string_field(
-        request,
-        "recipientIdentity",
-        "recipientIdentity",
-        PrivateVssRefusalCode::missing("recipientIdentityMissing"),
-        "recipientIdentity must be provided for private VSS proof generation",
-    )
-    .map_err(private_vss_refusal_to_error)?;
     let recipient_roster_position = u64_field(
         request,
         "recipientRosterPosition",
@@ -136,34 +128,12 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "rnsLimbIndex must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    let rns_prime = u64_field(
-        request,
-        "rnsPrime",
-        "rnsPrime",
-        PrivateVssRefusalCode::missing("rnsPrimeMissing"),
-        "rnsPrime must be provided for private VSS proof generation",
-    )
-    .map_err(private_vss_refusal_to_error)?;
-    if DATA_PRIMES.get(rns_limb_index) != Some(&rns_prime) {
-        return Err(CanonicalError::new(
+    let rns_prime = DATA_PRIMES.get(rns_limb_index).copied().ok_or_else(|| {
+        CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "rnsPrime must match Q_share at rnsLimbIndex",
-        ));
-    }
-    let ring_degree = usize_field(
-        request,
-        "ringDegree",
-        "ringDegree",
-        PrivateVssRefusalCode::missing("ringDegreeMissing"),
-        "ringDegree must be provided for private VSS proof generation",
-    )
-    .map_err(private_vss_refusal_to_error)?;
-    if ring_degree == 0 || ring_degree > POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "ringDegree is outside the selected setup parameters",
-        ));
-    }
+            "rnsLimbIndex is outside Q_share",
+        )
+    })?;
     let share_values = u64_vector_field(
         request,
         "shareValues",
@@ -172,10 +142,14 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "shareValues must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    if share_values.len() != ring_degree || share_values.iter().any(|value| *value >= rns_prime) {
+    let ring_degree = share_values.len();
+    if ring_degree == 0
+        || ring_degree > POLYNOMIAL_DEGREE
+        || share_values.iter().any(|value| *value >= rns_prime)
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "shareValues must be canonical Q_share residues with length ringDegree",
+            "shareValues must be a non-empty canonical Q_share residue vector within the supported ring degree",
         ));
     }
     let mut coefficient_commitment_roots = Vec::with_capacity(roster.decryption_threshold as usize);
@@ -217,12 +191,12 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         PrivateVssRefusalCode::missing("coefficientMessagesMissing"),
         "coefficientMessagesByShamirIndex must be provided for private VSS proof generation",
     )?;
-    let opening_randomness_by_shamir_index = i128_matrix3_field(
+    let opening_randomness_by_shamir_index_and_commitment_limb = i128_matrix4_field(
         request,
-        "openingRandomnessByShamirIndex",
-        "openingRandomnessByShamirIndex",
+        "openingRandomnessByShamirIndexAndCommitmentLimb",
+        "openingRandomnessByShamirIndexAndCommitmentLimb",
         PrivateVssRefusalCode::missing("openingRandomnessMissing"),
-        "openingRandomnessByShamirIndex must be provided for private VSS proof generation",
+        "openingRandomnessByShamirIndexAndCommitmentLimb must be provided for private VSS proof generation",
     )?;
     let carry_witnesses = derive_private_vss_carry_witnesses(
         rns_prime,
@@ -244,35 +218,27 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         setup_context,
         public_matrix_seed_hash,
         private_envelope_aad_hash,
-        &source_trustee_binding.source_trustee_identity,
         source_trustee_binding.source_trustee_roster_position,
         &source_trustee_binding.source_trustee_commitment_root,
-        recipient_identity,
         recipient_roster_position,
         rns_limb_index,
-        rns_prime,
-        ring_degree,
         &coefficient_commitment_roots,
         &share_values,
         proof_randomness_seed_hex,
     )?;
     let witness = PrivateVssShareSuccinctProofWitness {
         coefficient_messages_by_shamir_index,
-        opening_randomness_by_shamir_index,
+        opening_randomness_by_shamir_index_and_commitment_limb,
         carry_witnesses,
     };
     let generation_input = PrivateVssShareSuccinctProofGenerationInput {
         setup_context,
         public_matrix_seed_hash,
         private_envelope_aad_hash,
-        source_trustee_identity: &source_trustee_binding.source_trustee_identity,
         source_trustee_roster_position: source_trustee_binding.source_trustee_roster_position,
-        recipient_identity,
         recipient_roster_position,
         source_trustee_commitment_root: &source_trustee_binding.source_trustee_commitment_root,
         rns_limb_index,
-        rns_prime,
-        ring_degree,
         coefficient_commitment_roots: &coefficient_commitment_roots,
         share_values: &share_values,
         coefficient_commitments: &coefficient_commitment_values,
@@ -284,32 +250,21 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
 
     Ok((
         json!({
-            "sourceTrusteeIdentity": source_trustee_binding.source_trustee_identity,
-            "sourceTrusteeRosterPosition": source_trustee_binding.source_trustee_roster_position,
-            "recipientIdentity": recipient_identity,
-            "recipientRosterPosition": recipient_roster_position,
             "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
-            "ringDegree": ring_degree,
             "privateVssShareProofBytesHash": proof_bytes_hash,
         }),
         statement_hash,
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn statement_bound_private_vss_proof_randomness_seed_hex(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
     private_envelope_aad_hash: &str,
-    source_trustee_identity: &str,
     source_trustee_roster_position: u64,
     source_trustee_commitment_root: &str,
-    recipient_identity: &str,
     recipient_roster_position: u64,
     rns_limb_index: usize,
-    rns_prime: u64,
-    ring_degree: usize,
     coefficient_commitment_roots: &[String],
     share_values: &[u64],
     proof_randomness_seed_hex: &str,
@@ -324,14 +279,10 @@ fn statement_bound_private_vss_proof_randomness_seed_hex(
         "setupContext": setup_context,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "privateEnvelopeAadHash": private_envelope_aad_hash,
-        "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
-        "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
         "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-        "ringDegree": ring_degree,
         "shareValues": share_values,
         "coefficientCommitmentRoots": coefficient_commitment_roots,
         "proofRandomnessSeedHex": proof_randomness_seed_hex,
@@ -374,47 +325,61 @@ fn u64_matrix_field(
         .collect()
 }
 
-fn i128_matrix3_field(
+fn i128_matrix4_field(
     value: &Value,
     field_name: &str,
     object_path: &str,
     code: PrivateVssRefusalCode,
     message: impl Into<String>,
-) -> CanonicalResult<Vec<Vec<Vec<i128>>>> {
+) -> CanonicalResult<Vec<Vec<Vec<Vec<i128>>>>> {
     let outer_rows = array_field(value, field_name, object_path, code, message)
         .map_err(private_vss_refusal_to_error)?;
     outer_rows
         .iter()
         .enumerate()
-        .map(|(outer_index, middle_value)| {
-            let middle_rows = middle_value.as_array().ok_or_else(|| {
+        .map(|(outer_index, matrix_value)| {
+            let matrices = matrix_value.as_array().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     format!("{object_path}.{outer_index} must be an array"),
                 )
             })?;
-            middle_rows
+            matrices
                 .iter()
                 .enumerate()
-                .map(|(middle_index, inner_value)| {
-                    let inner_values = inner_value.as_array().ok_or_else(|| {
+                .map(|(matrix_index, rows_value)| {
+                    let rows = rows_value.as_array().ok_or_else(|| {
                         CanonicalError::new(
                             CanonicalErrorCode::InvalidFixture,
-                            format!("{object_path}.{outer_index}.{middle_index} must be an array"),
+                            format!("{object_path}.{outer_index}.{matrix_index} must be an array"),
                         )
                     })?;
-                    inner_values
+                    rows
                         .iter()
                         .enumerate()
-                        .map(|(inner_index, item)| {
-                            decimal_i128_value(item).ok_or_else(|| {
+                        .map(|(row_index, coefficients_value)| {
+                            let coefficients = coefficients_value.as_array().ok_or_else(|| {
                                 CanonicalError::new(
                                     CanonicalErrorCode::InvalidFixture,
                                     format!(
-                                        "{object_path}.{outer_index}.{middle_index}.{inner_index} must be a signed integer or decimal string"
+                                        "{object_path}.{outer_index}.{matrix_index}.{row_index} must be an array"
                                     ),
                                 )
-                            })
+                            })?;
+                            coefficients
+                                .iter()
+                                .enumerate()
+                                .map(|(coefficient_index, item)| {
+                                    decimal_i128_value(item).ok_or_else(|| {
+                                        CanonicalError::new(
+                                            CanonicalErrorCode::InvalidFixture,
+                                            format!(
+                                                "{object_path}.{outer_index}.{matrix_index}.{row_index}.{coefficient_index} must be a signed integer or decimal string"
+                                            ),
+                                        )
+                                    })
+                                })
+                                .collect()
                         })
                         .collect()
                 })

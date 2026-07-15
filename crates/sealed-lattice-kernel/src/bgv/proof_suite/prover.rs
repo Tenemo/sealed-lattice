@@ -26,9 +26,9 @@ use super::relation_plan::{
     RelationIntegerLiftComponentDescriptor, RelationIntegerLiftConvolutionKind,
     RelationIntegerLiftConvolutionProductDescriptor, RelationIntegerLiftFullRingHalf,
     RelationIntegerLiftFullRingNegacyclicProductDescriptor,
-    RelationIntegerLiftLinearTermDescriptor, RelationIntegerLiftReversedColumnBindingDescriptor,
-    RelationMaskDescriptor, RelationMaskKind, RelationMaskTargetClass, RelationOpeningSourceClass,
-    RelationTreeDescriptor,
+    RelationIntegerLiftLinearTermDescriptor,
+    RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor, RelationMaskDescriptor,
+    RelationMaskKind, RelationMaskTargetClass, RelationOpeningSourceClass, RelationTreeDescriptor,
 };
 use super::{
     CommonProofChallenge, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
@@ -656,10 +656,13 @@ where
         .collect::<BTreeSet<_>>();
     let mut columns = vec![None; variant.ordered_columns().len()];
 
-    for (column_index, descriptor) in variant.ordered_columns().iter().enumerate() {
+    for column_index in 0..variant.ordered_columns().len() {
         let column_ordinal = u32::try_from(column_index).map_err(|_| {
             CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
         })?;
+        let descriptor = variant.ordered_columns().get(column_index).ok_or(
+            CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn),
+        )?;
         let is_auxiliary_tree_column =
             tree_roles.get(&column_ordinal) == Some(&ProofTreeRole::AuxiliaryOracle);
         if reversed_columns.contains(&column_ordinal)
@@ -768,17 +771,14 @@ where
     Ok(CommonProofPreChallengeRelationColumns { columns })
 }
 
-/// Synthesizes every integer-lift auxiliary column from the checked
+/// Synthesizes every auxiliary column from the checked integer-lift
 /// descriptors and the complete transcript challenge vector, then applies the
 /// plan-assigned masks.  The function handles every batch in one call so no
 /// prover message can be inserted between consecutive theta or alpha draws.
-/// Callers may provide only non-integer-lift auxiliary columns used by other
-/// checked relation grammars.
 pub(crate) fn construct_post_challenge_relation_columns<Coins>(
     variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,
     mut pre_challenge_columns: CommonProofPreChallengeRelationColumns,
-    mut provided_non_integer_lift_auxiliary_columns: BTreeMap<u32, CommonProofSourcePolynomial>,
     application_challenges: &[RelationApplicationChallengeAssignment],
     coins: &mut Coins,
     maximum_candidate_draws_per_output: u32,
@@ -803,33 +803,9 @@ where
             CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
         })?;
         match tree_roles.get(&column_ordinal) {
-            Some(ProofTreeRole::AuxiliaryOracle)
-                if !integer_lift_auxiliary_columns.contains(&column_ordinal) =>
-            {
-                if pre_challenge_columns.columns[column_index].is_some() {
-                    return Err(CommonProofPrivateCoinError::Prover(
-                        CommonProofProverError::InvalidColumn,
-                    ));
-                }
-                let source = provided_non_integer_lift_auxiliary_columns
-                    .remove(&column_ordinal)
-                    .ok_or_else(|| {
-                        CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-                    })?;
-                validate_unmasked_column(descriptor, &source, variant.trace_domain_size())
-                    .map_err(CommonProofPrivateCoinError::Prover)?;
-                pre_challenge_columns.columns[column_index] = Some(mask_relation_column(
-                    variant,
-                    descriptor,
-                    trace_masks.get(&column_ordinal).copied(),
-                    source,
-                    coins,
-                    maximum_candidate_draws_per_output,
-                )?);
-            }
             Some(ProofTreeRole::AuxiliaryOracle) => {
-                if pre_challenge_columns.columns[column_index].is_some()
-                    || provided_non_integer_lift_auxiliary_columns.contains_key(&column_ordinal)
+                if !integer_lift_auxiliary_columns.contains(&column_ordinal)
+                    || pre_challenge_columns.columns[column_index].is_some()
                 {
                     return Err(CommonProofPrivateCoinError::Prover(
                         CommonProofProverError::InvalidColumn,
@@ -837,20 +813,13 @@ where
                 }
             }
             _ => {
-                if pre_challenge_columns.columns[column_index].is_none()
-                    || provided_non_integer_lift_auxiliary_columns.contains_key(&column_ordinal)
-                {
+                if pre_challenge_columns.columns[column_index].is_none() {
                     return Err(CommonProofPrivateCoinError::Prover(
                         CommonProofProverError::InvalidColumn,
                     ));
                 }
             }
         }
-    }
-    if !provided_non_integer_lift_auxiliary_columns.is_empty() {
-        return Err(CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::InvalidColumn,
-        ));
     }
 
     let trace_domain =
@@ -870,6 +839,21 @@ where
             application_challenges,
         )
         .map_err(CommonProofPrivateCoinError::Prover)?;
+
+        for permutation in &batch.ordered_negacyclic_automorphism_permutations {
+            synthesize_negacyclic_automorphism_permutation(
+                variant,
+                permutation,
+                theta,
+                &tree_roles,
+                &trace_masks,
+                &mut pre_challenge_columns.columns,
+                &mut trace_rows_by_column,
+                trace_domain,
+                coins,
+                maximum_candidate_draws_per_output,
+            )?;
+        }
 
         for binding in &batch.ordered_reversed_column_bindings {
             ensure_base_trace_rows(
@@ -1039,6 +1023,14 @@ fn integer_lift_derived_columns(
     let mut source_by_reversed_column = BTreeMap::new();
     let mut auxiliary_columns = BTreeSet::new();
     for batch in variant.ordered_integer_lift_batches() {
+        for permutation in &batch.ordered_negacyclic_automorphism_permutations {
+            auxiliary_columns.extend([
+                permutation.source_product_before_column_ordinal,
+                permutation.source_low_product_column_ordinal,
+                permutation.target_product_before_column_ordinal,
+                permutation.target_low_product_column_ordinal,
+            ]);
+        }
         for binding in &batch.ordered_reversed_column_bindings {
             match reversed_columns_by_source.insert(
                 binding.source_column_ordinal,
@@ -1246,6 +1238,144 @@ fn integer_lift_theta(
         return Err(CommonProofProverError::InvalidColumn);
     }
     ProofBaseFieldElement::from_canonical(value).map_err(CommonProofProverError::from)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn synthesize_negacyclic_automorphism_permutation<Coins>(
+    variant: &RelationPlanVariant,
+    descriptor: &RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor,
+    theta: ProofBaseFieldElement,
+    tree_roles: &BTreeMap<u32, ProofTreeRole>,
+    trace_masks: &BTreeMap<u32, RelationMaskDescriptor>,
+    columns: &mut [Option<CommonProofSourcePolynomial>],
+    trace_rows_by_column: &mut BTreeMap<u32, Vec<ProofBaseFieldElement>>,
+    trace_domain: ProofEvaluationDomain,
+    coins: &mut Coins,
+    maximum_candidate_draws_per_output: u32,
+) -> Result<(), CommonProofPrivateCoinError<Coins::Error>>
+where
+    Coins: CommonProofPrivateCoinSource,
+{
+    let input_columns = [
+        descriptor.source_low_column_ordinal,
+        descriptor.source_high_column_ordinal,
+        descriptor.target_low_column_ordinal,
+        descriptor.target_high_column_ordinal,
+        descriptor.mapped_low_position_column_ordinal,
+        descriptor.low_negation_bit_column_ordinal,
+        descriptor.mapped_high_position_column_ordinal,
+        descriptor.high_negation_bit_column_ordinal,
+        descriptor.target_low_position_column_ordinal,
+        descriptor.target_high_position_column_ordinal,
+    ];
+    for column_ordinal in input_columns {
+        ensure_base_trace_rows(columns, trace_rows_by_column, column_ordinal, trace_domain)
+            .map_err(CommonProofPrivateCoinError::Prover)?;
+    }
+    let rows = |column_ordinal| {
+        trace_rows_by_column.get(&column_ordinal).ok_or_else(|| {
+            CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
+        })
+    };
+    let source_low_rows = rows(descriptor.source_low_column_ordinal)?;
+    let source_high_rows = rows(descriptor.source_high_column_ordinal)?;
+    let target_low_rows = rows(descriptor.target_low_column_ordinal)?;
+    let target_high_rows = rows(descriptor.target_high_column_ordinal)?;
+    let mapped_low_position_rows = rows(descriptor.mapped_low_position_column_ordinal)?;
+    let low_negation_bit_rows = rows(descriptor.low_negation_bit_column_ordinal)?;
+    let mapped_high_position_rows = rows(descriptor.mapped_high_position_column_ordinal)?;
+    let high_negation_bit_rows = rows(descriptor.high_negation_bit_column_ordinal)?;
+    let target_low_position_rows = rows(descriptor.target_low_position_column_ordinal)?;
+    let target_high_position_rows = rows(descriptor.target_high_position_column_ordinal)?;
+    let row_count = trace_domain.size();
+    if input_columns.iter().any(|column_ordinal| {
+        trace_rows_by_column
+            .get(column_ordinal)
+            .is_none_or(|column_rows| column_rows.len() != row_count)
+    }) {
+        return Err(CommonProofPrivateCoinError::Prover(
+            CommonProofProverError::InvalidColumn,
+        ));
+    }
+    let one = ProofBaseFieldElement::ONE;
+    let two = one.add(one);
+    let three = two.add(one);
+    let encoded_source = |position: ProofBaseFieldElement,
+                          negation_bit: ProofBaseFieldElement,
+                          value: ProofBaseFieldElement| {
+        position
+            .multiply(three)
+            .add(one)
+            .add(value.subtract(negation_bit.multiply(two).multiply(value)))
+    };
+    let encoded_target = |position: ProofBaseFieldElement, value: ProofBaseFieldElement| {
+        position.multiply(three).add(one).add(value)
+    };
+    let mut source_before_rows = Vec::with_capacity(row_count);
+    let mut source_low_product_rows = Vec::with_capacity(row_count);
+    let mut target_before_rows = Vec::with_capacity(row_count);
+    let mut target_low_product_rows = Vec::with_capacity(row_count);
+    let mut source_before = one;
+    let mut target_before = one;
+    for row_ordinal in 0..row_count {
+        source_before_rows.push(source_before);
+        target_before_rows.push(target_before);
+        let source_low_factor = theta.subtract(encoded_source(
+            mapped_low_position_rows[row_ordinal],
+            low_negation_bit_rows[row_ordinal],
+            source_low_rows[row_ordinal],
+        ));
+        let source_low_product = source_before.multiply(source_low_factor);
+        source_low_product_rows.push(source_low_product);
+        let target_low_factor = theta.subtract(encoded_target(
+            target_low_position_rows[row_ordinal],
+            target_low_rows[row_ordinal],
+        ));
+        let target_low_product = target_before.multiply(target_low_factor);
+        target_low_product_rows.push(target_low_product);
+        let source_high_factor = theta.subtract(encoded_source(
+            mapped_high_position_rows[row_ordinal],
+            high_negation_bit_rows[row_ordinal],
+            source_high_rows[row_ordinal],
+        ));
+        let target_high_factor = theta.subtract(encoded_target(
+            target_high_position_rows[row_ordinal],
+            target_high_rows[row_ordinal],
+        ));
+        source_before = source_low_product.multiply(source_high_factor);
+        target_before = target_low_product.multiply(target_high_factor);
+    }
+    for (column_ordinal, synthesized_rows) in [
+        (
+            descriptor.source_product_before_column_ordinal,
+            source_before_rows,
+        ),
+        (
+            descriptor.source_low_product_column_ordinal,
+            source_low_product_rows,
+        ),
+        (
+            descriptor.target_product_before_column_ordinal,
+            target_before_rows,
+        ),
+        (
+            descriptor.target_low_product_column_ordinal,
+            target_low_product_rows,
+        ),
+    ] {
+        insert_auxiliary_trace_rows(
+            variant,
+            tree_roles,
+            trace_masks,
+            columns,
+            column_ordinal,
+            synthesized_rows,
+            trace_domain,
+            coins,
+            maximum_candidate_draws_per_output,
+        )?;
+    }
+    Ok(())
 }
 
 fn prefix_evaluation_rows(
@@ -4608,8 +4738,9 @@ pub(crate) trait CommonProofBoundOpeningProvider {
 }
 
 /// Complete application-owned inputs for one production common-proof
-/// attempt.  Only genuine source columns are accepted: integer-lift reversed
-/// and auxiliary columns are always synthesized by the common prover.
+/// attempt.  Only genuine pre-challenge source columns are accepted:
+/// integer-lift reversed and auxiliary columns are always synthesized by the
+/// common prover.
 pub(crate) struct CommonProofGenerationInput<'input> {
     pub(crate) protocol_version: u16,
     pub(crate) suite_identifier: [u8; HASH_BYTE_LENGTH],
@@ -4620,8 +4751,6 @@ pub(crate) struct CommonProofGenerationInput<'input> {
     pub(crate) top_count: Option<u16>,
     pub(crate) relation_trees: Vec<RelationProofTreeInput>,
     pub(crate) provided_pre_challenge_columns: BTreeMap<u32, CommonProofSourcePolynomial>,
-    pub(crate) provided_non_integer_lift_auxiliary_columns:
-        BTreeMap<u32, CommonProofSourcePolynomial>,
     pub(crate) maximum_external_memory_chunk_byte_length: u32,
     pub(crate) maximum_prefetched_query_byte_length: u64,
 }
@@ -5214,7 +5343,6 @@ where
         top_count,
         relation_trees,
         provided_pre_challenge_columns,
-        provided_non_integer_lift_auxiliary_columns,
         maximum_external_memory_chunk_byte_length,
         maximum_prefetched_query_byte_length,
     } = input;
@@ -5436,7 +5564,6 @@ where
             variant,
             relation_context,
             pre_challenge_columns,
-            provided_non_integer_lift_auxiliary_columns,
             &application_challenges,
             coins,
             relation_context.maximum_fiat_shamir_candidate_draws_per_output,

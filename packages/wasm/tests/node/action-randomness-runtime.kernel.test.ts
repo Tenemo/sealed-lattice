@@ -117,7 +117,6 @@ describe('Action-randomness real-WASM runtime in Node', () => {
                 actionContextHash: vector.actionContextHash,
                 canonicalRosterBytes: vector.canonicalRosterBytes,
                 ceremonyContextHash: vector.ceremonyContextHash,
-                maximumRecoveryTransitionsPerStateKey: 2,
                 suiteIdentifier: vector.suiteIdentifier,
             },
             kernel,
@@ -130,7 +129,7 @@ describe('Action-randomness real-WASM runtime in Node', () => {
         const verifyReservation = (
             capabilityKind:
                 | typeof stateCapabilityKinds.targetRelease
-                | typeof stateCapabilityKinds.setupDealerSetBranch,
+                | typeof stateCapabilityKinds.setupActionRandomnessRoot,
         ): VerifiedStateReservation => {
             const certifiedIntent =
                 capabilityKind === stateCapabilityKinds.targetRelease
@@ -161,7 +160,7 @@ describe('Action-randomness real-WASM runtime in Node', () => {
             stateCapabilityKinds.targetRelease,
         );
         const dealerSetReservation = verifyReservation(
-            stateCapabilityKinds.setupDealerSetBranch,
+            stateCapabilityKinds.setupActionRandomnessRoot,
         );
         const entropy = createDeterministicCryptoProvider([
             {

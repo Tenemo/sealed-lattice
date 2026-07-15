@@ -173,7 +173,6 @@ describe('Local storage-root real-WASM browser worker', () => {
             },
         });
         const created = await opened.custody.createAndSealActionRandomness({
-            creationRecoveryEpoch: 0n,
             recordVersion: 0n,
         });
         const stateVector = createStateVerifierTestVector({
@@ -186,7 +185,6 @@ describe('Local storage-root real-WASM browser worker', () => {
         const stateSession =
             await opened.custody.openActionStateVerifierSession({
                 canonicalRosterBytes: stateVector.canonicalRosterBytes,
-                maximumRecoveryTransitionsPerStateKey: 4,
             });
         if (!stateSession.isValid) {
             throw new Error('Worker state-verifier session did not open.');
@@ -227,7 +225,6 @@ describe('Local storage-root real-WASM browser worker', () => {
         const reopened = await opened.custody.openSealedActionRandomness({
             actionRandomnessCommitment: created.actionRandomnessCommitment,
             canonicalEnvelope: created.canonicalEnvelope,
-            creationRecoveryEpoch: 0n,
             recordVersion: 0n,
         });
         expect(reopened.actionRandomnessCommitment).toEqual(
@@ -235,7 +232,7 @@ describe('Local storage-root real-WASM browser worker', () => {
         );
         const dealerReservationVector = stateVector.reservationOnly.find(
             ({ capabilityKind }) =>
-                capabilityKind === stateCapabilityKinds.setupDealerSetBranch,
+                capabilityKind === stateCapabilityKinds.setupActionRandomnessRoot,
         );
         if (dealerReservationVector === undefined) {
             throw new Error('Missing dealer-set reservation vector.');
@@ -248,7 +245,7 @@ describe('Local storage-root real-WASM browser worker', () => {
                 canonicalStateCertificate:
                     dealerReservationVector.certifiedIntent
                         .canonicalStateCertificate,
-                capabilityKind: stateCapabilityKinds.setupDealerSetBranch,
+                capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
                 expectedAuthorizationHash: stateVector.authorizationHash,
                 stateVerifierSessionIdentifier: stateSession.value,
                 subjectParticipantIdentity:
@@ -320,13 +317,10 @@ describe('Local storage-root real-WASM browser worker', () => {
             kernel: loadFreshTranscriptCoreKernel(),
         });
         await workerKernel.createAndStageDeviceWrappingState({ binding });
-        await workerKernel.commitStagedActionStorageRoot({
-            mutationIdentifier: createBytes(32, 113),
-        });
+        await workerKernel.commitStagedActionStorageRoot();
 
         const expectedContext = {
             actionRandomnessCommitment: createBytes(64, 127),
-            creationRecoveryEpoch: 0n,
             identifierInput: {
                 recordType: 'subjectState',
                 stateKey: createBytes(64, 131),
@@ -360,7 +354,7 @@ describe('Local storage-root real-WASM browser worker', () => {
         await workerKernel.destroyActiveActionStorageRoot();
     });
 
-    it('completes the ordered crash, recovery, and binding-refusal lifecycle', async () => {
+    it('reopens local state after a crash and refuses a wrong commitment', async () => {
         {
             const primaryDatabaseName = databaseName();
             const first = await openWorker({
@@ -399,79 +393,5 @@ describe('Local storage-root real-WASM browser worker', () => {
             await closeWorker(reopened);
         }
 
-        {
-            const recoveryDatabaseName = databaseName();
-            const opened = await openWorker({
-                databaseName: recoveryDatabaseName,
-            });
-            const initialSnapshot = await opened.custody.initialize();
-            const untrustedExpectedCommitment = {
-                storageRootCommitment: initialSnapshot.storageRootCommitment,
-            };
-            const challenge = await opened.custody.beginRecoveryExport({
-                expectedSnapshot: initialSnapshot,
-                untrustedExpectedCommitment,
-            });
-            const confirmation = await opened.custody.confirmRecoveryExport({
-                confirmedChecksum: challenge.recoveryChecksum,
-                preparationIdentifier: challenge.preparationIdentifier,
-            });
-            expect(confirmation.canonicalRecoveryText).toMatch(
-                /^[A-Z2-7]{708}$/u,
-            );
-
-            await opened.custody.delete(confirmation.snapshot);
-            expect(await opened.custody.currentSnapshot()).toBeUndefined();
-            const recoveredSnapshot = await opened.custody.recover({
-                caseInsensitiveRecoveryText:
-                    confirmation.canonicalRecoveryText.toLowerCase(),
-                untrustedExpectedCommitment,
-            });
-            expect(recoveredSnapshot.storageRootCommitment).toEqual(
-                initialSnapshot.storageRootCommitment,
-            );
-            await closeWorker(opened);
-        }
-
-        {
-            const sourceDatabaseName = databaseName();
-            const source = await openWorker({
-                databaseName: sourceDatabaseName,
-            });
-            const initialSnapshot = await source.custody.initialize();
-            const challenge = await source.custody.beginRecoveryExport({
-                expectedSnapshot: initialSnapshot,
-                untrustedExpectedCommitment: {
-                    storageRootCommitment:
-                        initialSnapshot.storageRootCommitment,
-                },
-            });
-            const confirmation = await source.custody.confirmRecoveryExport({
-                confirmedChecksum: challenge.recoveryChecksum,
-                preparationIdentifier: challenge.preparationIdentifier,
-            });
-            await closeWorker(source);
-
-            const wrongBindingWorker = await openWorker({
-                binding: {
-                    ...binding,
-                    participantId: createBytes(64, 44),
-                },
-                databaseName: databaseName(),
-                knownStorageRootCommitment:
-                    initialSnapshot.storageRootCommitment,
-            });
-            await expect(
-                wrongBindingWorker.custody.recover({
-                    caseInsensitiveRecoveryText:
-                        confirmation.canonicalRecoveryText,
-                    untrustedExpectedCommitment: {
-                        storageRootCommitment:
-                            initialSnapshot.storageRootCommitment,
-                    },
-                }),
-            ).rejects.toMatchObject({ code: 'CommitmentMismatch' });
-            await closeWorker(wrongBindingWorker);
-        }
     });
 });

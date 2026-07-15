@@ -13,8 +13,6 @@ export const browserActionStorageCustodyErrorCodes = Object.freeze([
     'InvalidState',
     'OwnedWorkerFailure',
     'RecordAuthenticationFailed',
-    'RecoveryAlreadyExported',
-    'RecoveryConfirmationFailed',
     'StorageFailure',
     'Unavailable',
 ] as const);
@@ -57,19 +55,8 @@ export type WorkerPreparedDeviceWrappingState = Readonly<{
     wrappedStorageRoot: Uint8Array;
 }>;
 
-export type WorkerPreparedRecoveryState = WorkerPreparedDeviceWrappingState &
-    Readonly<{
-        canonicalRecoveryText: string;
-    }>;
-
-export type LocalStorageRecoveryExportMaterial = Readonly<{
-    canonicalRecoveryText: string;
-    recoveryChecksum: Uint8Array;
-}>;
-
 export type BrowserActionStateVerifierSessionInput = Readonly<{
     canonicalRosterBytes: Uint8Array;
-    maximumRecoveryTransitionsPerStateKey: number;
 }>;
 
 export type BrowserActionStateReservationVerificationInput = Readonly<{
@@ -79,7 +66,6 @@ export type BrowserActionStateReservationVerificationInput = Readonly<{
     expectedAuthorizationHash: Uint8Array;
     stateVerifierSessionIdentifier: string;
     subjectParticipantIdentity: Uint8Array;
-    verifiedPredecessorRecoveryIdentifier?: string;
 }>;
 
 export type BrowserActionRandomnessReservationVerificationInput = Readonly<{
@@ -87,20 +73,9 @@ export type BrowserActionRandomnessReservationVerificationInput = Readonly<{
     canonicalReservationIntentCarrier: Uint8Array;
     canonicalStateCertificate: Uint8Array;
     stateVerifierSessionIdentifier: string;
-    verifiedPredecessorRecoveryIdentifier?: string;
-}>;
-
-export type BrowserActionStateRecoveryVerificationInput = Readonly<{
-    canonicalRecoveryTransitionCarrier: Uint8Array;
-    canonicalStateCertificate: Uint8Array;
-    capabilityKind: StateCapabilityKind;
-    stateVerifierSessionIdentifier: string;
-    subjectParticipantIdentity: Uint8Array;
-    verifiedPredecessorRecoveryIdentifier?: string;
 }>;
 
 export type BrowserActionRandomnessRecordContext = Readonly<{
-    creationRecoveryEpoch: bigint;
     predecessorRecordHash?: Uint8Array;
     recordVersion: bigint;
 }>;
@@ -192,7 +167,6 @@ export type BrowserLocalRecordOpenableIdentifierInput = Exclude<
 
 export type BrowserLocalRecordExpectedContext = Readonly<{
     actionRandomnessCommitment: Uint8Array;
-    creationRecoveryEpoch: bigint;
     identifierInput: BrowserLocalRecordOpenableIdentifierInput;
     predecessorRecordHash?: Uint8Array;
     recordVersion: bigint;
@@ -218,23 +192,9 @@ export type BrowserActionStorageWorkerKernel = Readonly<{
         untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
         state: WorkerPreparedDeviceWrappingState;
     }): Promise<void>;
-    stageRecoveryValueImportAndDeviceWrapping(input: {
-        binding: BrowserActionStorageRootBinding;
-        caseInsensitiveRecoveryText: string;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-    }): Promise<WorkerPreparedRecoveryState>;
-    commitStagedActionStorageRoot(input: {
-        mutationIdentifier: Uint8Array;
-    }): Promise<void>;
+    commitStagedActionStorageRoot(): Promise<void>;
     discardStagedActionStorageRoot(): Promise<void>;
     destroyActiveActionStorageRoot(): Promise<void>;
-    prepareRecoveryExport(input: {
-        activeMutationIdentifier: Uint8Array;
-    }): Promise<LocalStorageRecoveryExportMaterial>;
-    confirmRecoveryChecksum(input: {
-        canonicalRecoveryText: string;
-        confirmedChecksum: Uint8Array;
-    }): Promise<void>;
     deriveActiveLocalRecordIdentifier(
         input: BrowserLocalRecordIdentifierInput,
     ): Promise<Uint8Array>;
@@ -253,9 +213,6 @@ export type BrowserActionStorageWorkerKernel = Readonly<{
     ): Promise<VerificationResult<string>>;
     verifyActionRandomnessReservation(
         input: BrowserActionRandomnessReservationVerificationInput,
-    ): Promise<VerificationResult<string>>;
-    verifyActionStateRecovery(
-        input: BrowserActionStateRecoveryVerificationInput,
     ): Promise<VerificationResult<string>>;
     releaseActionStateObject(identifier: string): Promise<void>;
     closeActionStateVerifierSession(identifier: string): Promise<void>;

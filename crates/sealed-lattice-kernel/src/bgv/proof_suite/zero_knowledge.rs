@@ -8,13 +8,28 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::relation_plan::{
-    ProofPrivacyMode, RelationColumnOrigin, RelationMaskKind,
-    RelationMaskTargetClass, RelationOpeningSourceClass,
+    ProofPrivacyMode, RelationColumnOrigin, RelationMaskKind, RelationMaskTargetClass,
+    RelationOpeningSourceClass,
 };
 use super::{RelationPlanCheckContext, RelationPlanError, RelationPlanVariant};
 
-/// Checks the Vandermonde image dimensions required by the common masking
+/// Checks the evaluation-image dimensions required by the common masking
 /// grammar. All counts come from the checked plan and field schedule.
+///
+/// For a base-field trace mask, every verifier-visible extension-field point
+/// contributes the degree of its minimal polynomial over the base field. The
+/// DEEP sampler rejects points outside the full-degree extension and rejects
+/// intersecting Frobenius orbits, so these minimal polynomials are distinct
+/// irreducibles. Query openings contribute distinct base-field linear factors
+/// after duplicate coordinates are identified. The Chinese remainder theorem
+/// therefore makes evaluation of a sufficiently long mask polynomial onto the
+/// complete consistent opening view surjective. Repeated coordinates only copy
+/// an already sampled value and cannot increase the required dimension.
+///
+/// Telescoping and opening-batch masks have extension-field coefficients, so
+/// their corresponding image argument is the ordinary Vandermonde argument
+/// over distinct visible points. The bounds below conservatively count the
+/// maximum number of coordinates before duplicate identification.
 pub(crate) fn validate_zero_knowledge_mask_image(
     variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,
@@ -41,8 +56,8 @@ pub(crate) fn validate_zero_knowledge_mask_image(
         if !matches!(column.origin(), RelationColumnOrigin::Prover) {
             continue;
         }
-        let column_ordinal = u32::try_from(column_ordinal)
-            .map_err(|_| RelationPlanError::CountOverflow)?;
+        let column_ordinal =
+            u32::try_from(column_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
         let mut deep_opening_count = 0_u64;
         let mut required_rotations = BTreeSet::new();
         for claim in variant.ordered_opening_claims().iter().filter(|claim| {
@@ -88,8 +103,7 @@ pub(crate) fn validate_zero_knowledge_mask_image(
     let mut telescoping_mask_count = 0_u32;
     for mask in variant.ordered_masks().iter().filter(|mask| {
         mask.mask_kind() == RelationMaskKind::Telescoping
-            && mask.target_class()
-                == RelationMaskTargetClass::QuotientComponent
+            && mask.target_class() == RelationMaskTargetClass::QuotientComponent
     }) {
         if mask.mask_degree_bound_exclusive() < minimum_telescoping_mask_degree {
             return Err(RelationPlanError::InvalidMaskGrammar);
@@ -113,8 +127,7 @@ pub(crate) fn validate_zero_knowledge_mask_image(
         .next()
         .ok_or(RelationPlanError::InvalidMaskGrammar)?;
     if opening_batch_masks.next().is_some()
-        || opening_batch_mask.mask_degree_bound_exclusive()
-            < minimum_opening_batch_mask_degree
+        || opening_batch_mask.mask_degree_bound_exclusive() < minimum_opening_batch_mask_degree
     {
         return Err(RelationPlanError::InvalidMaskGrammar);
     }
@@ -137,7 +150,9 @@ fn required_trace_mask_coefficient_count(
     let direct_tree_rotation = (false, 0);
     let query_rotation_count = u64::try_from(required_rotations.len())
         .map_err(|_| RelationPlanError::CountOverflow)?
-        .checked_add(u64::from(!required_rotations.contains(&direct_tree_rotation)))
+        .checked_add(u64::from(
+            !required_rotations.contains(&direct_tree_rotation),
+        ))
         .ok_or(RelationPlanError::CountOverflow)?;
     let query_base_coordinate_count = phase_pair_query_coordinate_count
         .checked_mul(query_rotation_count)
@@ -157,26 +172,18 @@ mod tests {
 
     #[test]
     fn one_direct_rotation_counts_each_deep_opening_once() {
-        let required = required_trace_mask_coefficient_count(
-            3,
-            5,
-            14,
-            &rotation_set(&[(false, 0)]),
-        )
-        .expect("mask-image count must fit");
+        let required =
+            required_trace_mask_coefficient_count(3, 5, 14, &rotation_set(&[(false, 0)]))
+                .expect("mask-image count must fit");
 
         assert_eq!(required, 3 * 5 + 14);
     }
 
     #[test]
     fn one_translated_rotation_also_counts_direct_query_openings() {
-        let required = required_trace_mask_coefficient_count(
-            3,
-            5,
-            14,
-            &rotation_set(&[(false, 1)]),
-        )
-        .expect("mask-image count must fit");
+        let required =
+            required_trace_mask_coefficient_count(3, 5, 14, &rotation_set(&[(false, 1)]))
+                .expect("mask-image count must fit");
 
         assert_eq!(required, 3 * 5 + 2 * 14);
     }
@@ -196,14 +203,11 @@ mod tests {
 
         assert_eq!(
             required,
-            deep_point_count * 2 * extension_degree
-                + 2 * phase_pair_query_coordinate_count
+            deep_point_count * 2 * extension_degree + 2 * phase_pair_query_coordinate_count
         );
         assert_ne!(
             required,
-            (deep_point_count * 2 * extension_degree
-                + phase_pair_query_coordinate_count)
-                * 2
+            (deep_point_count * 2 * extension_degree + phase_pair_query_coordinate_count) * 2
         );
     }
 
@@ -225,12 +229,7 @@ mod tests {
     #[test]
     fn mask_image_count_refuses_arithmetic_overflow() {
         assert_eq!(
-            required_trace_mask_coefficient_count(
-                u64::MAX,
-                2,
-                2,
-                &rotation_set(&[(false, 0)]),
-            ),
+            required_trace_mask_coefficient_count(u64::MAX, 2, 2, &rotation_set(&[(false, 0)]),),
             Err(RelationPlanError::CountOverflow)
         );
         assert_eq!(

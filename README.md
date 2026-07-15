@@ -26,10 +26,21 @@ internal ballot, aggregation, evaluation, and target-decryption components.
 These components are not yet a complete participant workflow or a supported-phone
 profile. The public package does not provide accepted board finality, state
 authorization, or target decryption. Proof-system and end-to-end security work
-also remains open. Production setup-mailbox sealing refuses until signing-key
-custody and reset-safe action randomness are composed behind one closed
-browser-local operation. See [SECURITY.md](SECURITY.md) for the authoritative
-limitations and evidence boundaries.
+also remains open. The dedicated custody worker now co-locates reset-safe
+setup-mailbox sealing, signing-key use, and the structured-commitment hiding
+openings: the provisional rank-one layout uses three independently sampled
+centered-ternary columns retained behind opaque capabilities and consumed only
+by the closed commitment operation. VSS coefficient messages, later
+proof-witness consumption,
+proof-backed private setup delivery, and the complete participant workflow
+remain uncomposed. The protocol package includes a conservative namespace
+freshness state machine: only an externally verified witness quorum can activate
+a namespace, recovery accepts only the exact certified state, and failure to
+recover that state irreversibly retires the action identity. The kernel-backed
+checkpoint and vote verifier, independent witness stores, and witness transport
+are not yet composed, so this is not a deployed durable freshness authority.
+See [SECURITY.md](SECURITY.md) for the authoritative limitations and evidence
+boundaries.
 
 ## Installation
 

@@ -167,7 +167,6 @@ pub(crate) fn build_linkage_public_vectors(
                     None => {
                         let matrix_polynomial = setup_commitment_matrix_coefficients_cached(
                             &linkage.public_matrix_seed_hash,
-                            commitment.source_rns_limb_index,
                             commitment_field,
                             row_index,
                             randomness_column,
@@ -259,7 +258,6 @@ pub(crate) fn build_private_vss_public_vectors(
                     None => {
                         let matrix_polynomial = setup_commitment_matrix_coefficients_cached(
                             &statement.public_matrix_seed_hash,
-                            statement.source_rns_limb_index,
                             commitment_field,
                             row_index,
                             randomness_column,

@@ -26,15 +26,69 @@ pub(super) const MAX_TWO_ADIC_ORDER: usize = 1 << 20;
 const PRECOMPUTED_ROOT_ORDER: usize = 65_536;
 
 // A multiplicative evaluation domain: the cyclic subgroup of a given
-// power-of-two order, with its forward/inverse cyclic transforms precomputed.
+// power-of-two order, retaining only the transform directions its caller uses.
 pub(super) struct CyclicDomain<'a, const LIMB_COUNT: usize> {
     pub(super) parameters: &'a ProofFieldParameters<LIMB_COUNT>,
     pub(super) size: usize,
-    // generator^i for i in 0..size (the domain points in transform order).
-    domain_points: Vec<[u64; LIMB_COUNT]>,
-    forward_twiddles: Vec<[u64; LIMB_COUNT]>,
-    inverse_twiddles: Vec<[u64; LIMB_COUNT]>,
-    size_inverse: [u64; LIMB_COUNT],
+    generator: [u64; LIMB_COUNT],
+    forward_twiddles: Option<Vec<[u64; LIMB_COUNT]>>,
+    inverse_twiddles: Option<Vec<[u64; LIMB_COUNT]>>,
+    size_inverse: Option<[u64; LIMB_COUNT]>,
+}
+
+// Domain geometry without transform tables. Verification and FRI folding need
+// subgroup points but never evaluate or interpolate whole polynomials, so they
+// should not allocate domain-sized forward and inverse twiddle tables.
+pub(super) struct CyclicDomainGeometry<'a, const LIMB_COUNT: usize> {
+    parameters: &'a ProofFieldParameters<LIMB_COUNT>,
+    pub(super) size: usize,
+    generator: [u64; LIMB_COUNT],
+    generator_inverse: [u64; LIMB_COUNT],
+}
+
+impl<'a, const LIMB_COUNT: usize> CyclicDomainGeometry<'a, LIMB_COUNT> {
+    pub(super) fn new(
+        parameters: &'a ProofFieldParameters<LIMB_COUNT>,
+        size: usize,
+    ) -> CanonicalResult<Self> {
+        validate_domain_size(size)?;
+        let generator = primitive_root_of_order(parameters, size);
+        // A subgroup generator satisfies generator^size = 1, so its inverse is
+        // generator^(size - 1). The public exponent is at most 20 bits; using
+        // the general Fermat inversion here would repeat hundreds of needless
+        // field squarings for every FRI layer.
+        let generator_inverse = power_by_domain_index(parameters, &generator, size - 1);
+        Ok(Self {
+            parameters,
+            size,
+            generator,
+            generator_inverse,
+        })
+    }
+
+    pub(super) fn point(&self, index: usize) -> [u64; LIMB_COUNT] {
+        assert!(
+            index < self.size,
+            "cyclic domain point index must be in range"
+        );
+        power_by_domain_index(self.parameters, &self.generator, index)
+    }
+
+    pub(super) fn inverse_point(&self, index: usize) -> [u64; LIMB_COUNT] {
+        assert!(
+            index < self.size,
+            "cyclic domain point index must be in range"
+        );
+        power_by_domain_index(self.parameters, &self.generator_inverse, index)
+    }
+
+    pub(super) fn generator(&self) -> &[u64; LIMB_COUNT] {
+        &self.generator
+    }
+
+    pub(super) fn generator_inverse(&self) -> &[u64; LIMB_COUNT] {
+        &self.generator_inverse
+    }
 }
 
 impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
@@ -42,35 +96,53 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
         parameters: &'a ProofFieldParameters<LIMB_COUNT>,
         size: usize,
     ) -> CanonicalResult<Self> {
-        if !size.is_power_of_two() || !(1..=MAX_TWO_ADIC_ORDER).contains(&size) {
-            return Err(invalid_domain(
-                "cyclic domain size must be a power of two within the two-adic order",
-            ));
-        }
-        let generator = primitive_root_of_order(parameters, size);
-        let generator_inverse = parameters.inverse(&generator);
-        let mut domain_points = Vec::with_capacity(size);
-        let mut forward_twiddles = Vec::with_capacity(size.max(1) / 2);
-        let mut inverse_twiddles = Vec::with_capacity(size.max(1) / 2);
-        let mut running = parameters.one();
-        for _ in 0..size {
-            domain_points.push(running);
-            running = parameters.multiply(&running, &generator);
-        }
+        Self::with_transform_directions(parameters, size, true, true)
+    }
+
+    pub(super) fn for_evaluation(
+        parameters: &'a ProofFieldParameters<LIMB_COUNT>,
+        size: usize,
+    ) -> CanonicalResult<Self> {
+        Self::with_transform_directions(parameters, size, true, false)
+    }
+
+    pub(super) fn for_interpolation(
+        parameters: &'a ProofFieldParameters<LIMB_COUNT>,
+        size: usize,
+    ) -> CanonicalResult<Self> {
+        Self::with_transform_directions(parameters, size, false, true)
+    }
+
+    fn with_transform_directions(
+        parameters: &'a ProofFieldParameters<LIMB_COUNT>,
+        size: usize,
+        include_forward: bool,
+        include_inverse: bool,
+    ) -> CanonicalResult<Self> {
+        let geometry = CyclicDomainGeometry::new(parameters, size)?;
+        let generator = *geometry.generator();
+        let generator_inverse = *geometry.generator_inverse();
+        let mut forward_twiddles = include_forward.then(|| Vec::with_capacity(size.max(1) / 2));
+        let mut inverse_twiddles = include_inverse.then(|| Vec::with_capacity(size.max(1) / 2));
         let mut forward_running = parameters.one();
         let mut inverse_running = parameters.one();
         for _ in 0..size / 2 {
-            forward_twiddles.push(forward_running);
-            inverse_twiddles.push(inverse_running);
-            forward_running = parameters.multiply(&forward_running, &generator);
-            inverse_running = parameters.multiply(&inverse_running, &generator_inverse);
+            if let Some(twiddles) = &mut forward_twiddles {
+                twiddles.push(forward_running);
+                forward_running = parameters.multiply(&forward_running, &generator);
+            }
+            if let Some(twiddles) = &mut inverse_twiddles {
+                twiddles.push(inverse_running);
+                inverse_running = parameters.multiply(&inverse_running, &generator_inverse);
+            }
         }
-        let size_inverse = parameters.inverse(&parameters.unsigned_word_to_element(size as u64));
+        let size_inverse = include_inverse
+            .then(|| parameters.inverse(&parameters.unsigned_word_to_element(size as u64)));
 
         Ok(Self {
             parameters,
             size,
-            domain_points,
+            generator,
             forward_twiddles,
             inverse_twiddles,
             size_inverse,
@@ -78,7 +150,11 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
     }
 
     pub(super) fn point(&self, index: usize) -> [u64; LIMB_COUNT] {
-        self.domain_points[index]
+        assert!(
+            index < self.size,
+            "cyclic domain point index must be in range"
+        );
+        power_by_domain_index(self.parameters, &self.generator, index)
     }
 
     // Interpolate the polynomial whose values on this subgroup are `values`,
@@ -87,13 +163,17 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
     pub(super) fn interpolate(&self, values: &[[u64; LIMB_COUNT]]) -> Vec<[u64; LIMB_COUNT]> {
         debug_assert_eq!(values.len(), self.size);
         let mut coefficients = values.to_vec();
-        radix_two_cyclic_transform_in_place(
-            self.parameters,
-            &mut coefficients,
-            &self.inverse_twiddles,
-        );
+        let inverse_twiddles = self
+            .inverse_twiddles
+            .as_deref()
+            .expect("cyclic domain was not constructed for interpolation");
+        radix_two_cyclic_transform_in_place(self.parameters, &mut coefficients, inverse_twiddles);
+        let size_inverse = self
+            .size_inverse
+            .as_ref()
+            .expect("an interpolation domain carries its size inverse");
         for coefficient in &mut coefficients {
-            *coefficient = self.parameters.multiply(coefficient, &self.size_inverse);
+            *coefficient = self.parameters.multiply(coefficient, size_inverse);
         }
         coefficients
     }
@@ -104,8 +184,20 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
         debug_assert!(coefficients.len() <= self.size);
         let mut values = vec![self.parameters.zero(); self.size];
         values[..coefficients.len()].copy_from_slice(coefficients);
-        radix_two_cyclic_transform_in_place(self.parameters, &mut values, &self.forward_twiddles);
+        self.evaluate_in_place(&mut values);
         values
+    }
+
+    // Evaluate one full, zero-padded coefficient buffer in place. Hot prover
+    // paths reuse this storage across columns rather than allocating and
+    // copying another domain-sized vector for every low-degree extension.
+    pub(super) fn evaluate_in_place(&self, values: &mut [[u64; LIMB_COUNT]]) {
+        debug_assert_eq!(values.len(), self.size);
+        let forward_twiddles = self
+            .forward_twiddles
+            .as_deref()
+            .expect("cyclic domain was not constructed for evaluation");
+        radix_two_cyclic_transform_in_place(self.parameters, values, forward_twiddles);
     }
 }
 
@@ -156,15 +248,48 @@ pub(super) fn coset_evaluate_coefficients<const LIMB_COUNT: usize>(
     coset_offset: &[u64; LIMB_COUNT],
     coefficients: &[[u64; LIMB_COUNT]],
 ) -> Vec<[u64; LIMB_COUNT]> {
-    let parameters = coset_domain.parameters;
+    let mut values = vec![coset_domain.parameters.zero(); coset_domain.size];
+    coset_evaluate_coefficients_into(coset_domain, coset_offset, coefficients, &mut values);
+    values
+}
+
+// Evaluate coefficients into a reusable full-domain buffer. The prefix is
+// overwritten and the unused tail is cleared before the in-place transform,
+// so values left by a longer preceding column cannot affect this evaluation.
+pub(super) fn coset_evaluate_coefficients_into<const LIMB_COUNT: usize>(
+    coset_domain: &CyclicDomain<'_, LIMB_COUNT>,
+    coset_offset: &[u64; LIMB_COUNT],
+    coefficients: &[[u64; LIMB_COUNT]],
+    values: &mut [[u64; LIMB_COUNT]],
+) {
     debug_assert!(coefficients.len() <= coset_domain.size);
-    let mut shifted = vec![parameters.zero(); coset_domain.size];
+    debug_assert_eq!(values.len(), coset_domain.size);
+    values[coefficients.len()..].fill(coset_domain.parameters.zero());
+    let mut offset_power = coset_domain.parameters.one();
+    for (value, coefficient) in values.iter_mut().zip(coefficients) {
+        *value = coset_domain.parameters.multiply(coefficient, &offset_power);
+        offset_power = coset_domain
+            .parameters
+            .multiply(&offset_power, coset_offset);
+    }
+    coset_domain.evaluate_in_place(values);
+}
+
+// Shift one full coefficient buffer onto the coset and evaluate it in place.
+// This is used after the prover has formed a weighted coefficient combination.
+pub(super) fn coset_evaluate_coefficients_in_place<const LIMB_COUNT: usize>(
+    coset_domain: &CyclicDomain<'_, LIMB_COUNT>,
+    coset_offset: &[u64; LIMB_COUNT],
+    coefficients: &mut [[u64; LIMB_COUNT]],
+) {
+    debug_assert_eq!(coefficients.len(), coset_domain.size);
+    let parameters = coset_domain.parameters;
     let mut offset_power = parameters.one();
-    for (index, coefficient) in coefficients.iter().enumerate() {
-        shifted[index] = parameters.multiply(coefficient, &offset_power);
+    for coefficient in coefficients.iter_mut() {
+        *coefficient = parameters.multiply(coefficient, &offset_power);
         offset_power = parameters.multiply(&offset_power, coset_offset);
     }
-    coset_domain.evaluate(&shifted)
+    coset_domain.evaluate_in_place(coefficients);
 }
 
 // A coset offset outside every FRI domain: a primitive root of order
@@ -188,9 +313,7 @@ fn primitive_root_of_order<const LIMB_COUNT: usize>(
         if order == PRECOMPUTED_ROOT_ORDER {
             return root;
         }
-        let mut step_exponent = [0_u64; LIMB_COUNT];
-        step_exponent[0] = (PRECOMPUTED_ROOT_ORDER / order.max(1)) as u64;
-        return parameters.power(&root, &step_exponent);
+        return power_by_domain_index(parameters, &root, PRECOMPUTED_ROOT_ORDER / order.max(1));
     }
     compute_primitive_two_adic_root(parameters, order.trailing_zeros())
 }
@@ -238,6 +361,27 @@ fn invalid_domain(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::MalformedLength, message)
 }
 
+fn validate_domain_size(size: usize) -> CanonicalResult<()> {
+    if !size.is_power_of_two() || !(1..=MAX_TWO_ADIC_ORDER).contains(&size) {
+        return Err(invalid_domain(
+            "cyclic domain size must be a power of two within the two-adic order",
+        ));
+    }
+    Ok(())
+}
+
+// Domain indices are public and at most 20 bits wide. Keep their conversion to
+// the field's little-endian public exponent representation in one place.
+fn power_by_domain_index<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    base: &[u64; LIMB_COUNT],
+    index: usize,
+) -> [u64; LIMB_COUNT] {
+    let mut exponent = [0_u64; LIMB_COUNT];
+    exponent[0] = index as u64;
+    parameters.power(base, &exponent)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::super::proof_field::{
@@ -261,6 +405,57 @@ mod tests {
             .collect()
     }
 
+    fn check_lightweight_geometry<const LIMB_COUNT: usize>(
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ) {
+        for size in [1_usize, 64, 1 << 17] {
+            let geometry = CyclicDomainGeometry::new(parameters, size).expect("domain geometry");
+            let mut indices = vec![0, size / 3, size - 1];
+            indices.sort_unstable();
+            indices.dedup();
+            for index in indices {
+                let mut full_width_exponent = [0_u64; LIMB_COUNT];
+                full_width_exponent[0] = index as u64;
+                assert_eq!(
+                    geometry.point(index),
+                    parameters.power(geometry.generator(), &full_width_exponent),
+                    "short public-index exponentiation must match the established field power at size {size}, index {index}"
+                );
+                assert_eq!(
+                    parameters.multiply(&geometry.point(index), &geometry.inverse_point(index)),
+                    parameters.one(),
+                    "a domain point and its inverse must multiply to one at size {size}, index {index}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lightweight_domain_geometry_matches_full_width_field_power() {
+        check_lightweight_geometry(&eight_limb_group_field_parameters());
+        check_lightweight_geometry(&sixteen_limb_group_field_parameters());
+    }
+
+    fn check_root_tower_across_precomputed_boundary<const LIMB_COUNT: usize>(
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ) {
+        for larger_order in [1_usize << 17, 1 << 18] {
+            let larger_root = primitive_root_of_order(parameters, larger_order);
+            let next_root = primitive_root_of_order(parameters, larger_order / 2);
+            assert_eq!(
+                parameters.multiply(&larger_root, &larger_root),
+                next_root,
+                "squaring the order-{larger_order} root must produce the next FRI layer root"
+            );
+        }
+    }
+
+    #[test]
+    fn computed_roots_continue_the_precomputed_fri_root_tower() {
+        check_root_tower_across_precomputed_boundary(&eight_limb_group_field_parameters());
+        check_root_tower_across_precomputed_boundary(&sixteen_limb_group_field_parameters());
+    }
+
     #[test]
     fn interpolation_inverts_evaluation() {
         let parameters = sixteen_limb_group_field_parameters();
@@ -271,6 +466,25 @@ mod tests {
             let recovered = domain.interpolate(&values);
             assert_eq!(recovered, coefficients, "round trip at size {size}");
         }
+    }
+
+    #[test]
+    fn direction_specific_domains_match_the_full_transform_domain() {
+        let parameters = sixteen_limb_group_field_parameters();
+        let size = 128;
+        let coefficients = deterministic_values(&parameters, size, 0x711d);
+        let full_domain = CyclicDomain::new(&parameters, size).expect("full domain");
+        let evaluation_domain =
+            CyclicDomain::for_evaluation(&parameters, size).expect("evaluation domain");
+        let interpolation_domain =
+            CyclicDomain::for_interpolation(&parameters, size).expect("interpolation domain");
+
+        let expected_values = full_domain.evaluate(&coefficients);
+        assert_eq!(evaluation_domain.evaluate(&coefficients), expected_values);
+        assert_eq!(
+            interpolation_domain.interpolate(&expected_values),
+            coefficients
+        );
     }
 
     #[test]
@@ -285,6 +499,31 @@ mod tests {
             let expected = evaluate_polynomial_at(&parameters, &coefficients, &point);
             assert_eq!(values[index], expected, "point {index}");
         }
+    }
+
+    #[test]
+    fn reusable_coset_buffer_clears_coefficients_from_longer_preceding_columns() {
+        let parameters = sixteen_limb_group_field_parameters();
+        let size = 128;
+        let domain = CyclicDomain::new(&parameters, size).expect("domain");
+        let offset = coset_offset(&parameters);
+        let longer = deterministic_values(&parameters, 97, 0x1111);
+        let shorter = deterministic_values(&parameters, 7, 0x2222);
+        let mut reusable = vec![parameters.zero(); size];
+
+        coset_evaluate_coefficients_into(&domain, &offset, &longer, &mut reusable);
+        coset_evaluate_coefficients_into(&domain, &offset, &shorter, &mut reusable);
+        assert_eq!(
+            reusable,
+            coset_evaluate_coefficients(&domain, &offset, &shorter),
+            "a shorter column must not inherit a transformed tail from prior scratch contents"
+        );
+
+        coset_evaluate_coefficients_into(&domain, &offset, &[], &mut reusable);
+        assert!(
+            reusable.iter().all(|value| *value == parameters.zero()),
+            "an empty coefficient vector must clear the complete reusable buffer"
+        );
     }
 
     #[test]

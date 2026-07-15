@@ -2,8 +2,8 @@ use core::fmt;
 use std::sync::OnceLock;
 
 use super::{
-    DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
-    ROOT_PARAMETERS, RootParameters, SPECIAL_PRIME,
+    DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, ROOT_PARAMETERS,
+    RootParameters, SPECIAL_PRIME,
 };
 
 const DATA_PRIME_BIT_LENGTH: u32 = 47;
@@ -36,8 +36,8 @@ impl std::error::Error for ParameterGenerationError {}
 
 /// Deterministically regenerates the complete supported data basis and the
 /// root certificate consumed by every NTT implementation.
-pub(crate) fn regenerate_supported_data_root_parameters(
-) -> Result<[RootParameters; DATA_PRIME_COUNT], ParameterGenerationError> {
+pub(crate) fn regenerate_supported_data_root_parameters()
+-> Result<[RootParameters; DATA_PRIME_COUNT], ParameterGenerationError> {
     let maximum_candidate = (1_u64 << DATA_PRIME_BIT_LENGTH) - 1;
     let mut multiplier = maximum_candidate
         .checked_sub(1)
@@ -141,14 +141,12 @@ pub(crate) fn verify_data_root_parameters(parameters: RootParameters) -> bool {
 /// Reproduces every algebraic prerequisite that is consumed by the fixed
 /// browser runtime. This checks the stored certificates rather than trusting
 /// a successful NTT round trip.
-pub(crate) fn validate_supported_algebraic_parameters(
-) -> Result<(), ParameterGenerationError> {
+pub(crate) fn validate_supported_algebraic_parameters() -> Result<(), ParameterGenerationError> {
     static VALIDATION: OnceLock<Result<(), ParameterGenerationError>> = OnceLock::new();
     *VALIDATION.get_or_init(validate_supported_algebraic_parameters_uncached)
 }
 
-fn validate_supported_algebraic_parameters_uncached(
-) -> Result<(), ParameterGenerationError> {
+fn validate_supported_algebraic_parameters_uncached() -> Result<(), ParameterGenerationError> {
     let plaintext_parameters = ROOT_PARAMETERS[0];
     if plaintext_parameters.modulus != PLAINTEXT_MODULUS
         || !verify_ntt_root_parameters(plaintext_parameters)
@@ -255,11 +253,7 @@ fn derive_root_parameters(modulus: u64) -> Result<RootParameters, ParameterGener
         cyclic_root,
         inverse_negacyclic_root: modular_power(negacyclic_root, modulus - 2, modulus),
         inverse_cyclic_root: modular_power(cyclic_root, modulus - 2, modulus),
-        inverse_polynomial_degree: modular_power(
-            POLYNOMIAL_DEGREE as u64,
-            modulus - 2,
-            modulus,
-        ),
+        inverse_polynomial_degree: modular_power(POLYNOMIAL_DEGREE as u64, modulus - 2, modulus),
     };
     if !verify_data_root_parameters(parameters) {
         return Err(ParameterGenerationError::InvalidCertificate);
@@ -282,15 +276,7 @@ fn is_prime(candidate: u64) -> bool {
 
     let trailing_zero_count = (candidate - 1).trailing_zeros();
     let odd_component = (candidate - 1) >> trailing_zero_count;
-    for witness in [
-        2_u64,
-        325,
-        9_375,
-        28_178,
-        450_775,
-        9_780_504,
-        1_795_265_022,
-    ] {
+    for witness in [2_u64, 325, 9_375, 28_178, 450_775, 9_780_504, 1_795_265_022] {
         let reduced_witness = witness % candidate;
         if reduced_witness == 0 {
             continue;
@@ -358,14 +344,13 @@ mod tests {
     fn deterministic_generation_reproduces_the_complete_data_basis() {
         let generated = regenerate_supported_data_root_parameters()
             .expect("the supported data basis regenerates");
-        assert_eq!(
-            generated.map(|parameters| parameters.modulus),
-            DATA_PRIMES
-        );
+        assert_eq!(generated.map(|parameters| parameters.modulus), DATA_PRIMES);
         assert_eq!(generated.as_slice(), &ROOT_PARAMETERS[1..=DATA_PRIME_COUNT]);
-        assert!(generated
-            .iter()
-            .all(|parameters| verify_data_root_parameters(*parameters)));
+        assert!(
+            generated
+                .iter()
+                .all(|parameters| verify_data_root_parameters(*parameters))
+        );
     }
 
     #[test]
@@ -422,12 +407,7 @@ mod tests {
 
     #[test]
     fn deterministic_primality_test_rejects_strong_pseudoprimes() {
-        for composite in [
-            341_u64,
-            3_215_031_751,
-            382_512_305_654_641_305,
-            u64::MAX,
-        ] {
+        for composite in [341_u64, 3_215_031_751, 382_512_305_654_641_305, u64::MAX] {
             assert!(!is_prime(composite), "{composite} must be composite");
         }
     }

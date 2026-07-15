@@ -991,7 +991,7 @@ mod tests {
     fn kernel_galois_keygen_material_satisfies_the_limb_group_atom() {
         use crate::bgv::evaluator::engine::DevelopmentBgvKey;
         use crate::bgv::evaluator::key_switch::generate_galois_key;
-        use crate::bgv::parameters::POLYNOMIAL_DEGREE;
+        use crate::bgv::parameters::{POLYNOMIAL_DEGREE, SPECIAL_PRIME};
 
         let parameters = sixteen_limb_group_field_parameters();
         let level = 1;
@@ -1020,11 +1020,20 @@ mod tests {
             }
             rotated
         };
+        let hybrid_gadget_source = rotated_secret
+            .iter()
+            .map(|coefficient| {
+                coefficient
+                    .checked_mul(i64::try_from(SPECIAL_PRIME).expect("special prime fits i64"))
+                    .expect("hybrid gadget source fits i64")
+            })
+            .collect::<Vec<_>>();
 
         for (digit_index, component) in galois_key.components.iter().enumerate() {
             let component_b = component
                 .component_b_coefficients()
                 .expect("generated component b converts from NTT form");
+            let component_b = component_b[..group_primes.len()].to_vec();
             let digit_bytes = (digit_index as u64).to_le_bytes();
             let error = DeterministicSampler::new(
                 KEY_SWITCH_ERROR_DOMAIN,
@@ -1060,7 +1069,7 @@ mod tests {
                 public_sample_by_limb: &public_sample_by_limb,
                 secret_coefficients: key.secret(),
                 error_coefficients: &error,
-                source: DigitAtomSource::DiagonalSignedPolynomial(&rotated_secret),
+                source: DigitAtomSource::DiagonalSignedPolynomial(&hybrid_gadget_source),
             })
             .expect("kernel-generated digit material satisfies the limb-group atom");
             assert!(report.maximum_carry_magnitude <= report.carry_bound);

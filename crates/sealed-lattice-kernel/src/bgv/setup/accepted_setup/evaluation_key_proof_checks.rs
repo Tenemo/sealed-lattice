@@ -420,7 +420,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     };
     let context = SuccinctSetupProofContext {
         setup_context_hash: setup_context_hash(setup_context)?,
-        trustee_identity: bridge_binding.trustee_identity.clone(),
         trustee_roster_position: inputs.trustee_roster_position,
         binding_roots: vec![
             binding.evaluator_key_schedule_root.clone(),

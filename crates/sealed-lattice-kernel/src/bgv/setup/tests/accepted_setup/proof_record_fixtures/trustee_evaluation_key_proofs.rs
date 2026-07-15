@@ -164,16 +164,22 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
         .iter()
         .map(|coefficient| i64::from(*coefficient < 0))
         .collect();
-    // The atom opens one original BDLOP source constant commitment. Its five
-    // ternary randomness columns are the exact opening used to construct the
-    // accepted VSS coefficient commitment at source limb zero.
-    let opening_randomness_by_limb = vec![
+    // The atom opens one original BDLOP source constant commitment. Each
+    // commitment field has the exact independent two-column ternary and
+    // one-column centered-binomial eta-two tape used to construct the
+    // accepted VSS coefficient commitment.
+    let opening_randomness_by_source_limb_and_commitment_limb = vec![
         accepted_vss_randomness_fixture(trustee_roster_position, 0, 0, ring_degree)
             .into_iter()
-            .map(|column| {
-                column
+            .map(|randomness_by_column| {
+                randomness_by_column
                     .into_iter()
-                    .map(|value| i64::try_from(value).expect("ternary randomness fits i64"))
+                    .map(|column| {
+                        column
+                            .into_iter()
+                            .map(|value| i64::try_from(value).expect("bounded randomness fits i64"))
+                            .collect()
+                    })
                     .collect()
             })
             .collect(),
@@ -186,7 +192,7 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
         },
         linkage: SameSecretLinkageWitness {
             negative_indicator_coefficients,
-            opening_randomness_by_limb,
+            opening_randomness_by_source_limb_and_commitment_limb,
         },
     }
 }

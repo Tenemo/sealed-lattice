@@ -16,7 +16,6 @@ import {
     concatenateBytes,
     createCanonicalTestRosterBytes,
     emptyHomogeneousListItem,
-    emptyOptionalItem,
     foundationHash512,
     hashItem,
     participantIdentityItem,
@@ -32,9 +31,7 @@ import {
 const stateReservationObjectType = 0x0051;
 const stateOutputIntentObjectType = 0x0052;
 const stateWitnessVoteObjectType = 0x0053;
-const stateRecoveryTransitionObjectType = 0x0054;
 const targetReleaseCapabilityKind = 3;
-const finalitySignatureCapabilityKind = 2;
 
 type SignedCarrierVector = Readonly<{
     canonicalCarrierBytes: Uint8Array;
@@ -61,9 +58,6 @@ export type StateVerifierTestVector = Readonly<{
     exactOutputBytes: Uint8Array;
     invalidExtraOutputCertificate: Uint8Array;
     output: CertifiedStateIntentTestVector;
-    recoveryFirst: CertifiedStateIntentTestVector;
-    recoveryPreservingOutput: CertifiedStateIntentTestVector;
-    recoverySecond: CertifiedStateIntentTestVector;
     reservation: CertifiedStateIntentTestVector;
     reservationVoteCarriers: readonly Uint8Array[];
     reservationOnly: readonly ReservationOnlyStateIntentTestVector[];
@@ -175,10 +169,8 @@ export const createStateVerifierTestVector = (
         const signedCarrier = (carrierInput: {
             objectType: number;
             payloadBytes: Uint8Array;
-            predecessorTransitionHash?: Uint8Array;
             producerRosterPosition: number;
             producerSequence: bigint;
-            recoveryEpoch: bigint;
             signaturePurpose: string;
         }): SignedCarrierVector => {
             const canonicalEnvelopeBytes = canonicalTuple(
@@ -189,13 +181,6 @@ export const createStateVerifierTestVector = (
                 unsigned16Item(carrierInput.objectType),
                 hashItem(ceremonyContextHash),
                 hashItem(actionContextHash),
-                unsigned64Item(carrierInput.recoveryEpoch),
-                carrierInput.predecessorTransitionHash === undefined
-                    ? emptyOptionalItem(0x06)
-                    : presentOptionalItem(
-                          0x06,
-                          carrierInput.predecessorTransitionHash,
-                      ),
                 presentOptionalItem(
                     0x07,
                     participantIdentities[carrierInput.producerRosterPosition],
@@ -244,7 +229,6 @@ export const createStateVerifierTestVector = (
                         ),
                         producerRosterPosition,
                         producerSequence,
-                        recoveryEpoch: 0n,
                         signaturePurpose: 'state-witness-vote',
                     }).canonicalCarrierBytes,
             );
@@ -267,7 +251,6 @@ export const createStateVerifierTestVector = (
             ),
             producerRosterPosition: 0,
             producerSequence: 0n,
-            recoveryEpoch: 0n,
             signaturePurpose: 'state-reservation-intent',
         });
         const reservation: CertifiedStateIntentTestVector = {
@@ -289,7 +272,6 @@ export const createStateVerifierTestVector = (
                     ),
                     producerRosterPosition,
                     producerSequence: 1n,
-                    recoveryEpoch: 0n,
                     signaturePurpose: 'state-witness-vote',
                 }).canonicalCarrierBytes,
         );
@@ -304,7 +286,6 @@ export const createStateVerifierTestVector = (
             ),
             producerRosterPosition: 0,
             producerSequence: 0n,
-            recoveryEpoch: 0n,
             signaturePurpose: 'state-reservation-intent',
         });
         const conflictingReservation: CertifiedStateIntentTestVector = {
@@ -319,9 +300,6 @@ export const createStateVerifierTestVector = (
         };
         const reservationOnly = [
             stateCapabilityKinds.setupActionRandomnessRoot,
-            stateCapabilityKinds.setupPublicSeedBranch,
-            stateCapabilityKinds.setupDealerSetBranch,
-            stateCapabilityKinds.setupRkgRoundOneBranch,
             stateCapabilityKinds.setupTerminalPackage,
         ].map((capabilityKind): ReservationOnlyStateIntentTestVector => {
             const reservationAuthorizationHash =
@@ -339,7 +317,6 @@ export const createStateVerifierTestVector = (
                 ),
                 producerRosterPosition: 0,
                 producerSequence: 0n,
-                recoveryEpoch: 0n,
                 signaturePurpose: 'state-reservation-intent',
             });
             return {
@@ -380,7 +357,6 @@ export const createStateVerifierTestVector = (
             ),
             producerRosterPosition: 0,
             producerSequence: 0n,
-            recoveryEpoch: 0n,
             signaturePurpose: 'state-output-intent',
         });
         const output: CertifiedStateIntentTestVector = {
@@ -399,74 +375,6 @@ export const createStateVerifierTestVector = (
             true,
         );
 
-        const recoveryPreservingOutputCarrier = signedCarrier({
-            objectType: stateRecoveryTransitionObjectType,
-            payloadBytes: canonicalTuple(
-                0x1614,
-                unsigned16Item(targetReleaseCapabilityKind),
-                presentOptionalItem(0x06, outputCarrier.objectHash),
-            ),
-            producerRosterPosition: 0,
-            producerSequence: 1n,
-            recoveryEpoch: 0n,
-            signaturePurpose: 'state-recovery-transition',
-        });
-        const recoveryPreservingOutput: CertifiedStateIntentTestVector = {
-            canonicalIntentCarrier:
-                recoveryPreservingOutputCarrier.canonicalCarrierBytes,
-            canonicalStateCertificate: certificateFor(
-                recoveryPreservingOutputCarrier.objectHash,
-                3n,
-                [1, 2, 3, 4, 5, 6, 7],
-            ),
-            objectHash: recoveryPreservingOutputCarrier.objectHash,
-        };
-
-        const recoveryFirstCarrier = signedCarrier({
-            objectType: stateRecoveryTransitionObjectType,
-            payloadBytes: canonicalTuple(
-                0x1614,
-                unsigned16Item(finalitySignatureCapabilityKind),
-                emptyOptionalItem(0x06),
-            ),
-            producerRosterPosition: 0,
-            producerSequence: 1n,
-            recoveryEpoch: 0n,
-            signaturePurpose: 'state-recovery-transition',
-        });
-        const recoveryFirst: CertifiedStateIntentTestVector = {
-            canonicalIntentCarrier: recoveryFirstCarrier.canonicalCarrierBytes,
-            canonicalStateCertificate: certificateFor(
-                recoveryFirstCarrier.objectHash,
-                3n,
-                [1, 2, 3, 4, 5, 6, 7],
-            ),
-            objectHash: recoveryFirstCarrier.objectHash,
-        };
-
-        const recoverySecondCarrier = signedCarrier({
-            objectType: stateRecoveryTransitionObjectType,
-            payloadBytes: canonicalTuple(
-                0x1614,
-                unsigned16Item(finalitySignatureCapabilityKind),
-                emptyOptionalItem(0x06),
-            ),
-            predecessorTransitionHash: recoveryFirstCarrier.objectHash,
-            producerRosterPosition: 0,
-            producerSequence: 2n,
-            recoveryEpoch: 1n,
-            signaturePurpose: 'state-recovery-transition',
-        });
-        const recoverySecond: CertifiedStateIntentTestVector = {
-            canonicalIntentCarrier: recoverySecondCarrier.canonicalCarrierBytes,
-            canonicalStateCertificate: certificateFor(
-                recoverySecondCarrier.objectHash,
-                6n,
-                [1, 2, 3, 4, 5, 6, 7],
-            ),
-            objectHash: recoverySecondCarrier.objectHash,
-        };
-
         return {
             actionContextHash,
             authorizationHash,
@@ -476,9 +384,6 @@ export const createStateVerifierTestVector = (
             exactOutputBytes,
             invalidExtraOutputCertificate,
             output,
-            recoveryFirst,
-            recoveryPreservingOutput,
-            recoverySecond,
             reservation,
             reservationVoteCarriers,
             reservationOnly,

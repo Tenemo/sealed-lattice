@@ -2,6 +2,85 @@ use super::super::super::proof_field::sixteen_limb_group_field_parameters;
 use super::super::test_support::build_synthetic_key_fixture;
 use super::*;
 
+#[test]
+fn coefficient_space_combination_matches_codeword_space_reference_including_shifted_g() {
+    let parameters = sixteen_limb_group_field_parameters();
+    for trace_size in [16_usize, 64] {
+        let coset_size = FRI_RATE_BLOWUP * 2 * trace_size;
+        let coset_domain = CyclicDomain::new(&parameters, coset_size).expect("coset domain");
+        let offset = coset_offset(&parameters);
+        let coefficient_vectors: Vec<Vec<[u64; 13]>> = [
+            trace_size / 2 + 1,
+            trace_size,
+            2 * trace_size - 3,
+            trace_size - 1,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(vector_index, coefficient_count)| {
+            (0..coefficient_count)
+                .map(|coefficient_index| {
+                    parameters.unsigned_word_to_element(
+                        17 + vector_index as u64 * 101 + coefficient_index as u64 * 13,
+                    )
+                })
+                .collect()
+        })
+        .collect();
+        let weights: Vec<[u64; 13]> = (0..=coefficient_vectors.len())
+            .map(|index| parameters.unsigned_word_to_element(29 + index as u64 * 31))
+            .collect();
+
+        let mut codeword_space_reference = vec![parameters.zero(); coset_size];
+        for (coefficients, weight) in coefficient_vectors.iter().zip(weights.iter()) {
+            let extended = coset_evaluate_coefficients(&coset_domain, &offset, coefficients);
+            for (combined_value, value) in codeword_space_reference.iter_mut().zip(extended) {
+                *combined_value =
+                    parameters.add(combined_value, &parameters.multiply(weight, &value));
+            }
+        }
+        let g_coefficients = &coefficient_vectors[3];
+        let shifted_g_degree = g_degree_adjustment_shift(trace_size);
+        let mut shifted_g = vec![parameters.zero(); shifted_g_degree];
+        shifted_g.extend_from_slice(g_coefficients);
+        let shifted_g_extended = coset_evaluate_coefficients(&coset_domain, &offset, &shifted_g);
+        for (combined_value, value) in codeword_space_reference.iter_mut().zip(shifted_g_extended) {
+            *combined_value = parameters.add(
+                combined_value,
+                &parameters.multiply(&weights[coefficient_vectors.len()], &value),
+            );
+        }
+
+        let mut coefficient_space_combination = vec![parameters.zero(); coset_size];
+        for (coefficients, weight) in coefficient_vectors.iter().zip(weights.iter()) {
+            super::prove::accumulate_weighted_coefficients(
+                &parameters,
+                &mut coefficient_space_combination,
+                weight,
+                coefficients,
+                0,
+            );
+        }
+        super::prove::accumulate_weighted_coefficients(
+            &parameters,
+            &mut coefficient_space_combination,
+            &weights[coefficient_vectors.len()],
+            g_coefficients,
+            shifted_g_degree,
+        );
+        coset_evaluate_coefficients_in_place(
+            &coset_domain,
+            &offset,
+            &mut coefficient_space_combination,
+        );
+
+        assert_eq!(
+            coefficient_space_combination, codeword_space_reference,
+            "coefficient-space fusion must preserve the exact combined codeword at trace size {trace_size}"
+        );
+    }
+}
+
 // The univariate-sumcheck helper `g` must have degree at most trace_size - 2;
 // otherwise its spare top coefficient can absorb a false sum. Shifting `g` by
 // `g_degree_adjustment_shift` makes the shared FRI bound enforce that exact
@@ -134,10 +213,8 @@ fn prover_and_verifier_transcript_order_matches() {
 
     assert!(verification_result.expect("audit proof verification"));
     assert_eq!(prover_events, verifier_events);
-    let event_count = prover_events.len();
     let transcripts = run_length_encode_transcript_order_audit(&prover_events);
     let audit_artifact = serde_json::json!({
-        "formatVersion": 1,
         "proofFamily": "limb-group-key-switch-atom",
         "fixture": {
             "digitCount": 3,
@@ -145,7 +222,6 @@ fn prover_and_verifier_transcript_order_matches() {
             "queryCount": 40,
             "ringDegree": ring_degree,
         },
-        "eventCount": event_count,
         "transcripts": transcripts,
     });
     let expected_artifact: serde_json::Value = serde_json::from_str(include_str!(concat!(

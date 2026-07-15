@@ -4,15 +4,16 @@ use std::{
     sync::Arc,
 };
 
+use super::schemas::EvaluatorReplayPayload;
 use super::{
     CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem,
     CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType,
     FoundationSchemaError, Hash512, ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster,
     SignedCarrier, StateCapabilityKind, StateError, StateOutputIntentPayload,
     StateRecoveryTransitionPayload, StateReservationIntentPayload, StateWitnessVoteKind,
-    StateWitnessVotePayload, StorageRootCommitmentPayload, StreamDescriptor, VerificationResult,
-    derive_state_key, derive_state_recovery_producer_sequence,
-    derive_state_witness_vote_sequence,
+    StateWitnessVotePayload,
+    StorageRootCommitmentPayload, StreamDescriptor, VerificationResult,
+    derive_state_key, derive_state_witness_vote_sequence,
 };
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
@@ -26,7 +27,6 @@ const BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1301;
 const BALLOT_CANDIDATE_LIST_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1400;
 const BALLOT_CANDIDATE_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x1401;
 const AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1404;
-const EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1502;
 const FINALITY_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1601;
 const TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1620;
 pub(crate) const MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT: u32 = 4_096;
@@ -35,7 +35,6 @@ pub(crate) const MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT: u32 = 4_096;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanonicalBoardLimits {
     pub maximum_ballot_attempts_per_participant: u64,
-    pub maximum_recovery_transitions_per_state_key: u64,
     pub maximum_retained_canonical_carrier_byte_length: u64,
     pub maximum_unordered_carriers_per_batch: u32,
     pub maximum_retained_transcript_objects: u32,
@@ -44,7 +43,6 @@ pub struct CanonicalBoardLimits {
 impl CanonicalBoardLimits {
     fn validate(self) -> BoardResult<()> {
         if self.maximum_ballot_attempts_per_participant == 0
-            || self.maximum_recovery_transitions_per_state_key == 0
             || self.maximum_retained_canonical_carrier_byte_length == 0
             || self.maximum_unordered_carriers_per_batch == 0
             || self.maximum_retained_transcript_objects == 0
@@ -54,25 +52,19 @@ impl CanonicalBoardLimits {
                 "canonical-board limits must be positive",
             ));
         }
-        if self.maximum_unordered_carriers_per_batch
-            > self.maximum_retained_transcript_objects
-        {
+        if self.maximum_unordered_carriers_per_batch > self.maximum_retained_transcript_objects {
             return Err(CanonicalBoardError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "canonical-board batch capacity exceeds retained-object capacity",
             ));
         }
-        if self.maximum_unordered_carriers_per_batch
-            > MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT
-        {
+        if self.maximum_unordered_carriers_per_batch > MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT {
             return Err(CanonicalBoardError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "canonical-board batch capacity exceeds the runtime maximum",
             ));
         }
-        if self.maximum_ballot_attempts_per_participant > u64::from(u16::MAX)
-            || self.maximum_recovery_transitions_per_state_key > u64::from(u16::MAX)
-        {
+        if self.maximum_ballot_attempts_per_participant > u64::from(u16::MAX) {
             return Err(CanonicalBoardError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "canonical-board suite limits exceed the version-one field widths",
@@ -165,10 +157,6 @@ impl VerifiedTranscriptObject {
         self.inner.envelope.producer_sequence
     }
 
-    pub fn recovery_epoch(&self) -> u64 {
-        self.inner.envelope.recovery_epoch
-    }
-
     /// Returns the first authenticated carrier retained for byte-identical replay.
     pub fn canonical_carrier_bytes(&self) -> &[u8] {
         &self.inner.canonical_carrier_bytes
@@ -216,7 +204,6 @@ enum ProducerSlot {
     StatefulSubject {
         object_type: FoundationObjectType,
         state_key: Hash512,
-        subject_epoch: u64,
         producer_sequence: u64,
     },
     StateWitness {
@@ -238,9 +225,8 @@ struct StateIntentCoordinate {
     capability_kind: StateCapabilityKind,
     state_key: Hash512,
     subject_participant_id: ParticipantIdentity,
-    subject_epoch: u64,
-    predecessor_transition_hash: Option<Hash512>,
     vote_kind: StateWitnessVoteKind,
+    recovery_epoch: u64,
 }
 
 struct ResolvedSemantics {
@@ -328,8 +314,14 @@ impl CanonicalBoardVerifier {
         limits.validate()?;
         let canonical_roster = Roster::decode(&roster.encode()?, &canonical_decode_limits)?;
         let mut roster_positions = HashMap::with_capacity(canonical_roster.entries.len());
-        for entry in &canonical_roster.entries {
-            roster_positions.insert(entry.participant_identity()?, entry.roster_position);
+        for (roster_position, entry) in canonical_roster.entries.iter().enumerate() {
+            let roster_position = u16::try_from(roster_position).map_err(|_| {
+                CanonicalBoardError::new(
+                    RefusalReason::OutsideSupportedProfile,
+                    "roster position does not fit the canonical field width",
+                )
+            })?;
+            roster_positions.insert(entry.participant_identity()?, roster_position);
         }
         Ok(Self {
             suite_id,
@@ -375,20 +367,20 @@ impl CanonicalBoardVerifier {
                 "canonical-board carrier count is outside the supported profile",
             ));
         }
-        let framed_byte_length = canonical_carriers.iter().try_fold(
-            4_usize,
-            |accumulated_byte_length, carrier| {
-                accumulated_byte_length
-                    .checked_add(4)
-                    .and_then(|value| value.checked_add(carrier.as_ref().len()))
-                    .ok_or_else(|| {
-                        CanonicalBoardError::new(
-                            RefusalReason::OutsideSupportedProfile,
-                            "canonical-board carrier byte length overflows",
-                        )
-                    })
-            },
-        )?;
+        let framed_byte_length =
+            canonical_carriers
+                .iter()
+                .try_fold(4_usize, |accumulated_byte_length, carrier| {
+                    accumulated_byte_length
+                        .checked_add(4)
+                        .and_then(|value| value.checked_add(carrier.as_ref().len()))
+                        .ok_or_else(|| {
+                            CanonicalBoardError::new(
+                                RefusalReason::OutsideSupportedProfile,
+                                "canonical-board carrier byte length overflows",
+                            )
+                        })
+                })?;
         if framed_byte_length > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
             return Err(CanonicalBoardError::new(
                 RefusalReason::OutsideSupportedProfile,
@@ -438,26 +430,26 @@ impl CanonicalBoardVerifier {
                 "canonical-board retained-object limit is exceeded",
             ));
         }
-        let pending_carrier_byte_length = pending_objects.values().try_fold(
-            0_u64,
-            |accumulated_byte_length, object| {
-                let object_byte_length =
-                    u64::try_from(object.canonical_carrier_bytes.len()).map_err(|_| {
-                        CanonicalBoardError::new(
-                            RefusalReason::OutsideSupportedProfile,
-                            "canonical-board carrier length does not fit u64",
-                        )
-                    })?;
-                accumulated_byte_length
-                    .checked_add(object_byte_length)
-                    .ok_or_else(|| {
-                        CanonicalBoardError::new(
-                            RefusalReason::OutsideSupportedProfile,
-                            "canonical-board retained carrier bytes overflow",
-                        )
-                    })
-            },
-        )?;
+        let pending_carrier_byte_length =
+            pending_objects
+                .values()
+                .try_fold(0_u64, |accumulated_byte_length, object| {
+                    let object_byte_length = u64::try_from(object.canonical_carrier_bytes.len())
+                        .map_err(|_| {
+                            CanonicalBoardError::new(
+                                RefusalReason::OutsideSupportedProfile,
+                                "canonical-board carrier length does not fit u64",
+                            )
+                        })?;
+                    accumulated_byte_length
+                        .checked_add(object_byte_length)
+                        .ok_or_else(|| {
+                            CanonicalBoardError::new(
+                                RefusalReason::OutsideSupportedProfile,
+                                "canonical-board retained carrier bytes overflow",
+                            )
+                        })
+                })?;
         let retained_carrier_byte_length = self
             .retained_canonical_carrier_byte_length
             .checked_add(pending_carrier_byte_length)
@@ -467,10 +459,7 @@ impl CanonicalBoardVerifier {
                     "canonical-board retained carrier bytes overflow",
                 )
             })?;
-        if retained_carrier_byte_length
-            > self
-                .limits
-                .maximum_retained_canonical_carrier_byte_length
+        if retained_carrier_byte_length > self.limits.maximum_retained_canonical_carrier_byte_length
         {
             return Err(CanonicalBoardError::new(
                 RefusalReason::OutsideSupportedProfile,
@@ -613,10 +602,7 @@ impl CanonicalBoardVerifier {
         &self,
         parsed: &ParsedBoardObject,
         available: &HashMap<Hash512, Arc<VerifiedTranscriptObjectData>>,
-    ) -> Result<
-        (VerifiedTranscriptObjectData, Option<ProducerSlot>),
-        ResolveError,
-    > {
+    ) -> Result<(VerifiedTranscriptObjectData, Option<ProducerSlot>), ResolveError> {
         let semantics = self.derive_and_validate_semantics(parsed, available)?;
         Ok((
             VerifiedTranscriptObjectData {
@@ -651,10 +637,8 @@ impl CanonicalBoardVerifier {
                 Ok(participant_slot(producer))
             }
             TypedPayload::PublicRandomnessCommitment => {
-                let producer = self.require_initial_signed_envelope(
-                    envelope,
-                    self.roster.entries.len(),
-                )?;
+                let producer =
+                    self.require_initial_signed_envelope(envelope, self.roster.entries.len())?;
                 require_sequence(envelope, 0)?;
                 for (roster_position, prerequisite_hash) in
                     envelope.ordered_prerequisite_hashes.iter().enumerate()
@@ -669,10 +653,7 @@ impl CanonicalBoardVerifier {
                 source_participant_id,
                 contribution_commitment_object_hash,
             } => {
-                let producer = self.require_initial_signed_envelope(
-                    envelope,
-                    self.roster.entries.len(),
-                )?;
+                let producer = self.require_initial_signed_envelope(envelope, 0)?;
                 let source_position = self.roster_position(*source_participant_id)?;
                 if envelope.producer_sequence != u64::from(source_position) {
                     return Err(CanonicalBoardError::new(
@@ -683,36 +664,8 @@ impl CanonicalBoardVerifier {
                 }
                 let commitment =
                     require_available(available, *contribution_commitment_object_hash)?;
-                require_object_type(
-                    commitment,
-                    FoundationObjectType::PublicRandomnessCommitment,
-                )?;
+                require_object_type(commitment, FoundationObjectType::PublicRandomnessCommitment)?;
                 require_producer(commitment, *source_participant_id)?;
-                for (roster_position, prerequisite_hash) in
-                    envelope.ordered_prerequisite_hashes.iter().enumerate()
-                {
-                    let prerequisite = require_available(available, *prerequisite_hash)?;
-                    let Some(state_intent) = prerequisite.state_intent else {
-                        return Err(CanonicalBoardError::new(
-                            RefusalReason::WrongTypeOrLength,
-                            "public-randomness reveal prerequisite is not a state reservation",
-                        )
-                        .into());
-                    };
-                    if prerequisite.envelope.object_type
-                        != FoundationObjectType::StateReservation
-                        || state_intent.vote_kind != StateWitnessVoteKind::Reservation
-                        || state_intent.capability_kind
-                            != StateCapabilityKind::SetupPublicSeedBranch
-                    {
-                        return Err(CanonicalBoardError::new(
-                            RefusalReason::WrongTypeOrLength,
-                            "public-randomness reveal prerequisite has the wrong state kind",
-                        )
-                        .into());
-                    }
-                    self.require_producer_at_position(prerequisite, roster_position)?;
-                }
                 Ok(participant_slot(producer))
             }
             TypedPayload::PrivateShareAcceptance => {
@@ -745,8 +698,7 @@ impl CanonicalBoardVerifier {
             }
             TypedPayload::BallotPackage => {
                 let producer = self.require_initial_signed_envelope(envelope, 1)?;
-                if envelope.producer_sequence
-                    >= self.limits.maximum_ballot_attempts_per_participant
+                if envelope.producer_sequence >= self.limits.maximum_ballot_attempts_per_participant
                 {
                     return Err(CanonicalBoardError::new(
                         RefusalReason::OutsideSupportedProfile,
@@ -757,11 +709,10 @@ impl CanonicalBoardVerifier {
                 Ok(participant_slot(producer))
             }
             TypedPayload::BallotCandidateList { entries } => {
-                let producer = self.require_stateful_subject_envelope(envelope, 0)?;
+                let producer = self.require_initial_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 for entry in entries {
-                    let ballot =
-                        require_available(available, entry.ballot_package_object_hash)?;
+                    let ballot = require_available(available, entry.ballot_package_object_hash)?;
                     require_object_type(ballot, FoundationObjectType::BallotPackage)?;
                     require_producer(ballot, producer)?;
                     if ballot.envelope.producer_sequence != entry.producer_sequence {
@@ -772,12 +723,7 @@ impl CanonicalBoardVerifier {
                         .into());
                     }
                 }
-                self.stateful_output_semantics(
-                    envelope,
-                    producer,
-                    StateCapabilityKind::BallotCandidateList,
-                    available,
-                )
+                Ok(participant_slot(producer))
             }
             TypedPayload::Aggregate {
                 selected_ballot_object_hashes,
@@ -816,22 +762,28 @@ impl CanonicalBoardVerifier {
             TypedPayload::Finality => {
                 let producer = self.require_stateful_subject_envelope(envelope, 1)?;
                 require_sequence(envelope, 0)?;
-                let replay =
-                    require_available(available, envelope.ordered_prerequisite_hashes[0])?;
+                let replay = require_available(available, envelope.ordered_prerequisite_hashes[0])?;
                 require_object_type(replay, FoundationObjectType::EvaluatorReplay)?;
                 self.stateful_output_semantics(
                     envelope,
                     producer,
                     StateCapabilityKind::FinalitySignature,
-                    available,
                 )
             }
             TypedPayload::StateReservation { capability_kind } => {
                 let subject = self.require_stateful_subject_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
-                let state_key = self.require_stateful_recovery_predecessor(
+                let state_key = derive_state_key(
+                    self.suite_id,
+                    self.ceremony_context_hash,
+                    self.action_context_hash,
+                    subject,
+                    *capability_kind,
+                )?;
+                self.require_state_recovery_predecessor(
                     envelope,
                     available,
+                    state_key,
                     subject,
                     *capability_kind,
                 )?;
@@ -839,16 +791,14 @@ impl CanonicalBoardVerifier {
                     producer_slot: Some(ProducerSlot::StatefulSubject {
                         object_type: envelope.object_type,
                         state_key,
-                        subject_epoch: envelope.recovery_epoch,
                         producer_sequence: envelope.producer_sequence,
                     }),
                     state_intent: Some(StateIntentCoordinate {
                         capability_kind: *capability_kind,
                         state_key,
                         subject_participant_id: subject,
-                        subject_epoch: envelope.recovery_epoch,
-                        predecessor_transition_hash: envelope.recovery_transition_hash,
                         vote_kind: StateWitnessVoteKind::Reservation,
+                        recovery_epoch: envelope.recovery_epoch,
                     }),
                 })
             }
@@ -857,8 +807,7 @@ impl CanonicalBoardVerifier {
             } => {
                 let subject = self.require_stateful_subject_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
-                let reservation =
-                    require_available(available, *reservation_intent_object_hash)?;
+                let reservation = require_available(available, *reservation_intent_object_hash)?;
                 require_object_type(reservation, FoundationObjectType::StateReservation)?;
                 let reservation_coordinate = reservation.state_intent.ok_or_else(|| {
                     ResolveError::Refused(CanonicalBoardError::new(
@@ -867,11 +816,10 @@ impl CanonicalBoardVerifier {
                     ))
                 })?;
                 if reservation_coordinate.vote_kind != StateWitnessVoteKind::Reservation
-                    || !reservation_coordinate.capability_kind.supports_exact_output()
+                    || !reservation_coordinate
+                        .capability_kind
+                        .supports_exact_output()
                     || reservation_coordinate.subject_participant_id != subject
-                    || reservation_coordinate.subject_epoch != envelope.recovery_epoch
-                    || reservation_coordinate.predecessor_transition_hash
-                        != envelope.recovery_transition_hash
                 {
                     return Err(CanonicalBoardError::new(
                         RefusalReason::WrongContext,
@@ -879,9 +827,10 @@ impl CanonicalBoardVerifier {
                     )
                     .into());
                 }
-                let state_key = self.require_stateful_recovery_predecessor(
-                    envelope,
-                    available,
+                let state_key = derive_state_key(
+                    self.suite_id,
+                    self.ceremony_context_hash,
+                    self.action_context_hash,
                     subject,
                     reservation_coordinate.capability_kind,
                 )?;
@@ -892,20 +841,28 @@ impl CanonicalBoardVerifier {
                     )
                     .into());
                 }
+                if envelope.recovery_epoch != reservation.envelope.recovery_epoch
+                    || envelope.recovery_transition_hash
+                        != reservation.envelope.recovery_transition_hash
+                {
+                    return Err(CanonicalBoardError::new(
+                        RefusalReason::WrongContext,
+                        "state output does not share its reservation recovery branch",
+                    )
+                    .into());
+                }
                 Ok(ResolvedSemantics {
                     producer_slot: Some(ProducerSlot::StatefulSubject {
                         object_type: envelope.object_type,
                         state_key: reservation_coordinate.state_key,
-                        subject_epoch: envelope.recovery_epoch,
                         producer_sequence: envelope.producer_sequence,
                     }),
                     state_intent: Some(StateIntentCoordinate {
                         capability_kind: reservation_coordinate.capability_kind,
                         state_key: reservation_coordinate.state_key,
                         subject_participant_id: subject,
-                        subject_epoch: envelope.recovery_epoch,
-                        predecessor_transition_hash: envelope.recovery_transition_hash,
                         vote_kind: StateWitnessVoteKind::Output,
+                        recovery_epoch: envelope.recovery_epoch,
                     }),
                 })
             }
@@ -927,7 +884,7 @@ impl CanonicalBoardVerifier {
                 }
                 let expected_sequence = derive_state_witness_vote_sequence(
                     intent_coordinate.vote_kind,
-                    intent_coordinate.subject_epoch,
+                    intent_coordinate.recovery_epoch,
                 )?;
                 require_sequence(envelope, expected_sequence)?;
                 Ok(ResolvedSemantics {
@@ -945,49 +902,64 @@ impl CanonicalBoardVerifier {
                 preserved_latest_intent_object_hash,
             } => {
                 let subject = self.require_stateful_subject_envelope(envelope, 0)?;
-                let expected_sequence =
-                    derive_state_recovery_producer_sequence(envelope.recovery_epoch)?;
-                require_sequence(envelope, expected_sequence)?;
-                let new_epoch = envelope.recovery_epoch.checked_add(1).ok_or_else(|| {
-                    ResolveError::Refused(CanonicalBoardError::new(
+                let new_recovery_epoch = envelope.recovery_epoch.checked_add(1).ok_or_else(|| {
+                    CanonicalBoardError::new(
                         RefusalReason::OutsideSupportedProfile,
                         "state recovery epoch overflows",
-                    ))
-                })?;
-                if new_epoch > self.limits.maximum_recovery_transitions_per_state_key {
-                    return Err(CanonicalBoardError::new(
-                        RefusalReason::OutsideSupportedProfile,
-                        "state recovery exceeds the suite transition maximum",
                     )
-                    .into());
-                }
-                let state_key = self.require_stateful_recovery_predecessor(
-                    envelope,
-                    available,
+                })?;
+                require_sequence(envelope, new_recovery_epoch)?;
+                let state_key = derive_state_key(
+                    self.suite_id,
+                    self.ceremony_context_hash,
+                    self.action_context_hash,
                     subject,
                     *capability_kind,
                 )?;
-                if let Some(preserved_hash) = preserved_latest_intent_object_hash {
-                    let preserved = require_available(available, *preserved_hash)?;
-                    let preserved_coordinate = preserved.state_intent.ok_or_else(|| {
+                if let Some(predecessor_hash) = envelope.recovery_transition_hash {
+                    let predecessor = require_available(available, predecessor_hash)?;
+                    require_object_type(predecessor, FoundationObjectType::RecoveryTransition)?;
+                    let predecessor_coordinate = predecessor.state_intent.ok_or_else(|| {
                         ResolveError::Refused(CanonicalBoardError::new(
                             RefusalReason::WrongTypeOrLength,
-                            "state recovery preserves a value that is not an intent",
+                            "recovery predecessor has no resolved state coordinate",
                         ))
                     })?;
-                    if !matches!(
-                        preserved_coordinate.vote_kind,
-                        StateWitnessVoteKind::Reservation | StateWitnessVoteKind::Output
-                    ) || preserved_coordinate.capability_kind != *capability_kind
-                        || preserved_coordinate.state_key != state_key
-                        || preserved_coordinate.subject_participant_id != subject
-                        || preserved_coordinate.subject_epoch != envelope.recovery_epoch
-                        || preserved_coordinate.predecessor_transition_hash
-                            != envelope.recovery_transition_hash
+                    if envelope.recovery_epoch == 0
+                        || predecessor_coordinate.state_key != state_key
+                        || predecessor_coordinate.subject_participant_id != subject
+                        || predecessor_coordinate.capability_kind != *capability_kind
+                        || predecessor_coordinate.vote_kind != StateWitnessVoteKind::Recovery
+                        || predecessor_coordinate.recovery_epoch != envelope.recovery_epoch
                     {
                         return Err(CanonicalBoardError::new(
                             RefusalReason::WrongContext,
-                            "state recovery does not preserve the matching latest intent",
+                            "recovery transition does not extend its typed predecessor",
+                        )
+                        .into());
+                    }
+                } else if envelope.recovery_epoch != 0 {
+                    return Err(CanonicalBoardError::new(
+                        RefusalReason::WrongContext,
+                        "noninitial recovery transition has no typed predecessor",
+                    )
+                    .into());
+                }
+                if let Some(preserved_hash) = preserved_latest_intent_object_hash {
+                    let preserved = require_available(available, *preserved_hash)?;
+                    let coordinate = preserved.state_intent.ok_or_else(|| {
+                        ResolveError::Refused(CanonicalBoardError::new(
+                            RefusalReason::WrongTypeOrLength,
+                            "recovery transition does not preserve a resolved state intent",
+                        ))
+                    })?;
+                    if coordinate.state_key != state_key
+                        || coordinate.subject_participant_id != subject
+                        || coordinate.capability_kind != *capability_kind
+                    {
+                        return Err(CanonicalBoardError::new(
+                            RefusalReason::WrongContext,
+                            "recovery transition preserves state from another state key",
                         )
                         .into());
                     }
@@ -996,16 +968,14 @@ impl CanonicalBoardVerifier {
                     producer_slot: Some(ProducerSlot::StatefulSubject {
                         object_type: envelope.object_type,
                         state_key,
-                        subject_epoch: envelope.recovery_epoch,
                         producer_sequence: envelope.producer_sequence,
                     }),
                     state_intent: Some(StateIntentCoordinate {
                         capability_kind: *capability_kind,
                         state_key,
                         subject_participant_id: subject,
-                        subject_epoch: new_epoch,
-                        predecessor_transition_hash: Some(parsed.object_hash),
                         vote_kind: StateWitnessVoteKind::Recovery,
+                        recovery_epoch: new_recovery_epoch,
                     }),
                 })
             }
@@ -1014,8 +984,7 @@ impl CanonicalBoardVerifier {
             } => {
                 let subject = self.require_stateful_subject_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
-                let reservation =
-                    require_available(available, *reservation_intent_object_hash)?;
+                let reservation = require_available(available, *reservation_intent_object_hash)?;
                 let coordinate = reservation.state_intent.ok_or_else(|| {
                     ResolveError::Refused(CanonicalBoardError::new(
                         RefusalReason::WrongTypeOrLength,
@@ -1026,9 +995,6 @@ impl CanonicalBoardVerifier {
                     || coordinate.vote_kind != StateWitnessVoteKind::Reservation
                     || coordinate.capability_kind != StateCapabilityKind::TargetRelease
                     || coordinate.subject_participant_id != subject
-                    || coordinate.subject_epoch != envelope.recovery_epoch
-                    || coordinate.predecessor_transition_hash
-                        != envelope.recovery_transition_hash
                 {
                     return Err(CanonicalBoardError::new(
                         RefusalReason::WrongContext,
@@ -1040,7 +1006,6 @@ impl CanonicalBoardVerifier {
                     envelope,
                     subject,
                     StateCapabilityKind::TargetRelease,
-                    available,
                 )
             }
             TypedPayload::StorageRootCommitment => {
@@ -1056,32 +1021,7 @@ impl CanonicalBoardVerifier {
         envelope: &ObjectEnvelope,
         subject_participant_id: ParticipantIdentity,
         capability_kind: StateCapabilityKind,
-        available: &HashMap<Hash512, Arc<VerifiedTranscriptObjectData>>,
     ) -> Result<ResolvedSemantics, ResolveError> {
-        let state_key = self.require_stateful_recovery_predecessor(
-            envelope,
-            available,
-            subject_participant_id,
-            capability_kind,
-        )?;
-        Ok(ResolvedSemantics {
-            producer_slot: Some(ProducerSlot::StatefulSubject {
-                object_type: envelope.object_type,
-                state_key,
-                subject_epoch: envelope.recovery_epoch,
-                producer_sequence: envelope.producer_sequence,
-            }),
-            state_intent: None,
-        })
-    }
-
-    fn require_stateful_recovery_predecessor(
-        &self,
-        envelope: &ObjectEnvelope,
-        available: &HashMap<Hash512, Arc<VerifiedTranscriptObjectData>>,
-        subject_participant_id: ParticipantIdentity,
-        capability_kind: StateCapabilityKind,
-    ) -> Result<Hash512, ResolveError> {
         let state_key = derive_state_key(
             self.suite_id,
             self.ceremony_context_hash,
@@ -1089,31 +1029,14 @@ impl CanonicalBoardVerifier {
             subject_participant_id,
             capability_kind,
         )?;
-        let Some(predecessor_hash) = envelope.recovery_transition_hash else {
-            return Ok(state_key);
-        };
-        let predecessor = require_available(available, predecessor_hash)?;
-        require_object_type(predecessor, FoundationObjectType::RecoveryTransition)?;
-        let predecessor_coordinate = predecessor.state_intent.ok_or_else(|| {
-            ResolveError::Refused(CanonicalBoardError::new(
-                RefusalReason::WrongTypeOrLength,
-                "state predecessor does not resolve to a recovery transition",
-            ))
-        })?;
-        if predecessor_coordinate.vote_kind != StateWitnessVoteKind::Recovery
-            || predecessor_coordinate.capability_kind != capability_kind
-            || predecessor_coordinate.state_key != state_key
-            || predecessor_coordinate.subject_participant_id != subject_participant_id
-            || predecessor_coordinate.subject_epoch != envelope.recovery_epoch
-            || predecessor_coordinate.predecessor_transition_hash != Some(predecessor_hash)
-        {
-            return Err(CanonicalBoardError::new(
-                RefusalReason::WrongContext,
-                "state object does not match its typed recovery predecessor",
-            )
-            .into());
-        }
-        Ok(state_key)
+        Ok(ResolvedSemantics {
+            producer_slot: Some(ProducerSlot::StatefulSubject {
+                object_type: envelope.object_type,
+                state_key,
+                producer_sequence: envelope.producer_sequence,
+            }),
+            state_intent: None,
+        })
     }
 
     fn require_initial_signed_envelope(
@@ -1121,12 +1044,6 @@ impl CanonicalBoardVerifier {
         envelope: &ObjectEnvelope,
         prerequisite_count: usize,
     ) -> BoardResult<ParticipantIdentity> {
-        if envelope.recovery_epoch != 0 || envelope.recovery_transition_hash.is_some() {
-            return Err(CanonicalBoardError::new(
-                RefusalReason::WrongContext,
-                "initial transcript family carries state-recovery coordinates",
-            ));
-        }
         self.require_signed_envelope(envelope, prerequisite_count)
     }
 
@@ -1135,15 +1052,6 @@ impl CanonicalBoardVerifier {
         envelope: &ObjectEnvelope,
         prerequisite_count: usize,
     ) -> BoardResult<ParticipantIdentity> {
-        if envelope.recovery_epoch > self.limits.maximum_recovery_transitions_per_state_key
-            || (envelope.recovery_epoch == 0 && envelope.recovery_transition_hash.is_some())
-            || (envelope.recovery_epoch > 0 && envelope.recovery_transition_hash.is_none())
-        {
-            return Err(CanonicalBoardError::new(
-                RefusalReason::WrongContext,
-                "stateful transcript object has inconsistent recovery coordinates",
-            ));
-        }
         self.require_signed_envelope(envelope, prerequisite_count)
     }
 
@@ -1175,13 +1083,11 @@ impl CanonicalBoardVerifier {
     ) -> BoardResult<()> {
         if envelope.producer_participant_id.is_some()
             || envelope.producer_sequence != 0
-            || envelope.recovery_epoch != 0
-            || envelope.recovery_transition_hash.is_some()
             || envelope.ordered_prerequisite_hashes.len() != prerequisite_count
         {
             return Err(CanonicalBoardError::new(
                 RefusalReason::WrongContext,
-                "deterministic transcript object carries producer or recovery coordinates",
+                "deterministic transcript object carries producer coordinates",
             ));
         }
         Ok(())
@@ -1220,6 +1126,48 @@ impl CanonicalBoardVerifier {
         }
         Ok(())
     }
+
+    fn require_state_recovery_predecessor(
+        &self,
+        envelope: &ObjectEnvelope,
+        available: &HashMap<Hash512, Arc<VerifiedTranscriptObjectData>>,
+        state_key: Hash512,
+        subject_participant_id: ParticipantIdentity,
+        capability_kind: StateCapabilityKind,
+    ) -> Result<(), ResolveError> {
+        match (envelope.recovery_epoch, envelope.recovery_transition_hash) {
+            (0, None) => Ok(()),
+            (0, Some(_)) | (_, None) => Err(CanonicalBoardError::new(
+                RefusalReason::WrongContext,
+                "state object has an inconsistent recovery predecessor coordinate",
+            )
+            .into()),
+            (recovery_epoch, Some(predecessor_hash)) => {
+                let predecessor = require_available(available, predecessor_hash)?;
+                require_object_type(predecessor, FoundationObjectType::RecoveryTransition)?;
+                let coordinate = predecessor.state_intent.ok_or_else(|| {
+                    ResolveError::Refused(CanonicalBoardError::new(
+                        RefusalReason::WrongTypeOrLength,
+                        "state recovery predecessor has no resolved state coordinate",
+                    ))
+                })?;
+                if coordinate.vote_kind != StateWitnessVoteKind::Recovery
+                    || coordinate.recovery_epoch != recovery_epoch
+                    || coordinate.state_key != state_key
+                    || coordinate.subject_participant_id != subject_participant_id
+                    || coordinate.capability_kind != capability_kind
+                {
+                    return Err(CanonicalBoardError::new(
+                        RefusalReason::WrongContext,
+                        "state object does not extend the named recovery predecessor",
+                    )
+                    .into());
+                }
+                Ok(())
+            }
+        }
+    }
+
 }
 
 enum DecodedBoardCarrier {
@@ -1290,7 +1238,7 @@ fn preflight_envelope_family(
 ) -> BoardResult<FoundationObjectType> {
     let envelope_tuple = CanonicalTuple::decode(canonical_envelope_bytes, limits)?;
     if envelope_tuple.schema_identifier != super::OBJECT_ENVELOPE_SCHEMA_IDENTIFIER
-        || envelope_tuple.items.len() != 12
+        || envelope_tuple.items.len() != 10
     {
         return Err(CanonicalBoardError::new(
             RefusalReason::WrongTypeOrLength,
@@ -1335,14 +1283,9 @@ fn decode_typed_payload(
             require_payload_header(
                 &tuple,
                 PUBLIC_RANDOMNESS_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER,
-                2,
+                1,
             )?;
             read_hash(&tuple.items[0])?;
-            require_hash_list_count(
-                &tuple.items[1],
-                usize::from(FOUNDATION_PROFILE.participant_count),
-                "public-randomness commitment has the wrong recovery-envelope count",
-            )?;
             Ok(TypedPayload::PublicRandomnessCommitment)
         }
         FoundationObjectType::PublicRandomnessReveal => {
@@ -1400,11 +1343,7 @@ fn decode_typed_payload(
             })
         }
         FoundationObjectType::PublicSetupRecord => {
-            require_payload_header(
-                &tuple,
-                DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER,
-                5,
-            )?;
+            require_payload_header(&tuple, DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER, 5)?;
             let dealer_roster_position = read_u16(&tuple.items[0])?;
             require_nonempty_hash_list(
                 &tuple.items[1],
@@ -1431,36 +1370,29 @@ fn decode_typed_payload(
             Ok(TypedPayload::BallotPackage)
         }
         FoundationObjectType::BallotCandidateList => {
-            require_payload_header(
-                &tuple,
-                BALLOT_CANDIDATE_LIST_PAYLOAD_SCHEMA_IDENTIFIER,
-                2,
-            )?;
+            require_payload_header(&tuple, BALLOT_CANDIDATE_LIST_PAYLOAD_SCHEMA_IDENTIFIER, 2)?;
             read_hash(&tuple.items[0])?;
-            let maximum_entry_count = usize::try_from(
-                maximum_ballot_attempts_per_participant,
-            )
-            .map_err(|_| {
-                CanonicalBoardError::new(
-                    RefusalReason::OutsideSupportedProfile,
-                    "candidate-list entry bound does not fit this runtime",
-                )
-            })?;
-            let entry_tuples = read_nested_tuple_list(
-                &tuple.items[1],
-                limits,
-                maximum_entry_count,
-            )?;
+            let maximum_entry_count = usize::try_from(maximum_ballot_attempts_per_participant)
+                .map_err(|_| {
+                    CanonicalBoardError::new(
+                        RefusalReason::OutsideSupportedProfile,
+                        "candidate-list entry bound does not fit this runtime",
+                    )
+                })?;
+            let entry_tuples =
+                read_nested_tuple_list(&tuple.items[1], limits, maximum_entry_count)?;
             let mut entries = Vec::with_capacity(entry_tuples.len());
             for (entry_index, entry) in entry_tuples.iter().enumerate() {
                 require_payload_header(entry, BALLOT_CANDIDATE_ENTRY_SCHEMA_IDENTIFIER, 2)?;
                 let producer_sequence = read_u64(&entry.items[0])?;
-                if producer_sequence != u64::try_from(entry_index).map_err(|_| {
-                    CanonicalBoardError::new(
-                        RefusalReason::OutsideSupportedProfile,
-                        "candidate-list entry index does not fit u64",
-                    )
-                })? {
+                if producer_sequence
+                    != u64::try_from(entry_index).map_err(|_| {
+                        CanonicalBoardError::new(
+                            RefusalReason::OutsideSupportedProfile,
+                            "candidate-list entry index does not fit u64",
+                        )
+                    })?
+                {
                     return Err(CanonicalBoardError::new(
                         RefusalReason::WrongTypeOrLength,
                         "candidate-list entries are not in contiguous producer-sequence order",
@@ -1488,17 +1420,9 @@ fn decode_typed_payload(
             })
         }
         FoundationObjectType::EvaluatorReplay => {
-            require_payload_header(
-                &tuple,
-                EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER,
-                4,
-            )?;
-            read_hash(&tuple.items[0])?;
-            let verified_aggregate_source_hash = read_hash(&tuple.items[1])?;
-            read_stream_descriptor(&tuple.items[2], limits)?;
-            read_stream_descriptor(&tuple.items[3], limits)?;
+            let replay_payload = EvaluatorReplayPayload::from_tuple(&tuple, limits)?;
             Ok(TypedPayload::EvaluatorReplay {
-                verified_aggregate_source_hash,
+                verified_aggregate_source_hash: replay_payload.verified_aggregate_source_hash(),
             })
         }
         FoundationObjectType::FinalitySignature => {
@@ -1507,33 +1431,21 @@ fn decode_typed_payload(
             Ok(TypedPayload::Finality)
         }
         FoundationObjectType::StateReservation => {
-            require_payload_header(
-                &tuple,
-                super::STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER,
-                2,
-            )?;
+            require_payload_header(&tuple, super::STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER, 2)?;
             let payload = StateReservationIntentPayload::decode(payload_bytes, limits)?;
             Ok(TypedPayload::StateReservation {
                 capability_kind: payload.capability_kind,
             })
         }
         FoundationObjectType::StateOutputIntent => {
-            require_payload_header(
-                &tuple,
-                super::STATE_OUTPUT_INTENT_SCHEMA_IDENTIFIER,
-                2,
-            )?;
+            require_payload_header(&tuple, super::STATE_OUTPUT_INTENT_SCHEMA_IDENTIFIER, 2)?;
             let payload = StateOutputIntentPayload::decode(payload_bytes, limits)?;
             Ok(TypedPayload::StateOutputIntent {
                 reservation_intent_object_hash: payload.reservation_intent_object_hash,
             })
         }
         FoundationObjectType::StateWitnessVote => {
-            require_payload_header(
-                &tuple,
-                super::STATE_WITNESS_VOTE_SCHEMA_IDENTIFIER,
-                1,
-            )?;
+            require_payload_header(&tuple, super::STATE_WITNESS_VOTE_SCHEMA_IDENTIFIER, 1)?;
             let payload = StateWitnessVotePayload::decode(payload_bytes, limits)?;
             Ok(TypedPayload::StateWitnessVote {
                 intent_object_hash: payload.intent_object_hash,
@@ -1553,11 +1465,7 @@ fn decode_typed_payload(
             })
         }
         FoundationObjectType::TargetDecryptionShare => {
-            require_payload_header(
-                &tuple,
-                TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER,
-                5,
-            )?;
+            require_payload_header(&tuple, TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER, 5)?;
             read_hash(&tuple.items[0])?;
             let reservation_intent_object_hash = read_hash(&tuple.items[1])?;
             read_stream_descriptor(&tuple.items[2], limits)?;
@@ -1665,23 +1573,19 @@ fn hash_list_layout(item: &CanonicalItem) -> BoardResult<(&[u8], usize)> {
             "transcript hash list is truncated",
         ));
     }
-    if u16::from_le_bytes([bytes[0], bytes[1]])
-        != CanonicalItemType::Hash512.canonical_code()
-    {
+    if u16::from_le_bytes([bytes[0], bytes[1]]) != CanonicalItemType::Hash512.canonical_code() {
         return Err(CanonicalBoardError::new(
             RefusalReason::WrongTypeOrLength,
             "transcript list has the wrong element type",
         ));
     }
-    let count = usize::try_from(u32::from_le_bytes([
-        bytes[2], bytes[3], bytes[4], bytes[5],
-    ]))
-    .map_err(|_| {
-        CanonicalBoardError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "transcript hash-list count does not fit this runtime",
-        )
-    })?;
+    let count = usize::try_from(u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]))
+        .map_err(|_| {
+            CanonicalBoardError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "transcript hash-list count does not fit this runtime",
+            )
+        })?;
     let expected_length = count
         .checked_mul(Hash512::BYTE_LENGTH)
         .and_then(|value| value.checked_add(6))
@@ -1771,15 +1675,13 @@ fn read_nested_tuple_list(
             "transcript list has the wrong nested element type",
         ));
     }
-    let count = usize::try_from(u32::from_le_bytes([
-        bytes[2], bytes[3], bytes[4], bytes[5],
-    ]))
-    .map_err(|_| {
-        CanonicalBoardError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "nested transcript-list count does not fit this runtime",
-        )
-    })?;
+    let count = usize::try_from(u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]))
+        .map_err(|_| {
+            CanonicalBoardError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "nested transcript-list count does not fit this runtime",
+            )
+        })?;
     if count == 0 || count > maximum_count {
         return Err(CanonicalBoardError::new(
             RefusalReason::OutsideSupportedProfile,
@@ -1821,15 +1723,13 @@ fn canonical_tuple_byte_length(bytes: &[u8]) -> BoardResult<usize> {
             "nested canonical tuple is truncated",
         ));
     }
-    let item_count = usize::try_from(u32::from_le_bytes([
-        bytes[4], bytes[5], bytes[6], bytes[7],
-    ]))
-    .map_err(|_| {
-        CanonicalBoardError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "nested canonical tuple item count does not fit this runtime",
-        )
-    })?;
+    let item_count = usize::try_from(u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]))
+        .map_err(|_| {
+            CanonicalBoardError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "nested canonical tuple item count does not fit this runtime",
+            )
+        })?;
     let mut offset = 8_usize;
     for _ in 0..item_count {
         let item_header = bytes.get(offset..offset.saturating_add(6)).ok_or_else(|| {

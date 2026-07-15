@@ -1,7 +1,7 @@
-import { bytesToHex } from '@noble/hashes/utils.js';
-import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
-import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
-import { describe, expect, it, vi } from 'vitest';
+import { bytesToHex } from "@noble/hashes/utils.js";
+import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
+import { describe, expect, it, vi } from "vitest";
 
 import {
     BrowserLocalKeyProviderError,
@@ -13,18 +13,18 @@ import {
     encapsulateResetSafeSetupMailbox,
     openBrowserLocalExternalKeyProvider,
     signFreshMailboxEnvelope,
-} from '../../src/browser-local-key-provider.js';
+} from "../../src/browser-local-key-provider.js";
 
 import {
     createBrowserLocalKeyOperations,
     createBrowserLocalMailboxOperations,
     createBrowserLocalSigningOperations,
     defaultResetSafeSetupMailboxScope,
-} from '#packages/crypto/tests/support/browser-local-key-operations';
+} from "#packages/crypto/tests/support/browser-local-key-operations";
 
 const textEncoder = new TextEncoder();
 const mailboxSignatureContext = textEncoder.encode(
-    'sealed-lattice/mailbox-signature/v1',
+    "sealed-lattice/mailbox-signature/v1",
 );
 
 const createKeyMaterial = () => {
@@ -40,22 +40,22 @@ const createKeyMaterial = () => {
 
 const setupMailboxSlot = Object.freeze({
     ...defaultResetSafeSetupMailboxScope,
-    recipientParticipantId: '66'.repeat(64),
-    producerSequence: '0',
+    recipientParticipantId: "66".repeat(64),
+    producerSequence: "0",
     payloadType: 2 as const,
-    statementHash: '77'.repeat(64),
-    orderedMaterialRoots: Object.freeze(['88'.repeat(64)]),
+    statementHash: "77".repeat(64),
+    orderedMaterialRoots: Object.freeze(["88".repeat(64)]),
 });
 
-const setupMailboxSlotHash = 'a5'.repeat(64);
+const setupMailboxSlotHash = "a5".repeat(64);
 const expectProviderError = (
     operation: () => unknown,
-    code: BrowserLocalKeyProviderError['code'],
+    code: BrowserLocalKeyProviderError["code"],
 ): void => {
     try {
         operation();
         throw new Error(
-            'Expected browser-local key-provider operation to fail.',
+            "Expected browser-local key-provider operation to fail.",
         );
     } catch (error) {
         expect(error).toBeInstanceOf(BrowserLocalKeyProviderError);
@@ -63,8 +63,8 @@ const expectProviderError = (
     }
 };
 
-describe('browser-local external key provider', () => {
-    it('opens distinct opaque capabilities only after both roster key pairs pass self-tests', () => {
+describe("browser-local external key provider", () => {
+    it("opens distinct opaque capabilities only after both roster key pairs pass self-tests", () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({
             ...createBrowserLocalKeyOperations({ signing, mailbox }),
@@ -97,7 +97,7 @@ describe('browser-local external key provider', () => {
                     signingPermit: freshMailbox.signingPermit,
                     envelopeHash: bytesToHex(envelopeHashBytes),
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
 
         const encapsulation = ml_kem768.encapsulate(
@@ -119,7 +119,7 @@ describe('browser-local external key provider', () => {
         provider.close();
     });
 
-    it('rejects one operation object reused for signing and mailbox capabilities', () => {
+    it("rejects one operation object reused for signing and mailbox capabilities", () => {
         const { signing, mailbox } = createKeyMaterial();
         const signingOperations = createBrowserLocalSigningOperations(signing);
         const mailboxOperations = createBrowserLocalMailboxOperations(mailbox);
@@ -143,15 +143,16 @@ describe('browser-local external key provider', () => {
                     mailbox: reusedOperations,
                     signing: reusedOperations,
                 }),
-            'UnsupportedProvider',
+            "UnsupportedProvider",
         );
         expect(revocationCount).toBe(1);
     });
 
-    it('replays one reset-safe setup-mailbox operation byte-identically without deriving another view', () => {
+    it("replays one reset-safe setup-mailbox operation byte-identically without deriving another view", () => {
         const { signing, mailbox } = createKeyMaterial();
         const randomnessObservation = {
             encapsulationConsumptionCount: 0,
+            signatureConsumptionCount: 0,
         };
         const provider = openBrowserLocalExternalKeyProvider({
             ...createBrowserLocalKeyOperations({
@@ -163,6 +164,7 @@ describe('browser-local external key provider', () => {
         });
         expect(randomnessObservation).toEqual({
             encapsulationConsumptionCount: 0,
+            signatureConsumptionCount: 0,
         });
 
         const first = encapsulateResetSafeSetupMailbox({
@@ -196,12 +198,13 @@ describe('browser-local external key provider', () => {
         ).toEqual(replay.sharedSecret);
         expect(randomnessObservation).toEqual({
             encapsulationConsumptionCount: 1,
+            signatureConsumptionCount: 0,
         });
 
         provider.close();
     });
 
-    it('refuses conflicting reset-safe producer slots as typed equivocation', () => {
+    it("refuses conflicting reset-safe producer slots as typed equivocation", () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({
             ...createBrowserLocalKeyOperations({ signing, mailbox }),
@@ -219,13 +222,13 @@ describe('browser-local external key provider', () => {
                     recipientEncapsulationKey: mailbox.publicKey,
                     setupMailboxSlot: {
                         ...setupMailboxSlot,
-                        statementHash: '99'.repeat(64),
+                        statementHash: "99".repeat(64),
                     },
-                    setupMailboxSlotHash: 'c7'.repeat(64),
+                    setupMailboxSlotHash: "c7".repeat(64),
                     signingCapability: provider.signingCapability,
                     sourceVerificationKey: signing.publicKey,
                 }),
-            'Equivocation',
+            "Equivocation",
         );
         const wrongRecipient = ml_kem768.keygen(
             new Uint8Array(ml_kem768.lengths.seed!).fill(0xe9),
@@ -239,7 +242,7 @@ describe('browser-local external key provider', () => {
                     signingCapability: provider.signingCapability,
                     sourceVerificationKey: signing.publicKey,
                 }),
-            'Equivocation',
+            "Equivocation",
         );
 
         first.ciphertext.fill(0);
@@ -248,7 +251,7 @@ describe('browser-local external key provider', () => {
         provider.close();
     });
 
-    it('refuses malformed and mismatched frozen roster keys', () => {
+    it("refuses malformed and mismatched frozen roster keys", () => {
         const first = createKeyMaterial();
         const secondSigning = ml_dsa65.keygen(
             new Uint8Array(ml_dsa65.lengths.seed!).fill(0x72),
@@ -266,7 +269,7 @@ describe('browser-local external key provider', () => {
                     },
                     mailbox: createBrowserLocalMailboxOperations(first.mailbox),
                 }),
-            'KeyMismatch',
+            "KeyMismatch",
         );
         expectProviderError(
             () =>
@@ -277,7 +280,7 @@ describe('browser-local external key provider', () => {
                         encapsulationKey: secondMailbox.publicKey,
                     },
                 }),
-            'KeyMismatch',
+            "KeyMismatch",
         );
         expectProviderError(
             () =>
@@ -288,7 +291,7 @@ describe('browser-local external key provider', () => {
                     },
                     mailbox: createBrowserLocalMailboxOperations(first.mailbox),
                 }),
-            'MalformedKey',
+            "MalformedKey",
         );
         expectProviderError(
             () =>
@@ -301,16 +304,16 @@ describe('browser-local external key provider', () => {
                         ).fill(0xff),
                     },
                 }),
-            'MalformedKey',
+            "MalformedKey",
         );
     });
 
-    it('fails closed when Web Crypto entropy is unavailable during opening or use', () => {
+    it("fails closed when Web Crypto entropy is unavailable during opening or use", () => {
         const { signing, mailbox } = createKeyMaterial();
-        const entropySpy = vi.spyOn(globalThis.crypto, 'getRandomValues');
+        const entropySpy = vi.spyOn(globalThis.crypto, "getRandomValues");
         try {
             entropySpy.mockImplementationOnce(() => {
-                throw new Error('entropy source failed while opening');
+                throw new Error("entropy source failed while opening");
             });
             expectProviderError(
                 () =>
@@ -320,14 +323,14 @@ describe('browser-local external key provider', () => {
                             mailbox,
                         }),
                     }),
-                'EntropyUnavailable',
+                "EntropyUnavailable",
             );
 
             const provider = openBrowserLocalExternalKeyProvider({
                 ...createBrowserLocalKeyOperations({ signing, mailbox }),
             });
             entropySpy.mockImplementationOnce(() => {
-                throw new Error('entropy source failed after opening');
+                throw new Error("entropy source failed after opening");
             });
             expectProviderError(
                 () =>
@@ -335,7 +338,7 @@ describe('browser-local external key provider', () => {
                         signingCapability: provider.signingCapability,
                         recipientEncapsulationKey: mailbox.publicKey,
                     }),
-                'EntropyUnavailable',
+                "EntropyUnavailable",
             );
             provider.close();
         } finally {
@@ -343,7 +346,7 @@ describe('browser-local external key provider', () => {
         }
     });
 
-    it('fails closed for unsupported, lost, and wrong-context reset-safe randomness capabilities', () => {
+    it("fails closed for unsupported, lost, and wrong-context reset-safe randomness capabilities", () => {
         const { signing, mailbox } = createKeyMaterial();
         const keyOperations = createBrowserLocalKeyOperations({
             signing,
@@ -364,7 +367,7 @@ describe('browser-local external key provider', () => {
                         providerWithoutResetSafeRandomness.signingCapability,
                     sourceVerificationKey: signing.publicKey,
                 }),
-            'UnsupportedProvider',
+            "UnsupportedProvider",
         );
         providerWithoutResetSafeRandomness.close();
 
@@ -374,7 +377,7 @@ describe('browser-local external key provider', () => {
                 mailbox,
                 resetSafeSetupMailboxScope: {
                     ...defaultResetSafeSetupMailboxScope,
-                    actionContextHash: 'f1'.repeat(64),
+                    actionContextHash: "f1".repeat(64),
                 },
             }),
         });
@@ -387,7 +390,7 @@ describe('browser-local external key provider', () => {
                     signingCapability: wrongContextProvider.signingCapability,
                     sourceVerificationKey: signing.publicKey,
                 }),
-            'KeyMismatch',
+            "KeyMismatch",
         );
         wrongContextProvider.close();
 
@@ -409,12 +412,12 @@ describe('browser-local external key provider', () => {
                         providerWithLostRandomness.signingCapability,
                     sourceVerificationKey: signing.publicKey,
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
         providerWithLostRandomness.close();
     });
 
-    it('rejects signing providers that ignore exact hedges or replace their frozen key', () => {
+    it("rejects signing providers that ignore exact hedges or replace their frozen key", () => {
         const first = createKeyMaterial();
         const replacementSigning = ml_dsa65.keygen(
             new Uint8Array(ml_dsa65.lengths.seed!).fill(0xfa),
@@ -442,7 +445,7 @@ describe('browser-local external key provider', () => {
                         revoke: () => undefined,
                     },
                 }),
-            'UnsupportedProvider',
+            "UnsupportedProvider",
         );
         expectProviderError(
             () =>
@@ -458,7 +461,7 @@ describe('browser-local external key provider', () => {
                         revoke: () => undefined,
                     },
                 }),
-            'UnsupportedProvider',
+            "UnsupportedProvider",
         );
 
         let activeSigningSecretKey = first.signing.secretKey;
@@ -482,16 +485,16 @@ describe('browser-local external key provider', () => {
         expectProviderError(
             () =>
                 signFreshMailboxEnvelope({
-                    envelopeHash: 'b6'.repeat(64),
+                    envelopeHash: "b6".repeat(64),
                     signingCapability: provider.signingCapability,
                     signingPermit: freshMailbox.signingPermit,
                 }),
-            'KeyMismatch',
+            "KeyMismatch",
         );
         provider.close();
     });
 
-    it('detects mailbox-key replacement before protocol decapsulation', () => {
+    it("detects mailbox-key replacement before protocol decapsulation", () => {
         const first = createKeyMaterial();
         const replacementMailbox = ml_kem768.keygen(
             new Uint8Array(ml_kem768.lengths.seed!).fill(0xfb),
@@ -518,7 +521,7 @@ describe('browser-local external key provider', () => {
                     capability: provider.mailboxCapability,
                     ciphertext: encapsulation.cipherText,
                 }),
-            'KeyMismatch',
+            "KeyMismatch",
         );
 
         encapsulation.cipherText.fill(0);
@@ -526,7 +529,7 @@ describe('browser-local external key provider', () => {
         provider.close();
     });
 
-    it('fails closed after external signing or mailbox capability loss', () => {
+    it("fails closed after external signing or mailbox capability loss", () => {
         const signingLossMaterial = createKeyMaterial();
         const signingLossOperations =
             createBrowserLocalKeyOperations(signingLossMaterial);
@@ -541,11 +544,11 @@ describe('browser-local external key provider', () => {
         expectProviderError(
             () =>
                 signFreshMailboxEnvelope({
-                    envelopeHash: 'd1'.repeat(64),
+                    envelopeHash: "d1".repeat(64),
                     signingCapability: signingLossProvider.signingCapability,
                     signingPermit: freshMailbox.signingPermit,
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
         freshMailbox.ciphertext.fill(0);
         freshMailbox.envelopeAttemptIdentifier.fill(0);
@@ -569,14 +572,14 @@ describe('browser-local external key provider', () => {
                     capability: mailboxLossProvider.mailboxCapability,
                     ciphertext: mailboxCiphertext.cipherText,
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
         mailboxCiphertext.cipherText.fill(0);
         mailboxCiphertext.sharedSecret.fill(0);
         mailboxLossProvider.close();
     });
 
-    it('refuses asynchronous key operations without a remote fallback', () => {
+    it("refuses asynchronous key operations without a remote fallback", () => {
         const signingMaterial = createKeyMaterial();
         const signingOperations =
             createBrowserLocalKeyOperations(signingMaterial);
@@ -589,10 +592,10 @@ describe('browser-local external key provider', () => {
                         signClosedMessage: (() =>
                             Promise.resolve(
                                 new Uint8Array(ml_dsa65.lengths.signature!),
-                            )) as unknown as BrowserLocalExternalKeyProviderInput['signing']['signClosedMessage'],
+                            )) as unknown as BrowserLocalExternalKeyProviderInput["signing"]["signClosedMessage"],
                     },
                 }),
-            'UnsupportedProvider',
+            "UnsupportedProvider",
         );
 
         const mailboxMaterial = createKeyMaterial();
@@ -607,14 +610,14 @@ describe('browser-local external key provider', () => {
                         decapsulateClosedCiphertext: (() =>
                             Promise.resolve(
                                 new Uint8Array(32),
-                            )) as unknown as BrowserLocalExternalKeyProviderInput['mailbox']['decapsulateClosedCiphertext'],
+                            )) as unknown as BrowserLocalExternalKeyProviderInput["mailbox"]["decapsulateClosedCiphertext"],
                     },
                 }),
-            'UnsupportedProvider',
+            "UnsupportedProvider",
         );
     });
 
-    it('keeps revocation scoped to the named capability and closes both capabilities', () => {
+    it("keeps revocation scoped to the named capability and closes both capabilities", () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({
             ...createBrowserLocalKeyOperations({ signing, mailbox }),
@@ -631,7 +634,7 @@ describe('browser-local external key provider', () => {
                     signingCapability: provider.signingCapability,
                     recipientEncapsulationKey: mailbox.publicKey,
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
         expect(
             decapsulateClosedMailboxCiphertext({
@@ -647,11 +650,11 @@ describe('browser-local external key provider', () => {
                     capability: provider.mailboxCapability,
                     ciphertext: encapsulation.cipherText,
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
     });
 
-    it('invalidates every capability and attempts every external revocation when close callbacks fail', () => {
+    it("invalidates every capability and attempts every external revocation when close callbacks fail", () => {
         const { signing, mailbox } = createKeyMaterial();
         const operations = createBrowserLocalKeyOperations({
             signing,
@@ -662,25 +665,25 @@ describe('browser-local external key provider', () => {
             signing: {
                 ...operations.signing,
                 revoke: () => {
-                    revocations.push('signing');
+                    revocations.push("signing");
                     operations.signing.revoke();
-                    throw new Error('signing revocation failed');
+                    throw new Error("signing revocation failed");
                 },
             },
             mailbox: {
                 ...operations.mailbox,
                 revoke: () => {
-                    revocations.push('mailbox');
+                    revocations.push("mailbox");
                     operations.mailbox.revoke();
-                    throw new Error('mailbox revocation failed');
+                    throw new Error("mailbox revocation failed");
                 },
             },
             resetSafeSetupMailboxRandomness: {
                 ...operations.resetSafeSetupMailboxRandomness!,
                 revoke: () => {
-                    revocations.push('reset-safe randomness');
+                    revocations.push("reset-safe randomness");
                     operations.resetSafeSetupMailboxRandomness!.revoke();
-                    throw new Error('randomness revocation failed');
+                    throw new Error("randomness revocation failed");
                 },
             },
         });
@@ -689,11 +692,11 @@ describe('browser-local external key provider', () => {
             new Uint8Array(ml_kem768.lengths.msg!).fill(0x64),
         );
 
-        expectProviderError(() => provider.close(), 'CapabilityUnavailable');
+        expectProviderError(() => provider.close(), "CapabilityUnavailable");
         expect(revocations).toEqual([
-            'reset-safe randomness',
-            'signing',
-            'mailbox',
+            "reset-safe randomness",
+            "signing",
+            "mailbox",
         ]);
         expectProviderError(
             () =>
@@ -701,7 +704,7 @@ describe('browser-local external key provider', () => {
                     signingCapability: provider.signingCapability,
                     recipientEncapsulationKey: mailbox.publicKey,
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
         expectProviderError(
             () =>
@@ -709,12 +712,12 @@ describe('browser-local external key provider', () => {
                     capability: provider.mailboxCapability,
                     ciphertext: encapsulation.cipherText,
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
         expect(() => provider.close()).not.toThrow();
     });
 
-    it('attempts every external revocation when key self-testing and cleanup both fail', () => {
+    it("attempts every external revocation when key self-testing and cleanup both fail", () => {
         const first = createKeyMaterial();
         const secondSigning = ml_dsa65.keygen(
             new Uint8Array(ml_dsa65.lengths.seed!).fill(0x75),
@@ -729,38 +732,38 @@ describe('browser-local external key provider', () => {
                         ...operations.signing,
                         verificationKey: secondSigning.publicKey,
                         revoke: () => {
-                            revocations.push('signing');
+                            revocations.push("signing");
                             operations.signing.revoke();
-                            throw new Error('signing revocation failed');
+                            throw new Error("signing revocation failed");
                         },
                     },
                     mailbox: {
                         ...operations.mailbox,
                         revoke: () => {
-                            revocations.push('mailbox');
+                            revocations.push("mailbox");
                             operations.mailbox.revoke();
-                            throw new Error('mailbox revocation failed');
+                            throw new Error("mailbox revocation failed");
                         },
                     },
                     resetSafeSetupMailboxRandomness: {
                         ...operations.resetSafeSetupMailboxRandomness!,
                         revoke: () => {
-                            revocations.push('reset-safe randomness');
+                            revocations.push("reset-safe randomness");
                             operations.resetSafeSetupMailboxRandomness!.revoke();
-                            throw new Error('randomness revocation failed');
+                            throw new Error("randomness revocation failed");
                         },
                     },
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
         expect(revocations).toEqual([
-            'reset-safe randomness',
-            'signing',
-            'mailbox',
+            "reset-safe randomness",
+            "signing",
+            "mailbox",
         ]);
     });
 
-    it('rejects capability-kind substitution at runtime', () => {
+    it("rejects capability-kind substitution at runtime", () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({
             ...createBrowserLocalKeyOperations({ signing, mailbox }),
@@ -773,7 +776,7 @@ describe('browser-local external key provider', () => {
                         provider.signingCapability as unknown as BrowserLocalMailboxCapability,
                     ciphertext: new Uint8Array(ml_kem768.lengths.cipherText!),
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
         expectProviderError(
             () =>
@@ -782,7 +785,7 @@ describe('browser-local external key provider', () => {
                         provider.mailboxCapability as unknown as BrowserLocalSigningCapability,
                     recipientEncapsulationKey: mailbox.publicKey,
                 }),
-            'CapabilityUnavailable',
+            "CapabilityUnavailable",
         );
         const freshMailbox = encapsulateFreshMailbox({
             signingCapability: provider.signingCapability,

@@ -338,11 +338,6 @@ const copyLocalRecordExpectedContext = (
                 label: 'Action-randomness commitment',
             },
         ),
-        creationRecoveryEpoch: copyUnsigned64(
-            value.creationRecoveryEpoch,
-            'Local-record creation recovery epoch',
-            errorCode,
-        ),
         identifierInput: copyOpenableLocalRecordIdentifierInput(
             value.identifierInput,
             errorCode,

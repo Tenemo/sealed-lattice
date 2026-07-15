@@ -180,14 +180,12 @@ mod tests {
                            batching_coefficient: ProofChallengeExtensionElement,
                            point: ProofChallengeExtensionElement| {
             batching_coefficient.multiply(
-                point
-                    .power(8 - source_degree)
-                    .multiply(
-                        evaluate_extension_at(coefficients, point)
-                            .subtract(opened_value)
-                            .divide(point.subtract(opening_point))
-                            .expect("test denominator is nonzero"),
-                    ),
+                point.power(8 - source_degree).multiply(
+                    evaluate_extension_at(coefficients, point)
+                        .subtract(opened_value)
+                        .divide(point.subtract(opening_point))
+                        .expect("test denominator is nonzero"),
+                ),
             )
         };
         assert_eq!(

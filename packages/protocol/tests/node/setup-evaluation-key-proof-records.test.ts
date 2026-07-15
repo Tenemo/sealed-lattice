@@ -22,6 +22,10 @@ import type {
     EvaluatorKeySchedule,
     RequiredGaloisKeyScheduleEntry,
 } from '#packages/protocol/src/setup/evaluator-key-schedule';
+import {
+    setupCommitmentModulusLimbCount,
+    setupCommitmentRandomnessWidth,
+} from '#packages/protocol/src/setup/vss-coefficient-commitments/constants-and-types';
 import type { VssSameSecretBridgeStatementSet } from '#packages/protocol/src/setup/vss-commitments';
 import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 import {
@@ -231,7 +235,6 @@ const componentVectorRoot = (
         keySwitchDomain,
         keySwitchSeedHex,
         level,
-        ringDegree,
         componentVectorsLittleEndianHexByDigitAndLimb,
     });
 };
@@ -255,7 +258,6 @@ const transportedShareMaterialRoot = (
 
     return evaluationKeyShareComponentMaterialReferenceRoot(
         proofFamily,
-        ringDegree,
         keySwitchComponentVectorRoot,
         keySwitchDomain,
         keySwitchSeedHex,
@@ -535,9 +537,18 @@ const trusteeWitnesses = (): TrusteeEvaluationKeyWitnessInput[] =>
                         Array.from({ length: ringDegree }, () => 1),
                     ),
             ),
-            openingRandomnessByLimb: Array.from(
+            openingRandomnessBySourceLimbAndCommitmentLimb: Array.from(
                 { length: qSharePrimes.length },
-                () => [Array.from({ length: ringDegree }, () => 1)],
+                () =>
+                    Array.from(
+                        { length: setupCommitmentModulusLimbCount },
+                        () =>
+                            Array.from(
+                                { length: setupCommitmentRandomnessWidth },
+                                () =>
+                                    Array.from({ length: ringDegree }, () => 1),
+                            ),
+                    ),
             ),
         }),
     );
@@ -684,7 +695,6 @@ const evaluationKeyShareMaterialTransportInput = (
 ): EvaluationKeyShareMaterialTransportInput => ({
     trusteeReferences: fixture.commonInput.trusteeReferences,
     qSharePrimes,
-    ringDegree,
     evaluatorKeySchedule: fixture.schedule,
     relinearizationRoundOneContributions: fixture.sourceRoundOneContributions,
     relinearizationRoundTwoContributions: fixture.sourceRoundTwoContributions,
@@ -1033,7 +1043,6 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                         fixture.schedule,
                     ),
                 },
-                ringDegree,
                 sameSecretLinkage: {
                     publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
                     commitments: [sourceConstantCommitment],
@@ -1187,7 +1196,6 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
         ).toBe(
             evaluationKeyShareComponentMaterialReferenceRoot(
                 'relinearization-key-share',
-                ringDegree,
                 keySwitchComponentVectorRoot,
                 'relinearization',
                 keySwitchSeedHex,

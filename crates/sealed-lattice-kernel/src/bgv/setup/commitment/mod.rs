@@ -13,15 +13,14 @@ use crate::{
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{derive_canonical_object_hash, hash_framed_parts_512 as hash512},
+    hashing::derive_canonical_object_hash,
 };
-
-use super::sampling::reduce_unbiased_u64;
 
 #[cfg(test)]
 mod algebra;
 mod commitment_parameters;
 mod computation;
+mod lattice_anchor;
 mod matrix;
 mod opening;
 mod serialization;
@@ -32,11 +31,18 @@ pub(super) use algebra::*;
 #[cfg(test)]
 pub(super) use commitment_parameters::setup_coefficient_fits_commitment_modulus_product;
 use commitment_parameters::setup_coefficients_fit_commitment_modulus_product;
-pub(crate) use commitment_parameters::{
-    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-};
 pub(super) use commitment_parameters::{
-    SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+    SETUP_COMMITMENT_HIDING_ERROR_COEFFICIENT_BOUND,
+    SETUP_COMMITMENT_HIDING_ERROR_DISTRIBUTION_PURPOSE,
+    SETUP_COMMITMENT_HIDING_SECRET_COEFFICIENT_BOUND,
+    SETUP_COMMITMENT_HIDING_SECRET_DISTRIBUTION_PURPOSE, SETUP_COMMITMENT_ROW_COUNT,
+    setup_commitment_randomness_coefficient_bound,
+    setup_commitment_randomness_distribution_purpose,
+};
+pub(crate) use commitment_parameters::{
+    SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
+    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+    SETUP_COMMITMENT_RANDOMNESS_WIDTH,
 };
 #[cfg(test)]
 use commitment_parameters::{
@@ -48,7 +54,6 @@ pub(super) use matrix::*;
 pub(super) use opening::*;
 pub(super) use serialization::*;
 
-pub(crate) use computation::compute_setup_commitment_from_opening_request;
 #[cfg(test)]
 pub(super) use computation::{
     compute_setup_big_signed_lifted_commitment, compute_setup_commitment_for_tests,
@@ -56,6 +61,15 @@ pub(super) use computation::{
 #[cfg(test)]
 use computation::{
     compute_setup_commitment_for_degree, compute_setup_signed_lifted_commitment_for_degree,
+};
+pub(crate) use computation::{
+    compute_setup_commitment_from_opening_request, compute_setup_commitment_from_typed_opening,
+};
+pub(crate) use lattice_anchor::LatticeAnchorCommitment;
+pub(crate) use lattice_anchor::{
+    compute_lattice_anchor_commitment_from_opening_request,
+    compute_lattice_anchor_commitment_from_typed_opening,
+    lattice_anchor_commitment_canonical_bytes, parse_lattice_anchor_commitment_canonical_bytes,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,12 +110,12 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_degree,
-        compute_setup_commitment_from_opening_request,
+        SETUP_COMMITMENT_HIDING_SECRET_WIDTH, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+        compute_setup_commitment_for_degree, compute_setup_commitment_from_opening_request,
         compute_setup_signed_lifted_commitment_for_degree,
-        setup_coefficient_fits_commitment_modulus_product, setup_commitment_root,
-        verify_setup_commitment_opening, verify_setup_lifted_commitment_opening,
-        verify_setup_signed_lifted_commitment_opening,
+        setup_coefficient_fits_commitment_modulus_product, setup_commitment_matrix_polynomial,
+        setup_commitment_root, verify_setup_commitment_opening,
+        verify_setup_lifted_commitment_opening, verify_setup_signed_lifted_commitment_opening,
     };
     use crate::{
         bgv::{
@@ -113,6 +127,15 @@ mod tests {
 
     const TEST_RING_DEGREE: usize = 8;
     const TEST_RANDOMNESS_INFINITY_BOUND: i128 = 1;
+
+    #[test]
+    fn commitment_matrix_sampler_rejects_a_modulus_outside_its_coordinate() {
+        let error =
+            setup_commitment_matrix_polynomial(&valid_hash('0'), 0, 0, 0, TEST_RING_DEGREE, 0)
+                .expect_err("a matrix coordinate cannot select the zero modulus");
+
+        assert!(error.message.contains("does not match"));
+    }
 
     #[test]
     fn commitment_opening_verifies_and_rejects_tampering() -> CanonicalResult<()> {
@@ -183,7 +206,7 @@ mod tests {
             "sourceRnsLimbIndex": 0,
             "shamirCoefficientIndex": 1,
             "messageCoefficients": message,
-            "randomnessByColumn": randomness,
+            "randomnessByCommitmentLimb": randomness,
             "ringDegree": TEST_RING_DEGREE,
         }))?;
 
@@ -204,10 +227,93 @@ mod tests {
             "sourceRnsLimbIndex": DATA_PRIMES.len(),
             "shamirCoefficientIndex": 1,
             "messageCoefficients": message_coefficients(),
-            "randomnessByColumn": randomness_columns(1),
+            "randomnessByCommitmentLimb": randomness_columns(1),
             "ringDegree": TEST_RING_DEGREE,
         });
         assert!(compute_setup_commitment_from_opening_request(&request).is_err());
+    }
+
+    #[test]
+    fn commitment_uses_only_the_opening_tape_for_each_commitment_limb() -> CanonicalResult<()> {
+        let public_matrix_seed_hash = valid_hash('9');
+        let message = message_coefficients();
+        let baseline_randomness = randomness_columns(1);
+        let mut changed_randomness = baseline_randomness.clone();
+        changed_randomness[1][0][0] = match changed_randomness[1][0][0] {
+            -1 => 1,
+            _ => -1,
+        };
+
+        let baseline_commitment = compute_setup_commitment_for_degree(
+            &public_matrix_seed_hash,
+            0,
+            0,
+            &message,
+            &baseline_randomness,
+            TEST_RING_DEGREE,
+        )?;
+        let changed_commitment = compute_setup_commitment_for_degree(
+            &public_matrix_seed_hash,
+            0,
+            0,
+            &message,
+            &changed_randomness,
+            TEST_RING_DEGREE,
+        )?;
+
+        assert_eq!(baseline_commitment.limbs[0], changed_commitment.limbs[0]);
+        assert_ne!(baseline_commitment.limbs[1], changed_commitment.limbs[1]);
+        assert_eq!(baseline_commitment.limbs[2], changed_commitment.limbs[2]);
+        Ok(())
+    }
+
+    #[test]
+    fn commitment_command_rejects_one_opening_tape_shared_across_commitment_limbs() {
+        let request = json!({
+            "command": "ComputeSetupCommitmentFromOpening",
+            "publicMatrixSeedHash": valid_hash('8'),
+            "sourceRnsLimbIndex": 0,
+            "shamirCoefficientIndex": 0,
+            "messageCoefficients": message_coefficients(),
+            "randomnessByCommitmentLimb": randomness_columns(1)[0],
+            "ringDegree": TEST_RING_DEGREE,
+        });
+
+        assert!(compute_setup_commitment_from_opening_request(&request).is_err());
+    }
+
+    #[test]
+    fn commitment_command_enforces_the_all_ternary_fresh_opening_profile() -> CanonicalResult<()> {
+        let public_matrix_seed_hash = valid_hash('7');
+        let ternary_randomness = fresh_randomness_columns();
+        let request = |randomness: Vec<Vec<Vec<i128>>>| {
+            json!({
+                "command": "ComputeSetupCommitmentFromOpening",
+                "publicMatrixSeedHash": public_matrix_seed_hash,
+                "sourceRnsLimbIndex": 0,
+                "shamirCoefficientIndex": 0,
+                "messageCoefficients": message_coefficients(),
+                "randomnessByCommitmentLimb": randomness,
+                "ringDegree": TEST_RING_DEGREE,
+            })
+        };
+
+        compute_setup_commitment_from_opening_request(&request(ternary_randomness.clone()))?;
+
+        let mut ternary_out_of_support = ternary_randomness.clone();
+        ternary_out_of_support[0][0][0] = 2;
+        let ternary_error =
+            compute_setup_commitment_from_opening_request(&request(ternary_out_of_support))
+                .expect_err("purpose-11 value two must be rejected");
+        assert!(ternary_error.message.contains("purpose 11 support"));
+
+        let mut hiding_error_out_of_support = ternary_randomness;
+        hiding_error_out_of_support[0][SETUP_COMMITMENT_HIDING_SECRET_WIDTH][0] = -2;
+        let hiding_error =
+            compute_setup_commitment_from_opening_request(&request(hiding_error_out_of_support))
+                .expect_err("purpose-12 value minus two must be rejected");
+        assert!(hiding_error.message.contains("purpose 12 support"));
+        Ok(())
     }
 
     #[test]
@@ -289,11 +395,19 @@ mod tests {
         let combined_randomness = first_randomness
             .iter()
             .zip(second_randomness.iter())
-            .map(|(first_column, second_column)| {
-                first_column
+            .map(|(first_limb, second_limb)| {
+                first_limb
                     .iter()
-                    .zip(second_column.iter())
-                    .map(|(first_value, second_value)| (3 * first_value) + (5 * second_value))
+                    .zip(second_limb.iter())
+                    .map(|(first_column, second_column)| {
+                        first_column
+                            .iter()
+                            .zip(second_column.iter())
+                            .map(|(first_value, second_value)| {
+                                (3 * first_value) + (5 * second_value)
+                            })
+                            .collect::<Vec<_>>()
+                    })
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
@@ -338,29 +452,72 @@ mod tests {
         vec![0, 1, 2, 3, 5, 8, 13, 34]
     }
 
-    fn randomness_columns(bound: i128) -> Vec<Vec<i128>> {
-        (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-            .map(|column_index| {
-                (0..TEST_RING_DEGREE)
-                    .map(|coefficient_index| {
-                        ((column_index + coefficient_index) as i128 % ((2 * bound) + 1)) - bound
+    fn randomness_columns(bound: i128) -> Vec<Vec<Vec<i128>>> {
+        super::SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+            .iter()
+            .enumerate()
+            .map(|(commitment_limb_position, _)| {
+                (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+                    .map(|column_index| {
+                        (0..TEST_RING_DEGREE)
+                            .map(|coefficient_index| {
+                                ((commitment_limb_position + column_index + coefficient_index)
+                                    as i128
+                                    % ((2 * bound) + 1))
+                                    - bound
+                            })
+                            .collect()
                     })
                     .collect()
             })
             .collect()
     }
 
-    fn shifted_randomness_columns() -> Vec<Vec<i128>> {
-        (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-            .map(|column_index| {
-                (0..TEST_RING_DEGREE)
-                    .map(
-                        |coefficient_index| match (column_index + (2 * coefficient_index)) % 3 {
-                            0 => -1,
-                            1 => 0,
-                            _ => 1,
-                        },
-                    )
+    fn shifted_randomness_columns() -> Vec<Vec<Vec<i128>>> {
+        super::SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+            .iter()
+            .enumerate()
+            .map(|(commitment_limb_position, _)| {
+                (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+                    .map(|column_index| {
+                        (0..TEST_RING_DEGREE)
+                            .map(|coefficient_index| {
+                                match (commitment_limb_position
+                                    + column_index
+                                    + (2 * coefficient_index))
+                                    % 3
+                                {
+                                    0 => -1,
+                                    1 => 0,
+                                    _ => 1,
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn fresh_randomness_columns() -> Vec<Vec<Vec<i128>>> {
+        super::SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+            .iter()
+            .enumerate()
+            .map(|(commitment_limb_position, _)| {
+                (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+                    .map(|column_index| {
+                        (0..TEST_RING_DEGREE)
+                            .map(|coefficient_index| {
+                                let support_position =
+                                    commitment_limb_position + column_index + coefficient_index;
+                                match support_position % 3 {
+                                    0 => -1,
+                                    1 => 0,
+                                    _ => 1,
+                                }
+                            })
+                            .collect()
+                    })
                     .collect()
             })
             .collect()

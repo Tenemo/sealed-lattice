@@ -2,12 +2,6 @@ import {
     copyCanonicalStreamDescriptor,
     createSetupPackageVerificationInput,
 } from '@sealed-lattice/protocol';
-import type {
-    EvaluationKeyShareComponentMaterialStream,
-    PublicKeyShareMaterialStream,
-    SetupProofMaterialStream,
-    SetupProofMaterialStreamSet,
-} from '@sealed-lattice/protocol';
 import {
     bgvCanonicalStreamFamilies,
     openBgvCanonicalStreamRuntime,
@@ -28,6 +22,8 @@ import {
 } from './kernel-json-snapshot.js';
 
 import type {
+    SetupMaterialStream,
+    SetupProofMaterialStreamSet,
     VerifyPrivateVssShareInput,
     VerifySetupPackageInput,
 } from './index.js';
@@ -47,8 +43,6 @@ type SetupProofMaterialTransportFieldName =
     | 'transportedVssShareLinkageProofMaterial'
     | 'transportedSameSecretBridgeProofMaterial'
     | 'transportedEvaluationKeyShareProofMaterial';
-
-type SetupProofMaterialTransportSet = SetupProofMaterialStreamSet;
 
 const setupProofMaterialFamilies = Object.freeze({
     transportedEvaluationKeyShareProofMaterial:
@@ -86,7 +80,7 @@ const ownedCanonicalDescriptorBytes = (
 const materialStreamSnapshot = (
     streamValue: unknown,
     streamPath: string,
-): SetupProofMaterialStream => {
+): SetupMaterialStream => {
     const streamDescriptors = plainRecordDescriptors(streamValue, streamPath);
     const descriptorBytes = copyCanonicalStreamDescriptor(
         dataPropertyValue(
@@ -107,7 +101,7 @@ const materialStreamSnapshot = (
 
     return {
         descriptorBytes,
-        pullChunk: pullChunkValue as SetupProofMaterialStream['pullChunk'],
+        pullChunk: pullChunkValue as SetupMaterialStream['pullChunk'],
     };
 };
 
@@ -115,13 +109,13 @@ const materialStreamCollectionSnapshot = (
     streamCollectionValue: unknown,
     fieldPath: string,
     state: KernelJsonSnapshotState,
-): readonly SetupProofMaterialStream[] => {
+): readonly SetupMaterialStream[] => {
     const { descriptors, length } = ordinaryArrayDescriptors(
         streamCollectionValue,
         fieldPath,
     );
     chargeKernelJsonSnapshotValues(state, length + 1);
-    const snapshots: SetupProofMaterialStream[] = [];
+    const snapshots: SetupMaterialStream[] = [];
     for (let streamIndex = 0; streamIndex < length; streamIndex += 1) {
         const streamDescriptor = descriptors[String(streamIndex)];
         if (streamDescriptor === undefined) {
@@ -274,7 +268,7 @@ export const snapshotSetupPackageVerificationInput = (
             ),
             'evaluationKeyShareComponentMaterialStreams',
             state,
-        ) as readonly EvaluationKeyShareComponentMaterialStream[];
+        );
     return {
         setupPackage,
         expectedManifestHash,
@@ -304,7 +298,7 @@ const authenticateCanonicalProofMaterial = async (
         readonly descriptorBytes: Uint8Array;
         readonly family: BgvCanonicalStreamFamily;
         readonly proofBytesHash: string;
-        readonly pullChunk: SetupProofMaterialStream['pullChunk'];
+        readonly pullChunk: SetupMaterialStream['pullChunk'];
     }>,
 ): Promise<void> => {
     await runtime.readMaterial({
@@ -318,7 +312,7 @@ const authenticateCanonicalProofMaterial = async (
 const streamPublicKeyShareMaterial = async (
     runtime: BgvCanonicalStreamRuntime,
     setupPackage: VerifySetupPackageInput['setupPackage'],
-    materialStream: PublicKeyShareMaterialStream,
+    materialStream: SetupMaterialStream,
 ): Promise<void> => {
     const setupPackageRecord = evaluationKeyComponentRecord(
         setupPackage,
@@ -450,7 +444,7 @@ const streamSetupProofMaterialSet = async (
     runtime: BgvCanonicalStreamRuntime,
     setupPackage: VerifySetupPackageInput['setupPackage'],
     fieldName: SetupProofMaterialTransportFieldName,
-    materialSet: SetupProofMaterialTransportSet,
+    materialSet: SetupProofMaterialStreamSet,
 ): Promise<void> => {
     if (!Array.isArray(materialSet.proofMaterialStreams)) {
         throw new TypeError(
@@ -486,7 +480,7 @@ const streamSetupProofMaterialSet = async (
             ),
             family: setupProofMaterialFamilies[fieldName],
             proofBytesHash,
-            pullChunk: pullChunkValue as SetupProofMaterialStream['pullChunk'],
+            pullChunk: pullChunkValue as SetupMaterialStream['pullChunk'],
         });
     }
 };
@@ -629,7 +623,7 @@ const evaluationKeyComponentReferencesInCanonicalOrder = (
 const streamEvaluationKeyShareComponentMaterial = async (
     runtime: BgvCanonicalStreamRuntime,
     setupPackage: VerifySetupPackageInput['setupPackage'],
-    componentMaterialStreams: readonly EvaluationKeyShareComponentMaterialStream[],
+    componentMaterialStreams: readonly SetupMaterialStream[],
 ): Promise<void> => {
     const componentMaterialStreamValues: unknown = componentMaterialStreams;
     if (!Array.isArray(componentMaterialStreamValues)) {
@@ -656,8 +650,7 @@ const streamEvaluationKeyShareComponentMaterial = async (
                 `${streamPath} must carry descriptorBytes and a pullChunk function.`,
             );
         }
-        const pullChunk =
-            pullChunkValue as EvaluationKeyShareComponentMaterialStream['pullChunk'];
+        const pullChunk = pullChunkValue as SetupMaterialStream['pullChunk'];
         await runtime.readMaterial({
             descriptorBytes: ownedCanonicalDescriptorBytes(
                 componentMaterialStream.descriptorBytes,
@@ -878,7 +871,7 @@ export const prepareSnapshottedPrivateVssShareVerificationInputForKernel =
                     family: bgvCanonicalStreamFamilies.vssOpeningCarry,
                     proofBytesHash,
                     pullChunk:
-                        pullChunkValue as SetupProofMaterialStream['pullChunk'],
+                        pullChunkValue as SetupMaterialStream['pullChunk'],
                 });
             }
         }

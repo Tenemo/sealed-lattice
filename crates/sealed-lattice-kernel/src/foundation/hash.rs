@@ -6,8 +6,8 @@ use sha3::{
 };
 
 use super::{
-    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
-    CanonicalItem, CanonicalItemType, CanonicalTuple,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError, CanonicalItem,
+    CanonicalItemType, CanonicalTuple,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -165,9 +165,7 @@ impl StreamingFoundationTupleHash512 {
             update_canonical_hash_item(&mut hasher, item)?;
         }
         hasher.update(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
-        hasher.update(
-            &streamed_item_byte_length_u32.to_le_bytes(),
-        );
+        hasher.update(&streamed_item_byte_length_u32.to_le_bytes());
         hasher.update(&payload_byte_length_u32.to_le_bytes());
         Ok(Self {
             hasher,
@@ -262,11 +260,9 @@ mod tests {
                 .expect("test tag is canonical"),
             CanonicalItem::unsigned64(0),
         ];
-        let expected_prefix = hash_foundation_tuple_512(
-            "sealed-lattice/proof/transcript/squeeze/v1",
-            &items,
-        )
-        .expect("the hash input is canonical");
+        let expected_prefix =
+            hash_foundation_tuple_512("sealed-lattice/proof/transcript/squeeze/v1", &items)
+                .expect("the hash input is canonical");
         let mut extended_output = [0_u8; 1024];
 
         fill_foundation_tuple_xof(
@@ -280,30 +276,27 @@ mod tests {
             &extended_output[..Hash512::BYTE_LENGTH],
             expected_prefix.as_bytes(),
         );
-        assert!(extended_output[Hash512::BYTE_LENGTH..]
-            .iter()
-            .any(|byte| *byte != 0));
+        assert!(
+            extended_output[Hash512::BYTE_LENGTH..]
+                .iter()
+                .any(|byte| *byte != 0)
+        );
     }
 
     #[test]
     fn streaming_variable_bytes_hash_matches_one_shot_for_every_fragmentation() {
         let prefix_items = [
             CanonicalItem::hash512([0x31; 64]),
-            CanonicalItem::nonempty_ascii("proof/1216/query-openings")
-                .expect("test tag"),
+            CanonicalItem::nonempty_ascii("proof/1216/query-openings").expect("test tag"),
         ];
         let payload = (0_u16..=1024)
             .flat_map(u16::to_le_bytes)
             .collect::<Vec<_>>();
         let mut one_shot_items = prefix_items.to_vec();
-        one_shot_items.push(
-            CanonicalItem::variable_bytes(&payload).expect("bounded test payload"),
-        );
-        let expected = hash_foundation_tuple_512(
-            "sealed-lattice/proof/transcript/absorb/v1",
-            &one_shot_items,
-        )
-        .expect("one-shot hash");
+        one_shot_items.push(CanonicalItem::variable_bytes(&payload).expect("bounded test payload"));
+        let expected =
+            hash_foundation_tuple_512("sealed-lattice/proof/transcript/absorb/v1", &one_shot_items)
+                .expect("one-shot hash");
 
         for fragment_byte_length in [1, 3, 63, 64, 65, 511, payload.len()] {
             let mut streaming = StreamingFoundationTupleHash512::new_variable_bytes(
