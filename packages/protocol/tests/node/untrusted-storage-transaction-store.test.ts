@@ -6,7 +6,7 @@ import {
     type UntrustedStorageAdapter,
     type UntrustedStorageAtomicMutation,
     type UntrustedStorageAuthenticator,
-    type UntrustedStorageRecoveryReport,
+    type UntrustedStorageRepairReport,
     type UntrustedStorageTransactionErrorCode,
     type UntrustedStorageTransactionLimits,
 } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
@@ -205,7 +205,7 @@ const openTestStore = async (input?: {
     namespace?: string;
 }): Promise<{
     adapter: DeterministicInMemoryStorageAdapter;
-    recoveryReport: UntrustedStorageRecoveryReport;
+    repairReport: UntrustedStorageRepairReport;
     store: UntrustedStorageTransactionStore;
 }> => {
     const adapter = input?.adapter ?? new DeterministicInMemoryStorageAdapter();
@@ -579,7 +579,7 @@ describe('untrusted storage transaction store', () => {
             postCommitTransaction.commit(),
             'InvalidState',
         );
-        await expect(postCommitStore.store.recover()).resolves.toMatchObject({
+        await expect(postCommitStore.store.repair()).resolves.toMatchObject({
             retainedObjectCount: 1,
         });
 
@@ -603,7 +603,7 @@ describe('untrusted storage transaction store', () => {
             abortTransaction.closeAfterFailure(),
             'CleanupFailed',
         );
-        await expect(abortStore.store.recover()).resolves.toMatchObject({
+        await expect(abortStore.store.repair()).resolves.toMatchObject({
             removedUnreferencedObjectCount: 1,
             retainedObjectCount: 0,
         });
@@ -1069,7 +1069,7 @@ describe('untrusted storage transaction store', () => {
         );
     });
 
-    it('fails recovery when retained storage exceeds the configured total quota', async () => {
+    it('fails repair when retained storage exceeds the configured total quota', async () => {
         const adapter = new DeterministicInMemoryStorageAdapter();
         const namespace = 'over-total-quota';
         const objectKey =
@@ -1096,7 +1096,7 @@ describe('untrusted storage transaction store', () => {
         );
     });
 
-    it('bounds hostile owned-key enumeration before recovery builds record maps', async () => {
+    it('bounds hostile owned-key enumeration before repair builds record maps', async () => {
         const adapter = new DeterministicInMemoryStorageAdapter();
         const namespace = 'owned-record-cap';
         const objectKey =
@@ -1136,7 +1136,7 @@ describe('untrusted storage transaction store', () => {
         );
     });
 
-    it('recovers abandoned writes but fails closed on corrupt, dangling, or aliased committed indices', async () => {
+    it('repairs abandoned writes but fails closed on corrupt, dangling, or aliased committed indices', async () => {
         const adapter = new DeterministicInMemoryStorageAdapter();
         const crashedStore = await openTestStore({ adapter });
         const abandonedTransaction = await crashedStore.store.beginTransaction({
@@ -1149,7 +1149,7 @@ describe('untrusted storage transaction store', () => {
         await abandonedLease.write(new Uint8Array([9, 9, 9]));
 
         const afterCrash = await openTestStore({ adapter });
-        expect(afterCrash.recoveryReport).toMatchObject({
+        expect(afterCrash.repairReport).toMatchObject({
             removedCorruptIndexCount: 0,
             removedUnreferencedObjectCount: 1,
             retainedObjectCount: 0,

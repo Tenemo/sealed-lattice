@@ -31,7 +31,6 @@ const binding = Object.freeze({
     suiteId: createBytes(64, 7),
 });
 
-
 const expectCustodyErrorCode = async (
     operation: Promise<unknown>,
     code: BrowserActionStorageCustodyError['code'],
@@ -140,22 +139,24 @@ describe('Local storage-root real-WASM worker kernel', () => {
         expect(reopened.actionRandomnessCommitment).toEqual(
             created.actionRandomnessCommitment,
         );
-        const dealerReservationVector = stateVector.reservationOnly.find(
-            ({ capabilityKind }) =>
-                capabilityKind === stateCapabilityKinds.setupActionRandomnessRoot,
-        );
-        if (dealerReservationVector === undefined) {
-            throw new Error('Missing dealer-set reservation vector.');
+        const terminalPackageReservationVector =
+            stateVector.reservationOnly.find(
+                ({ capabilityKind }) =>
+                    capabilityKind ===
+                    stateCapabilityKinds.setupTerminalPackage,
+            );
+        if (terminalPackageReservationVector === undefined) {
+            throw new Error('Missing terminal-package reservation vector.');
         }
-        const dealerReservation =
+        const terminalPackageReservation =
             await workerKernel.verifyActionStateReservation({
                 canonicalReservationIntentCarrier:
-                    dealerReservationVector.certifiedIntent
+                    terminalPackageReservationVector.certifiedIntent
                         .canonicalIntentCarrier,
                 canonicalStateCertificate:
-                    dealerReservationVector.certifiedIntent
+                    terminalPackageReservationVector.certifiedIntent
                         .canonicalStateCertificate,
-                capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
+                capabilityKind: stateCapabilityKinds.setupTerminalPackage,
                 expectedAuthorizationHash: stateVector.authorizationHash,
                 stateVerifierSessionIdentifier: openedStateSession.value,
                 subjectParticipantIdentity:
@@ -173,7 +174,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
                 subjectParticipantIdentity:
                     stateVector.subjectParticipantIdentity,
             });
-        if (!dealerReservation.isValid || !targetReservation.isValid) {
+        if (!terminalPackageReservation.isValid || !targetReservation.isValid) {
             throw new Error('Proof-attempt reservations did not verify.');
         }
         const persistentAttemptInput = {
@@ -181,7 +182,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
                 reopened.actionRandomnessSessionIdentifier,
             applicationStatementHash: createBytes(64, 177),
             rosterPosition: 0,
-            stateReservationIdentifier: dealerReservation.value,
+            stateReservationIdentifier: rootReservation.value,
             statementSchemaIdentifier: 0x1211,
         } as const;
         expect(
@@ -479,5 +480,4 @@ describe('Local storage-root real-WASM worker kernel', () => {
             'InvalidState',
         );
     });
-
 });

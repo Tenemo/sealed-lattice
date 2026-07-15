@@ -44,6 +44,7 @@ const COMMAND_SETUP_MAILBOX_SIGNATURE_HEDGE: u32 = 12;
 const COMMAND_CREATE_STRUCTURED_COMMITMENT_OPENING: u32 = 13;
 const COMMAND_RELEASE_STRUCTURED_COMMITMENT_OPENING: u32 = 14;
 const COMMAND_COMPUTE_STRUCTURED_COMMITMENT: u32 = 15;
+const COMMAND_SETUP_OBJECT_SIGNATURE_HEDGE: u32 = 16;
 
 const HANDLE_BYTE_LENGTH: usize = 4;
 const HASH_BYTE_LENGTH: usize = 64;
@@ -413,6 +414,7 @@ pub(crate) fn run_action_randomness_command(command: u32, input: &[u8]) -> Runti
             release_structured_commitment_opening(input)
         }
         COMMAND_COMPUTE_STRUCTURED_COMMITMENT => compute_structured_commitment(input),
+        COMMAND_SETUP_OBJECT_SIGNATURE_HEDGE => setup_object_signature_hedge(input),
         COMMAND_PERSISTENT_PROOF_ATTEMPT => persistent_proof_attempt(input),
         COMMAND_ORDINARY_PROOF_ATTEMPT => ordinary_proof_attempt(input),
         COMMAND_TARGET_RELEASE_ATTEMPT => target_release_attempt(input),
@@ -719,6 +721,44 @@ fn setup_mailbox_signature_hedge(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     })
 }
 
+fn setup_object_signature_hedge(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let handle = reader.read_u32()?;
+    let reservation_binding = read_verified_reservation_binding(&mut reader)?;
+    let roster_hash = Hash512::from_bytes(reader.read_array()?);
+    let signature_message_hash = Hash512::from_bytes(reader.read_array()?);
+    reader.finish()?;
+    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let randomness = registry.get(handle)?;
+        require_matching_setup_action_randomness_reservation(
+            randomness,
+            reservation_binding,
+            roster_hash,
+        )?;
+        let retained_roster = registry
+            .setup_rosters
+            .get(&handle)
+            .ok_or(RefusalReason::MissingPrerequisite.canonical_code() as u32)?;
+        if retained_roster.roster_hash != roster_hash {
+            return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
+        }
+
+        let mut signature_hedge_stream = randomness
+            .begin_stream(
+                PrivateRandomnessDomain::setup_source(4).map_err(schema_status)?,
+                signature_message_hash,
+                randomness.setup_attempt_identifier(),
+            )
+            .map_err(schema_status)?;
+        let mut signature_hedge = Zeroizing::new([0u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]);
+        signature_hedge_stream
+            .fill_bytes(signature_hedge.as_mut())
+            .map_err(schema_status)?;
+        Ok(signature_hedge.as_ref().to_vec())
+    })
+}
+
 fn create_structured_commitment_opening(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let mut reader = InputReader::new(input);
     let action_randomness_handle = reader.read_u32()?;
@@ -889,9 +929,7 @@ fn derive_structured_commitment_opening(
             .map_err(schema_status)?;
         let mut polynomial = Zeroizing::new(Vec::with_capacity(POLYNOMIAL_DEGREE));
         for _ in 0..POLYNOMIAL_DEGREE {
-            let coefficient = stream
-                .sample_centered_ternary(MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT)
-                .map_err(schema_status)?;
+            let coefficient = stream.sample_centered_binomial(2).map_err(schema_status)?;
             polynomial.push(
                 i8::try_from(coefficient).map_err(|_| {
                     RefusalReason::InvalidArithmeticRelation.canonical_code() as u32
@@ -1432,7 +1470,6 @@ mod tests {
         let storage_handle = u32::from_le_bytes(staged[..HANDLE_BYTE_LENGTH].try_into().unwrap());
         let mut commit_input = storage_handle.to_le_bytes().to_vec();
         commit_input.extend_from_slice(&storage_capability);
-        commit_input.extend_from_slice(&[0xd2; 32]);
         run_local_storage_root_command(LOCAL_STORAGE_ROOT_COMMAND_COMMIT, &commit_input)
             .expect("storage root commits");
 
@@ -1455,7 +1492,6 @@ mod tests {
             ),
             commitment,
             0,
-            0,
             None,
             [0xe3; LOCAL_RECORD_NONCE_BYTE_LENGTH],
             &[0x5a; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
@@ -1463,7 +1499,6 @@ mod tests {
         .expect("action root seals through the closed storage path");
 
         let mut record_suffix = Vec::with_capacity(17);
-        record_suffix.extend_from_slice(&0_u64.to_le_bytes());
         record_suffix.extend_from_slice(&0_u64.to_le_bytes());
         record_suffix.push(0);
         assert!(
@@ -1513,7 +1548,6 @@ mod tests {
                     ParticipantIdentity::from_bytes([0x44; HASH_BYTE_LENGTH]),
                 ),
                 commitment,
-                0,
                 0,
                 None,
                 [0xe4; LOCAL_RECORD_NONCE_BYTE_LENGTH],

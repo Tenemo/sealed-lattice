@@ -1427,7 +1427,7 @@ pub(super) fn target_partial_decryption_radix_digit_source(
         protocol_source_kind: 4,
         source_coordinates: vec![u64::from(target_role), u64::from(target_modulus_index)],
         statement_binding_path: vec![RelationSelectorPathStep::tuple_field(
-            13_u64 + u64::from(target_role),
+            11_u64 + u64::from(target_role),
         )],
         value_layout: least_nonnegative_residue_vector(modulus_reference, ring_degree),
     };

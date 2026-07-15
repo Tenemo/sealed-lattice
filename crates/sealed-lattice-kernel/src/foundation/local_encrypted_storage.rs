@@ -57,7 +57,6 @@ const LOCAL_RECORD_KEY_CUSTOMIZATION: &[u8] = b"sealed-lattice/local-record-key/
 #[repr(u16)]
 pub enum LocalRecordType {
     ActionRandomness = 1,
-    PublicCoinPrivateMaterial = 2,
     SourceVssMaterial = 3,
     AggregateThresholdShare = 4,
     ProofAttempt = 5,
@@ -77,7 +76,6 @@ impl LocalRecordType {
     pub const fn from_canonical_code(code: u16) -> Option<Self> {
         match code {
             1 => Some(Self::ActionRandomness),
-            2 => Some(Self::PublicCoinPrivateMaterial),
             3 => Some(Self::SourceVssMaterial),
             4 => Some(Self::AggregateThresholdShare),
             5 => Some(Self::ProofAttempt),
@@ -95,7 +93,6 @@ impl LocalRecordType {
 #[derive(Debug, Clone, Copy)]
 pub enum LocalRecordIdentifierInput<'input> {
     ActionRandomness,
-    PublicCoinPrivateMaterial,
     SourceVssMaterial {
         material_context_hash: Hash512,
     },
@@ -159,7 +156,6 @@ impl LocalRecordIdentifierInput<'_> {
     pub const fn record_type(self) -> LocalRecordType {
         match self {
             Self::ActionRandomness => LocalRecordType::ActionRandomness,
-            Self::PublicCoinPrivateMaterial => LocalRecordType::PublicCoinPrivateMaterial,
             Self::SourceVssMaterial { .. } => LocalRecordType::SourceVssMaterial,
             Self::AggregateThresholdShare { .. } => LocalRecordType::AggregateThresholdShare,
             Self::ProofAttempt { .. } => LocalRecordType::ProofAttempt,
@@ -277,10 +273,6 @@ pub fn derive_local_record_identifier(
     let (domain, items) = match identifier_input {
         LocalRecordIdentifierInput::ActionRandomness => (
             "sealed-lattice/local-record-id/action-randomness/v1",
-            Vec::from(binding_items),
-        ),
-        LocalRecordIdentifierInput::PublicCoinPrivateMaterial => (
-            "sealed-lattice/local-record-id/public-coin/v1",
             Vec::from(binding_items),
         ),
         LocalRecordIdentifierInput::SourceVssMaterial {

@@ -80,12 +80,13 @@ export type NamespaceFreshnessVerifier = Readonly<{
     verifyCertificate(input: {
         canonicalCheckpoint: Uint8Array;
         expectedContext: NamespaceFreshnessContext;
-        externalRosterWitnessIdentities: readonly Uint8Array[];
+        rosterParticipantWitnessIdentities: readonly Uint8Array[];
         freshnessQuorum: number;
         untrustedVoteCarriers: readonly Uint8Array[];
     }): VerificationResult<NamespaceFreshnessVerifiedCertificate>;
 }>;
 
+/** Participant-local signer for a roster member witnessing another member. */
 export type NamespaceFreshnessClosedWitnessSigner = Readonly<{
     signVerifiedCheckpoint(input: {
         verifiedCheckpoint: VerifiedNamespaceFreshnessCheckpoint;
@@ -128,13 +129,17 @@ export type NamespaceFreshnessWitnessStore = Readonly<{
     retire(): Promise<void>;
 }>;
 
-export type NamespaceFreshnessWitnessServiceState =
-    | 'active'
-    | 'retired';
+export type NamespaceFreshnessWitnessServiceState = 'active' | 'retired';
 
+/**
+ * Participant-client runtime for one roster member witnessing another member.
+ * This is not an external network service or a separate ceremony actor.
+ */
 export type NamespaceFreshnessWitnessService = Readonly<{
     state(): NamespaceFreshnessWitnessServiceState;
-    vote(canonicalCheckpoint: Uint8Array): Promise<VerificationResult<Uint8Array>>;
+    vote(
+        canonicalCheckpoint: Uint8Array,
+    ): Promise<VerificationResult<Uint8Array>>;
 }>;
 
 export type NamespaceFreshnessLocalHead = Readonly<{
@@ -206,7 +211,8 @@ export class NamespaceFreshnessError extends Error {
 
 const refused = <Value>(
     refusalReason: RefusalReason,
-): VerificationResult<Value> => Object.freeze({ isValid: false, refusalReason });
+): VerificationResult<Value> =>
+    Object.freeze({ isValid: false, refusalReason });
 
 const isUint8Array = (value: unknown): value is Uint8Array => {
     try {
@@ -277,10 +283,7 @@ const contextMatches = (
     context: NamespaceFreshnessContext,
 ): boolean =>
     bytesEqual(description.suiteIdentifier, context.suiteIdentifier) &&
-    bytesEqual(
-        description.ceremonyContextHash,
-        context.ceremonyContextHash,
-    ) &&
+    bytesEqual(description.ceremonyContextHash, context.ceremonyContextHash) &&
     bytesEqual(description.actionContextHash, context.actionContextHash) &&
     bytesEqual(
         description.subjectParticipantIdentity,
@@ -314,9 +317,7 @@ const copyDescription = (
         authenticatedHeadDigest: Uint8Array.from(
             description.authenticatedHeadDigest,
         ),
-        ceremonyContextHash: Uint8Array.from(
-            description.ceremonyContextHash,
-        ),
+        ceremonyContextHash: Uint8Array.from(description.ceremonyContextHash),
         checkpointHash: Uint8Array.from(description.checkpointHash),
         namespaceSequence: description.namespaceSequence,
         ...(description.previousCheckpointHash === undefined
@@ -336,25 +337,25 @@ const copyDescription = (
         version: checkpointVersion,
     });
 
-const validateWitnessUniverse = (
+const validateRosterParticipantWitnessIdentities = (
     context: NamespaceFreshnessContext,
-    externalRosterWitnessIdentities: readonly Uint8Array[],
+    rosterParticipantWitnessIdentities: readonly Uint8Array[],
     freshnessQuorum: number,
 ): readonly Uint8Array[] => {
     if (
-        !Array.isArray(externalRosterWitnessIdentities) ||
-        externalRosterWitnessIdentities.length === 0 ||
+        !Array.isArray(rosterParticipantWitnessIdentities) ||
+        rosterParticipantWitnessIdentities.length === 0 ||
         !Number.isSafeInteger(freshnessQuorum) ||
         freshnessQuorum <= 0 ||
-        freshnessQuorum > externalRosterWitnessIdentities.length
+        freshnessQuorum > rosterParticipantWitnessIdentities.length
     ) {
         throw new NamespaceFreshnessError(
             'InvalidConfiguration',
-            'The freshness witness universe or quorum is invalid.',
+            'The roster-participant witness identities or quorum are invalid.',
         );
     }
-    const identities = externalRosterWitnessIdentities.map((identity) =>
-        copyExactBytes(identity, 'externalRosterWitnessIdentity'),
+    const identities = rosterParticipantWitnessIdentities.map((identity) =>
+        copyExactBytes(identity, 'rosterParticipantWitnessIdentity'),
     );
     const identityKeys = identities.map(bytesKey);
     if (
@@ -492,11 +493,9 @@ export const openNamespaceFreshnessWitnessService = (input: {
                 return refused('wrongTypeOrLength');
             }
             const verifiedOwnVote = input.verifier.verifyVoteCarrier({
-                expectedWitnessParticipantIdentity:
-                    witnessParticipantIdentity,
+                expectedWitnessParticipantIdentity: witnessParticipantIdentity,
                 untrustedVoteCarrier: canonicalVoteCarrier,
-                verifiedCheckpoint:
-                    verifiedCheckpoint.value.verifiedCheckpoint,
+                verifiedCheckpoint: verifiedCheckpoint.value.verifiedCheckpoint,
             });
             if (!verifiedOwnVote.isValid) {
                 return refused(verifiedOwnVote.refusalReason);
@@ -504,8 +503,7 @@ export const openNamespaceFreshnessWitnessService = (input: {
             const nextCoordinate: NamespaceFreshnessWitnessCoordinate =
                 Object.freeze({
                     canonicalCheckpoint: Uint8Array.from(canonicalCheckpoint),
-                    canonicalVoteCarrier:
-                        Uint8Array.from(canonicalVoteCarrier),
+                    canonicalVoteCarrier: Uint8Array.from(canonicalVoteCarrier),
                     description: copyDescription(description),
                 });
             const expectedCheckpointHash =
@@ -575,17 +573,18 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
     acceptedCheckpointJournal: NamespaceFreshnessAcceptedCheckpointJournal;
     certificateTransport: NamespaceFreshnessCertificateTransport;
     context: NamespaceFreshnessContext;
-    externalRosterWitnessIdentities: readonly Uint8Array[];
+    rosterParticipantWitnessIdentities: readonly Uint8Array[];
     freshnessQuorum: number;
     localAuthority: NamespaceFreshnessLocalAuthority;
     verifier: NamespaceFreshnessVerifier;
 }): NamespaceFreshnessSubjectRuntime => {
     const context = copyContext(input.context);
-    const witnessIdentities = validateWitnessUniverse(
-        context,
-        input.externalRosterWitnessIdentities,
-        input.freshnessQuorum,
-    );
+    const rosterParticipantWitnessIdentities =
+        validateRosterParticipantWitnessIdentities(
+            context,
+            input.rosterParticipantWitnessIdentities,
+            input.freshnessQuorum,
+        );
     let state: NamespaceFreshnessSubjectState = 'unavailable';
     let retirementReason: NamespaceFreshnessRetirementReason | undefined;
     let acceptedCertificate: AcceptedCertificate | undefined;
@@ -646,7 +645,7 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
         const verification = input.verifier.verifyCertificate({
             canonicalCheckpoint: untrusted.canonicalCheckpoint,
             expectedContext: context,
-            externalRosterWitnessIdentities: witnessIdentities,
+            rosterParticipantWitnessIdentities,
             freshnessQuorum: input.freshnessQuorum,
             untrustedVoteCarriers: untrusted.untrustedVoteCarriers,
         });
@@ -661,7 +660,8 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
             !requireDescription(verification.value.description, context) ||
             !Array.isArray(verifiedWitnessIdentities) ||
             verifiedWitnessIdentities.length < input.freshnessQuorum ||
-            verifiedWitnessIdentities.length > witnessIdentities.length
+            verifiedWitnessIdentities.length >
+                rosterParticipantWitnessIdentities.length
         ) {
             return { kind: 'invalid' };
         }
@@ -675,8 +675,8 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
                 return { kind: 'invalid' };
             }
             const witnessKey = bytesKey(witnessIdentity);
-            const rosterPosition = witnessIdentities.findIndex((identity) =>
-                bytesEqual(identity, witnessIdentity),
+            const rosterPosition = rosterParticipantWitnessIdentities.findIndex(
+                (identity) => bytesEqual(identity, witnessIdentity),
             );
             if (
                 rosterPosition <= previousRosterPosition ||
@@ -690,9 +690,7 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
         return {
             kind: 'accepted',
             certificate: Object.freeze({
-                description: copyDescription(
-                    verification.value.description,
-                ),
+                description: copyDescription(verification.value.description),
                 canonicalCheckpoint: Uint8Array.from(
                     untrusted.canonicalCheckpoint,
                 ),
@@ -745,7 +743,8 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
             bySequence.set(candidate.description.namespaceSequence, candidate);
         }
         const ordered = [...bySequence.values()].sort((left, right) =>
-            left.description.namespaceSequence < right.description.namespaceSequence
+            left.description.namespaceSequence <
+            right.description.namespaceSequence
                 ? -1
                 : left.description.namespaceSequence >
                     right.description.namespaceSequence
@@ -868,7 +867,7 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
             if (state !== 'active' || activeCapability === undefined) {
                 throw new NamespaceFreshnessError(
                     'InvalidState',
-                    'The namespace has no externally certified freshness capability.',
+                    'The namespace has no roster-certified freshness capability.',
                 );
             }
             return activeCapability;
@@ -880,18 +879,19 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
                 }
                 state = 'unavailable';
                 activeCapability = undefined;
-                let untrustedCertificates;
+                let untrustedCertificates: readonly UntrustedNamespaceFreshnessCertificate[];
                 try {
                     untrustedCertificates =
                         await input.certificateTransport.readAvailableCertificates();
                 } catch {
                     return state;
                 }
+                const certificateCandidates = untrustedCertificates;
                 if (!Array.isArray(untrustedCertificates)) {
                     return retire('invalidCertificate');
                 }
                 const candidates: AcceptedCertificate[] = [];
-                for (const untrusted of untrustedCertificates) {
+                for (const untrusted of certificateCandidates) {
                     const verified = verifyUntrustedCertificate(untrusted);
                     if (verified.kind === 'invalid') {
                         return retire('invalidCertificate');
@@ -918,7 +918,7 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
                 ) {
                     throw new NamespaceFreshnessError(
                         'InvalidState',
-                        'Only an externally certified active namespace may mutate.',
+                        'Only a roster-certified active namespace may mutate.',
                     );
                 }
                 const predecessor = acceptedCertificate;
@@ -927,7 +927,10 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
                 await durableMutation();
                 const local = await authenticateLocalHead();
                 if (local.kind === 'failed') {
-                    return retire('localAuthenticationFailed', local.failureCause);
+                    return retire(
+                        'localAuthenticationFailed',
+                        local.failureCause,
+                    );
                 }
                 if (
                     !bytesEqual(
@@ -949,8 +952,7 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
                 }
                 const prepared = input.verifier.prepareCheckpoint({
                     context,
-                    authenticatedHeadDigest:
-                        local.head.authenticatedHeadDigest,
+                    authenticatedHeadDigest: local.head.authenticatedHeadDigest,
                     namespaceSequence: local.head.namespaceSequence,
                     previousCheckpointHash:
                         predecessor.description.checkpointHash,
@@ -970,7 +972,8 @@ export const openNamespaceFreshnessSubjectRuntime = (input: {
                 } catch {
                     return state;
                 }
-                const verified = verifyUntrustedCertificate(untrustedCertificate);
+                const verified =
+                    verifyUntrustedCertificate(untrustedCertificate);
                 if (verified.kind === 'unavailable') {
                     return state;
                 }

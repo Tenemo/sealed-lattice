@@ -2,7 +2,7 @@ import {
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
     type VssSourceTrusteeCoefficientOpeningStateGenerationInput,
-} from "./constants-and-types.js";
+} from './constants-and-types.js';
 import {
     RandomByteSampler,
     assertNonEmptyString,
@@ -14,7 +14,7 @@ import {
     sampleCenteredTernaryVector,
     sampleUniformResidueVector,
     webCryptoRandomBytes,
-} from "./encoding.js";
+} from './encoding.js';
 
 class CoefficientOpeningCleanupError extends Error {
     public readonly cleanupFailures: readonly unknown[];
@@ -25,9 +25,9 @@ class CoefficientOpeningCleanupError extends Error {
         cleanupFailures: readonly unknown[],
     ) {
         super(
-            "Coefficient-opening generation failed and worker-owned openings could not all be released.",
+            'Coefficient-opening generation failed and worker-owned openings could not all be released.',
         );
-        this.name = "CoefficientOpeningCleanupError";
+        this.name = 'CoefficientOpeningCleanupError';
         this.operationFailure = operationFailure;
         this.cleanupFailures = Object.freeze([...cleanupFailures]);
     }
@@ -49,7 +49,7 @@ export const openingStateByCoordinate = (
         sourceTrusteeState.coefficientOpenings.length !== expectedOpeningCount
     ) {
         throw new Error(
-            "source trustee coefficientOpenings must cover every Q_share limb and Shamir coefficient.",
+            'source trustee coefficientOpenings must cover every Q_share limb and Shamir coefficient.',
         );
     }
     const openingsByCoordinate = new Map<string, VssCoefficientOpeningInput>();
@@ -66,12 +66,12 @@ export const openingStateByCoordinate = (
             const expectedPrime = qSharePrimes[openingState.rnsLimbIndex];
             if (expectedPrime === undefined) {
                 throw new Error(
-                    "coefficient opening rnsLimbIndex is outside Q_share.",
+                    'coefficient opening rnsLimbIndex is outside Q_share.',
                 );
             }
             if (openingState.shamirCoefficientIndex >= thresholdDegree) {
                 throw new Error(
-                    "coefficient opening shamirCoefficientIndex is outside thresholdDegree.",
+                    'coefficient opening shamirCoefficientIndex is outside thresholdDegree.',
                 );
             }
             assertResidueVector(
@@ -81,11 +81,11 @@ export const openingStateByCoordinate = (
                 `coefficientOpenings.${String(openingIndex)}.coefficientMessage`,
             );
             if (
-                typeof openingState.openingCapability !== "object" ||
+                typeof openingState.openingCapability !== 'object' ||
                 openingState.openingCapability === null
             ) {
                 throw new Error(
-                    "coefficient opening must carry an opaque worker-owned opening capability.",
+                    'coefficient opening must carry an opaque worker-owned opening capability.',
                 );
             }
             const coordinateKey = openingCoordinateKey(
@@ -94,7 +94,7 @@ export const openingStateByCoordinate = (
             );
             if (openingsByCoordinate.has(coordinateKey)) {
                 throw new Error(
-                    "source trustee coefficientOpenings must have distinct limb/coefficient coordinates.",
+                    'source trustee coefficientOpenings must have distinct limb/coefficient coordinates.',
                 );
             }
             openingsByCoordinate.set(coordinateKey, openingState);
@@ -107,25 +107,25 @@ export const openingStateByCoordinate = (
 export const createVssSourceTrusteeCoefficientOpeningState = (
     input: VssSourceTrusteeCoefficientOpeningStateGenerationInput,
 ): VssSourceTrusteeCoefficientOpeningState => {
-    assertNonEmptyString(input.sourceTrusteeIdentity, "sourceTrusteeIdentity");
+    assertNonEmptyString(input.sourceTrusteeIdentity, 'sourceTrusteeIdentity');
     assertNonNegativeSafeInteger(
         input.sourceTrusteeRosterPosition,
-        "sourceTrusteeRosterPosition",
+        'sourceTrusteeRosterPosition',
     );
-    assertPositiveSafeInteger(input.participantCount, "participantCount");
-    assertPositiveSafeInteger(input.ringDegree, "ringDegree");
-    assertPositiveSafeInteger(input.thresholdDegree, "thresholdDegree");
+    assertPositiveSafeInteger(input.participantCount, 'participantCount');
+    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
+    assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
     assertProtocolHash(
         input.sourceSetupIntentObjectHash,
-        "sourceSetupIntentObjectHash",
+        'sourceSetupIntentObjectHash',
     );
     if (input.sourceTrusteeRosterPosition >= input.participantCount) {
         throw new Error(
-            "sourceTrusteeRosterPosition must be inside the accepted participant count.",
+            'sourceTrusteeRosterPosition must be inside the accepted participant count.',
         );
     }
     if (input.qSharePrimes.length === 0) {
-        throw new Error("qSharePrimes must contain at least one RNS prime.");
+        throw new Error('qSharePrimes must contain at least one RNS prime.');
     }
     input.qSharePrimes.forEach((qSharePrime, rnsLimbIndex) => {
         assertPositiveSafeInteger(
@@ -140,7 +140,7 @@ export const createVssSourceTrusteeCoefficientOpeningState = (
         input.ringDegree,
     );
     const coefficientOpenings: VssCoefficientOpeningInput[] = [];
-    const createdCapabilities: VssCoefficientOpeningInput["openingCapability"][] =
+    const createdCapabilities: VssCoefficientOpeningInput['openingCapability'][] =
         [];
     try {
         input.qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {

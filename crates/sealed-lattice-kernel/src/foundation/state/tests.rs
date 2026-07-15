@@ -34,9 +34,8 @@ impl TestFixture {
             let mut signing_seed = [0_u8; 32];
             signing_seed[0] =
                 u8::try_from(roster_position + 1).expect("test roster position fits u8");
-            signing_seed[31] =
-                u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
-                    .expect("test reverse roster position fits u8");
+            signing_seed[31] = u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                .expect("test reverse roster position fits u8");
             let (public_key, private_key) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
 
             let mut mailbox_seed = [0x41_u8; 32];
@@ -300,8 +299,11 @@ fn state_payload_and_certificate_codecs_are_exact_and_bounded() {
             Some(capability_kind)
         );
     }
-    for unassigned_code in [0, 1, 5, 6, 7, 9, u16::MAX] {
-        assert_eq!(StateCapabilityKind::from_canonical_code(unassigned_code), None);
+    for unassigned_code in [0, 5, 6, 7, 9, u16::MAX] {
+        assert_eq!(
+            StateCapabilityKind::from_canonical_code(unassigned_code),
+            None
+        );
     }
 
     let certificate = StateCertificate::new(
@@ -341,12 +343,10 @@ fn state_payload_and_certificate_codecs_are_exact_and_bounded() {
         RefusalReason::MalformedEncoding
     );
 
-    let mut unassigned_capability = CanonicalTuple::decode(
-        &reservation.encode().expect("reservation encodes"),
-        &limits,
-    )
-    .expect("reservation tuple decodes");
-    unassigned_capability.items[0] = CanonicalItem::unsigned16(1);
+    let mut unassigned_capability =
+        CanonicalTuple::decode(&reservation.encode().expect("reservation encodes"), &limits)
+            .expect("reservation tuple decodes");
+    unassigned_capability.items[0] = CanonicalItem::unsigned16(9);
     assert_eq!(
         StateReservationIntentPayload::decode(
             &unassigned_capability
@@ -426,9 +426,8 @@ fn state_derivations_are_domain_separated_and_exact_output_is_complete() {
         RefusalReason::WrongTypeOrLength
     );
 
-    let mut incomplete =
-        StateExactOutputHasher::new(StateCapabilityKind::FinalitySignature, 3)
-            .expect("incremental hasher begins");
+    let mut incomplete = StateExactOutputHasher::new(StateCapabilityKind::FinalitySignature, 3)
+        .expect("incremental hasher begins");
     incomplete.absorb(b"ab").expect("prefix absorbs");
     assert_eq!(
         incomplete
@@ -437,9 +436,8 @@ fn state_derivations_are_domain_separated_and_exact_output_is_complete() {
             .refusal_reason,
         RefusalReason::WrongTypeOrLength
     );
-    let mut overflowing =
-        StateExactOutputHasher::new(StateCapabilityKind::FinalitySignature, 2)
-            .expect("incremental hasher begins");
+    let mut overflowing = StateExactOutputHasher::new(StateCapabilityKind::FinalitySignature, 2)
+        .expect("incremental hasher begins");
     assert_eq!(
         overflowing
             .absorb(b"abc")
@@ -490,17 +488,20 @@ fn state_verifier_binds_reservation_quorum_and_exact_output() {
         .into_result()
         .expect("valid reservation verifies");
     assert_eq!(verified_reservation.intent_object_hash(), reservation_hash);
-    assert_eq!(verified_reservation.authorization_hash(), authorization_hash);
     assert_eq!(
-        verified_reservation.durable_binding().witness_vote_sequence(),
+        verified_reservation.authorization_hash(),
+        authorization_hash
+    );
+    assert_eq!(
+        verified_reservation
+            .durable_binding()
+            .witness_vote_sequence(),
         1
     );
 
-    let exact_output_hash = derive_state_exact_output_hash(
-        StateCapabilityKind::FinalitySignature,
-        EXACT_OUTPUT_BYTES,
-    )
-    .expect("exact-output hash derives");
+    let exact_output_hash =
+        derive_state_exact_output_hash(StateCapabilityKind::FinalitySignature, EXACT_OUTPUT_BYTES)
+            .expect("exact-output hash derives");
     let output_carrier = fixture.signed_subject_intent(
         FoundationObjectType::StateOutputIntent,
         StateOutputIntentPayload {
@@ -656,10 +657,7 @@ fn unordered_state_votes_authenticate_before_duplicate_and_equivocation_resoluti
         .collect::<Vec<_>>();
     unordered_votes.push(unordered_votes[0].clone());
     verifier
-        .certify_reservation_intent_from_unordered_vote_carriers(
-            &verified_intent,
-            &unordered_votes,
-        )
+        .certify_reservation_intent_from_unordered_vote_carriers(&verified_intent, &unordered_votes)
         .into_result()
         .expect("unordered votes and semantic replay verify");
 
@@ -676,11 +674,7 @@ fn unordered_state_votes_authenticate_before_duplicate_and_equivocation_resoluti
     let mut equivocation_votes = (1..=7)
         .map(|position| fixture.vote_carrier(position, reservation_hash, sequence))
         .collect::<Vec<_>>();
-    equivocation_votes.push(fixture.vote_carrier(
-        1,
-        Hash512::from_bytes([0xef; 64]),
-        sequence,
-    ));
+    equivocation_votes.push(fixture.vote_carrier(1, Hash512::from_bytes([0xef; 64]), sequence));
     expect_refusal(
         verifier.certify_reservation_intent_from_unordered_vote_carriers(
             &verified_intent,
@@ -713,10 +707,9 @@ fn setup_state_capabilities_are_reservation_only() {
     ] {
         let fixture = TestFixture::new();
         let verifier = fixture.verifier();
-        let authorization_hash = Hash512::from_bytes([
-            u8::try_from(capability_kind.canonical_code()).expect("capability code fits u8");
-            64
-        ]);
+        let authorization_hash = Hash512::from_bytes(
+            [u8::try_from(capability_kind.canonical_code()).expect("capability code fits u8"); 64],
+        );
         let reservation_carrier = fixture.signed_subject_intent(
             FoundationObjectType::StateReservation,
             StateReservationIntentPayload {
@@ -747,7 +740,10 @@ fn setup_state_capabilities_are_reservation_only() {
                 &verified_reservation,
                 b"not an output intent",
                 b"not a certificate",
-                verified_exact_output_stream(StateCapabilityKind::TargetRelease, EXACT_OUTPUT_BYTES),
+                verified_exact_output_stream(
+                    StateCapabilityKind::TargetRelease,
+                    EXACT_OUTPUT_BYTES,
+                ),
             ),
             RefusalReason::WrongTypeOrLength,
         );

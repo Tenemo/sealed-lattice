@@ -43,6 +43,13 @@ fn lease_input(
     [handle.to_le_bytes().as_slice(), capability.as_slice()].concat()
 }
 
+fn commit_input(
+    handle: u32,
+    capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+) -> Vec<u8> {
+    lease_input(handle, capability)
+}
+
 fn stage_output(output: &[u8]) -> (u32, [u8; HASH_BYTE_LENGTH]) {
     assert_eq!(output.len(), HANDLE_BYTE_LENGTH + HASH_BYTE_LENGTH);
     let handle = u32::from_le_bytes(output[..4].try_into().expect("handle"));
@@ -168,7 +175,7 @@ fn root_registry_runs_device_wrapping_and_cleanup_without_exporting_root_bytes()
 
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-        &lease_input(handle, &capability),
+        &commit_input(handle, &capability),
     )
     .expect("commit");
     run_local_storage_root_command(
@@ -282,7 +289,7 @@ fn root_registry_refuses_wrong_binding_commitment_capability_and_resource_exhaus
 }
 
 #[test]
-fn forged_or_stale_mutations_cannot_clear_legitimate_root_leases() {
+fn forged_or_stale_capabilities_cannot_clear_legitimate_root_leases() {
     reset_registry();
     let capability = test_capability(67);
     let staged = run_local_storage_root_command(
@@ -294,7 +301,7 @@ fn forged_or_stale_mutations_cannot_clear_legitimate_root_leases() {
     assert_eq!(
         run_local_storage_root_command(
             LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-            &lease_input(handle, &test_capability(83)),
+            &commit_input(handle, &test_capability(83)),
         ),
         Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH)
     );
@@ -309,11 +316,11 @@ fn forged_or_stale_mutations_cannot_clear_legitimate_root_leases() {
         LOCAL_STORAGE_ROOT_COMMAND_ASSOCIATED_DATA,
         &lease_input(handle, &capability),
     )
-    .expect("failed forged mutations retain the legitimate staged root");
+    .expect("failed forged operations retain the legitimate staged root");
 
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-        &lease_input(handle, &capability),
+        &commit_input(handle, &capability),
     )
     .expect("legitimate root commits");
     assert_eq!(
@@ -324,8 +331,16 @@ fn forged_or_stale_mutations_cannot_clear_legitimate_root_leases() {
         Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH)
     );
     run_local_storage_root_command(
-        LOCAL_STORAGE_ROOT_COMMAND_ASSOCIATED_DATA,
-        &lease_input(handle, &capability),
+        LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER,
+        &[
+            lease_input(handle, &capability).as_slice(),
+            LocalRecordType::CheckpointManifest
+                .canonical_code()
+                .to_le_bytes()
+                .as_slice(),
+            checkpoint_manifest_identifier_context().as_slice(),
+        ]
+        .concat(),
     )
     .expect("failed forged destruction retains the legitimate active root");
     reset_registry();
@@ -344,7 +359,7 @@ fn active_root_commands_derive_seal_open_hash_and_enforce_one_seal_per_record_ve
     let (handle, _) = stage_output(&staged);
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-        &lease_input(handle, &capability),
+        &commit_input(handle, &capability),
     )
     .expect("root commits");
 
@@ -458,7 +473,7 @@ fn record_commands_refuse_invalid_types_contexts_and_version_predecessor_pairs()
     let (handle, _) = stage_output(&staged);
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-        &lease_input(handle, &capability),
+        &commit_input(handle, &capability),
     )
     .expect("root commits");
 
@@ -525,7 +540,7 @@ fn active_root_seal_budgets_refuse_the_first_invocation_or_byte_beyond_the_ceili
     let (handle, _) = stage_output(&staged);
     run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
-        &lease_input(handle, &capability),
+        &commit_input(handle, &capability),
     )
     .expect("root commits");
     ROOT_REGISTRY.with(|registry| {

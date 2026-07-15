@@ -14,8 +14,8 @@ import {
     openPositivelyVerifiedStorageTransactionStore,
     openUntrustedStorageTransactionStore,
     type UntrustedStorageAdapter,
-    type UntrustedStorageAuthenticatedRecoveryProtection,
-    type UntrustedStorageRecoveryReport,
+    type UntrustedStorageAuthenticatedRepairProtection,
+    type UntrustedStorageRepairReport,
     type UntrustedStorageTransactionStoreOpenResult,
     type UntrustedStorageTransactionLimits,
     type UntrustedStorageTransactionStore,
@@ -54,7 +54,7 @@ class WebLockOwnedStorageError extends Error {
 type WebLockOwnedStorageState = 'open' | 'closing' | 'closed' | 'failed';
 
 export type WebLockOwnedStorageTransactionStore = Readonly<{
-    recoveryReport: UntrustedStorageRecoveryReport;
+    repairReport: UntrustedStorageRepairReport;
     store: UntrustedStorageTransactionStore;
     close(): Promise<void>;
     state(): WebLockOwnedStorageState;
@@ -74,7 +74,7 @@ type WebLockOwnedStorageBaseConfiguration = Readonly<{
 export type WebLockOwnedStorageConfiguration =
     WebLockOwnedStorageBaseConfiguration &
         Readonly<{
-            authenticatedRecoveryProtection: UntrustedStorageAuthenticatedRecoveryProtection;
+            authenticatedRepairProtection: UntrustedStorageAuthenticatedRepairProtection;
         }>;
 
 type WebLockOwnedBrowserActionStorageCustodyConfiguration =
@@ -197,20 +197,20 @@ class OwnedStorageTransactionStore implements WebLockOwnedStorageTransactionStor
     #lockRequestCompletion: Promise<void> | undefined;
     #closePromise: Promise<void> | undefined;
     #state: WebLockOwnedStorageState = 'open';
-    public readonly recoveryReport: UntrustedStorageRecoveryReport;
+    public readonly repairReport: UntrustedStorageRepairReport;
     public readonly store: UntrustedStorageTransactionStore;
 
     public constructor(input: {
         adapter: IndexedDbUntrustedStorageAdapter;
         namespace: string;
-        recoveryReport: UntrustedStorageRecoveryReport;
+        repairReport: UntrustedStorageRepairReport;
         releaseLock: Deferred<void>;
         store: UntrustedStorageTransactionStore;
     }) {
         this.#adapter = input.adapter;
         this.#namespace = input.namespace;
         this.#releaseLock = input.releaseLock;
-        this.recoveryReport = input.recoveryReport;
+        this.repairReport = input.repairReport;
         this.store = input.store;
     }
 
@@ -408,7 +408,7 @@ const resolveLockManager = (
     if (lockManager === undefined || lockManager === null) {
         throw new WebLockOwnedStorageError(
             'Unavailable',
-            'The Web Locks API is required for exclusive browser storage recovery.',
+            'The Web Locks API is required for exclusive browser storage repair.',
         );
     }
 
@@ -576,7 +576,7 @@ const openWebLockOwnedStorageTransactionStoreWithFactory = async (
                     ownedHandle = new OwnedStorageTransactionStore({
                         adapter,
                         namespace: configuration.namespace,
-                        recoveryReport: openedStore.recoveryReport,
+                        repairReport: openedStore.repairReport,
                         releaseLock,
                         store: openedStore.store,
                     });
@@ -648,8 +648,8 @@ export const openWebLockOwnedStorageTransactionStore = async (
         (adapter) =>
             openUntrustedStorageTransactionStore({
                 adapter,
-                authenticatedRecoveryProtection:
-                    configuration.authenticatedRecoveryProtection,
+                authenticatedRepairProtection:
+                    configuration.authenticatedRepairProtection,
                 limits: configuration.limits,
                 namespace: configuration.namespace,
             }),

@@ -244,8 +244,8 @@ impl ProofExternalMemoryPlan {
 
 /// The transaction-owned browser storage boundary.  Implementations must make
 /// `commit_transaction` atomic and use copy-on-write storage.  A secret object
-/// must be encrypted and authenticated before a successful commit.  A failed
-/// commit is recovered by the existing authenticated journal before this
+/// must be encrypted and authenticated before a successful commit. A failed
+/// commit is repaired from the existing authenticated journal before this
 /// executor is resumed.
 pub(crate) trait ProofExternalMemory {
     type Error;

@@ -1,49 +1,25 @@
-import type { ProtocolHash } from "@sealed-lattice/types";
+import type { ProtocolHash } from '@sealed-lattice/types';
 import type {
     ClosedWorkerStructuredCommitmentOpeningCapability,
     ClosedWorkerStructuredCommitmentOpeningOperations,
-} from "@sealed-lattice/wasm";
+} from '@sealed-lattice/wasm';
 
-import type { CollectiveBgvSetupContext } from "../vss-share-verification-records.js";
+import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 const setupCommitmentModuleRank = 1;
 
-export const setupCommitmentHidingSecretDistributionPurpose = 11;
-export const setupCommitmentHidingErrorDistributionPurpose = 12;
 export const setupCommitmentHidingSecretWidth = setupCommitmentModuleRank + 1;
 export const setupCommitmentHidingErrorWidth = setupCommitmentModuleRank;
 export const setupCommitmentRandomnessWidth =
     setupCommitmentHidingSecretWidth + setupCommitmentHidingErrorWidth;
 export const setupCommitmentModulusLimbCount = 3;
-export const setupCommitmentHidingSecretCoefficientBound = 1;
-export const setupCommitmentHidingErrorCoefficientBound = 1;
-
-export const setupCommitmentRandomnessCoefficientBound = (
-    randomnessColumnIndex: number,
-): number | undefined => {
-    if (
-        Number.isSafeInteger(randomnessColumnIndex) &&
-        randomnessColumnIndex >= 0 &&
-        randomnessColumnIndex < setupCommitmentHidingSecretWidth
-    ) {
-        return setupCommitmentHidingSecretCoefficientBound;
-    }
-    if (
-        Number.isSafeInteger(randomnessColumnIndex) &&
-        randomnessColumnIndex < setupCommitmentRandomnessWidth
-    ) {
-        return setupCommitmentHidingErrorCoefficientBound;
-    }
-
-    return undefined;
-};
 
 type SetupCommitmentLimbValue = {
     readonly rows: readonly (readonly number[])[];
 };
 
 export type SetupCommitmentValue = {
-    readonly objectType: "SetupCommitment";
+    readonly objectType: 'SetupCommitment';
     readonly sourceRnsLimbIndex: number;
     readonly shamirCoefficientIndex: number;
     readonly ringDegree: number;
@@ -81,13 +57,13 @@ export type VssSourceTrusteeCoefficientOpeningStateGenerationInput = {
 };
 
 export type VssSourceTrusteeCoefficientCommitmentRecord = Readonly<{
-    readonly objectType: "VssSourceTrusteeCoefficientCommitments";
+    readonly objectType: 'VssSourceTrusteeCoefficientCommitments';
     readonly sourceTrusteeIdentity: string;
     readonly coefficientCommitmentRoots: readonly ProtocolHash[];
 }>;
 
 export type VssCoefficientCommitmentSet = Readonly<{
-    readonly objectType: "VssCoefficientCommitmentSet";
+    readonly objectType: 'VssCoefficientCommitmentSet';
     readonly setupContextHash: ProtocolHash;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly sourceTrusteeRecords: readonly VssSourceTrusteeCoefficientCommitmentRecord[];

@@ -333,7 +333,7 @@ describe('State verifier real-WASM runtime in Node', () => {
                 refusalReason: 'consumedState',
             });
 
-            const recoveryDescriptor = descriptorFor(
+            const retryDescriptor = descriptorFor(
                 kernel,
                 canonicalStreamDomains.stateTargetReleaseExactOutput,
                 vector.exactOutputBytes,
@@ -347,26 +347,26 @@ describe('State verifier real-WASM runtime in Node', () => {
                 value: undefined,
             });
 
-            const recoveredOutput = session.openOutputVerification({
+            const retriedOutput = session.openOutputVerification({
                 canonicalOutputIntentCarrier:
                     vector.output.canonicalIntentCarrier,
                 canonicalStateCertificate:
                     vector.output.canonicalStateCertificate,
-                exactOutputDescriptorBytes: recoveryDescriptor,
+                exactOutputDescriptorBytes: retryDescriptor,
                 verifiedReservation: reservation.value,
             });
-            if (!recoveredOutput.isValid) {
-                throw new Error(recoveredOutput.refusalReason);
+            if (!retriedOutput.isValid) {
+                throw new Error(retriedOutput.refusalReason);
             }
             for (const [chunkIndex, chunk] of chunkBuffers(
                 vector.exactOutputBytes,
             ).entries()) {
                 expect(
-                    recoveredOutput.value.absorbChunk(chunkIndex, chunk),
+                    retriedOutput.value.absorbChunk(chunkIndex, chunk),
                 ).toEqual({ isValid: true, value: undefined });
             }
-            expect(recoveredOutput.value.finish().isValid).toBe(true);
-            expect(recoveredOutput.value.state()).toBe('completed');
+            expect(retriedOutput.value.finish().isValid).toBe(true);
+            expect(retriedOutput.value.state()).toBe('completed');
         } finally {
             session.dispose();
         }

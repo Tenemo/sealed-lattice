@@ -729,6 +729,14 @@ type EvaluationKeyRejectionCase<Input> = Readonly<{
     expectedMessage: string;
 }>;
 
+type EvaluationKeyShareMaterialTransportRejectionCase = Readonly<{
+    name: string;
+    createOverrides(
+        fixture: EvaluationKeyFixture,
+    ): Partial<EvaluationKeyShareMaterialTransportInput>;
+    expectedMessage: string;
+}>;
+
 const relinearizationKeyShareRoundsRejectionCases = [
     {
         name: 'rejects a malformed transported component material root',
@@ -881,11 +889,26 @@ const trusteeEvaluationKeyProofsRejectionCases = [
 
 const evaluationKeyShareMaterialTransportRejectionCases = [
     {
-        name: 'rejects an invalid construction ring degree',
-        createOverrides: (_fixture: EvaluationKeyFixture) => ({
-            ringDegree: 0,
-        }),
-        expectedMessage: 'ringDegree must be a positive safe integer',
+        name: 'rejects component material without a derived ring degree',
+        createOverrides: (fixture: EvaluationKeyFixture) => {
+            const firstContribution = fixture.sourceRoundOneContributions[0];
+
+            return {
+                relinearizationRoundOneContributions: replaceFirstArrayEntry(
+                    fixture.sourceRoundOneContributions,
+                    {
+                        ...firstContribution,
+                        keySwitchComponentVectorsLittleEndianHexByDigitAndLimb:
+                            replaceFirstArrayEntry(
+                                firstContribution.keySwitchComponentVectorsLittleEndianHexByDigitAndLimb,
+                                '',
+                            ),
+                    },
+                ),
+            };
+        },
+        expectedMessage:
+            'keySwitchComponentVectorsLittleEndianHexByDigitAndLimb.0.0 must encode complete 64-bit coefficients',
     },
     {
         name: 'rejects an empty Q_share basis',
@@ -948,7 +971,7 @@ const evaluationKeyShareMaterialTransportRejectionCases = [
         expectedMessage:
             'references a trustee roster position without a trustee reference',
     },
-] as const;
+] satisfies readonly EvaluationKeyShareMaterialTransportRejectionCase[];
 
 const expectedRelinearizationRoots = (
     contributions: readonly RelinearizationRoundOneContribution[],

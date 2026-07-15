@@ -103,7 +103,7 @@ export type BrowserLocalAuthenticatedMailboxStorageConfiguration = Readonly<{
 type StoredProducerSlot = Readonly<{
     actionContextHash: ProtocolHash;
     ceremonyContextHash: ProtocolHash;
-    payloadType: 1 | 2;
+    payloadType: 2;
     producerSequence: string;
     recipientParticipantId: string;
     rosterHash: ProtocolHash;
@@ -434,7 +434,7 @@ const decodeProducerSlot = (value: unknown): StoredProducerSlot => {
             'Stored mailbox producer slot has a noncanonical shape.',
         );
     }
-    if (value.payloadType !== 1 && value.payloadType !== 2) {
+    if (value.payloadType !== 2) {
         throw new AuthenticatedMailboxStorageError(
             'AuthenticationFailed',
             'Stored mailbox payload type is unsupported.',
@@ -1519,7 +1519,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                             } catch (observationFailure) {
                                 state = 'failed';
                                 throw cleanupError(
-                                    'Outbound mailbox publication failed and its committed state could not be recovered.',
+                                    'Outbound mailbox publication failed and its committed state could not be confirmed.',
                                     [operationFailure, observationFailure],
                                 );
                             }
@@ -2152,7 +2152,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                                 } catch (observationFailure) {
                                     state = 'failed';
                                     throw cleanupError(
-                                        'Mailbox staging publication failed and its committed state could not be recovered.',
+                                        'Mailbox staging publication failed and its committed state could not be confirmed.',
                                         [mapped, observationFailure],
                                     );
                                 }

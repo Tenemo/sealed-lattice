@@ -9,8 +9,7 @@ use super::{
     FoundationSchemaError, Hash512, ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster,
     SignedCarrier, StateCapabilityKind, StateCertificate, StateError,
     StateReservationVerificationInput, StateVerifier, StreamDescriptor, VerificationResult,
-    VerifiedCanonicalStreamSummary, VerifiedStateOutput, VerifiedStateRecovery,
-    VerifiedTranscriptObject,
+    VerifiedCanonicalStreamSummary, VerifiedStateOutput, VerifiedTranscriptObject,
     derive_canonical_stream_descriptor, hash_foundation_tuple_512,
 };
 
@@ -467,10 +466,9 @@ pub struct FinalityVerificationInput<'input> {
     pub certificate: &'input FinalityCertificate,
     pub verified_evaluator_replay: &'input VerifiedEvaluatorReplay,
     pub verified_finality_objects: &'input [&'input VerifiedTranscriptObject],
-    pub verified_predecessor_recoveries: &'input [Option<&'input VerifiedStateRecovery>],
 }
 
-/// Verifies one finality certificate against the frozen external roster and
+/// Verifies one finality certificate against the anchored participant roster and
 /// the shared state substrate. No signer, key, position, or replay source is
 /// accepted from transport metadata.
 pub struct FinalityVerifier {
@@ -489,7 +487,6 @@ impl FinalityVerifier {
         ceremony_context_hash: Hash512,
         action_context_hash: Hash512,
         roster: &Roster,
-        maximum_recovery_transitions_per_state_key: u64,
         canonical_decode_limits: CanonicalDecodeLimits,
     ) -> SchemaResult<Self> {
         let canonical_roster = Roster::new(roster.entries.clone())?;
@@ -499,7 +496,6 @@ impl FinalityVerifier {
             ceremony_context_hash,
             action_context_hash,
             &canonical_roster,
-            maximum_recovery_transitions_per_state_key,
             canonical_decode_limits,
         )
         .map_err(state_schema_error)?;
@@ -533,12 +529,6 @@ impl FinalityVerifier {
                 "finality provenance lists do not match the signer count",
             ));
         }
-        if input.verified_predecessor_recoveries.len() != signer_inputs.len() {
-            return Err(schema_error(
-                RefusalReason::WrongTypeOrLength,
-                "finality predecessor-recovery list does not match the signer count",
-            ));
-        }
         let finality_hash = input.statement.finality_hash()?;
         let mut previous_roster_position = None;
         let mut retained_finality_objects = Vec::with_capacity(signer_inputs.len());
@@ -557,7 +547,7 @@ impl FinalityVerifier {
             if previous_roster_position.is_some_and(|previous| previous >= roster_position) {
                 return Err(schema_error(
                     RefusalReason::Equivocation,
-                    "finality signers are duplicated or not in external-roster order",
+                    "finality signers are duplicated or not in participant roster order",
                 ));
             }
             previous_roster_position = Some(roster_position);
@@ -584,8 +574,6 @@ impl FinalityVerifier {
                 .verify_reservation(StateReservationVerificationInput {
                     subject_participant_id: signer,
                     capability_kind: StateCapabilityKind::FinalitySignature,
-                    verified_predecessor_recovery: input
-                        .verified_predecessor_recoveries[signer_index],
                     expected_authorization_hash: finality_hash,
                     canonical_reservation_intent_carrier: signer_input
                         .canonical_signed_reservation_intent_carrier(),
@@ -727,7 +715,7 @@ impl FinalityVerifier {
             .ok_or_else(|| {
                 schema_error(
                     RefusalReason::WrongContext,
-                    "finality signer is absent from the external roster",
+                    "finality signer is absent from the participant roster",
                 )
             })
     }

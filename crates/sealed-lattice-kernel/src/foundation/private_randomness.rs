@@ -107,7 +107,13 @@ impl PrivateRandomnessDomain {
     }
 
     pub fn setup_source(purpose: u16) -> SchemaResult<Self> {
-        assigned_fixed_purpose_domain(SETUP_SOURCE_FAMILY, purpose, 4)
+        if !matches!(purpose, 1 | 2 | 4) {
+            return Err(unassigned_randomness_domain());
+        }
+        Ok(Self {
+            family: SETUP_SOURCE_FAMILY,
+            purpose,
+        })
     }
 
     pub fn setup_mailbox(purpose: u16) -> SchemaResult<Self> {
@@ -1999,7 +2005,7 @@ mod tests {
 
         let mut stream = action_randomness
             .begin_stream(
-                PrivateRandomnessDomain::setup_source(3).expect("assigned setup-source domain"),
+                PrivateRandomnessDomain::setup_source(2).expect("assigned setup-source domain"),
                 hash(0xa1),
                 setup_attempt,
             )
@@ -2011,8 +2017,8 @@ mod tests {
         assert_eq!(
             first_block,
             fixed_lowercase_hex(concat!(
-                "7ac7eae0a4b6fd1aacc599e5bd68c04c178e374809afb4d072c0e61f6a130b59",
-                "1b010e50d8ba98fb973c159511b6daf5e36683bdd23307d7f7ce6a355124cab5",
+                "279d21339244bcf46f55e87b5b364187170959fe8314b76cf65f4587ef79603a",
+                "8536eba7788ab52c3d4648805519feec7f147da13c574d9189cfc75558fd662a",
             ))
         );
         assert_eq!(stream.cursor().next_counter(), 1);
@@ -2132,7 +2138,7 @@ mod tests {
     #[test]
     fn stream_resume_preserves_exact_byte_and_bit_suffixes() {
         let action_randomness = action_randomness();
-        let domain = PrivateRandomnessDomain::setup_source(3).expect("assigned domain");
+        let domain = PrivateRandomnessDomain::setup_source(2).expect("assigned domain");
         let context = hash(0xa1);
         let attempt = action_randomness.setup_attempt_identifier();
 
@@ -2227,41 +2233,48 @@ mod tests {
     #[test]
     fn sampling_is_bounded_and_stays_in_exact_output_domains() {
         let action_randomness = action_randomness();
-        let domain = PrivateRandomnessDomain::setup_source(3).expect("assigned domain");
+        let domain = PrivateRandomnessDomain::setup_source(2).expect("assigned domain");
         let attempt = action_randomness.setup_attempt_identifier();
-        let mut stream = action_randomness
+        let mut modular_stream = action_randomness
             .begin_stream(domain, hash(0xb1), attempt)
             .expect("stream starts");
 
         for modulus in [2, 3, 5, 251, 256, 257, 65_537, u32::MAX as u64, u64::MAX] {
             for _ in 0..257 {
-                let sample = stream
+                let sample = modular_stream
                     .sample_modulo(modulus, 64)
                     .expect("fixed ceiling is ample for deterministic test stream");
                 assert!(sample < modulus);
             }
         }
+
+        let mut ternary_stream = action_randomness
+            .begin_stream(domain, hash(0xb2), attempt)
+            .expect("ternary stream starts");
+        let mut binomial_stream = action_randomness
+            .begin_stream(domain, hash(0xb3), attempt)
+            .expect("binomial stream starts");
         for _ in 0..257 {
             assert!(matches!(
-                stream
+                ternary_stream
                     .sample_centered_ternary(64)
                     .expect("ternary sample succeeds"),
                 -1..=1
             ));
-            let centered_binomial = stream
+            let centered_binomial = binomial_stream
                 .sample_centered_binomial(7)
                 .expect("centered-binomial sample succeeds");
             assert!((-7..=7).contains(&centered_binomial));
         }
         assert_eq!(
-            stream
+            modular_stream
                 .sample_modulo(1, 64)
                 .expect_err("unit modulus refuses")
                 .refusal_reason,
             RefusalReason::WrongTypeOrLength,
         );
         assert_eq!(
-            stream
+            modular_stream
                 .sample_modulo(3, 0)
                 .expect_err("zero draw ceiling refuses")
                 .refusal_reason,
@@ -2395,6 +2408,7 @@ mod tests {
             );
         }
         assert!(PrivateRandomnessDomain::setup_mailbox(4).is_err());
+        assert!(PrivateRandomnessDomain::setup_source(3).is_err());
         assert!(PrivateRandomnessDomain::target_flooding(0).is_err());
         assert!(PrivateRandomnessDomain::target_flooding(3).is_err());
         assert!(PrivateRandomnessDomain::reset_safe_proof(0x1211, 0x4000).is_err());

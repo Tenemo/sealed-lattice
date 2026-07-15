@@ -80,7 +80,6 @@ const concatenateTestBytes = (...values: readonly Uint8Array[]): Uint8Array => {
 export class TestActionStorageWorkerKernel implements BrowserActionStorageWorkerKernel {
     readonly #actionStorageRoot: Uint8Array;
     readonly #cryptoProvider: Crypto;
-    #activeMutationIdentifier: Uint8Array | undefined;
     #activeRoot: Uint8Array | undefined;
     #lastDeviceKey: CryptoKey | undefined;
     #lastEnvelopeNonce: Uint8Array | undefined;
@@ -215,18 +214,11 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
     }
 
     public commitStagedActionStorageRoot(): Promise<void> {
-        if (
-            this.#stagedRoot === undefined ||
-            input.mutationIdentifier.byteLength !== 32
-        ) {
-            return Promise.reject(
-                new Error('No staged test storage root or invalid version.'),
-            );
+        if (this.#stagedRoot === undefined) {
+            return Promise.reject(new Error('No staged test storage root.'));
         }
         this.#activeRoot?.fill(0);
-        this.#activeMutationIdentifier?.fill(0);
         this.#activeRoot = this.#stagedRoot;
-        this.#activeMutationIdentifier = input.mutationIdentifier.slice();
         this.#stagedRoot = undefined;
 
         return Promise.resolve();
@@ -241,9 +233,7 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
 
     public destroyActiveActionStorageRoot(): Promise<void> {
         this.#activeRoot?.fill(0);
-        this.#activeMutationIdentifier?.fill(0);
         this.#activeRoot = undefined;
-        this.#activeMutationIdentifier = undefined;
 
         return Promise.resolve();
     }
@@ -254,7 +244,6 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         const activeRoot = this.#requireActiveRoot();
         const identifierInput = concatenateTestBytes(
             activeRoot,
-            this.#activeMutationIdentifier as Uint8Array,
             serializeTestRecordContext(input),
         );
         try {
@@ -344,6 +333,7 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
     ): ReturnType<
         BrowserActionStorageWorkerKernel['openActionStateVerifierSession']
     > {
+        void input;
         return Promise.reject(
             new Error('The test worker does not implement state verification.'),
         );
@@ -466,15 +456,6 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         return this.#stagedRoot !== undefined;
     }
 
-    public activeMutationIdentifierMatches(
-        mutationIdentifier: Uint8Array,
-    ): boolean {
-        return (
-            this.#activeMutationIdentifier !== undefined &&
-            testBytesEqual(this.#activeMutationIdentifier, mutationIdentifier)
-        );
-    }
-
     public retainedRootMatchesExpected(): boolean {
         return (
             this.#activeRoot !== undefined &&
@@ -568,10 +549,7 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
     }
 
     #requireActiveRoot(): Uint8Array {
-        if (
-            this.#activeRoot === undefined ||
-            this.#activeMutationIdentifier === undefined
-        ) {
+        if (this.#activeRoot === undefined) {
             throw new Error('No accepted test storage root is active.');
         }
         return this.#activeRoot;
@@ -582,7 +560,6 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
     ): Promise<CryptoKey> {
         const keyInput = concatenateTestBytes(
             this.#requireActiveRoot(),
-            this.#activeMutationIdentifier as Uint8Array,
             contextBytes,
         );
         try {

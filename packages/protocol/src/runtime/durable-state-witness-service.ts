@@ -77,6 +77,10 @@ export type DurableStateWitnessServiceLimits = Readonly<{
     transactionLifetimeMilliseconds: number;
 }>;
 
+/**
+ * Participant-client storage runtime for a roster member's state-witness role.
+ * This is not an external network service or a separate ceremony actor.
+ */
 export type DurableStateWitnessService = Readonly<{
     cacheSignedVoteCarrier(input: {
         canonicalSignedVoteCarrier: Uint8Array;

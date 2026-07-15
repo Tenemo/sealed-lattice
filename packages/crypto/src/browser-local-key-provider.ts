@@ -1,23 +1,26 @@
-import { hexToBytes } from "@noble/hashes/utils.js";
-import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
-import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
+import { hexToBytes } from '@noble/hashes/utils.js';
+import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import type {
     ProtocolHash,
     RefusalReason,
     SetupMailboxSlot,
-} from "@sealed-lattice/types";
+} from '@sealed-lattice/types';
 
-import { webCryptoRandomBytes } from "./web-crypto.js";
+import { webCryptoRandomBytes } from './web-crypto.js';
 
 const textEncoder = new TextEncoder();
 const signingSelfTestContext = textEncoder.encode(
-    "sealed-lattice/key-provider/signing-self-test/v1",
+    'sealed-lattice/key-provider/signing-self-test/v1',
 );
 const signingSelfTestMessage = textEncoder.encode(
-    "sealed-lattice browser-local signing capability",
+    'sealed-lattice browser-local signing capability',
 );
 const mailboxSignatureContext = textEncoder.encode(
-    "sealed-lattice/mailbox-signature/v1",
+    'sealed-lattice/mailbox-signature/v1',
+);
+const objectSignatureContext = textEncoder.encode(
+    'sealed-lattice/object-signature/v1',
 );
 const signingHedgeByteLength = 32;
 const mailboxAttemptIdentifierByteLength = 32;
@@ -48,11 +51,11 @@ type FreshMailboxSigningPermit = Readonly<{
 type BrowserLocalResetSafeSetupMailboxScope = Readonly<
     Pick<
         SetupMailboxSlot,
-        | "actionContextHash"
-        | "ceremonyContextHash"
-        | "rosterHash"
-        | "sourceParticipantId"
-        | "suiteId"
+        | 'actionContextHash'
+        | 'ceremonyContextHash'
+        | 'rosterHash'
+        | 'sourceParticipantId'
+        | 'suiteId'
     >
 >;
 
@@ -81,17 +84,20 @@ type BrowserLocalResetSafeSetupMailboxRandomnessOperations =
                 readonly setupMailboxSlot: SetupMailboxSlot;
                 readonly setupMailboxSlotHash: ProtocolHash;
             }): Uint8Array;
+            signSetupObject?(input: {
+                readonly signatureMessageHash: ProtocolHash;
+            }): Uint8Array;
             revoke(): void;
         }>;
 
 export type BrowserLocalKeyProviderFailureCode =
-    | "CapabilityUnavailable"
-    | "EntropyUnavailable"
-    | "Equivocation"
-    | "KeyMismatch"
-    | "MalformedKey"
-    | "MalformedRandomness"
-    | "UnsupportedProvider";
+    | 'CapabilityUnavailable'
+    | 'EntropyUnavailable'
+    | 'Equivocation'
+    | 'KeyMismatch'
+    | 'MalformedKey'
+    | 'MalformedRandomness'
+    | 'UnsupportedProvider';
 
 export class BrowserLocalKeyProviderError extends Error {
     public readonly code: BrowserLocalKeyProviderFailureCode;
@@ -103,13 +109,13 @@ export class BrowserLocalKeyProviderError extends Error {
         failureCause?: unknown,
     ) {
         super(message);
-        this.name = "BrowserLocalKeyProviderError";
+        this.name = 'BrowserLocalKeyProviderError';
         this.code = code;
         this.failureCause = failureCause;
     }
 
     public get refusalReason(): RefusalReason | undefined {
-        return this.code === "Equivocation" ? "equivocation" : undefined;
+        return this.code === 'Equivocation' ? 'equivocation' : undefined;
     }
 }
 
@@ -188,7 +194,7 @@ const copyExactBytes = (
     value: Uint8Array,
     expectedByteLength: number,
     label: string,
-    failureCode: BrowserLocalKeyProviderFailureCode = "MalformedKey",
+    failureCode: BrowserLocalKeyProviderFailureCode = 'MalformedKey',
 ): Uint8Array => {
     if (!(value instanceof Uint8Array)) {
         throw new BrowserLocalKeyProviderError(
@@ -209,7 +215,7 @@ const copyExactBytes = (
 const readProductionEntropy = (byteLength: number): Uint8Array =>
     webCryptoRandomBytes(
         byteLength,
-        "Browser-local key operations require Web Crypto getRandomValues.",
+        'Browser-local key operations require Web Crypto getRandomValues.',
     );
 
 const readEntropy = (byteLength: number): Uint8Array => {
@@ -218,14 +224,14 @@ const readEntropy = (byteLength: number): Uint8Array => {
         bytes = readProductionEntropy(byteLength);
     } catch (error) {
         throw new BrowserLocalKeyProviderError(
-            "EntropyUnavailable",
-            "Browser-local key-provider entropy failed.",
+            'EntropyUnavailable',
+            'Browser-local key-provider entropy failed.',
             error,
         );
     }
     if (!(bytes instanceof Uint8Array) || bytes.byteLength !== byteLength) {
         throw new BrowserLocalKeyProviderError(
-            "EntropyUnavailable",
+            'EntropyUnavailable',
             `Browser-local key-provider entropy must return exactly ${String(byteLength)} bytes.`,
         );
     }
@@ -255,10 +261,10 @@ const requireLowercaseHex = (
     value: unknown,
     byteLength: number,
     label: string,
-    failureCode: BrowserLocalKeyProviderFailureCode = "MalformedRandomness",
+    failureCode: BrowserLocalKeyProviderFailureCode = 'MalformedRandomness',
 ): string => {
     if (
-        typeof value !== "string" ||
+        typeof value !== 'string' ||
         value.length !== byteLength * 2 ||
         !/^[0-9a-f]+$/u.test(value)
     ) {
@@ -276,13 +282,13 @@ const canonicalUnsignedDecimalPattern = /^(?:0|[1-9][0-9]*)$/u;
 
 const requireCanonicalUnsigned64 = (value: string, label: string): string => {
     if (
-        typeof value !== "string" ||
+        typeof value !== 'string' ||
         !canonicalUnsignedDecimalPattern.test(value) ||
         value.length > 20 ||
         BigInt(value) > maximumUnsigned64
     ) {
         throw new BrowserLocalKeyProviderError(
-            "MalformedRandomness",
+            'MalformedRandomness',
             `${label} must be a canonical unsigned 64-bit decimal string.`,
         );
     }
@@ -291,72 +297,70 @@ const requireCanonicalUnsigned64 = (value: string, label: string): string => {
 };
 
 const copySetupMailboxSlot = (value: SetupMailboxSlot): SetupMailboxSlot => {
-    if (typeof value !== "object" || value === null) {
+    if (typeof value !== 'object' || value === null) {
         throw new BrowserLocalKeyProviderError(
-            "MalformedRandomness",
-            "The setup-mailbox slot must be an object.",
+            'MalformedRandomness',
+            'The setup-mailbox slot must be an object.',
         );
     }
     const orderedMaterialRoots = value.orderedMaterialRoots;
     if (!Array.isArray(orderedMaterialRoots)) {
         throw new BrowserLocalKeyProviderError(
-            "MalformedRandomness",
-            "The setup-mailbox material roots must be an array.",
+            'MalformedRandomness',
+            'The setup-mailbox material roots must be an array.',
         );
     }
-    const payloadType = value.payloadType;
-    if (payloadType !== 1 && payloadType !== 2) {
+    const payloadType = (value as Readonly<{ payloadType?: unknown }>)
+        .payloadType;
+    if (payloadType !== 2) {
         throw new BrowserLocalKeyProviderError(
-            "MalformedRandomness",
-            "The setup-mailbox payload type is not assigned.",
+            'MalformedRandomness',
+            'The setup-mailbox payload type must be recipient-private VSS.',
         );
     }
-    if (
-        (payloadType === 1 && orderedMaterialRoots.length !== 0) ||
-        (payloadType === 2 && orderedMaterialRoots.length === 0)
-    ) {
+    if (orderedMaterialRoots.length === 0) {
         throw new BrowserLocalKeyProviderError(
-            "MalformedRandomness",
-            "The setup-mailbox material roots do not match the payload type.",
+            'MalformedRandomness',
+            'The setup-mailbox material roots must not be empty.',
         );
     }
 
     return Object.freeze({
-        suiteId: requireLowercaseHex(value.suiteId, 64, "slot.suiteId"),
+        suiteId: requireLowercaseHex(value.suiteId, 64, 'slot.suiteId'),
         ceremonyContextHash: requireLowercaseHex(
             value.ceremonyContextHash,
             64,
-            "slot.ceremonyContextHash",
+            'slot.ceremonyContextHash',
         ),
         actionContextHash: requireLowercaseHex(
             value.actionContextHash,
             64,
-            "slot.actionContextHash",
+            'slot.actionContextHash',
         ),
         rosterHash: requireLowercaseHex(
             value.rosterHash,
             64,
-            "slot.rosterHash",
+            'slot.rosterHash',
         ),
         sourceParticipantId: requireLowercaseHex(
             value.sourceParticipantId,
             64,
-            "slot.sourceParticipantId",
+            'slot.sourceParticipantId',
         ),
         recipientParticipantId: requireLowercaseHex(
             value.recipientParticipantId,
             64,
-            "slot.recipientParticipantId",
+            'slot.recipientParticipantId',
         ),
         producerSequence: requireCanonicalUnsigned64(
             value.producerSequence,
-            "slot.producerSequence",
+            'slot.producerSequence',
         ),
         payloadType,
         statementHash: requireLowercaseHex(
             value.statementHash,
             64,
-            "slot.statementHash",
+            'slot.statementHash',
         ),
         orderedMaterialRoots: Object.freeze(
             orderedMaterialRoots.map((root, rootIndex) =>
@@ -374,26 +378,26 @@ const copyResetSafeSetupMailboxScope = (
     value: BrowserLocalResetSafeSetupMailboxScope,
 ): BrowserLocalResetSafeSetupMailboxScope =>
     Object.freeze({
-        suiteId: requireLowercaseHex(value.suiteId, 64, "scope.suiteId"),
+        suiteId: requireLowercaseHex(value.suiteId, 64, 'scope.suiteId'),
         ceremonyContextHash: requireLowercaseHex(
             value.ceremonyContextHash,
             64,
-            "scope.ceremonyContextHash",
+            'scope.ceremonyContextHash',
         ),
         actionContextHash: requireLowercaseHex(
             value.actionContextHash,
             64,
-            "scope.actionContextHash",
+            'scope.actionContextHash',
         ),
         rosterHash: requireLowercaseHex(
             value.rosterHash,
             64,
-            "scope.rosterHash",
+            'scope.rosterHash',
         ),
         sourceParticipantId: requireLowercaseHex(
             value.sourceParticipantId,
             64,
-            "scope.sourceParticipantId",
+            'scope.sourceParticipantId',
         ),
     });
 
@@ -417,7 +421,7 @@ const setupMailboxProducerSlotKey = (slot: SetupMailboxSlot): string =>
         slot.recipientParticipantId,
         slot.producerSequence,
         String(slot.payloadType),
-    ].join(":");
+    ].join(':');
 
 const wipeResetSafeSetupMailboxEntry = (
     entry: ResetSafeSetupMailboxCacheEntry,
@@ -437,7 +441,7 @@ const throwRevocationFailures = (
 ): void => {
     if (failures.length !== 0) {
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
+            'CapabilityUnavailable',
             `${operation} invalidated every local capability, but one or more external provider handles could not be released.`,
             Object.freeze([...failures]),
         );
@@ -488,7 +492,7 @@ const revokeSigning = (provider: ProviderState): void => {
             : () => signingOperations.revoke(),
         failures,
     );
-    throwRevocationFailures("Signing capability revocation", failures);
+    throwRevocationFailures('Signing capability revocation', failures);
 };
 
 const requireResetSafeSetupMailboxProvider = (
@@ -500,8 +504,8 @@ const requireResetSafeSetupMailboxProvider = (
         provider.resetSafeSetupMailboxScope === undefined
     ) {
         throw new BrowserLocalKeyProviderError(
-            "UnsupportedProvider",
-            "The browser-local provider does not support reset-safe setup-mailbox randomness.",
+            'UnsupportedProvider',
+            'The browser-local provider does not support reset-safe setup-mailbox randomness.',
         );
     }
 
@@ -524,7 +528,7 @@ const revokeMailbox = (provider: ProviderState): void => {
             : () => mailboxOperations.revoke(),
         failures,
     );
-    throwRevocationFailures("Mailbox capability revocation", failures);
+    throwRevocationFailures('Mailbox capability revocation', failures);
 };
 
 const closeProvider = (provider: ProviderState): void => {
@@ -539,7 +543,7 @@ const closeProvider = (provider: ProviderState): void => {
     } catch (error) {
         failures.push(error);
     }
-    throwRevocationFailures("Browser-local provider closure", failures);
+    throwRevocationFailures('Browser-local provider closure', failures);
 };
 
 const throwOpenFailure = (
@@ -548,8 +552,8 @@ const throwOpenFailure = (
 ): never => {
     if (cleanupFailure !== undefined) {
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The browser-local provider failed to open and could not release every external provider handle.",
+            'CapabilityUnavailable',
+            'The browser-local provider failed to open and could not release every external provider handle.',
             Object.freeze([operationFailure, cleanupFailure]),
         );
     }
@@ -572,7 +576,7 @@ const revokeUnopenedInput = (
     if (!keyOperationsAreReused) {
         attemptRevocation(() => input.mailbox.revoke(), failures);
     }
-    throwRevocationFailures("Failed provider input cleanup", failures);
+    throwRevocationFailures('Failed provider input cleanup', failures);
 };
 
 const requireSigningProvider = (
@@ -585,8 +589,8 @@ const requireSigningProvider = (
         capabilityState.provider.signingVerificationKey === undefined
     ) {
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The browser-local signing capability is unavailable or revoked.",
+            'CapabilityUnavailable',
+            'The browser-local signing capability is unavailable or revoked.',
         );
     }
 
@@ -603,8 +607,8 @@ const requireMailboxProvider = (
         capabilityState.provider.mailboxEncapsulationKey === undefined
     ) {
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The browser-local mailbox capability is unavailable or revoked.",
+            'CapabilityUnavailable',
+            'The browser-local mailbox capability is unavailable or revoked.',
         );
     }
 
@@ -620,8 +624,8 @@ const invokeSigningOperation = (
     const signingOperations = provider.signingOperations;
     if (signingOperations === undefined) {
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The browser-local signing operation is unavailable or revoked.",
+            'CapabilityUnavailable',
+            'The browser-local signing operation is unavailable or revoked.',
         );
     }
     const copiedMessage = message.slice();
@@ -637,16 +641,16 @@ const invokeSigningOperation = (
         return copyExactBytes(
             operationResult,
             mlDsa65SignatureByteLength,
-            "signing operation result",
-            "UnsupportedProvider",
+            'signing operation result',
+            'UnsupportedProvider',
         );
     } catch (error) {
         if (error instanceof BrowserLocalKeyProviderError) {
             throw error;
         }
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The browser-local signing operation failed.",
+            'CapabilityUnavailable',
+            'The browser-local signing operation failed.',
             error,
         );
     } finally {
@@ -664,8 +668,8 @@ const invokeMailboxDecapsulationOperation = (
     const mailboxOperations = provider.mailboxOperations;
     if (mailboxOperations === undefined) {
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The browser-local mailbox decapsulation operation is unavailable or revoked.",
+            'CapabilityUnavailable',
+            'The browser-local mailbox decapsulation operation is unavailable or revoked.',
         );
     }
     const copiedCiphertext = ciphertext.slice();
@@ -676,16 +680,16 @@ const invokeMailboxDecapsulationOperation = (
         return copyExactBytes(
             operationResult,
             mlKem768SharedSecretByteLength,
-            "mailbox decapsulation result",
-            "UnsupportedProvider",
+            'mailbox decapsulation result',
+            'UnsupportedProvider',
         );
     } catch (error) {
         if (error instanceof BrowserLocalKeyProviderError) {
             throw error;
         }
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The browser-local mailbox decapsulation operation failed.",
+            'CapabilityUnavailable',
+            'The browser-local mailbox decapsulation operation failed.',
             error,
         );
     } finally {
@@ -744,15 +748,15 @@ const validateSigningKeyPair = (provider: ProviderState): void => {
                 );
         } catch (error) {
             throw new BrowserLocalKeyProviderError(
-                "MalformedKey",
-                "The frozen roster verification key is not canonical ML-DSA-65.",
+                'MalformedKey',
+                'The frozen roster verification key is not canonical ML-DSA-65.',
                 error,
             );
         }
         if (!signaturesAreValid) {
             throw new BrowserLocalKeyProviderError(
-                "KeyMismatch",
-                "The browser-local signing operation does not match the frozen roster verification key.",
+                'KeyMismatch',
+                'The browser-local signing operation does not match the frozen roster verification key.',
             );
         }
         if (
@@ -760,8 +764,8 @@ const validateSigningKeyPair = (provider: ProviderState): void => {
             bytesEqual(firstSignature, alternateSignature)
         ) {
             throw new BrowserLocalKeyProviderError(
-                "UnsupportedProvider",
-                "The browser-local signing operation does not honor an exact ML-DSA hedge.",
+                'UnsupportedProvider',
+                'The browser-local signing operation does not honor an exact ML-DSA hedge.',
             );
         }
     } finally {
@@ -786,8 +790,8 @@ const validateMailboxKeyPair = (provider: ProviderState): void => {
             );
         } catch (error) {
             throw new BrowserLocalKeyProviderError(
-                "MalformedKey",
-                "The frozen roster encapsulation key is not canonical ML-KEM-768.",
+                'MalformedKey',
+                'The frozen roster encapsulation key is not canonical ML-KEM-768.',
                 error,
             );
         }
@@ -797,8 +801,8 @@ const validateMailboxKeyPair = (provider: ProviderState): void => {
         );
         if (!bytesEqual(encapsulation.sharedSecret, recoveredSharedSecret)) {
             throw new BrowserLocalKeyProviderError(
-                "KeyMismatch",
-                "The browser-local mailbox operation does not match the frozen roster encapsulation key.",
+                'KeyMismatch',
+                'The browser-local mailbox operation does not match the frozen roster encapsulation key.',
             );
         }
         provider.mailboxSelfTestCiphertext = encapsulation.cipherText.slice();
@@ -817,8 +821,8 @@ const validateMailboxKeyContinuity = (provider: ProviderState): void => {
     const expectedSharedSecret = provider.mailboxSelfTestSharedSecret;
     if (ciphertext === undefined || expectedSharedSecret === undefined) {
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The browser-local mailbox pairwise-test material is unavailable.",
+            'CapabilityUnavailable',
+            'The browser-local mailbox pairwise-test material is unavailable.',
         );
     }
 
@@ -830,8 +834,8 @@ const validateMailboxKeyContinuity = (provider: ProviderState): void => {
         );
         if (!bytesEqual(expectedSharedSecret, recoveredSharedSecret)) {
             throw new BrowserLocalKeyProviderError(
-                "KeyMismatch",
-                "The browser-local mailbox operation no longer matches its frozen roster encapsulation key.",
+                'KeyMismatch',
+                'The browser-local mailbox operation no longer matches its frozen roster encapsulation key.',
             );
         }
     } finally {
@@ -852,19 +856,19 @@ export const openBrowserLocalExternalKeyProvider = (
     try {
         if (input.signing === (input.mailbox as unknown)) {
             throw new BrowserLocalKeyProviderError(
-                "UnsupportedProvider",
-                "Signing and mailbox operations must use distinct browser-local capabilities.",
+                'UnsupportedProvider',
+                'Signing and mailbox operations must use distinct browser-local capabilities.',
             );
         }
         signingVerificationKey = copyExactBytes(
             input.signing.verificationKey,
             mlDsa65PublicKeyByteLength,
-            "signing.verificationKey",
+            'signing.verificationKey',
         );
         mailboxEncapsulationKey = copyExactBytes(
             input.mailbox.encapsulationKey,
             mlKem768PublicKeyByteLength,
-            "mailbox.encapsulationKey",
+            'mailbox.encapsulationKey',
         );
         resetSafeSetupMailboxScope =
             resetSafeSetupMailboxRandomnessOperations === undefined
@@ -940,7 +944,7 @@ const signClosedMailboxEnvelopeHash = (input: {
         input.message.byteLength !== 64
     ) {
         throw new TypeError(
-            "Closed protocol signature messages must be 64 bytes.",
+            'Closed protocol signature messages must be 64 bytes.',
         );
     }
     const hedge = readEntropy(signingHedgeByteLength);
@@ -962,8 +966,8 @@ const signClosedMailboxEnvelopeHash = (input: {
             )
         ) {
             throw new BrowserLocalKeyProviderError(
-                "KeyMismatch",
-                "The browser-local signing operation no longer matches its frozen roster verification key.",
+                'KeyMismatch',
+                'The browser-local signing operation no longer matches its frozen roster verification key.',
             );
         }
         return signature.slice();
@@ -981,7 +985,7 @@ export const decapsulateClosedMailboxCiphertext = (input: {
     const ciphertext = copyExactBytes(
         input.ciphertext,
         mlKem768CiphertextByteLength,
-        "ciphertext",
+        'ciphertext',
     );
     try {
         validateMailboxKeyContinuity(provider);
@@ -1014,7 +1018,7 @@ export const encapsulateFreshMailbox = (input: {
     const recipientEncapsulationKey = copyExactBytes(
         input.recipientEncapsulationKey,
         mlKem768PublicKeyByteLength,
-        "recipientEncapsulationKey",
+        'recipientEncapsulationKey',
     );
     const envelopeAttemptIdentifier = readEntropy(
         mailboxAttemptIdentifierByteLength,
@@ -1053,21 +1057,21 @@ export const signFreshMailboxEnvelope = (input: {
     const permit = freshMailboxSigningPermitStates.get(input.signingPermit);
     if (permit === undefined || permit.consumed) {
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The fresh-mailbox signing permit is unavailable or already consumed.",
+            'CapabilityUnavailable',
+            'The fresh-mailbox signing permit is unavailable or already consumed.',
         );
     }
     const provider = requireSigningProvider(input.signingCapability);
     if (permit.provider !== provider) {
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The fresh-mailbox signing permit belongs to another provider.",
+            'CapabilityUnavailable',
+            'The fresh-mailbox signing permit belongs to another provider.',
         );
     }
     const envelopeHash = requireLowercaseHex(
         input.envelopeHash,
         64,
-        "envelopeHash",
+        'envelopeHash',
     );
     permit.consumed = true;
     return signClosedMailboxEnvelopeHash({
@@ -1088,13 +1092,13 @@ const resetSafeSetupMailboxInput = (
     const copiedSlotHash = requireLowercaseHex(
         setupMailboxSlotHash,
         64,
-        "setupMailboxSlotHash",
+        'setupMailboxSlotHash',
     );
     const scope = provider.resetSafeSetupMailboxScope;
     if (scope === undefined || !setupMailboxScopeMatches(scope, copiedSlot)) {
         throw new BrowserLocalKeyProviderError(
-            "KeyMismatch",
-            "The setup-mailbox slot does not match the browser-local provider action and frozen-roster binding.",
+            'KeyMismatch',
+            'The setup-mailbox slot does not match the browser-local provider action and frozen-roster binding.',
         );
     }
 
@@ -1117,10 +1121,10 @@ const encapsulateWithResetSafeSetupMailboxRandomness = (
     readonly sharedSecret: Uint8Array;
 }> => {
     const operations = provider.resetSafeSetupMailboxRandomnessOperations;
-    if (operations === undefined) {
+    if (operations?.signSetupObject === undefined) {
         throw new BrowserLocalKeyProviderError(
-            "UnsupportedProvider",
-            "The browser-local provider does not support reset-safe setup-mailbox encapsulation.",
+            'UnsupportedProvider',
+            'The browser-local provider does not support reset-safe setup-mailbox encapsulation.',
         );
     }
     try {
@@ -1135,20 +1139,20 @@ const encapsulateWithResetSafeSetupMailboxRandomness = (
             ciphertext = copyExactBytes(
                 encapsulation.ciphertext,
                 mlKem768CiphertextByteLength,
-                "reset-safe setup-mailbox ciphertext",
-                "MalformedRandomness",
+                'reset-safe setup-mailbox ciphertext',
+                'MalformedRandomness',
             );
             envelopeAttemptIdentifier = copyExactBytes(
                 encapsulation.envelopeAttemptIdentifier,
                 mailboxAttemptIdentifierByteLength,
-                "reset-safe setup-mailbox envelope attempt identifier",
-                "MalformedRandomness",
+                'reset-safe setup-mailbox envelope attempt identifier',
+                'MalformedRandomness',
             );
             sharedSecret = copyExactBytes(
                 encapsulation.sharedSecret,
                 mlKem768SharedSecretByteLength,
-                "reset-safe setup-mailbox shared secret",
-                "MalformedRandomness",
+                'reset-safe setup-mailbox shared secret',
+                'MalformedRandomness',
             );
             return Object.freeze({
                 ciphertext,
@@ -1170,20 +1174,20 @@ const encapsulateWithResetSafeSetupMailboxRandomness = (
             throw error;
         }
         if (
-            typeof error === "object" &&
+            typeof error === 'object' &&
             error !== null &&
-            "code" in error &&
-            error.code === "CommitmentMismatch"
+            'code' in error &&
+            error.code === 'CommitmentMismatch'
         ) {
             throw new BrowserLocalKeyProviderError(
-                "KeyMismatch",
-                "The setup-mailbox recipient key does not match its frozen-roster slot.",
+                'KeyMismatch',
+                'The setup-mailbox recipient key does not match its frozen-roster slot.',
                 error,
             );
         }
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The reset-safe setup-mailbox encapsulation input is unavailable.",
+            'CapabilityUnavailable',
+            'The reset-safe setup-mailbox encapsulation input is unavailable.',
             error,
         );
     }
@@ -1206,20 +1210,20 @@ export const encapsulateResetSafeSetupMailbox = (input: {
     const sourceVerificationKey = copyExactBytes(
         input.sourceVerificationKey,
         mlDsa65PublicKeyByteLength,
-        "sourceVerificationKey",
+        'sourceVerificationKey',
     );
     const recipientEncapsulationKey = copyExactBytes(
         input.recipientEncapsulationKey,
         mlKem768PublicKeyByteLength,
-        "recipientEncapsulationKey",
+        'recipientEncapsulationKey',
     );
     try {
         if (
             !bytesEqual(sourceVerificationKey, provider.signingVerificationKey!)
         ) {
             throw new BrowserLocalKeyProviderError(
-                "KeyMismatch",
-                "The source verification key does not match the frozen browser-local signing capability.",
+                'KeyMismatch',
+                'The source verification key does not match the frozen browser-local signing capability.',
             );
         }
         const resetSafeInput = resetSafeSetupMailboxInput(
@@ -1241,8 +1245,8 @@ export const encapsulateResetSafeSetupMailbox = (input: {
                 )
             ) {
                 throw new BrowserLocalKeyProviderError(
-                    "Equivocation",
-                    "The reset-safe setup-mailbox producer slot conflicts with its cached operation.",
+                    'Equivocation',
+                    'The reset-safe setup-mailbox producer slot conflicts with its cached operation.',
                 );
             }
             return Object.freeze({
@@ -1298,8 +1302,8 @@ const invokeResetSafeSetupMailboxSigningOperation = (
     const operations = provider.resetSafeSetupMailboxRandomnessOperations;
     if (operations === undefined) {
         throw new BrowserLocalKeyProviderError(
-            "UnsupportedProvider",
-            "The browser-local provider does not support reset-safe setup-mailbox signing.",
+            'UnsupportedProvider',
+            'The browser-local provider does not support reset-safe setup-mailbox signing.',
         );
     }
     let operationResult: Uint8Array | undefined;
@@ -1308,16 +1312,16 @@ const invokeResetSafeSetupMailboxSigningOperation = (
         return copyExactBytes(
             operationResult,
             mlDsa65SignatureByteLength,
-            "reset-safe setup-mailbox signature",
-            "UnsupportedProvider",
+            'reset-safe setup-mailbox signature',
+            'UnsupportedProvider',
         );
     } catch (error) {
         if (error instanceof BrowserLocalKeyProviderError) {
             throw error;
         }
         throw new BrowserLocalKeyProviderError(
-            "CapabilityUnavailable",
-            "The reset-safe setup-mailbox signing operation failed.",
+            'CapabilityUnavailable',
+            'The reset-safe setup-mailbox signing operation failed.',
             error,
         );
     } finally {
@@ -1338,15 +1342,15 @@ export const signResetSafeSetupMailboxEnvelope = (input: {
     const sourceVerificationKey = copyExactBytes(
         input.sourceVerificationKey,
         mlDsa65PublicKeyByteLength,
-        "sourceVerificationKey",
+        'sourceVerificationKey',
     );
     try {
         if (
             !bytesEqual(sourceVerificationKey, provider.signingVerificationKey!)
         ) {
             throw new BrowserLocalKeyProviderError(
-                "KeyMismatch",
-                "The source verification key does not match the frozen browser-local signing capability.",
+                'KeyMismatch',
+                'The source verification key does not match the frozen browser-local signing capability.',
             );
         }
         const resetSafeInput = resetSafeSetupMailboxInput(
@@ -1363,22 +1367,22 @@ export const signResetSafeSetupMailboxEnvelope = (input: {
             cached.setupMailboxSlotHash !== resetSafeInput.setupMailboxSlotHash
         ) {
             throw new BrowserLocalKeyProviderError(
-                "CapabilityUnavailable",
-                "The setup-mailbox slot has no matching reset-safe encapsulation.",
+                'CapabilityUnavailable',
+                'The setup-mailbox slot has no matching reset-safe encapsulation.',
             );
         }
         const envelopeHash = requireLowercaseHex(
             input.envelopeHash,
             64,
-            "envelopeHash",
+            'envelopeHash',
         );
         if (
             cached.envelopeHash !== undefined &&
             cached.envelopeHash !== envelopeHash
         ) {
             throw new BrowserLocalKeyProviderError(
-                "Equivocation",
-                "The reset-safe setup-mailbox producer slot is already bound to another envelope.",
+                'Equivocation',
+                'The reset-safe setup-mailbox producer slot is already bound to another envelope.',
             );
         }
         cached.envelopeHash = envelopeHash;
@@ -1405,8 +1409,8 @@ export const signResetSafeSetupMailboxEnvelope = (input: {
                 )
             ) {
                 throw new BrowserLocalKeyProviderError(
-                    "KeyMismatch",
-                    "The reset-safe setup-mailbox signature does not match the frozen roster verification key.",
+                    'KeyMismatch',
+                    'The reset-safe setup-mailbox signature does not match the frozen roster verification key.',
                 );
             }
             cached.signature = signature.slice();
@@ -1416,5 +1420,67 @@ export const signResetSafeSetupMailboxEnvelope = (input: {
         }
     } finally {
         sourceVerificationKey.fill(0);
+    }
+};
+
+export const signResetSafeSetupObject = (input: {
+    readonly signatureMessageHash: ProtocolHash;
+    readonly signingCapability: BrowserLocalSigningCapability;
+}): Uint8Array => {
+    const provider = requireResetSafeSetupMailboxProvider(
+        input.signingCapability,
+    );
+    const operations = provider.resetSafeSetupMailboxRandomnessOperations;
+    const signSetupObject = operations?.signSetupObject;
+    if (signSetupObject === undefined) {
+        throw new BrowserLocalKeyProviderError(
+            'UnsupportedProvider',
+            'The browser-local provider does not support reset-safe setup-object signing.',
+        );
+    }
+    const signatureMessageHash = requireLowercaseHex(
+        input.signatureMessageHash,
+        64,
+        'signatureMessageHash',
+    );
+    let operationResult: Uint8Array | undefined;
+    let signature: Uint8Array | undefined;
+    try {
+        operationResult = signSetupObject({
+            signatureMessageHash,
+        });
+        signature = copyExactBytes(
+            operationResult,
+            mlDsa65SignatureByteLength,
+            'reset-safe setup-object signature',
+            'UnsupportedProvider',
+        );
+        requireSigningProvider(input.signingCapability);
+        if (
+            !ml_dsa65.verify(
+                signature,
+                hexToBytes(signatureMessageHash),
+                provider.signingVerificationKey!,
+                { context: objectSignatureContext },
+            )
+        ) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The reset-safe setup-object signature does not match the frozen roster verification key.',
+            );
+        }
+        return signature.slice();
+    } catch (error) {
+        if (error instanceof BrowserLocalKeyProviderError) {
+            throw error;
+        }
+        throw new BrowserLocalKeyProviderError(
+            'CapabilityUnavailable',
+            'The reset-safe setup-object signing operation failed.',
+            error,
+        );
+    } finally {
+        wipe(operationResult);
+        wipe(signature);
     }
 };

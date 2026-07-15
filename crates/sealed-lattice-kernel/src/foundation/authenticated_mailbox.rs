@@ -34,7 +34,7 @@ pub fn derive_setup_mailbox_slot_hash(
     statement_hash: Hash512,
     ordered_material_roots: &[Hash512],
 ) -> SchemaResult<Hash512> {
-    validate_mailbox_material_roots(payload_type, ordered_material_roots)?;
+    validate_mailbox_material_roots(ordered_material_roots)?;
     let material_roots = ordered_material_roots
         .iter()
         .map(|root| CanonicalItem::hash512(root.into_bytes()))
@@ -56,10 +56,7 @@ pub fn derive_setup_mailbox_slot_hash(
     )?)
 }
 
-fn validate_mailbox_material_roots(
-    _payload_type: MailboxPayloadType,
-    ordered_material_roots: &[Hash512],
-) -> SchemaResult<()> {
+fn validate_mailbox_material_roots(ordered_material_roots: &[Hash512]) -> SchemaResult<()> {
     if ordered_material_roots.is_empty() {
         return Err(schema_error(
             RefusalReason::WrongTypeOrLength,
@@ -110,7 +107,7 @@ impl MailboxKeyScheduleInput {
     }
 
     fn validate(&self) -> SchemaResult<()> {
-        validate_mailbox_material_roots(self.payload_type, &self.ordered_material_roots)
+        validate_mailbox_material_roots(&self.ordered_material_roots)
     }
 
     fn canonical_items(&self) -> SchemaResult<Vec<CanonicalItem>> {
@@ -455,6 +452,25 @@ mod tests {
                 .items
                 .len(),
             5
+        );
+    }
+
+    #[test]
+    fn removed_public_randomness_mailbox_payload_code_is_unassigned() {
+        let mut tuple = CanonicalTuple::decode(
+            &key_schedule_input().encode().expect("key schedule encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect("key-schedule tuple decodes");
+        tuple.items[8] = CanonicalItem::unsigned16(1);
+        let error = MailboxKeyScheduleInput::decode(
+            &tuple.encode().expect("changed key schedule encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect_err("removed mailbox payload code refuses");
+        assert_eq!(
+            error.refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
         );
     }
 

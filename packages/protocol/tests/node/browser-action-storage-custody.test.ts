@@ -255,11 +255,6 @@ describe('Browser action-storage custody', () => {
             ),
         });
         expect(workerKernel.retainedRootMatchesExpected()).toBe(true);
-        expect(
-            workerKernel.activeMutationIdentifierMatches(
-                snapshot.mutationIdentifier,
-            ),
-        ).toBe(true);
         expect(workerKernel.lastDeviceKeyIsNonExtractable()).toBe(true);
         expect(await workerKernel.lastDeviceKeyExportIsRefused()).toBe(true);
 
@@ -552,11 +547,6 @@ describe('Browser action-storage custody', () => {
             }),
         ).rejects.toMatchObject({ code: 'OwnedWorkerFailure' });
         expect(workerKernel.retainedRootMatchesExpected()).toBe(true);
-        expect(
-            workerKernel.activeMutationIdentifierMatches(
-                snapshot.mutationIdentifier,
-            ),
-        ).toBe(true);
     });
 
     it('allows only one concurrent initialization and discards the losing staged root', async () => {

@@ -130,8 +130,8 @@ pub use schemas::{
 pub use state::{
     STATE_CERTIFICATE_SCHEMA_IDENTIFIER, STATE_OUTPUT_INTENT_SCHEMA_IDENTIFIER,
     STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER, STATE_WITNESS_VOTE_SCHEMA_IDENTIFIER,
-    StateCapabilityKind, StateCertificate, StateDurableBinding, StateError, StateOutputIntentPayload,
-    StateReservationIntentPayload,
+    StateCapabilityKind, StateCertificate, StateDurableBinding, StateError,
+    StateOutputIntentPayload, StateReservationIntentPayload,
     StateReservationIntentVerificationInput, StateReservationVerificationInput, StateVerifier,
     StateWitnessVoteKind, StateWitnessVotePayload, VerifiedStateOutput, VerifiedStateOutputIntent,
     VerifiedStateReservation, VerifiedStateReservationIntent, derive_state_exact_output_hash,

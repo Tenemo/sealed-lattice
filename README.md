@@ -15,31 +15,40 @@ The protocol is designed around a public transcript and participant-side verific
 5. A deterministic evaluator computes the requested bounded result over ciphertexts, with a replay record that clients can check.
 6. A quorum of trustees produces target-bound decryption shares. Clients verify and combine them to reveal only the approved result.
 
+Whenever freshness or one-shot state must be witnessed, the witnesses are other identities from the same anchored participant roster, acting through their own mobile-browser clients. Witnessing is not a separate actor class or deployment: the ceremony never requires an external witness operator or trusted witness service.
+
+Participant action state is intentionally bound to the current phone and
+browser profile. There is no backup, export, import, migration, replacement
+device, or reactivation flow. Losing that state removes the participant from
+the current action; the protocol continues only when the remaining participants
+still satisfy the applicable setup, finality, and decryption thresholds.
+
+Every operation required to complete a vote must run in the participant's
+supported mobile browser. A desktop, native helper, server, remote prover, or
+stronger device is never an accepted substitute for missing mobile capability.
+
 Transcript and mailbox services only relay bytes. Correctness and acceptance must come from canonical encodings, recomputed hashes and roots, signatures, proof verification, and externally anchored poll and roster data.
 
 ## Prototype status
 
-The repository implements canonical protocol objects, browser-local
-authenticated storage, development collective BGV setup and VSS proofs, and
-internal ballot, aggregation, evaluation, and target-decryption components.
+The public package currently exposes poll-specification validation and hashing,
+setup-roster hashing, private-VSS share verification, and development
+setup-package verification. Internal Rust and WebAssembly code exercises
+canonical protocol objects, browser-local authenticated storage, collective BGV
+setup and VSS components, and verification substrate for state, finality, and
+namespace freshness.
 
-These components are not yet a complete participant workflow or a supported-phone
-profile. The public package does not provide accepted board finality, state
-authorization, or target decryption. Proof-system and end-to-end security work
-also remains open. The dedicated custody worker now co-locates reset-safe
-setup-mailbox sealing, signing-key use, and the structured-commitment hiding
-openings: the provisional rank-one layout uses three independently sampled
-centered-ternary columns retained behind opaque capabilities and consumed only
-by the closed commitment operation. VSS coefficient messages, later
-proof-witness consumption,
-proof-backed private setup delivery, and the complete participant workflow
-remain uncomposed. The protocol package includes a conservative namespace
-freshness state machine: only an externally verified witness quorum can activate
-a namespace, recovery accepts only the exact certified state, and failure to
-recover that state irreversibly retires the action identity. The kernel-backed
-checkpoint and vote verifier, independent witness stores, and witness transport
-are not yet composed, so this is not a deployed durable freshness authority.
-See [SECURITY.md](SECURITY.md) for the authoritative limitations and evidence
+Internal storage code can atomically repair abandoned same-browser writes and
+replay authenticated byte-identical outputs. Those mechanisms do not recover
+deleted participant state or make it portable.
+
+Ballot creation and proof, encrypted aggregation, evaluator replay, and target
+decryption remain internal, test-oriented development surfaces. They are not
+accepted participant capabilities or public package APIs. The repository does
+not yet compose a complete participant workflow, persistent non-forking release
+path across the participant quorum, supported-phone profile, or production
+proof-system assurance. See
+[SECURITY.md](SECURITY.md) for the authoritative limitations and evidence
 boundaries.
 
 ## Installation

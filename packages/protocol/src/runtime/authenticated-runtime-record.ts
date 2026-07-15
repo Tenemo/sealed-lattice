@@ -3,7 +3,7 @@ import { sha512 } from '@noble/hashes/sha2.js';
 import {
     UntrustedStorageTransactionError,
     type UntrustedStorageTransaction,
-    type UntrustedStorageAuthenticatedRecoveryProtection,
+    type UntrustedStorageAuthenticatedRepairProtection,
     type UntrustedStorageTransactionStore,
 } from './untrusted-storage-transaction-store.js';
 
@@ -15,12 +15,11 @@ const hashByteLength = 64;
 const participantIdentityByteLength = 64;
 const identifierByteLength = 32;
 const maximumAesGcmRandomNonceInvocationCount = 0x1_0000_0000;
-const authenticatedRecoveryHeadOperationDomain =
-    'sealed-lattice/runtime/recovery-head/v1';
-const authenticatedRecoveryHeadLogicalRecordKey =
-    'runtime/recovery/current-head';
-const authenticatedRecoveryIdentityDomain =
-    'sealed-lattice/runtime/recovery-identity/v1';
+const authenticatedRepairHeadOperationDomain =
+    'sealed-lattice/runtime/repair-head/v1';
+const authenticatedRepairHeadLogicalRecordKey = 'runtime/repair/current-head';
+const authenticatedRepairIdentityDomain =
+    'sealed-lattice/runtime/repair-identity/v1';
 
 export type RuntimeStorageAuthorityContext = Readonly<{
     actionContextHash: Uint8Array;
@@ -514,17 +513,17 @@ const openRuntimeRecord = async (input: {
     }
 };
 
-export const createRuntimeRecordAuthenticatedRecoveryProtection = (input: {
+export const createRuntimeRecordAuthenticatedRepairProtection = (input: {
     authorityContext: RuntimeStorageAuthorityContext;
     cryptoProvider?: Crypto;
     encryptionKey: CryptoKey;
     maximumRecordSealingCount: number;
-}): UntrustedStorageAuthenticatedRecoveryProtection => {
+}): UntrustedStorageAuthenticatedRepairProtection => {
     const protection = createRuntimeRecordProtection(input);
-    const recoveryIdentity = sha512(
+    const repairIdentity = sha512(
         concatenateBytes([
             encodeVariableBytes(
-                textEncoder.encode(authenticatedRecoveryIdentityDomain),
+                textEncoder.encode(authenticatedRepairIdentityDomain),
             ),
             protection.authorityContext.runtimeBuildManifestHash,
             protection.authorityContext.suiteIdentifier,
@@ -533,8 +532,8 @@ export const createRuntimeRecordAuthenticatedRecoveryProtection = (input: {
             protection.authorityContext.ownerParticipantIdentity,
         ]),
     );
-    const configuredRecoveryIdentity = recoveryIdentity.slice();
-    recoveryIdentity.fill(0);
+    const configuredRepairIdentity = repairIdentity.slice();
+    repairIdentity.fill(0);
 
     return Object.freeze({
         deriveDigest: (bytes: Uint8Array): Uint8Array => {
@@ -547,8 +546,8 @@ export const createRuntimeRecordAuthenticatedRecoveryProtection = (input: {
         open: async (sealedHeadBytes: Uint8Array): Promise<Uint8Array> => {
             try {
                 return await openRuntimeRecord({
-                    logicalRecordKey: authenticatedRecoveryHeadLogicalRecordKey,
-                    operationDomain: authenticatedRecoveryHeadOperationDomain,
+                    logicalRecordKey: authenticatedRepairHeadLogicalRecordKey,
+                    operationDomain: authenticatedRepairHeadOperationDomain,
                     protection,
                     sealedBytes: sealedHeadBytes,
                 });
@@ -556,12 +555,12 @@ export const createRuntimeRecordAuthenticatedRecoveryProtection = (input: {
                 sealedHeadBytes.fill(0);
             }
         },
-        recoveryIdentity: configuredRecoveryIdentity,
+        repairIdentity: configuredRepairIdentity,
         seal: async (headPlaintext: Uint8Array): Promise<Uint8Array> => {
             try {
                 return await sealRuntimeRecord({
-                    logicalRecordKey: authenticatedRecoveryHeadLogicalRecordKey,
-                    operationDomain: authenticatedRecoveryHeadOperationDomain,
+                    logicalRecordKey: authenticatedRepairHeadLogicalRecordKey,
+                    operationDomain: authenticatedRepairHeadOperationDomain,
                     plaintext: headPlaintext,
                     protection,
                 });

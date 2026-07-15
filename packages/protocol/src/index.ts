@@ -4,7 +4,7 @@ export {
     UntrustedStorageTransactionError,
     UntrustedStorageTransactionStore,
 } from './runtime/untrusted-storage-transaction-store.js';
-export { createRuntimeRecordAuthenticatedRecoveryProtection } from './runtime/authenticated-runtime-record.js';
+export { createRuntimeRecordAuthenticatedRepairProtection } from './runtime/authenticated-runtime-record.js';
 export { openCanonicalBoardRuntime } from './runtime/canonical-board-runtime.js';
 export {
     NamespaceFreshnessError,
@@ -39,12 +39,12 @@ export type {
 } from './runtime/namespace-freshness-runtime.js';
 export type {
     UntrustedStorageAdapter,
-    UntrustedStorageAuthenticatedRecoveryProtection,
+    UntrustedStorageAuthenticatedRepairProtection,
     UntrustedStorageAtomicMutation,
     UntrustedStorageAuthenticationInput,
     UntrustedStorageAuthenticator,
     UntrustedStorageExpectedValue,
-    UntrustedStorageRecoveryReport,
+    UntrustedStorageRepairReport,
     UntrustedStorageTransactionErrorCode,
     UntrustedStorageTransactionLimits,
     UntrustedStorageTransaction,

@@ -15,7 +15,6 @@ use crate::foundation::{
 };
 
 const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
-
 fn hash(byte: u8) -> Hash512 {
     Hash512::from_bytes([byte; 64])
 }

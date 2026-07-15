@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { UntrustedStorageAuthenticatedRecoveryProtection } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
+import type { UntrustedStorageAuthenticatedRepairProtection } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
 import {
     deriveWebLockStorageNamespaceName,
     openWebLockOwnedStorageTransactionStore,
@@ -25,9 +25,9 @@ const pendingOpenRequests = new Set<
 >();
 const databaseNames = new Set<string>();
 const openedFrames: HTMLIFrameElement[] = [];
-const recoveryProtections = new Map<
+const repairProtections = new Map<
     string,
-    UntrustedStorageAuthenticatedRecoveryProtection
+    UntrustedStorageAuthenticatedRepairProtection
 >();
 
 const copyToArrayBufferView = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
@@ -36,10 +36,10 @@ const copyToArrayBufferView = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
     return copy;
 };
 
-const recoveryProtectionFor = (
+const repairProtectionFor = (
     databaseName: string,
-): UntrustedStorageAuthenticatedRecoveryProtection => {
-    const existingProtection = recoveryProtections.get(databaseName);
+): UntrustedStorageAuthenticatedRepairProtection => {
+    const existingProtection = repairProtections.get(databaseName);
     if (existingProtection !== undefined) {
         return existingProtection;
     }
@@ -48,7 +48,7 @@ const recoveryProtectionFor = (
         false,
         ['decrypt', 'encrypt'],
     );
-    const recoveryIdentity = crypto.getRandomValues(new Uint8Array(64));
+    const repairIdentity = crypto.getRandomValues(new Uint8Array(64));
     const protection = Object.freeze({
         deriveDigest: async (bytes: Uint8Array) =>
             new Uint8Array(
@@ -59,7 +59,7 @@ const recoveryProtectionFor = (
             ),
         open: async (sealedBytes: Uint8Array) => {
             if (sealedBytes.byteLength < 28) {
-                throw new Error('Test recovery head is truncated.');
+                throw new Error('Test repair head is truncated.');
             }
             const nonce = copyToArrayBufferView(sealedBytes.slice(0, 12));
             const ciphertext = copyToArrayBufferView(sealedBytes.slice(12));
@@ -71,7 +71,7 @@ const recoveryProtectionFor = (
                 ),
             );
         },
-        recoveryIdentity,
+        repairIdentity,
         seal: async (plaintext: Uint8Array) => {
             const nonce = crypto.getRandomValues(new Uint8Array(12));
             const ciphertext = new Uint8Array(
@@ -89,7 +89,7 @@ const recoveryProtectionFor = (
             return sealedBytes;
         },
     });
-    recoveryProtections.set(databaseName, protection);
+    repairProtections.set(databaseName, protection);
     return protection;
 };
 const createDatabaseName = (): string => {
@@ -106,7 +106,7 @@ const configurationFor = (
     databaseName: string,
     overrides: Partial<WebLockOwnedStorageConfiguration> = {},
 ): WebLockOwnedStorageConfiguration => ({
-    authenticatedRecoveryProtection: recoveryProtectionFor(databaseName),
+    authenticatedRepairProtection: repairProtectionFor(databaseName),
     databaseName,
     limits: transactionLimits,
     namespace: 'browser-integration',
@@ -340,7 +340,7 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
         });
     });
 
-    it('runs abandoned-object recovery only after the previous owner closes', async () => {
+    it('runs abandoned-object repair only after the previous owner closes', async () => {
         const databaseName = createDatabaseName();
         const configuration = configurationFor(databaseName);
         const lockName = deriveWebLockStorageNamespaceName(configuration);
@@ -368,7 +368,7 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
 
         await firstHandle.close();
         const secondHandle = await secondOpenRequest;
-        expect(secondHandle.recoveryReport).toMatchObject({
+        expect(secondHandle.repairReport).toMatchObject({
             removedCorruptIndexCount: 0,
             removedUnreferencedObjectCount: 1,
             retainedObjectCount: 0,

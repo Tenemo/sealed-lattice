@@ -255,7 +255,7 @@ describe('Browser action-storage custody worker channel', () => {
                 ...expectedContext,
                 envelope,
             }),
-        ).rejects.toMatchObject({ code: 'OwnedWorkerFailure' });
+        ).resolves.toEqual(plaintext);
         await expect(
             custody.sealLocalRecord({
                 ...expectedContext,

@@ -1,11 +1,11 @@
 import {
-    createRuntimeRecordAuthenticatedRecoveryProtection,
+    createRuntimeRecordAuthenticatedRepairProtection,
     openUntrustedStorageTransactionStore,
     type RuntimeStorageAuthorityContext,
     type UntrustedStorageAdapter,
-    type UntrustedStorageAuthenticatedRecoveryProtection,
+    type UntrustedStorageAuthenticatedRepairProtection,
     type UntrustedStorageAtomicMutation,
-    type UntrustedStorageRecoveryReport,
+    type UntrustedStorageRepairReport,
     type UntrustedStorageTransactionLimits,
     type UntrustedStorageTransactionStore,
 } from '#packages/protocol/src/index';
@@ -157,25 +157,25 @@ const createIdentifierFactory = (): ((
     };
 };
 
-const authenticatedRecoveryProtections = new WeakMap<
+const authenticatedRepairProtections = new WeakMap<
     InMemoryRuntimeStorageAdapter,
-    Promise<UntrustedStorageAuthenticatedRecoveryProtection>
+    Promise<UntrustedStorageAuthenticatedRepairProtection>
 >();
 
-const authenticatedRecoveryProtectionFor = (
+const authenticatedRepairProtectionFor = (
     adapter: InMemoryRuntimeStorageAdapter,
-): Promise<UntrustedStorageAuthenticatedRecoveryProtection> => {
-    let protection = authenticatedRecoveryProtections.get(adapter);
+): Promise<UntrustedStorageAuthenticatedRepairProtection> => {
+    let protection = authenticatedRepairProtections.get(adapter);
     if (protection === undefined) {
         protection = generateRuntimeStorageEncryptionKey().then(
             (encryptionKey) =>
-                createRuntimeRecordAuthenticatedRecoveryProtection({
+                createRuntimeRecordAuthenticatedRepairProtection({
                     authorityContext: runtimeAuthorityContext(),
                     encryptionKey,
                     maximumRecordSealingCount: 0x1_0000_0000,
                 }),
         );
-        authenticatedRecoveryProtections.set(adapter, protection);
+        authenticatedRepairProtections.set(adapter, protection);
     }
     return protection;
 };
@@ -186,14 +186,14 @@ export const openRuntimeTestStore = async (input?: {
     namespace?: string;
 }): Promise<{
     adapter: InMemoryRuntimeStorageAdapter;
-    recoveryReport: UntrustedStorageRecoveryReport;
+    repairReport: UntrustedStorageRepairReport;
     store: UntrustedStorageTransactionStore;
 }> => {
     const adapter = input?.adapter ?? new InMemoryRuntimeStorageAdapter();
     const opened = await openUntrustedStorageTransactionStore({
         adapter,
-        authenticatedRecoveryProtection:
-            await authenticatedRecoveryProtectionFor(adapter),
+        authenticatedRepairProtection:
+            await authenticatedRepairProtectionFor(adapter),
         createIdentifier: createIdentifierFactory(),
         limits: { ...defaultLimits, ...input?.limits },
         monotonicClockMilliseconds: () => 0,

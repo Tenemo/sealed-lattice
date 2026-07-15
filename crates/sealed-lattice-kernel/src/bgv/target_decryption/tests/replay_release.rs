@@ -70,7 +70,7 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
     assert_eq!(evaluations.len(), 1, "one top-count evaluation record");
     let evaluation = &evaluations[0];
 
-    phase("reproducing the deterministic pipeline to recover the target pair");
+    phase("reproducing the deterministic pipeline for the target pair");
     let aggregate_ciphertext_root =
         ciphertext_object_root(&aggregate_ciphertext).expect("aggregate root");
     let replay_seed = hash512_hex(

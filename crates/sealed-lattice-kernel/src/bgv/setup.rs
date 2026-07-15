@@ -87,7 +87,9 @@ pub(crate) use same_secret_bridge::{
 };
 pub(crate) use setup_proof::ProofByteSource;
 #[cfg(test)]
-pub(crate) use setup_proof::authenticate_setup_proof_material_stream_for_test;
+pub(crate) use setup_proof::{
+    BgvProofMaterialBytes, authenticate_setup_proof_material_stream_for_test,
+};
 #[cfg(test)]
 pub(in crate::bgv) use trustee_evaluation_key_proof::target_decryption_interpolation_denominator_clearing_factor;
 #[cfg(test)]

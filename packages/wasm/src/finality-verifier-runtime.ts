@@ -46,7 +46,10 @@ export type FinalityVerifierKernelContext = Readonly<{
         capabilityLength: number,
         verifiedFinalityHandle: number,
     ): number;
-    runExclusive<Result>(operationName: string, operation: () => Result): Result;
+    runExclusive<Result>(
+        operationName: string,
+        operation: () => Result,
+    ): Result;
     verify(
         sessionHandle: number,
         capabilityPointer: number,
@@ -65,7 +68,10 @@ export type FinalityVerifierKernelContext = Readonly<{
     ): number;
 }>;
 
-const contexts = new WeakMap<TranscriptCoreKernel, FinalityVerifierKernelContext>();
+const contexts = new WeakMap<
+    TranscriptCoreKernel,
+    FinalityVerifierKernelContext
+>();
 
 export const registerFinalityVerifierKernelContext = (
     kernel: TranscriptCoreKernel,
@@ -184,7 +190,8 @@ class FinalityVerifierRefusalError extends Error {
 
 const refused = <Value>(
     refusalReason: RefusalReason,
-): VerificationResult<Value> => Object.freeze({ isValid: false, refusalReason });
+): VerificationResult<Value> =>
+    Object.freeze({ isValid: false, refusalReason });
 
 const valid = <Value>(value: Value): VerificationResult<Value> =>
     Object.freeze({ isValid: true, value });
@@ -402,13 +409,22 @@ class FinalityVerifierSessionImplementation implements FinalityVerifierSession {
         if (this.#state !== 'active') {
             return refused('consumedState');
         }
-        if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input)
+        ) {
             return refused('wrongTypeOrLength');
         }
         const statementRefusal = requireBytes(input.canonicalStatement);
         const certificateRefusal = requireBytes(input.canonicalCertificate);
-        if (statementRefusal !== undefined || certificateRefusal !== undefined) {
-            return refused(statementRefusal ?? certificateRefusal ?? 'wrongTypeOrLength');
+        if (
+            statementRefusal !== undefined ||
+            certificateRefusal !== undefined
+        ) {
+            return refused(
+                statementRefusal ?? certificateRefusal ?? 'wrongTypeOrLength',
+            );
         }
         if (
             !Array.isArray(input.verifiedFinalityObjects) ||
@@ -438,7 +454,7 @@ class FinalityVerifierSessionImplementation implements FinalityVerifierSession {
         let boardCapabilityPointer = 0;
         const finalityObjectHandles: number[] = [];
         try {
-            for (const verifiedObject of input.verifiedFinalityObjects) {
+            for (const verifiedObject of input.verifiedFinalityObjects as readonly VerifiedTranscriptObject[]) {
                 const authorization =
                     resolveVerifiedTranscriptObjectKernelAuthorization(
                         verifiedObject,
@@ -476,10 +492,7 @@ class FinalityVerifierSessionImplementation implements FinalityVerifierSession {
                 this.#context,
                 finalityHandleBytes,
             );
-            statusPointer = allocateZeroed(
-                this.#context,
-                wasm32WordByteLength,
-            );
+            statusPointer = allocateZeroed(this.#context, wasm32WordByteLength);
             const verifiedFinalityHandle = this.#context.runExclusive(
                 'finality verification',
                 () =>
@@ -532,17 +545,17 @@ class FinalityVerifierSessionImplementation implements FinalityVerifierSession {
             certificate.fill(0);
             finalityHandleBytes.fill(0);
             deallocate(this.#context, statementPointer, statement.byteLength);
-            deallocate(this.#context, certificatePointer, certificate.byteLength);
+            deallocate(
+                this.#context,
+                certificatePointer,
+                certificate.byteLength,
+            );
             deallocate(
                 this.#context,
                 finalityHandlesPointer,
                 finalityHandleBytes.byteLength,
             );
-            deallocate(
-                this.#context,
-                statusPointer,
-                wasm32WordByteLength,
-            );
+            deallocate(this.#context, statusPointer, wasm32WordByteLength);
         }
     }
 
@@ -670,18 +683,12 @@ class FinalityVerifierSessionImplementation implements FinalityVerifierSession {
 
     #resolve(
         verifiedFinality: VerifiedFinality,
-    ):
-        | VerifiedFinalityRecord
-        | Readonly<{ refusalReason: RefusalReason }> {
+    ): VerifiedFinalityRecord | Readonly<{ refusalReason: RefusalReason }> {
         if (this.#state !== 'active') {
             return { refusalReason: 'consumedState' };
         }
         const record = verifiedFinalityRecords.get(verifiedFinality);
-        if (
-            record === undefined ||
-            !record.active ||
-            record.session !== this
-        ) {
+        if (record === undefined || !record.active || record.session !== this) {
             return { refusalReason: 'consumedState' };
         }
         return record;

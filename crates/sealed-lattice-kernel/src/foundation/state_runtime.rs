@@ -899,7 +899,6 @@ mod tests {
         configuration.extend_from_slice(&[0x11; Hash512::BYTE_LENGTH]);
         configuration.extend_from_slice(&[0x22; Hash512::BYTE_LENGTH]);
         configuration.extend_from_slice(&[0x33; Hash512::BYTE_LENGTH]);
-        configuration.extend_from_slice(&8_u16.to_le_bytes());
         configuration.extend_from_slice(
             &u32::try_from(roster_bytes.len())
                 .expect("test roster length fits u32")

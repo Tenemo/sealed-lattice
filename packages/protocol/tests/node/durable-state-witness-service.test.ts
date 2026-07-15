@@ -34,7 +34,6 @@ import {
     openStateVerifierSession,
     type StateVerifierSession,
     type VerifiedStateDurableBinding,
-    type VerifiedStateOutput,
     type VerifiedStateReservation,
 } from '#packages/wasm/src/state-verifier-runtime';
 import {
@@ -310,34 +309,6 @@ const verifyOutputBinding = (input: {
     }
     const verifiedOutputIntent = requireValid(output.finish());
     return requireValid(input.session.durableBindingFor(verifiedOutputIntent));
-};
-
-const verifyCertifiedOutput = (input: {
-    kernel: TranscriptCoreKernel;
-    session: StateVerifierSession;
-    vector: StateVerifierTestVector;
-}): VerifiedStateOutput => {
-    const reservation = verifyReservation(input);
-    const output = requireValid(
-        input.session.openOutputVerification({
-            canonicalOutputIntentCarrier:
-                input.vector.output.canonicalIntentCarrier,
-            canonicalStateCertificate:
-                input.vector.output.canonicalStateCertificate,
-            exactOutputDescriptorBytes: descriptorFor(
-                input.kernel,
-                canonicalStreamDomains.stateTargetReleaseExactOutput,
-                input.vector.exactOutputBytes,
-            ),
-            verifiedReservation: reservation,
-        }),
-    );
-    for (const [chunkIndex, chunk] of chunkBuffers(
-        input.vector.exactOutputBytes,
-    ).entries()) {
-        requireValid(output.absorbChunk(chunkIndex, chunk));
-    }
-    return requireValid(output.finish());
 };
 
 describe('durable state witness service', () => {

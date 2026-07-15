@@ -183,6 +183,36 @@ impl BoardFixture {
         )
     }
 
+    fn public_randomness_reveal(
+        &self,
+        producer_roster_position: usize,
+        contribution_commitment_object_hash: Hash512,
+        reveal_byte: u8,
+    ) -> Vec<u8> {
+        let payload = CanonicalTuple::new(
+            PUBLIC_RANDOMNESS_REVEAL_PAYLOAD_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::hash512(contribution_commitment_object_hash.into_bytes()),
+                CanonicalItem::fixed_bytes([reveal_byte; Hash512::BYTE_LENGTH])
+                    .expect("public-randomness reveal bytes encode"),
+            ],
+        )
+        .encode()
+        .expect("public-randomness reveal payload encodes");
+        self.sign_envelope(
+            producer_roster_position,
+            self.envelope(
+                producer_roster_position,
+                FoundationObjectType::PublicRandomnessReveal,
+                0,
+                Vec::new(),
+                payload,
+            ),
+            0x52,
+        )
+    }
+
     fn ballot_package(
         &self,
         producer_roster_position: usize,
@@ -210,6 +240,49 @@ impl BoardFixture {
             0x60_u8.wrapping_add(
                 u8::try_from(producer_roster_position).expect("test roster position fits u8"),
             ),
+        )
+    }
+
+    fn aggregate(
+        &self,
+        verified_setup_source_hash: Hash512,
+        selected_ballot_object_hashes: &[Hash512],
+    ) -> (Vec<u8>, Hash512) {
+        let selected_ballots = selected_ballot_object_hashes
+            .iter()
+            .map(|hash| CanonicalItem::hash512(hash.into_bytes()))
+            .collect::<Vec<_>>();
+        let payload = CanonicalTuple::new(
+            AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::hash512(verified_setup_source_hash.into_bytes()),
+                CanonicalItem::hash512([0x52; Hash512::BYTE_LENGTH]),
+                CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &selected_ballots)
+                    .expect("selected-ballot hash list encodes"),
+                test_stream_descriptor_item(0xc3),
+            ],
+        )
+        .encode()
+        .expect("aggregate payload encodes");
+        let envelope = ObjectEnvelope {
+            suite_id: self.suite_id,
+            object_type: FoundationObjectType::Aggregate,
+            ceremony_context_hash: self.ceremony_context_hash,
+            action_context_hash: self.action_context_hash,
+            producer_participant_id: None,
+            producer_sequence: 0,
+            ordered_prerequisite_hashes: Vec::new(),
+            payload_bytes: payload,
+        };
+        let object_hash = envelope
+            .object_hash()
+            .expect("aggregate object hash derives");
+        (
+            envelope
+                .encode()
+                .expect("unsigned aggregate envelope encodes"),
+            object_hash,
         )
     }
 }
@@ -401,49 +474,59 @@ fn typed_prerequisite_order_is_roster_derived_and_failure_is_atomic() {
 }
 
 #[test]
+fn public_randomness_reveal_is_bound_to_its_authenticated_source_commitment() {
+    let fixture = BoardFixture::new();
+    let setup_intents = (0..usize::from(FOUNDATION_PROFILE.participant_count))
+        .map(|roster_position| {
+            fixture.setup_intent(
+                roster_position,
+                u8::try_from(roster_position + 1).expect("test position fits u8"),
+            )
+        })
+        .collect::<Vec<_>>();
+    let setup_intent_hashes = setup_intents
+        .iter()
+        .map(|carrier| carrier_object_hash(carrier))
+        .collect::<Vec<_>>();
+    let commitment = fixture.public_randomness_commitment(2, setup_intent_hashes);
+    let commitment_hash = carrier_object_hash(&commitment);
+    let reveal = fixture.public_randomness_reveal(2, commitment_hash, 0xa7);
+
+    let mut accepted_batch = vec![reveal, commitment.clone()];
+    accepted_batch.extend(setup_intents.clone().into_iter().rev());
+    fixture
+        .verifier()
+        .verify_unordered_carriers(&accepted_batch)
+        .into_result()
+        .expect("a source reveal matching its commitment verifies");
+
+    let wrong_source_reveal = fixture.public_randomness_reveal(3, commitment_hash, 0xa7);
+    let mut wrong_source_batch = vec![wrong_source_reveal, commitment];
+    wrong_source_batch.extend(setup_intents.into_iter().rev());
+    assert_eq!(
+        fixture
+            .verifier()
+            .verify_unordered_carriers(&wrong_source_batch)
+            .into_result()
+            .expect_err("another participant cannot reveal a source commitment"),
+        RefusalReason::WrongContext
+    );
+}
+
+#[test]
 fn deterministic_unsigned_objects_resolve_typed_dependencies() {
     let fixture = BoardFixture::new();
     let verified_setup_source_hash = Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]);
-    let ballots = (0..usize::from(FOUNDATION_PROFILE.participant_count))
-        .map(|roster_position| fixture.ballot_package(roster_position, verified_setup_source_hash))
+    let selected_roster_positions = [0_usize, 3, 9];
+    let ballots = selected_roster_positions
+        .iter()
+        .map(|roster_position| fixture.ballot_package(*roster_position, verified_setup_source_hash))
         .collect::<Vec<_>>();
     let ballot_hashes = ballots
         .iter()
         .map(|carrier| carrier_object_hash(carrier))
         .collect::<Vec<_>>();
-    let selected_ballots = ballot_hashes
-        .iter()
-        .map(|hash| CanonicalItem::hash512(hash.into_bytes()))
-        .collect::<Vec<_>>();
-    let aggregate_payload = CanonicalTuple::new(
-        AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER,
-        FOUNDATION_SCHEMA_VERSION,
-        vec![
-            CanonicalItem::hash512(verified_setup_source_hash.into_bytes()),
-            CanonicalItem::hash512([0x52; Hash512::BYTE_LENGTH]),
-            CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &selected_ballots)
-                .expect("selected-ballot hash list encodes"),
-            test_stream_descriptor_item(0xc3),
-        ],
-    )
-    .encode()
-    .expect("aggregate payload encodes");
-    let aggregate_envelope = ObjectEnvelope {
-        suite_id: fixture.suite_id,
-        object_type: FoundationObjectType::Aggregate,
-        ceremony_context_hash: fixture.ceremony_context_hash,
-        action_context_hash: fixture.action_context_hash,
-        producer_participant_id: None,
-        producer_sequence: 0,
-        ordered_prerequisite_hashes: Vec::new(),
-        payload_bytes: aggregate_payload,
-    };
-    let aggregate_hash = aggregate_envelope
-        .object_hash()
-        .expect("aggregate object hash derives");
-    let aggregate = aggregate_envelope
-        .encode()
-        .expect("unsigned aggregate envelope encodes");
+    let (aggregate, aggregate_hash) = fixture.aggregate(verified_setup_source_hash, &ballot_hashes);
     let replay_payload = CanonicalTuple::new(
         super::super::schemas::EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER,
         FOUNDATION_SCHEMA_VERSION,
@@ -476,14 +559,14 @@ fn deterministic_unsigned_objects_resolve_typed_dependencies() {
         .verify_unordered_carriers(&unordered)
         .into_result()
         .expect("deterministic objects resolve through later signed ballots");
-    assert_eq!(batch.objects().len(), 12);
+    assert_eq!(batch.objects().len(), selected_roster_positions.len() + 2);
     assert_eq!(
         batch
             .objects()
             .iter()
             .filter(|object| object.object_type() == FoundationObjectType::BallotPackage)
             .count(),
-        usize::from(FOUNDATION_PROFILE.participant_count)
+        selected_roster_positions.len()
     );
     assert!(
         batch
@@ -514,6 +597,52 @@ fn deterministic_unsigned_objects_resolve_typed_dependencies() {
             .expect_err("a signed family cannot use unsigned transport"),
         RefusalReason::WrongTypeOrLength
     );
+}
+
+#[test]
+fn aggregate_selected_ballot_subset_must_be_nonempty_unique_and_roster_ordered() {
+    let fixture = BoardFixture::new();
+    let verified_setup_source_hash = Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]);
+    let ballots = [
+        fixture.ballot_package(1, verified_setup_source_hash),
+        fixture.ballot_package(4, verified_setup_source_hash),
+    ];
+    let ballot_hashes = ballots
+        .iter()
+        .map(|carrier| carrier_object_hash(carrier))
+        .collect::<Vec<_>>();
+
+    let (empty_aggregate, _) = fixture.aggregate(verified_setup_source_hash, &[]);
+    assert_eq!(
+        fixture
+            .verifier()
+            .verify_unordered_carriers(&[empty_aggregate])
+            .into_result()
+            .expect_err("an empty selected-ballot subset refuses"),
+        RefusalReason::WrongTypeOrLength
+    );
+
+    for (selected_ballot_hashes, refusal_description) in [
+        (
+            vec![ballot_hashes[0], ballot_hashes[0]],
+            "a repeated selected ballot refuses",
+        ),
+        (
+            vec![ballot_hashes[1], ballot_hashes[0]],
+            "selected ballots outside roster order refuse",
+        ),
+    ] {
+        let (aggregate, _) = fixture.aggregate(verified_setup_source_hash, &selected_ballot_hashes);
+        let carriers = vec![aggregate, ballots[0].clone(), ballots[1].clone()];
+        assert_eq!(
+            fixture
+                .verifier()
+                .verify_unordered_carriers(&carriers)
+                .into_result()
+                .expect_err(refusal_description),
+            RefusalReason::WrongContext
+        );
+    }
 }
 
 #[test]

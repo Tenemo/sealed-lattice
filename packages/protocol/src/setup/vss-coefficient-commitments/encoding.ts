@@ -8,9 +8,6 @@ export {
 import {
     setupCommitmentHidingErrorWidth,
     setupCommitmentHidingSecretWidth,
-    setupCommitmentModulusLimbCount,
-    setupCommitmentRandomnessCoefficientBound,
-    setupCommitmentRandomnessWidth,
 } from './constants-and-types.js';
 
 type VssOpeningRandomByteSource = (byteLength: number) => Uint8Array;
@@ -123,73 +120,6 @@ export const assertResidueVector = (
             );
         }
     });
-};
-
-export const assertRandomness = (
-    randomnessByColumn: readonly (readonly number[])[],
-    ringDegree: number,
-    fieldName: string,
-): void => {
-    if (randomnessByColumn.length !== setupCommitmentRandomnessWidth) {
-        throw new Error(
-            `${fieldName} must contain the selected randomness width.`,
-        );
-    }
-    randomnessByColumn.forEach((randomnessColumn, randomnessColumnIndex) => {
-        const coefficientBound = setupCommitmentRandomnessCoefficientBound(
-            randomnessColumnIndex,
-        );
-        if (coefficientBound === undefined) {
-            throw new Error(
-                `${fieldName}.${String(randomnessColumnIndex)} is outside the selected randomness profile.`,
-            );
-        }
-        if (randomnessColumn.length !== ringDegree) {
-            throw new Error(
-                `${fieldName}.${String(randomnessColumnIndex)} length must match ringDegree.`,
-            );
-        }
-        randomnessColumn.forEach((coefficient, coefficientIndex) => {
-            if (
-                !Number.isSafeInteger(coefficient) ||
-                coefficient < -coefficientBound ||
-                coefficient > coefficientBound
-            ) {
-                const distributionDescription =
-                    randomnessColumnIndex <
-                    setupCommitmentHidingSecretWidth
-                        ? 'purpose-11 centered ternary'
-                        : 'purpose-12 centered ternary';
-                throw new TypeError(
-                    `${fieldName}.${String(randomnessColumnIndex)}.${String(coefficientIndex)} must be within the ${distributionDescription} support.`,
-                );
-            }
-        });
-    });
-};
-
-export const assertRandomnessByCommitmentLimb = (
-    randomnessByCommitmentLimb: readonly (readonly (readonly number[])[])[],
-    ringDegree: number,
-    fieldName: string,
-): void => {
-    if (
-        randomnessByCommitmentLimb.length !==
-        setupCommitmentModulusLimbCount
-    ) {
-        throw new Error(
-            `${fieldName} must contain one independent opening tape per commitment modulus limb.`,
-        );
-    }
-    randomnessByCommitmentLimb.forEach(
-        (randomnessByColumn, commitmentLimbPosition) => {
-            assertRandomness(
-                randomnessByColumn,
-                ringDegree,
-                `${fieldName}.${String(commitmentLimbPosition)}`,
-            );
-        },
-    );
 };
 
 export const centeredIntegerToResidue = (

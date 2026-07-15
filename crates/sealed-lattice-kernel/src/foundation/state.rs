@@ -18,7 +18,6 @@ pub const STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER: u16 = 0x1610;
 pub const STATE_OUTPUT_INTENT_SCHEMA_IDENTIFIER: u16 = 0x1611;
 pub const STATE_WITNESS_VOTE_SCHEMA_IDENTIFIER: u16 = 0x1612;
 pub const STATE_CERTIFICATE_SCHEMA_IDENTIFIER: u16 = 0x1613;
-pub const STATE_RECOVERY_TRANSITION_SCHEMA_IDENTIFIER: u16 = 0x1614;
 
 const STATE_SCHEMA_VERSION: u16 = 1;
 const STATE_EXACT_OUTPUT_HASH_DOMAIN: &str = "sealed-lattice/state/exact-output/v1";
@@ -26,13 +25,9 @@ const STATE_EXACT_OUTPUT_HASH_DOMAIN: &str = "sealed-lattice/state/exact-output/
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum StateCapabilityKind {
-    BallotCandidateList = 1,
     FinalitySignature = 2,
     TargetRelease = 3,
     SetupActionRandomnessRoot = 4,
-    SetupPublicSeedBranch = 5,
-    SetupDealerSetBranch = 6,
-    SetupRkgRoundOneBranch = 7,
     SetupTerminalPackage = 8,
 }
 
@@ -43,23 +38,16 @@ impl StateCapabilityKind {
 
     pub const fn from_canonical_code(code: u16) -> Option<Self> {
         match code {
-            1 => Some(Self::BallotCandidateList),
             2 => Some(Self::FinalitySignature),
             3 => Some(Self::TargetRelease),
             4 => Some(Self::SetupActionRandomnessRoot),
-            5 => Some(Self::SetupPublicSeedBranch),
-            6 => Some(Self::SetupDealerSetBranch),
-            7 => Some(Self::SetupRkgRoundOneBranch),
             8 => Some(Self::SetupTerminalPackage),
             _ => None,
         }
     }
 
     pub const fn supports_exact_output(self) -> bool {
-        matches!(
-            self,
-            Self::BallotCandidateList | Self::FinalitySignature | Self::TargetRelease
-        )
+        matches!(self, Self::FinalitySignature | Self::TargetRelease)
     }
 }
 
@@ -159,38 +147,6 @@ impl StateOutputIntentPayload {
         Ok(Self {
             reservation_intent_object_hash: read_hash512(&tuple.items[0])?,
             exact_output_hash: read_hash512(&tuple.items[1])?,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StateRecoveryTransitionPayload {
-    pub capability_kind: StateCapabilityKind,
-    pub preserved_latest_intent_object_hash: Option<Hash512>,
-}
-
-impl StateRecoveryTransitionPayload {
-    pub fn encode(self) -> StateResult<Vec<u8>> {
-        let preserved_intent = self
-            .preserved_latest_intent_object_hash
-            .map(|hash| CanonicalItem::hash512(hash.into_bytes()));
-        Ok(CanonicalTuple::new(
-            STATE_RECOVERY_TRANSITION_SCHEMA_IDENTIFIER,
-            STATE_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(self.capability_kind.canonical_code()),
-                CanonicalItem::optional(CanonicalItemType::Hash512, preserved_intent.as_ref())?,
-            ],
-        )
-        .encode()?)
-    }
-
-    pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> StateResult<Self> {
-        let tuple = CanonicalTuple::decode(bytes, limits)?;
-        require_state_tuple_header(&tuple, STATE_RECOVERY_TRANSITION_SCHEMA_IDENTIFIER, 2)?;
-        Ok(Self {
-            capability_kind: read_capability_kind(&tuple.items[0])?,
-            preserved_latest_intent_object_hash: read_optional_hash512(&tuple.items[1])?,
         })
     }
 }
@@ -386,34 +342,6 @@ fn read_hash512(item: &CanonicalItem) -> StateResult<Hash512> {
             )
         })?;
     Ok(Hash512::from_bytes(bytes))
-}
-
-fn read_optional_hash512(item: &CanonicalItem) -> StateResult<Option<Hash512>> {
-    let bytes = require_item_type(item, CanonicalItemType::Optional)?;
-    if bytes.len() < 3
-        || u16::from_le_bytes([bytes[0], bytes[1]]) != CanonicalItemType::Hash512.canonical_code()
-    {
-        return Err(StateError::new(
-            RefusalReason::WrongTypeOrLength,
-            "state optional hash has the wrong contained type",
-        ));
-    }
-    match bytes[2] {
-        0 if bytes.len() == 3 => Ok(None),
-        1 if bytes.len() == 3 + Hash512::BYTE_LENGTH => {
-            let hash_bytes: [u8; Hash512::BYTE_LENGTH] = bytes[3..].try_into().map_err(|_| {
-                StateError::new(
-                    RefusalReason::WrongTypeOrLength,
-                    "state optional hash has the wrong length",
-                )
-            })?;
-            Ok(Some(Hash512::from_bytes(hash_bytes)))
-        }
-        _ => Err(StateError::new(
-            RefusalReason::MalformedEncoding,
-            "state optional hash is malformed",
-        )),
-    }
 }
 
 fn read_variable_byte_list(item: &CanonicalItem) -> StateResult<Vec<Vec<u8>>> {
@@ -637,7 +565,6 @@ impl StateExactOutputHasher {
 pub enum StateWitnessVoteKind {
     Reservation,
     Output,
-    Recovery,
 }
 
 impl StateWitnessVoteKind {
@@ -645,43 +572,15 @@ impl StateWitnessVoteKind {
         match self {
             Self::Reservation => 1,
             Self::Output => 2,
-            Self::Recovery => 3,
         }
     }
 }
 
-pub fn derive_state_witness_vote_sequence(
-    vote_kind: StateWitnessVoteKind,
-    recovery_epoch: u64,
-) -> StateResult<u64> {
-    if vote_kind == StateWitnessVoteKind::Recovery && recovery_epoch == 0 {
-        return Err(StateError::new(
-            RefusalReason::WrongTypeOrLength,
-            "a recovery vote requires a non-zero recovery epoch",
-        ));
+pub const fn derive_state_witness_vote_sequence(vote_kind: StateWitnessVoteKind) -> u64 {
+    match vote_kind {
+        StateWitnessVoteKind::Reservation => 1,
+        StateWitnessVoteKind::Output => 2,
     }
-    recovery_epoch
-        .checked_mul(3)
-        .and_then(|base| match vote_kind {
-            StateWitnessVoteKind::Reservation => base.checked_add(1),
-            StateWitnessVoteKind::Output => base.checked_add(2),
-            StateWitnessVoteKind::Recovery => Some(base),
-        })
-        .ok_or_else(|| {
-            StateError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "state witness vote sequence overflows",
-            )
-        })
-}
-
-pub fn derive_state_recovery_producer_sequence(recovery_epoch: u64) -> StateResult<u64> {
-    recovery_epoch.checked_add(1).ok_or_else(|| {
-        StateError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "state recovery producer sequence overflows",
-        )
-    })
 }
 
 #[derive(Clone, Copy)]
@@ -694,8 +593,6 @@ struct StateReservationBinding {
     action_context_hash: Hash512,
     state_key: Hash512,
     authorization_hash: Hash512,
-    recovery_epoch: u64,
-    predecessor_transition_hash: Option<Hash512>,
 }
 
 #[derive(Clone, Copy)]
@@ -704,22 +601,6 @@ struct StateOutputBinding {
     output_intent_object_hash: Hash512,
     exact_output_hash: Hash512,
     exact_output_byte_length: u64,
-}
-
-#[derive(Clone, Copy)]
-struct StateRecoveryBinding {
-    transition_object_hash: Hash512,
-    subject_participant_id: ParticipantIdentity,
-    capability_kind: StateCapabilityKind,
-    suite_id: Hash512,
-    ceremony_context_hash: Hash512,
-    action_context_hash: Hash512,
-    state_key: Hash512,
-    old_recovery_epoch: u64,
-    new_recovery_epoch: u64,
-    predecessor_transition_hash: Option<Hash512>,
-    preserved_reservation_binding: Option<StateReservationBinding>,
-    preserved_output_binding: Option<StateOutputBinding>,
 }
 
 /// Verifier-derived durable lock metadata. This value is never decoded from a
@@ -739,8 +620,6 @@ pub struct StateDurableBinding {
     output_intent_object_hash: Option<Hash512>,
     exact_output_hash: Option<Hash512>,
     exact_output_byte_length: Option<u64>,
-    recovery_epoch: u64,
-    recovery_transition_hash: Option<Hash512>,
 }
 
 impl StateDurableBinding {
@@ -792,16 +671,8 @@ impl StateDurableBinding {
         self.exact_output_byte_length
     }
 
-    pub const fn recovery_epoch(self) -> u64 {
-        self.recovery_epoch
-    }
-
-    pub const fn recovery_transition_hash(self) -> Option<Hash512> {
-        self.recovery_transition_hash
-    }
-
-    pub fn witness_vote_sequence(self) -> StateResult<u64> {
-        derive_state_witness_vote_sequence(self.vote_kind, self.recovery_epoch)
+    pub const fn witness_vote_sequence(self) -> u64 {
+        derive_state_witness_vote_sequence(self.vote_kind)
     }
 }
 
@@ -850,14 +721,6 @@ impl VerifiedStateReservation {
 
     pub const fn authorization_hash(&self) -> Hash512 {
         self.binding.authorization_hash
-    }
-
-    pub const fn recovery_epoch(&self) -> u64 {
-        self.binding.recovery_epoch
-    }
-
-    pub const fn predecessor_transition_hash(&self) -> Option<Hash512> {
-        self.binding.predecessor_transition_hash
     }
 
     pub const fn durable_binding(&self) -> StateDurableBinding {
@@ -929,49 +792,6 @@ impl VerifiedStateOutput {
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum PreservedStateIntent<'state> {
-    Reservation(&'state VerifiedStateReservation),
-    Output(&'state VerifiedStateOutput),
-}
-
-pub struct VerifiedStateRecoveryIntent {
-    binding: StateRecoveryBinding,
-}
-
-impl VerifiedStateRecoveryIntent {
-    pub const fn durable_binding(&self) -> StateDurableBinding {
-        durable_recovery_binding(self.binding)
-    }
-}
-
-pub struct VerifiedStateRecovery {
-    binding: StateRecoveryBinding,
-}
-
-impl VerifiedStateRecovery {
-    pub const fn transition_object_hash(&self) -> Hash512 { self.binding.transition_object_hash }
-    pub const fn subject_participant_id(&self) -> ParticipantIdentity { self.binding.subject_participant_id }
-    pub const fn capability_kind(&self) -> StateCapabilityKind { self.binding.capability_kind }
-    pub const fn suite_id(&self) -> Hash512 { self.binding.suite_id }
-    pub const fn ceremony_context_hash(&self) -> Hash512 { self.binding.ceremony_context_hash }
-    pub const fn action_context_hash(&self) -> Hash512 { self.binding.action_context_hash }
-    pub const fn state_key(&self) -> Hash512 { self.binding.state_key }
-    pub const fn old_recovery_epoch(&self) -> u64 { self.binding.old_recovery_epoch }
-    pub const fn new_recovery_epoch(&self) -> u64 { self.binding.new_recovery_epoch }
-    pub const fn predecessor_transition_hash(&self) -> Option<Hash512> { self.binding.predecessor_transition_hash }
-    pub const fn preserved_latest_intent_object_hash(&self) -> Option<Hash512> {
-        if let Some(output) = self.binding.preserved_output_binding {
-            Some(output.output_intent_object_hash)
-        } else if let Some(reservation) = self.binding.preserved_reservation_binding {
-            Some(reservation.intent_object_hash)
-        } else {
-            None
-        }
-    }
-    pub const fn durable_binding(&self) -> StateDurableBinding { durable_recovery_binding(self.binding) }
-}
-
 const fn durable_reservation_binding(binding: StateReservationBinding) -> StateDurableBinding {
     StateDurableBinding {
         vote_kind: StateWitnessVoteKind::Reservation,
@@ -986,8 +806,6 @@ const fn durable_reservation_binding(binding: StateReservationBinding) -> StateD
         output_intent_object_hash: None,
         exact_output_hash: None,
         exact_output_byte_length: None,
-        recovery_epoch: binding.recovery_epoch,
-        recovery_transition_hash: binding.predecessor_transition_hash,
     }
 }
 
@@ -1005,43 +823,12 @@ const fn durable_output_binding(binding: StateOutputBinding) -> StateDurableBind
         output_intent_object_hash: Some(binding.output_intent_object_hash),
         exact_output_hash: Some(binding.exact_output_hash),
         exact_output_byte_length: Some(binding.exact_output_byte_length),
-        recovery_epoch: binding.reservation_binding.recovery_epoch,
-        recovery_transition_hash: binding.reservation_binding.predecessor_transition_hash,
-    }
-}
-
-const fn durable_recovery_binding(binding: StateRecoveryBinding) -> StateDurableBinding {
-    let (reservation_intent_object_hash, output_intent_object_hash, exact_output_hash,
-        exact_output_byte_length) = if let Some(output) = binding.preserved_output_binding {
-        (Some(output.reservation_binding.intent_object_hash), Some(output.output_intent_object_hash),
-            Some(output.exact_output_hash), Some(output.exact_output_byte_length))
-    } else if let Some(reservation) = binding.preserved_reservation_binding {
-        (Some(reservation.intent_object_hash), None, None, None)
-    } else {
-        (None, None, None, None)
-    };
-    StateDurableBinding {
-        vote_kind: StateWitnessVoteKind::Recovery,
-        capability_kind: binding.capability_kind,
-        suite_id: binding.suite_id,
-        ceremony_context_hash: binding.ceremony_context_hash,
-        action_context_hash: binding.action_context_hash,
-        subject_participant_id: binding.subject_participant_id,
-        state_key: binding.state_key,
-        intent_object_hash: binding.transition_object_hash,
-        reservation_intent_object_hash,
-        output_intent_object_hash,
-        exact_output_hash,
-        exact_output_byte_length,
-        recovery_epoch: binding.new_recovery_epoch,
-        recovery_transition_hash: Some(binding.transition_object_hash),
     }
 }
 
 pub struct StateReservationVerificationInput<'input> {
     pub subject_participant_id: ParticipantIdentity,
     pub capability_kind: StateCapabilityKind,
-    pub verified_predecessor_recovery: Option<&'input VerifiedStateRecovery>,
     pub expected_authorization_hash: Hash512,
     pub canonical_reservation_intent_carrier: &'input [u8],
     pub canonical_state_certificate: &'input [u8],
@@ -1050,26 +837,8 @@ pub struct StateReservationVerificationInput<'input> {
 pub struct StateReservationIntentVerificationInput<'input> {
     pub subject_participant_id: ParticipantIdentity,
     pub capability_kind: StateCapabilityKind,
-    pub verified_predecessor_recovery: Option<&'input VerifiedStateRecovery>,
     pub expected_authorization_hash: Hash512,
     pub canonical_reservation_intent_carrier: &'input [u8],
-}
-
-pub struct StateRecoveryVerificationInput<'input> {
-    pub subject_participant_id: ParticipantIdentity,
-    pub capability_kind: StateCapabilityKind,
-    pub verified_predecessor_recovery: Option<&'input VerifiedStateRecovery>,
-    pub preserved_state_intent: Option<PreservedStateIntent<'input>>,
-    pub canonical_recovery_transition_carrier: &'input [u8],
-    pub canonical_state_certificate: &'input [u8],
-}
-
-pub struct StateRecoveryIntentVerificationInput<'input> {
-    pub subject_participant_id: ParticipantIdentity,
-    pub capability_kind: StateCapabilityKind,
-    pub verified_predecessor_recovery: Option<&'input VerifiedStateRecovery>,
-    pub preserved_state_intent: Option<PreservedStateIntent<'input>>,
-    pub canonical_recovery_transition_carrier: &'input [u8],
 }
 
 pub struct StateVerifier {
@@ -1077,7 +846,6 @@ pub struct StateVerifier {
     ceremony_context_hash: Hash512,
     action_context_hash: Hash512,
     roster: Roster,
-    maximum_recovery_transitions_per_state_key: u64,
     canonical_decode_limits: CanonicalDecodeLimits,
 }
 
@@ -1088,22 +856,14 @@ impl StateVerifier {
         ceremony_context_hash: Hash512,
         action_context_hash: Hash512,
         roster: &Roster,
-        maximum_recovery_transitions_per_state_key: u64,
         canonical_decode_limits: CanonicalDecodeLimits,
     ) -> StateResult<Self> {
         Roster::new(roster.entries.clone()).map_err(StateError::from_schema)?;
-        if maximum_recovery_transitions_per_state_key == 0 {
-            return Err(StateError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "the maximum recovery-transition count must be non-zero",
-            ));
-        }
         Ok(Self {
             suite_id,
             ceremony_context_hash,
             action_context_hash,
             roster: roster.clone(),
-            maximum_recovery_transitions_per_state_key,
             canonical_decode_limits,
         })
     }
@@ -1126,7 +886,6 @@ impl StateVerifier {
             self.verify_reservation_intent_inner(StateReservationIntentVerificationInput {
                 subject_participant_id: input.subject_participant_id,
                 capability_kind: input.capability_kind,
-                verified_predecessor_recovery: input.verified_predecessor_recovery,
                 expected_authorization_hash: input.expected_authorization_hash,
                 canonical_reservation_intent_carrier: input.canonical_reservation_intent_carrier,
             })?;
@@ -1147,18 +906,10 @@ impl StateVerifier {
         &self,
         input: StateReservationIntentVerificationInput<'_>,
     ) -> StateResult<VerifiedStateReservationIntent> {
-        let (recovery_epoch, predecessor_transition_hash) =
-            self.resolve_reservation_recovery_predecessor(
-                input.subject_participant_id,
-                input.capability_kind,
-                input.verified_predecessor_recovery,
-            )?;
         let carrier = self.decode_and_verify_subject_carrier(
             input.canonical_reservation_intent_carrier,
             FoundationObjectType::StateReservation,
             input.subject_participant_id,
-            recovery_epoch,
-            predecessor_transition_hash,
             0,
         )?;
         let payload = StateReservationIntentPayload::decode(
@@ -1198,8 +949,6 @@ impl StateVerifier {
                 action_context_hash: self.action_context_hash,
                 state_key,
                 authorization_hash: payload.authorization_hash,
-                recovery_epoch,
-                predecessor_transition_hash,
             },
         })
     }
@@ -1230,7 +979,6 @@ impl StateVerifier {
                         intent_object_hash: binding.intent_object_hash,
                         subject_participant_id: binding.subject_participant_id,
                         vote_kind: StateWitnessVoteKind::Reservation,
-                        recovery_epoch: binding.recovery_epoch,
                     },
                 )
             })
@@ -1254,266 +1002,9 @@ impl StateVerifier {
                 intent_object_hash: binding.intent_object_hash,
                 subject_participant_id: binding.subject_participant_id,
                 vote_kind: StateWitnessVoteKind::Reservation,
-                recovery_epoch: binding.recovery_epoch,
             },
         )?;
         Ok(VerifiedStateReservation { binding })
-    }
-
-    pub fn verify_recovery(
-        &self,
-        input: StateRecoveryVerificationInput<'_>,
-    ) -> VerificationResult<VerifiedStateRecovery> {
-        let result = self
-            .verify_recovery_intent_inner(StateRecoveryIntentVerificationInput {
-                subject_participant_id: input.subject_participant_id,
-                capability_kind: input.capability_kind,
-                verified_predecessor_recovery: input.verified_predecessor_recovery,
-                preserved_state_intent: input.preserved_state_intent,
-                canonical_recovery_transition_carrier: input.canonical_recovery_transition_carrier,
-            })
-            .and_then(|intent| self.certify_recovery_inner(&intent, input.canonical_state_certificate));
-        match result {
-            Ok(value) => VerificationResult::valid(value),
-            Err(error) => VerificationResult::refused(error.refusal_reason),
-        }
-    }
-
-    pub fn verify_recovery_intent(
-        &self,
-        input: StateRecoveryIntentVerificationInput<'_>,
-    ) -> VerificationResult<VerifiedStateRecoveryIntent> {
-        match self.verify_recovery_intent_inner(input) {
-            Ok(value) => VerificationResult::valid(value),
-            Err(error) => VerificationResult::refused(error.refusal_reason),
-        }
-    }
-
-    fn verify_recovery_intent_inner(
-        &self,
-        input: StateRecoveryIntentVerificationInput<'_>,
-    ) -> StateResult<VerifiedStateRecoveryIntent> {
-        let state_key = derive_state_key(
-            self.suite_id,
-            self.ceremony_context_hash,
-            self.action_context_hash,
-            input.subject_participant_id,
-            input.capability_kind,
-        )?;
-        let (old_recovery_epoch, predecessor_transition_hash,
-            inherited_reservation_binding, inherited_output_binding) =
-            if let Some(predecessor) = input.verified_predecessor_recovery {
-                self.require_recovery_context(predecessor)?;
-                if predecessor.subject_participant_id() != input.subject_participant_id
-                    || predecessor.capability_kind() != input.capability_kind
-                    || predecessor.state_key() != state_key
-                {
-                    return Err(StateError::new(
-                        RefusalReason::WrongContext,
-                        "verified recovery predecessor belongs to another state key",
-                    ));
-                }
-                (
-                    predecessor.new_recovery_epoch(),
-                    Some(predecessor.transition_object_hash()),
-                    predecessor.binding.preserved_reservation_binding,
-                    predecessor.binding.preserved_output_binding,
-                )
-            } else {
-                (0, None, None, None)
-            };
-        let new_recovery_epoch = old_recovery_epoch.checked_add(1).ok_or_else(|| {
-            StateError::new(RefusalReason::OutsideSupportedProfile, "state recovery epoch overflows")
-        })?;
-        if new_recovery_epoch > self.maximum_recovery_transitions_per_state_key {
-            return Err(StateError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "state recovery transition exceeds the configured per-key bound",
-            ));
-        }
-        let carrier = self.decode_and_verify_subject_carrier(
-            input.canonical_recovery_transition_carrier,
-            FoundationObjectType::RecoveryTransition,
-            input.subject_participant_id,
-            old_recovery_epoch,
-            predecessor_transition_hash,
-            derive_state_recovery_producer_sequence(old_recovery_epoch)?,
-        )?;
-        let payload = StateRecoveryTransitionPayload::decode(
-            &carrier.envelope.payload_bytes,
-            &self.canonical_decode_limits,
-        )?;
-        if payload.capability_kind != input.capability_kind {
-            return Err(StateError::new(
-                RefusalReason::WrongTypeOrLength,
-                "recovery capability kind does not match the expected state key",
-            ));
-        }
-        let (preserved_reservation_binding, preserved_output_binding) =
-            self.resolve_preserved_state_intent(
-                input.subject_participant_id,
-                input.capability_kind,
-                state_key,
-                inherited_reservation_binding,
-                inherited_output_binding,
-                input.preserved_state_intent,
-                payload.preserved_latest_intent_object_hash,
-            )?;
-        let transition_object_hash = carrier.envelope.object_hash().map_err(StateError::from_schema)?;
-        Ok(VerifiedStateRecoveryIntent {
-            binding: StateRecoveryBinding {
-                transition_object_hash,
-                subject_participant_id: input.subject_participant_id,
-                capability_kind: input.capability_kind,
-                suite_id: self.suite_id,
-                ceremony_context_hash: self.ceremony_context_hash,
-                action_context_hash: self.action_context_hash,
-                state_key,
-                old_recovery_epoch,
-                new_recovery_epoch,
-                predecessor_transition_hash,
-                preserved_reservation_binding,
-                preserved_output_binding,
-            },
-        })
-    }
-
-    pub fn certify_recovery_intent(
-        &self,
-        verified_intent: &VerifiedStateRecoveryIntent,
-        canonical_state_certificate: &[u8],
-    ) -> VerificationResult<VerifiedStateRecovery> {
-        match self.certify_recovery_inner(verified_intent, canonical_state_certificate) {
-            Ok(value) => VerificationResult::valid(value),
-            Err(error) => VerificationResult::refused(error.refusal_reason),
-        }
-    }
-
-    pub fn certify_recovery_intent_from_unordered_vote_carriers(
-        &self,
-        verified_intent: &VerifiedStateRecoveryIntent,
-        canonical_vote_carriers: &[Vec<u8>],
-    ) -> VerificationResult<VerifiedStateRecovery> {
-        let binding = verified_intent.binding;
-        let result = self.require_recovery_binding_context(binding)
-            .and_then(|()| self.verify_unordered_vote_carriers(
-                canonical_vote_carriers,
-                &ResolvedStateIntent {
-                    intent_object_hash: binding.transition_object_hash,
-                    subject_participant_id: binding.subject_participant_id,
-                    vote_kind: StateWitnessVoteKind::Recovery,
-                    recovery_epoch: binding.new_recovery_epoch,
-                },
-            ))
-            .map(|()| VerifiedStateRecovery { binding });
-        match result {
-            Ok(value) => VerificationResult::valid(value),
-            Err(error) => VerificationResult::refused(error.refusal_reason),
-        }
-    }
-
-    fn certify_recovery_inner(
-        &self,
-        verified_intent: &VerifiedStateRecoveryIntent,
-        canonical_state_certificate: &[u8],
-    ) -> StateResult<VerifiedStateRecovery> {
-        let binding = verified_intent.binding;
-        self.require_recovery_binding_context(binding)?;
-        self.verify_certificate(
-            canonical_state_certificate,
-            &ResolvedStateIntent {
-                intent_object_hash: binding.transition_object_hash,
-                subject_participant_id: binding.subject_participant_id,
-                vote_kind: StateWitnessVoteKind::Recovery,
-                recovery_epoch: binding.new_recovery_epoch,
-            },
-        )?;
-        Ok(VerifiedStateRecovery { binding })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn resolve_preserved_state_intent(
-        &self,
-        subject_participant_id: ParticipantIdentity,
-        capability_kind: StateCapabilityKind,
-        state_key: Hash512,
-        inherited_reservation_binding: Option<StateReservationBinding>,
-        inherited_output_binding: Option<StateOutputBinding>,
-        supplied_state_intent: Option<PreservedStateIntent<'_>>,
-        declared_latest_intent_object_hash: Option<Hash512>,
-    ) -> StateResult<(Option<StateReservationBinding>, Option<StateOutputBinding>)> {
-        let mut reservation_binding = inherited_reservation_binding;
-        let mut output_binding = inherited_output_binding;
-        if let Some(supplied_state_intent) = supplied_state_intent {
-            match supplied_state_intent {
-                PreservedStateIntent::Reservation(reservation) => {
-                    self.require_reservation_context(reservation)?;
-                    let supplied = reservation.binding;
-                    if supplied.subject_participant_id != subject_participant_id
-                        || supplied.capability_kind != capability_kind
-                        || supplied.state_key != state_key
-                    {
-                        return Err(StateError::new(RefusalReason::WrongContext,
-                            "preserved reservation belongs to another state key"));
-                    }
-                    if output_binding.is_some() {
-                        return Err(StateError::new(RefusalReason::ConsumedState,
-                            "a recovery cannot replace a preserved output with a reservation"));
-                    }
-                    if let Some(inherited) = reservation_binding {
-                        if inherited.intent_object_hash != supplied.intent_object_hash {
-                            return Err(StateError::new(RefusalReason::WrongHashOrRoot,
-                                "a recovery cannot replace the preserved reservation"));
-                        }
-                    }
-                    reservation_binding = Some(supplied);
-                }
-                PreservedStateIntent::Output(output) => {
-                    self.require_reservation_binding_context(output.binding.reservation_binding)?;
-                    let supplied = output.binding;
-                    if supplied.reservation_binding.subject_participant_id != subject_participant_id
-                        || supplied.reservation_binding.capability_kind != capability_kind
-                        || supplied.reservation_binding.state_key != state_key
-                    {
-                        return Err(StateError::new(RefusalReason::WrongContext,
-                            "preserved output belongs to another state key"));
-                    }
-                    if let Some(inherited) = output_binding {
-                        if inherited.output_intent_object_hash != supplied.output_intent_object_hash {
-                            return Err(StateError::new(RefusalReason::WrongHashOrRoot,
-                                "a recovery cannot replace the preserved output"));
-                        }
-                    } else if let Some(inherited) = reservation_binding {
-                        if inherited.intent_object_hash != supplied.reservation_binding.intent_object_hash {
-                            return Err(StateError::new(RefusalReason::WrongHashOrRoot,
-                                "preserved output does not upgrade the preserved reservation"));
-                        }
-                    }
-                    reservation_binding = None;
-                    output_binding = Some(supplied);
-                }
-            }
-        }
-        let resolved_latest_hash = output_binding
-            .map(|binding| binding.output_intent_object_hash)
-            .or_else(|| reservation_binding.map(|binding| binding.intent_object_hash));
-        if declared_latest_intent_object_hash != resolved_latest_hash {
-            let refusal_reason = match (
-                declared_latest_intent_object_hash,
-                resolved_latest_hash,
-                inherited_reservation_binding,
-                inherited_output_binding,
-                supplied_state_intent,
-            ) {
-                (None, Some(_), _, _, _) => RefusalReason::ConsumedState,
-                (Some(_), None, _, _, _) => RefusalReason::MissingPrerequisite,
-                (Some(_), Some(_), Some(_), None, None) => RefusalReason::MissingPrerequisite,
-                _ => RefusalReason::WrongHashOrRoot,
-            };
-            return Err(StateError::new(refusal_reason,
-                "recovery payload does not resolve to the verified preserved state"));
-        }
-        Ok((reservation_binding, output_binding))
     }
 
     pub(crate) fn verify_output_from_verified_stream(
@@ -1596,8 +1087,6 @@ impl StateVerifier {
             canonical_output_intent_carrier,
             FoundationObjectType::StateOutputIntent,
             binding.subject_participant_id,
-            binding.recovery_epoch,
-            binding.predecessor_transition_hash,
             0,
         )?;
         let payload = StateOutputIntentPayload::decode(
@@ -1656,7 +1145,6 @@ impl StateVerifier {
                         intent_object_hash: binding.output_intent_object_hash,
                         subject_participant_id: binding.reservation_binding.subject_participant_id,
                         vote_kind: StateWitnessVoteKind::Output,
-                        recovery_epoch: binding.reservation_binding.recovery_epoch,
                     },
                 )
             })
@@ -1680,7 +1168,6 @@ impl StateVerifier {
                 intent_object_hash: binding.output_intent_object_hash,
                 subject_participant_id: binding.reservation_binding.subject_participant_id,
                 vote_kind: StateWitnessVoteKind::Output,
-                recovery_epoch: binding.reservation_binding.recovery_epoch,
             },
         )?;
         Ok(VerifiedStateOutput { binding })
@@ -1691,45 +1178,6 @@ impl StateVerifier {
         reservation: &VerifiedStateReservation,
     ) -> StateResult<()> {
         self.require_reservation_binding_context(reservation.binding)
-    }
-
-    fn resolve_reservation_recovery_predecessor(
-        &self,
-        subject_participant_id: ParticipantIdentity,
-        capability_kind: StateCapabilityKind,
-        verified_predecessor_recovery: Option<&VerifiedStateRecovery>,
-    ) -> StateResult<(u64, Option<Hash512>)> {
-        let Some(predecessor) = verified_predecessor_recovery else { return Ok((0, None)); };
-        self.require_recovery_context(predecessor)?;
-        let state_key = derive_state_key(self.suite_id, self.ceremony_context_hash,
-            self.action_context_hash, subject_participant_id, capability_kind)?;
-        if predecessor.subject_participant_id() != subject_participant_id
-            || predecessor.capability_kind() != capability_kind
-            || predecessor.state_key() != state_key
-        {
-            return Err(StateError::new(RefusalReason::WrongContext,
-                "verified recovery predecessor belongs to another state key"));
-        }
-        if predecessor.preserved_latest_intent_object_hash().is_some() {
-            return Err(StateError::new(RefusalReason::ConsumedState,
-                "the recovered state key already preserves a reservation or output"));
-        }
-        Ok((predecessor.new_recovery_epoch(), Some(predecessor.transition_object_hash())))
-    }
-
-    fn require_recovery_context(&self, recovery: &VerifiedStateRecovery) -> StateResult<()> {
-        self.require_recovery_binding_context(recovery.binding)
-    }
-
-    fn require_recovery_binding_context(&self, binding: StateRecoveryBinding) -> StateResult<()> {
-        if binding.suite_id != self.suite_id
-            || binding.ceremony_context_hash != self.ceremony_context_hash
-            || binding.action_context_hash != self.action_context_hash
-        {
-            return Err(StateError::new(RefusalReason::WrongContext,
-                "verified recovery belongs to another state verifier context"));
-        }
-        Ok(())
     }
 
     fn require_reservation_binding_context(
@@ -1753,8 +1201,6 @@ impl StateVerifier {
         canonical_carrier: &[u8],
         expected_object_type: FoundationObjectType,
         expected_subject_participant_id: ParticipantIdentity,
-        expected_recovery_epoch: u64,
-        expected_recovery_transition_hash: Option<Hash512>,
         expected_producer_sequence: u64,
     ) -> StateResult<SignedCarrier> {
         let carrier = SignedCarrier::decode(canonical_carrier, &self.canonical_decode_limits)
@@ -1762,8 +1208,6 @@ impl StateVerifier {
         self.require_envelope_context(&carrier.envelope)?;
         if carrier.envelope.object_type != expected_object_type
             || carrier.envelope.producer_participant_id != Some(expected_subject_participant_id)
-            || carrier.envelope.recovery_epoch != expected_recovery_epoch
-            || carrier.envelope.recovery_transition_hash != expected_recovery_transition_hash
             || carrier.envelope.producer_sequence != expected_producer_sequence
             || !carrier.envelope.ordered_prerequisite_hashes.is_empty()
         {
@@ -1812,10 +1256,7 @@ impl StateVerifier {
         canonical_vote_carriers: &[Vec<u8>],
         expected_intent: &ResolvedStateIntent,
     ) -> StateResult<()> {
-        let expected_sequence = derive_state_witness_vote_sequence(
-            expected_intent.vote_kind,
-            expected_intent.recovery_epoch,
-        )?;
+        let expected_sequence = derive_state_witness_vote_sequence(expected_intent.vote_kind);
         let mut previous_roster_position = None;
         for canonical_vote_carrier in canonical_vote_carriers {
             let verified_vote = self.verify_vote_carrier(
@@ -1840,7 +1281,7 @@ impl StateVerifier {
                 if roster_position < previous_position {
                     return Err(StateError::new(
                         RefusalReason::WrongTypeOrLength,
-                        "state certificate witnesses are not in external-roster order",
+                        "state certificate witnesses are not in participant roster order",
                     ));
                 }
             }
@@ -1864,10 +1305,7 @@ impl StateVerifier {
                 "untrusted state vote carrier count is outside the supported profile",
             ));
         }
-        let expected_sequence = derive_state_witness_vote_sequence(
-            expected_intent.vote_kind,
-            expected_intent.recovery_epoch,
-        )?;
+        let expected_sequence = derive_state_witness_vote_sequence(expected_intent.vote_kind);
         let mut unique_votes: Vec<VerifiedStateWitnessVote> = Vec::new();
         for canonical_vote_carrier in canonical_vote_carriers {
             let verified_vote = self.verify_vote_carrier(
@@ -1971,7 +1409,7 @@ impl StateVerifier {
         }
         Err(StateError::new(
             RefusalReason::WrongContext,
-            "state witness is not present in the external roster",
+            "state witness is not present in the participant roster",
         ))
     }
 }
@@ -1980,7 +1418,6 @@ struct ResolvedStateIntent {
     intent_object_hash: Hash512,
     subject_participant_id: ParticipantIdentity,
     vote_kind: StateWitnessVoteKind,
-    recovery_epoch: u64,
 }
 
 #[derive(Clone, Copy)]

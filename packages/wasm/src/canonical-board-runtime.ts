@@ -4,13 +4,12 @@ import { foundationProfile } from '@sealed-lattice/types';
 import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 
-const boardVerifierConfigurationVersion = 1;
+const boardVerifierConfigurationVersion = 2;
 const boardVerifierCapabilityByteLength = 32;
 const hashByteLength = 64;
 const wasm32WordByteLength = 4;
 const verifiedObjectDescriptionByteLength = 2 + 2 + hashByteLength;
-const fixedConfigurationByteLength =
-    2 + 3 * hashByteLength + 8 + 8 + 4 + 4 + 4;
+const fixedConfigurationByteLength = 2 + 3 * hashByteLength + 8 + 8 + 4 + 4 + 4;
 const maximumUnorderedCarrierCountConfigurationOffset =
     2 + 3 * hashByteLength + 8 + 8;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;

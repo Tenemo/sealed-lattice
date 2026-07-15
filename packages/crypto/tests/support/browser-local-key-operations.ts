@@ -1,8 +1,8 @@
-import { hexToBytes } from "@noble/hashes/utils.js";
-import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
-import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
+import { hexToBytes } from '@noble/hashes/utils.js';
+import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 
-import type { BrowserLocalExternalKeyProviderInput } from "../../src/index.js";
+import type { BrowserLocalExternalKeyProviderInput } from '../../src/index.js';
 
 type SigningKeyPair = Readonly<{
     readonly publicKey: Uint8Array;
@@ -28,19 +28,19 @@ type ResetSafeSetupMailboxRandomnessObservation = {
 };
 
 export const defaultResetSafeSetupMailboxScope = Object.freeze({
-    suiteId: "11".repeat(64),
-    ceremonyContextHash: "22".repeat(64),
-    actionContextHash: "33".repeat(64),
-    rosterHash: "44".repeat(64),
-    sourceParticipantId: "55".repeat(64),
+    suiteId: '11'.repeat(64),
+    ceremonyContextHash: '22'.repeat(64),
+    actionContextHash: '33'.repeat(64),
+    rosterHash: '44'.repeat(64),
+    sourceParticipantId: '55'.repeat(64),
 });
 
 const createResetSafeSetupMailboxRandomnessOperations = (
     scope: ResetSafeSetupMailboxScope,
-    signingOperations: BrowserLocalExternalKeyProviderInput["signing"],
+    signingOperations: BrowserLocalExternalKeyProviderInput['signing'],
     observation?: ResetSafeSetupMailboxRandomnessObservation,
 ): NonNullable<
-    BrowserLocalExternalKeyProviderInput["resetSafeSetupMailboxRandomness"]
+    BrowserLocalExternalKeyProviderInput['resetSafeSetupMailboxRandomness']
 > => {
     let active = true;
 
@@ -49,7 +49,7 @@ const createResetSafeSetupMailboxRandomnessOperations = (
         encapsulate: ({ recipientEncapsulationKey, setupMailboxSlotHash }) => {
             if (!active) {
                 throw new Error(
-                    "The test reset-safe mailbox randomness is revoked.",
+                    'The test reset-safe mailbox randomness is revoked.',
                 );
             }
             if (observation !== undefined) {
@@ -81,7 +81,7 @@ const createResetSafeSetupMailboxRandomnessOperations = (
         signEnvelope: ({ envelopeHash }) => {
             if (!active) {
                 throw new Error(
-                    "The test reset-safe mailbox randomness is revoked.",
+                    'The test reset-safe mailbox randomness is revoked.',
                 );
             }
             if (observation !== undefined) {
@@ -89,7 +89,30 @@ const createResetSafeSetupMailboxRandomnessOperations = (
             }
             const message = hexToBytes(envelopeHash);
             const context = new TextEncoder().encode(
-                "sealed-lattice/mailbox-signature/v1",
+                'sealed-lattice/mailbox-signature/v1',
+            );
+            const hedge = message.slice(0, 32);
+            try {
+                return signingOperations.signClosedMessage({
+                    context,
+                    hedge,
+                    message,
+                });
+            } finally {
+                context.fill(0);
+                hedge.fill(0);
+                message.fill(0);
+            }
+        },
+        signSetupObject: ({ signatureMessageHash }) => {
+            if (!active) {
+                throw new Error(
+                    'The test reset-safe setup randomness is revoked.',
+                );
+            }
+            const message = hexToBytes(signatureMessageHash);
+            const context = new TextEncoder().encode(
+                'sealed-lattice/object-signature/v1',
             );
             const hedge = message.slice(0, 32);
             try {
@@ -112,7 +135,7 @@ const createResetSafeSetupMailboxRandomnessOperations = (
 
 export const createBrowserLocalSigningOperations = (
     keyPair: SigningKeyPair,
-): BrowserLocalExternalKeyProviderInput["signing"] => {
+): BrowserLocalExternalKeyProviderInput['signing'] => {
     const verificationKey = keyPair.publicKey.slice();
     const secretKey = keyPair.secretKey.slice();
     let active = true;
@@ -121,7 +144,7 @@ export const createBrowserLocalSigningOperations = (
         verificationKey,
         signClosedMessage: ({ message, context, hedge }) => {
             if (!active) {
-                throw new Error("The test signing operation is revoked.");
+                throw new Error('The test signing operation is revoked.');
             }
             return ml_dsa65.sign(message, secretKey, {
                 context,
@@ -141,7 +164,7 @@ export const createBrowserLocalSigningOperations = (
 
 export const createBrowserLocalMailboxOperations = (
     keyPair: MailboxKeyPair,
-): BrowserLocalExternalKeyProviderInput["mailbox"] => {
+): BrowserLocalExternalKeyProviderInput['mailbox'] => {
     const encapsulationKey = keyPair.publicKey.slice();
     const secretKey = keyPair.secretKey.slice();
     let active = true;
@@ -150,7 +173,7 @@ export const createBrowserLocalMailboxOperations = (
         encapsulationKey,
         decapsulateClosedCiphertext: (ciphertext) => {
             if (!active) {
-                throw new Error("The test mailbox operation is revoked.");
+                throw new Error('The test mailbox operation is revoked.');
             }
             return ml_kem768.decapsulate(ciphertext, secretKey);
         },
@@ -172,7 +195,7 @@ export const createBrowserLocalKeyOperations = (input: {
     readonly resetSafeSetupMailboxScope?: ResetSafeSetupMailboxScope;
 }): Pick<
     BrowserLocalExternalKeyProviderInput,
-    "mailbox" | "resetSafeSetupMailboxRandomness" | "signing"
+    'mailbox' | 'resetSafeSetupMailboxRandomness' | 'signing'
 > => {
     const signing = createBrowserLocalSigningOperations(input.signing);
     return {

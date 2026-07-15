@@ -276,7 +276,6 @@ fn action_storage_and_local_record_inputs_round_trip_canonically() {
         LocalRecordType::CheckpointChunk,
         test_hash(0xa2),
         4,
-        2,
         Some(test_hash(0xa3)),
         19,
     )
@@ -301,7 +300,6 @@ fn action_storage_and_local_record_inputs_round_trip_canonically() {
                 LocalRecordType::CheckpointChunk,
                 test_hash(0xa2),
                 version,
-                2,
                 predecessor,
                 19,
             ),
@@ -319,11 +317,6 @@ fn all_record_identifier_assignments_are_closed_and_context_bound() {
             LocalRecordIdentifierInput::ActionRandomness,
         )
         .expect("action-randomness identifier"),
-        derive_local_record_identifier(
-            test_binding(),
-            LocalRecordIdentifierInput::PublicCoinPrivateMaterial,
-        )
-        .expect("public-coin identifier"),
         derive_local_record_identifier(
             test_binding(),
             LocalRecordIdentifierInput::SourceVssMaterial {
@@ -394,7 +387,7 @@ fn all_record_identifier_assignments_are_closed_and_context_bound() {
     let unique_identifiers = identifiers.iter().collect::<std::collections::HashSet<_>>();
     assert_eq!(unique_identifiers.len(), identifiers.len());
 
-    for record_type_code in 1..=11 {
+    for record_type_code in [1, 3, 4, 5, 6, 7, 8, 9, 10, 11] {
         assert_eq!(
             LocalRecordType::from_canonical_code(record_type_code)
                 .expect("assigned record type")
@@ -403,6 +396,7 @@ fn all_record_identifier_assignments_are_closed_and_context_bound() {
         );
     }
     assert_eq!(LocalRecordType::from_canonical_code(0), None);
+    assert_eq!(LocalRecordType::from_canonical_code(2), None);
     assert_eq!(LocalRecordType::from_canonical_code(12), None);
 
     let digest_items = source_digests
@@ -426,7 +420,7 @@ fn all_record_identifier_assignments_are_closed_and_context_bound() {
         ],
     )
     .expect("checkpoint identifier hashes");
-    assert_eq!(identifiers[9], expected_checkpoint_identifier);
+    assert_eq!(identifiers[8], expected_checkpoint_identifier);
 }
 
 #[test]

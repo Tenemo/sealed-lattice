@@ -1,27 +1,43 @@
 import {
     openBrowserLocalExternalKeyProvider,
+    sealAuthenticatedMailbox,
+    signResetSafeSetupObject,
+    type AuthenticatedMailboxCarrier,
+    type AuthenticatedMailboxSealInput,
     type BrowserLocalExternalKeyProvider,
     type BrowserLocalExternalKeyProviderInput,
-} from "@sealed-lattice/crypto";
-import type { BrowserActionStorageWorkerKernel } from "@sealed-lattice/types";
+} from '@sealed-lattice/crypto';
+import type {
+    BrowserActionStorageWorkerKernel,
+    ProtocolHash,
+} from '@sealed-lattice/types';
 import {
     openClosedWorkerSetupMailboxRandomness,
     openClosedWorkerStructuredCommitmentOpenings,
     type ClosedWorkerSetupMailboxRandomnessOperations,
     type ClosedWorkerStructuredCommitmentOpeningOperations,
-} from "@sealed-lattice/wasm";
+} from '@sealed-lattice/wasm';
 
 export type BrowserLocalActionCryptographicProvider = Readonly<{
     readonly actionRandomnessSessionIdentifier: string;
     readonly externalKeyProvider: BrowserLocalExternalKeyProvider;
     readonly structuredCommitmentOpenings: ClosedWorkerStructuredCommitmentOpeningOperations;
+    sealSetupMailbox(
+        input: Omit<
+            AuthenticatedMailboxSealInput,
+            'sourceSigningCapability' | 'sourceVerificationKey'
+        >,
+    ): Promise<AuthenticatedMailboxCarrier>;
+    signSetupObject(input: {
+        readonly signatureMessageHash: ProtocolHash;
+    }): Uint8Array;
     close(): Promise<void>;
 }>;
 
 export type BrowserLocalActionCryptographicProviderInput = Readonly<{
     readonly actionRandomnessSessionIdentifier: string;
-    readonly mailbox: BrowserLocalExternalKeyProviderInput["mailbox"];
-    readonly signing: BrowserLocalExternalKeyProviderInput["signing"];
+    readonly mailbox: BrowserLocalExternalKeyProviderInput['mailbox'];
+    readonly signing: BrowserLocalExternalKeyProviderInput['signing'];
     readonly stateReservationIdentifier: string;
     readonly workerKernel: BrowserActionStorageWorkerKernel;
 }>;
@@ -32,9 +48,9 @@ class BrowserLocalActionCryptographicProviderCleanupError extends Error {
 
     public constructor(operationFailure: unknown, cleanupFailure: unknown) {
         super(
-            "The action cryptographic provider operation failed and its worker-owned state could not be fully released.",
+            'The action cryptographic provider operation failed and its worker-owned state could not be fully released.',
         );
-        this.name = "BrowserLocalActionCryptographicProviderCleanupError";
+        this.name = 'BrowserLocalActionCryptographicProviderCleanupError';
         this.operationFailure = operationFailure;
         this.cleanupFailure = cleanupFailure;
     }
@@ -45,7 +61,7 @@ class BrowserLocalActionCryptographicProviderOperationError extends Error {
 
     public constructor(message: string, failureCause: unknown) {
         super(message);
-        this.name = "BrowserLocalActionCryptographicProviderOperationError";
+        this.name = 'BrowserLocalActionCryptographicProviderOperationError';
         this.failureCause = failureCause;
     }
 }
@@ -87,7 +103,7 @@ export const openBrowserLocalActionCryptographicProvider = async (
         if (firstFailure !== undefined) {
             throw errorFromUnknownFailure(
                 firstFailure,
-                "Closing worker-owned action cryptographic state failed.",
+                'Closing worker-owned action cryptographic state failed.',
             );
         }
     };
@@ -95,6 +111,7 @@ export const openBrowserLocalActionCryptographicProvider = async (
     let structuredCommitmentOpenings: ClosedWorkerStructuredCommitmentOpeningOperations;
     let sourceMailboxEncapsulationKey = new Uint8Array(0);
     let sourceSigningVerificationKey = new Uint8Array(0);
+    let rosterBoundSourceSigningVerificationKey = new Uint8Array(0);
     try {
         sourceMailboxEncapsulationKey = input.mailbox.encapsulationKey.slice();
         sourceSigningVerificationKey = input.signing.verificationKey.slice();
@@ -130,7 +147,7 @@ export const openBrowserLocalActionCryptographicProvider = async (
         }
         throw errorFromUnknownFailure(
             error,
-            "Opening worker-owned action cryptographic state failed.",
+            'Opening worker-owned action cryptographic state failed.',
         );
     }
     let externalKeyProvider: BrowserLocalExternalKeyProvider;
@@ -150,7 +167,10 @@ export const openBrowserLocalActionCryptographicProvider = async (
                 revoke: () => input.signing.revoke(),
             },
         });
+        rosterBoundSourceSigningVerificationKey =
+            sourceSigningVerificationKey.slice();
     } catch (error) {
+        rosterBoundSourceSigningVerificationKey.fill(0);
         const cleanupFailures: unknown[] = [];
         try {
             structuredCommitmentOpenings.revoke();
@@ -170,7 +190,7 @@ export const openBrowserLocalActionCryptographicProvider = async (
         }
         throw errorFromUnknownFailure(
             error,
-            "Opening the browser-local external key provider failed.",
+            'Opening the browser-local external key provider failed.',
         );
     } finally {
         sourceMailboxEncapsulationKey.fill(0);
@@ -179,6 +199,7 @@ export const openBrowserLocalActionCryptographicProvider = async (
 
     let closePromise: Promise<void> | undefined;
     const close = async (): Promise<void> => {
+        rosterBoundSourceSigningVerificationKey.fill(0);
         let providerFailure: unknown;
         try {
             externalKeyProvider.close();
@@ -210,19 +231,19 @@ export const openBrowserLocalActionCryptographicProvider = async (
         if (providerFailure !== undefined) {
             throw errorFromUnknownFailure(
                 providerFailure,
-                "Closing the browser-local external key provider failed.",
+                'Closing the browser-local external key provider failed.',
             );
         }
         if (structuredOpeningFailure !== undefined) {
             throw errorFromUnknownFailure(
                 structuredOpeningFailure,
-                "Closing structured-commitment opening custody failed.",
+                'Closing structured-commitment opening custody failed.',
             );
         }
         if (workerFailure !== undefined) {
             throw errorFromUnknownFailure(
                 workerFailure,
-                "Closing worker-owned action cryptographic state failed.",
+                'Closing worker-owned action cryptographic state failed.',
             );
         }
     };
@@ -231,6 +252,38 @@ export const openBrowserLocalActionCryptographicProvider = async (
         actionRandomnessSessionIdentifier:
             input.actionRandomnessSessionIdentifier,
         externalKeyProvider,
+        sealSetupMailbox: async (sealInput) => {
+            if (closePromise !== undefined) {
+                throw new BrowserLocalActionCryptographicProviderOperationError(
+                    'The action cryptographic provider is closing or closed.',
+                    undefined,
+                );
+            }
+            const sourceVerificationKey =
+                rosterBoundSourceSigningVerificationKey.slice();
+            try {
+                return await sealAuthenticatedMailbox({
+                    ...sealInput,
+                    sourceSigningCapability:
+                        externalKeyProvider.signingCapability,
+                    sourceVerificationKey,
+                });
+            } finally {
+                sourceVerificationKey.fill(0);
+            }
+        },
+        signSetupObject: (signingInput) => {
+            if (closePromise !== undefined) {
+                throw new BrowserLocalActionCryptographicProviderOperationError(
+                    'The action cryptographic provider is closing or closed.',
+                    undefined,
+                );
+            }
+            return signResetSafeSetupObject({
+                ...signingInput,
+                signingCapability: externalKeyProvider.signingCapability,
+            });
+        },
         structuredCommitmentOpenings,
         close: () => (closePromise ??= close()),
     });

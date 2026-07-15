@@ -230,27 +230,6 @@ describe('Local storage-root real-WASM browser worker', () => {
         expect(reopened.actionRandomnessCommitment).toEqual(
             created.actionRandomnessCommitment,
         );
-        const dealerReservationVector = stateVector.reservationOnly.find(
-            ({ capabilityKind }) =>
-                capabilityKind === stateCapabilityKinds.setupActionRandomnessRoot,
-        );
-        if (dealerReservationVector === undefined) {
-            throw new Error('Missing dealer-set reservation vector.');
-        }
-        const dealerReservation =
-            await opened.custody.verifyActionStateReservation({
-                canonicalReservationIntentCarrier:
-                    dealerReservationVector.certifiedIntent
-                        .canonicalIntentCarrier,
-                canonicalStateCertificate:
-                    dealerReservationVector.certifiedIntent
-                        .canonicalStateCertificate,
-                capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
-                expectedAuthorizationHash: stateVector.authorizationHash,
-                stateVerifierSessionIdentifier: stateSession.value,
-                subjectParticipantIdentity:
-                    stateVector.subjectParticipantIdentity,
-            });
         const targetReservation =
             await opened.custody.verifyActionStateReservation({
                 canonicalReservationIntentCarrier:
@@ -263,7 +242,7 @@ describe('Local storage-root real-WASM browser worker', () => {
                 subjectParticipantIdentity:
                     stateVector.subjectParticipantIdentity,
             });
-        if (!dealerReservation.isValid || !targetReservation.isValid) {
+        if (!targetReservation.isValid) {
             throw new Error(
                 'Browser worker proof-attempt reservations did not verify.',
             );
@@ -273,7 +252,7 @@ describe('Local storage-root real-WASM browser worker', () => {
                 reopened.actionRandomnessSessionIdentifier,
             applicationStatementHash: createBytes(64, 177),
             rosterPosition: 0,
-            stateReservationIdentifier: dealerReservation.value,
+            stateReservationIdentifier: rootReservation.value,
             statementSchemaIdentifier: 0x1211,
         } as const;
         expect(
@@ -343,7 +322,7 @@ describe('Local storage-root real-WASM browser worker', () => {
         ).toHaveLength(64);
 
         const tamperedEnvelope = envelope.slice();
-        tamperedEnvelope[tamperedEnvelope.length - 17] ^= 1;
+        tamperedEnvelope[tamperedEnvelope.length - 1] ^= 1;
         await expectCustodyErrorCode(
             workerKernel.openActiveLocalRecord({
                 ...expectedContext,
@@ -392,6 +371,5 @@ describe('Local storage-root real-WASM browser worker', () => {
             });
             await closeWorker(reopened);
         }
-
     });
 });

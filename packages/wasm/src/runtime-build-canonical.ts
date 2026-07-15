@@ -424,7 +424,10 @@ const isAssignedRandomUse = (family: number, purpose: number): boolean => {
     if (family === 0x0116) {
         return purpose >= 1 && purpose <= 12 && purpose !== 0;
     }
-    if (family === 0x1201 || family === 0x2120) {
+    if (family === 0x1201) {
+        return purpose === 1 || purpose === 2 || purpose === 4;
+    }
+    if (family === 0x2120) {
         return purpose <= 4;
     }
     if (family === 0x0200) {

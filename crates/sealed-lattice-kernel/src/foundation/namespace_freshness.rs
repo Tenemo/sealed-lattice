@@ -330,7 +330,7 @@ pub struct NamespaceFreshnessVerifier {
     storage_instance_identity: Hash512,
     roster: Roster,
     roster_hash: Hash512,
-    external_witness_identities: Vec<ParticipantIdentity>,
+    roster_participant_witness_identities: Vec<ParticipantIdentity>,
 }
 
 impl NamespaceFreshnessVerifier {
@@ -352,10 +352,10 @@ impl NamespaceFreshnessVerifier {
         {
             return Err(schema_error(
                 RefusalReason::WrongContext,
-                "namespace freshness subject is absent from the external roster",
+                "namespace freshness subject is absent from the participant roster",
             ));
         }
-        let external_witness_identities = roster
+        let roster_participant_witness_identities = roster
             .entries
             .iter()
             .map(|entry| entry.participant_identity())
@@ -365,12 +365,12 @@ impl NamespaceFreshnessVerifier {
                 Err(error) => Some(Err(error)),
             })
             .collect::<SchemaResult<Vec<_>>>()?;
-        if external_witness_identities.len()
+        if roster_participant_witness_identities.len()
             != usize::from(FOUNDATION_PROFILE.participant_count - 1)
         {
             return Err(schema_error(
                 RefusalReason::WrongContext,
-                "namespace freshness witness universe is incomplete",
+                "participant roster does not provide every non-subject witness identity",
             ));
         }
         Ok(Self {
@@ -381,7 +381,7 @@ impl NamespaceFreshnessVerifier {
             storage_instance_identity,
             roster,
             roster_hash,
-            external_witness_identities,
+            roster_participant_witness_identities,
         })
     }
 
@@ -462,7 +462,7 @@ impl NamespaceFreshnessVerifier {
     ) -> VerificationResult<ParticipantIdentity> {
         if expected_witness_participant_identity == self.subject_participant_identity
             || !self
-                .external_witness_identities
+                .roster_participant_witness_identities
                 .contains(&expected_witness_participant_identity)
         {
             return VerificationResult::refused(RefusalReason::WrongContext);
@@ -511,7 +511,7 @@ impl NamespaceFreshnessVerifier {
         limits: &CanonicalDecodeLimits,
     ) -> VerificationResult<VerifiedNamespaceFreshnessCertificate> {
         if canonical_vote_carriers.len() < usize::from(FOUNDATION_PROFILE.state_witness_quorum)
-            || canonical_vote_carriers.len() > self.external_witness_identities.len()
+            || canonical_vote_carriers.len() > self.roster_participant_witness_identities.len()
         {
             return VerificationResult::refused(RefusalReason::MissingPrerequisite);
         }
@@ -524,7 +524,7 @@ impl NamespaceFreshnessVerifier {
             };
             let witness_identity = decoded.vote().witness_participant_identity();
             let Some(roster_position) = self
-                .external_witness_identities
+                .roster_participant_witness_identities
                 .iter()
                 .position(|identity| *identity == witness_identity)
             else {
@@ -696,7 +696,7 @@ mod tests {
         roster: Roster,
         roster_hash: Hash512,
         signing_keys: Vec<ml_dsa_65::PrivateKey>,
-        storage_recovery_identity: Hash512,
+        storage_instance_identity: Hash512,
         suite_identifier: Hash512,
     }
 
@@ -744,7 +744,7 @@ mod tests {
                 roster,
                 roster_hash,
                 signing_keys,
-                storage_recovery_identity: hash(0x44),
+                storage_instance_identity: hash(0x44),
                 suite_identifier: hash(0x11),
             }
         }
@@ -755,7 +755,7 @@ mod tests {
                 self.ceremony_context_hash,
                 self.action_context_hash,
                 self.subject_identity(),
-                self.storage_recovery_identity,
+                self.storage_instance_identity,
                 &self.roster,
             )
             .expect("namespace freshness verifier")
@@ -777,8 +777,6 @@ mod tests {
                 self.suite_identifier,
                 self.ceremony_context_hash,
                 self.action_context_hash,
-                0,
-                None,
             );
             let message = vote
                 .signature_message(self.roster_hash)
@@ -808,7 +806,7 @@ mod tests {
             fixture.ceremony_context_hash,
             fixture.action_context_hash,
             fixture.subject_identity(),
-            fixture.storage_recovery_identity,
+            fixture.storage_instance_identity,
             0,
             hash(0x55),
             None,
@@ -826,7 +824,7 @@ mod tests {
                 fixture.ceremony_context_hash,
                 fixture.action_context_hash,
                 fixture.subject_identity(),
-                fixture.storage_recovery_identity,
+                fixture.storage_instance_identity,
                 0,
                 hash(0x55),
                 Some(hash(0x66)),
@@ -841,7 +839,7 @@ mod tests {
                 fixture.ceremony_context_hash,
                 fixture.action_context_hash,
                 fixture.subject_identity(),
-                fixture.storage_recovery_identity,
+                fixture.storage_instance_identity,
                 1,
                 hash(0x55),
                 None,
@@ -853,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn certificate_verifies_every_ordered_external_vote() {
+    fn certificate_verifies_every_ordered_roster_participant_vote() {
         let fixture = TestFixture::new();
         let verifier = fixture.verifier();
         let verified_checkpoint = verifier

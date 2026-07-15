@@ -221,7 +221,7 @@ const copyDeviceWrappingStateForWrite = (
     } catch (error) {
         throw new IndexedDbUntrustedStorageAdapterError(
             'InvalidMutation',
-            'The replacement device-wrapping state is invalid.',
+            'The proposed device-wrapping state is invalid.',
             error,
         );
     }

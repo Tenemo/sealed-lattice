@@ -621,9 +621,9 @@ describe('Authenticated checkpoint store', () => {
                 stateChunks: chunkState(stateBytes),
             }),
         ).rejects.toMatchObject({ code: 'ResourceLimit' });
-        await boundedStore.recover(identity.checkpointLineageIdentifier);
+        await boundedStore.repair(identity.checkpointLineageIdentifier);
         expect(adapter.keys()).toHaveLength(1);
-        expect(adapter.keys()[0]).toMatch(/\/recovery\/current-head$/u);
+        expect(adapter.keys()[0]).toMatch(/\/repair\/current-head$/u);
     });
 
     it('refuses every changed resume cursor, source, operation, and boundary coordinate', async () => {
@@ -740,7 +740,7 @@ describe('Authenticated checkpoint store', () => {
         );
     });
 
-    it('refuses recovery when obsolete committed chunk ciphertext is corrupt', async () => {
+    it('refuses interrupted-publication repair when obsolete committed chunk ciphertext is corrupt', async () => {
         const checkpointStore = openStore();
         const identity = await checkpointStore.beginOperation(0);
         const firstState = stateBytesFor(18);
@@ -788,7 +788,7 @@ describe('Authenticated checkpoint store', () => {
 
         const restartedCheckpointStore = openStore();
         await expect(
-            restartedCheckpointStore.recover(
+            restartedCheckpointStore.repair(
                 identity.checkpointLineageIdentifier,
             ),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
@@ -982,7 +982,7 @@ describe('Authenticated checkpoint store', () => {
         await expect(
             checkpointStore.evict(identity.checkpointLineageIdentifier),
         ).rejects.toMatchObject({ code: 'StorageFailure' });
-        await checkpointStore.recover(identity.checkpointLineageIdentifier);
+        await checkpointStore.repair(identity.checkpointLineageIdentifier);
         await expect(
             checkpointStore.resume({
                 checkpointLineageIdentifier:

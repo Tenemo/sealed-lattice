@@ -369,12 +369,6 @@ type VerifiedStateReservationKernelAuthorization = Readonly<{
     sessionHandle: number;
 }>;
 
-export type StateVerifierSessionKernelAuthorization = Readonly<{
-    capabilityMemory: WebAssembly.Memory;
-    capabilityPointer: number;
-    sessionHandle: number;
-}>;
-
 const verifiedObjectRecords = new WeakMap<object, VerifiedObjectRecord>();
 const durableBindingDescriptions = new WeakMap<
     object,
@@ -460,18 +454,6 @@ export const resolveVerifiedStateReservationKernelAuthorization = (
     }
 
     return record.session.reservationKernelAuthorization(record, kernel);
-};
-
-export const resolveStateVerifierSessionKernelAuthorization = (
-    session: StateVerifierSession,
-    kernel: TranscriptCoreKernel,
-): StateVerifierSessionKernelAuthorization => {
-    if (!(session instanceof StateVerifierSessionImplementation)) {
-        throw new TypeError(
-            'The state-verifier session was not issued by this WASM runtime.',
-        );
-    }
-    return session.sessionKernelAuthorization(kernel);
 };
 
 const refused = <Value>(
@@ -1071,24 +1053,6 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
             capabilityMemory: this.#context.memory,
             capabilityPointer: this.#capabilityPointer,
             reservationHandle: record.handle,
-            sessionHandle: this.#handle,
-        });
-    }
-
-    public sessionKernelAuthorization(
-        kernel: TranscriptCoreKernel,
-    ): StateVerifierSessionKernelAuthorization {
-        if (this.#state !== 'active') {
-            throw new TypeError('The state-verifier session is unavailable.');
-        }
-        if (kernel !== this.#kernel) {
-            throw new TypeError(
-                'The state-verifier session belongs to another WASM kernel.',
-            );
-        }
-        return Object.freeze({
-            capabilityMemory: this.#context.memory,
-            capabilityPointer: this.#capabilityPointer,
             sessionHandle: this.#handle,
         });
     }

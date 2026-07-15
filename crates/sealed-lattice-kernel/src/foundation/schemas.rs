@@ -76,13 +76,12 @@ pub enum FoundationObjectType {
     StateReservation = 0x0051,
     StateOutputIntent = 0x0052,
     StateWitnessVote = 0x0053,
-    RecoveryTransition = 0x0054,
     TargetDecryptionShare = 0x0060,
     StorageRootCommitment = 0x0070,
 }
 
 impl FoundationObjectType {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 16] = [
         Self::PublicRandomnessCommitment,
         Self::PublicRandomnessReveal,
         Self::SetupIntent,
@@ -97,7 +96,6 @@ impl FoundationObjectType {
         Self::StateReservation,
         Self::StateOutputIntent,
         Self::StateWitnessVote,
-        Self::RecoveryTransition,
         Self::TargetDecryptionShare,
         Self::StorageRootCommitment,
     ];
@@ -122,7 +120,6 @@ impl FoundationObjectType {
             0x0051 => Some(Self::StateReservation),
             0x0052 => Some(Self::StateOutputIntent),
             0x0053 => Some(Self::StateWitnessVote),
-            0x0054 => Some(Self::RecoveryTransition),
             0x0060 => Some(Self::TargetDecryptionShare),
             0x0070 => Some(Self::StorageRootCommitment),
             _ => None,
@@ -477,8 +474,6 @@ pub struct ObjectEnvelope {
     pub object_type: FoundationObjectType,
     pub ceremony_context_hash: Hash512,
     pub action_context_hash: Hash512,
-    pub recovery_epoch: u64,
-    pub recovery_transition_hash: Option<Hash512>,
     pub producer_participant_id: Option<ParticipantIdentity>,
     pub producer_sequence: u64,
     pub ordered_prerequisite_hashes: Vec<Hash512>,
@@ -490,9 +485,6 @@ impl ObjectEnvelope {
         let producer = self
             .producer_participant_id
             .map(|identity| CanonicalItem::participant_identity(identity.into_bytes()));
-        let recovery_transition = self
-            .recovery_transition_hash
-            .map(|hash| CanonicalItem::hash512(hash.into_bytes()));
         let prerequisites = self
             .ordered_prerequisite_hashes
             .iter()
@@ -508,8 +500,6 @@ impl ObjectEnvelope {
                 CanonicalItem::unsigned16(self.object_type.canonical_code()),
                 CanonicalItem::hash512(self.ceremony_context_hash.into_bytes()),
                 CanonicalItem::hash512(self.action_context_hash.into_bytes()),
-                CanonicalItem::unsigned64(self.recovery_epoch),
-                CanonicalItem::optional(CanonicalItemType::Hash512, recovery_transition.as_ref())?,
                 CanonicalItem::optional(CanonicalItemType::ParticipantIdentity, producer.as_ref())?,
                 CanonicalItem::unsigned64(self.producer_sequence),
                 CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &prerequisites)?,
@@ -530,7 +520,7 @@ impl ObjectEnvelope {
         budget: &mut CanonicalDecodeBudget,
     ) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode_with_budget(bytes, limits, budget)?;
-        require_header(&tuple, OBJECT_ENVELOPE_SCHEMA_IDENTIFIER, 12)?;
+        require_header(&tuple, OBJECT_ENVELOPE_SCHEMA_IDENTIFIER, 10)?;
         if read_ascii(&tuple.items[0])? != FOUNDATION_PROFILE.protocol_name
             || read_u16(&tuple.items[1])? != FOUNDATION_PROFILE.protocol_version
         {
@@ -551,12 +541,10 @@ impl ObjectEnvelope {
             object_type,
             ceremony_context_hash: read_hash(&tuple.items[4])?,
             action_context_hash: read_hash(&tuple.items[5])?,
-            recovery_epoch: read_u64(&tuple.items[6])?,
-            recovery_transition_hash: read_optional_hash(&tuple.items[7])?,
-            producer_participant_id: read_optional_participant_identity(&tuple.items[8])?,
-            producer_sequence: read_u64(&tuple.items[9])?,
-            ordered_prerequisite_hashes: read_hash_list(&tuple.items[10])?,
-            payload_bytes: read_variable_item(&tuple.items[11], CanonicalItemType::RawBytes)?
+            producer_participant_id: read_optional_participant_identity(&tuple.items[6])?,
+            producer_sequence: read_u64(&tuple.items[7])?,
+            ordered_prerequisite_hashes: read_hash_list(&tuple.items[8])?,
+            payload_bytes: read_variable_item(&tuple.items[9], CanonicalItemType::RawBytes)?
                 .to_vec(),
         })
     }
@@ -610,7 +598,7 @@ impl SignedCarrier {
         })
     }
 
-    /// Verifies the carrier against the producer key selected by the external roster.
+    /// Verifies the carrier against the producer key selected by the anchored participant roster.
     pub fn verify_signature(&self, roster: &Roster) -> VerificationResult<()> {
         let Some(producer_participant_id) = self.envelope.producer_participant_id else {
             return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
@@ -678,7 +666,6 @@ pub fn signature_message(envelope: &ObjectEnvelope, roster_hash: Hash512) -> Sch
         FoundationObjectType::StateReservation => "state-reservation-intent",
         FoundationObjectType::StateOutputIntent => "state-output-intent",
         FoundationObjectType::StateWitnessVote => "state-witness-vote",
-        FoundationObjectType::RecoveryTransition => "state-recovery-transition",
         FoundationObjectType::TargetDecryptionShare => "target-release-output",
         FoundationObjectType::StorageRootCommitment => "storage-root-commitment",
     };
@@ -1016,13 +1003,6 @@ fn read_optional_fixed_64_byte_value(
             "optional 64-byte value encoding is malformed",
         )),
     }
-}
-
-fn read_optional_hash(item: &CanonicalItem) -> SchemaResult<Option<Hash512>> {
-    Ok(
-        read_optional_fixed_64_byte_value(item, CanonicalItemType::Hash512)?
-            .map(Hash512::from_bytes),
-    )
 }
 
 fn read_optional_participant_identity(

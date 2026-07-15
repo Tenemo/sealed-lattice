@@ -135,7 +135,7 @@ export type AuthenticatedCheckpointStore = Readonly<{
         identity: CheckpointOperationIdentity;
         stateChunks: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
     }): Promise<Uint8Array>;
-    recover(checkpointLineageIdentifier: Uint8Array): Promise<void>;
+    repair(checkpointLineageIdentifier: Uint8Array): Promise<void>;
     resume(input: {
         checkpointLineageIdentifier: Uint8Array;
         expectedBoundary: ExpectedCheckpointBoundary;
@@ -1571,7 +1571,7 @@ export const openAuthenticatedCheckpointStore = (input: {
         }
     };
 
-    const recoverUnlocked = async (
+    const repairInterruptedPublicationUnlocked = async (
         lineageIdentifier: Uint8Array,
     ): Promise<void> => {
         const journal = await readJournal(lineageIdentifier);
@@ -1605,7 +1605,7 @@ export const openAuthenticatedCheckpointStore = (input: {
         });
     };
 
-    const recover: AuthenticatedCheckpointStore['recover'] = async (
+    const repair: AuthenticatedCheckpointStore['repair'] = async (
         checkpointLineageIdentifier,
     ) => {
         const lineageIdentifier = copyExactBytes(
@@ -1616,7 +1616,7 @@ export const openAuthenticatedCheckpointStore = (input: {
         await runCheckpointLineageExclusive(
             input.store,
             lineageIdentifier,
-            () => recoverUnlocked(lineageIdentifier),
+            () => repairInterruptedPublicationUnlocked(lineageIdentifier),
         );
     };
 
@@ -1748,7 +1748,7 @@ export const openAuthenticatedCheckpointStore = (input: {
                 'Checkpoint cursor attempts were not issued for this operation.',
             );
         }
-        await recoverUnlocked(lineageIdentifier);
+        await repairInterruptedPublicationUnlocked(lineageIdentifier);
         const descriptor = parseStreamDescriptor(
             boundary.stateStreamDescriptorBytes,
             limits,
@@ -1978,7 +1978,7 @@ export const openAuthenticatedCheckpointStore = (input: {
         } finally {
             manifestPlaintext.fill(0);
         }
-        await recoverUnlocked(lineageIdentifier);
+        await repairInterruptedPublicationUnlocked(lineageIdentifier);
         return canonicalManifestBytes.slice();
     };
 
@@ -2016,7 +2016,7 @@ export const openAuthenticatedCheckpointStore = (input: {
             identifierByteLength,
             'checkpointLineageIdentifier',
         );
-        await recoverUnlocked(lineageIdentifier);
+        await repairInterruptedPublicationUnlocked(lineageIdentifier);
         const expectedBoundary = copyAndValidateBoundary(
             untrustedExpectedBoundary,
             limits,
@@ -2209,7 +2209,7 @@ export const openAuthenticatedCheckpointStore = (input: {
             identifierByteLength,
             'checkpointLineageIdentifier',
         );
-        await recoverUnlocked(lineageIdentifier);
+        await repairInterruptedPublicationUnlocked(lineageIdentifier);
         const manifest = await readManifest(lineageIdentifier);
         if (manifest === undefined) {
             return;
@@ -2249,7 +2249,7 @@ export const openAuthenticatedCheckpointStore = (input: {
             transactionLifetimeMilliseconds:
                 limits.transactionLifetimeMilliseconds,
         });
-        await recoverUnlocked(lineageIdentifier);
+        await repairInterruptedPublicationUnlocked(lineageIdentifier);
     };
 
     const evict: AuthenticatedCheckpointStore['evict'] = async (
@@ -2267,7 +2267,7 @@ export const openAuthenticatedCheckpointStore = (input: {
         );
     };
 
-    return Object.freeze({ beginOperation, evict, publish, recover, resume });
+    return Object.freeze({ beginOperation, evict, publish, repair, resume });
 };
 
 export { AuthenticatedRuntimeRecordError as AuthenticatedCheckpointStoreError };

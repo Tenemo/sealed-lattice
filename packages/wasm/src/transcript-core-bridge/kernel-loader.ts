@@ -275,12 +275,10 @@ export const createTranscriptCoreKernelLoader = (
                 executeCommand<BgvLatticeAnchorCommitmentComputation>({
                     command: 'ComputeLatticeAnchorCommitmentFromOpening',
                     publicMatrixSeedHash: input.publicMatrixSeedHash,
-                    commitmentDataPrimeIndex:
-                        input.commitmentDataPrimeIndex,
+                    commitmentDataPrimeIndex: input.commitmentDataPrimeIndex,
                     secretContributionCoefficients:
                         input.secretContributionCoefficients,
                     openingPolynomials: input.openingPolynomials,
-                    ringDegree: input.ringDegree,
                 }),
             computeSetupCommitmentFromOpening: (
                 input,

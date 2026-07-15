@@ -1,8 +1,8 @@
-import { hkdf } from "@noble/hashes/hkdf.js";
-import { sha384 } from "@noble/hashes/sha2.js";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
-import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
-import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
+import { hkdf } from '@noble/hashes/hkdf.js';
+import { sha384 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
+import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import {
     foundationProfile,
     type MailboxAssociatedData,
@@ -15,7 +15,7 @@ import {
     type SignedMailboxEnvelope,
     type UnsignedMailboxEnvelope,
     type VerificationResult,
-} from "@sealed-lattice/types";
+} from '@sealed-lattice/types';
 
 export type {
     MailboxAssociatedData,
@@ -25,19 +25,23 @@ export type {
     SetupMailboxSlot,
     SignedMailboxEnvelope,
     UnsignedMailboxEnvelope,
-} from "@sealed-lattice/types";
+} from '@sealed-lattice/types';
 
+import {
+    resolveAuthenticatedMailboxFrozenRosterSourceVerificationKey,
+    type AuthenticatedMailboxFrozenRoster,
+} from './authenticated-mailbox-frozen-roster.js';
 import {
     decapsulateClosedMailboxCiphertext,
     encapsulateResetSafeSetupMailbox,
     signResetSafeSetupMailboxEnvelope,
     type BrowserLocalMailboxCapability,
     type BrowserLocalSigningCapability,
-} from "./browser-local-key-provider.js";
+} from './browser-local-key-provider.js';
 
 const textEncoder = new TextEncoder();
 const mailboxSignatureContext = textEncoder.encode(
-    "sealed-lattice/mailbox-signature/v1",
+    'sealed-lattice/mailbox-signature/v1',
 );
 const aesGcmKeyByteLength = 32;
 const aesGcmNonceByteLength = 12;
@@ -47,19 +51,19 @@ const mlDsa65VerificationKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 const canonicalUnsignedDecimalPattern = /^(?:0|[1-9][0-9]*)$/u;
 const refusalReasons = new Set<RefusalReason>([
-    "malformedEncoding",
-    "unsupportedVersionOrSuite",
-    "outsideSupportedProfile",
-    "wrongContext",
-    "wrongTypeOrLength",
-    "wrongHashOrRoot",
-    "invalidSignature",
-    "duplicateIdentity",
-    "equivocation",
-    "missingPrerequisite",
-    "invalidProof",
-    "invalidArithmeticRelation",
-    "consumedState",
+    'malformedEncoding',
+    'unsupportedVersionOrSuite',
+    'outsideSupportedProfile',
+    'wrongContext',
+    'wrongTypeOrLength',
+    'wrongHashOrRoot',
+    'invalidSignature',
+    'duplicateIdentity',
+    'equivocation',
+    'missingPrerequisite',
+    'invalidProof',
+    'invalidArithmeticRelation',
+    'consumedState',
 ]);
 
 export type AuthenticatedMailboxKernel = Readonly<{
@@ -88,12 +92,12 @@ export type AuthenticatedMailboxKernel = Readonly<{
 }>;
 
 type MailboxLeaseState =
-    | "active"
-    | "authenticating"
-    | "cancelled"
-    | "completed"
-    | "decrypting"
-    | "failed";
+    | 'active'
+    | 'authenticating'
+    | 'cancelled'
+    | 'completed'
+    | 'decrypting'
+    | 'failed';
 
 type MailboxGcmEncryptorLease = Readonly<{
     cancel(): void;
@@ -179,7 +183,7 @@ export type AuthenticatedMailboxPlaintextSinkLease = Readonly<{
      * committed means the exact envelope was already published. prepared
      * means every exact plaintext chunk is durably staged but unpublished.
      */
-    readonly disposition: "committed" | "fresh" | "prepared";
+    readonly disposition: 'committed' | 'fresh' | 'prepared';
     /** Removes only an unpublished fresh transaction and its staged bytes. */
     cancel(): Promise<void>;
     /**
@@ -225,7 +229,7 @@ export type AuthenticatedMailboxProducerSlot = Readonly<{
 }>;
 
 type AuthenticatedMailboxOutboundCacheLease = Readonly<{
-    readonly disposition: "cached" | "fresh";
+    readonly disposition: 'cached' | 'fresh';
     cachedCarrier(): Promise<AuthenticatedMailboxCarrier>;
     stageChunk(input: {
         readonly bytes: ArrayBuffer;
@@ -250,7 +254,7 @@ export type AuthenticatedMailboxOutboundCache = Readonly<{
 }>;
 
 type AuthenticatedMailboxInboundSlotLease = Readonly<{
-    readonly disposition: "byteIdenticalRetransmission" | "fresh";
+    readonly disposition: 'byteIdenticalRetransmission' | 'fresh';
     cancel(): Promise<void>;
     commit(): Promise<void>;
 }>;
@@ -318,13 +322,13 @@ export type AuthenticatedMailboxOpenInput = Readonly<{
     readonly plaintextSinkBoundary: AuthenticatedMailboxPlaintextSinkBoundary;
     readonly pullCiphertextChunk: MailboxChunkPull;
     readonly recipientMailboxCapability: BrowserLocalMailboxCapability;
-    readonly sourceVerificationKey: Uint8Array;
+    readonly sourceRoster: AuthenticatedMailboxFrozenRoster;
     readonly stagingBoundary: AuthenticatedMailboxStagingBoundary;
     readonly streamBoundary: AuthenticatedMailboxStreamBoundary;
 }>;
 
 export type OpenedAuthenticatedMailbox = Readonly<{
-    readonly disposition: "accepted" | "byteIdenticalRetransmission";
+    readonly disposition: 'accepted' | 'byteIdenticalRetransmission';
     readonly envelopeHash: ProtocolHash;
     readonly plaintextByteLength: number;
 }>;
@@ -337,8 +341,8 @@ export class AuthenticatedMailboxCleanupError extends Error {
         operationFailure: unknown,
         cleanupFailures: readonly unknown[],
     ) {
-        super("The authenticated mailbox operation and its cleanup failed.");
-        this.name = "AuthenticatedMailboxCleanupError";
+        super('The authenticated mailbox operation and its cleanup failed.');
+        this.name = 'AuthenticatedMailboxCleanupError';
         this.operationFailure = operationFailure;
         this.cleanupFailures = cleanupFailures;
     }
@@ -349,7 +353,7 @@ class AuthenticatedMailboxRefusalError extends Error {
 
     public constructor(refusalReason: RefusalReason, message: string) {
         super(message);
-        this.name = "AuthenticatedMailboxRefusalError";
+        this.name = 'AuthenticatedMailboxRefusalError';
         this.refusalReason = refusalReason;
     }
 }
@@ -358,18 +362,18 @@ class AuthenticatedMailboxOperationError extends Error {
     public readonly failureCause: unknown;
 
     public constructor(failureCause: unknown) {
-        super("The authenticated mailbox operation failed.");
-        this.name = "AuthenticatedMailboxOperationError";
+        super('The authenticated mailbox operation failed.');
+        this.name = 'AuthenticatedMailboxOperationError';
         this.failureCause = failureCause;
     }
 }
 
 const isUint8Array = (value: unknown): value is Uint8Array =>
     ArrayBuffer.isView(value) &&
-    Object.prototype.toString.call(value) === "[object Uint8Array]";
+    Object.prototype.toString.call(value) === '[object Uint8Array]';
 
 const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
-    Object.prototype.toString.call(value) === "[object ArrayBuffer]";
+    Object.prototype.toString.call(value) === '[object ArrayBuffer]';
 
 const requireExactBytes = (
     value: Uint8Array,
@@ -399,7 +403,7 @@ const parseMailboxByteLength = (
     label: string,
 ): number => {
     if (
-        typeof value !== "string" ||
+        typeof value !== 'string' ||
         !canonicalUnsignedDecimalPattern.test(value)
     ) {
         throw new AuthenticatedMailboxRefusalError(
@@ -415,7 +419,7 @@ const parseMailboxByteLength = (
     ) {
         throw new AuthenticatedMailboxRefusalError(
             parsed > foundationProfile.maximumCanonicalStreamByteLength
-                ? "outsideSupportedProfile"
+                ? 'outsideSupportedProfile'
                 : refusalReason,
             `${label} is outside the supported mailbox stream profile.`,
         );
@@ -455,7 +459,7 @@ const canonicalAssociatedDataMatches = (
 
 const producerSlot = (
     associatedData:
-        | AuthenticatedMailboxSealCommonInput["associatedData"]
+        | AuthenticatedMailboxSealCommonInput['associatedData']
         | MailboxAssociatedData,
 ): AuthenticatedMailboxProducerSlot => ({
     suiteId: associatedData.suiteId,
@@ -483,7 +487,7 @@ const expectedChunkByteLength = (
 
 const throwIfAborted = (abortSignal: AbortSignal | undefined): void => {
     if (abortSignal?.aborted === true) {
-        throw new Error("The authenticated mailbox operation was cancelled.");
+        throw new Error('The authenticated mailbox operation was cancelled.');
     }
 };
 
@@ -510,8 +514,8 @@ const requirePulledChunk = (
             new Uint8Array(value).fill(0);
         }
         throw new AuthenticatedMailboxRefusalError(
-            "wrongTypeOrLength",
-            "A mailbox stream chunk has the wrong type or byte length.",
+            'wrongTypeOrLength',
+            'A mailbox stream chunk has the wrong type or byte length.',
         );
     }
 
@@ -529,8 +533,8 @@ const requireNoTrailingChunk = async (
             new Uint8Array(trailing).fill(0);
         }
         throw new AuthenticatedMailboxRefusalError(
-            "wrongTypeOrLength",
-            "A mailbox stream contains bytes after its authenticated length.",
+            'wrongTypeOrLength',
+            'A mailbox stream contains bytes after its authenticated length.',
         );
     }
     throwIfAborted(abortSignal);
@@ -546,7 +550,7 @@ const signatureValid = (
         sourceSignature = requireExactBytes(
             hexToBytes(sourceSignatureHex),
             mlDsa65SignatureByteLength,
-            "sourceSignatureHex",
+            'sourceSignatureHex',
         );
         return ml_dsa65.verify(
             sourceSignature,
@@ -571,7 +575,7 @@ const validatedCarrierEnvelope = (
     envelopeHash: ProtocolHash;
 }> => {
     let decodedEnvelope: ReturnType<
-        AuthenticatedMailboxKernel["decodeSignedMailboxEnvelope"]
+        AuthenticatedMailboxKernel['decodeSignedMailboxEnvelope']
     >;
     try {
         decodedEnvelope = kernel.decodeSignedMailboxEnvelope({
@@ -579,8 +583,8 @@ const validatedCarrierEnvelope = (
         });
     } catch {
         throw new AuthenticatedMailboxRefusalError(
-            "malformedEncoding",
-            "The signed mailbox envelope is not canonical.",
+            'malformedEncoding',
+            'The signed mailbox envelope is not canonical.',
         );
     }
     if (
@@ -588,8 +592,8 @@ const validatedCarrierEnvelope = (
         decodedEnvelope.envelopeHash !== expectedEnvelopeHash
     ) {
         throw new AuthenticatedMailboxRefusalError(
-            "wrongHashOrRoot",
-            "The signed mailbox envelope does not match its expected envelope hash.",
+            'wrongHashOrRoot',
+            'The signed mailbox envelope does not match its expected envelope hash.',
         );
     }
     if (
@@ -600,8 +604,8 @@ const validatedCarrierEnvelope = (
         )
     ) {
         throw new AuthenticatedMailboxRefusalError(
-            "invalidSignature",
-            "The mailbox source signature is invalid.",
+            'invalidSignature',
+            'The mailbox source signature is invalid.',
         );
     }
 
@@ -614,8 +618,8 @@ const validatedCarrierEnvelope = (
 const validateDescriptorLength = (envelope: SignedMailboxEnvelope): number => {
     const plaintextByteLength = parseMailboxByteLength(
         envelope.ciphertextDescriptor.totalByteLength,
-        "wrongTypeOrLength",
-        "The mailbox ciphertext descriptor byte length",
+        'wrongTypeOrLength',
+        'The mailbox ciphertext descriptor byte length',
     );
     if (
         !Array.isArray(envelope.ciphertextDescriptor.orderedChunkDigests) ||
@@ -623,8 +627,8 @@ const validateDescriptorLength = (envelope: SignedMailboxEnvelope): number => {
             expectedChunkCount(plaintextByteLength)
     ) {
         throw new AuthenticatedMailboxRefusalError(
-            "wrongTypeOrLength",
-            "The mailbox ciphertext descriptor has the wrong chunk count.",
+            'wrongTypeOrLength',
+            'The mailbox ciphertext descriptor has the wrong chunk count.',
         );
     }
 
@@ -635,15 +639,15 @@ const refusalReasonFromBoundaryError = (
     error: unknown,
 ): RefusalReason | undefined => {
     if (
-        typeof error !== "object" ||
+        typeof error !== 'object' ||
         error === null ||
-        !("refusalReason" in error)
+        !('refusalReason' in error)
     ) {
         return undefined;
     }
     const refusalReason = error.refusalReason;
 
-    return typeof refusalReason === "string" &&
+    return typeof refusalReason === 'string' &&
         refusalReasons.has(refusalReason as RefusalReason)
         ? (refusalReason as RefusalReason)
         : undefined;
@@ -659,7 +663,7 @@ const asVerificationRefusal = (error: unknown): unknown => {
         ? error
         : new AuthenticatedMailboxRefusalError(
               refusalReason,
-              "The authenticated mailbox was refused by its canonical runtime boundary.",
+              'The authenticated mailbox was refused by its canonical runtime boundary.',
           );
 };
 
@@ -676,7 +680,7 @@ const cancelSynchronousLease = (
         return;
     }
     const state = lease.state();
-    if (state === "cancelled" || state === "completed" || state === "failed") {
+    if (state === 'cancelled' || state === 'completed' || state === 'failed') {
         return;
     }
     try {
@@ -729,13 +733,13 @@ const sealMailbox = async (
 ): Promise<AuthenticatedMailboxCarrier> => {
     const plaintextByteLength = parseMailboxByteLength(
         String(input.plaintextByteLength),
-        "wrongTypeOrLength",
-        "The authenticated mailbox plaintext byte length",
+        'wrongTypeOrLength',
+        'The authenticated mailbox plaintext byte length',
     );
     if (plaintextByteLength !== input.plaintextByteLength) {
         throw new AuthenticatedMailboxRefusalError(
-            "wrongTypeOrLength",
-            "The authenticated mailbox plaintext byte length must be a positive safe integer.",
+            'wrongTypeOrLength',
+            'The authenticated mailbox plaintext byte length must be a positive safe integer.',
         );
     }
     throwIfAborted(input.abortSignal);
@@ -768,12 +772,12 @@ const sealMailbox = async (
         sourceVerificationKey = requireExactBytes(
             input.sourceVerificationKey,
             mlDsa65VerificationKeyByteLength,
-            "sourceVerificationKey",
+            'sourceVerificationKey',
         );
         recipientEncapsulationKey = requireExactBytes(
             input.recipientEncapsulationKey,
             ml_kem768.lengths.publicKey!,
-            "recipientEncapsulationKey",
+            'recipientEncapsulationKey',
         );
         encapsulation = encapsulateResetSafeSetupMailbox({
             recipientEncapsulationKey,
@@ -783,11 +787,11 @@ const sealMailbox = async (
             sourceVerificationKey,
         });
 
-        if (outboundLease.disposition === "cached") {
+        if (outboundLease.disposition === 'cached') {
             const cachedCarrier = await outboundLease.cachedCarrier();
             const canonicalEnvelopeBytes = requireNonemptyBytes(
                 cachedCarrier.canonicalEnvelopeBytes,
-                "cachedCarrier.canonicalEnvelopeBytes",
+                'cachedCarrier.canonicalEnvelopeBytes',
             );
             const validatedCachedCarrier = validatedCarrierEnvelope(
                 input.kernel,
@@ -805,8 +809,8 @@ const sealMailbox = async (
             ) {
                 canonicalEnvelopeBytes.fill(0);
                 throw new AuthenticatedMailboxRefusalError(
-                    "wrongContext",
-                    "The cached setup-mailbox carrier does not match its requested producer slot.",
+                    'wrongContext',
+                    'The cached setup-mailbox carrier does not match its requested producer slot.',
                 );
             }
             result = Object.freeze({ canonicalEnvelopeBytes });
@@ -859,8 +863,8 @@ const sealMailbox = async (
                     expectedChunkCount(plaintextByteLength)
             ) {
                 throw new AuthenticatedMailboxRefusalError(
-                    "wrongTypeOrLength",
-                    "The canonical mailbox stream writer returned inconsistent metadata.",
+                    'wrongTypeOrLength',
+                    'The canonical mailbox stream writer returned inconsistent metadata.',
                 );
             }
             for (
@@ -919,13 +923,13 @@ const sealMailbox = async (
             });
             if (encodedEnvelope.envelopeHash !== envelopeHash) {
                 throw new AuthenticatedMailboxRefusalError(
-                    "wrongHashOrRoot",
-                    "The canonical mailbox encoder returned an inconsistent envelope hash.",
+                    'wrongHashOrRoot',
+                    'The canonical mailbox encoder returned an inconsistent envelope hash.',
                 );
             }
             const canonicalEnvelopeBytes = requireNonemptyBytes(
                 hexToBytes(encodedEnvelope.canonicalBytesHex),
-                "canonicalEnvelopeBytes",
+                'canonicalEnvelopeBytes',
             );
             result = Object.freeze({ canonicalEnvelopeBytes });
             await outboundLease.commit(result);
@@ -961,7 +965,7 @@ const sealMailbox = async (
     if (cleanupFailures.length > 0) {
         throw new AuthenticatedMailboxCleanupError(
             operationFailure ??
-                new Error("Authenticated mailbox sealing completed."),
+                new Error('Authenticated mailbox sealing completed.'),
             cleanupFailures,
         );
     }
@@ -971,7 +975,7 @@ const sealMailbox = async (
             : new AuthenticatedMailboxOperationError(operationFailure);
     }
     if (result === undefined) {
-        throw new Error("Authenticated mailbox sealing produced no result.");
+        throw new Error('Authenticated mailbox sealing produced no result.');
     }
 
     return result;
@@ -986,12 +990,7 @@ export const openAuthenticatedMailbox = async (
 ): Promise<VerificationResult<OpenedAuthenticatedMailbox>> => {
     const canonicalEnvelopeBytes = requireNonemptyBytes(
         input.carrier.canonicalEnvelopeBytes,
-        "carrier.canonicalEnvelopeBytes",
-    );
-    const sourceVerificationKey = requireExactBytes(
-        input.sourceVerificationKey,
-        mlDsa65VerificationKeyByteLength,
-        "sourceVerificationKey",
+        'carrier.canonicalEnvelopeBytes',
     );
     let gcmVerifier: MailboxGcmVerifierLease | undefined;
     let inboundSlotLease: AuthenticatedMailboxInboundSlotLease | undefined;
@@ -1008,8 +1007,21 @@ export const openAuthenticatedMailbox = async (
     let plaintextSinkLease: AuthenticatedMailboxPlaintextSinkLease | undefined;
     let retainPlaintextSinkForRetry = false;
     let result: VerificationResult<OpenedAuthenticatedMailbox> | undefined;
+    let sourceVerificationKey: Uint8Array | undefined;
     try {
         throwIfAborted(input.abortSignal);
+        sourceVerificationKey =
+            resolveAuthenticatedMailboxFrozenRosterSourceVerificationKey(
+                input.sourceRoster,
+                input.expectedAssociatedData.rosterHash,
+                input.expectedAssociatedData.sourceParticipantId,
+            );
+        if (sourceVerificationKey === undefined) {
+            throw new AuthenticatedMailboxRefusalError(
+                'wrongContext',
+                'The mailbox source is not bound to the expected frozen roster.',
+            );
+        }
         const validatedCarrier = validatedCarrierEnvelope(
             input.kernel,
             { canonicalEnvelopeBytes },
@@ -1025,8 +1037,8 @@ export const openAuthenticatedMailbox = async (
             )
         ) {
             throw new AuthenticatedMailboxRefusalError(
-                "wrongContext",
-                "The mailbox associated data does not match the expected protocol slot.",
+                'wrongContext',
+                'The mailbox associated data does not match the expected protocol slot.',
             );
         }
         const plaintextByteLength = validateDescriptorLength(envelope);
@@ -1045,16 +1057,16 @@ export const openAuthenticatedMailbox = async (
                 producerSlot: producerSlot(envelope.associatedData),
             });
             plaintextSinkCommitted =
-                plaintextSinkLease.disposition === "committed";
+                plaintextSinkLease.disposition === 'committed';
             if (
-                inboundDisposition === "fresh" &&
-                plaintextSinkLease.disposition === "committed"
+                inboundDisposition === 'fresh' &&
+                plaintextSinkLease.disposition === 'committed'
             ) {
                 throw new Error(
-                    "A committed plaintext delivery is missing its authenticated inbound mailbox slot.",
+                    'A committed plaintext delivery is missing its authenticated inbound mailbox slot.',
                 );
             }
-            if (plaintextSinkLease.disposition === "fresh") {
+            if (plaintextSinkLease.disposition === 'fresh') {
                 streamVerifier = input.streamBoundary.openVerifier({
                     descriptor: envelope.ciphertextDescriptor,
                 });
@@ -1064,8 +1076,8 @@ export const openAuthenticatedMailbox = async (
                         expectedChunkCount(plaintextByteLength)
                 ) {
                     throw new AuthenticatedMailboxRefusalError(
-                        "wrongTypeOrLength",
-                        "The canonical mailbox descriptor metadata does not match its authenticated length.",
+                        'wrongTypeOrLength',
+                        'The canonical mailbox descriptor metadata does not match its authenticated length.',
                     );
                 }
                 let gcmTag: Uint8Array | undefined;
@@ -1073,19 +1085,19 @@ export const openAuthenticatedMailbox = async (
                     gcmTag = requireExactBytes(
                         hexToBytes(envelope.gcmTagHex),
                         aesGcmTagByteLength,
-                        "gcmTagHex",
+                        'gcmTagHex',
                     );
                     kemCiphertext = requireExactBytes(
                         hexToBytes(envelope.kemCiphertextHex),
                         mlKem768CiphertextByteLength,
-                        "kemCiphertextHex",
+                        'kemCiphertextHex',
                     );
                 } catch (error) {
                     throw new AuthenticatedMailboxRefusalError(
-                        "wrongTypeOrLength",
+                        'wrongTypeOrLength',
                         error instanceof Error
                             ? error.message
-                            : "The mailbox cryptographic fields have the wrong length.",
+                            : 'The mailbox cryptographic fields have the wrong length.',
                     );
                 }
                 sharedSecret = decapsulateClosedMailboxCiphertext({
@@ -1214,9 +1226,9 @@ export const openAuthenticatedMailbox = async (
                 await stagingLease.dispose();
                 stagingDisposed = true;
             }
-            if (plaintextSinkLease.disposition !== "committed") {
+            if (plaintextSinkLease.disposition !== 'committed') {
                 retainPlaintextSinkForRetry = true;
-                if (inboundDisposition === "fresh") {
+                if (inboundDisposition === 'fresh') {
                     await inboundSlotLease.commit();
                     inboundSlotCommitted = true;
                 } else {
@@ -1232,9 +1244,9 @@ export const openAuthenticatedMailbox = async (
                 isValid: true,
                 value: {
                     disposition:
-                        inboundDisposition === "byteIdenticalRetransmission"
-                            ? "byteIdenticalRetransmission"
-                            : "accepted",
+                        inboundDisposition === 'byteIdenticalRetransmission'
+                            ? 'byteIdenticalRetransmission'
+                            : 'accepted',
                     envelopeHash,
                     plaintextByteLength,
                 },
@@ -1277,11 +1289,11 @@ export const openAuthenticatedMailbox = async (
     kemCiphertext?.fill(0);
     keyAndNonce?.fill(0);
     sharedSecret?.fill(0);
-    sourceVerificationKey.fill(0);
+    sourceVerificationKey?.fill(0);
     if (cleanupFailures.length > 0) {
         throw new AuthenticatedMailboxCleanupError(
             operationFailure ??
-                new Error("Authenticated mailbox opening completed."),
+                new Error('Authenticated mailbox opening completed.'),
             cleanupFailures,
         );
     }
@@ -1297,7 +1309,7 @@ export const openAuthenticatedMailbox = async (
             : new AuthenticatedMailboxOperationError(operationFailure);
     }
     if (result === undefined) {
-        throw new Error("Authenticated mailbox opening produced no result.");
+        throw new Error('Authenticated mailbox opening produced no result.');
     }
 
     return result;

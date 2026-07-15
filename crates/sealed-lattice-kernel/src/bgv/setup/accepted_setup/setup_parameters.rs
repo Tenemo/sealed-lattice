@@ -21,9 +21,10 @@ pub(super) fn setup_parameters_value(roster: &AcceptedRosterParameters) -> Canon
 
 // The bounded-domain evaluator profile binding: the score-difference domain the
 // comparison polynomial is interpolated over is a deterministic function of the
-// roster (score span times ballot count, ballots being full-roster), so binding
-// it here makes the evaluator comparison domain part of the setup-parameter
-// identity instead of an unbound runtime argument.
+// roster. The roster size is the maximum selected-ballot count, so this bound
+// covers every permitted nonempty subset without making the selected count an
+// unbound runtime parameter. Binding it here makes the evaluator comparison
+// domain part of the setup-parameter identity.
 pub(super) fn bounded_domain_evaluator_value_for_roster(
     roster: &AcceptedRosterParameters,
 ) -> CanonicalResult<Value> {

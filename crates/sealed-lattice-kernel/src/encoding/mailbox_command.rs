@@ -553,17 +553,17 @@ mod tests {
         .expect_err("uppercase hex refuses");
         assert_eq!(error.code, CanonicalErrorCode::InvalidHex);
 
-        let mut invalid_recovery_slot = setup_mailbox_slot_value();
-        invalid_recovery_slot["payloadType"] = Value::from(1);
+        let mut unassigned_payload_slot = setup_mailbox_slot_value();
+        unassigned_payload_slot["payloadType"] = Value::from(1);
         let error = run_transcript_core_command_inner(
             json!({
                 "command": "DeriveSetupMailboxSlotHash",
-                "value": invalid_recovery_slot,
+                "value": unassigned_payload_slot,
             })
             .to_string()
             .as_bytes(),
         )
-        .expect_err("recovery mailbox with material roots refuses");
-        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+        .expect_err("unassigned mailbox payload type refuses");
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
     }
 }

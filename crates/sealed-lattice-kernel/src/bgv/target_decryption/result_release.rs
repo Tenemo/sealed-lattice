@@ -95,19 +95,24 @@ pub(super) fn absorb_target_decryption_result_release_share(
             "target result release session store is unavailable",
         )
     })?;
-    // Once an active session begins verifying this share, any refusal aborts
-    // the session and the proof verifier consumes its authenticated material.
-    // Requests that do not name an active session never reach that boundary.
-    let absorb_result = {
-        let session = sessions.get_mut(&release_verification_id).ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "target result release verification id is not active",
-            )
-        })?;
-        let _proof_material_attempt_guard =
-            target_proof_material_attempt_guard(input.target_share_proof);
-        absorb_target_result_release_share(session, input.target_share_proof)
+    let session = sessions.get_mut(&release_verification_id).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "target result release verification id is not active",
+        )
+    })?;
+    // Once an active session begins this attempt, transfer the proof material
+    // into the verifier. Any refusal consumes the material and aborts the
+    // session. Requests without an active session never reach this boundary.
+    let absorb_result = match take_target_decryption_share_proof_material_for_active_attempt(
+        input.target_share_proof,
+    ) {
+        Ok(proof_material_attempt) => absorb_target_result_release_share(
+            session,
+            input.target_share_proof,
+            proof_material_attempt,
+        ),
+        Err(error) => Err(error),
     };
     match absorb_result {
         Ok(()) => Ok(Value::Null),
@@ -154,6 +159,7 @@ pub(super) fn finish_target_decryption_result_release(
 fn absorb_target_result_release_share(
     session: &mut TargetResultReleaseSession,
     target_share_proof: &Value,
+    proof_material_attempt: TargetDecryptionShareProofMaterialAttempt,
 ) -> CanonicalResult<()> {
     if session.verified_shares.len() >= session.required_share_count {
         return Err(CanonicalError::new(
@@ -166,6 +172,7 @@ fn absorb_target_result_release_share(
         &session.target_accepted,
         &session.target_ciphertexts,
         target_share_proof,
+        proof_material_attempt,
     )?;
     if !session
         .seen_roster_positions
@@ -261,6 +268,7 @@ fn verify_target_share_release_entry(
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
     share_proof: &Value,
+    proof_material_attempt: TargetDecryptionShareProofMaterialAttempt,
 ) -> CanonicalResult<VerifiedTargetShareRelease> {
     let target_decryption_share = value_at_path(share_proof, &["targetDecryptionShare"])?;
     let proof_statement = value_at_path(share_proof, &["proofStatement"])?;
@@ -285,6 +293,7 @@ fn verify_target_share_release_entry(
             target_decryption_share,
             proof_statement,
             proof_material,
+            proof_material_attempt,
         },
     )?;
     let payload = value_at_path(target_decryption_share, &["sharePayload"])?;

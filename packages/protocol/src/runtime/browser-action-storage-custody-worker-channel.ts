@@ -241,10 +241,7 @@ const copyUntrustedExpectedCommitment = (
 const copySnapshot = (value: unknown): BrowserDeviceWrappingSnapshot => {
     if (
         !isPlainRecord(value) ||
-        !hasRequiredKeys(value, [
-            'mutationIdentifier',
-            'storageRootCommitment',
-        ])
+        !hasRequiredKeys(value, ['mutationIdentifier', 'storageRootCommitment'])
     ) {
         throw new BrowserActionStorageCustodyError(
             'InvalidInput',

@@ -1019,8 +1019,7 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
             );
         }
         await this.#workerCall(
-            () =>
-                this.#workerKernel.commitStagedActionStorageRoot(),
+            () => this.#workerKernel.commitStagedActionStorageRoot(),
             'Activating the browser action-storage root failed inside the owned worker.',
         );
     }

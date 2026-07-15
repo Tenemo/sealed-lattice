@@ -32,7 +32,6 @@ pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_HASH_RECORD_ENVELOPE: u32 = 17;
 pub(crate) const LOCAL_STORAGE_ROOT_STATUS_RESOURCE_LIMIT: u32 = 0x0001_0000;
 pub(crate) const LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE: u32 = 0x0001_0001;
 pub(crate) const LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH: u32 = 0x0001_0002;
-
 const HASH_BYTE_LENGTH: usize = 64;
 #[cfg(test)]
 const BINDING_BYTE_LENGTH: usize = HASH_BYTE_LENGTH * 4;
@@ -101,11 +100,7 @@ impl RootRegistry {
         require_lease_mut(self.active.as_mut(), handle, capability)
     }
 
-    fn commit(
-        &mut self,
-        handle: u32,
-        capability: &[u8],
-    ) -> RuntimeResult<()> {
+    fn commit(&mut self, handle: u32, capability: &[u8]) -> RuntimeResult<()> {
         require_lease(self.staged.as_ref(), handle, capability)?;
         let staged = self
             .staged
@@ -665,10 +660,6 @@ fn derive_record_identifier_from_context(
         LocalRecordType::ActionRandomness => {
             reader.finish()?;
             LocalRecordIdentifierInput::ActionRandomness
-        }
-        LocalRecordType::PublicCoinPrivateMaterial => {
-            reader.finish()?;
-            LocalRecordIdentifierInput::PublicCoinPrivateMaterial
         }
         LocalRecordType::SourceVssMaterial => {
             let material_context_hash = Hash512::from_bytes(reader.read_array()?);

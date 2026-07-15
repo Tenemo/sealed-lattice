@@ -1,6 +1,7 @@
 use super::*;
 
 const TEST_TARGET_SHARE_PROOF_BYTES: [u8; 5] = [1, 2, 3, 4, 5];
+const TEST_OTHER_FAMILY_PROOF_BYTES: [u8; 7] = [9, 8, 7, 6, 5, 4, 3];
 
 #[test]
 fn target_share_proof_statement_binds_local_witness_and_share() {
@@ -260,6 +261,16 @@ fn target_result_release_consumes_proof_material_only_at_the_active_verification
         CanonicalErrorCode::InvalidProtocolObject
     );
     assert!(verification_error.message.contains("common proof suite"));
+    let first_aborted_session_error =
+        finish_bgv_target_decryption_result_release_for_test(&json!({
+            "releaseVerificationId": "rust-target-release-proof-lifecycle-first",
+        }))
+        .expect_err("the failed verification must abort its release session");
+    assert!(
+        first_aborted_session_error
+            .message
+            .contains("is not active")
+    );
 
     begin_bgv_target_decryption_result_release_for_test(&json!({
         "releaseVerificationId": "rust-target-release-proof-lifecycle-second",
@@ -286,6 +297,69 @@ fn target_result_release_consumes_proof_material_only_at_the_active_verification
     );
     let aborted_session_error = finish_bgv_target_decryption_result_release_for_test(&json!({
         "releaseVerificationId": "rust-target-release-proof-lifecycle-second",
+    }))
+    .expect_err("a refused share must abort its release session");
+    assert!(aborted_session_error.message.contains("is not active"));
+}
+
+#[test]
+fn target_result_release_does_not_consume_another_proof_family() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let mut target_share_proof = statement_backed_target_share_with_test_proof_material(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        "trustee-1",
+    );
+    let public_key_share_proof_bytes_hash = hash512_hex(
+        "sealed-lattice/setup/public-key-share/succinct-proof-bytes",
+        &[&TEST_OTHER_FAMILY_PROOF_BYTES],
+    );
+    target_share_proof["proofMaterial"]["proofBytesHash"] =
+        json!(public_key_share_proof_bytes_hash.clone());
+    crate::bgv::setup::authenticate_setup_proof_material_stream_for_test(
+        "public-key-share",
+        &public_key_share_proof_bytes_hash,
+        &TEST_OTHER_FAMILY_PROOF_BYTES,
+    )
+    .expect("authenticate another proof family's material");
+
+    begin_bgv_target_decryption_result_release_for_test(&json!({
+        "releaseVerificationId": "rust-target-release-wrong-proof-family",
+        "setupPackage": setup_package,
+        "targetAcceptedRecord": accepted_record,
+        "targetCiphertextBinding": target_ciphertext_binding,
+        "targetCiphertexts": target_ciphertexts,
+    }))
+    .expect("begin target release verification");
+    let verification_error = absorb_bgv_target_decryption_result_release_share_for_test(&json!({
+        "releaseVerificationId": "rust-target-release-wrong-proof-family",
+        "targetShareProof": target_share_proof,
+    }))
+    .expect_err("a target share must refuse another proof family's material");
+    assert_eq!(
+        verification_error.code,
+        CanonicalErrorCode::ComponentMismatch
+    );
+    assert!(
+        verification_error
+            .message
+            .contains("different proof family")
+    );
+
+    let retained_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        "public-key-share",
+        &public_key_share_proof_bytes_hash,
+    )
+    .expect("look up another proof family's material");
+    assert!(
+        retained_material.is_some(),
+        "a target verification attempt must not evict another proof family's bytes"
+    );
+    let aborted_session_error = finish_bgv_target_decryption_result_release_for_test(&json!({
+        "releaseVerificationId": "rust-target-release-wrong-proof-family",
     }))
     .expect_err("a refused share must abort its release session");
     assert!(aborted_session_error.message.contains("is not active"));

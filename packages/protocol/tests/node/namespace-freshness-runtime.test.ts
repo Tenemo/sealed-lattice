@@ -16,8 +16,7 @@ import {
     type VerifiedNamespaceFreshnessCheckpoint,
 } from '#packages/protocol/src/runtime/namespace-freshness-runtime';
 
-const bytes = (value: number): Uint8Array =>
-    new Uint8Array(64).fill(value);
+const bytes = (value: number): Uint8Array => new Uint8Array(64).fill(value);
 const key = (value: Uint8Array): string =>
     Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
@@ -29,7 +28,7 @@ const context = (): NamespaceFreshnessContext => ({
     suiteIdentifier: bytes(0x11),
 });
 
-const witnessIdentities = (): readonly Uint8Array[] =>
+const rosterParticipantWitnessIdentities = (): readonly Uint8Array[] =>
     Array.from({ length: 9 }, (_unused, index) => bytes(0x60 + index));
 
 type FakeVerifier = Readonly<{
@@ -128,7 +127,8 @@ const createFakeVerifier = (): FakeVerifier => {
                         Object.create(null),
                     ) as VerifiedNamespaceFreshnessCertificate,
                     verifiedWitnessIdentities: witnessIndexes.map(
-                        (index) => input.externalRosterWitnessIdentities[index]!,
+                        (index) =>
+                            input.rosterParticipantWitnessIdentities[index],
                     ),
                 },
             };
@@ -159,30 +159,38 @@ const createSubjectHarness = (input: {
     let journalWrites = 0;
     const runtime = openNamespaceFreshnessSubjectRuntime({
         acceptedCheckpointJournal: {
-            storeAcceptedCertificate: async () => {
+            storeAcceptedCertificate: () => {
                 journalWrites += 1;
+                return Promise.resolve();
             },
         },
         certificateTransport: {
-            publishCheckpoint: async () => {
+            publishCheckpoint: () => {
                 if (input.publish === undefined) {
-                    throw new Error('witness quorum unavailable');
+                    return Promise.reject(
+                        new Error('witness quorum unavailable'),
+                    );
                 }
-                return input.publish;
+                return Promise.resolve(input.publish);
             },
-            readAvailableCertificates: async () => input.available,
+            readAvailableCertificates: () => Promise.resolve(input.available),
         },
         context: context(),
-        externalRosterWitnessIdentities: witnessIdentities(),
+        rosterParticipantWitnessIdentities:
+            rosterParticipantWitnessIdentities(),
         freshnessQuorum: 7,
         localAuthority: {
-            authenticateCurrentHead: async () => ({
-                authenticatedHeadDigest: head.authenticatedHeadDigest.slice(),
-                namespaceSequence: head.namespaceSequence,
-                storageInstanceIdentity: head.storageInstanceIdentity.slice(),
-            }),
-            retireActionSecrets: async () => {
+            authenticateCurrentHead: () =>
+                Promise.resolve({
+                    authenticatedHeadDigest:
+                        head.authenticatedHeadDigest.slice(),
+                    namespaceSequence: head.namespaceSequence,
+                    storageInstanceIdentity:
+                        head.storageInstanceIdentity.slice(),
+                }),
+            retireActionSecrets: () => {
                 retired += 1;
+                return Promise.resolve();
             },
         },
         verifier: input.verifier,
@@ -197,7 +205,7 @@ const createSubjectHarness = (input: {
 };
 
 describe('Namespace freshness subject runtime', () => {
-    it('activates only when an external quorum certifies the exact local head', async () => {
+    it('activates only when a roster-participant quorum certifies the exact local head', async () => {
         const fake = createFakeVerifier();
         const genesis = fake.prepare({
             authenticatedHeadDigest: bytes(0x10),
@@ -241,9 +249,7 @@ describe('Namespace freshness subject runtime', () => {
             verifier: fake.verifier,
         });
         await expect(harness.runtime.startup()).resolves.toBe('retired');
-        expect(harness.runtime.retirementReason()).toBe(
-            'localStateMismatch',
-        );
+        expect(harness.runtime.retirementReason()).toBe('localStateMismatch');
         await expect(harness.runtime.startup()).resolves.toBe('retired');
         expect(() => harness.runtime.activeCapability()).toThrow(
             NamespaceFreshnessError,
@@ -300,7 +306,7 @@ describe('Namespace freshness subject runtime', () => {
         );
 
         const invalid = certificateFor(first, 8);
-        invalid.untrustedVoteCarriers[7]![0] = 0xff;
+        invalid.untrustedVoteCarriers[7][0] = 0xff;
         const invalidHarness = createSubjectHarness({
             available: [invalid],
             head: {
@@ -333,24 +339,25 @@ describe('Namespace freshness subject runtime', () => {
         });
         await harness.runtime.startup();
         await expect(
-            harness.runtime.certifyMutation(async () => {
+            harness.runtime.certifyMutation(() => {
                 harness.setHead({
                     authenticatedHeadDigest: bytes(0x20),
                     namespaceSequence: 1n,
                     storageInstanceIdentity: bytes(0x44),
                 });
+                return Promise.resolve();
             }),
         ).resolves.toBe('unavailable');
         expect(() => harness.runtime.activeCapability()).toThrow(
-            'no externally certified freshness capability',
+            'no roster-certified freshness capability',
         );
         await expect(
-            harness.runtime.certifyMutation(async () => undefined),
+            harness.runtime.certifyMutation(() => Promise.resolve()),
         ).rejects.toMatchObject({ code: 'InvalidState' });
     });
 });
 
-describe('Namespace freshness witness service', () => {
+describe('Namespace freshness participant witness service', () => {
     it('atomically locks one successor and replays only byte-identical votes', async () => {
         const fake = createFakeVerifier();
         const genesis = fake.prepare({
@@ -373,11 +380,11 @@ describe('Namespace freshness witness service', () => {
         const service = openNamespaceFreshnessWitnessService({
             context: context(),
             signer: {
-                signVerifiedCheckpoint: async () =>
-                    Uint8Array.of(++signCount, 0x90),
+                signVerifiedCheckpoint: () =>
+                    Promise.resolve(Uint8Array.of(++signCount, 0x90)),
             },
             store: {
-                compareAndLock: async ({
+                compareAndLock: ({
                     expectedCheckpointHash,
                     nextCoordinate,
                 }) => {
@@ -388,17 +395,20 @@ describe('Namespace freshness witness service', () => {
                               key(expectedCheckpointHash) !==
                                   key(coordinate.description.checkpointHash)
                     ) {
-                        return { kind: 'changed' };
+                        return Promise.resolve({ kind: 'changed' });
                     }
                     coordinate = nextCoordinate;
-                    return { kind: 'committed' };
+                    return Promise.resolve({ kind: 'committed' });
                 },
-                load: async (): Promise<NamespaceFreshnessWitnessStoreSnapshot> =>
-                    coordinate === undefined
-                        ? { kind: 'authorized-empty' }
-                        : { kind: 'current', coordinate },
-                retire: async () => {
+                load: (): Promise<NamespaceFreshnessWitnessStoreSnapshot> =>
+                    Promise.resolve(
+                        coordinate === undefined
+                            ? { kind: 'authorized-empty' }
+                            : { kind: 'current', coordinate },
+                    ),
+                retire: () => {
                     retired += 1;
+                    return Promise.resolve();
                 },
             },
             verifier: fake.verifier,
@@ -431,15 +441,17 @@ describe('Namespace freshness witness service', () => {
         const service = openNamespaceFreshnessWitnessService({
             context: context(),
             signer: {
-                signVerifiedCheckpoint: async () => Uint8Array.of(1),
+                signVerifiedCheckpoint: () => Promise.resolve(Uint8Array.of(1)),
             },
             store: {
-                compareAndLock: async () => ({
-                    kind: 'authentication-failed',
-                }),
-                load: async () => ({ kind: 'authentication-failed' }),
-                retire: async () => {
+                compareAndLock: () =>
+                    Promise.resolve({
+                        kind: 'authentication-failed',
+                    }),
+                load: () => Promise.resolve({ kind: 'authentication-failed' }),
+                retire: () => {
                     retired += 1;
+                    return Promise.resolve();
                 },
             },
             verifier: fake.verifier,

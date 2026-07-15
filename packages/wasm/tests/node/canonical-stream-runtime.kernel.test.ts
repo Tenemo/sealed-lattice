@@ -92,7 +92,6 @@ describe('Canonical stream real-WASM runtime', () => {
             targetOrderPartialDecryption: 20,
             maliciousTargetShareProof: 21,
             checkpointState: 22,
-            stateBallotCandidateListExactOutput: 23,
             stateFinalitySignatureExactOutput: 24,
             stateTargetReleaseExactOutput: 25,
             publicKeyShareMaterial: 26,

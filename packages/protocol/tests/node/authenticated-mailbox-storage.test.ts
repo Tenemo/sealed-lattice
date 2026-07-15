@@ -35,7 +35,7 @@ const producerSlot = (input: {
 }) => ({
     actionContextHash: hashHex(0x33),
     ceremonyContextHash: hashHex(0x22),
-    payloadType: 1 as const,
+    payloadType: 2 as const,
     producerSequence: input.producerSequence ?? '7',
     recipientParticipantId:
         input.direction === 'inbound' ? hashHex(0x44) : hashHex(0x77),
@@ -268,7 +268,7 @@ describe('Browser-local authenticated mailbox storage', () => {
         });
     });
 
-    it('durably reserves outbound slots before chunk consumption and recovers abandoned journals', async () => {
+    it('durably reserves outbound slots before chunk consumption and repairs abandoned journals', async () => {
         const firstHarness = await createHarness();
         const slot = producerSlot({
             direction: 'outbound',
@@ -293,13 +293,13 @@ describe('Browser-local authenticated mailbox storage', () => {
             encryptionKey: firstHarness.encryptionKey,
             storeHarness: firstHarness.storeHarness,
         });
-        const recoveredLease =
+        const repairedLease =
             await restartedHarness.storage.outboundCache.reserve({
                 plaintextByteLength: 23,
                 producerSlot: slot,
             });
-        expect(recoveredLease.disposition).toBe('fresh');
-        await recoveredLease.cancel();
+        expect(repairedLease.disposition).toBe('fresh');
+        await repairedLease.cancel();
 
         expect(
             restartedHarness.adapter
@@ -360,13 +360,13 @@ describe('Browser-local authenticated mailbox storage', () => {
             encryptionKey: firstHarness.encryptionKey,
             storeHarness: firstHarness.storeHarness,
         });
-        const recoveredLease =
+        const repairedLease =
             await restartedHarness.storage.outboundCache.reserve({
                 plaintextByteLength: 17,
                 producerSlot: slot,
             });
-        expect(recoveredLease.disposition).toBe('fresh');
-        await recoveredLease.cancel();
+        expect(repairedLease.disposition).toBe('fresh');
+        await repairedLease.cancel();
         expect(logicalRecordKeys(restartedHarness.adapter)).toEqual([]);
     });
 
@@ -527,7 +527,7 @@ describe('Browser-local authenticated mailbox storage', () => {
         expect(adapter.keys()).toEqual(initialKeys);
     });
 
-    it('recovers a sealed staging lease after restart before accepting replacement chunks', async () => {
+    it('repairs a sealed staging lease after restart before accepting replacement chunks', async () => {
         const firstHarness = await createHarness();
         const envelopeHash = hashHex(0x93);
         const abandonedLease = await firstHarness.storage.stagingBoundary.open({
@@ -781,9 +781,9 @@ describe('Browser-local authenticated mailbox storage', () => {
         harness.adapter.rawWrite(replacementObjectKey, replacementBytes);
         const headKey = harness.adapter
             .keys()
-            .find((key) => key.endsWith('/recovery/current-head'));
+            .find((key) => key.endsWith('/repair/current-head'));
         if (headKey === undefined) {
-            throw new Error('Expected authenticated recovery head.');
+            throw new Error('Expected authenticated repair head.');
         }
         const headBeforeRefusedMutations = harness.adapter.rawRead(headKey);
 
@@ -936,13 +936,13 @@ describe('Browser-local authenticated mailbox storage', () => {
         await reservation.value.commit();
         const headKey = firstHarness.adapter
             .keys()
-            .find((key) => key.endsWith('/recovery/current-head'));
+            .find((key) => key.endsWith('/repair/current-head'));
         if (headKey === undefined) {
-            throw new Error('Expected authenticated recovery head.');
+            throw new Error('Expected authenticated repair head.');
         }
         const headBytes = firstHarness.adapter.rawRead(headKey);
         if (headBytes === undefined) {
-            throw new Error('Expected authenticated recovery head bytes.');
+            throw new Error('Expected authenticated repair head bytes.');
         }
         headBytes[Math.floor(headBytes.byteLength / 2)] ^= 0x80;
         firstHarness.adapter.rawWrite(headKey, headBytes);
