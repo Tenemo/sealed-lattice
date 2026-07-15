@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::{BigInt, BigUint};
-use num_traits::{One, Zero};
+use num_traits::Zero;
 
 use super::*;
 
@@ -65,9 +65,7 @@ impl BallotValidityRelationPlanInput {
         if self.active_data_modulus_indices != expected_data_modulus_indices {
             return Err(RelationPlanError::NonCanonicalOrder);
         }
-        if context.resolved_modulus(SuiteModulusReference::plaintext())?
-            != self.plaintext_modulus
-        {
+        if context.resolved_modulus(SuiteModulusReference::plaintext())? != self.plaintext_modulus {
             return Err(RelationPlanError::InvalidModulus);
         }
 
@@ -76,7 +74,8 @@ impl BallotValidityRelationPlanInput {
             .iter()
             .copied()
             .map(|modulus_index| {
-                let modulus = context.resolved_modulus(SuiteModulusReference::data(modulus_index))?;
+                let modulus =
+                    context.resolved_modulus(SuiteModulusReference::data(modulus_index))?;
                 if modulus <= self.plaintext_modulus || modulus >= context.base_field_modulus {
                     return Err(RelationPlanError::InvalidModulus);
                 }
@@ -90,11 +89,7 @@ impl BallotValidityRelationPlanInput {
             .ring_degree
             .checked_mul(2)
             .ok_or(RelationPlanError::CountOverflow)?;
-        if modular_power(
-            self.primitive_two_n_root,
-            two_n,
-            self.plaintext_modulus,
-        ) != 1
+        if modular_power(self.primitive_two_n_root, two_n, self.plaintext_modulus) != 1
             || modular_power(
                 self.primitive_two_n_root,
                 self.ring_degree,
@@ -122,32 +117,27 @@ impl BallotValidityRelationPlanInput {
             encoder_weight_multipliers.push(inverse_slot_root);
             let mut weight = inverse_ring_degree;
             let mut weights = Vec::with_capacity(
-                usize::try_from(self.ring_degree)
-                    .map_err(|_| RelationPlanError::CountOverflow)?,
+                usize::try_from(self.ring_degree).map_err(|_| RelationPlanError::CountOverflow)?,
             );
             for _ in 0..self.ring_degree {
                 weights.push(weight);
                 weight = modular_product(weight, inverse_slot_root, self.plaintext_modulus);
             }
             encoder_weights_by_option.push(weights);
-            slot_exponent = modular_product(
-                slot_exponent,
-                u64::from(self.slot_generator),
-                two_n,
-            );
+            slot_exponent = modular_product(slot_exponent, u64::from(self.slot_generator), two_n);
         }
 
         let mut encoder_reduction_maximum = 0_u64;
         for coefficient_ordinal in 0..self.ring_degree {
             let coefficient_ordinal = usize::try_from(coefficient_ordinal)
                 .map_err(|_| RelationPlanError::CountOverflow)?;
-            let weight_sum = encoder_weights_by_option.iter().try_fold(
-                0_u128,
-                |sum, weights| {
-                    sum.checked_add(u128::from(weights[coefficient_ordinal]))
-                        .ok_or(RelationPlanError::IntegerBoundOverflow)
-                },
-            )?;
+            let weight_sum =
+                encoder_weights_by_option
+                    .iter()
+                    .try_fold(0_u128, |sum, weights| {
+                        sum.checked_add(u128::from(weights[coefficient_ordinal]))
+                            .ok_or(RelationPlanError::IntegerBoundOverflow)
+                    })?;
             let reduction = u64::try_from(
                 u128::from(MAXIMUM_SCORE)
                     .checked_mul(weight_sum)
@@ -216,8 +206,7 @@ struct BallotValidityPlanBuilder<'context> {
     ordered_verifier_sources: Vec<RelationVerifierSource>,
     verifier_source_ordinals: BTreeMap<BallotVerifierSourceKey, u32>,
     ordered_columns: Vec<RelationColumnDescriptor>,
-    semantic_cells_by_column:
-        BTreeMap<u32, (SignedIntegerInterval, RelationBoundCertificate)>,
+    semantic_cells_by_column: BTreeMap<u32, (SignedIntegerInterval, RelationBoundCertificate)>,
     ordered_integer_lift_batches: Vec<RelationIntegerLiftBatchDescriptor>,
     ordered_constraints: Vec<RelationConstraintDescriptor>,
     base_tree_columns: Vec<u32>,
@@ -354,10 +343,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
 
     fn add_trit_column(&mut self, phase: ProofTreePhase) -> Result<u32, RelationPlanError> {
         let column_ordinal = self.push_prover_column(phase)?;
-        let constraint_ordinal = self.add_full_trace_constraint(
-            trinary_constraint_expression(column_ordinal),
-            false,
-        )?;
+        let constraint_ordinal =
+            self.add_full_trace_constraint(trinary_constraint_expression(column_ordinal), false)?;
         self.insert_semantic_cell(
             column_ordinal,
             SignedIntegerInterval::new(0, 2),
@@ -368,10 +355,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
 
     fn add_binary_column(&mut self, phase: ProofTreePhase) -> Result<u32, RelationPlanError> {
         let column_ordinal = self.push_prover_column(phase)?;
-        let constraint_ordinal = self.add_full_trace_constraint(
-            binary_constraint_expression(column_ordinal),
-            false,
-        )?;
+        let constraint_ordinal =
+            self.add_full_trace_constraint(binary_constraint_expression(column_ordinal), false)?;
         self.insert_semantic_cell(
             column_ordinal,
             SignedIntegerInterval::new(0, 1),
@@ -385,9 +370,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         count: usize,
         phase: ProofTreePhase,
     ) -> Result<Vec<u32>, RelationPlanError> {
-        (0..count)
-            .map(|_| self.add_trit_column(phase))
-            .collect()
+        (0..count).map(|_| self.add_trit_column(phase)).collect()
     }
 
     fn certify_unsigned_recomposition(
@@ -456,11 +439,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         phase: ProofTreePhase,
     ) -> Result<BoundedUnsignedColumn, RelationPlanError> {
         let target_column_ordinal = self.push_prover_column(phase)?;
-        self.certify_existing_bounded_unsigned_column(
-            target_column_ordinal,
-            maximum,
-            phase,
-        )
+        self.certify_existing_bounded_unsigned_column(target_column_ordinal, maximum, phase)
     }
 
     fn certify_existing_bounded_unsigned_column(
@@ -471,16 +450,9 @@ impl<'context> BallotValidityPlanBuilder<'context> {
     ) -> Result<BoundedUnsignedColumn, RelationPlanError> {
         let digit_count = radix_digit_count(maximum)?;
         let ordered_digit_column_ordinals = self.add_trit_columns(digit_count, phase)?;
-        self.certify_unsigned_recomposition(
-            target_column_ordinal,
-            &ordered_digit_column_ordinals,
-        )?;
+        self.certify_unsigned_recomposition(target_column_ordinal, &ordered_digit_column_ordinals)?;
         if checked_radix_power(digit_count)? - 1 != maximum {
-            self.add_upper_bound_comparator(
-                &ordered_digit_column_ordinals,
-                maximum,
-                phase,
-            )?;
+            self.add_upper_bound_comparator(&ordered_digit_column_ordinals, maximum, phase)?;
         }
         Ok(BoundedUnsignedColumn {
             target_column_ordinal,
@@ -525,34 +497,32 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             false,
         )?;
         let maximum_digits = fixed_radix_digits(maximum, digit_count)?;
-        let ordered_difference_digit_column_ordinals =
-            self.add_trit_columns(digit_count, phase)?;
+        let ordered_difference_digit_column_ordinals = self.add_trit_columns(digit_count, phase)?;
         let ordered_borrow_column_ordinals = (0..digit_count.saturating_sub(1))
             .map(|_| self.add_binary_column(phase))
             .collect::<Result<Vec<_>, _>>()?;
         let mut ordered_comparator_constraint_ordinals = Vec::with_capacity(digit_count);
         for digit_ordinal in 0..digit_count {
-            ordered_comparator_constraint_ordinals.push(self.add_full_trace_constraint(
-                unsigned_radix_comparator_digit_expression(
-                    maximum_digits[digit_ordinal],
-                    ordered_digit_column_ordinals[digit_ordinal],
-                    ordered_difference_digit_column_ordinals[digit_ordinal],
-                    digit_ordinal
-                        .checked_sub(1)
-                        .map(|ordinal| ordered_borrow_column_ordinals[ordinal]),
-                    (digit_ordinal + 1 < digit_count)
-                        .then_some(ordered_borrow_column_ordinals[digit_ordinal]),
-                    RADIX,
-                ),
-                true,
-            )?);
+            ordered_comparator_constraint_ordinals.push(
+                self.add_full_trace_constraint(
+                    unsigned_radix_comparator_digit_expression(
+                        maximum_digits[digit_ordinal],
+                        ordered_digit_column_ordinals[digit_ordinal],
+                        ordered_difference_digit_column_ordinals[digit_ordinal],
+                        digit_ordinal
+                            .checked_sub(1)
+                            .map(|ordinal| ordered_borrow_column_ordinals[ordinal]),
+                        (digit_ordinal + 1 < digit_count)
+                            .then(|| ordered_borrow_column_ordinals[digit_ordinal]),
+                        RADIX,
+                    ),
+                    true,
+                )?,
+            );
         }
         self.insert_semantic_cell(
             target_column_ordinal,
-            SignedIntegerInterval::from_bigints(
-                BigInt::zero(),
-                BigInt::from(maximum),
-            )?,
+            SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(maximum))?,
             RelationBoundCertificate::CanonicalModulusRecomposition {
                 recomposition_constraint_ordinal,
                 modulus_reference,
@@ -584,10 +554,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             .map(|_| self.add_binary_column(phase))
             .collect::<Result<Vec<_>, _>>()?;
         for digit_ordinal in 0..value_digits.len() {
-            let mut terms = vec![integer_constant_term(
-                maximum_digits[digit_ordinal],
-                false,
-            )];
+            let mut terms = vec![integer_constant_term(maximum_digits[digit_ordinal], false)];
             terms.push(integer_column_term(
                 value_digits[digit_ordinal],
                 false,
@@ -694,10 +661,12 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         if !strictly_sorted_unique(&excluded_roots) {
             return Err(RelationPlanError::InvalidZeroifier);
         }
-        Ok(vec![RelationExpressionInstruction::TraceDomainExceptRoots {
-            trace_domain_size: self.input.ring_degree,
-            ordered_excluded_roots: excluded_roots,
-        }])
+        Ok(vec![
+            RelationExpressionInstruction::TraceDomainExceptRoots {
+                trace_domain_size: self.input.ring_degree,
+                ordered_excluded_roots: excluded_roots,
+            },
+        ])
     }
 }
 
@@ -745,13 +714,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
 
     fn add_score_and_encoder_columns(
         &mut self,
-    ) -> Result<
-        (
-            Vec<BoundedUnsignedColumn>,
-            Vec<BoundedUnsignedColumn>,
-        ),
-        RelationPlanError,
-    > {
+    ) -> Result<(Vec<BoundedUnsignedColumn>, Vec<BoundedUnsignedColumn>), RelationPlanError> {
         let score_offset_maximum = MAXIMUM_SCORE
             .checked_sub(MINIMUM_SCORE)
             .ok_or(RelationPlanError::InvalidBoundCertificate)?;
@@ -782,30 +745,18 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             let initial_weight = self.geometry.encoder_weights_by_option[option_ordinal][0];
             self.add_constraint(
                 sum_integer_terms(vec![
-                    integer_column_term(
-                        encoder_weight.target_column_ordinal,
-                        false,
-                        0,
-                        false,
-                    ),
+                    integer_column_term(encoder_weight.target_column_ordinal, false, 0, false),
                     integer_constant_term(initial_weight, true),
                 ])?,
                 self.point_zeroifier(0)?,
                 true,
             )?;
             let multiplier = self.geometry.encoder_weight_multipliers[option_ordinal];
-            let reduction_quotient = self.add_bounded_unsigned_column(
-                multiplier.saturating_sub(1),
-                ProofTreePhase::Base,
-            )?;
+            let reduction_quotient = self
+                .add_bounded_unsigned_column(multiplier.saturating_sub(1), ProofTreePhase::Base)?;
             self.add_constraint(
                 sum_integer_terms(vec![
-                    integer_column_term(
-                        encoder_weight.target_column_ordinal,
-                        false,
-                        1,
-                        false,
-                    ),
+                    integer_column_term(encoder_weight.target_column_ordinal, false, 1, false),
                     integer_scaled_column_term(
                         encoder_weight.target_column_ordinal,
                         multiplier,
@@ -892,18 +843,10 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             .checked_mul(modulus - 1)
             .and_then(|bound| bound.checked_add(3 * plaintext_modulus - 1))
             .ok_or(RelationPlanError::IntegerBoundOverflow)?;
-        let absolute_bound = positive_numerator_bound
-            .max(negative_numerator_bound)
-            / modulus;
+        let absolute_bound = positive_numerator_bound.max(negative_numerator_bound) / modulus;
         Ok(EncryptionQuotientColumns {
-            component_zero: self.add_signed_integer_column(
-                absolute_bound,
-                ProofTreePhase::Base,
-            )?,
-            component_one: self.add_signed_integer_column(
-                absolute_bound,
-                ProofTreePhase::Base,
-            )?,
+            component_zero: self.add_signed_integer_column(absolute_bound, ProofTreePhase::Base)?,
+            component_one: self.add_signed_integer_column(absolute_bound, ProofTreePhase::Base)?,
         })
     }
 
@@ -988,20 +931,19 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                 .map(|(_, term)| term)
                 .collect();
 
-            let ordered_convolution_products = vec![
-                RelationIntegerLiftConvolutionProductDescriptor {
+            let ordered_convolution_products =
+                vec![RelationIntegerLiftConvolutionProductDescriptor {
                     negative: true,
                     convolution_kind: RelationIntegerLiftConvolutionKind::Negacyclic,
                     multiplicand_column_ordinal: public_key_column_ordinal,
-                    reversed_multiplier_column_ordinal:
-                        reversed_randomizer_shifted.target_column_ordinal,
+                    reversed_multiplier_column_ordinal: reversed_randomizer_shifted
+                        .target_column_ordinal,
                     multiplier_offset: 1,
                     suffix_evaluation_column_ordinal: self
                         .push_prover_column(ProofTreePhase::Auxiliary)?,
                     reversed_transpose_column_ordinal: self
                         .push_prover_column(ProofTreePhase::Auxiliary)?,
-                },
-            ];
+                }];
             components.push(RelationIntegerLiftComponentDescriptor {
                 quotient_is_negative: true,
                 quotient_column_ordinal,
@@ -1036,8 +978,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             ordered_reversed_column_bindings: Vec::new(),
             ordered_components,
         };
-        let modulus_ordinal = u16::try_from(modulus_ordinal)
-            .map_err(|_| RelationPlanError::CountOverflow)?;
+        let modulus_ordinal =
+            u16::try_from(modulus_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
         for program in batch.constraint_programs(
             modulus_ordinal,
             self.input.ring_degree,
@@ -1060,12 +1002,9 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         let data_moduli = self.geometry.data_moduli.clone();
         for limb_ordinal in 0..data_moduli.len() {
             let data_modulus_index = self.input.active_data_modulus_indices[limb_ordinal];
-            public_limb_columns.push(
-                self.add_public_data_limb_columns(data_modulus_index)?,
-            );
-            quotient_limb_columns.push(
-                self.add_encryption_quotient_columns(data_moduli[limb_ordinal])?,
-            );
+            public_limb_columns.push(self.add_public_data_limb_columns(data_modulus_index)?);
+            quotient_limb_columns
+                .push(self.add_encryption_quotient_columns(data_moduli[limb_ordinal])?);
         }
 
         let (score_offsets, encoder_weights) = self.add_score_and_encoder_columns()?;
@@ -1075,10 +1014,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         )?;
         let reversed_randomizer_shifted =
             self.add_bounded_unsigned_column(2, ProofTreePhase::Base)?;
-        let error_zero_shifted =
-            self.add_bounded_unsigned_column(4, ProofTreePhase::Base)?;
-        let error_one_shifted =
-            self.add_bounded_unsigned_column(4, ProofTreePhase::Base)?;
+        let error_zero_shifted = self.add_bounded_unsigned_column(4, ProofTreePhase::Base)?;
+        let error_one_shifted = self.add_bounded_unsigned_column(4, ProofTreePhase::Base)?;
         let encoder_reduction = self.add_bounded_unsigned_column(
             self.geometry.encoder_reduction_maximum,
             ProofTreePhase::Base,
@@ -1095,9 +1032,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             .zip(quotient_limb_columns.iter().copied())
             .enumerate()
         {
-            for challenge_ordinal in
-                0..self.context.non_native_modular_identity_challenge_count
-            {
+            for challenge_ordinal in 0..self.context.non_native_modular_identity_challenge_count {
                 self.add_integer_lift_batch(
                     modulus_ordinal,
                     challenge_ordinal,
@@ -1122,10 +1057,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         {
             return Err(RelationPlanError::DuplicateItem);
         }
-        self.ordered_integer_lift_batches = keyed_batches
-            .into_iter()
-            .map(|(_, batch)| batch)
-            .collect();
+        self.ordered_integer_lift_batches =
+            keyed_batches.into_iter().map(|(_, batch)| batch).collect();
         self.finish()
     }
 
@@ -1133,10 +1066,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         if self.base_tree_columns.is_empty() || self.auxiliary_tree_columns.is_empty() {
             return Err(RelationPlanError::InvalidRoot);
         }
-        let required_rotations_by_column = required_column_rotations(
-            &self.ordered_constraints,
-            &[],
-        )?;
+        let required_rotations_by_column =
+            required_column_rotations(&self.ordered_constraints, &[])?;
         if required_rotations_by_column.len() != self.ordered_columns.len() {
             return Err(RelationPlanError::InvalidOpening);
         }
@@ -1191,8 +1122,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             .ok_or(RelationPlanError::DegreeBoundExceeded)?;
         for column in &mut self.ordered_columns {
             if matches!(column.origin, RelationColumnOrigin::Prover) {
-                column.source_degree_bound_exclusive =
-                    prover_column_degree_bound_exclusive;
+                column.source_degree_bound_exclusive = prover_column_degree_bound_exclusive;
             }
         }
         let ordered_trees = vec![
@@ -1227,14 +1157,14 @@ impl<'context> BallotValidityPlanBuilder<'context> {
 
         let ordered_opening_points = (0..self.context.deep_point_count)
             .flat_map(|deep_point_ordinal| {
-                used_rotations.iter().map(move |rotation| {
-                    RelationOpeningPointDescriptor {
+                used_rotations
+                    .iter()
+                    .map(move |rotation| RelationOpeningPointDescriptor {
                         deep_point_ordinal,
                         trace_rotation_is_negative: rotation.0,
                         trace_rotation_magnitude: rotation.1,
                         conjugate_index: 0,
-                    }
-                })
+                    })
             })
             .collect::<Vec<_>>();
         let opening_point_ordinals = ordered_opening_points
@@ -1338,11 +1268,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         let component_count = u128::from(quotient_component_count);
         let rounded_mask_degree = component_count
             .checked_add(1)
-            .and_then(|count| {
-                count.checked_mul(u128::from(
-                    trace_mask_degree_bound_exclusive,
-                ))
-            })
+            .and_then(|count| count.checked_mul(u128::from(trace_mask_degree_bound_exclusive)))
             .and_then(|degree| degree.checked_add(component_count - 1))
             .ok_or(RelationPlanError::DegreeBoundExceeded)?
             / component_count;
@@ -1395,9 +1321,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                     proof_privacy_mode: ProofPrivacyMode::SecretBearing,
                     trace_domain_size: self.input.ring_degree,
                     evaluation_domain_size: self.input.evaluation_domain_size,
-                    opening_degree_bound_exclusive: self
-                        .input
-                        .opening_degree_bound_exclusive,
+                    opening_degree_bound_exclusive: self.input.opening_degree_bound_exclusive,
                     ordered_non_native_moduli: self.ordered_non_native_moduli,
                     ordered_verifier_sources: self.ordered_verifier_sources,
                     ordered_public_samplers: Vec::new(),
@@ -1510,10 +1434,7 @@ fn canonical_ballot_verifier_sources(
     Ok((sources, source_ordinals))
 }
 
-fn validate_slot_generator(
-    ring_degree: u64,
-    slot_generator: u16,
-) -> Result<(), RelationPlanError> {
+fn validate_slot_generator(ring_degree: u64, slot_generator: u16) -> Result<(), RelationPlanError> {
     let two_n = ring_degree
         .checked_mul(2)
         .ok_or(RelationPlanError::CountOverflow)?;
@@ -1597,10 +1518,7 @@ fn checked_radix_power(exponent: usize) -> Result<u64, RelationPlanError> {
     })
 }
 
-fn fixed_radix_digits(
-    mut value: u64,
-    digit_count: usize,
-) -> Result<Vec<u64>, RelationPlanError> {
+fn fixed_radix_digits(mut value: u64, digit_count: usize) -> Result<Vec<u64>, RelationPlanError> {
     if digit_count == 0 {
         return Err(RelationPlanError::InvalidBoundCertificate);
     }
@@ -1761,8 +1679,8 @@ mod tests {
         let maximum_two_adic_order = 1_u64 << 32;
         RelationPlanCheckContext {
             base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
-            challenge_extension_degree:
-                crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
+            challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
+                as u16,
             evaluation_blowup_factor: 2,
             evaluation_domain_generator: modular_power(
                 crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
@@ -1779,10 +1697,7 @@ mod tests {
             non_native_modular_identity_challenge_count: 1,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
             resolved_moduli: vec![
-                ResolvedSuiteModulus::new(
-                    SuiteModulusReference::data(0),
-                    TEST_DATA_MODULUS,
-                ),
+                ResolvedSuiteModulus::new(SuiteModulusReference::data(0), TEST_DATA_MODULUS),
                 ResolvedSuiteModulus::new(
                     SuiteModulusReference::plaintext(),
                     TEST_PLAINTEXT_MODULUS,
@@ -1821,7 +1736,10 @@ mod tests {
         let variant = compiled
             .select_variant(None, None)
             .expect("the ballot relation has one unparameterized variant");
-        assert_eq!(variant.proof_privacy_mode(), ProofPrivacyMode::SecretBearing);
+        assert_eq!(
+            variant.proof_privacy_mode(),
+            ProofPrivacyMode::SecretBearing
+        );
         assert_eq!(
             variant.ordered_non_native_moduli,
             vec![
@@ -1842,7 +1760,10 @@ mod tests {
                     statement_binding_path,
                     value_layout,
                 } => {
-                    assert_eq!(value_layout.residue_modulus, Some(SuiteModulusReference::data(0)));
+                    assert_eq!(
+                        value_layout.residue_modulus,
+                        Some(SuiteModulusReference::data(0))
+                    );
                     assert_eq!(value_layout.shape, vec![TEST_RING_DEGREE]);
                     assert_eq!(
                         value_layout.embedding_kind,
@@ -1885,14 +1806,10 @@ mod tests {
                 _ => None,
             })
             .collect::<BTreeSet<_>>();
-        assert!(typed_expression_modulus_multiples.contains(&(
-            SuiteModulusReference::plaintext(),
-            1,
-        )));
-        assert!(typed_expression_modulus_multiples.contains(&(
-            SuiteModulusReference::data(0),
-            1,
-        )));
+        assert!(
+            typed_expression_modulus_multiples.contains(&(SuiteModulusReference::plaintext(), 1,))
+        );
+        assert!(typed_expression_modulus_multiples.contains(&(SuiteModulusReference::data(0), 1,)));
         assert!(variant.ordered_radix_convolutions.is_empty());
         assert_eq!(variant.ordered_integer_lift_batches.len(), 1);
         let batch = &variant.ordered_integer_lift_batches[0];
@@ -1915,8 +1832,7 @@ mod tests {
             .filter(|challenge| {
                 matches!(
                     challenge.role,
-                    RelationChallengeRole::NonNativeTheta
-                        | RelationChallengeRole::NonNativeAlpha
+                    RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha
                 )
             })
             .collect::<Vec<_>>();
@@ -1929,9 +1845,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![vec![0, 0]]
         );
-        assert!(non_native_challenges
-            .iter()
-            .all(|challenge| challenge.role != RelationChallengeRole::NonNativeAlpha));
+        assert!(
+            non_native_challenges
+                .iter()
+                .all(|challenge| challenge.role != RelationChallengeRole::NonNativeAlpha)
+        );
         assert!(non_native_challenges.iter().all(|challenge| matches!(
             challenge.sampling,
             RelationChallengeSampling::ProductResidueVectorCoordinate {
@@ -2071,11 +1989,9 @@ mod tests {
         (0..ring_degree)
             .map(|row_ordinal| {
                 let output_ordinal = ring_degree - 1 - row_ordinal;
-                coefficients
-                    .iter()
-                    .copied()
-                    .enumerate()
-                    .fold(0_u64, |sum, (coefficient_ordinal, coefficient)| {
+                coefficients.iter().copied().enumerate().fold(
+                    0_u64,
+                    |sum, (coefficient_ordinal, coefficient)| {
                         let unreduced_exponent = coefficient_ordinal + output_ordinal;
                         let term = modular_product(
                             coefficient,
@@ -2091,7 +2007,8 @@ mod tests {
                         } else {
                             modular_addition(sum, term, modulus)
                         }
-                    })
+                    },
+                )
             })
             .collect()
     }
@@ -2103,11 +2020,9 @@ mod tests {
     ) -> Vec<u64> {
         let mut reversed_weights = vec![0_u64; coefficients.len()];
         let theta_to_ring_degree = modular_power(theta, coefficients.len() as u64, modulus);
-        reversed_weights[coefficients.len() - 1] = coefficients
-            .iter()
-            .copied()
-            .enumerate()
-            .fold(0_u64, |sum, (coefficient_ordinal, coefficient)| {
+        reversed_weights[coefficients.len() - 1] = coefficients.iter().copied().enumerate().fold(
+            0_u64,
+            |sum, (coefficient_ordinal, coefficient)| {
                 modular_addition(
                     sum,
                     modular_product(
@@ -2117,7 +2032,8 @@ mod tests {
                     ),
                     modulus,
                 )
-            });
+            },
+        );
         for row_ordinal in (1..coefficients.len()).rev() {
             let theta_times_current =
                 modular_product(theta, reversed_weights[row_ordinal], modulus);
@@ -2137,7 +2053,6 @@ mod tests {
     }
 
     fn modular_difference(left: u64, right: u64, modulus: u64) -> u64 {
-        ((u128::from(left) + u128::from(modulus) - u128::from(right))
-            % u128::from(modulus)) as u64
+        ((u128::from(left) + u128::from(modulus) - u128::from(right)) % u128::from(modulus)) as u64
     }
 }

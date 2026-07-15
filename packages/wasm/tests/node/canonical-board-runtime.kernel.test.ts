@@ -80,8 +80,7 @@ describe('Canonical board real-WASM runtime in Node', () => {
                     .reverse()
                     .map((canonicalCarrier) => ({ canonicalCarrier })),
                 {
-                    canonicalCarrier:
-                        vector.reservation.canonicalIntentCarrier,
+                    canonicalCarrier: vector.reservation.canonicalIntentCarrier,
                     relayArrivalIndex: Number.MAX_SAFE_INTEGER,
                 },
             ];
@@ -131,8 +130,7 @@ describe('Canonical board real-WASM runtime in Node', () => {
             });
             const replay = session.verifyUnorderedCarriers([
                 {
-                    canonicalCarrier:
-                        vector.reservation.canonicalIntentCarrier,
+                    canonicalCarrier: vector.reservation.canonicalIntentCarrier,
                 },
             ]);
             expect(replay.isValid).toBe(true);

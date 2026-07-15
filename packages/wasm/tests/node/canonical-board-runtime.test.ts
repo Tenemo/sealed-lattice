@@ -97,12 +97,17 @@ const createFakeKernel = (verifyStatus = 0): FakeKernel => {
             if (outputLength !== 3) {
                 return 5;
             }
-            new Uint8Array(memory.buffer).set([0x91, 0x92, 0x93], outputPointer);
+            new Uint8Array(memory.buffer).set(
+                [0x91, 0x92, 0x93],
+                outputPointer,
+            );
             return 0;
         },
         deallocate: (pointer, byteLength) => {
             if (allocations.get(pointer) !== byteLength) {
-                throw new Error('test deallocation does not match its allocation');
+                throw new Error(
+                    'test deallocation does not match its allocation',
+                );
             }
             allocations.delete(pointer);
         },

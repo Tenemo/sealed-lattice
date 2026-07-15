@@ -309,101 +309,14 @@ pub(in crate::bgv::setup) fn vss_aggregate_threshold_statement_from_commitment_r
 }
 
 pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
-    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
-    coefficient_commitment_set: &Value,
-    recipient_share_commitment_set: &Value,
-    aggregate_threshold_commitment_set: &Value,
-    context: &VssAggregateThresholdProofContext<'_>,
+    _proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
+    _coefficient_commitment_set: &Value,
+    _recipient_share_commitment_set: &Value,
+    _aggregate_threshold_commitment_set: &Value,
+    _context: &VssAggregateThresholdProofContext<'_>,
 ) -> CanonicalResult<()> {
-    let participant_count = context.participant_count;
-    let rns_limb_count = context.rns_limb_count;
-    let recipient_source_records =
-        array_at_path(recipient_share_commitment_set, &["sourceTrusteeRecords"])?;
-    let coefficient_source_records =
-        array_at_path(coefficient_commitment_set, &["sourceTrusteeRecords"])?;
-    let aggregate_recipient_records =
-        array_at_path(aggregate_threshold_commitment_set, &["recipientRecords"])?;
-    let aggregate_proof_hashes = array_at_path(
-        aggregate_threshold_commitment_set,
-        &["aggregateThresholdProofBytesHashes"],
-    )?;
-    if aggregate_proof_hashes.len() != aggregate_recipient_records.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "VSS aggregate threshold proofs must cover every aggregate record",
-        ));
-    }
-    let mut seen_proof_bytes_hashes = std::collections::BTreeSet::new();
-    for (aggregate_record_index, (aggregate_record, proof_hash)) in aggregate_recipient_records
-        .iter()
-        .zip(aggregate_proof_hashes)
-        .enumerate()
-    {
-        let proof_bytes_hash = proof_hash.as_str().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS aggregate threshold proof hash must be a string",
-            )
-        })?;
-        validate_hash_string(proof_bytes_hash, "aggregateThresholdProofBytesHashes")?;
-        if !seen_proof_bytes_hashes.insert(proof_bytes_hash.to_string()) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS aggregate threshold proofs must reference unique proof material",
-            ));
-        }
-        let vss_aggregate = vss_aggregate_threshold_statement_from_commitment_records(
-            VssAggregateThresholdStatementInput {
-                public_matrix_seed_hash: context.public_matrix_seed_hash,
-                participant_count,
-                rns_limb_count,
-                coefficient_source_records,
-                recipient_source_records,
-                aggregate_record,
-                aggregate_record_index,
-                trustee_identities: context.trustee_identities,
-            },
-        )?;
-        // Verify the unit-point share-linkage proof that T_{j,l} is the modular
-        // sum of the bound source shares. An incremental setup session may have
-        // already checked these bytes against this exact request and released
-        // them; otherwise the source-aware decoder consumes the authenticated
-        // canonical stream chunks now.
-        let proof_request = json!({
-            "context": {
-                "setupContextHash": &context.setup_context_hash,
-                "trusteeIdentity": "vss-aggregate-threshold",
-                "trusteeRosterPosition": 0,
-            },
-            "ringDegree": context.ring_degree,
-            "vssShareLinkage": &vss_aggregate,
-        });
-        let verification_binding_hash = crate::bgv::setup::trustee_evaluation_key_proof::vss_share_linkage_proof_verification_binding_hash(
-            proof_bytes_hash,
-            &proof_request,
-        )?;
-        let consumed_preverified_binding =
-            if let Some(proof_binding_session) = proof_binding_session {
-                crate::bgv::setup::consume_accepted_setup_proof_binding(
-                    proof_binding_session.session_handle,
-                    crate::bgv::setup::trustee_evaluation_key_proof::VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                    proof_bytes_hash,
-                    &verification_binding_hash,
-                )?
-            } else {
-                false
-            };
-        if !consumed_preverified_binding {
-            let proof_bytes = crate::bgv::setup::trustee_evaluation_key_proof::verified_vss_share_linkage_proof_material_bytes(
-                proof_bytes_hash,
-                proof_binding_session,
-            )?;
-            crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_proof_source_from_request(
-                &proof_request,
-                proof_bytes.as_ref(),
-            )?;
-        }
-    }
-
-    Ok(())
+    Err(CanonicalError::new(
+        CanonicalErrorCode::InvalidProtocolObject,
+        "aggregate threshold-share acceptance requires verification by the common proof suite",
+    ))
 }

@@ -63,8 +63,6 @@ pub(crate) fn evaluate_initial_fri_pair(
         return Err(ProofOpeningError::EmptyOpeningBatch);
     }
 
-    let positive_point = ProofChallengeExtensionElement::from_base(evaluation_point);
-    let opposite_point = ProofChallengeExtensionElement::from_base(evaluation_point.negate());
     let mut positive = opening_batch_mask_pair
         .map(OpenedFriLayerPair::first)
         .unwrap_or(ProofChallengeExtensionElement::ZERO);

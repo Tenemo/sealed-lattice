@@ -131,9 +131,11 @@ const stateExactOutputHash = (
         variableBytesItem(exactOutputBytes),
     );
 
-export const createStateVerifierTestVector = (input: {
-    setupActionRandomnessAuthorizationHash?: Uint8Array;
-} = {}): StateVerifierTestVector => {
+export const createStateVerifierTestVector = (
+    input: {
+        setupActionRandomnessAuthorizationHash?: Uint8Array;
+    } = {},
+): StateVerifierTestVector => {
     if (
         input.setupActionRandomnessAuthorizationHash !== undefined &&
         input.setupActionRandomnessAuthorizationHash.byteLength !== 64
@@ -170,7 +172,7 @@ export const createStateVerifierTestVector = (input: {
             ),
         );
 
-        const signedCarrier = (input: {
+        const signedCarrier = (carrierInput: {
             objectType: number;
             payloadBytes: Uint8Array;
             predecessorTransitionHash?: Uint8Array;
@@ -184,23 +186,23 @@ export const createStateVerifierTestVector = (input: {
                 asciiItem('sealed-lattice'),
                 unsigned16Item(1),
                 hashItem(suiteIdentifier),
-                unsigned16Item(input.objectType),
+                unsigned16Item(carrierInput.objectType),
                 hashItem(ceremonyContextHash),
                 hashItem(actionContextHash),
-                unsigned64Item(input.recoveryEpoch),
-                input.predecessorTransitionHash === undefined
+                unsigned64Item(carrierInput.recoveryEpoch),
+                carrierInput.predecessorTransitionHash === undefined
                     ? emptyOptionalItem(0x06)
                     : presentOptionalItem(
                           0x06,
-                          input.predecessorTransitionHash,
+                          carrierInput.predecessorTransitionHash,
                       ),
                 presentOptionalItem(
                     0x07,
-                    participantIdentities[input.producerRosterPosition],
+                    participantIdentities[carrierInput.producerRosterPosition],
                 ),
-                unsigned64Item(input.producerSequence),
+                unsigned64Item(carrierInput.producerSequence),
                 emptyHomogeneousListItem(0x06),
-                variableBytesItem(input.payloadBytes),
+                variableBytesItem(carrierInput.payloadBytes),
             );
             const objectHash = foundationHash512(
                 'sealed-lattice/foundation/object/v1',
@@ -210,11 +212,11 @@ export const createStateVerifierTestVector = (input: {
                 'sealed-lattice/foundation/signature-message/v1',
                 hashItem(objectHash),
                 hashItem(rosterHash),
-                asciiItem(input.signaturePurpose),
+                asciiItem(carrierInput.signaturePurpose),
             );
             const signature = signCanonicalCarrierFixtureMessage(
                 signatureMessage,
-                signingKeyPairs[input.producerRosterPosition].secretKey,
+                signingKeyPairs[carrierInput.producerRosterPosition].secretKey,
             );
             return {
                 canonicalCarrierBytes: canonicalTuple(

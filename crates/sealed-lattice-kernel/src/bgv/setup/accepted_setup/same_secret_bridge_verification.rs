@@ -1,11 +1,22 @@
 use super::*;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
-    SameSecretBridgeStatement, SameSecretLinkageStatement, VssPublicCommandCommitmentExpectation,
+    SameSecretLinkageStatement, VssPublicCommandCommitmentExpectation,
     vss_share_linkage_commitment_from_value,
 };
 
 const SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD: &str = "sameSecretBridgeStatementSet";
 const SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD: &str = "sameSecretBridgeProofMaterialSet";
+
+#[derive(Clone)]
+pub(in crate::bgv::setup) struct SameSecretBridgeStatement {
+    pub(in crate::bgv::setup) public_matrix_seed_hash: String,
+    pub(in crate::bgv::setup) source_trustee_identity: String,
+    pub(in crate::bgv::setup) source_trustee_roster_position: u64,
+    pub(in crate::bgv::setup) bridge_rns_primes: Vec<u64>,
+    pub(in crate::bgv::setup) target_constant_commitment_roots: Vec<String>,
+    pub(in crate::bgv::setup) target_constant_commitments:
+        Vec<crate::bgv::setup::trustee_evaluation_key_proof::VssShareLinkageCommitment>,
+}
 
 pub(super) enum SameSecretBridgeVerification {
     Verified(VerifiedSameSecretBridgeMaterial),

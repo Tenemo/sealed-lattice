@@ -4,7 +4,7 @@ use super::*;
 use super::super::{
     field::ProofBaseFieldElement,
     merkle::CanonicalProofMerkleTree,
-    PROOF_BASE_FIELD_MODULUS,
+    CommonProofTranscript, PROOF_BASE_FIELD_MODULUS,
 };
 
 #[derive(Clone)]

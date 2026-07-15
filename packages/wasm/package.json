@@ -11,10 +11,6 @@
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
         },
-        "./action-cryptographic-provider": {
-            "types": "./dist/browser-local-action-cryptographic-provider.d.ts",
-            "import": "./dist/browser-local-action-cryptographic-provider.js"
-        },
         "./published-sdk": {
             "types": "./dist/published-sdk.d.ts",
             "import": "./dist/published-sdk.js"
@@ -22,7 +18,6 @@
     },
     "dependencies": {
         "@noble/hashes": "2.2.0",
-        "@sealed-lattice/crypto": "workspace:*",
         "@sealed-lattice/types": "workspace:*"
     },
     "scripts": {

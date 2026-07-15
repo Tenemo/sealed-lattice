@@ -80,8 +80,6 @@ pub(in crate::bgv) use trustee_evaluation_key_proof::target_decryption_interpola
 #[cfg(test)]
 pub(crate) use trustee_evaluation_key_proof::{
     TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND, TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-    generate_target_decryption_share_proof_bytes_from_request,
-    verify_target_decryption_share_proof_source_from_request,
 };
 
 pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
@@ -92,11 +90,6 @@ pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
     verify_collective_bgv_setup_package_in_session_from_request(request, session)
 }
 
-#[cfg(test)]
-pub(crate) use trustee_evaluation_key_proof::verify_vss_share_linkage_proof_material_set_from_request;
-pub(crate) use trustee_evaluation_key_proof::{
-    generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
-};
 pub(crate) use vss_commitment::{
     VssAggregateThresholdProofContext, compute_vss_committed_material_commitment_request,
     verify_vss_public_aggregate_threshold_proofs,

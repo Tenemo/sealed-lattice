@@ -15,39 +15,34 @@ use crate::foundation::{
     PrivateRandomnessStream, ProofObjectHeader, hash_foundation_tuple_512,
 };
 
-use super::{
-    CompleteProofTreeCatalog, CommonProofPrivacyMode, CommonProofTranscript,
-    CommonProofTranscriptSchedule, CompiledRelationPlan, ProofBodyError,
-    CommonProofQueryOpeningAbsorber,
-    ProofBaseFieldElement, ProofChallengeExtensionElement,
-    ProofEvaluationDomain, ProofFieldError, ProofLeafVisibility,
-    ProofMerkleError, ProofMerkleTreeContext, ProofOraclePhasePairLeaf,
-    ProofPolynomialError, ProofTreeCatalogEntry, ProofTreeCatalogSource,
-    ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
-    RelationPlanCheckContext, RelationPlanError, RelationPlanVariant,
-    SuiteModulusReference, ValidatedRelationPlanArtifact,
-    CommonProofChallenge, ProofProfileError,
-    ProofTreeCatalogInput, RelationProofTreeInput, StatementOwnedProofTreeInput,
-    build_complete_proof_tree_catalog,
-    divide_extension_polynomial_by_linear, evaluate_extension_at,
-    extension_polynomial_degree, fold_extension_evaluations, TranscriptError,
-};
 use super::external_memory::{
     ProofExternalMemory, ProofExternalMemoryError, ProofExternalMemoryExecutor,
-    ProofExternalMemoryExecutorError, ProofExternalMemoryObject,
-    ProofExternalMemoryObjectPlan, ProofExternalMemoryPlan,
-    ProofExternalMemoryProtection,
+    ProofExternalMemoryExecutorError, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
+    ProofExternalMemoryPlan, ProofExternalMemoryProtection,
 };
 use super::relation_plan::{
-    BoundTreeConstructionKind, ProofPrivacyMode, RelationColumnDescriptor,
-    RelationColumnOrigin, RelationColumnValueType,
-    RelationIntegerLiftCoefficient, RelationIntegerLiftComponentDescriptor,
-    RelationIntegerLiftConvolutionKind, RelationIntegerLiftConvolutionProductDescriptor,
-    RelationIntegerLiftFullRingHalf,
+    BoundTreeConstructionKind, ProofPrivacyMode, RelationColumnDescriptor, RelationColumnOrigin,
+    RelationColumnValueType, RelationIntegerLiftCoefficient,
+    RelationIntegerLiftComponentDescriptor, RelationIntegerLiftConvolutionKind,
+    RelationIntegerLiftConvolutionProductDescriptor, RelationIntegerLiftFullRingHalf,
     RelationIntegerLiftFullRingNegacyclicProductDescriptor,
     RelationIntegerLiftLinearTermDescriptor, RelationIntegerLiftReversedColumnBindingDescriptor,
-    RelationMaskDescriptor, RelationMaskKind, RelationMaskTargetClass,
-    RelationOpeningSourceClass, RelationTreeDescriptor,
+    RelationMaskDescriptor, RelationMaskKind, RelationMaskTargetClass, RelationOpeningSourceClass,
+    RelationTreeDescriptor,
+};
+use super::{
+    CommonProofChallenge, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
+    CommonProofTranscript, CommonProofTranscriptSchedule, CompiledRelationPlan,
+    CompleteProofTreeCatalog, ProofBaseFieldElement, ProofBodyError,
+    ProofChallengeExtensionElement, ProofEvaluationDomain, ProofFieldError, ProofLeafVisibility,
+    ProofMerkleError, ProofMerkleTreeContext, ProofOraclePhasePairLeaf, ProofPolynomialError,
+    ProofProfileError, ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource,
+    ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
+    RelationPlanCheckContext, RelationPlanError, RelationPlanVariant, RelationProofTreeInput,
+    StatementOwnedProofTreeInput, SuiteModulusReference, TranscriptError,
+    ValidatedRelationPlanArtifact, build_complete_proof_tree_catalog,
+    divide_extension_polynomial_by_linear, evaluate_extension_at, extension_polynomial_degree,
+    fold_extension_evaluations,
 };
 
 const PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER: u16 = 0x0107;
@@ -116,11 +111,7 @@ pub(crate) trait CommonProofPrivateCoinSource {
         maximum_candidate_draws_per_output: u32,
     ) -> Result<u64, Self::Error>;
 
-    fn fill_raw_bytes(
-        &mut self,
-        purpose: u16,
-        destination: &mut [u8],
-    ) -> Result<(), Self::Error>;
+    fn fill_raw_bytes(&mut self, purpose: u16, destination: &mut [u8]) -> Result<(), Self::Error>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -186,10 +177,8 @@ impl<'action> PrivateRandomnessCommonProofCoinSource<'action> {
         )?;
         for cursor in authenticated_cursors {
             let purpose = cursor.purpose();
-            let domain = PrivateRandomnessDomain::from_assigned_pair(
-                family_schema_identifier,
-                purpose,
-            )?;
+            let domain =
+                PrivateRandomnessDomain::from_assigned_pair(family_schema_identifier, purpose)?;
             drop(action_private_randomness.resume_stream(
                 domain,
                 derivation_context_hash,
@@ -211,10 +200,8 @@ impl<'action> PrivateRandomnessCommonProofCoinSource<'action> {
         &self,
         purpose: u16,
     ) -> Result<PrivateRandomnessStream<'action>, PrivateRandomnessCommonProofCoinError> {
-        let domain = PrivateRandomnessDomain::from_assigned_pair(
-            self.family_schema_identifier,
-            purpose,
-        )?;
+        let domain =
+            PrivateRandomnessDomain::from_assigned_pair(self.family_schema_identifier, purpose)?;
         let action_private_randomness: &'action ActionPrivateRandomness =
             self.action_private_randomness;
         match self.cursors_by_purpose.get(&purpose).copied() {
@@ -256,11 +243,7 @@ impl CommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource<'_>
         result
     }
 
-    fn fill_raw_bytes(
-        &mut self,
-        purpose: u16,
-        destination: &mut [u8],
-    ) -> Result<(), Self::Error> {
+    fn fill_raw_bytes(&mut self, purpose: u16, destination: &mut [u8]) -> Result<(), Self::Error> {
         let mut stream = self.stream_for_purpose(purpose)?;
         let result = stream
             .fill_bytes(destination)
@@ -344,10 +327,7 @@ impl CommonProofColumnEvaluations {
     fn tree_value(&self, position: usize) -> Result<ProofTreeValue, CommonProofProverError> {
         match self {
             Self::Base(values) => values.get(position).copied().map(ProofTreeValue::Base),
-            Self::Extension(values) => values
-                .get(position)
-                .copied()
-                .map(ProofTreeValue::Extension),
+            Self::Extension(values) => values.get(position).copied().map(ProofTreeValue::Extension),
         }
         .ok_or(CommonProofProverError::InvalidColumn)
     }
@@ -383,11 +363,9 @@ pub(crate) fn evaluate_common_proof_tree_columns(
             Some(_) => return Err(CommonProofProverError::InvalidTree),
         }
         evaluations.push(match column {
-            CommonProofSourcePolynomial::Base(coefficients) => {
-                CommonProofColumnEvaluations::Base(
-                    evaluation_domain.evaluate_base_polynomial(coefficients)?,
-                )
-            }
+            CommonProofSourcePolynomial::Base(coefficients) => CommonProofColumnEvaluations::Base(
+                evaluation_domain.evaluate_base_polynomial(coefficients)?,
+            ),
             CommonProofSourcePolynomial::Extension(coefficients) => {
                 CommonProofColumnEvaluations::Extension(
                     evaluation_domain.evaluate_extension_polynomial(coefficients)?,
@@ -425,11 +403,9 @@ pub(crate) fn evaluate_pre_challenge_common_proof_tree_columns(
             Some(_) => return Err(CommonProofProverError::InvalidTree),
         }
         evaluations.push(match column {
-            CommonProofSourcePolynomial::Base(coefficients) => {
-                CommonProofColumnEvaluations::Base(
-                    evaluation_domain.evaluate_base_polynomial(coefficients)?,
-                )
-            }
+            CommonProofSourcePolynomial::Base(coefficients) => CommonProofColumnEvaluations::Base(
+                evaluation_domain.evaluate_base_polynomial(coefficients)?,
+            ),
             CommonProofSourcePolynomial::Extension(coefficients) => {
                 CommonProofColumnEvaluations::Extension(
                     evaluation_domain.evaluate_extension_polynomial(coefficients)?,
@@ -461,8 +437,8 @@ pub(crate) fn common_proof_phase_pair_values(
         column_evaluations.first(),
         Some(CommonProofColumnEvaluations::Base(_))
     );
-    let first_position = usize::try_from(leaf_index)
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let first_position =
+        usize::try_from(leaf_index).map_err(|_| CommonProofProverError::CountOverflow)?;
     let opposite_position = first_position
         .checked_add(evaluation_size / 2)
         .ok_or(CommonProofProverError::CountOverflow)?;
@@ -514,9 +490,9 @@ where
     let mut coefficients = Vec::new();
     coefficients
         .try_reserve_exact(coefficient_count)
-        .map_err(|_| CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::AllocationLimitExceeded,
-        ))?;
+        .map_err(|_| {
+            CommonProofPrivateCoinError::Prover(CommonProofProverError::AllocationLimitExceeded)
+        })?;
     for _ in 0..coefficient_count {
         let coordinate = coins
             .sample_modulo(
@@ -555,9 +531,9 @@ where
     let mut coefficients = Vec::new();
     coefficients
         .try_reserve_exact(coefficient_count)
-        .map_err(|_| CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::AllocationLimitExceeded,
-        ))?;
+        .map_err(|_| {
+            CommonProofPrivateCoinError::Prover(CommonProofProverError::AllocationLimitExceeded)
+        })?;
     for _ in 0..coefficient_count {
         let mut coordinates = [0_u64; super::PROOF_CHALLENGE_EXTENSION_DEGREE];
         for coordinate in &mut coordinates {
@@ -590,8 +566,8 @@ pub(crate) fn apply_trace_mask(
     trace_domain_size: u64,
     mask: CommonProofSourcePolynomial,
 ) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
-    let trace_domain_size = usize::try_from(trace_domain_size)
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let trace_domain_size =
+        usize::try_from(trace_domain_size).map_err(|_| CommonProofProverError::CountOverflow)?;
     if trace_domain_size == 0 || mask.coefficient_count() == 0 {
         return Err(CommonProofProverError::InvalidMask);
     }
@@ -649,10 +625,7 @@ pub(crate) struct CommonProofPreChallengeRelationColumns {
 }
 
 impl CommonProofPreChallengeRelationColumns {
-    pub(crate) fn column(
-        &self,
-        column_ordinal: u32,
-    ) -> Option<&CommonProofSourcePolynomial> {
+    pub(crate) fn column(&self, column_ordinal: u32) -> Option<&CommonProofSourcePolynomial> {
         self.columns
             .get(usize::try_from(column_ordinal).ok()?)
             .and_then(Option::as_ref)
@@ -673,11 +646,10 @@ pub(crate) fn construct_pre_challenge_relation_columns<Coins>(
 where
     Coins: CommonProofPrivateCoinSource,
 {
-    let tree_roles = proof_created_tree_roles_by_column(variant)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
+    let tree_roles =
+        proof_created_tree_roles_by_column(variant).map_err(CommonProofPrivateCoinError::Prover)?;
     let (reversed_columns_by_source, integer_lift_auxiliary_columns) =
-        integer_lift_derived_columns(variant)
-            .map_err(CommonProofPrivateCoinError::Prover)?;
+        integer_lift_derived_columns(variant).map_err(CommonProofPrivateCoinError::Prover)?;
     let reversed_columns = reversed_columns_by_source
         .values()
         .copied()
@@ -685,12 +657,11 @@ where
     let mut columns = vec![None; variant.ordered_columns().len()];
 
     for (column_index, descriptor) in variant.ordered_columns().iter().enumerate() {
-        let column_ordinal = u32::try_from(column_index)
-            .map_err(|_| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::CountOverflow,
-            ))?;
-        let is_auxiliary_tree_column = tree_roles.get(&column_ordinal)
-            == Some(&ProofTreeRole::AuxiliaryOracle);
+        let column_ordinal = u32::try_from(column_index).map_err(|_| {
+            CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
+        })?;
+        let is_auxiliary_tree_column =
+            tree_roles.get(&column_ordinal) == Some(&ProofTreeRole::AuxiliaryOracle);
         if reversed_columns.contains(&column_ordinal)
             || integer_lift_auxiliary_columns.contains(&column_ordinal)
             || is_auxiliary_tree_column
@@ -715,14 +686,12 @@ where
         ));
     }
 
-    let trace_domain = ProofEvaluationDomain::new_subgroup(
-        usize::try_from(variant.trace_domain_size())
-            .map_err(|_| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::CountOverflow,
-            ))?,
-    )
-    .map_err(CommonProofProverError::from)
-    .map_err(CommonProofPrivateCoinError::Prover)?;
+    let trace_domain =
+        ProofEvaluationDomain::new_subgroup(usize::try_from(variant.trace_domain_size()).map_err(
+            |_| CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow),
+        )?)
+        .map_err(CommonProofProverError::from)
+        .map_err(CommonProofPrivateCoinError::Prover)?;
     for (source_ordinal, reversed_ordinal) in reversed_columns_by_source {
         let source = columns
             .get(usize::try_from(source_ordinal).map_err(|_| {
@@ -732,8 +701,8 @@ where
             .ok_or_else(|| {
                 CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
             })?;
-        let mut reversed_rows = base_trace_rows(source, trace_domain)
-            .map_err(CommonProofPrivateCoinError::Prover)?;
+        let mut reversed_rows =
+            base_trace_rows(source, trace_domain).map_err(CommonProofPrivateCoinError::Prover)?;
         reversed_rows.reverse();
         let reversed_polynomial = CommonProofSourcePolynomial::Base(
             trace_domain
@@ -755,19 +724,16 @@ where
         }
     }
 
-    let trace_masks = trace_masks_by_column(variant)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
+    let trace_masks =
+        trace_masks_by_column(variant).map_err(CommonProofPrivateCoinError::Prover)?;
     for (column_index, descriptor) in variant.ordered_columns().iter().enumerate() {
-        let column_ordinal = u32::try_from(column_index)
-            .map_err(|_| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::CountOverflow,
-            ))?;
+        let column_ordinal = u32::try_from(column_index).map_err(|_| {
+            CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
+        })?;
         match tree_roles.get(&column_ordinal) {
             Some(ProofTreeRole::BaseOracle) => {
                 let source = columns[column_index].take().ok_or_else(|| {
-                    CommonProofPrivateCoinError::Prover(
-                        CommonProofProverError::InvalidColumn,
-                    )
+                    CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
                 })?;
                 columns[column_index] = Some(mask_relation_column(
                     variant,
@@ -812,8 +778,7 @@ pub(crate) fn construct_post_challenge_relation_columns<Coins>(
     variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,
     mut pre_challenge_columns: CommonProofPreChallengeRelationColumns,
-    mut provided_non_integer_lift_auxiliary_columns:
-        BTreeMap<u32, CommonProofSourcePolynomial>,
+    mut provided_non_integer_lift_auxiliary_columns: BTreeMap<u32, CommonProofSourcePolynomial>,
     application_challenges: &[RelationApplicationChallengeAssignment],
     coins: &mut Coins,
     maximum_candidate_draws_per_output: u32,
@@ -826,18 +791,17 @@ where
             CommonProofProverError::InvalidColumn,
         ));
     }
-    let tree_roles = proof_created_tree_roles_by_column(variant)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-    let (_, integer_lift_auxiliary_columns) = integer_lift_derived_columns(variant)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-    let trace_masks = trace_masks_by_column(variant)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
+    let tree_roles =
+        proof_created_tree_roles_by_column(variant).map_err(CommonProofPrivateCoinError::Prover)?;
+    let (_, integer_lift_auxiliary_columns) =
+        integer_lift_derived_columns(variant).map_err(CommonProofPrivateCoinError::Prover)?;
+    let trace_masks =
+        trace_masks_by_column(variant).map_err(CommonProofPrivateCoinError::Prover)?;
 
     for (column_index, descriptor) in variant.ordered_columns().iter().enumerate() {
-        let column_ordinal = u32::try_from(column_index)
-            .map_err(|_| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::CountOverflow,
-            ))?;
+        let column_ordinal = u32::try_from(column_index).map_err(|_| {
+            CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
+        })?;
         match tree_roles.get(&column_ordinal) {
             Some(ProofTreeRole::AuxiliaryOracle)
                 if !integer_lift_auxiliary_columns.contains(&column_ordinal) =>
@@ -850,9 +814,7 @@ where
                 let source = provided_non_integer_lift_auxiliary_columns
                     .remove(&column_ordinal)
                     .ok_or_else(|| {
-                        CommonProofPrivateCoinError::Prover(
-                            CommonProofProverError::InvalidColumn,
-                        )
+                        CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
                     })?;
                 validate_unmasked_column(descriptor, &source, variant.trace_domain_size())
                     .map_err(CommonProofPrivateCoinError::Prover)?;
@@ -867,8 +829,7 @@ where
             }
             Some(ProofTreeRole::AuxiliaryOracle) => {
                 if pre_challenge_columns.columns[column_index].is_some()
-                    || provided_non_integer_lift_auxiliary_columns
-                        .contains_key(&column_ordinal)
+                    || provided_non_integer_lift_auxiliary_columns.contains_key(&column_ordinal)
                 {
                     return Err(CommonProofPrivateCoinError::Prover(
                         CommonProofProverError::InvalidColumn,
@@ -877,8 +838,7 @@ where
             }
             _ => {
                 if pre_challenge_columns.columns[column_index].is_none()
-                    || provided_non_integer_lift_auxiliary_columns
-                        .contains_key(&column_ordinal)
+                    || provided_non_integer_lift_auxiliary_columns.contains_key(&column_ordinal)
                 {
                     return Err(CommonProofPrivateCoinError::Prover(
                         CommonProofProverError::InvalidColumn,
@@ -893,14 +853,12 @@ where
         ));
     }
 
-    let trace_domain = ProofEvaluationDomain::new_subgroup(
-        usize::try_from(variant.trace_domain_size())
-            .map_err(|_| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::CountOverflow,
-            ))?,
-    )
-    .map_err(CommonProofProverError::from)
-    .map_err(CommonProofPrivateCoinError::Prover)?;
+    let trace_domain =
+        ProofEvaluationDomain::new_subgroup(usize::try_from(variant.trace_domain_size()).map_err(
+            |_| CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow),
+        )?)
+        .map_err(CommonProofProverError::from)
+        .map_err(CommonProofPrivateCoinError::Prover)?;
     let mut trace_rows_by_column = BTreeMap::<u32, Vec<ProofBaseFieldElement>>::new();
 
     for batch in variant.ordered_integer_lift_batches() {
@@ -930,14 +888,14 @@ where
             .map_err(CommonProofPrivateCoinError::Prover)?;
             let source_rows = trace_rows_by_column
                 .get(&binding.source_column_ordinal)
-                .ok_or_else(|| CommonProofPrivateCoinError::Prover(
-                    CommonProofProverError::InvalidColumn,
-                ))?;
+                .ok_or_else(|| {
+                    CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
+                })?;
             let reversed_rows = trace_rows_by_column
                 .get(&binding.reversed_column_ordinal)
-                .ok_or_else(|| CommonProofPrivateCoinError::Prover(
-                    CommonProofProverError::InvalidColumn,
-                ))?;
+                .ok_or_else(|| {
+                    CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
+                })?;
             let prefix_rows = prefix_evaluation_rows(source_rows, theta);
             let suffix_rows = suffix_evaluation_rows(reversed_rows, theta);
             insert_auxiliary_trace_rows(
@@ -1042,8 +1000,7 @@ where
         .ok_or_else(|| {
             CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
         })?;
-    validate_column_polynomials(variant, &columns)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
+    validate_column_polynomials(variant, &columns).map_err(CommonProofPrivateCoinError::Prover)?;
     Ok(columns)
 }
 
@@ -1186,23 +1143,21 @@ where
             if variant.proof_privacy_mode() == ProofPrivacyMode::SecretBearing =>
         {
             let sampled = match source.value_type() {
-                RelationColumnValueType::BaseField => CommonProofSourcePolynomial::Base(
-                    sample_private_base_polynomial(
+                RelationColumnValueType::BaseField => {
+                    CommonProofSourcePolynomial::Base(sample_private_base_polynomial(
                         coins,
                         mask.mask_purpose(),
                         mask.mask_degree_bound_exclusive(),
                         maximum_candidate_draws_per_output,
-                    )?,
-                ),
+                    )?)
+                }
                 RelationColumnValueType::ChallengeExtension => {
-                    CommonProofSourcePolynomial::Extension(
-                        sample_private_extension_polynomial(
-                            coins,
-                            mask.mask_purpose(),
-                            mask.mask_degree_bound_exclusive(),
-                            maximum_candidate_draws_per_output,
-                        )?,
-                    )
+                    CommonProofSourcePolynomial::Extension(sample_private_extension_polynomial(
+                        coins,
+                        mask.mask_purpose(),
+                        mask.mask_degree_bound_exclusive(),
+                        maximum_candidate_draws_per_output,
+                    )?)
                 }
             };
             apply_trace_mask(source, variant.trace_domain_size(), sampled)
@@ -1260,10 +1215,7 @@ fn ensure_base_trace_rows(
         return Ok(());
     }
     let source = columns
-        .get(
-            usize::try_from(column_ordinal)
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-        )
+        .get(usize::try_from(column_ordinal).map_err(|_| CommonProofProverError::CountOverflow)?)
         .and_then(Option::as_ref)
         .ok_or(CommonProofProverError::InvalidColumn)?;
     let rows = base_trace_rows(source, trace_domain)?;
@@ -1282,13 +1234,10 @@ fn integer_lift_theta(
         .non_native_modulus_ordinal(modulus_reference)
         .map_err(CommonProofProverError::from)?;
     let expected_challenge = CommonProofChallenge::Theta { modulus_ordinal };
-    let mut matching = assignments
-        .iter()
-        .copied()
-        .filter(|assignment| {
-            assignment.challenge() == expected_challenge
-                && assignment.repetition_ordinal() == challenge_ordinal
-        });
+    let mut matching = assignments.iter().copied().filter(|assignment| {
+        assignment.challenge() == expected_challenge
+            && assignment.repetition_ordinal() == challenge_ordinal
+    });
     let value = matching
         .next()
         .map(RelationApplicationChallengeAssignment::value)
@@ -1346,18 +1295,17 @@ where
             CommonProofProverError::InvalidColumn,
         ));
     }
-    let column_index = usize::try_from(column_ordinal).map_err(|_| {
-        CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
-    })?;
+    let column_index = usize::try_from(column_ordinal)
+        .map_err(|_| CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow))?;
     let descriptor = variant.ordered_columns().get(column_index).ok_or_else(|| {
         CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
     })?;
     if descriptor.value_type() != RelationColumnValueType::BaseField
         || columns
             .get(column_index)
-            .ok_or_else(|| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::InvalidColumn,
-            ))?
+            .ok_or_else(|| {
+                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
+            })?
             .is_some()
     {
         return Err(CommonProofPrivateCoinError::Prover(
@@ -1469,9 +1417,7 @@ fn integer_lift_linear_evaluation_rows(
     Ok(suffix_evaluation_rows(&coefficient_rows, theta))
 }
 
-fn product_accumulator_rows(
-    product_rows: &[ProofBaseFieldElement],
-) -> Vec<ProofBaseFieldElement> {
+fn product_accumulator_rows(product_rows: &[ProofBaseFieldElement]) -> Vec<ProofBaseFieldElement> {
     let mut accumulator_rows = vec![ProofBaseFieldElement::ZERO; product_rows.len()];
     for row_ordinal in 0..product_rows.len().saturating_sub(1) {
         accumulator_rows[row_ordinal + 1] =
@@ -1490,9 +1436,8 @@ fn convolution_transpose_rows(
         return Err(CommonProofProverError::InvalidColumn);
     }
     let row_count = multiplicand_rows.len();
-    let theta_to_row_count = theta.power(
-        u64::try_from(row_count).map_err(|_| CommonProofProverError::CountOverflow)?,
-    );
+    let theta_to_row_count =
+        theta.power(u64::try_from(row_count).map_err(|_| CommonProofProverError::CountOverflow)?);
     let last = row_count - 1;
     let mut transpose_rows = vec![ProofBaseFieldElement::ZERO; row_count];
     match kind {
@@ -1510,9 +1455,7 @@ fn convolution_transpose_rows(
             for row_ordinal in (0..last).rev() {
                 transpose_rows[row_ordinal] = theta
                     .multiply(transpose_rows[row_ordinal + 1])
-                    .subtract(
-                        theta_to_row_count.multiply(multiplicand_rows[row_ordinal + 1]),
-                    );
+                    .subtract(theta_to_row_count.multiply(multiplicand_rows[row_ordinal + 1]));
             }
         }
         RelationIntegerLiftConvolutionKind::OrdinaryHighHalf => {
@@ -1562,14 +1505,14 @@ where
     let (suffix_rows, transpose_rows, contribution_rows) = {
         let multiplicand_rows = trace_rows_by_column
             .get(&product.multiplicand_column_ordinal)
-            .ok_or_else(|| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::InvalidColumn,
-            ))?;
+            .ok_or_else(|| {
+                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
+            })?;
         let reversed_multiplier_rows = trace_rows_by_column
             .get(&product.reversed_multiplier_column_ordinal)
-            .ok_or_else(|| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::InvalidColumn,
-            ))?;
+            .ok_or_else(|| {
+                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
+            })?;
         let suffix_rows = suffix_evaluation_rows(multiplicand_rows, theta);
         let transpose_rows = convolution_transpose_rows(
             product.convolution_kind,
@@ -1584,7 +1527,11 @@ where
             .zip(reversed_multiplier_rows.iter().copied())
             .map(|(transpose, reversed_multiplier)| {
                 let value = transpose.multiply(reversed_multiplier.subtract(offset));
-                if product.negative { value.negate() } else { value }
+                if product.negative {
+                    value.negate()
+                } else {
+                    value
+                }
             })
             .collect::<Vec<_>>();
         (suffix_rows, transpose_rows, contribution_rows)
@@ -1639,9 +1586,8 @@ fn full_ring_transpose_rows(
     {
         return Err(CommonProofProverError::InvalidColumn);
     }
-    let theta_to_half_ring_degree = theta.power(
-        u64::try_from(row_count).map_err(|_| CommonProofProverError::CountOverflow)?,
-    );
+    let theta_to_half_ring_degree =
+        theta.power(u64::try_from(row_count).map_err(|_| CommonProofProverError::CountOverflow)?);
     let last = row_count - 1;
     let mut transpose_rows = vec![ProofBaseFieldElement::ZERO; row_count];
     transpose_rows[last] = match (selected_half, low_multiplier) {
@@ -1693,13 +1639,8 @@ where
         product.reversed_multiplier_low_column_ordinal,
         product.reversed_multiplier_high_column_ordinal,
     ] {
-        ensure_base_trace_rows(
-            columns,
-            trace_rows_by_column,
-            column_ordinal,
-            trace_domain,
-        )
-        .map_err(CommonProofPrivateCoinError::Prover)?;
+        ensure_base_trace_rows(columns, trace_rows_by_column, column_ordinal, trace_domain)
+            .map_err(CommonProofPrivateCoinError::Prover)?;
     }
     let low_offset = base_field_constant(product.multiplier_low_offset)
         .map_err(CommonProofPrivateCoinError::Prover)?;
@@ -1714,24 +1655,24 @@ where
     ) = {
         let multiplicand_low_rows = trace_rows_by_column
             .get(&product.multiplicand_low_column_ordinal)
-            .ok_or_else(|| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::InvalidColumn,
-            ))?;
+            .ok_or_else(|| {
+                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
+            })?;
         let multiplicand_high_rows = trace_rows_by_column
             .get(&product.multiplicand_high_column_ordinal)
-            .ok_or_else(|| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::InvalidColumn,
-            ))?;
+            .ok_or_else(|| {
+                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
+            })?;
         let reversed_multiplier_low_rows = trace_rows_by_column
             .get(&product.reversed_multiplier_low_column_ordinal)
-            .ok_or_else(|| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::InvalidColumn,
-            ))?;
+            .ok_or_else(|| {
+                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
+            })?;
         let reversed_multiplier_high_rows = trace_rows_by_column
             .get(&product.reversed_multiplier_high_column_ordinal)
-            .ok_or_else(|| CommonProofPrivateCoinError::Prover(
-                CommonProofProverError::InvalidColumn,
-            ))?;
+            .ok_or_else(|| {
+                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
+            })?;
         let low_suffix_rows = suffix_evaluation_rows(multiplicand_low_rows, theta);
         let high_suffix_rows = suffix_evaluation_rows(multiplicand_high_rows, theta);
         let low_transpose_rows = full_ring_transpose_rows(
@@ -1756,12 +1697,10 @@ where
         .map_err(CommonProofPrivateCoinError::Prover)?;
         let mut contribution_rows = Vec::with_capacity(trace_domain.size());
         for row_ordinal in 0..trace_domain.size() {
-            let low_product = low_transpose_rows[row_ordinal].multiply(
-                reversed_multiplier_low_rows[row_ordinal].subtract(low_offset),
-            );
-            let high_product = high_transpose_rows[row_ordinal].multiply(
-                reversed_multiplier_high_rows[row_ordinal].subtract(high_offset),
-            );
+            let low_product = low_transpose_rows[row_ordinal]
+                .multiply(reversed_multiplier_low_rows[row_ordinal].subtract(low_offset));
+            let high_product = high_transpose_rows[row_ordinal]
+                .multiply(reversed_multiplier_high_rows[row_ordinal].subtract(high_offset));
             let value = low_product.add(high_product);
             contribution_rows.push(if product.negative {
                 value.negate()
@@ -1852,10 +1791,8 @@ pub(crate) fn construct_composed_quotient_polynomial(
     if evaluation_domain.size()
         != usize::try_from(variant.evaluation_domain_size())
             .map_err(|_| CommonProofProverError::CountOverflow)?
-        || evaluation_domain.generator().canonical()
-            != context.evaluation_domain_generator
-        || evaluation_domain.coset_offset().canonical()
-            != context.evaluation_coset_offset
+        || evaluation_domain.generator().canonical() != context.evaluation_domain_generator
+        || evaluation_domain.coset_offset().canonical() != context.evaluation_coset_offset
         || variant.evaluation_domain_size() % variant.trace_domain_size() != 0
     {
         return Err(CommonProofProverError::InvalidQuotient);
@@ -1873,10 +1810,9 @@ pub(crate) fn construct_composed_quotient_polynomial(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let evaluation_size = evaluation_domain.size();
-    let trace_rotation_stride = usize::try_from(
-        variant.evaluation_domain_size() / variant.trace_domain_size(),
-    )
-    .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let trace_rotation_stride =
+        usize::try_from(variant.evaluation_domain_size() / variant.trace_domain_size())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
     let trace_domain_size = usize::try_from(variant.trace_domain_size())
         .map_err(|_| CommonProofProverError::CountOverflow)?;
 
@@ -1896,10 +1832,9 @@ pub(crate) fn construct_composed_quotient_polynomial(
             |column_ordinal, rotation_is_negative, rotation_magnitude| {
                 let column_index = usize::try_from(column_ordinal)
                     .map_err(|_| RelationPlanError::CountOverflow)?;
-                let reduced_rotation = usize::try_from(
-                    rotation_magnitude % variant.trace_domain_size(),
-                )
-                .map_err(|_| RelationPlanError::CountOverflow)?;
+                let reduced_rotation =
+                    usize::try_from(rotation_magnitude % variant.trace_domain_size())
+                        .map_err(|_| RelationPlanError::CountOverflow)?;
                 let rotation_offset = reduced_rotation
                     .checked_mul(trace_rotation_stride)
                     .ok_or(RelationPlanError::CountOverflow)?;
@@ -1926,8 +1861,7 @@ pub(crate) fn construct_composed_quotient_polynomial(
             },
         )?);
     }
-    let mut quotient = evaluation_domain
-        .interpolate_extension_polynomial(&quotient_evaluations)?;
+    let mut quotient = evaluation_domain.interpolate_extension_polynomial(&quotient_evaluations)?;
     trim_extension_polynomial(&mut quotient);
     Ok(quotient)
 }
@@ -1938,10 +1872,10 @@ pub(crate) fn decompose_composed_quotient(
     component_count: u32,
     component_stride: u64,
 ) -> Result<Vec<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
-    let component_count = usize::try_from(component_count)
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
-    let component_stride = usize::try_from(component_stride)
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let component_count =
+        usize::try_from(component_count).map_err(|_| CommonProofProverError::CountOverflow)?;
+    let component_stride =
+        usize::try_from(component_stride).map_err(|_| CommonProofProverError::CountOverflow)?;
     if component_count < 2 || component_stride == 0 || quotient.is_empty() {
         return Err(CommonProofProverError::InvalidQuotient);
     }
@@ -1990,12 +1924,9 @@ where
         .quotient_decomposition_stride(context)
         .map_err(CommonProofProverError::from)
         .map_err(CommonProofPrivateCoinError::Prover)?;
-    let mut components = decompose_composed_quotient(
-        quotient,
-        context.quotient_component_count,
-        stride,
-    )
-    .map_err(CommonProofPrivateCoinError::Prover)?;
+    let mut components =
+        decompose_composed_quotient(quotient, context.quotient_component_count, stride)
+            .map_err(CommonProofPrivateCoinError::Prover)?;
     if variant.proof_privacy_mode() == ProofPrivacyMode::PublicOnly {
         if !variant.ordered_masks().is_empty() {
             return Err(CommonProofPrivateCoinError::Prover(
@@ -2015,9 +1946,10 @@ where
         })
         .collect::<Vec<_>>();
     if telescoping_descriptors.len() + 1 != components.len()
-        || telescoping_descriptors.iter().enumerate().any(|(ordinal, mask)| {
-            usize::try_from(mask.target_ordinal()).ok() != Some(ordinal)
-        })
+        || telescoping_descriptors
+            .iter()
+            .enumerate()
+            .any(|(ordinal, mask)| usize::try_from(mask.target_ordinal()).ok() != Some(ordinal))
     {
         return Err(CommonProofPrivateCoinError::Prover(
             CommonProofProverError::InvalidMask,
@@ -2027,9 +1959,9 @@ where
     let mut randomizers = Vec::new();
     randomizers
         .try_reserve_exact(telescoping_descriptors.len())
-        .map_err(|_| CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::AllocationLimitExceeded,
-        ))?;
+        .map_err(|_| {
+            CommonProofPrivateCoinError::Prover(CommonProofProverError::AllocationLimitExceeded)
+        })?;
     for descriptor in telescoping_descriptors {
         randomizers.push(sample_private_extension_polynomial(
             coins,
@@ -2040,9 +1972,7 @@ where
     }
 
     let stride = usize::try_from(stride)
-        .map_err(|_| CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::CountOverflow,
-        ))?;
+        .map_err(|_| CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow))?;
     for component_ordinal in 0..components.len() {
         if component_ordinal < randomizers.len() {
             add_shifted_extension_polynomial(
@@ -2061,10 +1991,9 @@ where
         }
         trim_extension_polynomial(&mut components[component_ordinal]);
         if components[component_ordinal].len()
-            > usize::try_from(context.quotient_component_degree_bound_exclusive)
-                .map_err(|_| CommonProofPrivateCoinError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ))?
+            > usize::try_from(context.quotient_component_degree_bound_exclusive).map_err(|_| {
+                CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
+            })?
         {
             return Err(CommonProofPrivateCoinError::Prover(
                 CommonProofProverError::InvalidQuotient,
@@ -2091,9 +2020,9 @@ where
             && mask.target_class() == RelationMaskTargetClass::Batch
             && mask.target_ordinal() == 0
     });
-    let descriptor = descriptors.next().ok_or_else(|| {
-        CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidMask)
-    })?;
+    let descriptor = descriptors
+        .next()
+        .ok_or_else(|| CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidMask))?;
     if descriptors.next().is_some() {
         return Err(CommonProofPrivateCoinError::Prover(
             CommonProofProverError::InvalidMask,
@@ -2208,7 +2137,9 @@ pub(crate) fn construct_initial_fri_polynomial(
             RelationOpeningSourceClass::TreeColumn => columns
                 .get(
                     usize::try_from(
-                        claim.column_ordinal().ok_or(CommonProofProverError::InvalidOpening)?,
+                        claim
+                            .column_ordinal()
+                            .ok_or(CommonProofProverError::InvalidOpening)?,
                     )
                     .map_err(|_| CommonProofProverError::CountOverflow)?,
                 )
@@ -2260,9 +2191,7 @@ pub(crate) fn construct_initial_fri_polynomial(
         }
     }
     trim_extension_polynomial(&mut initial);
-    if extension_polynomial_degree(&initial)
-        .is_some_and(|degree| degree >= opening_bound - 1)
-    {
+    if extension_polynomial_degree(&initial).is_some_and(|degree| degree >= opening_bound - 1) {
         return Err(CommonProofProverError::InvalidFriLayer);
     }
     Ok(initial)
@@ -2275,18 +2204,11 @@ pub(crate) fn construct_next_fri_layer(
     current_evaluations: &[ProofChallengeExtensionElement],
     current_domain: ProofEvaluationDomain,
     challenge: ProofChallengeExtensionElement,
-) -> Result<
-    (ProofEvaluationDomain, Vec<ProofChallengeExtensionElement>),
-    CommonProofProverError,
-> {
+) -> Result<(ProofEvaluationDomain, Vec<ProofChallengeExtensionElement>), CommonProofProverError> {
     if current_evaluations.len() != current_domain.size() {
         return Err(CommonProofProverError::InvalidFriLayer);
     }
-    let folded = fold_extension_evaluations(
-        current_evaluations,
-        current_domain,
-        challenge,
-    )?;
+    let folded = fold_extension_evaluations(current_evaluations, current_domain, challenge)?;
     Ok((current_domain.folded()?, folded))
 }
 
@@ -2302,11 +2224,9 @@ pub(crate) fn construct_fri_terminal_coefficients(
     if bound == 0 || terminal_evaluations.len() != terminal_domain.size() {
         return Err(CommonProofProverError::InvalidFriLayer);
     }
-    let mut coefficients = terminal_domain
-        .interpolate_extension_polynomial(terminal_evaluations)?;
-    if extension_polynomial_degree(&coefficients)
-        .is_some_and(|degree| degree >= bound)
-    {
+    let mut coefficients =
+        terminal_domain.interpolate_extension_polynomial(terminal_evaluations)?;
+    if extension_polynomial_degree(&coefficients).is_some_and(|degree| degree >= bound) {
         return Err(CommonProofProverError::InvalidFriLayer);
     }
     coefficients.resize(bound, ProofChallengeExtensionElement::ZERO);
@@ -2344,9 +2264,7 @@ fn subtract_extension_polynomial(
 }
 
 fn trim_base_polynomial(coefficients: &mut Vec<ProofBaseFieldElement>) {
-    while coefficients.len() > 1
-        && coefficients.last() == Some(&ProofBaseFieldElement::ZERO)
-    {
+    while coefficients.len() > 1 && coefficients.last() == Some(&ProofBaseFieldElement::ZERO) {
         coefficients.pop();
     }
 }
@@ -2458,10 +2376,7 @@ pub(crate) fn common_proof_merkle_storage_plan(
     let canonical_leaf_byte_length = canonical_common_proof_leaf_byte_length(context, value_type)?;
     let stored_leaf_byte_length = u64::try_from(canonical_leaf_byte_length)
         .map_err(|_| CommonProofProverError::CountOverflow)?
-        .checked_mul(
-            u64::try_from(leaf_count)
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-        )
+        .checked_mul(u64::try_from(leaf_count).map_err(|_| CommonProofProverError::CountOverflow)?)
         .ok_or(CommonProofProverError::CountOverflow)?;
 
     let leaf_bytes_object = ProofExternalMemoryObject::new(first_object_ordinal);
@@ -2545,9 +2460,7 @@ fn common_proof_tree_value_type(
             Ok(RelationColumnValueType::ChallengeExtension)
         }
         ProofTreeCatalogSource::RelationProofCreated { .. }
-        | ProofTreeCatalogSource::RelationBoundPublic => {
-            Err(CommonProofProverError::InvalidTree)
-        }
+        | ProofTreeCatalogSource::RelationBoundPublic => Err(CommonProofProverError::InvalidTree),
     }
 }
 
@@ -2555,12 +2468,10 @@ fn canonical_common_proof_leaf_byte_length(
     context: &ProofMerkleTreeContext,
     value_type: RelationColumnValueType,
 ) -> Result<usize, CommonProofProverError> {
-    let row_width = usize::try_from(context.row_width())
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let row_width =
+        usize::try_from(context.row_width()).map_err(|_| CommonProofProverError::CountOverflow)?;
     let empty_value = match value_type {
-        RelationColumnValueType::BaseField => {
-            ProofTreeValue::Base(ProofBaseFieldElement::ZERO)
-        }
+        RelationColumnValueType::BaseField => ProofTreeValue::Base(ProofBaseFieldElement::ZERO),
         RelationColumnValueType::ChallengeExtension => {
             ProofTreeValue::Extension(ProofChallengeExtensionElement::ZERO)
         }
@@ -2568,15 +2479,11 @@ fn canonical_common_proof_leaf_byte_length(
     let row = vec![empty_value; row_width];
     let secret_salt = (context.leaf_visibility() == ProofLeafVisibility::SecretBearing)
         .then_some([0_u8; PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]);
-    Ok(ProofOraclePhasePairLeaf::new(
-        context,
-        0,
-        secret_salt,
-        row.clone(),
-        row,
-    )?
-    .canonical_bytes()?
-    .len())
+    Ok(
+        ProofOraclePhasePairLeaf::new(context, 0, secret_salt, row.clone(), row)?
+            .canonical_bytes()?
+            .len(),
+    )
 }
 
 fn common_proof_tree_value_has_type(
@@ -2585,13 +2492,11 @@ fn common_proof_tree_value_has_type(
 ) -> bool {
     matches!(
         (value, expected_type),
-        (
-            ProofTreeValue::Base(_),
-            RelationColumnValueType::BaseField
-        ) | (
-            ProofTreeValue::Extension(_),
-            RelationColumnValueType::ChallengeExtension
-        )
+        (ProofTreeValue::Base(_), RelationColumnValueType::BaseField)
+            | (
+                ProofTreeValue::Extension(_),
+                RelationColumnValueType::ChallengeExtension
+            )
     )
 }
 
@@ -2622,9 +2527,7 @@ fn common_proof_merkle_storage_plan_matches(
     };
     let expected_leaf_storage_byte_length = u64::try_from(canonical_leaf_byte_length)
         .map_err(|_| CommonProofProverError::CountOverflow)?
-        .checked_mul(
-            u64::try_from(leaf_count).map_err(|_| CommonProofProverError::CountOverflow)?,
-        )
+        .checked_mul(u64::try_from(leaf_count).map_err(|_| CommonProofProverError::CountOverflow)?)
         .ok_or(CommonProofProverError::CountOverflow)?;
     let materialization_step = leaf_plan.issued_step();
     let query_step = leaf_plan.last_use_step();
@@ -2749,10 +2652,8 @@ impl CommonProofMerkleMaterializer {
         let context_hash = context.context_hash()?;
         let leaf_count = context.leaf_count()?;
         let value_type = common_proof_tree_value_type(catalog_entry)?;
-        let expected_leaf_byte_length = canonical_common_proof_leaf_byte_length(
-            &context,
-            value_type,
-        )?;
+        let expected_leaf_byte_length =
+            canonical_common_proof_leaf_byte_length(&context, value_type)?;
         let expected_level_count = usize::try_from(leaf_count.trailing_zeros())
             .map_err(|_| CommonProofProverError::CountOverflow)?
             .checked_add(1)
@@ -2817,9 +2718,7 @@ impl CommonProofMerkleMaterializer {
                 CommonProofProverError::InvalidTree,
             ));
         }
-        let secret_salt = if self.context.leaf_visibility()
-            == ProofLeafVisibility::SecretBearing
-        {
+        let secret_salt = if self.context.leaf_visibility() == ProofLeafVisibility::SecretBearing {
             let mut salt = [0_u8; PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
             coins
                 .fill_raw_bytes(PRIVATE_PROOF_SALT_PURPOSE, &mut salt)
@@ -2831,9 +2730,7 @@ impl CommonProofMerkleMaterializer {
         let leaf = ProofOraclePhasePairLeaf::new(
             &self.context,
             u64::try_from(self.next_leaf_index).map_err(|_| {
-                CommonProofTreeStorageError::Prover(
-                    CommonProofProverError::CountOverflow,
-                )
+                CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow)
             })?,
             secret_salt,
             first_point_values,
@@ -2869,294 +2766,272 @@ impl CommonProofMerkleMaterializer {
         CommonProofTreeStorageError<Storage::Error, core::convert::Infallible>,
     > {
         match self.phase {
-                CommonProofMerkleMaterializerPhase::BeginLeafBytes => {
-                    executor
-                        .begin_object(storage, self.leaf_bytes_object)
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.phase = CommonProofMerkleMaterializerPhase::BeginLeafDigests;
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            CommonProofMerkleMaterializerPhase::BeginLeafBytes => {
+                executor
+                    .begin_object(storage, self.leaf_bytes_object)
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.phase = CommonProofMerkleMaterializerPhase::BeginLeafDigests;
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::BeginLeafDigests => {
+                executor
+                    .begin_object(storage, self.digest_level_objects[0])
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.phase = CommonProofMerkleMaterializerPhase::NeedLeafValues;
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::NeedLeafValues => {
+                return Ok(CommonProofMerkleMaterializerProgress::NeedsLeafValues {
+                    leaf_index: u64::try_from(self.next_leaf_index).map_err(|_| {
+                        CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow)
+                    })?,
+                });
+            }
+            CommonProofMerkleMaterializerPhase::WriteLeafBytes => {
+                let end = next_bounded_offset(
+                    self.current_byte_offset,
+                    self.current_leaf_bytes.len(),
+                    executor.maximum_chunk_byte_length(),
+                )
+                .map_err(CommonProofTreeStorageError::Prover)?;
+                executor
+                    .append_object_bytes(
+                        storage,
+                        self.leaf_bytes_object,
+                        &self.current_leaf_bytes[self.current_byte_offset..end],
+                    )
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.current_byte_offset = end;
+                if end == self.current_leaf_bytes.len() {
+                    self.current_byte_offset = 0;
+                    self.phase = CommonProofMerkleMaterializerPhase::WriteLeafDigest;
                 }
-                CommonProofMerkleMaterializerPhase::BeginLeafDigests => {
-                    executor
-                        .begin_object(storage, self.digest_level_objects[0])
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.phase = CommonProofMerkleMaterializerPhase::NeedLeafValues;
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::WriteLeafDigest => {
+                let end = next_bounded_offset(
+                    self.current_byte_offset,
+                    HASH_BYTE_LENGTH,
+                    executor.maximum_chunk_byte_length(),
+                )
+                .map_err(CommonProofTreeStorageError::Prover)?;
+                executor
+                    .append_object_bytes(
+                        storage,
+                        self.digest_level_objects[0],
+                        &self.current_leaf_digest[self.current_byte_offset..end],
+                    )
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.current_byte_offset = end;
+                if end == HASH_BYTE_LENGTH {
+                    self.current_leaf_bytes = Zeroizing::new(Vec::new());
+                    self.current_leaf_digest = [0; HASH_BYTE_LENGTH];
+                    self.current_byte_offset = 0;
+                    self.next_leaf_index = self.next_leaf_index.checked_add(1).ok_or(
+                        CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow),
+                    )?;
+                    self.phase = if self.next_leaf_index == self.leaf_count {
+                        CommonProofMerkleMaterializerPhase::SealLeafBytes
+                    } else {
+                        CommonProofMerkleMaterializerPhase::NeedLeafValues
+                    };
                 }
-                CommonProofMerkleMaterializerPhase::NeedLeafValues => {
-                    return Ok(CommonProofMerkleMaterializerProgress::NeedsLeafValues {
-                        leaf_index: u64::try_from(self.next_leaf_index).map_err(|_| {
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::SealLeafBytes => {
+                executor
+                    .seal_object(storage, self.leaf_bytes_object)
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.phase = CommonProofMerkleMaterializerPhase::SealLeafDigests;
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::SealLeafDigests => {
+                executor
+                    .seal_object(storage, self.digest_level_objects[0])
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.current_level_ordinal = 1;
+                self.phase = if self.digest_level_objects.len() == 1 {
+                    CommonProofMerkleMaterializerPhase::ReadRoot
+                } else {
+                    CommonProofMerkleMaterializerPhase::BeginParentLevel
+                };
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::BeginParentLevel => {
+                let object = *self
+                    .digest_level_objects
+                    .get(self.current_level_ordinal)
+                    .ok_or(CommonProofTreeStorageError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ))?;
+                executor
+                    .begin_object(storage, object)
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.current_parent_index = 0;
+                self.current_byte_offset = 0;
+                self.phase = CommonProofMerkleMaterializerPhase::ReadLeftChild;
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::ReadLeftChild => {
+                let child_object = self.digest_level_objects[self.current_level_ordinal - 1];
+                let child_index = self.current_parent_index.checked_mul(2).ok_or(
+                    CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow),
+                )?;
+                let storage_offset =
+                    stored_hash_chunk_offset(child_index, self.current_byte_offset)
+                        .map_err(CommonProofTreeStorageError::Prover)?;
+                let end = next_bounded_offset(
+                    self.current_byte_offset,
+                    HASH_BYTE_LENGTH,
+                    executor.maximum_chunk_byte_length(),
+                )
+                .map_err(CommonProofTreeStorageError::Prover)?;
+                executor
+                    .read_object_bytes(
+                        storage,
+                        child_object,
+                        storage_offset,
+                        &mut self.left_child_digest[self.current_byte_offset..end],
+                    )
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.current_byte_offset = end;
+                if end == HASH_BYTE_LENGTH {
+                    self.current_byte_offset = 0;
+                    self.phase = CommonProofMerkleMaterializerPhase::ReadRightChild;
+                }
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::ReadRightChild => {
+                let child_object = self.digest_level_objects[self.current_level_ordinal - 1];
+                let child_index = self
+                    .current_parent_index
+                    .checked_mul(2)
+                    .and_then(|index| index.checked_add(1))
+                    .ok_or(CommonProofTreeStorageError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ))?;
+                let storage_offset =
+                    stored_hash_chunk_offset(child_index, self.current_byte_offset)
+                        .map_err(CommonProofTreeStorageError::Prover)?;
+                let end = next_bounded_offset(
+                    self.current_byte_offset,
+                    HASH_BYTE_LENGTH,
+                    executor.maximum_chunk_byte_length(),
+                )
+                .map_err(CommonProofTreeStorageError::Prover)?;
+                executor
+                    .read_object_bytes(
+                        storage,
+                        child_object,
+                        storage_offset,
+                        &mut self.right_child_digest[self.current_byte_offset..end],
+                    )
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.current_byte_offset = end;
+                if end == HASH_BYTE_LENGTH {
+                    self.current_leaf_digest = common_proof_merkle_node_digest(
+                        self.context_hash,
+                        u32::try_from(self.current_level_ordinal).map_err(|_| {
                             CommonProofTreeStorageError::Prover(
                                 CommonProofProverError::CountOverflow,
                             )
                         })?,
-                    });
-                }
-                CommonProofMerkleMaterializerPhase::WriteLeafBytes => {
-                    let end = next_bounded_offset(
-                        self.current_byte_offset,
-                        self.current_leaf_bytes.len(),
-                        executor.maximum_chunk_byte_length(),
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    executor
-                        .append_object_bytes(
-                            storage,
-                            self.leaf_bytes_object,
-                            &self.current_leaf_bytes[self.current_byte_offset..end],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_byte_offset = end;
-                    if end == self.current_leaf_bytes.len() {
-                        self.current_byte_offset = 0;
-                        self.phase = CommonProofMerkleMaterializerPhase::WriteLeafDigest;
-                    }
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::WriteLeafDigest => {
-                    let end = next_bounded_offset(
-                        self.current_byte_offset,
-                        HASH_BYTE_LENGTH,
-                        executor.maximum_chunk_byte_length(),
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    executor
-                        .append_object_bytes(
-                            storage,
-                            self.digest_level_objects[0],
-                            &self.current_leaf_digest[self.current_byte_offset..end],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_byte_offset = end;
-                    if end == HASH_BYTE_LENGTH {
-                        self.current_leaf_bytes = Zeroizing::new(Vec::new());
-                        self.current_leaf_digest = [0; HASH_BYTE_LENGTH];
-                        self.current_byte_offset = 0;
-                        self.next_leaf_index = self
-                            .next_leaf_index
-                            .checked_add(1)
-                            .ok_or(CommonProofTreeStorageError::Prover(
+                        u64::try_from(self.current_parent_index).map_err(|_| {
+                            CommonProofTreeStorageError::Prover(
                                 CommonProofProverError::CountOverflow,
-                            ))?;
-                        self.phase = if self.next_leaf_index == self.leaf_count {
-                            CommonProofMerkleMaterializerPhase::SealLeafBytes
-                        } else {
-                            CommonProofMerkleMaterializerPhase::NeedLeafValues
-                        };
-                    }
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::SealLeafBytes => {
-                    executor
-                        .seal_object(storage, self.leaf_bytes_object)
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.phase = CommonProofMerkleMaterializerPhase::SealLeafDigests;
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::SealLeafDigests => {
-                    executor
-                        .seal_object(storage, self.digest_level_objects[0])
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_level_ordinal = 1;
-                    self.phase = if self.digest_level_objects.len() == 1 {
-                        CommonProofMerkleMaterializerPhase::ReadRoot
-                    } else {
-                        CommonProofMerkleMaterializerPhase::BeginParentLevel
-                    };
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::BeginParentLevel => {
-                    let object = *self
-                        .digest_level_objects
-                        .get(self.current_level_ordinal)
-                        .ok_or(CommonProofTreeStorageError::Prover(
-                            CommonProofProverError::InvalidTree,
-                        ))?;
-                    executor
-                        .begin_object(storage, object)
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_parent_index = 0;
+                            )
+                        })?,
+                        self.left_child_digest,
+                        self.right_child_digest,
+                    )
+                    .map_err(CommonProofTreeStorageError::Prover)?;
+                    self.left_child_digest = [0; HASH_BYTE_LENGTH];
+                    self.right_child_digest = [0; HASH_BYTE_LENGTH];
                     self.current_byte_offset = 0;
-                    self.phase = CommonProofMerkleMaterializerPhase::ReadLeftChild;
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+                    self.phase = CommonProofMerkleMaterializerPhase::WriteParentDigest;
                 }
-                CommonProofMerkleMaterializerPhase::ReadLeftChild => {
-                    let child_object = self.digest_level_objects
-                        [self.current_level_ordinal - 1];
-                    let child_index = self
-                        .current_parent_index
-                        .checked_mul(2)
-                        .ok_or(CommonProofTreeStorageError::Prover(
-                            CommonProofProverError::CountOverflow,
-                        ))?;
-                    let storage_offset = stored_hash_chunk_offset(
-                        child_index,
-                        self.current_byte_offset,
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::WriteParentDigest => {
+                let end = next_bounded_offset(
+                    self.current_byte_offset,
+                    HASH_BYTE_LENGTH,
+                    executor.maximum_chunk_byte_length(),
+                )
+                .map_err(CommonProofTreeStorageError::Prover)?;
+                executor
+                    .append_object_bytes(
+                        storage,
+                        self.digest_level_objects[self.current_level_ordinal],
+                        &self.current_leaf_digest[self.current_byte_offset..end],
                     )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    let end = next_bounded_offset(
-                        self.current_byte_offset,
-                        HASH_BYTE_LENGTH,
-                        executor.maximum_chunk_byte_length(),
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    executor
-                        .read_object_bytes(
-                            storage,
-                            child_object,
-                            storage_offset,
-                            &mut self.left_child_digest[self.current_byte_offset..end],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_byte_offset = end;
-                    if end == HASH_BYTE_LENGTH {
-                        self.current_byte_offset = 0;
-                        self.phase = CommonProofMerkleMaterializerPhase::ReadRightChild;
-                    }
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::ReadRightChild => {
-                    let child_object = self.digest_level_objects
-                        [self.current_level_ordinal - 1];
-                    let child_index = self
-                        .current_parent_index
-                        .checked_mul(2)
-                        .and_then(|index| index.checked_add(1))
-                        .ok_or(CommonProofTreeStorageError::Prover(
-                            CommonProofProverError::CountOverflow,
-                        ))?;
-                    let storage_offset = stored_hash_chunk_offset(
-                        child_index,
-                        self.current_byte_offset,
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    let end = next_bounded_offset(
-                        self.current_byte_offset,
-                        HASH_BYTE_LENGTH,
-                        executor.maximum_chunk_byte_length(),
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    executor
-                        .read_object_bytes(
-                            storage,
-                            child_object,
-                            storage_offset,
-                            &mut self.right_child_digest[self.current_byte_offset..end],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_byte_offset = end;
-                    if end == HASH_BYTE_LENGTH {
-                        self.current_leaf_digest = common_proof_merkle_node_digest(
-                            self.context_hash,
-                            u32::try_from(self.current_level_ordinal).map_err(|_| {
-                                CommonProofTreeStorageError::Prover(
-                                    CommonProofProverError::CountOverflow,
-                                )
-                            })?,
-                            u64::try_from(self.current_parent_index).map_err(|_| {
-                                CommonProofTreeStorageError::Prover(
-                                    CommonProofProverError::CountOverflow,
-                                )
-                            })?,
-                            self.left_child_digest,
-                            self.right_child_digest,
-                        )
-                        .map_err(CommonProofTreeStorageError::Prover)?;
-                        self.left_child_digest = [0; HASH_BYTE_LENGTH];
-                        self.right_child_digest = [0; HASH_BYTE_LENGTH];
-                        self.current_byte_offset = 0;
-                        self.phase = CommonProofMerkleMaterializerPhase::WriteParentDigest;
-                    }
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::WriteParentDigest => {
-                    let end = next_bounded_offset(
-                        self.current_byte_offset,
-                        HASH_BYTE_LENGTH,
-                        executor.maximum_chunk_byte_length(),
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    executor
-                        .append_object_bytes(
-                            storage,
-                            self.digest_level_objects[self.current_level_ordinal],
-                            &self.current_leaf_digest[self.current_byte_offset..end],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_byte_offset = end;
-                    if end == HASH_BYTE_LENGTH {
-                        self.current_leaf_digest = [0; HASH_BYTE_LENGTH];
-                        self.current_byte_offset = 0;
-                        self.current_parent_index = self
-                            .current_parent_index
-                            .checked_add(1)
-                            .ok_or(CommonProofTreeStorageError::Prover(
-                                CommonProofProverError::CountOverflow,
-                            ))?;
-                        let parent_count = self.leaf_count >> self.current_level_ordinal;
-                        self.phase = if self.current_parent_index == parent_count {
-                            CommonProofMerkleMaterializerPhase::SealParentLevel
-                        } else {
-                            CommonProofMerkleMaterializerPhase::ReadLeftChild
-                        };
-                    }
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::SealParentLevel => {
-                    executor
-                        .seal_object(
-                            storage,
-                            self.digest_level_objects[self.current_level_ordinal],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_level_ordinal = self
-                        .current_level_ordinal
-                        .checked_add(1)
-                        .ok_or(CommonProofTreeStorageError::Prover(
-                            CommonProofProverError::CountOverflow,
-                        ))?;
-                    self.phase = if self.current_level_ordinal
-                        == self.digest_level_objects.len()
-                    {
-                        self.current_byte_offset = 0;
-                        CommonProofMerkleMaterializerPhase::ReadRoot
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.current_byte_offset = end;
+                if end == HASH_BYTE_LENGTH {
+                    self.current_leaf_digest = [0; HASH_BYTE_LENGTH];
+                    self.current_byte_offset = 0;
+                    self.current_parent_index = self.current_parent_index.checked_add(1).ok_or(
+                        CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow),
+                    )?;
+                    let parent_count = self.leaf_count >> self.current_level_ordinal;
+                    self.phase = if self.current_parent_index == parent_count {
+                        CommonProofMerkleMaterializerPhase::SealParentLevel
                     } else {
-                        CommonProofMerkleMaterializerPhase::BeginParentLevel
+                        CommonProofMerkleMaterializerPhase::ReadLeftChild
                     };
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
                 }
-                CommonProofMerkleMaterializerPhase::ReadRoot => {
-                    let end = next_bounded_offset(
-                        self.current_byte_offset,
-                        HASH_BYTE_LENGTH,
-                        executor.maximum_chunk_byte_length(),
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::SealParentLevel => {
+                executor
+                    .seal_object(
+                        storage,
+                        self.digest_level_objects[self.current_level_ordinal],
                     )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    executor
-                        .read_object_bytes(
-                            storage,
-                            *self.digest_level_objects.last().ok_or(
-                                CommonProofTreeStorageError::Prover(
-                                    CommonProofProverError::InvalidTree,
-                                ),
-                            )?,
-                            u64::try_from(self.current_byte_offset).map_err(|_| {
-                                CommonProofTreeStorageError::Prover(
-                                    CommonProofProverError::CountOverflow,
-                                )
-                            })?,
-                            &mut self.root[self.current_byte_offset..end],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_byte_offset = end;
-                    if end == HASH_BYTE_LENGTH {
-                        self.phase = CommonProofMerkleMaterializerPhase::Complete;
-                    }
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.current_level_ordinal = self.current_level_ordinal.checked_add(1).ok_or(
+                    CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow),
+                )?;
+                self.phase = if self.current_level_ordinal == self.digest_level_objects.len() {
+                    self.current_byte_offset = 0;
+                    CommonProofMerkleMaterializerPhase::ReadRoot
+                } else {
+                    CommonProofMerkleMaterializerPhase::BeginParentLevel
+                };
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::ReadRoot => {
+                let end = next_bounded_offset(
+                    self.current_byte_offset,
+                    HASH_BYTE_LENGTH,
+                    executor.maximum_chunk_byte_length(),
+                )
+                .map_err(CommonProofTreeStorageError::Prover)?;
+                executor
+                    .read_object_bytes(
+                        storage,
+                        *self.digest_level_objects.last().ok_or(
+                            CommonProofTreeStorageError::Prover(
+                                CommonProofProverError::InvalidTree,
+                            ),
+                        )?,
+                        u64::try_from(self.current_byte_offset).map_err(|_| {
+                            CommonProofTreeStorageError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            )
+                        })?,
+                        &mut self.root[self.current_byte_offset..end],
+                    )
+                    .map_err(CommonProofTreeStorageError::Storage)?;
+                self.current_byte_offset = end;
+                if end == HASH_BYTE_LENGTH {
+                    self.phase = CommonProofMerkleMaterializerPhase::Complete;
                 }
-                CommonProofMerkleMaterializerPhase::Complete => {
-                    return Ok(CommonProofMerkleMaterializerProgress::Complete);
-                }
+                return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
+            }
+            CommonProofMerkleMaterializerPhase::Complete => {
+                return Ok(CommonProofMerkleMaterializerProgress::Complete);
+            }
         }
     }
 
@@ -3219,41 +3094,32 @@ pub(crate) fn materialize_common_proof_merkle_tree<Storage, Coins, LeafValues>(
     digest_level_objects: Vec<ProofExternalMemoryObject>,
     coins: &mut Coins,
     mut leaf_values: LeafValues,
-) -> Result<
-    StoredCommonProofMerkleTree,
-    CommonProofTreeStorageError<Storage::Error, Coins::Error>,
->
+) -> Result<StoredCommonProofMerkleTree, CommonProofTreeStorageError<Storage::Error, Coins::Error>>
 where
     Storage: ProofExternalMemory,
     Coins: CommonProofPrivateCoinSource,
-    LeafValues: FnMut(
-        u64,
-    ) -> Result<(Vec<ProofTreeValue>, Vec<ProofTreeValue>), CommonProofProverError>,
+    LeafValues:
+        FnMut(u64) -> Result<(Vec<ProofTreeValue>, Vec<ProofTreeValue>), CommonProofProverError>,
 {
-    let context = catalog_entry
-        .common_context()
-        .cloned()
-        .ok_or(CommonProofTreeStorageError::Prover(
-            CommonProofProverError::InvalidTree,
-        ))?;
+    let context =
+        catalog_entry
+            .common_context()
+            .cloned()
+            .ok_or(CommonProofTreeStorageError::Prover(
+                CommonProofProverError::InvalidTree,
+            ))?;
     let leaf_count = context
         .leaf_count()
         .map_err(CommonProofProverError::from)
         .map_err(CommonProofTreeStorageError::Prover)?;
-    let value_type = common_proof_tree_value_type(catalog_entry)
+    let value_type =
+        common_proof_tree_value_type(catalog_entry).map_err(CommonProofTreeStorageError::Prover)?;
+    let canonical_leaf_byte_length = canonical_common_proof_leaf_byte_length(&context, value_type)
         .map_err(CommonProofTreeStorageError::Prover)?;
-    let canonical_leaf_byte_length = canonical_common_proof_leaf_byte_length(
-        &context,
-        value_type,
-    )
-    .map_err(CommonProofTreeStorageError::Prover)?;
-    let expected_row_width = usize::try_from(context.row_width()).map_err(|_| {
-        CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow)
-    })?;
+    let expected_row_width = usize::try_from(context.row_width())
+        .map_err(|_| CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow))?;
     let expected_level_count = usize::try_from(leaf_count.trailing_zeros())
-        .map_err(|_| CommonProofTreeStorageError::Prover(
-            CommonProofProverError::CountOverflow,
-        ))?
+        .map_err(|_| CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow))?
         .checked_add(1)
         .ok_or(CommonProofTreeStorageError::Prover(
             CommonProofProverError::CountOverflow,
@@ -3277,8 +3143,8 @@ where
         let leaf_index = u64::try_from(leaf_index).map_err(|_| {
             CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow)
         })?;
-        let (first_point_values, opposite_point_values) = leaf_values(leaf_index)
-            .map_err(CommonProofTreeStorageError::Prover)?;
+        let (first_point_values, opposite_point_values) =
+            leaf_values(leaf_index).map_err(CommonProofTreeStorageError::Prover)?;
         if first_point_values.len() != expected_row_width
             || opposite_point_values.len() != expected_row_width
             || first_point_values
@@ -3290,9 +3156,7 @@ where
                 CommonProofProverError::InvalidTree,
             ));
         }
-        let secret_salt = if context.leaf_visibility()
-            == ProofLeafVisibility::SecretBearing
-        {
+        let secret_salt = if context.leaf_visibility() == ProofLeafVisibility::SecretBearing {
             let mut salt = [0_u8; PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
             coins
                 .fill_raw_bytes(PRIVATE_PROOF_SALT_PURPOSE, &mut salt)
@@ -3320,24 +3184,14 @@ where
                 CommonProofProverError::InvalidTree,
             ));
         }
-        append_bounded(
-            executor,
-            storage,
-            leaf_bytes_object,
-            &canonical_bytes,
-        )
-        .map_err(CommonProofTreeStorageError::Storage)?;
+        append_bounded(executor, storage, leaf_bytes_object, &canonical_bytes)
+            .map_err(CommonProofTreeStorageError::Storage)?;
         let digest = leaf
             .digest()
             .map_err(CommonProofProverError::from)
             .map_err(CommonProofTreeStorageError::Prover)?;
-        append_bounded(
-            executor,
-            storage,
-            digest_level_objects[0],
-            &digest,
-        )
-        .map_err(CommonProofTreeStorageError::Storage)?;
+        append_bounded(executor, storage, digest_level_objects[0], &digest)
+            .map_err(CommonProofTreeStorageError::Storage)?;
     }
     executor
         .seal_object(storage, leaf_bytes_object)
@@ -3359,37 +3213,24 @@ where
             .begin_object(storage, parent_object)
             .map_err(CommonProofTreeStorageError::Storage)?;
         for parent_index in 0..parent_count {
-            let left_child_index = parent_index
-                .checked_mul(2)
-                .ok_or(CommonProofTreeStorageError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ))?;
+            let left_child_index =
+                parent_index
+                    .checked_mul(2)
+                    .ok_or(CommonProofTreeStorageError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ))?;
             let right_child_index = left_child_index + 1;
-            let left = read_stored_hash(
-                executor,
-                storage,
-                child_object,
-                left_child_index,
-            )
-            .map_err(CommonProofTreeStorageError::Storage)?;
-            let right = read_stored_hash(
-                executor,
-                storage,
-                child_object,
-                right_child_index,
-            )
-            .map_err(CommonProofTreeStorageError::Storage)?;
+            let left = read_stored_hash(executor, storage, child_object, left_child_index)
+                .map_err(CommonProofTreeStorageError::Storage)?;
+            let right = read_stored_hash(executor, storage, child_object, right_child_index)
+                .map_err(CommonProofTreeStorageError::Storage)?;
             let digest = common_proof_merkle_node_digest(
                 context_hash,
                 u32::try_from(level_ordinal).map_err(|_| {
-                    CommonProofTreeStorageError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    )
+                    CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow)
                 })?,
                 u64::try_from(parent_index).map_err(|_| {
-                    CommonProofTreeStorageError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    )
+                    CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow)
                 })?,
                 left,
                 right,
@@ -3406,9 +3247,11 @@ where
     let root = read_stored_hash(
         executor,
         storage,
-        *digest_level_objects.last().ok_or(
-            CommonProofTreeStorageError::Prover(CommonProofProverError::InvalidTree),
-        )?,
+        *digest_level_objects
+            .last()
+            .ok_or(CommonProofTreeStorageError::Prover(
+                CommonProofProverError::InvalidTree,
+            ))?,
         0,
     )
     .map_err(CommonProofTreeStorageError::Storage)?;
@@ -3429,10 +3272,11 @@ fn append_bounded<Storage: ProofExternalMemory>(
     object: ProofExternalMemoryObject,
     bytes: &[u8],
 ) -> Result<(), ProofExternalMemoryExecutorError<Storage::Error>> {
-    let maximum_chunk = usize::try_from(executor.maximum_chunk_byte_length())
-        .map_err(|_| ProofExternalMemoryExecutorError::Execution(
+    let maximum_chunk = usize::try_from(executor.maximum_chunk_byte_length()).map_err(|_| {
+        ProofExternalMemoryExecutorError::Execution(
             super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-        ))?;
+        )
+    })?;
     if maximum_chunk == 0 {
         return Err(ProofExternalMemoryExecutorError::Execution(
             super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
@@ -3451,10 +3295,11 @@ fn read_exact_bounded<Storage: ProofExternalMemory>(
     offset: u64,
     destination: &mut [u8],
 ) -> Result<(), ProofExternalMemoryExecutorError<Storage::Error>> {
-    let maximum_chunk = usize::try_from(executor.maximum_chunk_byte_length())
-        .map_err(|_| ProofExternalMemoryExecutorError::Execution(
+    let maximum_chunk = usize::try_from(executor.maximum_chunk_byte_length()).map_err(|_| {
+        ProofExternalMemoryExecutorError::Execution(
             super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-        ))?;
+        )
+    })?;
     if maximum_chunk == 0 {
         return Err(ProofExternalMemoryExecutorError::Execution(
             super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
@@ -3713,10 +3558,8 @@ impl CommonProofOpeningPrefetcher {
             evaluation_domain_size,
             sorted_query_representatives,
         )?;
-        let frontier_coordinates = minimal_frontier_coordinates(
-            &opened_leaf_indexes,
-            tree.leaf_count,
-        )?;
+        let frontier_coordinates =
+            minimal_frontier_coordinates(&opened_leaf_indexes, tree.leaf_count)?;
         let opened_leaf_byte_length = opened_leaf_indexes
             .len()
             .checked_mul(tree.canonical_leaf_byte_length)
@@ -3764,10 +3607,8 @@ impl CommonProofOpeningPrefetcher {
         &mut self,
         executor: &mut ProofExternalMemoryExecutor,
         storage: &mut Storage,
-    ) -> Result<
-        CommonProofOpeningPrefetchProgress,
-        ProofExternalMemoryExecutorError<Storage::Error>,
-    > {
+    ) -> Result<CommonProofOpeningPrefetchProgress, ProofExternalMemoryExecutorError<Storage::Error>>
+    {
         match self.phase {
             CommonProofOpeningPrefetchPhase::ReadLeaves => {
                 if self.next_item_index == self.opened_leaf_indexes.len() {
@@ -3794,9 +3635,11 @@ impl CommonProofOpeningPrefetcher {
                     self.canonical_leaf_byte_length,
                     executor.maximum_chunk_byte_length(),
                 )
-                .map_err(|_| ProofExternalMemoryExecutorError::Execution(
-                    super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                ))?;
+                .map_err(|_| {
+                    ProofExternalMemoryExecutorError::Execution(
+                        super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
+                    )
+                })?;
                 let destination_start = self
                     .next_item_index
                     .checked_mul(self.canonical_leaf_byte_length)
@@ -3851,15 +3694,16 @@ impl CommonProofOpeningPrefetcher {
                     HASH_BYTE_LENGTH,
                     executor.maximum_chunk_byte_length(),
                 )
-                .map_err(|_| ProofExternalMemoryExecutorError::Execution(
-                    super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                ))?;
+                .map_err(|_| {
+                    ProofExternalMemoryExecutorError::Execution(
+                        super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
+                    )
+                })?;
                 executor.read_object_bytes(
                     storage,
                     object,
                     storage_offset,
-                    &mut self.frontier_digests[self.next_item_index]
-                        [self.current_byte_offset..end],
+                    &mut self.frontier_digests[self.next_item_index][self.current_byte_offset..end],
                 )?;
                 self.current_byte_offset = end;
                 if end == HASH_BYTE_LENGTH {
@@ -4037,10 +3881,7 @@ pub(crate) fn encode_common_proof_query_tree_fragment<Artifact>(
     sorted_query_representatives: &[u64],
     artifact: &mut Artifact,
     maximum_fragment_byte_length: usize,
-) -> Result<
-    Vec<u8>,
-    CommonProofEncodingError<BoundedCommonProofByteSinkError, Artifact::Error>,
->
+) -> Result<Vec<u8>, CommonProofEncodingError<BoundedCommonProofByteSinkError, Artifact::Error>>
 where
     Artifact: CommonProofOpeningArtifact,
 {
@@ -4055,10 +3896,12 @@ where
         || !geometry.leaf_count.is_power_of_two()
         || geometry.canonical_leaf_byte_length == 0
         || sorted_query_representatives.is_empty()
-        || !sorted_query_representatives.windows(2).all(|pair| pair[0] < pair[1])
-        || sorted_query_representatives.last().is_some_and(|representative| {
-            *representative >= catalog.evaluation_domain_size() / 2
-        })
+        || !sorted_query_representatives
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+        || sorted_query_representatives
+            .last()
+            .is_some_and(|representative| *representative >= catalog.evaluation_domain_size() / 2)
     {
         return Err(CommonProofEncodingError::Prover(
             CommonProofProverError::InvalidOpening,
@@ -4123,9 +3966,7 @@ pub(crate) enum CommonProofTranscriptQuerySinkError<SinkError> {
     Transcript(TranscriptError),
 }
 
-impl<Sink: CommonProofByteSink> CommonProofByteSink
-    for CommonProofTranscriptQuerySink<'_, Sink>
-{
+impl<Sink: CommonProofByteSink> CommonProofByteSink for CommonProofTranscriptQuerySink<'_, Sink> {
     type Error = CommonProofTranscriptQuerySinkError<Sink::Error>;
 
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
@@ -4174,20 +4015,16 @@ pub(crate) fn write_common_proof_prefix<Sink>(
 where
     Sink: CommonProofByteSink,
 {
-    let expected_opening_claim_count = usize::try_from(
-        transcript_schedule.opening_claim_count(),
-    )
-    .map_err(|_| {
-        CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow)
-    })?;
+    let expected_opening_claim_count =
+        usize::try_from(transcript_schedule.opening_claim_count())
+            .map_err(|_| CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow))?;
     if canonical_header_bytes.is_empty()
         || tree_roots.len() != catalog.entries().len()
         || deep_evaluations.len() != expected_opening_claim_count
         || terminal_coefficients.len()
-            != usize::try_from(transcript_schedule.terminal_coefficient_count())
-                .map_err(|_| CommonProofEncodingError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ))?
+            != usize::try_from(transcript_schedule.terminal_coefficient_count()).map_err(|_| {
+                CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow)
+            })?
     {
         return Err(CommonProofEncodingError::Prover(
             CommonProofProverError::InvalidInput,
@@ -4252,12 +4089,14 @@ fn write_extension_list<Sink>(
 where
     Sink: CommonProofByteSink,
 {
-    write_u16(sink, CanonicalItemType::ChallengeExtensionElement.canonical_code())?;
+    write_u16(
+        sink,
+        CanonicalItemType::ChallengeExtensionElement.canonical_code(),
+    )?;
     write_u32(
         sink,
-        u32::try_from(values.len()).map_err(|_| {
-            CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow)
-        })?,
+        u32::try_from(values.len())
+            .map_err(|_| CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow))?,
     )?;
     for value in values {
         for coordinate in value.canonical_coordinates() {
@@ -4290,10 +4129,7 @@ pub(crate) fn common_proof_query_section_byte_length(
             catalog.evaluation_domain_size(),
             sorted_query_representatives,
         )?;
-        let frontier_count = minimal_frontier_node_count(
-            &opened_indexes,
-            geometry.leaf_count,
-        )?;
+        let frontier_count = minimal_frontier_node_count(&opened_indexes, geometry.leaf_count)?;
         let leaf_payload = opened_indexes
             .len()
             .checked_mul(
@@ -4326,10 +4162,12 @@ fn validate_query_geometry(
 ) -> Result<(), CommonProofProverError> {
     if geometries.len() != catalog.entries().len()
         || sorted_query_representatives.is_empty()
-        || !sorted_query_representatives.windows(2).all(|pair| pair[0] < pair[1])
-        || sorted_query_representatives.last().is_some_and(|representative| {
-            *representative >= catalog.evaluation_domain_size() / 2
-        })
+        || !sorted_query_representatives
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+        || sorted_query_representatives
+            .last()
+            .is_some_and(|representative| *representative >= catalog.evaluation_domain_size() / 2)
     {
         return Err(CommonProofProverError::InvalidOpening);
     }
@@ -4405,13 +4243,9 @@ impl<'input, Sink: CommonProofByteSink> CommonProofQuerySectionWriter<'input, Si
     where
         Artifact: CommonProofOpeningArtifact,
     {
-        let entry = self
-            .catalog
-            .entries()
-            .get(self.next_catalog_index)
-            .ok_or(CommonProofEncodingError::Prover(
-                CommonProofProverError::InvalidOpening,
-            ))?;
+        let entry = self.catalog.entries().get(self.next_catalog_index).ok_or(
+            CommonProofEncodingError::Prover(CommonProofProverError::InvalidOpening),
+        )?;
         let geometry = self
             .geometries
             .get(self.next_catalog_index)
@@ -4421,8 +4255,7 @@ impl<'input, Sink: CommonProofByteSink> CommonProofQuerySectionWriter<'input, Si
             ))?;
         if artifact.tree_catalog_index() != entry.tree_catalog_index()
             || artifact.leaf_count() != geometry.leaf_count
-            || artifact.canonical_leaf_byte_length()
-                != geometry.canonical_leaf_byte_length
+            || artifact.canonical_leaf_byte_length() != geometry.canonical_leaf_byte_length
         {
             return Err(CommonProofEncodingError::Prover(
                 CommonProofProverError::InvalidTree,
@@ -4475,24 +4308,23 @@ where
     write_u16_item(sink, tree_catalog_index)?;
     let list_payload_length = opened_indexes
         .len()
-        .checked_mul(
-            canonical_leaf_byte_length
-                .checked_add(4)
-                .ok_or(CommonProofEncodingError::Prover(
-                    CommonProofProverError::CountOverflow,
-                ))?,
-        )
+        .checked_mul(canonical_leaf_byte_length.checked_add(4).ok_or(
+            CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow),
+        )?)
         .and_then(|length| length.checked_add(6))
         .ok_or(CommonProofEncodingError::Prover(
             CommonProofProverError::CountOverflow,
         ))?;
-    write_item_header(sink, CanonicalItemType::HomogeneousList, list_payload_length)?;
+    write_item_header(
+        sink,
+        CanonicalItemType::HomogeneousList,
+        list_payload_length,
+    )?;
     write_u16(sink, CanonicalItemType::RawBytes.canonical_code())?;
     write_u32(
         sink,
-        u32::try_from(opened_indexes.len()).map_err(|_| {
-            CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow)
-        })?,
+        u32::try_from(opened_indexes.len())
+            .map_err(|_| CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow))?,
     )?;
     let mut leaf_bytes = Zeroizing::new(vec![0_u8; canonical_leaf_byte_length]);
     for leaf_index in opened_indexes {
@@ -4524,11 +4356,7 @@ where
 {
     let frontier_count = minimal_frontier_node_count(opened_indexes, leaf_count)
         .map_err(CommonProofEncodingError::Prover)?;
-    write_tuple_header(
-        sink,
-        PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
-        2,
-    )?;
+    write_tuple_header(sink, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, 2)?;
     write_u16_item(sink, tree_catalog_index)?;
     let list_payload_length = frontier_count
         .checked_mul(AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH)
@@ -4536,13 +4364,16 @@ where
         .ok_or(CommonProofEncodingError::Prover(
             CommonProofProverError::CountOverflow,
         ))?;
-    write_item_header(sink, CanonicalItemType::HomogeneousList, list_payload_length)?;
+    write_item_header(
+        sink,
+        CanonicalItemType::HomogeneousList,
+        list_payload_length,
+    )?;
     write_u16(sink, CanonicalItemType::NestedTuple.canonical_code())?;
     write_u32(
         sink,
-        u32::try_from(frontier_count).map_err(|_| {
-            CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow)
-        })?,
+        u32::try_from(frontier_count)
+            .map_err(|_| CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow))?,
     )?;
 
     let mut required = opened_indexes.iter().copied().collect::<BTreeSet<_>>();
@@ -4561,11 +4392,7 @@ where
                 let digest = artifact
                     .read_digest(level, sibling)
                     .map_err(CommonProofEncodingError::Artifact)?;
-                write_tuple_header(
-                    sink,
-                    PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER,
-                    3,
-                )?;
+                write_tuple_header(sink, PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER, 3)?;
                 write_u32_item(sink, level)?;
                 write_u64_item(sink, sibling)?;
                 write_hash_item(sink, digest)?;
@@ -4621,10 +4448,12 @@ fn minimal_frontier_coordinates(
     if sorted_unique_leaf_indexes.is_empty()
         || leaf_count == 0
         || !leaf_count.is_power_of_two()
-        || !sorted_unique_leaf_indexes.windows(2).all(|pair| pair[0] < pair[1])
-        || sorted_unique_leaf_indexes.last().is_some_and(|index| {
-            usize::try_from(*index).map_or(true, |index| index >= leaf_count)
-        })
+        || !sorted_unique_leaf_indexes
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+        || sorted_unique_leaf_indexes
+            .last()
+            .is_some_and(|index| usize::try_from(*index).map_or(true, |index| index >= leaf_count))
     {
         return Err(CommonProofProverError::InvalidOpening);
     }
@@ -4683,9 +4512,8 @@ where
     write_u16(sink, item_type.canonical_code())?;
     write_u32(
         sink,
-        u32::try_from(byte_length).map_err(|_| {
-            CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow)
-        })?,
+        u32::try_from(byte_length)
+            .map_err(|_| CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow))?,
     )
 }
 
@@ -4791,8 +4619,7 @@ pub(crate) struct CommonProofGenerationInput<'input> {
     pub(crate) schedule_position: Option<u32>,
     pub(crate) top_count: Option<u16>,
     pub(crate) relation_trees: Vec<RelationProofTreeInput>,
-    pub(crate) provided_pre_challenge_columns:
-        BTreeMap<u32, CommonProofSourcePolynomial>,
+    pub(crate) provided_pre_challenge_columns: BTreeMap<u32, CommonProofSourcePolynomial>,
     pub(crate) provided_non_integer_lift_auxiliary_columns:
         BTreeMap<u32, CommonProofSourcePolynomial>,
     pub(crate) maximum_external_memory_chunk_byte_length: u32,
@@ -4800,12 +4627,7 @@ pub(crate) struct CommonProofGenerationInput<'input> {
 }
 
 #[derive(Debug)]
-pub(crate) enum CommonProofGenerationError<
-    StorageError,
-    CoinError,
-    SinkError,
-    BoundOpeningError,
-> {
+pub(crate) enum CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError> {
     Prover(CommonProofProverError),
     Profile(ProofProfileError),
     Relation(RelationPlanError),
@@ -4817,14 +4639,8 @@ pub(crate) enum CommonProofGenerationError<
     Sink(SinkError),
     BoundOpening(BoundOpeningError),
     Cleanup {
-        original: Box<
-            CommonProofGenerationError<
-                StorageError,
-                CoinError,
-                SinkError,
-                BoundOpeningError,
-            >,
-        >,
+        original:
+            Box<CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError>>,
         cleanup: ProofExternalMemoryExecutorError<StorageError>,
     },
 }
@@ -4840,26 +4656,21 @@ enum GeneratedCommonProofStoragePlanError {
     Storage(ProofExternalMemoryError),
 }
 
-fn checked_add_u64(
-    left: u64,
-    right: u64,
-) -> Result<u64, GeneratedCommonProofStoragePlanError> {
-    left.checked_add(right).ok_or(
-        GeneratedCommonProofStoragePlanError::Prover(
+fn checked_add_u64(left: u64, right: u64) -> Result<u64, GeneratedCommonProofStoragePlanError> {
+    left.checked_add(right)
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
             CommonProofProverError::CountOverflow,
-        ),
-    )
+        ))
 }
 
 fn checked_multiply_u64(
     left: u64,
     right: u64,
 ) -> Result<u64, GeneratedCommonProofStoragePlanError> {
-    left.checked_mul(right).ok_or(
-        GeneratedCommonProofStoragePlanError::Prover(
+    left.checked_mul(right)
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
             CommonProofProverError::CountOverflow,
-        ),
-    )
+        ))
 }
 
 fn ceiling_division_u64(
@@ -4871,17 +4682,33 @@ fn ceiling_division_u64(
             CommonProofProverError::InvalidInput,
         ));
     }
-    Ok(numerator
-        .checked_add(denominator - 1)
-        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
-            CommonProofProverError::CountOverflow,
-        ))?
-        / denominator)
+    Ok(numerator.checked_add(denominator - 1).ok_or(
+        GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow),
+    )? / denominator)
 }
 
-fn common_tree_materialization_phase(
-    source: ProofTreeCatalogSource,
-) -> Option<u8> {
+fn common_tree_materialization_write_transaction_count(
+    leaf_count: u64,
+    canonical_leaf_byte_length: u64,
+    chunk_byte_length: u64,
+) -> Result<u64, GeneratedCommonProofStoragePlanError> {
+    let leaf_record_transaction_count =
+        ceiling_division_u64(canonical_leaf_byte_length, chunk_byte_length)?;
+    let digest_record_transaction_count =
+        ceiling_division_u64(HASH_BYTE_LENGTH as u64, chunk_byte_length)?;
+    let digest_count = leaf_count
+        .checked_mul(2)
+        .and_then(|count| count.checked_sub(1))
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    checked_add_u64(
+        checked_multiply_u64(leaf_count, leaf_record_transaction_count)?,
+        checked_multiply_u64(digest_count, digest_record_transaction_count)?,
+    )
+}
+
+fn common_tree_materialization_phase(source: ProofTreeCatalogSource) -> Option<u8> {
     match source {
         ProofTreeCatalogSource::RelationProofCreated {
             tree_role: ProofTreeRole::BaseOracle,
@@ -4920,9 +4747,7 @@ fn generated_common_proof_storage_plan(
                 .map(|phase| (phase, entry.tree_catalog_index(), entry))
         })
         .collect::<Vec<_>>();
-    common_entries.sort_unstable_by_key(|(phase, catalog_index, _)| {
-        (*phase, *catalog_index)
-    });
+    common_entries.sort_unstable_by_key(|(phase, catalog_index, _)| (*phase, *catalog_index));
     if common_entries.is_empty() {
         return Err(GeneratedCommonProofStoragePlanError::Prover(
             CommonProofProverError::InvalidTree,
@@ -4930,22 +4755,18 @@ fn generated_common_proof_storage_plan(
     }
 
     let query_step = u32::try_from(common_entries.len()).map_err(|_| {
-        GeneratedCommonProofStoragePlanError::Prover(
-            CommonProofProverError::CountOverflow,
-        )
+        GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
     })?;
-    let step_count = query_step.checked_add(1).ok_or(
-        GeneratedCommonProofStoragePlanError::Prover(
-            CommonProofProverError::CountOverflow,
-        ),
-    )?;
+    let step_count =
+        query_step
+            .checked_add(1)
+            .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                CommonProofProverError::CountOverflow,
+            ))?;
     let chunk_byte_length = u64::from(maximum_chunk_byte_length);
-    let hash_read_transaction_count = ceiling_division_u64(
-        HASH_BYTE_LENGTH as u64,
-        chunk_byte_length,
-    )?;
-    let maximum_opened_leaf_count =
-        u64::from(transcript_schedule.unique_query_count());
+    let hash_read_transaction_count =
+        ceiling_division_u64(HASH_BYTE_LENGTH as u64, chunk_byte_length)?;
+    let maximum_opened_leaf_count = u64::from(transcript_schedule.unique_query_count());
 
     let mut next_object_ordinal = 0_u32;
     let mut object_plans = Vec::new();
@@ -4955,15 +4776,10 @@ fn generated_common_proof_storage_plan(
     let mut maximum_total_read_byte_length = 0_u64;
     let mut maximum_transaction_count = 0_u64;
 
-    for (materialization_index, (_, catalog_index, entry)) in
-        common_entries.iter().enumerate()
-    {
-        let materialization_step = u32::try_from(materialization_index)
-            .map_err(|_| {
-                GeneratedCommonProofStoragePlanError::Prover(
-                    CommonProofProverError::CountOverflow,
-                )
-            })?;
+    for (materialization_index, (_, catalog_index, entry)) in common_entries.iter().enumerate() {
+        let materialization_step = u32::try_from(materialization_index).map_err(|_| {
+            GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+        })?;
         let tree_plan = common_proof_merkle_storage_plan(
             entry,
             next_object_ordinal,
@@ -4972,103 +4788,92 @@ fn generated_common_proof_storage_plan(
         )
         .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
         next_object_ordinal = tree_plan.next_object_ordinal();
-        let context = entry.common_context().ok_or(
-            GeneratedCommonProofStoragePlanError::Prover(
-                CommonProofProverError::InvalidTree,
-            ),
-        )?;
-        let leaf_count = u64::try_from(context.leaf_count()?).map_err(|_| {
-            GeneratedCommonProofStoragePlanError::Prover(
-                CommonProofProverError::CountOverflow,
-            )
+        let context =
+            entry
+                .common_context()
+                .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                    CommonProofProverError::InvalidTree,
+                ))?;
+        let leaf_count = u64::try_from(
+            context
+                .leaf_count()
+                .map_err(CommonProofProverError::from)
+                .map_err(GeneratedCommonProofStoragePlanError::Prover)?,
+        )
+        .map_err(|_| {
+            GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
         })?;
         let opened_leaf_count = maximum_opened_leaf_count.min(leaf_count);
         let tree_height = u64::from(leaf_count.trailing_zeros());
-        let frontier_node_bound =
-            checked_multiply_u64(opened_leaf_count, tree_height)?;
+        let frontier_node_bound = checked_multiply_u64(opened_leaf_count, tree_height)?;
         let construction_digest_read_count = leaf_count
             .checked_mul(2)
             .and_then(|count| count.checked_sub(1))
             .ok_or(GeneratedCommonProofStoragePlanError::Prover(
                 CommonProofProverError::CountOverflow,
             ))?;
-        let construction_read_byte_length = checked_multiply_u64(
-            construction_digest_read_count,
-            HASH_BYTE_LENGTH as u64,
-        )?;
+        let construction_read_byte_length =
+            checked_multiply_u64(construction_digest_read_count, HASH_BYTE_LENGTH as u64)?;
         let query_leaf_read_byte_length = checked_multiply_u64(
             opened_leaf_count,
             u64::try_from(tree_plan.canonical_leaf_byte_length()).map_err(|_| {
-                GeneratedCommonProofStoragePlanError::Prover(
-                    CommonProofProverError::CountOverflow,
-                )
+                GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
             })?,
         )?;
-        let query_frontier_read_byte_length = checked_multiply_u64(
-            frontier_node_bound,
-            HASH_BYTE_LENGTH as u64,
-        )?;
+        let query_frontier_read_byte_length =
+            checked_multiply_u64(frontier_node_bound, HASH_BYTE_LENGTH as u64)?;
         maximum_total_read_byte_length = checked_add_u64(
             maximum_total_read_byte_length,
             checked_add_u64(
                 construction_read_byte_length,
-                checked_add_u64(
-                    query_leaf_read_byte_length,
-                    query_frontier_read_byte_length,
-                )?,
+                checked_add_u64(query_leaf_read_byte_length, query_frontier_read_byte_length)?,
             )?,
         )?;
 
-        let object_count = u64::try_from(tree_plan.object_plans().len())
-            .map_err(|_| {
-                GeneratedCommonProofStoragePlanError::Prover(
-                    CommonProofProverError::CountOverflow,
-                )
-            })?;
+        let object_count = u64::try_from(tree_plan.object_plans().len()).map_err(|_| {
+            GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+        })?;
         maximum_transaction_count = checked_add_u64(
             maximum_transaction_count,
             checked_multiply_u64(object_count, 2)?,
         )?;
         for object_plan in tree_plan.object_plans() {
-            maximum_stored_byte_length = checked_add_u64(
-                maximum_stored_byte_length,
-                object_plan.exact_byte_length(),
-            )?;
+            maximum_stored_byte_length =
+                checked_add_u64(maximum_stored_byte_length, object_plan.exact_byte_length())?;
             maximum_total_written_byte_length = checked_add_u64(
                 maximum_total_written_byte_length,
                 object_plan.exact_byte_length(),
             )?;
-            maximum_transaction_count = checked_add_u64(
-                maximum_transaction_count,
-                ceiling_division_u64(
-                    object_plan.exact_byte_length(),
-                    chunk_byte_length,
-                )?,
-            )?;
         }
         maximum_transaction_count = checked_add_u64(
             maximum_transaction_count,
-            checked_multiply_u64(
-                construction_digest_read_count,
-                hash_read_transaction_count,
+            common_tree_materialization_write_transaction_count(
+                leaf_count,
+                u64::try_from(tree_plan.canonical_leaf_byte_length()).map_err(|_| {
+                    GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    )
+                })?,
+                chunk_byte_length,
             )?,
+        )?;
+        maximum_transaction_count = checked_add_u64(
+            maximum_transaction_count,
+            checked_multiply_u64(construction_digest_read_count, hash_read_transaction_count)?,
         )?;
         let query_leaf_read_transaction_count = checked_multiply_u64(
             opened_leaf_count,
             ceiling_division_u64(
-                u64::try_from(tree_plan.canonical_leaf_byte_length())
-                    .map_err(|_| {
-                        GeneratedCommonProofStoragePlanError::Prover(
-                            CommonProofProverError::CountOverflow,
-                        )
-                    })?,
+                u64::try_from(tree_plan.canonical_leaf_byte_length()).map_err(|_| {
+                    GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    )
+                })?,
                 chunk_byte_length,
             )?,
         )?;
-        let query_frontier_read_transaction_count = checked_multiply_u64(
-            frontier_node_bound,
-            hash_read_transaction_count,
-        )?;
+        let query_frontier_read_transaction_count =
+            checked_multiply_u64(frontier_node_bound, hash_read_transaction_count)?;
         maximum_transaction_count = checked_add_u64(
             maximum_transaction_count,
             checked_add_u64(
@@ -5090,21 +4895,16 @@ fn generated_common_proof_storage_plan(
         maximum_transaction_count,
         u64::try_from(common_entries.len())
             .map_err(|_| {
-                GeneratedCommonProofStoragePlanError::Prover(
-                    CommonProofProverError::CountOverflow,
-                )
+                GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
             })?
             .checked_add(1)
             .ok_or(GeneratedCommonProofStoragePlanError::Prover(
                 CommonProofProverError::CountOverflow,
             ))?,
     )?;
-    let maximum_transaction_operation_count =
-        u32::try_from(object_plans.len()).map_err(|_| {
-            GeneratedCommonProofStoragePlanError::Prover(
-                CommonProofProverError::CountOverflow,
-            )
-        })?;
+    let maximum_transaction_operation_count = u32::try_from(object_plans.len()).map_err(|_| {
+        GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+    })?;
     let external_memory_plan = ProofExternalMemoryPlan::new(
         step_count,
         maximum_chunk_byte_length,
@@ -5150,16 +4950,12 @@ fn validate_generation_relation_trees(
                 };
                 let expected_width = u32::try_from(ordered_column_ordinals.len())
                     .map_err(|_| CommonProofProverError::CountOverflow)?;
-                let expected_visibility = if ordered_column_ordinals.iter().any(
-                    |column_ordinal| {
-                        usize::try_from(*column_ordinal)
-                            .ok()
-                            .and_then(|index| variant.ordered_columns().get(index))
-                            .is_some_and(|column| {
-                                column.origin() == &RelationColumnOrigin::Prover
-                            })
-                    },
-                ) {
+                let expected_visibility = if ordered_column_ordinals.iter().any(|column_ordinal| {
+                    usize::try_from(*column_ordinal)
+                        .ok()
+                        .and_then(|index| variant.ordered_columns().get(index))
+                        .is_some_and(|column| column.origin() == &RelationColumnOrigin::Prover)
+                }) {
                     ProofLeafVisibility::SecretBearing
                 } else {
                     ProofLeafVisibility::Public
@@ -5170,11 +4966,7 @@ fn validate_generation_relation_trees(
                 {
                     return Err(CommonProofProverError::InvalidTree);
                 }
-                validate_generation_tree_columns(
-                    variant,
-                    ordered_column_ordinals,
-                    None,
-                )?;
+                validate_generation_tree_columns(variant, ordered_column_ordinals, None)?;
             }
             (
                 RelationTreeDescriptor::BoundPublic {
@@ -5197,10 +4989,7 @@ fn validate_generation_relation_trees(
                     ) => ordered_column_ordinals.len() == 4,
                     (
                         BoundTreeConstructionKind::SetupPolynomial,
-                        StatementOwnedProofTreeInput::SetupPolynomial {
-                            row_width,
-                            ..
-                        },
+                        StatementOwnedProofTreeInput::SetupPolynomial { row_width, .. },
                     ) => usize::try_from(*row_width)
                         .is_ok_and(|width| width == ordered_column_ordinals.len()),
                     _ => false,
@@ -5241,25 +5030,20 @@ fn validate_generation_tree_columns(
                 },
                 Some(expected),
             ) if *expected_root_source_ordinal == expected => {}
-            (RelationColumnOrigin::BoundTree { .. }, _)
-            | (_, Some(_)) => return Err(CommonProofProverError::InvalidTree),
+            (RelationColumnOrigin::BoundTree { .. }, _) | (_, Some(_)) => {
+                return Err(CommonProofProverError::InvalidTree);
+            }
             (_, None) => {}
         }
     }
     Ok(())
 }
 
-fn statement_owned_tree_root(
-    input: &RelationProofTreeInput,
-) -> Option<[u8; HASH_BYTE_LENGTH]> {
+fn statement_owned_tree_root(input: &RelationProofTreeInput) -> Option<[u8; HASH_BYTE_LENGTH]> {
     match input {
         RelationProofTreeInput::BoundPublic(
-            StatementOwnedProofTreeInput::CommittedMaterial {
-                expected_root, ..
-            }
-            | StatementOwnedProofTreeInput::SetupPolynomial {
-                expected_root, ..
-            },
+            StatementOwnedProofTreeInput::CommittedMaterial { expected_root, .. }
+            | StatementOwnedProofTreeInput::SetupPolynomial { expected_root, .. },
         ) => Some(*expected_root),
         RelationProofTreeInput::ProofCreated { .. } => None,
     }
@@ -5273,48 +5057,30 @@ fn unique_catalog_entry(
         .entries()
         .iter()
         .filter(|entry| predicate(entry.source()));
-    let entry = matches
-        .next()
-        .ok_or(CommonProofProverError::InvalidTree)?;
+    let entry = matches.next().ok_or(CommonProofProverError::InvalidTree)?;
     if matches.next().is_some() {
         return Err(CommonProofProverError::InvalidTree);
     }
     Ok(entry)
 }
 
-fn map_private_coin_generation_error<
-    StorageError,
-    CoinError,
-    SinkError,
-    BoundOpeningError,
->(
+fn map_private_coin_generation_error<StorageError, CoinError, SinkError, BoundOpeningError>(
     error: CommonProofPrivateCoinError<CoinError>,
 ) -> CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError> {
     match error {
-        CommonProofPrivateCoinError::Prover(error) => {
-            CommonProofGenerationError::Prover(error)
-        }
+        CommonProofPrivateCoinError::Prover(error) => CommonProofGenerationError::Prover(error),
         CommonProofPrivateCoinError::CoinSource(error) => {
             CommonProofGenerationError::CoinSource(error)
         }
     }
 }
 
-fn map_tree_storage_generation_error<
-    StorageError,
-    CoinError,
-    SinkError,
-    BoundOpeningError,
->(
+fn map_tree_storage_generation_error<StorageError, CoinError, SinkError, BoundOpeningError>(
     error: CommonProofTreeStorageError<StorageError, CoinError>,
 ) -> CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError> {
     match error {
-        CommonProofTreeStorageError::Prover(error) => {
-            CommonProofGenerationError::Prover(error)
-        }
-        CommonProofTreeStorageError::Storage(error) => {
-            CommonProofGenerationError::Storage(error)
-        }
+        CommonProofTreeStorageError::Prover(error) => CommonProofGenerationError::Prover(error),
+        CommonProofTreeStorageError::Storage(error) => CommonProofGenerationError::Storage(error),
         CommonProofTreeStorageError::CoinSource(error) => {
             CommonProofGenerationError::CoinSource(error)
         }
@@ -5328,10 +5094,7 @@ fn materialize_evaluated_common_tree<Storage, Coins>(
     storage: &mut Storage,
     coins: &mut Coins,
     column_evaluations: &[CommonProofColumnEvaluations],
-) -> Result<
-    StoredCommonProofMerkleTree,
-    CommonProofTreeStorageError<Storage::Error, Coins::Error>,
->
+) -> Result<StoredCommonProofMerkleTree, CommonProofTreeStorageError<Storage::Error, Coins::Error>>
 where
     Storage: ProofExternalMemory,
     Coins: CommonProofPrivateCoinSource,
@@ -5413,13 +5176,8 @@ where
         coins,
         column_evaluations,
     )?;
-    insert_materialized_tree(
-        tree,
-        tree_roots,
-        root_present,
-        stored_trees,
-    )
-    .map_err(CommonProofTreeStorageError::Prover)?;
+    insert_materialized_tree(tree, tree_roots, root_present, stored_trees)
+        .map_err(CommonProofTreeStorageError::Prover)?;
     executor
         .complete_step(storage)
         .map_err(CommonProofTreeStorageError::Storage)
@@ -5438,12 +5196,7 @@ pub(crate) fn generate_common_proof<Storage, Coins, Sink, BoundOpenings>(
     bound_openings: &mut BoundOpenings,
 ) -> Result<
     (),
-    CommonProofGenerationError<
-        Storage::Error,
-        Coins::Error,
-        Sink::Error,
-        BoundOpenings::Error,
-    >,
+    CommonProofGenerationError<Storage::Error, Coins::Error, Sink::Error, BoundOpenings::Error>,
 >
 where
     Storage: ProofExternalMemory,
@@ -5470,15 +5223,12 @@ where
             CommonProofProverError::InvalidInput,
         ));
     }
-    let validated_artifact = ValidatedRelationPlanArtifact::from_compiled_plan(
-        relation_plan,
-        relation_context,
-    )
-    .map_err(CommonProofGenerationError::Profile)?;
-    let canonical_header_bytes = canonical_proof_object_header_bytes(
-        canonical_application_statement_bytes,
-    )
-    .map_err(CommonProofGenerationError::Prover)?;
+    let validated_artifact =
+        ValidatedRelationPlanArtifact::from_compiled_plan(relation_plan, relation_context)
+            .map_err(CommonProofGenerationError::Profile)?;
+    let canonical_header_bytes =
+        canonical_proof_object_header_bytes(canonical_application_statement_bytes)
+            .map_err(CommonProofGenerationError::Prover)?;
     let variant = relation_plan
         .select_variant(schedule_position, top_count)
         .map_err(CommonProofGenerationError::Relation)?;
@@ -5488,19 +5238,14 @@ where
         .common_proof_transcript_schedule(relation_context)
         .map_err(CommonProofGenerationError::Relation)?;
     let evaluation_domain = ProofEvaluationDomain::new(
-        usize::try_from(variant.evaluation_domain_size())
-            .map_err(|_| {
-                CommonProofGenerationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                )
-            })?,
+        usize::try_from(variant.evaluation_domain_size()).map_err(|_| {
+            CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow)
+        })?,
         relation_context.evaluation_coset_offset,
     )
     .map_err(CommonProofProverError::from)
     .map_err(CommonProofGenerationError::Prover)?;
-    if evaluation_domain.generator().canonical()
-        != relation_context.evaluation_domain_generator
-    {
+    if evaluation_domain.generator().canonical() != relation_context.evaluation_domain_generator {
         return Err(CommonProofGenerationError::Prover(
             CommonProofProverError::InvalidTree,
         ));
@@ -5544,16 +5289,18 @@ where
     let mut root_present = vec![false; catalog.entries().len()];
     for (tree_index, relation_tree) in relation_trees.iter().enumerate() {
         if let Some(root) = statement_owned_tree_root(relation_tree) {
-            let destination = tree_roots
-                .get_mut(tree_index)
-                .ok_or(CommonProofGenerationError::Prover(
-                    CommonProofProverError::InvalidTree,
-                ))?;
-            let presence = root_present
-                .get_mut(tree_index)
-                .ok_or(CommonProofGenerationError::Prover(
-                    CommonProofProverError::InvalidTree,
-                ))?;
+            let destination =
+                tree_roots
+                    .get_mut(tree_index)
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ))?;
+            let presence =
+                root_present
+                    .get_mut(tree_index)
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ))?;
             *destination = root;
             *presence = true;
         }
@@ -5563,15 +5310,10 @@ where
     opening_geometries
         .try_reserve_exact(catalog.entries().len())
         .map_err(|_| {
-            CommonProofGenerationError::Prover(
-                CommonProofProverError::AllocationLimitExceeded,
-            )
+            CommonProofGenerationError::Prover(CommonProofProverError::AllocationLimitExceeded)
         })?;
     for entry in catalog.entries() {
-        if let Some(tree_plan) = storage_plan
-            .tree_plans
-            .get(&entry.tree_catalog_index())
-        {
+        if let Some(tree_plan) = storage_plan.tree_plans.get(&entry.tree_catalog_index()) {
             let leaf_count = entry
                 .common_context()
                 .ok_or(CommonProofGenerationError::Prover(
@@ -5583,8 +5325,7 @@ where
             opening_geometries.push(CommonProofOpeningGeometry {
                 tree_catalog_index: entry.tree_catalog_index(),
                 leaf_count,
-                canonical_leaf_byte_length: tree_plan
-                    .canonical_leaf_byte_length(),
+                canonical_leaf_byte_length: tree_plan.canonical_leaf_byte_length(),
             });
         } else if entry.source() == ProofTreeCatalogSource::RelationBoundPublic {
             opening_geometries.push(
@@ -5599,17 +5340,12 @@ where
         }
     }
 
-    let mut executor = ProofExternalMemoryExecutor::new(
-        storage_plan.external_memory_plan,
-    )
-    .map_err(CommonProofGenerationError::StoragePlan)?;
+    let mut executor = ProofExternalMemoryExecutor::new(storage_plan.external_memory_plan)
+        .map_err(CommonProofGenerationError::StoragePlan)?;
     let generation_result = (|| {
-        let mut stored_trees =
-            BTreeMap::<u16, StoredCommonProofMerkleTree>::new();
+        let mut stored_trees = BTreeMap::<u16, StoredCommonProofMerkleTree>::new();
 
-        for (tree_index, descriptor) in
-            variant.ordered_trees().iter().enumerate()
-        {
+        for (tree_index, descriptor) in variant.ordered_trees().iter().enumerate() {
             let RelationTreeDescriptor::ProofCreated {
                 proof_tree_role: 1,
                 ordered_column_ordinals,
@@ -5617,18 +5353,19 @@ where
             else {
                 continue;
             };
-            let entry = catalog.entries().get(tree_index).ok_or(
-                CommonProofGenerationError::Prover(
-                    CommonProofProverError::InvalidTree,
-                ),
-            )?;
-            let evaluations =
-                evaluate_pre_challenge_common_proof_tree_columns(
-                    &evaluation_domain,
-                    &pre_challenge_columns,
-                    ordered_column_ordinals,
-                )
-                .map_err(CommonProofGenerationError::Prover)?;
+            let entry =
+                catalog
+                    .entries()
+                    .get(tree_index)
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ))?;
+            let evaluations = evaluate_pre_challenge_common_proof_tree_columns(
+                &evaluation_domain,
+                &pre_challenge_columns,
+                ordered_column_ordinals,
+            )
+            .map_err(CommonProofGenerationError::Prover)?;
             materialize_and_record_common_tree(
                 entry,
                 &evaluations,
@@ -5669,9 +5406,7 @@ where
         }
 
         let mut application_challenges = Vec::new();
-        for challenge_group in
-            transcript_schedule.ordered_application_challenge_groups()
-        {
+        for challenge_group in transcript_schedule.ordered_application_challenge_groups() {
             let challenge = challenge_group.challenge();
             let values = transcript
                 .sample_application_challenge_group(challenge)
@@ -5707,9 +5442,7 @@ where
             relation_context.maximum_fiat_shamir_candidate_draws_per_output,
         )
         .map_err(map_private_coin_generation_error)?;
-        for (tree_index, descriptor) in
-            variant.ordered_trees().iter().enumerate()
-        {
+        for (tree_index, descriptor) in variant.ordered_trees().iter().enumerate() {
             let RelationTreeDescriptor::ProofCreated {
                 proof_tree_role: 2,
                 ordered_column_ordinals,
@@ -5717,11 +5450,13 @@ where
             else {
                 continue;
             };
-            let entry = catalog.entries().get(tree_index).ok_or(
-                CommonProofGenerationError::Prover(
-                    CommonProofProverError::InvalidTree,
-                ),
-            )?;
+            let entry =
+                catalog
+                    .entries()
+                    .get(tree_index)
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ))?;
             let evaluations = evaluate_common_proof_tree_columns(
                 &evaluation_domain,
                 &columns,
@@ -5759,9 +5494,7 @@ where
         }
 
         let mut composition_challenges = Vec::new();
-        for constraint_ordinal in
-            0..transcript_schedule.composition_challenge_count()
-        {
+        for constraint_ordinal in 0..transcript_schedule.composition_challenge_count() {
             composition_challenges.push(
                 transcript
                     .sample_composition_challenge(constraint_ordinal)
@@ -5785,19 +5518,12 @@ where
             relation_context.maximum_fiat_shamir_candidate_draws_per_output,
         )
         .map_err(map_private_coin_generation_error)?;
-        for (component_index, component) in
-            quotient_components.iter().enumerate()
-        {
+        for (component_index, component) in quotient_components.iter().enumerate() {
             let component_ordinal = u16::try_from(component_index).map_err(|_| {
-                CommonProofGenerationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                )
+                CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow)
             })?;
             let entry = unique_catalog_entry(&catalog, |source| {
-                source
-                    == ProofTreeCatalogSource::QuotientComponent {
-                        component_ordinal,
-                    }
+                source == ProofTreeCatalogSource::QuotientComponent { component_ordinal }
             })
             .map_err(CommonProofGenerationError::Prover)?;
             let evaluations = vec![CommonProofColumnEvaluations::Extension(
@@ -5829,9 +5555,8 @@ where
         let mut deep_points = Vec::new();
         for point_ordinal in 0..transcript_schedule.deep_point_count() {
             let mut relation_error = None;
-            let point = transcript.sample_deep_point(
-                point_ordinal,
-                |candidate| match variant.deep_point_candidate_is_forbidden(
+            let point = transcript.sample_deep_point(point_ordinal, |candidate| {
+                match variant.deep_point_candidate_is_forbidden(
                     relation_context,
                     point_ordinal,
                     candidate,
@@ -5842,14 +5567,12 @@ where
                         relation_error = Some(error);
                         true
                     }
-                },
-            );
+                }
+            });
             if let Some(error) = relation_error {
                 return Err(CommonProofGenerationError::Relation(error));
             }
-            deep_points.push(
-                point.map_err(CommonProofGenerationError::Transcript)?,
-            );
+            deep_points.push(point.map_err(CommonProofGenerationError::Transcript)?);
         }
         let opening_points = variant
             .derive_opening_points(relation_context, &deep_points)
@@ -5872,14 +5595,12 @@ where
             .absorb_deep_evaluations(&deep_evaluations)
             .map_err(CommonProofGenerationError::Transcript)?;
 
-        if transcript_schedule.privacy_mode()
-            == CommonProofPrivacyMode::SecretBearing
-        {
-            let mask = opening_batch_mask.as_ref().ok_or(
-                CommonProofGenerationError::Prover(
+        if transcript_schedule.privacy_mode() == CommonProofPrivacyMode::SecretBearing {
+            let mask = opening_batch_mask
+                .as_ref()
+                .ok_or(CommonProofGenerationError::Prover(
                     CommonProofProverError::InvalidMask,
-                ),
-            )?;
+                ))?;
             let entry = unique_catalog_entry(&catalog, |source| {
                 source == ProofTreeCatalogSource::OpeningBatchMask
             })
@@ -5903,9 +5624,7 @@ where
             )
             .map_err(map_tree_storage_generation_error)?;
             transcript
-                .absorb_opening_batch_mask_root(
-                    tree_roots[usize::from(entry.tree_catalog_index())],
-                )
+                .absorb_opening_batch_mask_root(tree_roots[usize::from(entry.tree_catalog_index())])
                 .map_err(CommonProofGenerationError::Transcript)?;
         } else if opening_batch_mask.is_some() {
             return Err(CommonProofGenerationError::Prover(
@@ -5940,25 +5659,18 @@ where
             let challenge = transcript
                 .sample_fri_fold_challenge(fold_ordinal)
                 .map_err(CommonProofGenerationError::Transcript)?;
-            let (next_domain, next_evaluations) = construct_next_fri_layer(
-                &fri_evaluations,
-                fri_domain,
-                challenge,
-            )
-            .map_err(CommonProofGenerationError::Prover)?;
+            let (next_domain, next_evaluations) =
+                construct_next_fri_layer(&fri_evaluations, fri_domain, challenge)
+                    .map_err(CommonProofGenerationError::Prover)?;
             fri_domain = next_domain;
             fri_evaluations = next_evaluations;
             if fold_ordinal + 1 < transcript_schedule.fri_fold_count() {
                 let entry = unique_catalog_entry(&catalog, |source| {
-                    source
-                        == ProofTreeCatalogSource::NonterminalFriLayer {
-                            fold_ordinal,
-                        }
+                    source == ProofTreeCatalogSource::NonterminalFriLayer { fold_ordinal }
                 })
                 .map_err(CommonProofGenerationError::Prover)?;
-                let mut evaluations = vec![
-                    CommonProofColumnEvaluations::Extension(fri_evaluations),
-                ];
+                let mut evaluations =
+                    vec![CommonProofColumnEvaluations::Extension(fri_evaluations)];
                 materialize_and_record_common_tree(
                     entry,
                     &evaluations,
@@ -5972,9 +5684,7 @@ where
                 )
                 .map_err(map_tree_storage_generation_error)?;
                 fri_evaluations = match evaluations.pop() {
-                    Some(CommonProofColumnEvaluations::Extension(values)) => {
-                        values
-                    }
+                    Some(CommonProofColumnEvaluations::Extension(values)) => values,
                     _ => {
                         return Err(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidFriLayer,
@@ -6014,13 +5724,12 @@ where
                 CommonProofProverError::InvalidTree,
             ));
         }
-        let query_section_byte_length =
-            common_proof_query_section_byte_length(
-                &catalog,
-                &opening_geometries,
-                &sorted_query_representatives,
-            )
-            .map_err(CommonProofGenerationError::Prover)?;
+        let query_section_byte_length = common_proof_query_section_byte_length(
+            &catalog,
+            &opening_geometries,
+            &sorted_query_representatives,
+        )
+        .map_err(CommonProofGenerationError::Prover)?;
         write_common_proof_prefix(
             sink,
             &canonical_header_bytes,
@@ -6031,12 +5740,8 @@ where
             &transcript_schedule,
         )
         .map_err(|error| match error {
-            CommonProofEncodingError::Prover(error) => {
-                CommonProofGenerationError::Prover(error)
-            }
-            CommonProofEncodingError::Sink(error) => {
-                CommonProofGenerationError::Sink(error)
-            }
+            CommonProofEncodingError::Prover(error) => CommonProofGenerationError::Prover(error),
+            CommonProofEncodingError::Sink(error) => CommonProofGenerationError::Sink(error),
             CommonProofEncodingError::Artifact(artifact) => match artifact {},
         })?;
 
@@ -6044,10 +5749,8 @@ where
             .begin_query_openings(query_section_byte_length)
             .map_err(CommonProofGenerationError::Transcript)?;
         {
-            let transcript_sink = CommonProofTranscriptQuerySink::new(
-                sink,
-                &mut query_opening_absorber,
-            );
+            let transcript_sink =
+                CommonProofTranscriptQuerySink::new(sink, &mut query_opening_absorber);
             let mut writer = CommonProofQuerySectionWriter::new(
                 transcript_sink,
                 &catalog,
@@ -6090,11 +5793,9 @@ where
                         })?;
                     continue;
                 }
-                let tree = stored_trees
-                    .get(&entry.tree_catalog_index())
-                    .ok_or(CommonProofGenerationError::Prover(
-                        CommonProofProverError::InvalidTree,
-                    ))?;
+                let tree = stored_trees.get(&entry.tree_catalog_index()).ok_or(
+                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree),
+                )?;
                 let mut prefetcher = CommonProofOpeningPrefetcher::new(
                     tree,
                     entry,
@@ -6167,9 +5868,8 @@ where
 mod tests {
     use super::*;
     use crate::foundation::{
-        ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput,
-        ActionRandomnessRoot, ParticipantIdentity, PersistentProofCoinInput,
-        ProofApplicationSlot,
+        ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
+        ParticipantIdentity, PersistentProofCoinInput, ProofApplicationSlot,
     };
 
     fn base(value: u64) -> ProofBaseFieldElement {
@@ -6218,8 +5918,7 @@ mod tests {
         for (left_ordinal, left_value) in left.iter().copied().enumerate() {
             for (right_ordinal, right_value) in right.iter().copied().enumerate() {
                 let sum_ordinal = left_ordinal + right_ordinal;
-                output[sum_ordinal] =
-                    output[sum_ordinal].add(left_value.multiply(right_value));
+                output[sum_ordinal] = output[sum_ordinal].add(left_value.multiply(right_value));
             }
         }
         output
@@ -6229,28 +5928,29 @@ mod tests {
         coefficients: &[ProofBaseFieldElement],
         theta: ProofBaseFieldElement,
     ) -> ProofBaseFieldElement {
-        coefficients.iter().rev().fold(
-            ProofBaseFieldElement::ZERO,
-            |accumulated, coefficient| accumulated.multiply(theta).add(*coefficient),
-        )
+        coefficients
+            .iter()
+            .rev()
+            .fold(ProofBaseFieldElement::ZERO, |accumulated, coefficient| {
+                accumulated.multiply(theta).add(*coefficient)
+            })
     }
 
     #[test]
     fn trace_mask_changes_coefficients_but_preserves_every_trace_domain_value() {
         let witness = CommonProofSourcePolynomial::Base(vec![base(7), base(11), base(13)]);
         let mask = CommonProofSourcePolynomial::Base(vec![base(17), base(19), base(23)]);
-        let masked = apply_trace_mask(witness.clone(), 8, mask)
-            .expect("valid trace mask is applied");
+        let masked =
+            apply_trace_mask(witness.clone(), 8, mask).expect("valid trace mask is applied");
         assert_ne!(masked, witness);
 
         let trace_domain = ProofEvaluationDomain::new(8, 7)
             .expect("evaluation domain exposes the trace subgroup generator");
         for position in 0..trace_domain.size() {
-            let point = ProofChallengeExtensionElement::from_base(
-                trace_domain.generator().power(
+            let point =
+                ProofChallengeExtensionElement::from_base(trace_domain.generator().power(
                     u64::try_from(position).expect("test position fits the field exponent"),
-                ),
-            );
+                ));
             assert_eq!(masked.evaluate_at(point), witness.evaluate_at(point));
         }
     }
@@ -6267,9 +5967,7 @@ mod tests {
 
     #[test]
     fn reversal_fingerprints_cover_zero_one_and_largest_non_native_challenges() {
-        let source = [3, -2, 7, 1, -4, 5, 2, -1]
-            .map(signed_base)
-            .to_vec();
+        let source = [3, -2, 7, 1, -4, 5, 2, -1].map(signed_base).to_vec();
         let mut reversed = source.iter().copied().rev().collect::<Vec<_>>();
         for theta in [base(0), base(1), base(96)] {
             let prefix = prefix_evaluation_rows(&source, theta);
@@ -6327,13 +6025,8 @@ mod tests {
                         &ordinary[row_count..],
                     ),
                 ] {
-                    let transpose = convolution_transpose_rows(
-                        kind,
-                        &multiplicand,
-                        &suffix,
-                        theta,
-                    )
-                    .expect("checked transpose rows");
+                    let transpose = convolution_transpose_rows(kind, &multiplicand, &suffix, theta)
+                        .expect("checked transpose rows");
                     let dot_product = transpose
                         .iter()
                         .copied()
@@ -6372,8 +6065,7 @@ mod tests {
             let mut multiplier = multiplier_low.clone();
             multiplier.extend_from_slice(&multiplier_high);
             let product = naive_negacyclic_product(&multiplicand, &multiplier);
-            let reversed_multiplier_low =
-                multiplier_low.iter().copied().rev().collect::<Vec<_>>();
+            let reversed_multiplier_low = multiplier_low.iter().copied().rev().collect::<Vec<_>>();
             let reversed_multiplier_high =
                 multiplier_high.iter().copied().rev().collect::<Vec<_>>();
 
@@ -6418,12 +6110,8 @@ mod tests {
                         },
                     );
                     let selected_coefficients = match selected_half {
-                        RelationIntegerLiftFullRingHalf::Low => {
-                            &product[..half_ring_degree]
-                        }
-                        RelationIntegerLiftFullRingHalf::High => {
-                            &product[half_ring_degree..]
-                        }
+                        RelationIntegerLiftFullRingHalf::Low => &product[..half_ring_degree],
+                        RelationIntegerLiftFullRingHalf::High => &product[half_ring_degree..],
                     };
                     assert_eq!(
                         dot_product,
@@ -6438,8 +6126,7 @@ mod tests {
                         ProofBaseFieldElement::ZERO,
                         |sum, row_ordinal| {
                             sum.add(
-                                mutated[row_ordinal]
-                                    .multiply(reversed_multiplier_low[row_ordinal]),
+                                mutated[row_ordinal].multiply(reversed_multiplier_low[row_ordinal]),
                             )
                             .add(
                                 high_transpose[row_ordinal]
@@ -6458,9 +6145,7 @@ mod tests {
 
     #[test]
     fn product_accumulator_enforces_every_row_and_the_terminal_identity() {
-        let product_rows = [4, -3, 7, 2, -5, 1, 6, -2]
-            .map(signed_base)
-            .to_vec();
+        let product_rows = [4, -3, 7, 2, -5, 1, 6, -2].map(signed_base).to_vec();
         let accumulator = product_accumulator_rows(&product_rows);
         for row_ordinal in 0..product_rows.len() - 1 {
             assert_eq!(
@@ -6494,7 +6179,10 @@ mod tests {
         let quotient = (1..=11).map(extension).collect::<Vec<_>>();
         let components = decompose_composed_quotient(&quotient, 3, 4)
             .expect("quotient fits the declared decomposition");
-        assert_eq!(components.iter().map(Vec::len).collect::<Vec<_>>(), vec![4, 4, 3]);
+        assert_eq!(
+            components.iter().map(Vec::len).collect::<Vec<_>>(),
+            vec![4, 4, 3]
+        );
         assert_eq!(components.concat(), quotient);
         assert_eq!(
             decompose_composed_quotient(&[extension(1); 9], 2, 4),
@@ -6503,25 +6191,46 @@ mod tests {
     }
 
     #[test]
+    fn materialization_write_budget_counts_every_bounded_record_append() {
+        assert_eq!(
+            common_tree_materialization_write_transaction_count(4, 100, 1_024)
+                .expect("four leaves and seven digests fit the transaction count"),
+            11,
+        );
+        assert_eq!(
+            common_tree_materialization_write_transaction_count(4, 100, 48)
+                .expect("record-local chunking fits the transaction count"),
+            26,
+        );
+        assert_eq!(
+            common_tree_materialization_write_transaction_count(u64::MAX, 100, 48),
+            Err(GeneratedCommonProofStoragePlanError::Prover(
+                CommonProofProverError::CountOverflow,
+            )),
+        );
+    }
+
+    #[test]
     fn phase_pair_values_use_the_exact_opposite_domain_position() {
-        let first_column = CommonProofColumnEvaluations::Base(
-            (0..8).map(|value| base(value + 1)).collect(),
-        );
-        let second_column = CommonProofColumnEvaluations::Base(
-            (0..8).map(|value| base(value + 21)).collect(),
-        );
-        let (first, opposite) = common_proof_phase_pair_values(
-            &[first_column, second_column],
-            2,
-        )
-        .expect("phase pair is in range");
+        let first_column =
+            CommonProofColumnEvaluations::Base((0..8).map(|value| base(value + 1)).collect());
+        let second_column =
+            CommonProofColumnEvaluations::Base((0..8).map(|value| base(value + 21)).collect());
+        let (first, opposite) = common_proof_phase_pair_values(&[first_column, second_column], 2)
+            .expect("phase pair is in range");
         assert_eq!(
             first,
-            vec![ProofTreeValue::Base(base(3)), ProofTreeValue::Base(base(23))]
+            vec![
+                ProofTreeValue::Base(base(3)),
+                ProofTreeValue::Base(base(23))
+            ]
         );
         assert_eq!(
             opposite,
-            vec![ProofTreeValue::Base(base(7)), ProofTreeValue::Base(base(27))]
+            vec![
+                ProofTreeValue::Base(base(7)),
+                ProofTreeValue::Base(base(27))
+            ]
         );
     }
 
@@ -6561,8 +6270,7 @@ mod tests {
         .and_then(|header| header.encode())
         .expect("foundation proof header encodes");
         assert_eq!(
-            canonical_proof_object_header_bytes(&statement)
-                .expect("prover proof header encodes"),
+            canonical_proof_object_header_bytes(&statement).expect("prover proof header encodes"),
             expected
         );
         assert_eq!(
@@ -6578,9 +6286,9 @@ mod tests {
         let action_context_hash = Hash512::from_bytes([0x33; 64]);
         let participant_identity =
             ParticipantIdentity::from_bytes([0x44; ParticipantIdentity::BYTE_LENGTH]);
-        let action_private_randomness = ActionRandomnessRoot::from_injected_bytes(
-            Zeroizing::new([0x55; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]),
-        )
+        let action_private_randomness = ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
+            [0x55; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+        ))
         .derive(ActionRandomnessDerivationInput::new(
             suite_identifier,
             ceremony_context_hash,
@@ -6598,11 +6306,9 @@ mod tests {
             None,
         )
         .expect("reset-safe proof slot is assigned");
-        let attempt_input = PersistentProofCoinInput::new(
-            application_slot,
-            Hash512::from_bytes([0x66; 64]),
-        )
-        .expect("persistent proof attempt input is valid");
+        let attempt_input =
+            PersistentProofCoinInput::new(application_slot, Hash512::from_bytes([0x66; 64]))
+                .expect("persistent proof attempt input is valid");
         let attempt_identifier = action_private_randomness
             .persistent_proof_attempt_identifier(&attempt_input)
             .expect("persistent proof attempt derives");

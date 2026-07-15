@@ -426,7 +426,7 @@ type VerifiedObjectRecord = {
     session: StateVerifierSessionImplementation;
 };
 
-export type VerifiedStateReservationKernelAuthorization = Readonly<{
+type VerifiedStateReservationKernelAuthorization = Readonly<{
     capabilityMemory: WebAssembly.Memory;
     capabilityPointer: number;
     reservationHandle: number;
@@ -505,7 +505,8 @@ export const resolveVerifiedStateReservationKernelAuthorization = (
     kernel: TranscriptCoreKernel,
 ): VerifiedStateReservationKernelAuthorization => {
     if (
-        (typeof reservation !== 'object' && typeof reservation !== 'function') ||
+        (typeof reservation !== 'object' &&
+            typeof reservation !== 'function') ||
         reservation === null
     ) {
         throw new TypeError(
@@ -1140,7 +1141,9 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
             record.kind !== 'reservation' ||
             record.session !== this
         ) {
-            throw new TypeError('The verified state reservation is unavailable.');
+            throw new TypeError(
+                'The verified state reservation is unavailable.',
+            );
         }
         if (kernel !== this.#kernel) {
             throw new TypeError(

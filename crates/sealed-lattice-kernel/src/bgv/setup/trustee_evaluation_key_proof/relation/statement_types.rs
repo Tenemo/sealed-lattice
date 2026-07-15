@@ -200,9 +200,7 @@ impl TrusteeEvaluationKeyWitness {
     pub(crate) fn negative_indicator_coefficients(&self) -> &[i64] {
         match self {
             Self::PrivateVssShare { .. } => &[],
-            Self::TrusteeEvaluationKey { linkage, .. } => {
-                &linkage.negative_indicator_coefficients
-            }
+            Self::TrusteeEvaluationKey { linkage, .. } => &linkage.negative_indicator_coefficients,
         }
     }
 
@@ -227,9 +225,7 @@ impl TrusteeEvaluationKeyWitness {
     pub(crate) fn opening_randomness_by_limb_mut(&mut self) -> &mut [Vec<Vec<i64>>] {
         match self {
             Self::PrivateVssShare { .. } => &mut [],
-            Self::TrusteeEvaluationKey { linkage, .. } => {
-                &mut linkage.opening_randomness_by_limb
-            }
+            Self::TrusteeEvaluationKey { linkage, .. } => &mut linkage.opening_randomness_by_limb,
         }
     }
 
@@ -295,7 +291,10 @@ impl EvaluationKeyShareDescriptor {
         for component_b_by_limb in &self.component_b_by_digit {
             for (rns_limb_index, component_b) in component_b_by_limb.iter().enumerate() {
                 let modulus = DATA_PRIMES[rns_limb_index];
-                if component_b.iter().any(|coefficient| *coefficient >= modulus) {
+                if component_b
+                    .iter()
+                    .any(|coefficient| *coefficient >= modulus)
+                {
                     return Err(invalid_succinct_setup_proof(
                         "key component material contains noncanonical Q_share residues",
                     ));

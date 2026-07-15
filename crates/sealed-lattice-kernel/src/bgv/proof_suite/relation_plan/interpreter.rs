@@ -423,7 +423,7 @@ impl RelationPlanVariant {
                 || point.power(self.evaluation_domain_size) == evaluation_coset_constant
         };
         if point_is_in_excluded_domain(candidate)
-            || !self.zeroifiers_are_nonzero_at(candidate)?
+            || !self.zeroifiers_are_nonzero_at(context, candidate)?
         {
             return Ok(true);
         }
@@ -479,7 +479,7 @@ impl RelationPlanVariant {
                 .multiply_base(trace_generator.power(signed_exponent))
                 .frobenius(descriptor.conjugate_index);
             if point_is_in_excluded_domain(translated)
-                || !self.zeroifiers_are_nonzero_at(translated)?
+                || !self.zeroifiers_are_nonzero_at(context, translated)?
                 || prior_translated_points.contains(&translated.canonical_coordinates())
                 || !translated_points.insert(translated.canonical_coordinates())
             {
@@ -491,6 +491,7 @@ impl RelationPlanVariant {
 
     fn zeroifiers_are_nonzero_at(
         &self,
+        context: &RelationPlanCheckContext,
         evaluation_point: ProofChallengeExtensionElement,
     ) -> Result<bool, RelationPlanError> {
         let no_challenges = CheckedApplicationChallenges {
@@ -498,6 +499,8 @@ impl RelationPlanVariant {
         };
         for constraint in &self.ordered_constraints {
             let zeroifier = evaluate_program(
+                self,
+                context,
                 &constraint.zeroifier_postfix_expression,
                 evaluation_point,
                 &no_challenges,
@@ -743,7 +746,7 @@ mod tests {
     }
 }
 
-fn signed_rotation_exponent(
+pub(super) fn signed_rotation_exponent(
     rotation_is_negative: bool,
     rotation_magnitude: u64,
     trace_domain_size: u64,

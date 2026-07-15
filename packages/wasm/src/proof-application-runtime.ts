@@ -1,13 +1,10 @@
-import type {
-    RefusalReason,
-    VerificationResult,
-} from '@sealed-lattice/types';
+import type { RefusalReason, VerificationResult } from '@sealed-lattice/types';
 
+import { TranscriptCoreKernelCommandError } from './transcript-core-bridge/kernel-runtime.js';
 import type {
     DecodedProofApplicationBinding,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-types.js';
-import { TranscriptCoreKernelCommandError } from './transcript-core-bridge/kernel-runtime.js';
 
 const foundationHashByteLength = 64;
 const maximumUnsigned64 = 0xffff_ffff_ffff_ffffn;
@@ -296,8 +293,7 @@ const copyBytes = (
         !ArrayBuffer.isView(value) ||
         Object.prototype.toString.call(value) !== '[object Uint8Array]' ||
         (!allowEmpty && value.byteLength === 0) ||
-        (exactByteLength !== undefined &&
-            value.byteLength !== exactByteLength)
+        (exactByteLength !== undefined && value.byteLength !== exactByteLength)
     ) {
         throw new TypeError(`${label} has an invalid byte length.`);
     }
@@ -313,8 +309,7 @@ const hexToBytes = (
         typeof value !== 'string' ||
         value.length === 0 ||
         !lowercaseHexPattern.test(value) ||
-        (exactByteLength !== undefined &&
-            value.length !== exactByteLength * 2)
+        (exactByteLength !== undefined && value.length !== exactByteLength * 2)
     ) {
         throw new TypeError(`${label} is not canonical lowercase hexadecimal.`);
     }

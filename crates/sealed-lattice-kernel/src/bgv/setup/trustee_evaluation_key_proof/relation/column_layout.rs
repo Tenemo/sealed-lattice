@@ -7,6 +7,12 @@ use crate::bgv::setup::commitment::{
 };
 use crate::encoding::CanonicalResult;
 
+pub(crate) const QUOTIENT_COLUMN_ROW_CHECK_LOW: usize = 0;
+pub(crate) const QUOTIENT_COLUMN_ROW_CHECK_HIGH: usize = 1;
+pub(crate) const QUOTIENT_COLUMN_SUMCHECK_VANISHING: usize = 2;
+pub(crate) const QUOTIENT_COLUMN_SUMCHECK_RESIDUAL: usize = 3;
+pub(crate) const PHASE_TWO_COLUMN_COUNT: usize = 4;
+
 pub(crate) struct LimbColumnLayout {
     pub(crate) limb_index: usize,
     pub(crate) base_ring_degree: usize,
@@ -68,8 +74,7 @@ impl LimbColumnLayout {
         let claim_count = consistency_vector_count
             .checked_mul(consistency_repetitions)
             .ok_or_else(|| invalid_succinct_setup_proof("consistency claim count overflowed"))?;
-        let claim_mask_digit_counts =
-            vec![family_shape.claim_mask_digit_count(); claim_count];
+        let claim_mask_digit_counts = vec![family_shape.claim_mask_digit_count(); claim_count];
         let mut claim_mask_slot_offsets = Vec::with_capacity(claim_count + 1);
         let mut mask_slot_count = 0_usize;
         claim_mask_slot_offsets.push(mask_slot_count);

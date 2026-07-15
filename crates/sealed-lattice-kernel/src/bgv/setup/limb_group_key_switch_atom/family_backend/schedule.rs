@@ -213,11 +213,6 @@ fn bridged_kind<'a>(key: &'a EvaluationKeyShareDescriptor) -> CanonicalResult<Br
                 aggregate_residues_by_digit: &key.round_one_aggregate_diagonal,
             }
         }
-        EvaluationKeyShareKind::PublicKeyShare => {
-            return Err(invalid_schedule(
-                "public-key share descriptors do not belong to the key-bearing schedule",
-            ));
-        }
     })
 }
 

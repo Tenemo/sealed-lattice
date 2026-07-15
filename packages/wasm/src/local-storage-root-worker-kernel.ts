@@ -32,14 +32,14 @@ import {
     type VerifiedStateRecovery,
     type VerifiedStateReservation,
 } from './state-verifier-runtime.js';
-import type {
-    SetupMailboxSlot,
-    TranscriptCoreKernel,
-} from './transcript-core-bridge/kernel-types.js';
 import {
     resolveActionRandomnessKernelContext,
     type ActionRandomnessKernelContext,
 } from './transcript-core-bridge/action-randomness-kernel-context.js';
+import type {
+    SetupMailboxSlot,
+    TranscriptCoreKernel,
+} from './transcript-core-bridge/kernel-types.js';
 import {
     resolveLocalStorageRootKernelContext,
     type LocalStorageRootKernelContext,
@@ -93,7 +93,6 @@ const actionRandomnessCommands = Object.freeze({
     persistentProofAttempt: 5,
     openSealed: 10,
     setupMailboxEncapsulate: 3,
-    setupMailboxSignatureHedge: 4,
     setupActionRandomnessAuthorization: 11,
     targetReleaseAttempt: 7,
     validateSetupMailboxSourceKeys: 12,
@@ -119,11 +118,9 @@ type RootLease = {
     storageRootCommitment: Uint8Array<ArrayBuffer>;
 };
 
-export type WorkerActionRandomnessRecordContext =
-    BrowserActionRandomnessRecordContext;
+type WorkerActionRandomnessRecordContext = BrowserActionRandomnessRecordContext;
 
-export type WorkerSealedActionRandomnessSession =
-    BrowserSealedActionRandomnessSession;
+type WorkerSealedActionRandomnessSession = BrowserSealedActionRandomnessSession;
 
 export type ClosedWorkerSetupMailboxRandomnessOperations = Readonly<{
     readonly actionContextHash: ProtocolHash;
@@ -140,18 +137,10 @@ export type ClosedWorkerSetupMailboxRandomnessOperations = Readonly<{
         readonly envelopeAttemptIdentifier: Uint8Array<ArrayBuffer>;
         readonly sharedSecret: Uint8Array<ArrayBuffer>;
     }>;
-    withSignatureHedge<Result>(
-        input: {
-            readonly envelopeHash: ProtocolHash;
-            readonly setupMailboxSlot: SetupMailboxSlot;
-            readonly setupMailboxSlotHash: ProtocolHash;
-        },
-        consume: (hedge: Uint8Array<ArrayBuffer>) => Result,
-    ): Result;
     revoke(): void;
 }>;
 
-export type WorkerSetupMailboxRandomnessInput = Readonly<{
+type WorkerSetupMailboxRandomnessInput = Readonly<{
     readonly actionRandomnessSessionIdentifier: string;
     readonly sourceMailboxEncapsulationKey: Uint8Array;
     readonly sourceSigningVerificationKey: Uint8Array;
@@ -1018,11 +1007,10 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             input.canonicalRosterBytes,
             'Canonical roster bytes',
         );
-        const maximumRecoveryTransitionsPerStateKey =
-            encodeCanonicalUnsigned16(
-                input.maximumRecoveryTransitionsPerStateKey,
-                'Maximum recovery transitions per state key',
-            );
+        const maximumRecoveryTransitionsPerStateKey = encodeCanonicalUnsigned16(
+            input.maximumRecoveryTransitionsPerStateKey,
+            'Maximum recovery transitions per state key',
+        );
         const opened = openStateVerifierSession({
             configuration: {
                 actionContextHash: activeLease.binding.actionContextHash,
@@ -1102,7 +1090,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             capabilityKind: input.capabilityKind,
             kind: 'reservation',
             sessionIdentifier,
-            subjectParticipantIdentity: input.subjectParticipantIdentity.slice(),
+            subjectParticipantIdentity:
+                input.subjectParticipantIdentity.slice(),
             value: verified.value,
         });
         return Object.freeze({ isValid: true, value: identifier });
@@ -1117,11 +1106,10 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 'The action-randomness reservation input must be an object.',
             );
         }
-        const stateVerifierSessionIdentifier =
-            requireOpaqueWorkerIdentifier(
-                input.stateVerifierSessionIdentifier,
-                'State-verifier session identifier',
-            );
+        const stateVerifierSessionIdentifier = requireOpaqueWorkerIdentifier(
+            input.stateVerifierSessionIdentifier,
+            'State-verifier session identifier',
+        );
         const stateVerifierSession = this.#requireStateVerifierSessionRecord(
             stateVerifierSessionIdentifier,
         );
@@ -1159,8 +1147,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     input.canonicalStateCertificate,
                     'Canonical state certificate',
                 ),
-                capabilityKind:
-                    stateCapabilityKinds.setupActionRandomnessRoot,
+                capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
                 expectedAuthorizationHash,
                 subjectParticipantIdentity: activeBinding.participantId.slice(),
                 verifiedPredecessorRecovery: this.#resolvePredecessorRecovery(
@@ -1173,8 +1160,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             }
             const identifier = this.#issueOpaqueWorkerIdentifier();
             this.#stateObjects.set(identifier, {
-                capabilityKind:
-                    stateCapabilityKinds.setupActionRandomnessRoot,
+                capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
                 kind: 'reservation',
                 sessionIdentifier: stateVerifierSessionIdentifier,
                 subjectParticipantIdentity: activeBinding.participantId.slice(),
@@ -1435,9 +1421,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             sessionIdentifier,
             'Action-randomness session identifier',
         );
-        const sessionHandle = this.#actionRandomnessSessions.get(
-            copiedIdentifier,
-        );
+        const sessionHandle =
+            this.#actionRandomnessSessions.get(copiedIdentifier);
         if (sessionHandle === undefined) {
             return;
         }
@@ -1454,11 +1439,10 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 'The setup-mailbox randomness input must be an object.',
             );
         }
-        const actionRandomnessSessionIdentifier =
-            requireOpaqueWorkerIdentifier(
-                input.actionRandomnessSessionIdentifier,
-                'Action-randomness session identifier',
-            );
+        const actionRandomnessSessionIdentifier = requireOpaqueWorkerIdentifier(
+            input.actionRandomnessSessionIdentifier,
+            'Action-randomness session identifier',
+        );
         const stateReservationIdentifier = requireOpaqueWorkerIdentifier(
             input.stateReservationIdentifier,
             'State-reservation identifier',
@@ -1466,8 +1450,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         const initialBinding = this.#requireActiveLease().binding;
         const actionRandomnessSessionHandle =
             this.#requireActionRandomnessSession(
-            actionRandomnessSessionIdentifier,
-        );
+                actionRandomnessSessionIdentifier,
+            );
         const initialReservation = this.#requireStateReservation(
             stateReservationIdentifier,
             stateCapabilityKinds.setupActionRandomnessRoot,
@@ -1555,8 +1539,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 typeof setupMailboxSlot !== 'object' ||
                 setupMailboxSlot === null ||
                 setupMailboxSlot.suiteId !== suiteId ||
-                setupMailboxSlot.ceremonyContextHash !==
-                    ceremonyContextHash ||
+                setupMailboxSlot.ceremonyContextHash !== ceremonyContextHash ||
                 setupMailboxSlot.actionContextHash !== actionContextHash ||
                 setupMailboxSlot.rosterHash !== rosterHash ||
                 setupMailboxSlot.sourceParticipantId !== sourceParticipantId ||
@@ -1591,7 +1574,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             }) => {
                 const { reservation, sessionHandle, slotHashBytes } =
                     requireSlot(setupMailboxSlot, setupMailboxSlotHash);
-                const reservationAuthorization =
+                const slotReservationAuthorization =
                     this.#reservationAuthorizationBytes(reservation.value);
                 const copiedRecipientEncapsulationKey = copyExactBytes(
                     recipientEncapsulationKey,
@@ -1608,7 +1591,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                         actionRandomnessCommands.setupMailboxEncapsulate,
                         concatenateBytes(
                             encodeUnsigned32(sessionHandle),
-                            reservationAuthorization,
+                            slotReservationAuthorization,
                             rosterHashBytes,
                             slotHashBytes,
                             recipientParticipantIdentityBytes,
@@ -1646,57 +1629,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 } finally {
                     copiedRecipientEncapsulationKey.fill(0);
                     recipientParticipantIdentityBytes.fill(0);
-                    reservationAuthorization.fill(0);
+                    slotReservationAuthorization.fill(0);
                     slotHashBytes.fill(0);
-                    output?.fill(0);
-                }
-            },
-            withSignatureHedge: (
-                {
-                    envelopeHash,
-                    setupMailboxSlot,
-                    setupMailboxSlotHash,
-                },
-                consume,
-            ) => {
-                if (typeof consume !== 'function') {
-                    throw new BrowserActionStorageCustodyError(
-                        'InvalidInput',
-                        'The setup-mailbox signature consumer must be a function.',
-                    );
-                }
-                const { reservation, sessionHandle, slotHashBytes } =
-                    requireSlot(setupMailboxSlot, setupMailboxSlotHash);
-                const reservationAuthorization =
-                    this.#reservationAuthorizationBytes(reservation.value);
-                const envelopeHashBytes = protocolHashBytes(
-                    envelopeHash,
-                    'Setup-mailbox envelope hash',
-                );
-                let output: Uint8Array<ArrayBuffer> | undefined;
-                try {
-                    output = this.#runActionRandomnessCommand(
-                        actionRandomnessCommands.setupMailboxSignatureHedge,
-                        concatenateBytes(
-                            encodeUnsigned32(sessionHandle),
-                            reservationAuthorization,
-                            rosterHashBytes,
-                            envelopeHashBytes,
-                        ),
-                        'derive and consume a setup-mailbox signature hedge',
-                        'runtime',
-                    );
-                    if (output.byteLength !== attemptIdentifierByteLength) {
-                        throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM action-randomness kernel returned a malformed setup-mailbox signature hedge.',
-                        );
-                    }
-                    return consume(output);
-                } finally {
-                    reservationAuthorization.fill(0);
-                    slotHashBytes.fill(0);
-                    envelopeHashBytes.fill(0);
                     output?.fill(0);
                 }
             },
@@ -1766,8 +1700,9 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             expectedCapabilityKind,
             this.#requireActiveLease().binding,
         );
-        const reservationAuthorization =
-            this.#reservationAuthorizationBytes(reservation.value);
+        const reservationAuthorization = this.#reservationAuthorizationBytes(
+            reservation.value,
+        );
         try {
             return this.#parseProofAttemptOutput(
                 this.#runActionRandomnessCommand(
@@ -1824,8 +1759,9 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             stateCapabilityKinds.targetRelease,
             this.#requireActiveLease().binding,
         );
-        const reservationAuthorization =
-            this.#reservationAuthorizationBytes(reservation.value);
+        const reservationAuthorization = this.#reservationAuthorizationBytes(
+            reservation.value,
+        );
         try {
             return this.#parseProofAttemptOutput(
                 this.#runActionRandomnessCommand(
@@ -1928,11 +1864,10 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     ): Uint8Array<ArrayBuffer> {
         let authorization;
         try {
-            authorization =
-                resolveVerifiedStateReservationKernelAuthorization(
-                    reservation,
-                    this.#kernel,
-                );
+            authorization = resolveVerifiedStateReservationKernelAuthorization(
+                reservation,
+                this.#kernel,
+            );
         } catch (error) {
             throw new BrowserActionStorageCustodyError(
                 'InvalidState',
@@ -2050,10 +1985,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             }
 
             return Object.freeze({
-                applicationSlotHash: output.slice(
-                    0,
-                    foundationHashByteLength,
-                ),
+                applicationSlotHash: output.slice(0, foundationHashByteLength),
                 attemptIdentifier: output.slice(foundationHashByteLength),
             });
         } finally {
@@ -2819,116 +2751,121 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             );
         }
         const context = this.#actionRandomnessContext;
-        return context.runExclusive(`action randomness: ${operationName}`, () => {
-            let inputPointer = 0;
-            let metadataPointer = 0;
-            let outputPointer = 0;
-            let outputByteLength = 0;
-            try {
-                if (input.byteLength > 0) {
-                    inputPointer = context.allocate(input.byteLength);
-                    if (inputPointer === 0) {
+        return context.runExclusive(
+            `action randomness: ${operationName}`,
+            () => {
+                let inputPointer = 0;
+                let metadataPointer = 0;
+                let outputPointer = 0;
+                let outputByteLength = 0;
+                try {
+                    if (input.byteLength > 0) {
+                        inputPointer = context.allocate(input.byteLength);
+                        if (inputPointer === 0) {
+                            throw new BrowserActionStorageCustodyError(
+                                'OwnedWorkerFailure',
+                                'WASM could not allocate action-randomness input.',
+                            );
+                        }
+                        new Uint8Array(
+                            context.memory.buffer,
+                            inputPointer,
+                            input.byteLength,
+                        ).set(input);
+                    }
+                    metadataPointer = context.allocate(
+                        wasm32WordByteLength * 2,
+                    );
+                    if (metadataPointer === 0) {
                         throw new BrowserActionStorageCustodyError(
                             'OwnedWorkerFailure',
-                            'WASM could not allocate action-randomness input.',
+                            'WASM could not allocate action-randomness metadata.',
                         );
                     }
-                    new Uint8Array(
-                        context.memory.buffer,
+                    outputPointer = context.command(
+                        command,
                         inputPointer,
                         input.byteLength,
-                    ).set(input);
-                }
-                metadataPointer = context.allocate(wasm32WordByteLength * 2);
-                if (metadataPointer === 0) {
-                    throw new BrowserActionStorageCustodyError(
-                        'OwnedWorkerFailure',
-                        'WASM could not allocate action-randomness metadata.',
+                        metadataPointer,
+                        metadataPointer + wasm32WordByteLength,
                     );
-                }
-                outputPointer = context.command(
-                    command,
-                    inputPointer,
-                    input.byteLength,
-                    metadataPointer,
-                    metadataPointer + wasm32WordByteLength,
-                );
-                const metadata = new DataView(
-                    context.memory.buffer,
-                    metadataPointer,
-                    wasm32WordByteLength * 2,
-                );
-                const status = metadata.getUint32(0, true);
-                outputByteLength = metadata.getUint32(
-                    wasm32WordByteLength,
-                    true,
-                );
-                if (status !== 0) {
-                    if (outputPointer !== 0 || outputByteLength !== 0) {
-                        throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM action-randomness command returned output with an error status.',
-                        );
-                    }
-                    this.#throwCommandStatus(status, failureContext);
-                }
-                if (
-                    outputByteLength > maximumCommandByteLength ||
-                    (outputByteLength === 0) !== (outputPointer === 0) ||
-                    outputPointer + outputByteLength >
-                        context.memory.buffer.byteLength
-                ) {
-                    throw new BrowserActionStorageCustodyError(
-                        'OwnedWorkerFailure',
-                        'The WASM action-randomness command returned invalid output metadata.',
-                    );
-                }
-                return outputByteLength === 0
-                    ? new Uint8Array(0)
-                    : new Uint8Array(
-                          context.memory.buffer,
-                          outputPointer,
-                          outputByteLength,
-                      ).slice();
-            } catch (error) {
-                throw error instanceof BrowserActionStorageCustodyError
-                    ? error
-                    : new BrowserActionStorageCustodyError(
-                          'OwnedWorkerFailure',
-                          `The WASM kernel failed to ${operationName}.`,
-                          error,
-                      );
-            } finally {
-                input.fill(0);
-                if (outputPointer !== 0 && outputByteLength > 0) {
-                    new Uint8Array(
-                        context.memory.buffer,
-                        outputPointer,
-                        outputByteLength,
-                    ).fill(0);
-                    context.deallocate(outputPointer, outputByteLength);
-                }
-                if (metadataPointer !== 0) {
-                    new Uint8Array(
+                    const metadata = new DataView(
                         context.memory.buffer,
                         metadataPointer,
                         wasm32WordByteLength * 2,
-                    ).fill(0);
-                    context.deallocate(
-                        metadataPointer,
-                        wasm32WordByteLength * 2,
                     );
+                    const status = metadata.getUint32(0, true);
+                    outputByteLength = metadata.getUint32(
+                        wasm32WordByteLength,
+                        true,
+                    );
+                    if (status !== 0) {
+                        if (outputPointer !== 0 || outputByteLength !== 0) {
+                            throw new BrowserActionStorageCustodyError(
+                                'OwnedWorkerFailure',
+                                'The WASM action-randomness command returned output with an error status.',
+                            );
+                        }
+                        this.#throwCommandStatus(status, failureContext);
+                    }
+                    if (
+                        outputByteLength > maximumCommandByteLength ||
+                        (outputByteLength === 0) !== (outputPointer === 0) ||
+                        outputPointer + outputByteLength >
+                            context.memory.buffer.byteLength
+                    ) {
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'The WASM action-randomness command returned invalid output metadata.',
+                        );
+                    }
+                    return outputByteLength === 0
+                        ? new Uint8Array(0)
+                        : new Uint8Array(
+                              context.memory.buffer,
+                              outputPointer,
+                              outputByteLength,
+                          ).slice();
+                } catch (error) {
+                    throw error instanceof BrowserActionStorageCustodyError
+                        ? error
+                        : new BrowserActionStorageCustodyError(
+                              'OwnedWorkerFailure',
+                              `The WASM kernel failed to ${operationName}.`,
+                              error,
+                          );
+                } finally {
+                    input.fill(0);
+                    if (outputPointer !== 0 && outputByteLength > 0) {
+                        new Uint8Array(
+                            context.memory.buffer,
+                            outputPointer,
+                            outputByteLength,
+                        ).fill(0);
+                        context.deallocate(outputPointer, outputByteLength);
+                    }
+                    if (metadataPointer !== 0) {
+                        new Uint8Array(
+                            context.memory.buffer,
+                            metadataPointer,
+                            wasm32WordByteLength * 2,
+                        ).fill(0);
+                        context.deallocate(
+                            metadataPointer,
+                            wasm32WordByteLength * 2,
+                        );
+                    }
+                    if (inputPointer !== 0) {
+                        new Uint8Array(
+                            context.memory.buffer,
+                            inputPointer,
+                            input.byteLength,
+                        ).fill(0);
+                        context.deallocate(inputPointer, input.byteLength);
+                    }
                 }
-                if (inputPointer !== 0) {
-                    new Uint8Array(
-                        context.memory.buffer,
-                        inputPointer,
-                        input.byteLength,
-                    ).fill(0);
-                    context.deallocate(inputPointer, input.byteLength);
-                }
-            }
-        });
+            },
+        );
     }
 
     #runCommand(
@@ -3465,8 +3402,10 @@ const createWorkerKernelFromLoadedKernel = (input: {
             workerKernel.closeActionRandomness(sessionIdentifier),
         createAndSeal: (operationInput) =>
             workerKernel.createAndSealActionRandomness(operationInput),
-        openSetupMailboxRandomness: async (operationInput) =>
-            workerKernel.openClosedSetupMailboxRandomness(operationInput),
+        openSetupMailboxRandomness: (operationInput) =>
+            Promise.resolve().then(() =>
+                workerKernel.openClosedSetupMailboxRandomness(operationInput),
+            ),
         openSealed: (operationInput) =>
             workerKernel.openSealedActionRandomness(operationInput),
     });

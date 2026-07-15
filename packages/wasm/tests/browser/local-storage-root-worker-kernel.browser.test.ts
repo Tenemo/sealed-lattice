@@ -206,7 +206,9 @@ describe('Local storage-root real-WASM browser worker', () => {
                 stateVerifierSessionIdentifier: stateSession.value,
             });
         if (!rootReservation.isValid) {
-            throw new Error('Worker action-randomness reservation did not verify.');
+            throw new Error(
+                'Worker action-randomness reservation did not verify.',
+            );
         }
         expect(created.actionRandomnessCommitment).toHaveLength(64);
         expect(created.canonicalEnvelope.length).toBeGreaterThan(64);
@@ -216,21 +218,18 @@ describe('Local storage-root real-WASM browser worker', () => {
         await opened.custody.closeActionRandomness(
             created.actionRandomnessSessionIdentifier,
         );
-        const reopened =
-            await opened.custody.openSealedActionRandomness({
-                actionRandomnessCommitment:
-                    created.actionRandomnessCommitment,
-                canonicalEnvelope: created.canonicalEnvelope,
-                creationRecoveryEpoch: 0n,
-                recordVersion: 0n,
-            });
+        const reopened = await opened.custody.openSealedActionRandomness({
+            actionRandomnessCommitment: created.actionRandomnessCommitment,
+            canonicalEnvelope: created.canonicalEnvelope,
+            creationRecoveryEpoch: 0n,
+            recordVersion: 0n,
+        });
         expect(reopened.actionRandomnessCommitment).toEqual(
             created.actionRandomnessCommitment,
         );
         const dealerReservationVector = stateVector.reservationOnly.find(
             ({ capabilityKind }) =>
-                capabilityKind ===
-                stateCapabilityKinds.setupDealerSetBranch,
+                capabilityKind === stateCapabilityKinds.setupDealerSetBranch,
         );
         if (dealerReservationVector === undefined) {
             throw new Error('Missing dealer-set reservation vector.');
@@ -243,8 +242,7 @@ describe('Local storage-root real-WASM browser worker', () => {
                 canonicalStateCertificate:
                     dealerReservationVector.certifiedIntent
                         .canonicalStateCertificate,
-                capabilityKind:
-                    stateCapabilityKinds.setupDealerSetBranch,
+                capabilityKind: stateCapabilityKinds.setupDealerSetBranch,
                 expectedAuthorizationHash: stateVector.authorizationHash,
                 stateVerifierSessionIdentifier: stateSession.value,
                 subjectParticipantIdentity:
@@ -291,13 +289,9 @@ describe('Local storage-root real-WASM browser worker', () => {
             stateReservationIdentifier: targetReservation.value,
         } as const;
         expect(
-            await opened.custody.deriveTargetReleaseAttempt(
-                targetAttemptInput,
-            ),
+            await opened.custody.deriveTargetReleaseAttempt(targetAttemptInput),
         ).toEqual(
-            await opened.custody.deriveTargetReleaseAttempt(
-                targetAttemptInput,
-            ),
+            await opened.custody.deriveTargetReleaseAttempt(targetAttemptInput),
         );
         await expectCustodyErrorCode(
             opened.custody.deriveTargetReleaseAttempt({

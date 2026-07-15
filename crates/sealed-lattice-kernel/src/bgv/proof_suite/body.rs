@@ -3,21 +3,18 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-use crate::foundation::{
-    CanonicalItem, CanonicalItemType, hash_foundation_tuple_512,
-};
+use crate::foundation::{CanonicalItem, CanonicalItemType, hash_foundation_tuple_512};
 
 use super::{
     decoder::{BoundedProofDecoder, ProofByteSource, ProofDecodeError},
     field::ProofChallengeExtensionElement,
     merkle::{
-        ProofAuthenticationNode, ProofLeafVisibility, ProofMerkleError,
-        ProofMerkleTreeContext, ProofOraclePhasePairLeaf, ProofTreeRole, ProofTreeValue,
-        verify_authentication_frontier,
+        ProofAuthenticationNode, ProofLeafVisibility, ProofMerkleError, ProofMerkleTreeContext,
+        ProofOraclePhasePairLeaf, ProofTreeRole, ProofTreeValue, verify_authentication_frontier,
     },
     transcript::{
-        CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
-        CommonProofTranscriptSchedule, TranscriptError,
+        CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber, CommonProofTranscriptSchedule,
+        TranscriptError,
     },
 };
 
@@ -171,9 +168,7 @@ impl ProofTreeCatalogEntry {
         match &self.construction {
             ProofTreeConstruction::Common(context) => Ok(context.leaf_count()?),
             ProofTreeConstruction::CommittedMaterial { .. }
-            | ProofTreeConstruction::SetupPolynomial { .. } => {
-                Err(ProofBodyError::InvalidCatalog)
-            }
+            | ProofTreeConstruction::SetupPolynomial { .. } => Err(ProofBodyError::InvalidCatalog),
         }
     }
 }
@@ -204,8 +199,7 @@ pub(crate) fn maximum_verifier_tree_hash_equation_count(
     catalog: &CompleteProofTreeCatalog,
     unique_query_count: u32,
 ) -> Result<u64, ProofBodyError> {
-    if unique_query_count == 0
-        || u64::from(unique_query_count) > catalog.evaluation_domain_size / 2
+    if unique_query_count == 0 || u64::from(unique_query_count) > catalog.evaluation_domain_size / 2
     {
         return Err(ProofBodyError::InvalidQueryRepresentatives);
     }
@@ -217,10 +211,8 @@ pub(crate) fn maximum_verifier_tree_hash_equation_count(
         let maximum_opened_leaf_count = usize::try_from(unique_query_count)
             .map_err(|_| ProofBodyError::CountOverflow)?
             .min(leaf_count);
-        let opening_equations = maximum_merkle_opening_hash_equation_count(
-            leaf_count,
-            maximum_opened_leaf_count,
-        )?;
+        let opening_equations =
+            maximum_merkle_opening_hash_equation_count(leaf_count, maximum_opened_leaf_count)?;
         equation_count = equation_count
             .checked_add(opening_equations)
             .ok_or(ProofBodyError::CountOverflow)?;
@@ -260,17 +252,15 @@ fn maximum_merkle_opening_hash_equation_count(
     {
         return Err(ProofBodyError::InvalidCatalog);
     }
-    let opened_leaf_count = u64::try_from(maximum_opened_leaf_count)
-        .map_err(|_| ProofBodyError::CountOverflow)?;
+    let opened_leaf_count =
+        u64::try_from(maximum_opened_leaf_count).map_err(|_| ProofBodyError::CountOverflow)?;
     let mut equation_count = opened_leaf_count;
     let mut node_count = leaf_count / 2;
     while node_count != 0 {
         equation_count = equation_count
             .checked_add(
-                opened_leaf_count.min(
-                    u64::try_from(node_count)
-                        .map_err(|_| ProofBodyError::CountOverflow)?,
-                ),
+                opened_leaf_count
+                    .min(u64::try_from(node_count).map_err(|_| ProofBodyError::CountOverflow)?),
             )
             .ok_or(ProofBodyError::CountOverflow)?;
         node_count /= 2;
@@ -293,21 +283,22 @@ pub(crate) fn build_complete_proof_tree_catalog(
 
     let proof_header_hash = hash_foundation_tuple_512(
         "sealed-lattice/proof/header/v1",
-        &[CanonicalItem::variable_bytes(&input.canonical_proof_object_header_bytes)
-            .map_err(|_| ProofBodyError::CanonicalEncoding)?],
+        &[
+            CanonicalItem::variable_bytes(&input.canonical_proof_object_header_bytes)
+                .map_err(|_| ProofBodyError::CanonicalEncoding)?,
+        ],
     )
     .map_err(|_| ProofBodyError::CanonicalEncoding)?
     .into_bytes();
 
     let quotient_component_count = usize::from(transcript_schedule.quotient_component_count());
     let nonterminal_fri_tree_count = usize::from(transcript_schedule.fri_fold_count() - 1);
-    let opening_batch_tree_count = if transcript_schedule.privacy_mode()
-        == CommonProofPrivacyMode::SecretBearing
-    {
-        1
-    } else {
-        0
-    };
+    let opening_batch_tree_count =
+        if transcript_schedule.privacy_mode() == CommonProofPrivacyMode::SecretBearing {
+            1
+        } else {
+            0
+        };
     let total_tree_count = input
         .relation_trees
         .len()
@@ -423,8 +414,7 @@ pub(crate) fn build_complete_proof_tree_catalog(
         }
     }
 
-    if ordered_base_tree_ordinals.as_slice()
-        != transcript_schedule.ordered_base_tree_ordinals()
+    if ordered_base_tree_ordinals.as_slice() != transcript_schedule.ordered_base_tree_ordinals()
         || ordered_auxiliary_tree_ordinals.as_slice()
             != transcript_schedule.ordered_auxiliary_tree_ordinals()
     {
@@ -687,11 +677,7 @@ impl DecodedProofBody {
     }
 }
 
-pub(crate) struct PendingProofBodyQueries<
-    'source,
-    'layout,
-    Source: ProofByteSource + ?Sized,
-> {
+pub(crate) struct PendingProofBodyQueries<'source, 'layout, Source: ProofByteSource + ?Sized> {
     source: &'source Source,
     layout: &'layout ProofBodyLayout,
     declared_byte_length: usize,
@@ -716,9 +702,7 @@ impl<Source: ProofByteSource + ?Sized> AbsorbingQuerySource<'_, '_, Source> {
     }
 }
 
-impl<Source: ProofByteSource + ?Sized> ProofByteSource
-    for AbsorbingQuerySource<'_, '_, Source>
-{
+impl<Source: ProofByteSource + ?Sized> ProofByteSource for AbsorbingQuerySource<'_, '_, Source> {
     fn byte_length(&self) -> usize {
         self.byte_length
     }
@@ -781,11 +765,7 @@ where
     Source: ProofByteSource + ?Sized,
     Source: 'source,
 {
-    let mut decoder = BoundedProofDecoder::new(
-        source,
-        declared_byte_length,
-        proof_byte_ceiling,
-    )?;
+    let mut decoder = BoundedProofDecoder::new(source, declared_byte_length, proof_byte_ceiling)?;
     let mut tree_roots = Vec::new();
     tree_roots
         .try_reserve_exact(layout.catalog.entries.len())
@@ -829,8 +809,7 @@ where
 
     let deep_evaluations = read_extension_value_list(
         &mut decoder,
-        usize::try_from(layout.deep_evaluation_count)
-            .map_err(|_| ProofBodyError::CountOverflow)?,
+        usize::try_from(layout.deep_evaluation_count).map_err(|_| ProofBodyError::CountOverflow)?,
     )?;
 
     read_serialized_roots(
@@ -951,10 +930,8 @@ impl<'source, 'layout, Source: ProofByteSource + ?Sized>
                 entry.tree_catalog_index,
                 ProofBodyError::InvalidTreeCatalogIndex,
             )?;
-            let opening_list_byte_length = raw_byte_list_byte_length(
-                opened_leaf_indexes.len(),
-                expected_leaf_byte_length,
-            )?;
+            let opening_list_byte_length =
+                raw_byte_list_byte_length(opened_leaf_indexes.len(), expected_leaf_byte_length)?;
             read_item_header(
                 &mut decoder,
                 CanonicalItemType::HomogeneousList,
@@ -1105,8 +1082,8 @@ fn read_item_header<Source: ProofByteSource + ?Sized>(
     if decoder.read_u16()? != expected_item_type.canonical_code() {
         return Err(ProofBodyError::InvalidItemType);
     }
-    let byte_length = usize::try_from(decoder.read_u32()?)
-        .map_err(|_| ProofBodyError::CountOverflow)?;
+    let byte_length =
+        usize::try_from(decoder.read_u32()?).map_err(|_| ProofBodyError::CountOverflow)?;
     if byte_length != expected_byte_length {
         return Err(ProofBodyError::InvalidItemLength);
     }
@@ -1121,8 +1098,7 @@ fn read_list_header<Source: ProofByteSource + ?Sized>(
     if decoder.read_u16()? != expected_element_type.canonical_code() {
         return Err(ProofBodyError::InvalidItemType);
     }
-    let count = usize::try_from(decoder.read_u32()?)
-        .map_err(|_| ProofBodyError::CountOverflow)?;
+    let count = usize::try_from(decoder.read_u32()?).map_err(|_| ProofBodyError::CountOverflow)?;
     if count != expected_count {
         return Err(ProofBodyError::InvalidListCount);
     }
@@ -1200,15 +1176,12 @@ fn entry_leaf_count(
         ProofTreeConstruction::Common(_) => entry.leaf_count(),
         ProofTreeConstruction::CommittedMaterial { .. }
         | ProofTreeConstruction::SetupPolynomial { .. } => {
-            usize::try_from(evaluation_domain_size / 2)
-                .map_err(|_| ProofBodyError::CountOverflow)
+            usize::try_from(evaluation_domain_size / 2).map_err(|_| ProofBodyError::CountOverflow)
         }
     }
 }
 
-fn canonical_leaf_byte_length(
-    entry: &ProofTreeCatalogEntry,
-) -> Result<usize, ProofBodyError> {
+fn canonical_leaf_byte_length(entry: &ProofTreeCatalogEntry) -> Result<usize, ProofBodyError> {
     match &entry.construction {
         ProofTreeConstruction::Common(context) => {
             let value_byte_length = match entry.source {
@@ -1224,19 +1197,18 @@ fn canonical_leaf_byte_length(
                     return Err(ProofBodyError::InvalidCatalog);
                 }
             };
-            let row_width = usize::try_from(context.row_width())
-                .map_err(|_| ProofBodyError::CountOverflow)?;
+            let row_width =
+                usize::try_from(context.row_width()).map_err(|_| ProofBodyError::CountOverflow)?;
             let list_values_byte_length = row_width
                 .checked_mul(value_byte_length)
                 .and_then(|length| length.checked_mul(2))
                 .ok_or(ProofBodyError::CountOverflow)?;
-            let salt_item_byte_length = if context.leaf_visibility()
-                == ProofLeafVisibility::SecretBearing
-            {
-                6 + SECRET_LEAF_SALT_BYTE_LENGTH
-            } else {
-                0
-            };
+            let salt_item_byte_length =
+                if context.leaf_visibility() == ProofLeafVisibility::SecretBearing {
+                    6 + SECRET_LEAF_SALT_BYTE_LENGTH
+                } else {
+                    0
+                };
             124_usize
                 .checked_add(list_values_byte_length)
                 .and_then(|length| length.checked_add(salt_item_byte_length))
@@ -1411,8 +1383,7 @@ fn decode_statement_owned_phase_pair_leaf(
         )?;
         let _ = decoder.read_array::<SECRET_LEAF_SALT_BYTE_LENGTH>()?;
     }
-    let row_width =
-        usize::try_from(layout.row_width).map_err(|_| ProofBodyError::CountOverflow)?;
+    let row_width = usize::try_from(layout.row_width).map_err(|_| ProofBodyError::CountOverflow)?;
     let first_point_values =
         read_tree_value_list_item(&mut decoder, TreeValueKind::Base, row_width)?;
     let opposite_point_values =
@@ -1481,10 +1452,7 @@ fn read_tree_value_list_item<Source: ProofByteSource + ?Sized>(
     Ok(values)
 }
 
-fn hash_canonical_leaf(
-    domain: &str,
-    canonical_bytes: &[u8],
-) -> Result<[u8; 64], ProofBodyError> {
+fn hash_canonical_leaf(domain: &str, canonical_bytes: &[u8]) -> Result<[u8; 64], ProofBodyError> {
     Ok(hash_foundation_tuple_512(
         domain,
         &[CanonicalItem::variable_bytes(canonical_bytes)
@@ -1506,11 +1474,7 @@ fn read_authentication_frontier<Source: ProofByteSource + ?Sized>(
     expected_tree_catalog_index: u16,
     expected_node_count: usize,
 ) -> Result<Vec<ParsedAuthenticationNode>, ProofBodyError> {
-    read_tuple_header(
-        decoder,
-        PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
-        2,
-    )?;
+    read_tuple_header(decoder, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, 2)?;
     read_u16_item(
         decoder,
         expected_tree_catalog_index,
@@ -1525,21 +1489,13 @@ fn read_authentication_frontier<Source: ProofByteSource + ?Sized>(
         CanonicalItemType::HomogeneousList,
         list_byte_length,
     )?;
-    read_list_header(
-        decoder,
-        CanonicalItemType::NestedTuple,
-        expected_node_count,
-    )?;
+    read_list_header(decoder, CanonicalItemType::NestedTuple, expected_node_count)?;
     let mut nodes = Vec::new();
     nodes
         .try_reserve_exact(expected_node_count)
         .map_err(|_| ProofBodyError::AllocationLimitExceeded)?;
     for _ in 0..expected_node_count {
-        read_tuple_header(
-            decoder,
-            PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER,
-            3,
-        )?;
+        read_tuple_header(decoder, PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER, 3)?;
         let node = ParsedAuthenticationNode {
             level: read_u32_item(decoder)?,
             node_index: read_u64_item(decoder)?,
@@ -1563,9 +1519,9 @@ fn minimal_frontier_node_count(
         || !sorted_unique_leaf_indexes
             .windows(2)
             .all(|pair| pair[0] < pair[1])
-        || sorted_unique_leaf_indexes.last().is_some_and(|index| {
-            usize::try_from(*index).map_or(true, |index| index >= leaf_count)
-        })
+        || sorted_unique_leaf_indexes
+            .last()
+            .is_some_and(|index| usize::try_from(*index).map_or(true, |index| index >= leaf_count))
     {
         return Err(ProofBodyError::InvalidQueryRepresentatives);
     }
@@ -1681,9 +1637,7 @@ fn verify_statement_owned_frontier(
             let parent_index = index / 2;
             let parent_digest = statement_owned_node_digest(
                 construction,
-                level
-                    .checked_add(1)
-                    .ok_or(ProofBodyError::CountOverflow)?,
+                level.checked_add(1).ok_or(ProofBodyError::CountOverflow)?,
                 parent_index,
                 left,
                 right,
@@ -1742,6 +1696,10 @@ fn statement_owned_node_digest(
         .map_err(|_| ProofBodyError::CanonicalEncoding)?
         .into_bytes())
 }
+
+#[cfg(test)]
+#[path = "body/common-proof-engine-tests.rs"]
+mod common_proof_engine_tests;
 
 #[cfg(test)]
 #[path = "body/tests.rs"]

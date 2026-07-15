@@ -7,9 +7,7 @@ import type {
     BgvCollectiveSetupParametersDescription,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvRnsParametersDescription,
-    BgvSameSecretBridgeProofGeneration,
     BgvVssCommittedMaterialCommitmentComputation,
-    BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     DecodedMailboxAssociatedData,
     DecodedMailboxKeyScheduleInput,
@@ -307,38 +305,6 @@ export const createTranscriptCoreKernelLoader = (
                     ringDegree: input.ringDegree,
                     messageCoefficients: input.messageCoefficients,
                     materialSeedHex: input.materialSeedHex,
-                }),
-            generateVssShareLinkageProof: (
-                input,
-            ): BgvVssShareLinkageProofGeneration =>
-                executeCommand<BgvVssShareLinkageProofGeneration>({
-                    command: 'GenerateVssShareLinkageProof',
-                    context: input.context,
-                    ringDegree: input.ringDegree,
-                    vssShareLinkage: input.vssShareLinkage,
-                    coefficientMessagesByShamirIndex:
-                        input.coefficientMessagesByShamirIndex,
-                    recipientShareMessagesByItem:
-                        input.recipientShareMessagesByItem,
-                    carryWitnessesByItem: input.carryWitnessesByItem,
-                    vssCommittedMaterialSeedsByBoundMessage:
-                        input.vssCommittedMaterialSeedsByBoundMessage,
-                    proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                }),
-            generateSameSecretBridgeProof: (
-                input,
-            ): BgvSameSecretBridgeProofGeneration =>
-                executeCommand<BgvSameSecretBridgeProofGeneration>({
-                    command: 'GenerateSameSecretBridgeProof',
-                    context: input.context,
-                    ringDegree: input.ringDegree,
-                    sameSecretLinkage: input.sameSecretLinkage,
-                    sameSecretBridge: input.sameSecretBridge,
-                    secretCoefficients: input.secretCoefficients,
-                    openingRandomnessByLimb: input.openingRandomnessByLimb,
-                    vssCommittedMaterialSeedsByBoundMessage:
-                        input.vssCommittedMaterialSeedsByBoundMessage,
-                    proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                 }),
         };
         registerKernelContexts(kernel, runtime);

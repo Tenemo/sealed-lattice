@@ -2,7 +2,6 @@ use super::*;
 
 mod common;
 mod shares;
-mod succinct_proof_transport;
 mod succinct_proofs;
 
 pub(super) use common::{PublicKeyCommonBinding, public_key_refusal};

@@ -683,6 +683,9 @@ fn literal_list_index(ordinal: usize) -> Option<RelationSelectorPathStep> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::{
+        ProofBaseFieldElement, ProofChallengeExtensionElement,
+    };
 
     fn check_context() -> RelationPlanCheckContext {
         let evaluation_domain_size = 128_u64;

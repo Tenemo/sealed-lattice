@@ -1,4 +1,3 @@
-use super::super::*;
 use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
@@ -301,12 +300,11 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> PublicKeyShareSuccinctProofFixture {
     use crate::bgv::setup::trustee_evaluation_key_proof::{
-        EvaluationKeyShareDescriptor, KeyBearingWitness, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-        PUBLIC_KEY_SHARE_PROOF_FAMILY, SetupProofStatement, SuccinctSetupProofContext,
-        TrusteeEvaluationKeyStatement, VssCommittedMaterialWitness,
-        public_key_share_succinct_proof_bytes_hash, verify_trustee_evaluation_key_proof_bytes,
+        PUBLIC_KEY_SHARE_PROOF_FAMILY, public_key_share_succinct_proof_bytes_hash,
     };
     let setup_context = &package["setupContext"];
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -321,95 +319,38 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         .expect("same-secret bridge material");
     let per_trustee_records = (0..participant_count)
         .map(|trustee_roster_position| {
-            let trustee_identity = format!("trustee-{trustee_roster_position}");
             let bridge_binding = verified_same_secret_bridge
                 .statement_for_roster_position(trustee_roster_position)
                 .expect("same-secret bridge statement binding");
-            assert_eq!(bridge_binding.trustee_identity, trustee_identity);
-            let ring_degree = package["sameSecretBridgeStatementSet"]["ringDegree"]
-                .as_u64()
-                .expect("same-secret bridge ring degree") as usize;
-            let (coefficients_by_limb, error_coefficients) =
-                public_key_share_coefficients_and_errors_for_fixture(
+            let trustee_identity = bridge_binding.trustee_identity.as_str();
+            let share_record = package["publicKeyShares"]["shareRecords"]
+                .get(
+                    usize::try_from(trustee_roster_position)
+                        .expect("trustee roster position fits usize"),
+                )
+                .expect("public-key share record");
+            let public_key_share_root =
+                crate::bgv::setup::accepted_setup::derive_public_key_share_root(
+                    setup_context,
                     public_matrix_seed_hash,
                     trustee_roster_position,
-                    ring_degree,
-                );
-            let secret_coefficients = (0..ring_degree)
-                .map(|coefficient_position| {
-                    accepted_vss_secret_coefficient_fixture(
-                        trustee_roster_position,
-                        coefficient_position,
-                    )
-                })
-                .collect::<Vec<_>>();
-            let negative_indicator_coefficients = secret_coefficients
-                .iter()
-                .map(|coefficient| i64::from(*coefficient < 0))
-                .collect();
-            let committed_material_seeds =
-            vss_public_material::same_secret_bridge_committed_material_seeds_from_fixture_package(
-                package,
-                trustee_roster_position,
-            );
-            let statement = TrusteeEvaluationKeyStatement {
-                context: SuccinctSetupProofContext {
-                    setup_context_hash: crate::bgv::setup::accepted_setup::setup_context_hash(
-                        setup_context,
-                    )
-                    .expect("setup context hash"),
-                    trustee_identity: trustee_identity.clone(),
-                    trustee_roster_position,
-                    binding_roots: Vec::new(),
-                },
-                ring_degree,
-                proof: SetupProofStatement::PublicKeyShare {
-                    key: EvaluationKeyShareDescriptor {
-                        kind: EvaluationKeyShareKind::PublicKeyShare,
-                        level: DATA_PRIMES.len() - 1,
-                        key_switch_domain: PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL.to_string(),
-                        key_switch_seed_hex: public_matrix_seed_hash.to_string(),
-                        component_b_by_digit: vec![coefficients_by_limb],
-                        round_one_aggregate_diagonal: Vec::new(),
-                    },
-                    same_secret_bridge: bridge_binding.statement.clone(),
-                },
-            };
-            let witness = TrusteeEvaluationKeyWitness::PublicKeyShare {
-                key: KeyBearingWitness {
-                    secret_coefficients,
-                    error_coefficients_by_key: vec![vec![error_coefficients]],
-                },
-                negative_indicator_coefficients,
-                committed_material: VssCommittedMaterialWitness {
-                    vss_committed_material_seeds_by_bound_message: committed_material_seeds,
-                },
-            };
-            let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
-                "objectType": "PublicKeyShareProofRoot",
-                "fixture": "public-key-share-succinct-proof-randomness",
+                    share_record,
+                )
+                .expect("public-key share root");
+
+            // This accepted-setup composition fixture injects the opaque state
+            // that a successful common-proof verification owns. The common
+            // proof suite tests its algebra independently; these deterministic
+            // bytes exist only to exercise authenticated, one-shot transport
+            // and exact statement rebinding without reviving the retired
+            // per-modulus proof engine.
+            let proof_bytes = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "PublicKeyShareCommonProofTransportFixture",
+                "setupContextHash": setup_context_hash,
                 "trusteeRosterPosition": trustee_roster_position,
             }))
-            .expect("public-key share succinct proof randomness seed");
-            let statement_hash_hex = to_hex(&statement.statement_hash());
-            let checkpointed_proof = checkpointed_proof_bytes_with_verification_state(
-                PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY,
-                &statement_hash_hex,
-                |proof_bytes| verify_trustee_evaluation_key_proof_bytes(&statement, proof_bytes),
-                || {
-                    let proof = prove_evaluation_key_share(
-                        &statement,
-                        &witness,
-                        &proof_randomness_seed_hex,
-                    )
-                    .expect("public-key share succinct proof");
-                    encode_trustee_evaluation_key_proof(&proof)
-                },
-            );
-            let CheckpointedProofBytes {
-                proof_bytes,
-                was_semantically_verified,
-            } = checkpointed_proof;
+            .expect("public-key share common-proof transport fixture")
+            .into_bytes();
             let proof_bytes_hash = public_key_share_succinct_proof_bytes_hash(&proof_bytes);
             authenticate_setup_proof_material_stream_for_test(
                 PUBLIC_KEY_SHARE_PROOF_FAMILY,
@@ -417,20 +358,16 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
                 &proof_bytes,
             )
             .expect("authenticate public-key share proof material stream");
-            final_package_phase(&format!(
-                "generated public-key share succinct proof trustee {trustee_roster_position}"
-            ));
-
-            if !was_semantically_verified {
-                verify_trustee_evaluation_key_proof_bytes(&statement, &proof_bytes)
-                    .expect("verify generated public-key share proof bytes");
-            }
-            let verification_binding_hash = crate::bgv::setup::accepted_setup::
-            public_key_share_succinct_proof_verification_binding_hash(
-                &proof_bytes_hash,
-                &statement,
-            )
-            .expect("public-key share proof verification binding");
+            let verification_binding_hash =
+                crate::bgv::setup::accepted_setup::public_key_share_succinct_proof_verification_binding_hash(
+                    &proof_bytes_hash,
+                    &setup_context_hash,
+                    trustee_identity,
+                    trustee_roster_position,
+                    &bridge_binding.statement.target_constant_commitment_roots,
+                    &public_key_share_root,
+                )
+                .expect("public-key share proof verification binding");
             crate::bgv::setup::retain_accepted_setup_proof_binding(
                 proof_binding_session.session_handle,
                 PUBLIC_KEY_SHARE_PROOF_FAMILY,

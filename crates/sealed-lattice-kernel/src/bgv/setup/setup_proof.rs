@@ -1,6 +1,5 @@
 pub(in crate::bgv::setup) mod material_transport;
 
-pub(crate) use crate::bgv::proof_suite::ProofByteSource;
 pub(crate) use self::material_transport::{BgvProofMaterialBytes, CanonicalProofMaterialBytes};
 pub(in crate::bgv::setup) use self::material_transport::{
     SetupProofMaterialBytes, take_verified_setup_proof_material_bytes,
@@ -10,6 +9,7 @@ pub(in crate::bgv::setup) use self::material_transport::{
     authenticate_setup_proof_material_stream_for_test,
     authenticate_setup_proof_material_stream_in_session_for_test,
 };
+pub(crate) use crate::bgv::proof_suite::ProofByteSource;
 
 use crate::{
     bgv::setup_helpers::validate_hash_string,

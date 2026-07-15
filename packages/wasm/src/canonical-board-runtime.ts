@@ -1,7 +1,4 @@
-import type {
-    RefusalReason,
-    VerificationResult,
-} from '@sealed-lattice/types';
+import type { RefusalReason, VerificationResult } from '@sealed-lattice/types';
 import { foundationProfile } from '@sealed-lattice/types';
 
 import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
@@ -168,7 +165,7 @@ type VerifiedObjectRecord = {
 
 const verifiedObjectRecords = new WeakMap<object, VerifiedObjectRecord>();
 
-export type VerifiedTranscriptObjectKernelAuthorization = Readonly<{
+type VerifiedTranscriptObjectKernelAuthorization = Readonly<{
     capabilityMemory: WebAssembly.Memory;
     capabilityPointer: number;
     objectHandle: number;
@@ -187,7 +184,7 @@ export const resolveVerifiedTranscriptObjectKernelAuthorization = (
             'The transcript object was not issued by the WASM canonical-board verifier.',
         );
     }
-    const record = verifiedObjectRecords.get(object as object);
+    const record = verifiedObjectRecords.get(object);
     if (record === undefined || record.released) {
         throw new TypeError(
             'The transcript object is unavailable or was not issued by the WASM canonical-board verifier.',
@@ -198,9 +195,11 @@ export const resolveVerifiedTranscriptObjectKernelAuthorization = (
 
 class CanonicalBoardInternalError extends Error {
     public override readonly name = 'CanonicalBoardInternalError';
+    public readonly failureCause: unknown;
 
-    public constructor(message: string, options?: unknown) {
-        super(message, options === undefined ? undefined : { cause: options });
+    public constructor(message: string, failureCause?: unknown) {
+        super(message);
+        this.failureCause = failureCause;
     }
 }
 
@@ -231,9 +230,7 @@ const isUint8Array = (value: unknown): value is Uint8Array => {
     }
 };
 
-const isFoundationObjectType = (
-    value: number,
-): value is FoundationObjectType =>
+const isFoundationObjectType = (value: number): value is FoundationObjectType =>
     Object.values(foundationObjectTypes).some(
         (assignedValue) => assignedValue === value,
     );
@@ -277,10 +274,7 @@ const requireCopiedBytes = (
     return undefined;
 };
 
-const requirePositiveSafeInteger = (
-    value: unknown,
-    maximum: number,
-): void => {
+const requirePositiveSafeInteger = (value: unknown, maximum: number): void => {
     if (
         typeof value !== 'number' ||
         !Number.isSafeInteger(value) ||
@@ -293,7 +287,7 @@ const requirePositiveSafeInteger = (
 
 const encodeConfiguration = (
     input: CanonicalBoardVerifierConfiguration,
-): Uint8Array => {
+): Uint8Array<ArrayBuffer> => {
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
         throw new CanonicalBoardRefusalError('wrongTypeOrLength');
     }
@@ -413,11 +407,7 @@ const encodeConfiguration = (
         true,
     );
     offset += wasm32WordByteLength;
-    view.setUint32(
-        offset,
-        configuration.canonicalRosterBytes.byteLength,
-        true,
-    );
+    view.setUint32(offset, configuration.canonicalRosterBytes.byteLength, true);
     offset += wasm32WordByteLength;
     bytes.set(configuration.canonicalRosterBytes, offset);
     return bytes;
@@ -426,7 +416,10 @@ const encodeConfiguration = (
 const frameCarriers = (
     carriers: readonly UntrustedCanonicalBoardCarrier[],
     maximumCarrierCount: number,
-): Readonly<{ bytes: Uint8Array; carrierCount: number }> => {
+): Readonly<{
+    bytes: Uint8Array<ArrayBuffer>;
+    carrierCount: number;
+}> => {
     if (!Array.isArray(carriers)) {
         throw new CanonicalBoardRefusalError('wrongTypeOrLength');
     }
@@ -443,10 +436,14 @@ const frameCarriers = (
     ) {
         throw new CanonicalBoardRefusalError('outsideSupportedProfile');
     }
-    const copiedCarriers: Uint8Array[] = [];
+    const copiedCarriers: Uint8Array<ArrayBuffer>[] = [];
     let framedByteLength = wasm32WordByteLength;
     try {
-        for (let carrierIndex = 0; carrierIndex < carrierCount; carrierIndex += 1) {
+        for (
+            let carrierIndex = 0;
+            carrierIndex < carrierCount;
+            carrierIndex += 1
+        ) {
             let carrier: unknown;
             try {
                 carrier = (carriers as readonly unknown[])[carrierIndex];
@@ -481,9 +478,7 @@ const frameCarriers = (
                     foundationProfile.maximumCopiedBufferByteLength ||
                 nextFramedByteLength > maximumWasm32UnsignedInteger
             ) {
-                throw new CanonicalBoardRefusalError(
-                    'outsideSupportedProfile',
-                );
+                throw new CanonicalBoardRefusalError('outsideSupportedProfile');
             }
             framedByteLength = nextFramedByteLength;
             const copiedCarrier = new Uint8Array(
@@ -663,9 +658,7 @@ const createCapability = (context: CanonicalBoardKernelContext): number => {
     }
 };
 
-class CanonicalBoardVerifierSessionImplementation
-    implements CanonicalBoardVerifierSession
-{
+class CanonicalBoardVerifierSessionImplementation implements CanonicalBoardVerifierSession {
     readonly #context: CanonicalBoardKernelContext;
     readonly #handle: number;
     readonly #kernel: TranscriptCoreKernel;
@@ -726,7 +719,6 @@ class CanonicalBoardVerifierSessionImplementation
             return refused('consumedState');
         }
         let framed = new Uint8Array();
-        let framedCarrierCount = 0;
         let framedPointer = 0;
         let maximumOutputByteLength = 0;
         let outputPointer = 0;
@@ -737,7 +729,7 @@ class CanonicalBoardVerifierSessionImplementation
                 this.#maximumCarrierCount,
             );
             framed = framedCarriers.bytes;
-            framedCarrierCount = framedCarriers.carrierCount;
+            const framedCarrierCount = framedCarriers.carrierCount;
             framedPointer = allocateAndCopy(this.#context, framed);
             maximumOutputByteLength =
                 wasm32WordByteLength +
@@ -746,10 +738,7 @@ class CanonicalBoardVerifierSessionImplementation
                 this.#context,
                 maximumOutputByteLength,
             );
-            statusPointer = allocateZeroed(
-                this.#context,
-                wasm32WordByteLength,
-            );
+            statusPointer = allocateZeroed(this.#context, wasm32WordByteLength);
             const outputByteLength = this.#context.runExclusive(
                 'canonical-board unordered verification',
                 () =>
@@ -885,10 +874,7 @@ class CanonicalBoardVerifierSessionImplementation
         let outputPointer = 0;
         let statusPointer = 0;
         try {
-            statusPointer = allocateZeroed(
-                this.#context,
-                wasm32WordByteLength,
-            );
+            statusPointer = allocateZeroed(this.#context, wasm32WordByteLength);
             outputByteLength = this.#context.runExclusive(
                 'canonical-board cached carrier length',
                 () =>
@@ -964,9 +950,7 @@ class CanonicalBoardVerifierSessionImplementation
         }
     }
 
-    public release(
-        object: VerifiedTranscriptObject,
-    ): void {
+    public release(object: VerifiedTranscriptObject): void {
         const resolved = this.#resolveObject(object);
         if ('refusalReason' in resolved) {
             throw new CanonicalBoardRefusalError(resolved.refusalReason);
@@ -1007,7 +991,7 @@ class CanonicalBoardVerifierSessionImplementation
             throw new CanonicalBoardRefusalError(refusalReason);
         }
         for (const object of this.#objectsByHandle.values()) {
-            const record = verifiedObjectRecords.get(object as object);
+            const record = verifiedObjectRecords.get(object);
             if (record !== undefined) {
                 record.released = true;
             }
@@ -1040,7 +1024,7 @@ class CanonicalBoardVerifierSessionImplementation
             released: false,
             session: this,
         };
-        verifiedObjectRecords.set(object as object, record);
+        verifiedObjectRecords.set(object, record);
         this.#objectsByHandle.set(handle, object);
         return object;
     }
@@ -1059,7 +1043,7 @@ class CanonicalBoardVerifierSessionImplementation
         ) {
             return { refusalReason: 'wrongTypeOrLength' };
         }
-        const record = verifiedObjectRecords.get(object as object);
+        const record = verifiedObjectRecords.get(object);
         if (record === undefined || record.session !== this) {
             return { refusalReason: 'wrongContext' };
         }

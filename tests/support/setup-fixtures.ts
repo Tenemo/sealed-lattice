@@ -1,12 +1,11 @@
 import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
-import type {
-    CollectiveBgvSetupContext,
-    VssOpeningRandomByteSource,
-} from '#packages/protocol/src/index';
+import type { CollectiveBgvSetupContext } from '#packages/protocol/src/index';
 
 // Per-suite namespaces keep deterministic fixture hashes isolated.
 
 export type SetupFixtureHash = (label: string) => string;
+
+type VssOpeningRandomByteSource = (byteLength: number) => Uint8Array;
 
 export const makeSetupFixtureHash =
     (fixtureNamespace: string): SetupFixtureHash =>

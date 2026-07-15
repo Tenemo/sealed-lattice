@@ -1,11 +1,7 @@
 import {
-    type VssCoefficientCommitmentBundleInput,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
     type VssSourceTrusteeCoefficientOpeningStateGenerationInput,
-    type VssSourceTrusteeCoefficientOpeningStateProvider,
-    type VssSourceTrusteeCoefficientOpeningStateProviderInput,
-    type VssSourceTrusteeCoefficientOpeningStateReference,
 } from './constants-and-types.js';
 import {
     RandomByteSampler,
@@ -15,131 +11,11 @@ import {
     assertRandomness,
     assertResidueVector,
     centeredIntegerToResidue,
-    defaultRandomBytes,
     sampleCenteredTernaryVector,
     sampleCommitmentOpeningRandomness,
     sampleUniformResidueVector,
+    webCryptoRandomBytes,
 } from './encoding.js';
-
-const sourceTrusteeReferenceFromOpeningState = (
-    sourceTrusteeOpeningState: VssSourceTrusteeCoefficientOpeningState,
-): VssSourceTrusteeCoefficientOpeningStateReference => ({
-    sourceTrusteeIdentity: sourceTrusteeOpeningState.sourceTrusteeIdentity,
-    sourceTrusteeRosterPosition:
-        sourceTrusteeOpeningState.sourceTrusteeRosterPosition,
-});
-
-export const sortedSourceTrusteeReferences = (
-    sourceTrusteeReferences: readonly VssSourceTrusteeCoefficientOpeningStateReference[],
-): VssSourceTrusteeCoefficientOpeningStateReference[] =>
-    [...sourceTrusteeReferences].sort(
-        (left, right) =>
-            left.sourceTrusteeRosterPosition -
-            right.sourceTrusteeRosterPosition,
-    );
-
-export const assertFullSourceTrusteeReferenceCoverage = (
-    sourceTrusteeReferences: readonly VssSourceTrusteeCoefficientOpeningStateReference[],
-    participantCount: number,
-): void => {
-    if (sourceTrusteeReferences.length !== participantCount) {
-        throw new Error(
-            'source trustee opening references must contain every accepted participant.',
-        );
-    }
-    sourceTrusteeReferences.forEach(
-        (sourceTrusteeReference, expectedRosterPosition) => {
-            if (
-                sourceTrusteeReference.sourceTrusteeRosterPosition !==
-                expectedRosterPosition
-            ) {
-                throw new Error(
-                    'source trustee opening reference roster positions must be contiguous from zero.',
-                );
-            }
-            assertNonEmptyString(
-                sourceTrusteeReference.sourceTrusteeIdentity,
-                'sourceTrusteeIdentity',
-            );
-        },
-    );
-};
-
-export const sourceTrusteeOpeningStateProviderFromInput = (
-    input: Pick<
-        VssCoefficientCommitmentBundleInput,
-        'sourceTrusteeOpeningStateProvider' | 'sourceTrusteeOpeningStates'
-    >,
-): VssSourceTrusteeCoefficientOpeningStateProvider => {
-    if (
-        input.sourceTrusteeOpeningStates !== undefined &&
-        input.sourceTrusteeOpeningStateProvider !== undefined
-    ) {
-        throw new Error(
-            'provide sourceTrusteeOpeningStates or sourceTrusteeOpeningStateProvider, not both.',
-        );
-    }
-    if (input.sourceTrusteeOpeningStateProvider !== undefined) {
-        return input.sourceTrusteeOpeningStateProvider;
-    }
-    if (input.sourceTrusteeOpeningStates === undefined) {
-        throw new Error(
-            'sourceTrusteeOpeningStates or sourceTrusteeOpeningStateProvider is required.',
-        );
-    }
-
-    const sourceTrusteeStatesByRosterPosition = new Map<
-        number,
-        VssSourceTrusteeCoefficientOpeningState
-    >();
-    input.sourceTrusteeOpeningStates.forEach((sourceTrusteeOpeningState) => {
-        sourceTrusteeStatesByRosterPosition.set(
-            sourceTrusteeOpeningState.sourceTrusteeRosterPosition,
-            sourceTrusteeOpeningState,
-        );
-    });
-
-    return {
-        sourceTrusteeReferences: input.sourceTrusteeOpeningStates.map(
-            sourceTrusteeReferenceFromOpeningState,
-        ),
-        loadSourceTrusteeOpeningState: (sourceTrusteeReference) => {
-            const sourceTrusteeOpeningState =
-                sourceTrusteeStatesByRosterPosition.get(
-                    sourceTrusteeReference.sourceTrusteeRosterPosition,
-                );
-            if (sourceTrusteeOpeningState === undefined) {
-                throw new Error(
-                    'source trustee opening provider is missing the requested roster position.',
-                );
-            }
-
-            return sourceTrusteeOpeningState;
-        },
-    };
-};
-
-export const loadSourceTrusteeOpeningState = (
-    sourceTrusteeOpeningStateProvider: VssSourceTrusteeCoefficientOpeningStateProvider,
-    sourceTrusteeReference: VssSourceTrusteeCoefficientOpeningStateReference,
-): VssSourceTrusteeCoefficientOpeningState => {
-    const sourceTrusteeOpeningState =
-        sourceTrusteeOpeningStateProvider.loadSourceTrusteeOpeningState(
-            sourceTrusteeReference,
-        );
-    if (
-        sourceTrusteeOpeningState.sourceTrusteeIdentity !==
-            sourceTrusteeReference.sourceTrusteeIdentity ||
-        sourceTrusteeOpeningState.sourceTrusteeRosterPosition !==
-            sourceTrusteeReference.sourceTrusteeRosterPosition
-    ) {
-        throw new Error(
-            'loaded source trustee opening state must match the requested source trustee reference.',
-        );
-    }
-
-    return sourceTrusteeOpeningState;
-};
 
 export const openingCoordinateKey = (
     rnsLimbIndex: number,
@@ -240,9 +116,7 @@ export const createVssSourceTrusteeCoefficientOpeningState = (
         );
     });
 
-    const sampler = new RandomByteSampler(
-        input.randomBytes ?? defaultRandomBytes,
-    );
+    const sampler = new RandomByteSampler(webCryptoRandomBytes);
     const shortSecretCoefficients = sampleCenteredTernaryVector(
         sampler,
         input.ringDegree,
@@ -251,95 +125,40 @@ export const createVssSourceTrusteeCoefficientOpeningState = (
         (rnsPrime, rnsLimbIndex) =>
             Array.from(
                 { length: input.thresholdDegree },
-                (_unused, shamirCoefficientIndex) => ({
-                    rnsLimbIndex,
-                    rnsPrime,
-                    shamirCoefficientIndex,
-                    coefficientMessage:
-                        shamirCoefficientIndex === 0
-                            ? shortSecretCoefficients.map((coefficient) =>
-                                  centeredIntegerToResidue(
-                                      coefficient,
+                (_unused, shamirCoefficientIndex) =>
+                    Object.freeze({
+                        rnsLimbIndex,
+                        rnsPrime,
+                        shamirCoefficientIndex,
+                        coefficientMessage: Object.freeze(
+                            shamirCoefficientIndex === 0
+                                ? shortSecretCoefficients.map((coefficient) =>
+                                      centeredIntegerToResidue(
+                                          coefficient,
+                                          rnsPrime,
+                                      ),
+                                  )
+                                : sampleUniformResidueVector(
+                                      sampler,
                                       rnsPrime,
+                                      input.ringDegree,
                                   ),
-                              )
-                            : sampleUniformResidueVector(
-                                  sampler,
-                                  rnsPrime,
-                                  input.ringDegree,
-                              ),
-                    randomnessByColumn: sampleCommitmentOpeningRandomness(
-                        sampler,
-                        input.ringDegree,
-                    ),
-                }),
+                        ),
+                        randomnessByColumn: Object.freeze(
+                            sampleCommitmentOpeningRandomness(
+                                sampler,
+                                input.ringDegree,
+                            ).map((randomnessColumn) =>
+                                Object.freeze([...randomnessColumn]),
+                            ),
+                        ),
+                    }),
             ),
     );
 
-    return {
+    return Object.freeze({
         sourceTrusteeIdentity: input.sourceTrusteeIdentity,
         sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
-        coefficientOpenings,
-    };
-};
-
-export const createVssSourceTrusteeCoefficientOpeningStateProvider = (
-    input: VssSourceTrusteeCoefficientOpeningStateProviderInput,
-): VssSourceTrusteeCoefficientOpeningStateProvider => {
-    assertPositiveSafeInteger(input.participantCount, 'participantCount');
-    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
-    assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
-    input.qSharePrimes.forEach((qSharePrime, rnsLimbIndex) => {
-        assertPositiveSafeInteger(
-            qSharePrime,
-            `qSharePrimes.${String(rnsLimbIndex)}`,
-        );
+        coefficientOpenings: Object.freeze(coefficientOpenings),
     });
-    const sourceTrusteeReferences = input.sourceTrustees.map(
-        (sourceTrusteeReference) => {
-            assertNonEmptyString(
-                sourceTrusteeReference.sourceTrusteeIdentity,
-                'sourceTrusteeIdentity',
-            );
-            assertNonNegativeSafeInteger(
-                sourceTrusteeReference.sourceTrusteeRosterPosition,
-                'sourceTrusteeRosterPosition',
-            );
-            if (
-                sourceTrusteeReference.sourceTrusteeRosterPosition >=
-                input.participantCount
-            ) {
-                throw new Error(
-                    'sourceTrusteeRosterPosition must be inside the accepted participant count.',
-                );
-            }
-
-            return sourceTrusteeReference;
-        },
-    );
-    const sortedReferences = sortedSourceTrusteeReferences(
-        sourceTrusteeReferences,
-    );
-    assertFullSourceTrusteeReferenceCoverage(
-        sortedReferences,
-        input.participantCount,
-    );
-
-    return {
-        sourceTrusteeReferences,
-        loadSourceTrusteeOpeningState: (sourceTrusteeReference) =>
-            createVssSourceTrusteeCoefficientOpeningState({
-                sourceTrusteeIdentity:
-                    sourceTrusteeReference.sourceTrusteeIdentity,
-                sourceTrusteeRosterPosition:
-                    sourceTrusteeReference.sourceTrusteeRosterPosition,
-                participantCount: input.participantCount,
-                qSharePrimes: input.qSharePrimes,
-                ringDegree: input.ringDegree,
-                thresholdDegree: input.thresholdDegree,
-                randomBytes: input.randomBytesForSourceTrustee(
-                    sourceTrusteeReference,
-                ),
-            }),
-    };
 };

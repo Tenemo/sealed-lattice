@@ -1,5 +1,20 @@
 import { browserActionStorageCustodyErrorCodes } from '@sealed-lattice/types';
 
+import {
+    copyActionProofAttemptBinding,
+    copyActionRandomnessReservationVerificationInput,
+    copyActionStateRecoveryVerificationInput,
+    copyActionStateReservationVerificationInput,
+    copyActionStateVerifierSessionInput,
+    copyCreateAndSealActionRandomnessInput,
+    copyOpenedActionRandomnessSession,
+    copyOpaqueWorkerIdentifier,
+    copyOpenSealedActionRandomnessInput,
+    copyPersistentProofAttemptInput,
+    copySealedActionRandomnessSession,
+    copyTargetReleaseAttemptInput,
+    copyWorkerIdentifierVerificationResult,
+} from './browser-action-cryptography-validation.js';
 import type { BrowserActionStorageWorkerKernel } from './browser-action-storage-custody-internal.js';
 import {
     BrowserActionStorageCustodyError,
@@ -25,21 +40,6 @@ import {
     type BrowserRecoveryExportConfirmation,
     type VerificationResult,
 } from './browser-action-storage-custody.js';
-import {
-    copyActionProofAttemptBinding,
-    copyActionRandomnessReservationVerificationInput,
-    copyActionStateRecoveryVerificationInput,
-    copyActionStateReservationVerificationInput,
-    copyActionStateVerifierSessionInput,
-    copyCreateAndSealActionRandomnessInput,
-    copyOpenedActionRandomnessSession,
-    copyOpaqueWorkerIdentifier,
-    copyOpenSealedActionRandomnessInput,
-    copyPersistentProofAttemptInput,
-    copySealedActionRandomnessSession,
-    copyTargetReleaseAttemptInput,
-    copyWorkerIdentifierVerificationResult,
-} from './browser-action-cryptography-validation.js';
 import {
     copyLocalRecordBytes,
     copyLocalRecordIdentifierInput,
@@ -1283,10 +1283,7 @@ const copyHostCommandInput = (
         case 'verify-state-recovery':
             return copyActionStateRecoveryVerificationInput(input);
         case 'release-state-object':
-            return copyOpaqueWorkerIdentifier(
-                input,
-                'State object identifier',
-            );
+            return copyOpaqueWorkerIdentifier(input, 'State object identifier');
         case 'close-state-verifier-session':
             return copyOpaqueWorkerIdentifier(
                 input,

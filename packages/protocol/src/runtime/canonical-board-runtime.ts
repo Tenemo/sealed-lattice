@@ -1,7 +1,4 @@
-import type {
-    RefusalReason,
-    VerificationResult,
-} from '@sealed-lattice/types';
+import type { RefusalReason, VerificationResult } from '@sealed-lattice/types';
 import {
     openCanonicalBoardVerifierSession,
     type CanonicalBoardVerifierConfiguration,
@@ -82,8 +79,7 @@ const isHash = (value: unknown): value is Uint8Array => {
     try {
         return (
             ArrayBuffer.isView(value) &&
-            Object.prototype.toString.call(value) ===
-                '[object Uint8Array]' &&
+            Object.prototype.toString.call(value) === '[object Uint8Array]' &&
             value.byteLength === hashByteLength
         );
     } catch {
@@ -245,7 +241,7 @@ class CanonicalBoardRuntimeImplementation implements CanonicalBoardRuntime {
         const snapshot = Object.freeze(
             Object.create(null) as object,
         ) as VerifiedCanonicalBoardSnapshot;
-        snapshotRecords.set(snapshot as object, {
+        snapshotRecords.set(snapshot, {
             objectsByHash: new Map(sortedObjects),
             runtime: this,
         });
@@ -266,7 +262,7 @@ class CanonicalBoardRuntimeImplementation implements CanonicalBoardRuntime {
         ) {
             return { refusalReason: 'wrongTypeOrLength' };
         }
-        const record = snapshotRecords.get(snapshot as object);
+        const record = snapshotRecords.get(snapshot);
         if (record === undefined || record.runtime !== this) {
             return { refusalReason: 'wrongContext' };
         }
@@ -304,8 +300,6 @@ export const openCanonicalBoardRuntime = (
         return opened;
     }
     return valid(
-        Object.freeze(
-            new CanonicalBoardRuntimeImplementation(opened.value),
-        ),
+        Object.freeze(new CanonicalBoardRuntimeImplementation(opened.value)),
     );
 };

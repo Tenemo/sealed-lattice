@@ -420,6 +420,7 @@ fn trim_trailing_extension_zeroes(coefficients: &mut Vec<ProofChallengeExtension
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::PROOF_EVALUATION_COSET_OFFSET;
 
     fn base(value: u64) -> ProofBaseFieldElement {
         ProofBaseFieldElement::from_canonical(value).expect("test value is canonical")

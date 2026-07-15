@@ -388,7 +388,7 @@ pub struct ActionPrivateRandomness {
 
 impl ActionPrivateRandomness {
     pub(crate) fn root(&self) -> &[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH] {
-        self.root.as_ref()
+        &self.root
     }
 
     pub const fn derivation_input(&self) -> ActionRandomnessDerivationInput {

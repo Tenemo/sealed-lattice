@@ -31,8 +31,8 @@ const maximumUnsigned64 = 0xffff_ffff_ffff_ffffn;
 const reservedEntryState = 1;
 const verificationStartedEntryState = 2;
 const assignedProofFamilies = Object.freeze([
-    0x2110, 0x2111, 0x1211, 0x1212, 0x1213, 0x1214, 0x1215, 0x1216,
-    0x1217, 0x1218, 0x1302, 0x1621,
+    0x2110, 0x2111, 0x1211, 0x1212, 0x1213, 0x1214, 0x1215, 0x1216, 0x1217,
+    0x1218, 0x1302, 0x1621,
 ] as const);
 
 export type ProofFamilyApplicationCeiling = Readonly<{
@@ -175,9 +175,11 @@ const copyAndValidateLimits = (
         limits.transactionLifetimeMilliseconds,
         'transactionLifetimeMilliseconds',
     );
+    const untrustedOrderedFamilyApplicationCeilings: unknown =
+        limits.orderedFamilyApplicationCeilings;
     if (
-        !Array.isArray(limits.orderedFamilyApplicationCeilings) ||
-        limits.orderedFamilyApplicationCeilings.length !==
+        !Array.isArray(untrustedOrderedFamilyApplicationCeilings) ||
+        untrustedOrderedFamilyApplicationCeilings.length !==
             assignedProofFamilies.length
     ) {
         throw new AuthenticatedRuntimeRecordError(
@@ -191,8 +193,7 @@ const copyAndValidateLimits = (
             if (
                 typeof ceiling !== 'object' ||
                 ceiling === null ||
-                ceiling.applicationStatementSchemaIdentifier !==
-                    expectedFamily
+                ceiling.applicationStatementSchemaIdentifier !== expectedFamily
             ) {
                 throw new AuthenticatedRuntimeRecordError(
                     'InvalidConfiguration',
@@ -252,7 +253,9 @@ export const openProofApplicationLedger = (input: {
         maximumRecordSealingCount: limits.maximumRecordSealingCount,
     });
     let operationTail = Promise.resolve();
-    const enqueue = <Result>(operation: () => Promise<Result>): Promise<Result> => {
+    const enqueue = <Result>(
+        operation: () => Promise<Result>,
+    ): Promise<Result> => {
         const result = operationTail.then(operation, operation);
         operationTail = result.then(
             () => undefined,
@@ -269,7 +272,11 @@ export const openProofApplicationLedger = (input: {
                 limits,
             );
             try {
-                const opened = await readRecord(input.store, protection, limits);
+                const opened = await readRecord(
+                    input.store,
+                    protection,
+                    limits,
+                );
                 const existing = findEntry(
                     opened.record,
                     description.applicationSlotHash,
@@ -339,7 +346,11 @@ export const openProofApplicationLedger = (input: {
                 'signatureVerificationCount',
             );
             try {
-                const opened = await readRecord(input.store, protection, limits);
+                const opened = await readRecord(
+                    input.store,
+                    protection,
+                    limits,
+                );
                 const entry = findEntry(
                     opened.record,
                     description.applicationSlotHash,
@@ -392,8 +403,7 @@ export const openProofApplicationLedger = (input: {
                 }
                 entry.verificationStarted = true;
                 entry.proofQueryCount = proofQueryCount;
-                entry.signatureVerificationCount =
-                    signatureVerificationCount;
+                entry.signatureVerificationCount = signatureVerificationCount;
                 recomputeCounters(opened.record, limits);
                 await writeRecord(
                     input.store,
@@ -422,11 +432,12 @@ export const openProofApplicationLedger = (input: {
                         protection,
                         limits,
                     );
-                    const entryIndex = opened.record.entries.findIndex((entry) =>
-                        bytesEqual(
-                            entry.applicationSlotHash,
-                            description.applicationSlotHash,
-                        ),
+                    const entryIndex = opened.record.entries.findIndex(
+                        (entry) =>
+                            bytesEqual(
+                                entry.applicationSlotHash,
+                                description.applicationSlotHash,
+                            ),
                     );
                     if (entryIndex < 0) {
                         return false;
@@ -652,11 +663,7 @@ const encodeRecord = (
                 : reservedEntryState,
         );
         view.setBigUint64(offset + 3, entry.proofQueryCount, true);
-        view.setUint32(
-            offset + 11,
-            entry.signatureVerificationCount,
-            true,
-        );
+        view.setUint32(offset + 11, entry.signatureVerificationCount, true);
         view.setBigUint64(offset + 15, entry.proofByteLength, true);
         bytes.set(entry.applicationSlotHash, offset + 23);
         view.setUint32(
@@ -694,7 +701,11 @@ const decodeRecord = (
     }
     const entries: ProofApplicationEntry[] = [];
     let offset = recordHeaderByteLength;
-    for (let entryIndex = 0; entryIndex < declaredObjectCount; entryIndex += 1) {
+    for (
+        let entryIndex = 0;
+        entryIndex < declaredObjectCount;
+        entryIndex += 1
+    ) {
         if (offset > bytes.byteLength - entryHeaderByteLength) {
             destroyEntries(entries);
             throw authenticationFailure(
@@ -707,10 +718,7 @@ const decodeRecord = (
         );
         const state = view.getUint8(offset + 2);
         const proofQueryCount = view.getBigUint64(offset + 3, true);
-        const signatureVerificationCount = view.getUint32(
-            offset + 11,
-            true,
-        );
+        const signatureVerificationCount = view.getUint32(offset + 11, true);
         const proofByteLength = view.getBigUint64(offset + 15, true);
         const applicationSlotHash = bytes.slice(offset + 23, offset + 87);
         const bindingByteLength = view.getUint32(offset + 87, true);
@@ -737,8 +745,7 @@ const decodeRecord = (
                 limits.maximumProofApplicationBindingByteLength ||
             bindingEnd > bytes.byteLength ||
             (state === reservedEntryState &&
-                (proofQueryCount !== 0n ||
-                    signatureVerificationCount !== 0))
+                (proofQueryCount !== 0n || signatureVerificationCount !== 0))
         ) {
             applicationSlotHash.fill(0);
             destroyEntries(entries);
@@ -824,9 +831,8 @@ const recomputeCounters = (
         familyCounts.set(
             entry.applicationStatementSchemaIdentifier,
             checkedNumberAdd(
-                familyCounts.get(
-                    entry.applicationStatementSchemaIdentifier,
-                ) ?? 0,
+                familyCounts.get(entry.applicationStatementSchemaIdentifier) ??
+                    0,
                 1,
                 'proof family count',
             ),
@@ -863,9 +869,8 @@ const recomputeCounters = (
     }
     for (const ceiling of limits.orderedFamilyApplicationCeilings) {
         if (
-            (familyCounts.get(
-                ceiling.applicationStatementSchemaIdentifier,
-            ) ?? 0) > ceiling.maximumApplicationSlotCount
+            (familyCounts.get(ceiling.applicationStatementSchemaIdentifier) ??
+                0) > ceiling.maximumApplicationSlotCount
         ) {
             throw resourceLimit(
                 'The stored proof application family count exceeds its derived ceiling.',
@@ -1083,10 +1088,5 @@ const destroyBindingDescription = (
     description.suiteIdentifier.fill(0);
 };
 
-export {
-    AuthenticatedRuntimeRecordError as ProofApplicationLedgerError,
-};
-export type {
-    AuthenticatedRuntimeRecordErrorCode as ProofApplicationLedgerErrorCode,
-    RuntimeStorageAuthorityContext,
-};
+export { AuthenticatedRuntimeRecordError as ProofApplicationLedgerError };
+export type { AuthenticatedRuntimeRecordErrorCode as ProofApplicationLedgerErrorCode };

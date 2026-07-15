@@ -38,14 +38,9 @@ use super::super::setup_proof::{
     authenticate_setup_proof_material_stream_for_test,
     authenticate_setup_proof_material_stream_in_session_for_test,
 };
-use super::super::trustee_evaluation_key_proof::{
-    EvaluationKeyShareKind, TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof,
-    prove_evaluation_key_share,
-};
 use super::*;
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
 use crate::encoding::CanonicalErrorCode;
-use crate::hashing::to_hex;
 use crate::protocol_signatures::{
     create_ml_dsa_public_key_hash_fixture, create_protocol_signature_fixture,
 };

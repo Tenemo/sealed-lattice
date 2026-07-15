@@ -22,18 +22,6 @@ import {
     type VerificationResult,
 } from '@sealed-lattice/types';
 
-import type {
-    BrowserActionStorageCustody,
-    BrowserDeviceWrappingSnapshot,
-    BrowserRecoveryExportChallenge,
-    BrowserRecoveryExportConfirmation,
-} from './browser-action-storage-custody.js';
-import {
-    copyLocalRecordBytes,
-    copyLocalRecordIdentifierInput,
-    copyLocalRecordOpenInput,
-    copyLocalRecordSealInput,
-} from './browser-local-record-validation.js';
 import {
     copyActionProofAttemptBinding,
     copyActionRandomnessReservationVerificationInput,
@@ -49,6 +37,18 @@ import {
     copyTargetReleaseAttemptInput,
     copyWorkerIdentifierVerificationResult,
 } from './browser-action-cryptography-validation.js';
+import type {
+    BrowserActionStorageCustody,
+    BrowserDeviceWrappingSnapshot,
+    BrowserRecoveryExportChallenge,
+    BrowserRecoveryExportConfirmation,
+} from './browser-action-storage-custody.js';
+import {
+    copyLocalRecordBytes,
+    copyLocalRecordIdentifierInput,
+    copyLocalRecordOpenInput,
+    copyLocalRecordSealInput,
+} from './browser-local-record-validation.js';
 
 export type {
     BrowserActionStorageWorkerKernel,
@@ -997,9 +997,8 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
     ): Promise<VerificationResult<string>> {
         let copiedInput: BrowserActionRandomnessReservationVerificationInput;
         try {
-            copiedInput = copyActionRandomnessReservationVerificationInput(
-                input,
-            );
+            copiedInput =
+                copyActionRandomnessReservationVerificationInput(input);
         } catch (error) {
             return Promise.reject(normalizeInputError(error));
         }
@@ -1152,9 +1151,7 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         return this.#runOperation(() =>
             this.#workerCall(
                 () =>
-                    this.#workerKernel.closeActionRandomness(
-                        copiedIdentifier,
-                    ),
+                    this.#workerKernel.closeActionRandomness(copiedIdentifier),
                 'Closing action randomness failed inside the owned worker.',
             ),
         );

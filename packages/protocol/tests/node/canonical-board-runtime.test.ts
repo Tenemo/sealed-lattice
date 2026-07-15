@@ -16,14 +16,11 @@ import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-br
 const openCanonicalBoardVerifierSessionMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@sealed-lattice/wasm', () => ({
-    openCanonicalBoardVerifierSession:
-        openCanonicalBoardVerifierSessionMock,
+    openCanonicalBoardVerifierSession: openCanonicalBoardVerifierSessionMock,
 }));
 
 const createVerifiedObject = (): VerifiedTranscriptObject =>
-    Object.freeze(
-        Object.create(null) as object,
-    ) as VerifiedTranscriptObject;
+    Object.freeze(Object.create(null) as object) as VerifiedTranscriptObject;
 
 type FakeSession = Readonly<{
     close: ReturnType<typeof vi.fn>;
@@ -40,33 +37,42 @@ const createFakeSession = (
         object: VerifiedTranscriptObject;
     }>[],
 ): FakeSession => {
-    const descriptions = new WeakMap<object, VerifiedTranscriptObjectDescription>();
+    const descriptions = new WeakMap<
+        object,
+        VerifiedTranscriptObjectDescription
+    >();
     const cachedCarriers = new WeakMap<object, Uint8Array>();
     for (const entry of entries) {
-        descriptions.set(entry.object as object, entry.description);
-        cachedCarriers.set(entry.object as object, entry.cachedCarrier);
+        descriptions.set(entry.object, entry.description);
+        cachedCarriers.set(entry.object, entry.cachedCarrier);
     }
     let state: 'active' | 'closed' = 'active';
     const close = vi.fn(() => {
         state = 'closed';
     });
     const verifyUnorderedCarriers = vi.fn();
-    const describe = vi.fn((object: VerifiedTranscriptObject) => {
-        const description = descriptions.get(object as object);
+    const describeObject = vi.fn((object: VerifiedTranscriptObject) => {
+        const description = descriptions.get(object);
         return description === undefined
-            ? { isValid: false as const, refusalReason: 'wrongContext' as const }
+            ? {
+                  isValid: false as const,
+                  refusalReason: 'wrongContext' as const,
+              }
             : { isValid: true as const, value: description };
     });
     const copyCachedCarrier = vi.fn((object: VerifiedTranscriptObject) => {
-        const carrier = cachedCarriers.get(object as object);
+        const carrier = cachedCarriers.get(object);
         return carrier === undefined
-            ? { isValid: false as const, refusalReason: 'wrongContext' as const }
+            ? {
+                  isValid: false as const,
+                  refusalReason: 'wrongContext' as const,
+              }
             : { isValid: true as const, value: carrier.slice() };
     });
     const session = {
         close,
         copyCachedCarrier,
-        describe,
+        describe: describeObject,
         release: vi.fn(),
         state: () => state,
         verifyUnorderedCarriers,
@@ -74,7 +80,7 @@ const createFakeSession = (
     return {
         close,
         copyCachedCarrier,
-        describe,
+        describe: describeObject,
         session,
         verifyUnorderedCarriers,
     };
@@ -200,15 +206,11 @@ describe('canonical board runtime', () => {
         });
         const runtime = requireValid(openCanonicalBoardRuntime(runtimeInput()));
         const snapshot = requireValid(
-            runtime.ingestUnordered([
-                { canonicalCarrier: Uint8Array.of(1) },
-            ]),
+            runtime.ingestUnordered([{ canonicalCarrier: Uint8Array.of(1) }]),
         );
 
         expect(
-            runtime.ingestUnordered([
-                { canonicalCarrier: Uint8Array.of(2) },
-            ]),
+            runtime.ingestUnordered([{ canonicalCarrier: Uint8Array.of(2) }]),
         ).toEqual({ isValid: false, refusalReason: 'equivocation' });
         expect(requireValid(runtime.objects(snapshot))).toEqual([object]);
     });
@@ -243,14 +245,10 @@ describe('canonical board runtime', () => {
         });
         const runtime = requireValid(openCanonicalBoardRuntime(runtimeInput()));
         const firstSnapshot = requireValid(
-            runtime.ingestUnordered([
-                { canonicalCarrier: Uint8Array.of(1) },
-            ]),
+            runtime.ingestUnordered([{ canonicalCarrier: Uint8Array.of(1) }]),
         );
         const secondSnapshot = requireValid(
-            runtime.ingestUnordered([
-                { canonicalCarrier: Uint8Array.of(2) },
-            ]),
+            runtime.ingestUnordered([{ canonicalCarrier: Uint8Array.of(2) }]),
         );
 
         expect(requireValid(runtime.objects(firstSnapshot))).toEqual([
@@ -319,17 +317,12 @@ describe('canonical board runtime', () => {
             isValid: false,
             refusalReason: 'wrongTypeOrLength',
         });
-        expect(
-            firstRuntime.findObject(snapshot, Uint8Array.of(1)),
-        ).toEqual({
+        expect(firstRuntime.findObject(snapshot, Uint8Array.of(1))).toEqual({
             isValid: false,
             refusalReason: 'wrongTypeOrLength',
         });
         expect(
-            firstRuntime.findObject(
-                snapshot,
-                new Uint8Array(64).fill(0xaa),
-            ),
+            firstRuntime.findObject(snapshot, new Uint8Array(64).fill(0xaa)),
         ).toEqual({
             isValid: false,
             refusalReason: 'missingPrerequisite',

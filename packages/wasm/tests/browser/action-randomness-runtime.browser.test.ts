@@ -1,8 +1,8 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { describe, expect, it } from 'vitest';
 
-import { loadFreshTranscriptCoreKernel } from '#packages/wasm/src/index';
 import { openActionRandomnessSession } from '#packages/wasm/src/action-randomness-runtime';
+import { loadFreshTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
     openStateVerifierSession,
     stateCapabilityKinds,

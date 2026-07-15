@@ -41,8 +41,8 @@ fn trustee_verifier_rejects_oversized_ring_degree_before_processing_proof_limbs(
 #[test]
 fn tampered_component_material_is_rejected() {
     let (mut statement, witness) =
-        generate_development_public_key_share_instance("0011aabb", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
+        generate_development_trustee_instance("0011aabb", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("trustee evaluation-key instance");
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     statement.keys_mut()[0].component_b_by_digit[0][0][0] ^= 1;
@@ -53,8 +53,8 @@ fn tampered_component_material_is_rejected() {
 #[test]
 fn tampered_deep_evaluation_is_rejected() {
     let (statement, witness) =
-        generate_development_public_key_share_instance("c0ffee11", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
+        generate_development_trustee_instance("c0ffee11", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("trustee evaluation-key instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let modulus = statement.limb_moduli()[0];
@@ -67,8 +67,8 @@ fn tampered_deep_evaluation_is_rejected() {
 #[test]
 fn tampered_consistency_claim_is_rejected() {
     let (statement, witness) =
-        generate_development_public_key_share_instance("13371337", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
+        generate_development_trustee_instance("13371337", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("trustee evaluation-key instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     proof.limb_proofs[0].masked_consistency_claims[0] += 1;
@@ -79,8 +79,8 @@ fn tampered_consistency_claim_is_rejected() {
 #[test]
 fn tampered_sumcheck_residual_zero_anchor_is_rejected() {
     let (statement, witness) =
-        generate_development_public_key_share_instance("a11ce000", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
+        generate_development_trustee_instance("a11ce000", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("trustee evaluation-key instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let modulus = statement.limb_moduli()[0];
@@ -100,8 +100,8 @@ fn tampered_sumcheck_residual_zero_anchor_is_rejected() {
 #[test]
 fn tampered_sumcheck_residual_low_degree_proof_is_rejected() {
     let (statement, witness) =
-        generate_development_public_key_share_instance("a11ce001", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
+        generate_development_trustee_instance("a11ce001", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("trustee evaluation-key instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let modulus = statement.limb_moduli()[0];
@@ -126,13 +126,13 @@ fn forged_secret_inconsistent_across_limbs_is_rejected() {
     // Emulate that by proving two honest instances with different secrets and
     // splicing one limb proof across them.
     let (statement, witness) =
-        generate_development_public_key_share_instance("aaaa0001", SMALL_RING_DEGREE)
-            .expect("first instance");
+        generate_development_trustee_instance("aaaa0001", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("first trustee evaluation-key instance");
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let (other_statement, other_witness) =
-        generate_development_public_key_share_instance("bbbb0002", SMALL_RING_DEGREE)
-            .expect("second instance");
+        generate_development_trustee_instance("bbbb0002", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("second trustee evaluation-key instance");
     let other_proof =
         prove_evaluation_key_share(&other_statement, &other_witness, PROOF_RANDOMNESS_SEED)
             .expect("prove");

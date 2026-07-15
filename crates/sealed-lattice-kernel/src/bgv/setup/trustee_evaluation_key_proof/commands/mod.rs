@@ -1,10 +1,10 @@
 use serde_json::{Value, json};
 
+use super::invalid_succinct_setup_proof;
 use super::relation::{
     KeyBearingWitness, SameSecretLinkageWitness, TrusteeEvaluationKeyStatement,
     TrusteeEvaluationKeyWitness,
 };
-use super::invalid_succinct_setup_proof;
 use crate::bgv::setup::ProofByteSource;
 use crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule as atom_schedule;
 use crate::bgv::setup::setup_proof::SetupProofFamily;
@@ -84,10 +84,7 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         },
         linkage: SameSecretLinkageWitness {
             negative_indicator_coefficients,
-            opening_randomness_by_limb: read_i64_matrix(
-                request,
-                "openingRandomnessByLimb",
-            )?,
+            opening_randomness_by_limb: read_i64_matrix(request, "openingRandomnessByLimb")?,
         },
     };
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;

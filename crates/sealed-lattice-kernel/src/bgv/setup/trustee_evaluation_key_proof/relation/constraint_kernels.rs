@@ -117,10 +117,7 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
     let mask_digit_constraint = |value: &Domain::Value| {
         let value_minus_one = domain.value_sub_base(value, 1);
         let value_minus_two = domain.value_sub_base(value, 2);
-        domain.value_mul(
-            &domain.value_mul(value, &value_minus_one),
-            &value_minus_two,
-        )
+        domain.value_mul(&domain.value_mul(value, &value_minus_one), &value_minus_two)
     };
 
     if layout.private_vss_active() {
@@ -231,10 +228,8 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                     };
                     let product =
                         domain.value_mul(&publics.consistency[repetition][half], &witness_value);
-                    accumulated = tower.add(
-                        &accumulated,
-                        &domain.challenge_times(alpha_value, &product),
-                    );
+                    accumulated =
+                        tower.add(&accumulated, &domain.challenge_times(alpha_value, &product));
                 }
             }
         }
@@ -243,7 +238,7 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
         for (column_index, relation_values) in publics.linkage.iter().enumerate() {
             for (half, relation_value) in relation_values.iter().enumerate().take(TRACE_SPLIT) {
                 let column_value =
-                    private_vss_column_value(column_values, layout, column_index, half);
+                    private_vss_column_value::<Domain>(column_values, layout, column_index, half);
                 accumulated = tower.add(
                     &accumulated,
                     &domain.challenge_times(relation_value, &column_value),
@@ -304,10 +299,8 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                 };
                 let product =
                     domain.value_mul(&publics.consistency[repetition][half], &witness_value);
-                accumulated = tower.add(
-                    &accumulated,
-                    &domain.challenge_times(alpha_value, &product),
-                );
+                accumulated =
+                    tower.add(&accumulated, &domain.challenge_times(alpha_value, &product));
             }
         }
     }

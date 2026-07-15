@@ -40,20 +40,6 @@ export type VssSourceTrusteeCoefficientOpeningState = {
     readonly coefficientOpenings: readonly VssCoefficientOpeningInput[];
 };
 
-export type VssSourceTrusteeCoefficientOpeningStateReference = Readonly<{
-    readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
-}>;
-
-export type VssSourceTrusteeCoefficientOpeningStateProvider = Readonly<{
-    readonly sourceTrusteeReferences: readonly VssSourceTrusteeCoefficientOpeningStateReference[];
-    readonly loadSourceTrusteeOpeningState: (
-        sourceTrusteeReference: VssSourceTrusteeCoefficientOpeningStateReference,
-    ) => VssSourceTrusteeCoefficientOpeningState;
-}>;
-
-export type VssOpeningRandomByteSource = (byteLength: number) => Uint8Array;
-
 export type VssSourceTrusteeCoefficientOpeningStateGenerationInput = {
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -61,19 +47,7 @@ export type VssSourceTrusteeCoefficientOpeningStateGenerationInput = {
     readonly qSharePrimes: readonly number[];
     readonly ringDegree: number;
     readonly thresholdDegree: number;
-    readonly randomBytes?: VssOpeningRandomByteSource;
 };
-
-export type VssSourceTrusteeCoefficientOpeningStateProviderInput = Readonly<{
-    readonly sourceTrustees: readonly VssSourceTrusteeCoefficientOpeningStateReference[];
-    readonly participantCount: number;
-    readonly qSharePrimes: readonly number[];
-    readonly ringDegree: number;
-    readonly thresholdDegree: number;
-    readonly randomBytesForSourceTrustee: (
-        sourceTrusteeReference: VssSourceTrusteeCoefficientOpeningStateReference,
-    ) => VssOpeningRandomByteSource;
-}>;
 
 export type VssSourceTrusteeCoefficientCommitmentRecord = Readonly<{
     readonly objectType: 'VssSourceTrusteeCoefficientCommitments';
@@ -94,27 +68,14 @@ export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly coefficientOpenings: readonly VssCoefficientOpeningMaterial[];
 }>;
 
-export type VssCoefficientCommitmentBundle = Readonly<{
-    readonly commitmentSet: VssCoefficientCommitmentSet;
-    readonly privateOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[];
-}>;
-
-export type VssCoefficientCommitmentBundleInput = {
+export type VssSourceTrusteeCoefficientCommitmentContributionInput = {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly qSharePrimes: readonly number[];
     readonly ringDegree: number;
     readonly thresholdDegree: number;
-    readonly sourceTrusteeOpeningStates?: readonly VssSourceTrusteeCoefficientOpeningState[];
-    readonly sourceTrusteeOpeningStateProvider?: VssSourceTrusteeCoefficientOpeningStateProvider;
-    readonly setupCommitmentComputer: SetupCommitmentOpeningComputer;
-};
-
-export type VssSourceTrusteeCoefficientCommitmentContributionInput = Omit<
-    VssCoefficientCommitmentBundleInput,
-    'sourceTrusteeOpeningStateProvider' | 'sourceTrusteeOpeningStates'
-> & {
     readonly sourceTrusteeOpeningState: VssSourceTrusteeCoefficientOpeningState;
+    readonly setupCommitmentComputer: SetupCommitmentOpeningComputer;
 };
 
 type SetupCommitmentOpeningComputation = Readonly<{

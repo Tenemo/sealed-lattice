@@ -1,7 +1,7 @@
 import { registerAcceptedSetupSessionKernelContext } from '../accepted-setup-session-runtime.js';
 import { registerCanonicalStreamKernelContext } from '../canonical-stream-runtime.js';
-import { registerActionRandomnessKernelContext } from './action-randomness-kernel-context.js';
 
+import { registerActionRandomnessKernelContext } from './action-randomness-kernel-context.js';
 import type {
     BgvCollectiveSetupVerification,
     TranscriptCoreKernelContextOwner,

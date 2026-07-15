@@ -26,7 +26,9 @@ internal ballot, aggregation, evaluation, and target-decryption components.
 These components are not yet a complete participant workflow or a supported-phone
 profile. The public package does not provide accepted board finality, state
 authorization, or target decryption. Proof-system and end-to-end security work
-also remains open. See [SECURITY.md](SECURITY.md) for the authoritative
+also remains open. Production setup-mailbox sealing refuses until signing-key
+custody and reset-safe action randomness are composed behind one closed
+browser-local operation. See [SECURITY.md](SECURITY.md) for the authoritative
 limitations and evidence boundaries.
 
 ## Installation

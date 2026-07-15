@@ -9,6 +9,9 @@ const TRIT_RADIX: u64 = 3;
 const MATERIAL_DIGIT_RADIX: u64 = 129_140_163;
 const MATERIAL_DIGIT_TRIT_COUNT: usize = 17;
 const MODULAR_QUOTIENT_BIT_COUNT: usize = 17;
+pub(super) const TRUSTEE_QUOTIENT_LOW_TRIT_COUNT: usize = 9;
+pub(super) const TRUSTEE_QUOTIENT_HIGH_RADIX: u16 = 19_683;
+pub(super) const TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE: u64 = 49_207;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SameSecretRelationPlanInput {
@@ -44,10 +47,26 @@ pub(super) struct KeyRelationGeometry {
     material_column_degree_bound_exclusive: Option<u64>,
     public_polynomial_column_degree_bound_exclusive: u64,
     relation_data_modulus_indices: Vec<u16>,
+    relation_special_modulus_indices: Vec<u16>,
     commitment_data_modulus_indices: Vec<u16>,
     commitment_module_rank: u16,
     plaintext_modulus: Option<u64>,
+    schedule_position: Option<u32>,
     first_mask_purpose: u16,
+}
+
+pub(super) struct TrusteeKeyRelationGeometryInput {
+    pub(super) schedule_position: u32,
+    pub(super) ring_degree: u64,
+    pub(super) evaluation_domain_size: u64,
+    pub(super) opening_degree_bound_exclusive: u64,
+    pub(super) public_polynomial_column_degree_bound_exclusive: u64,
+    pub(super) data_modulus_count: usize,
+    pub(super) special_modulus_count: usize,
+    pub(super) commitment_data_modulus_indices: Vec<u16>,
+    pub(super) commitment_module_rank: u16,
+    pub(super) plaintext_modulus: u64,
+    pub(super) first_mask_purpose: u16,
 }
 
 impl KeyRelationGeometry {
@@ -62,9 +81,11 @@ impl KeyRelationGeometry {
             public_polynomial_column_degree_bound_exclusive: input
                 .public_polynomial_column_degree_bound_exclusive,
             relation_data_modulus_indices: input.sharing_data_modulus_indices.clone(),
+            relation_special_modulus_indices: Vec::new(),
             commitment_data_modulus_indices: input.commitment_data_modulus_indices.clone(),
             commitment_module_rank: input.commitment_module_rank,
             plaintext_modulus: None,
+            schedule_position: None,
             first_mask_purpose: input.first_mask_purpose,
         }
     }
@@ -78,11 +99,39 @@ impl KeyRelationGeometry {
             public_polynomial_column_degree_bound_exclusive: input
                 .public_polynomial_column_degree_bound_exclusive,
             relation_data_modulus_indices: input.data_modulus_indices.clone(),
+            relation_special_modulus_indices: Vec::new(),
             commitment_data_modulus_indices: input.commitment_data_modulus_indices.clone(),
             commitment_module_rank: input.commitment_module_rank,
             plaintext_modulus: Some(input.plaintext_modulus),
+            schedule_position: None,
             first_mask_purpose: input.first_mask_purpose,
         }
+    }
+
+    pub(super) fn for_trustee(
+        input: TrusteeKeyRelationGeometryInput,
+    ) -> Result<Self, RelationPlanError> {
+        let relation_data_modulus_indices = (0..input.data_modulus_count)
+            .map(|index| u16::try_from(index).map_err(|_| RelationPlanError::CountOverflow))
+            .collect::<Result<Vec<_>, _>>()?;
+        let relation_special_modulus_indices = (0..input.special_modulus_count)
+            .map(|index| u16::try_from(index).map_err(|_| RelationPlanError::CountOverflow))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            ring_degree: input.ring_degree,
+            evaluation_domain_size: input.evaluation_domain_size,
+            opening_degree_bound_exclusive: input.opening_degree_bound_exclusive,
+            material_column_degree_bound_exclusive: None,
+            public_polynomial_column_degree_bound_exclusive: input
+                .public_polynomial_column_degree_bound_exclusive,
+            relation_data_modulus_indices,
+            relation_special_modulus_indices,
+            commitment_data_modulus_indices: input.commitment_data_modulus_indices,
+            commitment_module_rank: input.commitment_module_rank,
+            plaintext_modulus: Some(input.plaintext_modulus),
+            schedule_position: Some(input.schedule_position),
+            first_mask_purpose: input.first_mask_purpose,
+        })
     }
 
     fn trace_domain_size(&self) -> Result<u64, RelationPlanError> {
@@ -105,11 +154,13 @@ impl KeyRelationGeometry {
             || self.public_polynomial_column_degree_bound_exclusive == 0
             || self.public_polynomial_column_degree_bound_exclusive
                 > self.opening_degree_bound_exclusive
-            || self.material_column_degree_bound_exclusive.is_some_and(|degree| {
-                degree == 0 || degree > self.opening_degree_bound_exclusive
-            })
+            || self
+                .material_column_degree_bound_exclusive
+                .is_some_and(|degree| degree == 0 || degree > self.opening_degree_bound_exclusive)
             || self.relation_data_modulus_indices.is_empty()
             || !strictly_sorted_unique(&self.relation_data_modulus_indices)
+            || (!self.relation_special_modulus_indices.is_empty()
+                && !strictly_sorted_unique(&self.relation_special_modulus_indices))
             || self.commitment_data_modulus_indices.is_empty()
             || !strictly_sorted_unique(&self.commitment_data_modulus_indices)
             || self.commitment_module_rank == 0
@@ -133,10 +184,11 @@ impl KeyRelationGeometry {
                 .map(|index| u16::try_from(index).map_err(|_| RelationPlanError::CountOverflow))
                 .collect::<Result<Vec<_>, _>>()?;
             if self.relation_data_modulus_indices != expected_data_modulus_indices
-                || self
-                    .commitment_data_modulus_indices
-                    .iter()
-                    .any(|index| self.relation_data_modulus_indices.binary_search(index).is_err())
+                || self.commitment_data_modulus_indices.iter().any(|index| {
+                    self.relation_data_modulus_indices
+                        .binary_search(index)
+                        .is_err()
+                })
             {
                 return Err(RelationPlanError::NonCanonicalOrder);
             }
@@ -162,9 +214,25 @@ impl KeyRelationGeometry {
                 Ok((reference, modulus))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let mut resolved_special_moduli = self
+            .relation_special_modulus_indices
+            .iter()
+            .copied()
+            .map(|index| {
+                let reference = SuiteModulusReference::special(index);
+                let modulus = context.resolved_modulus(reference)?;
+                if modulus <= self.ring_degree
+                    || modulus >= context.base_field_modulus
+                    || modulus.is_multiple_of(2)
+                {
+                    return Err(RelationPlanError::InvalidModulus);
+                }
+                Ok((reference, modulus))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        resolved_moduli.append(&mut resolved_special_moduli);
         if let Some(plaintext_modulus) = self.plaintext_modulus {
-            if context.resolved_modulus(SuiteModulusReference::plaintext())?
-                != plaintext_modulus
+            if context.resolved_modulus(SuiteModulusReference::plaintext())? != plaintext_modulus
                 || plaintext_modulus < 3
                 || resolved_moduli
                     .iter()
@@ -204,9 +272,7 @@ impl KeyRelationGeometry {
             .checked_add(1)
             .and_then(|term_count| term_count.checked_mul(u128::from(self.ring_degree)))
             .and_then(|coefficient_count| {
-                coefficient_count.checked_mul(u128::from(
-                    maximum_centered_matrix_coefficient,
-                ))
+                coefficient_count.checked_mul(u128::from(maximum_centered_matrix_coefficient))
             })
             .and_then(|bound| bound.checked_add(4))
             .ok_or(RelationPlanError::IntegerBoundOverflow)?;
@@ -229,8 +295,19 @@ pub(super) enum KeyVerifierSourceKey {
         row: u16,
         column: u16,
     },
+    TrusteeBdlopMatrix {
+        data_modulus_index: u16,
+        matrix_part: u16,
+        row: u16,
+        column: u16,
+    },
     PublicKeyCommonReference {
         data_modulus_index: u16,
+    },
+    RelinearizationCommonReference {
+        schedule_position: u32,
+        decomposition_block_index: u16,
+        modulus_reference: SuiteModulusReference,
     },
 }
 
@@ -280,10 +357,21 @@ pub(super) struct AnchorQuotientWitness {
     rows: Vec<[u32; 2]>,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct TrusteeAnchorOpeningWitness {
+    hiding_secrets: Vec<SplitIntegerVector>,
+    hiding_errors: Vec<ShiftedSmallVector>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct TrusteeRadixThreeQuotientWitness {
+    low_quotients: [u32; 2],
+    high_carries: [u32; 2],
+}
+
 #[derive(Default)]
 struct PendingIntegerLiftBatch {
-    reversed_bindings:
-        BTreeMap<(u32, u32), RelationIntegerLiftReversedColumnBindingDescriptor>,
+    reversed_bindings: BTreeMap<(u32, u32), RelationIntegerLiftReversedColumnBindingDescriptor>,
     components: Vec<RelationIntegerLiftComponentDescriptor>,
 }
 
@@ -300,8 +388,7 @@ pub(super) struct KeyRelationPlanBuilder<'context> {
     bound_trees: Vec<RelationTreeDescriptor>,
     base_tree_columns: Vec<u32>,
     auxiliary_tree_columns: Vec<u32>,
-    pending_integer_lift_batches:
-        BTreeMap<(SuiteModulusReference, u16), PendingIntegerLiftBatch>,
+    pending_integer_lift_batches: BTreeMap<(SuiteModulusReference, u16), PendingIntegerLiftBatch>,
     ordered_integer_lift_batches: Vec<RelationIntegerLiftBatchDescriptor>,
     ordered_constraints: Vec<RelationConstraintDescriptor>,
 }
@@ -334,10 +421,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         })
     }
 
-    fn modulus(
-        &self,
-        modulus_reference: SuiteModulusReference,
-    ) -> Result<u64, RelationPlanError> {
+    fn modulus(&self, modulus_reference: SuiteModulusReference) -> Result<u64, RelationPlanError> {
         self.resolved_moduli
             .get(&modulus_reference)
             .copied()
@@ -401,6 +485,21 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         zeroifier_postfix_expression: Vec<RelationExpressionInstruction>,
         enforce_proof_base_field_no_wrap: bool,
     ) -> Result<u32, RelationPlanError> {
+        self.add_constraint_with_integer_factors(
+            numerator_postfix_expression,
+            zeroifier_postfix_expression,
+            enforce_proof_base_field_no_wrap,
+            Vec::new(),
+        )
+    }
+
+    fn add_constraint_with_integer_factors(
+        &mut self,
+        numerator_postfix_expression: Vec<RelationExpressionInstruction>,
+        zeroifier_postfix_expression: Vec<RelationExpressionInstruction>,
+        enforce_proof_base_field_no_wrap: bool,
+        ordered_injective_integer_factor_expressions: Vec<Vec<RelationExpressionInstruction>>,
+    ) -> Result<u32, RelationPlanError> {
         let ordinal = u32::try_from(self.ordered_constraints.len())
             .map_err(|_| RelationPlanError::CountOverflow)?;
         self.ordered_constraints.push(RelationConstraintDescriptor {
@@ -409,7 +508,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             numerator_postfix_expression,
             zeroifier_postfix_expression,
             enforce_proof_base_field_no_wrap,
-            ordered_injective_integer_factor_expressions: Vec::new(),
+            ordered_injective_integer_factor_expressions,
         });
         Ok(ordinal)
     }
@@ -466,6 +565,43 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         Ok(column)
     }
 
+    fn add_finite_integer_set_column(
+        &mut self,
+        ordered_values: Vec<BigInt>,
+        phase: ProofTreePhase,
+    ) -> Result<u32, RelationPlanError> {
+        let column = self.push_prover_column(phase)?;
+        let (expression, ordered_factor_expressions) = finite_integer_set_constraint_expressions(
+            column,
+            &ordered_values,
+            self.context.base_field_modulus,
+        )?;
+        let constraint_ordinal = self.add_constraint_with_integer_factors(
+            expression,
+            full_trace_zeroifier_expression(self.geometry.trace_domain_size()?),
+            false,
+            ordered_factor_expressions,
+        )?;
+        self.insert_semantic_cell(
+            column,
+            SignedIntegerInterval::from_bigints(
+                ordered_values
+                    .first()
+                    .cloned()
+                    .ok_or(RelationPlanError::InvalidBoundCertificate)?,
+                ordered_values
+                    .last()
+                    .cloned()
+                    .ok_or(RelationPlanError::InvalidBoundCertificate)?,
+            )?,
+            RelationBoundCertificate::FiniteIntegerSet {
+                constraint_ordinal,
+                ordered_values,
+            },
+        )?;
+        Ok(column)
+    }
+
     fn add_trit_columns(
         &mut self,
         count: usize,
@@ -488,12 +624,10 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             self.context.base_field_modulus,
         )?;
         let constraint_ordinal = self.add_full_trace_constraint(expression, false)?;
-        let maximum = BigUint::from(radix)
-            .pow(
-                u32::try_from(ordered_digit_column_ordinals.len())
-                    .map_err(|_| RelationPlanError::CountOverflow)?,
-            )
-            - BigUint::one();
+        let maximum = BigUint::from(radix).pow(
+            u32::try_from(ordered_digit_column_ordinals.len())
+                .map_err(|_| RelationPlanError::CountOverflow)?,
+        ) - BigUint::one();
         self.insert_semantic_cell(
             target_column_ordinal,
             SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(maximum))?,
@@ -530,15 +664,74 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         }
         let target_column_ordinal = self.add_bounded_material_digit(maximum, phase)?;
         let maximum_digits = vec![maximum];
-        self.add_upper_bound_comparator(
-            &[target_column_ordinal],
-            &maximum_digits,
-            phase,
-        )?;
+        self.add_upper_bound_comparator(&[target_column_ordinal], &maximum_digits, phase)?;
         Ok(BoundedUnsignedColumn {
             target_column_ordinal,
             ordered_digit_column_ordinals: vec![target_column_ordinal],
         })
+    }
+
+    fn add_canonical_modulus_column(
+        &mut self,
+        modulus_reference: SuiteModulusReference,
+        phase: ProofTreePhase,
+    ) -> Result<u32, RelationPlanError> {
+        let maximum = self
+            .context
+            .resolved_modulus(modulus_reference)?
+            .checked_sub(1)
+            .ok_or(RelationPlanError::InvalidModulus)?;
+        let digit_count = minimum_unsigned_radix_digit_count(maximum, TRIT_RADIX)?;
+        let target_column_ordinal = self.push_prover_column(phase)?;
+        let ordered_digit_column_ordinals = self.add_trit_columns(digit_count, phase)?;
+        let recomposition_constraint_ordinal = self.add_full_trace_constraint(
+            radix_recomposition_expression(
+                target_column_ordinal,
+                TRIT_RADIX,
+                None,
+                &ordered_digit_column_ordinals,
+                self.context.base_field_modulus,
+            )?,
+            false,
+        )?;
+        let maximum_digits = fixed_radix_digits(maximum, digit_count, TRIT_RADIX)?;
+        let ordered_difference_digit_column_ordinals = self.add_trit_columns(digit_count, phase)?;
+        let ordered_borrow_column_ordinals = (0..digit_count.saturating_sub(1))
+            .map(|_| self.add_binary_column(phase))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut ordered_comparator_constraint_ordinals = Vec::with_capacity(digit_count);
+        for digit_ordinal in 0..digit_count {
+            ordered_comparator_constraint_ordinals.push(
+                self.add_full_trace_constraint(
+                    unsigned_radix_comparator_digit_expression(
+                        maximum_digits[digit_ordinal],
+                        ordered_digit_column_ordinals[digit_ordinal],
+                        ordered_difference_digit_column_ordinals[digit_ordinal],
+                        digit_ordinal
+                            .checked_sub(1)
+                            .map(|ordinal| ordered_borrow_column_ordinals[ordinal]),
+                        (digit_ordinal + 1 < digit_count)
+                            .then(|| ordered_borrow_column_ordinals[digit_ordinal]),
+                        TRIT_RADIX,
+                    ),
+                    true,
+                )?,
+            );
+        }
+        self.insert_semantic_cell(
+            target_column_ordinal,
+            SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(maximum))?,
+            RelationBoundCertificate::CanonicalModulusRecomposition {
+                recomposition_constraint_ordinal,
+                modulus_reference,
+                radix: TRIT_RADIX,
+                ordered_digit_column_ordinals,
+                ordered_comparator_constraint_ordinals,
+                ordered_difference_digit_column_ordinals,
+                ordered_borrow_column_ordinals,
+            },
+        )?;
+        Ok(target_column_ordinal)
     }
 
     fn add_upper_bound_comparator(
@@ -557,10 +750,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             } else {
                 MATERIAL_DIGIT_RADIX - 1
             };
-            difference_digits.push(self.add_bounded_material_digit(
-                difference_maximum,
-                phase,
-            )?);
+            difference_digits.push(self.add_bounded_material_digit(difference_maximum, phase)?);
         }
         let borrows = (0..value_digits.len().saturating_sub(1))
             .map(|_| self.add_binary_column(phase))
@@ -594,10 +784,8 @@ impl KeyRelationPlanBuilder<'_> {
         {
             return Err(RelationPlanError::InvalidRoot);
         }
-        let required_rotations_by_column = required_column_rotations(
-            &self.ordered_constraints,
-            &[],
-        )?;
+        let required_rotations_by_column =
+            required_column_rotations(&self.ordered_constraints, &[])?;
         if required_rotations_by_column.len() != self.ordered_columns.len() {
             return Err(RelationPlanError::InvalidOpening);
         }
@@ -657,14 +845,14 @@ impl KeyRelationPlanBuilder<'_> {
 
         let ordered_opening_points = (0..self.context.deep_point_count)
             .flat_map(|deep_point_ordinal| {
-                used_rotations.iter().map(move |rotation| {
-                    RelationOpeningPointDescriptor {
+                used_rotations
+                    .iter()
+                    .map(move |rotation| RelationOpeningPointDescriptor {
                         deep_point_ordinal,
                         trace_rotation_is_negative: rotation.0,
                         trace_rotation_magnitude: rotation.1,
                         conjugate_index: 0,
-                    }
-                })
+                    })
             })
             .collect::<Vec<_>>();
         let opening_point_ordinals = ordered_opening_points
@@ -771,9 +959,7 @@ impl KeyRelationPlanBuilder<'_> {
         let component_count = u128::from(quotient_component_count);
         let rounded_mask_degree = component_count
             .checked_add(1)
-            .and_then(|count| {
-                count.checked_mul(u128::from(trace_mask_degree_bound_exclusive))
-            })
+            .and_then(|count| count.checked_mul(u128::from(trace_mask_degree_bound_exclusive)))
             .and_then(|degree| degree.checked_add(component_count - 1))
             .ok_or(RelationPlanError::DegreeBoundExceeded)?
             / component_count;
@@ -821,14 +1007,12 @@ impl KeyRelationPlanBuilder<'_> {
                 application_statement_schema_identifier: self
                     .application_statement_schema_identifier,
                 variants: vec![RelationPlanVariant {
-                    schedule_position: None,
+                    schedule_position: self.geometry.schedule_position,
                     top_count: None,
                     proof_privacy_mode: ProofPrivacyMode::SecretBearing,
                     trace_domain_size: self.geometry.trace_domain_size()?,
                     evaluation_domain_size: self.geometry.evaluation_domain_size,
-                    opening_degree_bound_exclusive: self
-                        .geometry
-                        .opening_degree_bound_exclusive,
+                    opening_degree_bound_exclusive: self.geometry.opening_degree_bound_exclusive,
                     ordered_non_native_moduli: self.ordered_non_native_moduli,
                     ordered_verifier_sources: self.ordered_verifier_sources,
                     ordered_public_samplers: Vec::new(),
@@ -863,10 +1047,7 @@ fn derived_trace_mask_degree_bound(
         }
         let rotation_count = u64::try_from(
             required_rotations_by_column
-                .get(
-                    &u32::try_from(column_ordinal)
-                        .map_err(|_| RelationPlanError::CountOverflow)?,
-                )
+                .get(&u32::try_from(column_ordinal).map_err(|_| RelationPlanError::CountOverflow)?)
                 .ok_or(RelationPlanError::InvalidOpening)?
                 .len(),
         )
@@ -877,6 +1058,7 @@ fn derived_trace_mask_degree_bound(
             .ok_or(RelationPlanError::CountOverflow)?;
         let query_view_count = u64::from(context.unique_query_count)
             .checked_mul(2)
+            .and_then(|count| count.checked_mul(rotation_count))
             .ok_or(RelationPlanError::CountOverflow)?;
         maximum_view_count = maximum_view_count.max(
             deep_opening_view_count
@@ -884,10 +1066,11 @@ fn derived_trace_mask_degree_bound(
                 .ok_or(RelationPlanError::CountOverflow)?,
         );
     }
-    maximum_view_count
-        .checked_mul(2)
-        .filter(|degree| *degree > 0 && *degree <= trace_domain_size)
-        .ok_or(RelationPlanError::InvalidMaskGrammar)
+    if maximum_view_count == 0 || maximum_view_count > trace_domain_size {
+        Err(RelationPlanError::InvalidMaskGrammar)
+    } else {
+        Ok(maximum_view_count)
+    }
 }
 
 pub(super) fn statement_root_source(
@@ -942,6 +1125,61 @@ pub(super) fn bdlop_matrix_source(
     )
 }
 
+pub(super) fn trustee_bdlop_matrix_source(
+    ring_degree: u64,
+    data_modulus_index: u16,
+    matrix_part: u16,
+    row: u16,
+    column: u16,
+) -> (KeyVerifierSourceKey, RelationVerifierSource) {
+    let modulus_reference = SuiteModulusReference::data(data_modulus_index);
+    (
+        KeyVerifierSourceKey::TrusteeBdlopMatrix {
+            data_modulus_index,
+            matrix_part,
+            row,
+            column,
+        },
+        RelationVerifierSource::Protocol {
+            protocol_source_kind: 5,
+            source_coordinates: vec![
+                u64::from(data_modulus_index),
+                u64::from(matrix_part),
+                u64::from(row),
+                u64::from(column),
+            ],
+            statement_binding_path: vec![RelationSelectorPathStep::tuple_field(0)],
+            value_layout: least_nonnegative_residue_vector(modulus_reference, ring_degree),
+        },
+    )
+}
+
+pub(super) fn relinearization_common_reference_source(
+    ring_degree: u64,
+    schedule_position: u32,
+    decomposition_block_index: u16,
+    modulus_reference: SuiteModulusReference,
+) -> (KeyVerifierSourceKey, RelationVerifierSource) {
+    (
+        KeyVerifierSourceKey::RelinearizationCommonReference {
+            schedule_position,
+            decomposition_block_index,
+            modulus_reference,
+        },
+        RelationVerifierSource::Protocol {
+            protocol_source_kind: 7,
+            source_coordinates: vec![
+                u64::from(schedule_position),
+                u64::from(decomposition_block_index),
+                modulus_reference.catalog as u64,
+                u64::from(modulus_reference.modulus_index),
+            ],
+            statement_binding_path: vec![RelationSelectorPathStep::tuple_field(0)],
+            value_layout: least_nonnegative_residue_vector(modulus_reference, ring_degree),
+        },
+    )
+}
+
 pub(super) fn public_key_common_reference_source(
     ring_degree: u64,
     data_modulus_index: u16,
@@ -968,6 +1206,13 @@ fn centered_residue_vector(
         shape: vec![element_count],
         embedding_kind: RelationEmbeddingKind::Centered,
     }
+}
+
+fn least_nonnegative_residue_vector(
+    modulus_reference: SuiteModulusReference,
+    element_count: u64,
+) -> RelationValueLayout {
+    RelationValueLayout::residue_vector(modulus_reference, element_count)
 }
 
 fn canonical_sources(
@@ -1049,6 +1294,49 @@ fn constant_linear_term(
         column_ordinal,
         column_offset,
         coefficient: RelationIntegerLiftCoefficient::Constant(1),
+    }
+}
+
+fn scaled_constant_linear_term(
+    column_ordinal: u32,
+    negative: bool,
+    coefficient: u64,
+) -> RelationIntegerLiftLinearTermDescriptor {
+    RelationIntegerLiftLinearTermDescriptor {
+        negative,
+        column_ordinal,
+        column_offset: 0,
+        coefficient: RelationIntegerLiftCoefficient::Constant(coefficient),
+    }
+}
+
+fn plaintext_scaled_linear_term(
+    column_ordinal: u32,
+    negative: bool,
+) -> RelationIntegerLiftLinearTermDescriptor {
+    RelationIntegerLiftLinearTermDescriptor {
+        negative,
+        column_ordinal,
+        column_offset: 0,
+        coefficient: RelationIntegerLiftCoefficient::Modulus {
+            modulus_reference: SuiteModulusReference::plaintext(),
+            multiplier: 1,
+        },
+    }
+}
+
+fn trustee_quotient_carry_linear_term(
+    carry_column_ordinal: u32,
+    modulus_reference: SuiteModulusReference,
+) -> RelationIntegerLiftLinearTermDescriptor {
+    RelationIntegerLiftLinearTermDescriptor {
+        negative: true,
+        column_ordinal: carry_column_ordinal,
+        column_offset: 0,
+        coefficient: RelationIntegerLiftCoefficient::Modulus {
+            modulus_reference,
+            multiplier: TRUSTEE_QUOTIENT_HIGH_RADIX,
+        },
     }
 }
 
@@ -1206,22 +1494,21 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         batch_key: (SuiteModulusReference, u16),
         quotient_column_ordinal: u32,
         mut ordered_linear_terms: Vec<RelationIntegerLiftLinearTermDescriptor>,
-        mut ordered_full_ring_negacyclic_products:
-            Vec<RelationIntegerLiftFullRingNegacyclicProductDescriptor>,
+        mut ordered_full_ring_negacyclic_products: Vec<
+            RelationIntegerLiftFullRingNegacyclicProductDescriptor,
+        >,
     ) -> Result<(), RelationPlanError> {
         sort_canonical_items(&mut ordered_linear_terms, |term| term.canonical_bytes())?;
-        sort_canonical_items(
-            &mut ordered_full_ring_negacyclic_products,
-            |product| product.canonical_bytes(),
-        )?;
+        sort_canonical_items(&mut ordered_full_ring_negacyclic_products, |product| {
+            product.canonical_bytes()
+        })?;
         let component = RelationIntegerLiftComponentDescriptor {
             quotient_is_negative: true,
             quotient_column_ordinal,
             ordered_linear_terms,
             ordered_convolution_products: Vec::new(),
             ordered_full_ring_negacyclic_products,
-            linear_evaluation_column_ordinal: self
-                .push_prover_column(ProofTreePhase::Auxiliary)?,
+            linear_evaluation_column_ordinal: self.push_prover_column(ProofTreePhase::Auxiliary)?,
             product_accumulator_column_ordinal: self
                 .push_prover_column(ProofTreePhase::Auxiliary)?,
         };
@@ -1230,6 +1517,262 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             .or_default()
             .components
             .push(component);
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn add_relinearization_round_one_equations(
+        &mut self,
+        modulus_reference: SuiteModulusReference,
+        challenge_ordinal: u16,
+        round_one_left: &SplitIntegerVector,
+        round_one_right: &SplitIntegerVector,
+        common_reference: SplitIntegerVector,
+        secret: &ReversibleShiftedSmallVector,
+        ephemeral_secret: &ReversibleShiftedSmallVector,
+        round_one_left_error: &ShiftedSmallVector,
+        round_one_right_error: &ShiftedSmallVector,
+        gadget_coefficient: u64,
+        left_quotient: TrusteeRadixThreeQuotientWitness,
+        right_quotient: TrusteeRadixThreeQuotientWitness,
+    ) -> Result<(), RelationPlanError> {
+        let modulus = self.modulus(modulus_reference)?;
+        if secret.source.offset != 0
+            || ephemeral_secret.source.offset != 0
+            || round_one_left_error.offset != 0
+            || round_one_right_error.offset != 0
+            || gadget_coefficient >= modulus
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let batch_key = (modulus_reference, challenge_ordinal);
+        for half_ordinal in 0..2 {
+            let selected_half = integer_lift_half(half_ordinal)?;
+            let mut left_linear_terms = vec![
+                constant_linear_term(round_one_left.halves[half_ordinal], 0, false),
+                plaintext_scaled_linear_term(
+                    round_one_left_error.coefficients.halves[half_ordinal],
+                    true,
+                ),
+                trustee_quotient_carry_linear_term(
+                    left_quotient.high_carries[half_ordinal],
+                    modulus_reference,
+                ),
+            ];
+            if gadget_coefficient != 0 {
+                left_linear_terms.push(scaled_constant_linear_term(
+                    secret.source.coefficients.halves[half_ordinal],
+                    true,
+                    gadget_coefficient,
+                ));
+            }
+            let common_reference_times_ephemeral = self.full_ring_product(
+                batch_key,
+                selected_half,
+                false,
+                common_reference,
+                ephemeral_secret,
+            )?;
+            self.add_integer_lift_component(
+                batch_key,
+                left_quotient.low_quotients[half_ordinal],
+                left_linear_terms,
+                vec![common_reference_times_ephemeral],
+            )?;
+
+            let common_reference_times_secret =
+                self.full_ring_product(batch_key, selected_half, true, common_reference, secret)?;
+            self.add_integer_lift_component(
+                batch_key,
+                right_quotient.low_quotients[half_ordinal],
+                vec![
+                    constant_linear_term(round_one_right.halves[half_ordinal], 0, false),
+                    plaintext_scaled_linear_term(
+                        round_one_right_error.coefficients.halves[half_ordinal],
+                        true,
+                    ),
+                    trustee_quotient_carry_linear_term(
+                        right_quotient.high_carries[half_ordinal],
+                        modulus_reference,
+                    ),
+                ],
+                vec![common_reference_times_secret],
+            )?;
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn add_relinearization_round_two_equation(
+        &mut self,
+        modulus_reference: SuiteModulusReference,
+        challenge_ordinal: u16,
+        round_two: &SplitIntegerVector,
+        aggregate_round_one_left: &ReversibleShiftedSmallVector,
+        aggregate_round_one_right: &ReversibleShiftedSmallVector,
+        secret: &ReversibleShiftedSmallVector,
+        ephemeral_secret: &ReversibleShiftedSmallVector,
+        round_two_error: &ShiftedSmallVector,
+        quotient: TrusteeRadixThreeQuotientWitness,
+    ) -> Result<(), RelationPlanError> {
+        let modulus = self.modulus(modulus_reference)?;
+        let centered_offset = (modulus - 1) / 2;
+        if secret.source.offset != 0
+            || ephemeral_secret.source.offset != 0
+            || round_two_error.offset != 0
+            || aggregate_round_one_left.source.offset != centered_offset
+            || aggregate_round_one_right.source.offset != centered_offset
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let batch_key = (modulus_reference, challenge_ordinal);
+        for half_ordinal in 0..2 {
+            let selected_half = integer_lift_half(half_ordinal)?;
+            let secret_times_aggregate_left = self.full_ring_product(
+                batch_key,
+                selected_half,
+                true,
+                secret.source.coefficients,
+                aggregate_round_one_left,
+            )?;
+            let ephemeral_times_aggregate_right = self.full_ring_product(
+                batch_key,
+                selected_half,
+                true,
+                ephemeral_secret.source.coefficients,
+                aggregate_round_one_right,
+            )?;
+            let secret_times_aggregate_right = self.full_ring_product(
+                batch_key,
+                selected_half,
+                false,
+                secret.source.coefficients,
+                aggregate_round_one_right,
+            )?;
+            self.add_integer_lift_component(
+                batch_key,
+                quotient.low_quotients[half_ordinal],
+                vec![
+                    constant_linear_term(round_two.halves[half_ordinal], 0, false),
+                    plaintext_scaled_linear_term(
+                        round_two_error.coefficients.halves[half_ordinal],
+                        true,
+                    ),
+                    trustee_quotient_carry_linear_term(
+                        quotient.high_carries[half_ordinal],
+                        modulus_reference,
+                    ),
+                ],
+                vec![
+                    secret_times_aggregate_left,
+                    ephemeral_times_aggregate_right,
+                    secret_times_aggregate_right,
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn add_trustee_anchor_equations(
+        &mut self,
+        modulus_reference: SuiteModulusReference,
+        challenge_ordinal: u16,
+        commitments: &[SplitIntegerVector],
+        first_matrix: &[Vec<ReversibleShiftedSmallVector>],
+        second_matrix: &[ReversibleShiftedSmallVector],
+        opening: &TrusteeAnchorOpeningWitness,
+        secret: &ShiftedSmallVector,
+        quotients: &[TrusteeRadixThreeQuotientWitness],
+    ) -> Result<(), RelationPlanError> {
+        let rank = usize::from(self.geometry.commitment_module_rank);
+        let centered_offset = (self.modulus(modulus_reference)? - 1) / 2;
+        if commitments.len() != rank + 1
+            || first_matrix.len() != rank
+            || first_matrix.iter().any(|row| row.len() != rank + 1)
+            || second_matrix.len() != rank
+            || opening.hiding_secrets.len() != rank + 1
+            || opening.hiding_errors.len() != rank
+            || quotients.len() != rank + 1
+            || secret.offset != 0
+            || first_matrix
+                .iter()
+                .flatten()
+                .chain(second_matrix)
+                .any(|matrix| matrix.source.offset != centered_offset)
+            || opening.hiding_errors.iter().any(|value| value.offset != 0)
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let batch_key = (modulus_reference, challenge_ordinal);
+        for row_ordinal in 0..rank {
+            for half_ordinal in 0..2 {
+                let selected_half = integer_lift_half(half_ordinal)?;
+                let mut products = Vec::with_capacity(rank + 1);
+                for column_ordinal in 0..=rank {
+                    products.push(self.full_ring_product(
+                        batch_key,
+                        selected_half,
+                        true,
+                        opening.hiding_secrets[column_ordinal],
+                        &first_matrix[row_ordinal][column_ordinal],
+                    )?);
+                }
+                self.add_integer_lift_component(
+                    batch_key,
+                    quotients[row_ordinal].low_quotients[half_ordinal],
+                    vec![
+                        constant_linear_term(
+                            commitments[row_ordinal].halves[half_ordinal],
+                            0,
+                            false,
+                        ),
+                        constant_linear_term(
+                            opening.hiding_errors[row_ordinal].coefficients.halves[half_ordinal],
+                            0,
+                            true,
+                        ),
+                        trustee_quotient_carry_linear_term(
+                            quotients[row_ordinal].high_carries[half_ordinal],
+                            modulus_reference,
+                        ),
+                    ],
+                    products,
+                )?;
+            }
+        }
+
+        for half_ordinal in 0..2 {
+            let selected_half = integer_lift_half(half_ordinal)?;
+            let mut products = Vec::with_capacity(rank);
+            for column_ordinal in 0..rank {
+                products.push(self.full_ring_product(
+                    batch_key,
+                    selected_half,
+                    true,
+                    opening.hiding_secrets[column_ordinal],
+                    &second_matrix[column_ordinal],
+                )?);
+            }
+            self.add_integer_lift_component(
+                batch_key,
+                quotients[rank].low_quotients[half_ordinal],
+                vec![
+                    constant_linear_term(commitments[rank].halves[half_ordinal], 0, false),
+                    constant_linear_term(
+                        opening.hiding_secrets[rank].halves[half_ordinal],
+                        0,
+                        true,
+                    ),
+                    constant_linear_term(secret.coefficients.halves[half_ordinal], 0, true),
+                    trustee_quotient_carry_linear_term(
+                        quotients[rank].high_carries[half_ordinal],
+                        modulus_reference,
+                    ),
+                ],
+                products,
+            )?;
+        }
         Ok(())
     }
 
@@ -1285,9 +1828,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                             false,
                         ),
                         constant_linear_term(
-                            opening.hiding_errors[row_ordinal]
-                                .coefficients
-                                .halves[half_ordinal],
+                            opening.hiding_errors[row_ordinal].coefficients.halves[half_ordinal],
                             opening.hiding_errors[row_ordinal].offset,
                             true,
                         ),
@@ -1315,10 +1856,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 vec![
                     constant_linear_term(commitments[rank].halves[half_ordinal], 0, false),
                     constant_linear_term(
-                        opening.hiding_secrets[rank]
-                            .source
-                            .coefficients
-                            .halves[half_ordinal],
+                        opening.hiding_secrets[rank].source.coefficients.halves[half_ordinal],
                         opening.hiding_secrets[rank].source.offset,
                         true,
                     ),
@@ -1360,11 +1898,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 batch_key,
                 quotient_columns[half_ordinal],
                 vec![
-                    constant_linear_term(
-                        public_key_share.halves[half_ordinal],
-                        0,
-                        false,
-                    ),
+                    constant_linear_term(public_key_share.halves[half_ordinal], 0, false),
                     RelationIntegerLiftLinearTermDescriptor {
                         negative: true,
                         column_ordinal: error.coefficients.halves[half_ordinal],
@@ -1389,10 +1923,9 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 .reversed_bindings
                 .into_values()
                 .collect::<Vec<_>>();
-            sort_canonical_items(
-                &mut ordered_reversed_column_bindings,
-                |binding| binding.canonical_bytes(),
-            )?;
+            sort_canonical_items(&mut ordered_reversed_column_bindings, |binding| {
+                binding.canonical_bytes()
+            })?;
             let mut ordered_components = pending_batch.components;
             sort_canonical_items(&mut ordered_components, |component| {
                 component.canonical_bytes()
@@ -1434,18 +1967,21 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         let trace_domain_size = self.geometry.trace_domain_size()?;
         let mut halves = Vec::with_capacity(2);
         for half_ordinal in 0..2_u64 {
-            halves.push(self.push_column(
-                RelationColumnOrigin::VerifierSequence {
-                    verifier_source_ordinal: source_ordinal,
-                    first_logical_element_index: half_ordinal
-                        .checked_mul(trace_domain_size)
-                        .ok_or(RelationPlanError::CountOverflow)?,
-                    logical_element_stride: 1,
-                },
-                self.geometry.public_polynomial_column_degree_bound_exclusive,
-                Some(modulus_reference),
-                Some(ProofTreePhase::Base),
-            )?);
+            halves.push(
+                self.push_column(
+                    RelationColumnOrigin::VerifierSequence {
+                        verifier_source_ordinal: source_ordinal,
+                        first_logical_element_index: half_ordinal
+                            .checked_mul(trace_domain_size)
+                            .ok_or(RelationPlanError::CountOverflow)?,
+                        logical_element_stride: 1,
+                    },
+                    self.geometry
+                        .public_polynomial_column_degree_bound_exclusive,
+                    Some(modulus_reference),
+                    Some(ProofTreePhase::Base),
+                )?,
+            );
         }
         Ok(SplitIntegerVector {
             halves: halves
@@ -1476,7 +2012,8 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 RelationColumnOrigin::BoundTree {
                     expected_root_source_ordinal: source_ordinal,
                 },
-                self.geometry.public_polynomial_column_degree_bound_exclusive,
+                self.geometry
+                    .public_polynomial_column_degree_bound_exclusive,
                 Some(modulus_reference),
                 None,
             )?;
@@ -1484,7 +2021,8 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 RelationColumnOrigin::BoundTree {
                     expected_root_source_ordinal: source_ordinal,
                 },
-                self.geometry.public_polynomial_column_degree_bound_exclusive,
+                self.geometry
+                    .public_polynomial_column_degree_bound_exclusive,
                 Some(modulus_reference),
                 None,
             )?;
@@ -1528,7 +2066,8 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 RelationColumnOrigin::BoundTree {
                     expected_root_source_ordinal: source_ordinal,
                 },
-                self.geometry.public_polynomial_column_degree_bound_exclusive,
+                self.geometry
+                    .public_polynomial_column_degree_bound_exclusive,
                 Some(*modulus_reference),
                 None,
             )?;
@@ -1536,7 +2075,8 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 RelationColumnOrigin::BoundTree {
                     expected_root_source_ordinal: source_ordinal,
                 },
-                self.geometry.public_polynomial_column_degree_bound_exclusive,
+                self.geometry
+                    .public_polynomial_column_degree_bound_exclusive,
                 Some(*modulus_reference),
                 None,
             )?;
@@ -1555,6 +2095,60 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             ordered_column_ordinals: tree_columns,
         });
         Ok(limbs)
+    }
+
+    pub(super) fn add_setup_polynomial_rows_root(
+        &mut self,
+        source_key: &KeyVerifierSourceKey,
+        ordered_row_modulus_references: &[SuiteModulusReference],
+        root_use: BoundPolynomialRootUse,
+    ) -> Result<Vec<SplitIntegerVector>, RelationPlanError> {
+        if ordered_row_modulus_references.is_empty() {
+            return Err(RelationPlanError::InvalidRoot);
+        }
+        let source_ordinal = self.source_ordinal(source_key)?;
+        let mut tree_columns = Vec::with_capacity(
+            ordered_row_modulus_references
+                .len()
+                .checked_mul(2)
+                .ok_or(RelationPlanError::CountOverflow)?,
+        );
+        let mut rows = Vec::with_capacity(ordered_row_modulus_references.len());
+        for modulus_reference in ordered_row_modulus_references {
+            self.modulus(*modulus_reference)?;
+            let low = self.push_column(
+                RelationColumnOrigin::BoundTree {
+                    expected_root_source_ordinal: source_ordinal,
+                },
+                self.geometry
+                    .public_polynomial_column_degree_bound_exclusive,
+                Some(*modulus_reference),
+                None,
+            )?;
+            let high = self.push_column(
+                RelationColumnOrigin::BoundTree {
+                    expected_root_source_ordinal: source_ordinal,
+                },
+                self.geometry
+                    .public_polynomial_column_degree_bound_exclusive,
+                Some(*modulus_reference),
+                None,
+            )?;
+            tree_columns.extend([low, high]);
+            rows.push(SplitIntegerVector {
+                halves: [low, high],
+            });
+        }
+        self.bound_trees.push(RelationTreeDescriptor::BoundPublic {
+            construction_kind: BoundTreeConstructionKind::SetupPolynomial,
+            expected_root_source_ordinal: source_ordinal,
+            root_use: match root_use {
+                BoundPolynomialRootUse::Input => BoundTreeRootUse::Input,
+                BoundPolynomialRootUse::Output => BoundTreeRootUse::Output,
+            },
+            ordered_column_ordinals: tree_columns,
+        });
+        Ok(rows)
     }
 
     pub(super) fn add_committed_material_root(
@@ -1641,6 +2235,39 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         })
     }
 
+    pub(super) fn add_signed_ternary_vector(
+        &mut self,
+    ) -> Result<ShiftedSmallVector, RelationPlanError> {
+        let ordered_values = vec![BigInt::from(-1), BigInt::zero(), BigInt::one()];
+        Ok(ShiftedSmallVector {
+            coefficients: SplitIntegerVector {
+                halves: [
+                    self.add_finite_integer_set_column(
+                        ordered_values.clone(),
+                        ProofTreePhase::Base,
+                    )?,
+                    self.add_finite_integer_set_column(ordered_values, ProofTreePhase::Base)?,
+                ],
+            },
+            offset: 0,
+        })
+    }
+
+    pub(super) fn add_reversible_signed_ternary_vector(
+        &mut self,
+    ) -> Result<ReversibleShiftedSmallVector, RelationPlanError> {
+        let source = self.add_signed_ternary_vector()?;
+        Ok(ReversibleShiftedSmallVector {
+            source,
+            reversed: SplitIntegerVector {
+                halves: [
+                    self.push_prover_column(ProofTreePhase::Base)?,
+                    self.push_prover_column(ProofTreePhase::Base)?,
+                ],
+            },
+        })
+    }
+
     pub(super) fn add_binary_vector(&mut self) -> Result<[u32; 2], RelationPlanError> {
         Ok([
             self.add_binary_column(ProofTreePhase::Base)?,
@@ -1664,6 +2291,86 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         })
     }
 
+    pub(super) fn add_signed_eta_two_vector(
+        &mut self,
+    ) -> Result<ShiftedSmallVector, RelationPlanError> {
+        let ordered_values = (-2..=2).map(BigInt::from).collect::<Vec<_>>();
+        Ok(ShiftedSmallVector {
+            coefficients: SplitIntegerVector {
+                halves: [
+                    self.add_finite_integer_set_column(
+                        ordered_values.clone(),
+                        ProofTreePhase::Base,
+                    )?,
+                    self.add_finite_integer_set_column(ordered_values, ProofTreePhase::Base)?,
+                ],
+            },
+            offset: 0,
+        })
+    }
+
+    pub(super) fn add_recentered_vector(
+        &mut self,
+        canonical_vector: SplitIntegerVector,
+        modulus_reference: SuiteModulusReference,
+    ) -> Result<ReversibleShiftedSmallVector, RelationPlanError> {
+        let modulus = self.modulus(modulus_reference)?;
+        let centered_offset = modulus
+            .checked_sub(1)
+            .ok_or(RelationPlanError::InvalidModulus)?
+            / 2;
+        let mut shifted_centered_halves = Vec::with_capacity(2);
+        let mut reversed_halves = Vec::with_capacity(2);
+        for canonical_half in canonical_vector.halves {
+            let shifted_centered =
+                self.add_canonical_modulus_column(modulus_reference, ProofTreePhase::Base)?;
+            let recentering_carry = self.add_binary_column(ProofTreePhase::Base)?;
+            let expression = vec![
+                unrotated_column_expression(shifted_centered),
+                unrotated_column_expression(canonical_half),
+                RelationExpressionInstruction::Negation,
+                RelationExpressionInstruction::Addition,
+                RelationExpressionInstruction::BaseFieldConstant(centered_offset),
+                RelationExpressionInstruction::Negation,
+                RelationExpressionInstruction::Addition,
+                unrotated_column_expression(recentering_carry),
+                RelationExpressionInstruction::NonNativeModulusConstant {
+                    modulus_reference,
+                    multiplier: 1,
+                },
+                RelationExpressionInstruction::Multiplication,
+                RelationExpressionInstruction::Addition,
+            ];
+            self.add_full_trace_constraint(expression, true)?;
+            shifted_centered_halves.push(shifted_centered);
+            reversed_halves.push(self.push_prover_column(ProofTreePhase::Base)?);
+        }
+        Ok(ReversibleShiftedSmallVector {
+            source: ShiftedSmallVector {
+                coefficients: SplitIntegerVector {
+                    halves: shifted_centered_halves
+                        .try_into()
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                },
+                offset: centered_offset,
+            },
+            reversed: SplitIntegerVector {
+                halves: reversed_halves
+                    .try_into()
+                    .map_err(|_| RelationPlanError::CountOverflow)?,
+            },
+        })
+    }
+
+    pub(super) fn add_recentered_split_verifier_vector(
+        &mut self,
+        source_key: &KeyVerifierSourceKey,
+        modulus_reference: SuiteModulusReference,
+    ) -> Result<ReversibleShiftedSmallVector, RelationPlanError> {
+        let canonical_vector = self.add_split_verifier_vector(source_key, modulus_reference)?;
+        self.add_recentered_vector(canonical_vector, modulus_reference)
+    }
+
     pub(super) fn add_anchor_opening_witness(
         &mut self,
     ) -> Result<AnchorOpeningWitness, RelationPlanError> {
@@ -1675,6 +2382,25 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             .map(|_| self.add_shifted_eta_two_vector())
             .collect::<Result<Vec<_>, _>>()?;
         Ok(AnchorOpeningWitness {
+            hiding_secrets,
+            hiding_errors,
+        })
+    }
+
+    pub(super) fn add_trustee_anchor_opening_witness(
+        &mut self,
+    ) -> Result<TrusteeAnchorOpeningWitness, RelationPlanError> {
+        let rank = usize::from(self.geometry.commitment_module_rank);
+        let hiding_secrets = (0..=rank)
+            .map(|_| {
+                self.add_signed_ternary_vector()
+                    .map(|vector| vector.coefficients)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let hiding_errors = (0..rank)
+            .map(|_| self.add_signed_eta_two_vector())
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(TrusteeAnchorOpeningWitness {
             hiding_secrets,
             hiding_errors,
         })
@@ -1697,10 +2423,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         let maximum = BigInt::from(&offset - BigUint::one());
         self.insert_semantic_cell(
             target,
-            SignedIntegerInterval::from_bigints(
-                -BigInt::from(offset.clone()),
-                maximum,
-            )?,
+            SignedIntegerInterval::from_bigints(-BigInt::from(offset.clone()), maximum)?,
             RelationBoundCertificate::ShiftedRadixRecomposition {
                 constraint_ordinal,
                 radix: 2,
@@ -1709,6 +2432,52 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             },
         )?;
         Ok(target)
+    }
+
+    fn add_trustee_quotient_low_column(&mut self) -> Result<u32, RelationPlanError> {
+        let target = self.push_prover_column(ProofTreePhase::Base)?;
+        let trits = self.add_trit_columns(TRUSTEE_QUOTIENT_LOW_TRIT_COUNT, ProofTreePhase::Base)?;
+        let radix_power = BigUint::from(TRIT_RADIX).pow(
+            u32::try_from(TRUSTEE_QUOTIENT_LOW_TRIT_COUNT)
+                .map_err(|_| RelationPlanError::CountOverflow)?,
+        );
+        let offset = (&radix_power - BigUint::one()) / BigUint::from(2_u8);
+        let expression = radix_recomposition_expression(
+            target,
+            TRIT_RADIX,
+            Some(&offset),
+            &trits,
+            self.context.base_field_modulus,
+        )?;
+        let constraint_ordinal = self.add_full_trace_constraint(expression, false)?;
+        let maximum = BigInt::from(&radix_power - BigUint::one()) - BigInt::from(offset.clone());
+        self.insert_semantic_cell(
+            target,
+            SignedIntegerInterval::from_bigints(-BigInt::from(offset.clone()), maximum)?,
+            RelationBoundCertificate::ShiftedRadixRecomposition {
+                constraint_ordinal,
+                radix: TRIT_RADIX,
+                offset,
+                ordered_digit_column_ordinals: trits,
+            },
+        )?;
+        Ok(target)
+    }
+
+    pub(super) fn add_trustee_radix_three_quotient_witness(
+        &mut self,
+    ) -> Result<TrusteeRadixThreeQuotientWitness, RelationPlanError> {
+        let carry_values = (-2..=2).map(BigInt::from).collect::<Vec<_>>();
+        Ok(TrusteeRadixThreeQuotientWitness {
+            low_quotients: [
+                self.add_trustee_quotient_low_column()?,
+                self.add_trustee_quotient_low_column()?,
+            ],
+            high_carries: [
+                self.add_finite_integer_set_column(carry_values.clone(), ProofTreePhase::Base)?,
+                self.add_finite_integer_set_column(carry_values, ProofTreePhase::Base)?,
+            ],
+        })
     }
 
     pub(super) fn add_anchor_quotient_witness(

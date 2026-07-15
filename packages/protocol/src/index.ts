@@ -101,12 +101,6 @@ export {
     createTrusteeEvaluationKeyProofs,
 } from './setup/evaluation-key-proof-records.js';
 export { createEvaluatorKeySchedule } from './setup/evaluator-key-schedule.js';
-export {
-    createVssSourceTrusteeCoefficientOpeningState,
-    createVssSourceTrusteeCoefficientOpeningStateProvider,
-    createVssCoefficientCommitmentBundle,
-    setupCommitmentRandomnessWidth,
-} from './setup/vss-coefficient-commitments.js';
 export { copyCanonicalStreamDescriptor } from './setup/canonical-stream-descriptor.js';
 export { createSetupPackageVerificationInput } from './setup/setup-package-assembly.js';
 export {
@@ -131,12 +125,6 @@ export type {
     TransportedPublicKeyShareProofMaterialSet,
     PublicKeyShareSet,
 } from './setup/public-key-share-records.js';
-export type {
-    VssCoefficientOpeningInput,
-    VssSourceTrusteeCoefficientCommitmentRecord,
-    VssSourceTrusteeCoefficientOpeningState,
-    VssOpeningRandomByteSource,
-} from './setup/vss-coefficient-commitments.js';
 export type {
     SetupPackage,
     SetupPackageVerificationInput,

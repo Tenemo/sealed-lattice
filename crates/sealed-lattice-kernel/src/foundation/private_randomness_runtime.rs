@@ -26,7 +26,6 @@ use super::{
 const COMMAND_OPEN: u32 = 1;
 const COMMAND_CLOSE: u32 = 2;
 const COMMAND_SETUP_MAILBOX_ENCAPSULATE: u32 = 3;
-const COMMAND_SETUP_MAILBOX_SIGNATURE_HEDGE: u32 = 4;
 const COMMAND_PERSISTENT_PROOF_ATTEMPT: u32 = 5;
 const COMMAND_ORDINARY_PROOF_ATTEMPT: u32 = 6;
 const COMMAND_TARGET_RELEASE_ATTEMPT: u32 = 7;
@@ -47,8 +46,10 @@ pub(crate) const ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE: u32 = 0x0001_0001;
 type RuntimeResult<Value> = Result<Value, u32>;
 
 struct ValidatedSetupMailboxRoster {
-    mailbox_encapsulation_keys:
-        Vec<(ParticipantIdentity, [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH])>,
+    mailbox_encapsulation_keys: Vec<(
+        ParticipantIdentity,
+        [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
+    )>,
     roster_hash: Hash512,
 }
 
@@ -184,15 +185,11 @@ impl<'input> InputReader<'input> {
     }
 }
 
-pub(crate) fn run_action_randomness_command(
-    command: u32,
-    input: &[u8],
-) -> RuntimeResult<Vec<u8>> {
+pub(crate) fn run_action_randomness_command(command: u32, input: &[u8]) -> RuntimeResult<Vec<u8>> {
     match command {
         COMMAND_OPEN => open(input),
         COMMAND_CLOSE => close(input),
         COMMAND_SETUP_MAILBOX_ENCAPSULATE => setup_mailbox_encapsulate(input),
-        COMMAND_SETUP_MAILBOX_SIGNATURE_HEDGE => setup_mailbox_signature_hedge(input),
         COMMAND_PERSISTENT_PROOF_ATTEMPT => persistent_proof_attempt(input),
         COMMAND_ORDINARY_PROOF_ATTEMPT => ordinary_proof_attempt(input),
         COMMAND_TARGET_RELEASE_ATTEMPT => target_release_attempt(input),
@@ -216,7 +213,8 @@ fn open(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         .derive(derivation_input)
         .map_err(schema_status)?;
     let commitment = randomness.action_randomness_commitment();
-    let handle = ACTION_RANDOMNESS_REGISTRY.with(|registry| registry.borrow_mut().open(randomness))?;
+    let handle =
+        ACTION_RANDOMNESS_REGISTRY.with(|registry| registry.borrow_mut().open(randomness))?;
     let mut output = Vec::with_capacity(HANDLE_BYTE_LENGTH + HASH_BYTE_LENGTH);
     output.extend_from_slice(&handle.to_le_bytes());
     output.extend_from_slice(commitment.as_bytes());
@@ -240,7 +238,8 @@ fn create_and_seal(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         .derive(derivation_input)
         .map_err(schema_status)?;
     let commitment = randomness.action_randomness_commitment();
-    let handle = ACTION_RANDOMNESS_REGISTRY.with(|registry| registry.borrow_mut().open(randomness))?;
+    let handle =
+        ACTION_RANDOMNESS_REGISTRY.with(|registry| registry.borrow_mut().open(randomness))?;
     let sealed_envelope = ACTION_RANDOMNESS_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let randomness = registry.get(handle)?;
@@ -265,7 +264,8 @@ fn create_and_seal(input: &[u8]) -> RuntimeResult<Vec<u8>> {
             return Err(status);
         }
     };
-    let mut output = Vec::with_capacity(HANDLE_BYTE_LENGTH + HASH_BYTE_LENGTH + sealed_envelope.len());
+    let mut output =
+        Vec::with_capacity(HANDLE_BYTE_LENGTH + HASH_BYTE_LENGTH + sealed_envelope.len());
     output.extend_from_slice(&handle.to_le_bytes());
     output.extend_from_slice(commitment.as_bytes());
     output.extend_from_slice(&sealed_envelope);
@@ -379,7 +379,8 @@ fn open_sealed(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     if randomness.action_randomness_commitment() != expected_commitment {
         return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
     }
-    let handle = ACTION_RANDOMNESS_REGISTRY.with(|registry| registry.borrow_mut().open(randomness))?;
+    let handle =
+        ACTION_RANDOMNESS_REGISTRY.with(|registry| registry.borrow_mut().open(randomness))?;
     let mut output = Vec::with_capacity(HANDLE_BYTE_LENGTH + HASH_BYTE_LENGTH);
     output.extend_from_slice(&handle.to_le_bytes());
     output.extend_from_slice(expected_commitment.as_bytes());
@@ -432,22 +433,19 @@ fn setup_mailbox_encapsulate(input: &[u8]) -> RuntimeResult<Vec<u8>> {
                 attempt_identifier,
             )
             .map_err(schema_status)?;
-        let mut envelope_attempt_identifier =
-            [0u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
+        let mut envelope_attempt_identifier = [0u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
         envelope_attempt_stream
             .fill_bytes(&mut envelope_attempt_identifier)
             .map_err(schema_status)?;
-        let mut encapsulation_coins =
-            Zeroizing::new([0u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]);
+        let mut encapsulation_coins = Zeroizing::new([0u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]);
         encapsulation_coin_stream
             .fill_bytes(encapsulation_coins.as_mut())
             .map_err(schema_status)?;
-        let recipient_encapsulation_key = ml_kem_768::EncapsKey::try_from_bytes(
-            frozen_recipient_encapsulation_key,
-        )
-        .map_err(|_| RefusalReason::WrongTypeOrLength.canonical_code() as u32)?;
+        let recipient_encapsulation_key =
+            ml_kem_768::EncapsKey::try_from_bytes(frozen_recipient_encapsulation_key)
+                .map_err(|_| RefusalReason::WrongTypeOrLength.canonical_code() as u32)?;
         let (shared_secret, ciphertext) =
-            recipient_encapsulation_key.encaps_from_seed(encapsulation_coins.as_ref());
+            recipient_encapsulation_key.encaps_from_seed(&encapsulation_coins);
         let shared_secret = Zeroizing::new(shared_secret.into_bytes());
         let ciphertext = ciphertext.into_bytes();
         let mut output = Vec::with_capacity(
@@ -457,34 +455,6 @@ fn setup_mailbox_encapsulate(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         output.extend_from_slice(&ciphertext);
         output.extend_from_slice(shared_secret.as_ref());
         Ok(output)
-    })
-}
-
-fn setup_mailbox_signature_hedge(input: &[u8]) -> RuntimeResult<Vec<u8>> {
-    let mut reader = InputReader::new(input);
-    let handle = reader.read_u32()?;
-    let reservation_binding = read_verified_reservation_binding(&mut reader)?;
-    let roster_hash = Hash512::from_bytes(reader.read_array()?);
-    let envelope_hash = Hash512::from_bytes(reader.read_array()?);
-    reader.finish()?;
-    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let randomness = registry.get(handle)?;
-        require_matching_setup_action_randomness_reservation(
-            randomness,
-            reservation_binding,
-            roster_hash,
-        )?;
-        let mut stream = randomness
-            .begin_stream(
-                PrivateRandomnessDomain::setup_mailbox(3).map_err(schema_status)?,
-                envelope_hash,
-                randomness.setup_attempt_identifier(),
-            )
-            .map_err(schema_status)?;
-        let mut output = Zeroizing::new(vec![0u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]);
-        stream.fill_bytes(&mut output).map_err(schema_status)?;
-        Ok(core::mem::take(&mut *output))
     })
 }
 
@@ -551,12 +521,9 @@ fn ordinary_proof_attempt(input: &[u8]) -> RuntimeResult<Vec<u8>> {
             Some(producer_sequence),
         )
         .map_err(schema_status)?;
-        let coin_input = OrdinaryProofCoinInput::new(
-            slot,
-            application_statement_hash,
-            *attempt_nonce,
-        )
-        .map_err(schema_status)?;
+        let coin_input =
+            OrdinaryProofCoinInput::new(slot, application_statement_hash, *attempt_nonce)
+                .map_err(schema_status)?;
         let attempt = randomness
             .ordinary_proof_attempt_identifier(&coin_input)
             .map_err(schema_status)?;
@@ -658,11 +625,7 @@ fn read_verified_reservation_binding(
     let session_handle = reader.read_u32()?;
     let capability = reader.read_array::<STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH>()?;
     let verified_reservation_handle = reader.read_u32()?;
-    verified_state_reservation_binding(
-        session_handle,
-        &capability,
-        verified_reservation_handle,
-    )
+    verified_state_reservation_binding(session_handle, &capability, verified_reservation_handle)
 }
 
 fn persistent_proof_reservation_kind(
@@ -670,9 +633,7 @@ fn persistent_proof_reservation_kind(
 ) -> RuntimeResult<StateCapabilityKind> {
     match statement_schema_identifier {
         0x2110 => Ok(StateCapabilityKind::SetupPublicSeedBranch),
-        0x2111 | 0x1211 | 0x1212 | 0x1214 | 0x1217 => {
-            Ok(StateCapabilityKind::SetupDealerSetBranch)
-        }
+        0x2111 | 0x1211 | 0x1212 | 0x1214 | 0x1217 => Ok(StateCapabilityKind::SetupDealerSetBranch),
         0x1216 => Ok(StateCapabilityKind::SetupRkgRoundOneBranch),
         0x1621 => Ok(StateCapabilityKind::TargetRelease),
         _ => Err(RefusalReason::WrongTypeOrLength.canonical_code() as u32),
@@ -851,11 +812,9 @@ mod tests {
         staged_input.extend_from_slice(&[0x33; HASH_BYTE_LENGTH]);
         staged_input.extend_from_slice(&[0x44; HASH_BYTE_LENGTH]);
         staged_input.extend_from_slice(&[0x82; 48]);
-        let staged = run_local_storage_root_command(
-            LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
-            &staged_input,
-        )
-        .expect("storage root stages");
+        let staged =
+            run_local_storage_root_command(LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW, &staged_input)
+                .expect("storage root stages");
         let storage_handle = u32::from_le_bytes(staged[..HANDLE_BYTE_LENGTH].try_into().unwrap());
         let mut commit_input = storage_handle.to_le_bytes().to_vec();
         commit_input.extend_from_slice(&storage_capability);
@@ -865,8 +824,7 @@ mod tests {
 
         let opened = run_action_randomness_command(COMMAND_OPEN, &open_input())
             .expect("action root opens before sealing");
-        let created_handle =
-            u32::from_le_bytes(opened[..HANDLE_BYTE_LENGTH].try_into().unwrap());
+        let created_handle = u32::from_le_bytes(opened[..HANDLE_BYTE_LENGTH].try_into().unwrap());
         let commitment = Hash512::from_bytes(
             opened[HANDLE_BYTE_LENGTH..]
                 .try_into()
@@ -894,16 +852,16 @@ mod tests {
         record_suffix.extend_from_slice(&0_u64.to_le_bytes());
         record_suffix.extend_from_slice(&0_u64.to_le_bytes());
         record_suffix.push(0);
-        assert!(!envelope.windows(ACTION_RANDOMNESS_ROOT_BYTE_LENGTH).any(|window| {
-            window == [0x5a; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]
-        }));
+        assert!(
+            !envelope
+                .windows(ACTION_RANDOMNESS_ROOT_BYTE_LENGTH)
+                .any(|window| { window == [0x5a; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH] })
+        );
         let mut first_attempt_input = created_handle.to_le_bytes().to_vec();
         first_attempt_input.extend_from_slice(&[0xa5; ATTEMPT_IDENTIFIER_BYTE_LENGTH]);
-        let first_attempt = run_action_randomness_command(
-            COMMAND_FRESH_BALLOT_ATTEMPT,
-            &first_attempt_input,
-        )
-        .expect("created session accepts a fresh attempt identifier");
+        let first_attempt =
+            run_action_randomness_command(COMMAND_FRESH_BALLOT_ATTEMPT, &first_attempt_input)
+                .expect("created session accepts a fresh attempt identifier");
         run_action_randomness_command(COMMAND_CLOSE, &created_handle.to_le_bytes())
             .expect("created session closes");
 
@@ -921,11 +879,8 @@ mod tests {
         let mut reopened_attempt_input = reopened_handle.to_le_bytes().to_vec();
         reopened_attempt_input.extend_from_slice(&[0xa5; ATTEMPT_IDENTIFIER_BYTE_LENGTH]);
         assert_eq!(
-            run_action_randomness_command(
-                COMMAND_FRESH_BALLOT_ATTEMPT,
-                &reopened_attempt_input,
-            )
-            .expect("reopened session accepts the same fresh attempt identifier"),
+            run_action_randomness_command(COMMAND_FRESH_BALLOT_ATTEMPT, &reopened_attempt_input,)
+                .expect("reopened session accepts the same fresh attempt identifier"),
             first_attempt,
         );
 

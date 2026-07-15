@@ -2,10 +2,10 @@ use super::*;
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_before_collective_key_material()
+fn heavy_accepted_setup_collective_setup_verifier_consumes_public_key_share_common_proof_bindings_before_collective_key_material()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_before_collective_key_material",
+        "heavy_accepted_setup_collective_setup_verifier_consumes_public_key_share_common_proof_bindings_before_collective_key_material",
     );
     let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
 
@@ -94,19 +94,18 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proof_byte_content()
+fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_share_proof_without_common_proof_binding()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proof_byte_content",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_share_proof_without_common_proof_binding",
     );
     let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
     let proof_binding_session = fixture.begin_proof_binding_session();
     let mut package = fixture.package.clone();
     let verification_request = fixture.verification_request.clone();
-    // The descriptor, hashes, and package roots below are rebound,
-    // so these deliberately malformed proof bytes reach the semantic decoder.
-    // The fixture itself retains only opaque verifier bindings, never a second
-    // copy of every trustee's proof merely to support this negative test.
+    // Authenticated transport bytes alone are not proof acceptance. Rebinding
+    // the package to a new proof hash without a verifier-owned common-proof
+    // binding must fail closed before accepted setup can use the share.
     let proof_bytes = vec![0x53, 0x4c, 0x50, 0x4b, 0x01, 0xff, 0x00];
     let proof_bytes_hash =
         crate::bgv::setup::trustee_evaluation_key_proof::public_key_share_succinct_proof_bytes_hash(

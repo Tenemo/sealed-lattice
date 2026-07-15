@@ -1,6 +1,7 @@
 import { shake256 } from '@noble/hashes/sha3.js';
 import {
     copyVerifiedStateDurableBinding,
+    stateCapabilityKinds,
     stateWitnessVoteKinds,
     type StateDurableBindingDescription,
     type VerifiedStateDurableBinding,
@@ -25,11 +26,44 @@ import type {
 
 const durableStateRecordVersion = 1;
 const hashByteLength = 64;
+const intentLockRecordOperationDomain =
+    'sealed-lattice/runtime/state-intent-lock-record/v1';
+const signedVoteCarrierRecordOperationDomain =
+    'sealed-lattice/runtime/state-signed-vote-carrier-record/v1';
 const exactOutputRecordOperationDomain =
     'sealed-lattice/runtime/state-exact-output-record/v1';
 const stateExactOutputHashDomain = 'sealed-lattice/state/exact-output/v1';
+const intentLockRecordByteLength = 335;
+const signedVoteCarrierRecordHeaderByteLength = 222;
 const exactOutputRecordHeaderByteLength = 204;
 const textEncoder = new TextEncoder();
+const validStateCapabilityKinds = new Set<number>(
+    Object.values(stateCapabilityKinds),
+);
+const validStateWitnessVoteKinds = new Set<number>(
+    Object.values(stateWitnessVoteKinds),
+);
+
+type OpenedIntentLockRecord = {
+    capabilityKind: number;
+    currentEpoch: bigint;
+    latestRecoveryTransitionHash?: Uint8Array;
+    outputIntentObjectHash?: Uint8Array;
+    reservationIntentObjectHash?: Uint8Array;
+    stateKey: Uint8Array;
+    subjectParticipantIdentity: Uint8Array;
+};
+
+type OpenedSignedVoteCarrierRecord = {
+    canonicalSignedVoteCarrier: Uint8Array;
+    capabilityKind: number;
+    intentObjectHash: Uint8Array;
+    stateKey: Uint8Array;
+    subjectEpoch: bigint;
+    subjectParticipantIdentity: Uint8Array;
+    voteKind: number;
+    witnessVoteSequence: bigint;
+};
 
 type OpenedExactOutputRecord = {
     capabilityKind: number;
@@ -42,16 +76,27 @@ type OpenedExactOutputRecord = {
 export type DurableStateWitnessServiceLimits = Readonly<{
     maximumExactOutputByteLength: number;
     maximumRecordSealingCount: number;
+    maximumSignedVoteCarrierByteLength: number;
     transactionLifetimeMilliseconds: number;
 }>;
 
 export type DurableStateWitnessService = Readonly<{
+    cacheSignedVoteCarrier(input: {
+        canonicalSignedVoteCarrier: Uint8Array;
+        verifiedIntentBinding: VerifiedStateDurableBinding;
+    }): Promise<Uint8Array>;
     cacheExactOutput(input: {
         exactOutputBytes: Uint8Array;
         verifiedOutputBinding: VerifiedStateDurableBinding;
     }): Promise<void>;
+    compareAndLockIntent(input: {
+        verifiedIntentBinding: VerifiedStateDurableBinding;
+    }): Promise<void>;
     readExactOutput(input: {
         verifiedOutputBinding: VerifiedStateDurableBinding;
+    }): Promise<Uint8Array>;
+    readSignedVoteCarrier(input: {
+        verifiedIntentBinding: VerifiedStateDurableBinding;
     }): Promise<Uint8Array>;
 }>;
 
@@ -79,6 +124,563 @@ const closeTransactionAfterFailure = async (
         );
     }
     return mappedOperationFailure;
+};
+
+const intentLockRecordKey = (binding: StateDurableBindingDescription): string =>
+    `state-intent-lock/${bytesToHex(binding.stateKey)}`;
+
+const signedVoteCarrierRecordKey = (
+    binding: StateDurableBindingDescription,
+): string =>
+    `state-signed-vote-carrier/${bytesToHex(binding.stateKey)}/${binding.witnessVoteSequence.toString(10)}`;
+
+const writeOptionalHash = (
+    bytes: Uint8Array,
+    offset: number,
+    value: Uint8Array | undefined,
+): void => {
+    if (value === undefined) {
+        bytes[offset] = 0;
+        return;
+    }
+    bytes[offset] = 1;
+    bytes.set(value, offset + 1);
+};
+
+const readOptionalHash = (
+    bytes: Uint8Array,
+    offset: number,
+    label: string,
+): Uint8Array | undefined => {
+    const present = bytes[offset];
+    const value = bytes.slice(offset + 1, offset + 1 + hashByteLength);
+    if (present === 0) {
+        const isCanonicalAbsentValue = value.every((byte) => byte === 0);
+        value.fill(0);
+        if (!isCanonicalAbsentValue) {
+            throw new AuthenticatedRuntimeRecordError(
+                'AuthenticationFailed',
+                `${label} has a noncanonical absent value.`,
+            );
+        }
+        return undefined;
+    }
+    if (present !== 1) {
+        value.fill(0);
+        throw new AuthenticatedRuntimeRecordError(
+            'AuthenticationFailed',
+            `${label} has an invalid presence flag.`,
+        );
+    }
+    return value;
+};
+
+const copyIntentLockRecord = (
+    record: OpenedIntentLockRecord,
+): OpenedIntentLockRecord => ({
+    capabilityKind: record.capabilityKind,
+    currentEpoch: record.currentEpoch,
+    ...(record.latestRecoveryTransitionHash === undefined
+        ? {}
+        : {
+              latestRecoveryTransitionHash:
+                  record.latestRecoveryTransitionHash.slice(),
+          }),
+    ...(record.outputIntentObjectHash === undefined
+        ? {}
+        : { outputIntentObjectHash: record.outputIntentObjectHash.slice() }),
+    ...(record.reservationIntentObjectHash === undefined
+        ? {}
+        : {
+              reservationIntentObjectHash:
+                  record.reservationIntentObjectHash.slice(),
+          }),
+    stateKey: record.stateKey.slice(),
+    subjectParticipantIdentity: record.subjectParticipantIdentity.slice(),
+});
+
+const destroyOpenedIntentLockRecord = (
+    record: OpenedIntentLockRecord,
+): void => {
+    record.latestRecoveryTransitionHash?.fill(0);
+    record.outputIntentObjectHash?.fill(0);
+    record.reservationIntentObjectHash?.fill(0);
+    record.stateKey.fill(0);
+    record.subjectParticipantIdentity.fill(0);
+};
+
+const encodeIntentLockRecord = (record: OpenedIntentLockRecord): Uint8Array => {
+    const bytes = new Uint8Array(intentLockRecordByteLength);
+    const view = new DataView(bytes.buffer);
+    view.setUint16(0, durableStateRecordVersion, true);
+    view.setUint16(2, record.capabilityKind, true);
+    bytes.set(record.stateKey, 4);
+    bytes.set(record.subjectParticipantIdentity, 68);
+    view.setBigUint64(132, record.currentEpoch, true);
+    writeOptionalHash(bytes, 140, record.latestRecoveryTransitionHash);
+    writeOptionalHash(bytes, 205, record.reservationIntentObjectHash);
+    writeOptionalHash(bytes, 270, record.outputIntentObjectHash);
+    return bytes;
+};
+
+const decodeIntentLockRecord = (bytes: Uint8Array): OpenedIntentLockRecord => {
+    if (bytes.byteLength !== intentLockRecordByteLength) {
+        throw new AuthenticatedRuntimeRecordError(
+            'AuthenticationFailed',
+            'Intent-lock record has noncanonical framing.',
+        );
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const recordVersion = view.getUint16(0, true);
+    const capabilityKind = view.getUint16(2, true);
+    const currentEpoch = view.getBigUint64(132, true);
+    const latestRecoveryTransitionHash = readOptionalHash(
+        bytes,
+        140,
+        'Intent-lock recovery transition',
+    );
+    const reservationIntentObjectHash = readOptionalHash(
+        bytes,
+        205,
+        'Intent-lock reservation',
+    );
+    const outputIntentObjectHash = readOptionalHash(
+        bytes,
+        270,
+        'Intent-lock output',
+    );
+    if (
+        recordVersion !== durableStateRecordVersion ||
+        !validStateCapabilityKinds.has(capabilityKind) ||
+        (currentEpoch === 0n) !==
+            (latestRecoveryTransitionHash === undefined) ||
+        (outputIntentObjectHash !== undefined &&
+            reservationIntentObjectHash === undefined)
+    ) {
+        latestRecoveryTransitionHash?.fill(0);
+        reservationIntentObjectHash?.fill(0);
+        outputIntentObjectHash?.fill(0);
+        throw new AuthenticatedRuntimeRecordError(
+            'AuthenticationFailed',
+            'Intent-lock record has inconsistent authenticated state.',
+        );
+    }
+    return {
+        capabilityKind,
+        currentEpoch,
+        ...(latestRecoveryTransitionHash === undefined
+            ? {}
+            : { latestRecoveryTransitionHash }),
+        ...(outputIntentObjectHash === undefined
+            ? {}
+            : { outputIntentObjectHash }),
+        ...(reservationIntentObjectHash === undefined
+            ? {}
+            : { reservationIntentObjectHash }),
+        stateKey: bytes.slice(4, 68),
+        subjectParticipantIdentity: bytes.slice(68, 132),
+    };
+};
+
+const intentLockRecordsEqual = (
+    left: OpenedIntentLockRecord,
+    right: OpenedIntentLockRecord,
+): boolean =>
+    left.capabilityKind === right.capabilityKind &&
+    left.currentEpoch === right.currentEpoch &&
+    bytesEqual(
+        left.latestRecoveryTransitionHash,
+        right.latestRecoveryTransitionHash,
+    ) &&
+    bytesEqual(left.outputIntentObjectHash, right.outputIntentObjectHash) &&
+    bytesEqual(
+        left.reservationIntentObjectHash,
+        right.reservationIntentObjectHash,
+    ) &&
+    bytesEqual(left.stateKey, right.stateKey) &&
+    bytesEqual(
+        left.subjectParticipantIdentity,
+        right.subjectParticipantIdentity,
+    );
+
+const intentLockConflict = (message: string): never => {
+    throw new AuthenticatedRuntimeRecordError('Conflict', message);
+};
+
+const requireIntentLockIdentity = (
+    record: OpenedIntentLockRecord,
+    binding: StateDurableBindingDescription,
+): void => {
+    if (
+        record.capabilityKind !== binding.capabilityKind ||
+        !bytesEqual(record.stateKey, binding.stateKey) ||
+        !bytesEqual(
+            record.subjectParticipantIdentity,
+            binding.subjectParticipantIdentity,
+        )
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'AuthenticationFailed',
+            'Intent-lock record does not match its authenticated state key.',
+        );
+    }
+};
+
+const requireCurrentStateMatchesBinding = (
+    record: OpenedIntentLockRecord,
+    binding: StateDurableBindingDescription,
+): void => {
+    if (
+        record.currentEpoch !== binding.subjectEpoch ||
+        !bytesEqual(
+            record.latestRecoveryTransitionHash,
+            binding.predecessorTransitionHash,
+        )
+    ) {
+        intentLockConflict(
+            'The intent belongs to a different recovery state than the durable lock.',
+        );
+    }
+};
+
+const initialIntentLockRecord = (
+    binding: StateDurableBindingDescription,
+): OpenedIntentLockRecord => {
+    if (binding.voteKind === stateWitnessVoteKinds.output) {
+        intentLockConflict(
+            'An output intent cannot be locked before its reservation.',
+        );
+    }
+    if (
+        binding.voteKind === stateWitnessVoteKinds.reservation &&
+        (binding.subjectEpoch !== 0n ||
+            binding.predecessorTransitionHash !== undefined)
+    ) {
+        intentLockConflict(
+            'A missing post-recovery lock can only be filled through a verified recovery binding.',
+        );
+    }
+    return {
+        capabilityKind: binding.capabilityKind,
+        currentEpoch: binding.subjectEpoch,
+        ...(binding.voteKind === stateWitnessVoteKinds.recovery
+            ? { latestRecoveryTransitionHash: binding.intentObjectHash.slice() }
+            : {}),
+        ...(binding.outputIntentObjectHash === undefined
+            ? {}
+            : {
+                  outputIntentObjectHash:
+                      binding.outputIntentObjectHash.slice(),
+              }),
+        ...(binding.reservationIntentObjectHash === undefined
+            ? {}
+            : {
+                  reservationIntentObjectHash:
+                      binding.reservationIntentObjectHash.slice(),
+              }),
+        stateKey: binding.stateKey.slice(),
+        subjectParticipantIdentity: binding.subjectParticipantIdentity.slice(),
+    };
+};
+
+const nextIntentLockRecord = (
+    binding: StateDurableBindingDescription,
+    currentRecord: OpenedIntentLockRecord | undefined,
+): OpenedIntentLockRecord => {
+    if (currentRecord === undefined) {
+        return initialIntentLockRecord(binding);
+    }
+    requireIntentLockIdentity(currentRecord, binding);
+    const nextRecord = copyIntentLockRecord(currentRecord);
+    switch (binding.voteKind) {
+        case stateWitnessVoteKinds.reservation:
+            requireCurrentStateMatchesBinding(currentRecord, binding);
+            if (
+                currentRecord.reservationIntentObjectHash !== undefined &&
+                !bytesEqual(
+                    currentRecord.reservationIntentObjectHash,
+                    binding.intentObjectHash,
+                )
+            ) {
+                destroyOpenedIntentLockRecord(nextRecord);
+                intentLockConflict(
+                    'A different reservation intent is already locked for this state key.',
+                );
+            }
+            if (nextRecord.reservationIntentObjectHash === undefined) {
+                nextRecord.reservationIntentObjectHash =
+                    binding.intentObjectHash.slice();
+            }
+            return nextRecord;
+        case stateWitnessVoteKinds.output:
+            requireCurrentStateMatchesBinding(currentRecord, binding);
+            if (
+                binding.reservationIntentObjectHash === undefined ||
+                !bytesEqual(
+                    currentRecord.reservationIntentObjectHash,
+                    binding.reservationIntentObjectHash,
+                )
+            ) {
+                destroyOpenedIntentLockRecord(nextRecord);
+                intentLockConflict(
+                    'The output intent does not extend the durable reservation lock.',
+                );
+            }
+            if (
+                currentRecord.outputIntentObjectHash !== undefined &&
+                !bytesEqual(
+                    currentRecord.outputIntentObjectHash,
+                    binding.intentObjectHash,
+                )
+            ) {
+                destroyOpenedIntentLockRecord(nextRecord);
+                intentLockConflict(
+                    'A different output intent is already locked for this state key.',
+                );
+            }
+            if (nextRecord.outputIntentObjectHash === undefined) {
+                nextRecord.outputIntentObjectHash =
+                    binding.intentObjectHash.slice();
+            }
+            return nextRecord;
+        case stateWitnessVoteKinds.recovery:
+            if (binding.subjectEpoch === currentRecord.currentEpoch) {
+                if (
+                    !bytesEqual(
+                        currentRecord.latestRecoveryTransitionHash,
+                        binding.intentObjectHash,
+                    ) ||
+                    (binding.reservationIntentObjectHash !== undefined &&
+                        !bytesEqual(
+                            currentRecord.reservationIntentObjectHash,
+                            binding.reservationIntentObjectHash,
+                        )) ||
+                    (binding.outputIntentObjectHash !== undefined &&
+                        !bytesEqual(
+                            currentRecord.outputIntentObjectHash,
+                            binding.outputIntentObjectHash,
+                        ))
+                ) {
+                    destroyOpenedIntentLockRecord(nextRecord);
+                    intentLockConflict(
+                        'A different recovery transition already occupies this epoch.',
+                    );
+                }
+                return nextRecord;
+            }
+            if (
+                binding.subjectEpoch !== currentRecord.currentEpoch + 1n ||
+                !bytesEqual(
+                    binding.predecessorTransitionHash,
+                    currentRecord.latestRecoveryTransitionHash,
+                )
+            ) {
+                destroyOpenedIntentLockRecord(nextRecord);
+                intentLockConflict(
+                    'The recovery transition does not immediately advance the durable recovery state.',
+                );
+            }
+            if (
+                (currentRecord.reservationIntentObjectHash !== undefined &&
+                    !bytesEqual(
+                        currentRecord.reservationIntentObjectHash,
+                        binding.reservationIntentObjectHash,
+                    )) ||
+                (currentRecord.outputIntentObjectHash !== undefined &&
+                    !bytesEqual(
+                        currentRecord.outputIntentObjectHash,
+                        binding.outputIntentObjectHash,
+                    ))
+            ) {
+                destroyOpenedIntentLockRecord(nextRecord);
+                intentLockConflict(
+                    'The recovery transition does not preserve every durable local lock.',
+                );
+            }
+            nextRecord.currentEpoch = binding.subjectEpoch;
+            nextRecord.latestRecoveryTransitionHash =
+                binding.intentObjectHash.slice();
+            if (binding.reservationIntentObjectHash === undefined) {
+                delete nextRecord.reservationIntentObjectHash;
+            } else {
+                nextRecord.reservationIntentObjectHash =
+                    binding.reservationIntentObjectHash.slice();
+            }
+            if (binding.outputIntentObjectHash === undefined) {
+                delete nextRecord.outputIntentObjectHash;
+            } else {
+                nextRecord.outputIntentObjectHash =
+                    binding.outputIntentObjectHash.slice();
+            }
+            return nextRecord;
+    }
+};
+
+const requireIntentIsLocked = (
+    record: OpenedIntentLockRecord,
+    binding: StateDurableBindingDescription,
+): void => {
+    requireIntentLockIdentity(record, binding);
+    let matches: boolean;
+    switch (binding.voteKind) {
+        case stateWitnessVoteKinds.reservation:
+            matches =
+                record.currentEpoch === binding.subjectEpoch &&
+                bytesEqual(
+                    record.latestRecoveryTransitionHash,
+                    binding.predecessorTransitionHash,
+                ) &&
+                bytesEqual(
+                    record.reservationIntentObjectHash,
+                    binding.intentObjectHash,
+                );
+            break;
+        case stateWitnessVoteKinds.output:
+            matches =
+                record.currentEpoch === binding.subjectEpoch &&
+                bytesEqual(
+                    record.latestRecoveryTransitionHash,
+                    binding.predecessorTransitionHash,
+                ) &&
+                bytesEqual(
+                    record.reservationIntentObjectHash,
+                    binding.reservationIntentObjectHash,
+                ) &&
+                bytesEqual(
+                    record.outputIntentObjectHash,
+                    binding.intentObjectHash,
+                );
+            break;
+        case stateWitnessVoteKinds.recovery:
+            matches =
+                record.currentEpoch === binding.subjectEpoch &&
+                bytesEqual(
+                    record.latestRecoveryTransitionHash,
+                    binding.intentObjectHash,
+                ) &&
+                (binding.reservationIntentObjectHash === undefined ||
+                    bytesEqual(
+                        record.reservationIntentObjectHash,
+                        binding.reservationIntentObjectHash,
+                    )) &&
+                (binding.outputIntentObjectHash === undefined ||
+                    bytesEqual(
+                        record.outputIntentObjectHash,
+                        binding.outputIntentObjectHash,
+                    ));
+            break;
+    }
+    if (!matches) {
+        intentLockConflict(
+            'The signed vote carrier does not match the current durable intent lock.',
+        );
+    }
+};
+
+const encodeSignedVoteCarrierRecord = (
+    binding: StateDurableBindingDescription,
+    canonicalSignedVoteCarrier: Uint8Array,
+): Uint8Array => {
+    const bytes = new Uint8Array(
+        signedVoteCarrierRecordHeaderByteLength +
+            canonicalSignedVoteCarrier.byteLength,
+    );
+    const view = new DataView(bytes.buffer);
+    view.setUint16(0, durableStateRecordVersion, true);
+    view.setUint16(2, binding.capabilityKind, true);
+    view.setUint16(4, binding.voteKind, true);
+    bytes.set(binding.stateKey, 6);
+    bytes.set(binding.subjectParticipantIdentity, 70);
+    bytes.set(binding.intentObjectHash, 134);
+    view.setBigUint64(198, binding.subjectEpoch, true);
+    view.setBigUint64(206, binding.witnessVoteSequence, true);
+    view.setBigUint64(214, BigInt(canonicalSignedVoteCarrier.byteLength), true);
+    bytes.set(
+        canonicalSignedVoteCarrier,
+        signedVoteCarrierRecordHeaderByteLength,
+    );
+    return bytes;
+};
+
+const decodeSignedVoteCarrierRecord = (
+    bytes: Uint8Array,
+    limits: DurableStateWitnessServiceLimits,
+): OpenedSignedVoteCarrierRecord => {
+    if (bytes.byteLength < signedVoteCarrierRecordHeaderByteLength) {
+        throw new AuthenticatedRuntimeRecordError(
+            'AuthenticationFailed',
+            'Signed-vote carrier record is truncated.',
+        );
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const canonicalSignedVoteCarrierByteLength = view.getBigUint64(214, true);
+    const capabilityKind = view.getUint16(2, true);
+    const voteKind = view.getUint16(4, true);
+    if (
+        view.getUint16(0, true) !== durableStateRecordVersion ||
+        !validStateCapabilityKinds.has(capabilityKind) ||
+        !validStateWitnessVoteKinds.has(voteKind) ||
+        canonicalSignedVoteCarrierByteLength === 0n ||
+        canonicalSignedVoteCarrierByteLength >
+            BigInt(limits.maximumSignedVoteCarrierByteLength) ||
+        canonicalSignedVoteCarrierByteLength !==
+            BigInt(bytes.byteLength - signedVoteCarrierRecordHeaderByteLength)
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'AuthenticationFailed',
+            'Signed-vote carrier record has noncanonical framing.',
+        );
+    }
+    return {
+        canonicalSignedVoteCarrier: bytes.slice(
+            signedVoteCarrierRecordHeaderByteLength,
+        ),
+        capabilityKind,
+        intentObjectHash: bytes.slice(134, 198),
+        stateKey: bytes.slice(6, 70),
+        subjectEpoch: view.getBigUint64(198, true),
+        subjectParticipantIdentity: bytes.slice(70, 134),
+        voteKind,
+        witnessVoteSequence: view.getBigUint64(206, true),
+    };
+};
+
+const destroyOpenedSignedVoteCarrierRecord = (
+    record: OpenedSignedVoteCarrierRecord,
+): void => {
+    record.canonicalSignedVoteCarrier.fill(0);
+    record.intentObjectHash.fill(0);
+    record.stateKey.fill(0);
+    record.subjectParticipantIdentity.fill(0);
+};
+
+const requireSignedVoteCarrierMatchesBinding = (
+    record: OpenedSignedVoteCarrierRecord,
+    binding: StateDurableBindingDescription,
+): void => {
+    if (
+        !bytesEqual(record.stateKey, binding.stateKey) ||
+        record.witnessVoteSequence !== binding.witnessVoteSequence
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'AuthenticationFailed',
+            'Signed-vote carrier record does not match its authenticated slot.',
+        );
+    }
+    if (
+        record.capabilityKind !== binding.capabilityKind ||
+        record.voteKind !== binding.voteKind ||
+        record.subjectEpoch !== binding.subjectEpoch ||
+        !bytesEqual(record.intentObjectHash, binding.intentObjectHash) ||
+        !bytesEqual(
+            record.subjectParticipantIdentity,
+            binding.subjectParticipantIdentity,
+        )
+    ) {
+        intentLockConflict(
+            'A different signed vote carrier is already stored in this witness sequence slot.',
+        );
+    }
 };
 
 const encodeExactOutputRecord = (
@@ -260,6 +862,72 @@ const copyVerifiedBinding = (
     return description;
 };
 
+const readIntentLockRecord = async (input: {
+    binding: StateDurableBindingDescription;
+    protection: ReturnType<typeof createRuntimeRecordProtection>;
+    store: UntrustedStorageTransactionStore;
+}): Promise<
+    | Readonly<{
+          record: OpenedIntentLockRecord;
+          sealedBytes: Uint8Array;
+      }>
+    | undefined
+> => {
+    const opened = await readRuntimeRecord({
+        logicalRecordKey: intentLockRecordKey(input.binding),
+        operationDomain: intentLockRecordOperationDomain,
+        protection: input.protection,
+        store: input.store,
+    });
+    if (opened === undefined) {
+        return undefined;
+    }
+    try {
+        return {
+            record: decodeIntentLockRecord(opened.plaintext),
+            sealedBytes: opened.sealedBytes,
+        };
+    } finally {
+        opened.plaintext.fill(0);
+    }
+};
+
+const readSignedVoteCarrierRecord = async (input: {
+    binding: StateDurableBindingDescription;
+    limits: DurableStateWitnessServiceLimits;
+    protection: ReturnType<typeof createRuntimeRecordProtection>;
+    store: UntrustedStorageTransactionStore;
+}): Promise<OpenedSignedVoteCarrierRecord | undefined> => {
+    const opened = await readRuntimeRecord({
+        logicalRecordKey: signedVoteCarrierRecordKey(input.binding),
+        operationDomain: signedVoteCarrierRecordOperationDomain,
+        protection: input.protection,
+        store: input.store,
+    });
+    if (opened === undefined) {
+        return undefined;
+    }
+    try {
+        return decodeSignedVoteCarrierRecord(opened.plaintext, input.limits);
+    } finally {
+        opened.plaintext.fill(0);
+        opened.sealedBytes.fill(0);
+    }
+};
+
+const beginDurableStateTransaction = async (input: {
+    lifetimeMilliseconds: number;
+    store: UntrustedStorageTransactionStore;
+}): Promise<UntrustedStorageTransaction> => {
+    try {
+        return await input.store.beginTransaction({
+            lifetimeMilliseconds: input.lifetimeMilliseconds,
+        });
+    } catch (error) {
+        throw mapStorageError(error);
+    }
+};
+
 const requireExactOutputCacheMatches = async (input: {
     binding: StateDurableBindingDescription;
     limits: DurableStateWitnessServiceLimits;
@@ -334,6 +1002,10 @@ export const openDurableStateWitnessService = (input: {
         );
     }
     requireSafePositiveInteger(
+        input.limits.maximumSignedVoteCarrierByteLength,
+        'maximumSignedVoteCarrierByteLength',
+    );
+    requireSafePositiveInteger(
         input.limits.transactionLifetimeMilliseconds,
         'transactionLifetimeMilliseconds',
     );
@@ -344,6 +1016,211 @@ export const openDurableStateWitnessService = (input: {
         encryptionKey: input.encryptionKey,
         maximumRecordSealingCount: limits.maximumRecordSealingCount,
     });
+
+    const compareAndLockIntent: DurableStateWitnessService['compareAndLockIntent'] =
+        async ({ verifiedIntentBinding }) => {
+            const binding = copyVerifiedBinding(
+                verifiedIntentBinding,
+                protection.authorityContext,
+            );
+            const openedCurrentRecord = await readIntentLockRecord({
+                binding,
+                protection,
+                store: input.store,
+            });
+            let nextRecord: OpenedIntentLockRecord | undefined;
+            let plaintext: Uint8Array | undefined;
+            try {
+                nextRecord = nextIntentLockRecord(
+                    binding,
+                    openedCurrentRecord?.record,
+                );
+                if (
+                    openedCurrentRecord !== undefined &&
+                    intentLockRecordsEqual(
+                        openedCurrentRecord.record,
+                        nextRecord,
+                    )
+                ) {
+                    return;
+                }
+                plaintext = encodeIntentLockRecord(nextRecord);
+                const transaction = await beginDurableStateTransaction({
+                    lifetimeMilliseconds:
+                        limits.transactionLifetimeMilliseconds,
+                    store: input.store,
+                });
+                try {
+                    await stageRuntimeRecordWrite({
+                        expectedCurrentSealedBytes:
+                            openedCurrentRecord?.sealedBytes ?? null,
+                        logicalRecordKey: intentLockRecordKey(binding),
+                        operationDomain: intentLockRecordOperationDomain,
+                        plaintext,
+                        protection,
+                        transaction,
+                    });
+                    await transaction.commit();
+                } catch (error) {
+                    const mapped = await closeTransactionAfterFailure(
+                        transaction,
+                        error,
+                    );
+                    if (mapped.code !== 'Conflict') {
+                        throw mapped;
+                    }
+                    const racedRecord = await readIntentLockRecord({
+                        binding,
+                        protection,
+                        store: input.store,
+                    });
+                    if (racedRecord === undefined) {
+                        throw mapped;
+                    }
+                    let replayedRecord: OpenedIntentLockRecord | undefined;
+                    try {
+                        replayedRecord = nextIntentLockRecord(
+                            binding,
+                            racedRecord.record,
+                        );
+                        if (
+                            !intentLockRecordsEqual(
+                                racedRecord.record,
+                                replayedRecord,
+                            )
+                        ) {
+                            throw mapped;
+                        }
+                    } finally {
+                        if (replayedRecord !== undefined) {
+                            destroyOpenedIntentLockRecord(replayedRecord);
+                        }
+                        destroyOpenedIntentLockRecord(racedRecord.record);
+                        racedRecord.sealedBytes.fill(0);
+                    }
+                }
+            } finally {
+                plaintext?.fill(0);
+                if (nextRecord !== undefined) {
+                    destroyOpenedIntentLockRecord(nextRecord);
+                }
+                if (openedCurrentRecord !== undefined) {
+                    destroyOpenedIntentLockRecord(openedCurrentRecord.record);
+                    openedCurrentRecord.sealedBytes.fill(0);
+                }
+            }
+        };
+
+    const cacheSignedVoteCarrier: DurableStateWitnessService['cacheSignedVoteCarrier'] =
+        async ({ canonicalSignedVoteCarrier, verifiedIntentBinding }) => {
+            const binding = copyVerifiedBinding(
+                verifiedIntentBinding,
+                protection.authorityContext,
+            );
+            const candidateCarrier = copyBoundedBytes(
+                canonicalSignedVoteCarrier,
+                limits.maximumSignedVoteCarrierByteLength,
+                'canonicalSignedVoteCarrier',
+            );
+            let existingCarrier = await readSignedVoteCarrierRecord({
+                binding,
+                limits,
+                protection,
+                store: input.store,
+            });
+            if (existingCarrier !== undefined) {
+                try {
+                    requireSignedVoteCarrierMatchesBinding(
+                        existingCarrier,
+                        binding,
+                    );
+                    return existingCarrier.canonicalSignedVoteCarrier.slice();
+                } finally {
+                    candidateCarrier.fill(0);
+                    destroyOpenedSignedVoteCarrierRecord(existingCarrier);
+                }
+            }
+
+            const openedLockRecord = await readIntentLockRecord({
+                binding,
+                protection,
+                store: input.store,
+            });
+            if (openedLockRecord === undefined) {
+                candidateCarrier.fill(0);
+                throw new AuthenticatedRuntimeRecordError(
+                    'Conflict',
+                    'A signed vote carrier cannot be cached before its intent is durably locked.',
+                );
+            }
+            let carrierPlaintext: Uint8Array | undefined;
+            let lockPlaintext: Uint8Array | undefined;
+            try {
+                requireIntentIsLocked(openedLockRecord.record, binding);
+                carrierPlaintext = encodeSignedVoteCarrierRecord(
+                    binding,
+                    candidateCarrier,
+                );
+                lockPlaintext = encodeIntentLockRecord(openedLockRecord.record);
+                const transaction = await beginDurableStateTransaction({
+                    lifetimeMilliseconds:
+                        limits.transactionLifetimeMilliseconds,
+                    store: input.store,
+                });
+                try {
+                    await stageRuntimeRecordWrite({
+                        expectedCurrentSealedBytes:
+                            openedLockRecord.sealedBytes,
+                        logicalRecordKey: intentLockRecordKey(binding),
+                        operationDomain: intentLockRecordOperationDomain,
+                        plaintext: lockPlaintext,
+                        protection,
+                        transaction,
+                    });
+                    await stageRuntimeRecordWrite({
+                        expectedCurrentSealedBytes: null,
+                        logicalRecordKey: signedVoteCarrierRecordKey(binding),
+                        operationDomain: signedVoteCarrierRecordOperationDomain,
+                        plaintext: carrierPlaintext,
+                        protection,
+                        transaction,
+                    });
+                    await transaction.commit();
+                    return candidateCarrier.slice();
+                } catch (error) {
+                    const mapped = await closeTransactionAfterFailure(
+                        transaction,
+                        error,
+                    );
+                    if (mapped.code !== 'Conflict') {
+                        throw mapped;
+                    }
+                    existingCarrier = await readSignedVoteCarrierRecord({
+                        binding,
+                        limits,
+                        protection,
+                        store: input.store,
+                    });
+                    if (existingCarrier === undefined) {
+                        throw mapped;
+                    }
+                    requireSignedVoteCarrierMatchesBinding(
+                        existingCarrier,
+                        binding,
+                    );
+                    return existingCarrier.canonicalSignedVoteCarrier.slice();
+                }
+            } finally {
+                candidateCarrier.fill(0);
+                carrierPlaintext?.fill(0);
+                lockPlaintext?.fill(0);
+                destroyOpenedIntentLockRecord(openedLockRecord.record);
+                openedLockRecord.sealedBytes.fill(0);
+                if (existingCarrier !== undefined) {
+                    destroyOpenedSignedVoteCarrierRecord(existingCarrier);
+                }
+            }
+        };
 
     const cacheExactOutput: DurableStateWitnessService['cacheExactOutput'] =
         async ({ exactOutputBytes, verifiedOutputBinding }) => {
@@ -477,7 +1354,39 @@ export const openDurableStateWitnessService = (input: {
             return exactOutputBytes;
         };
 
-    return Object.freeze({ cacheExactOutput, readExactOutput });
+    const readSignedVoteCarrier: DurableStateWitnessService['readSignedVoteCarrier'] =
+        async ({ verifiedIntentBinding }) => {
+            const binding = copyVerifiedBinding(
+                verifiedIntentBinding,
+                protection.authorityContext,
+            );
+            const record = await readSignedVoteCarrierRecord({
+                binding,
+                limits,
+                protection,
+                store: input.store,
+            });
+            if (record === undefined) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'MissingRecord',
+                    'The signed vote carrier is unavailable.',
+                );
+            }
+            try {
+                requireSignedVoteCarrierMatchesBinding(record, binding);
+                return record.canonicalSignedVoteCarrier.slice();
+            } finally {
+                destroyOpenedSignedVoteCarrierRecord(record);
+            }
+        };
+
+    return Object.freeze({
+        cacheExactOutput,
+        cacheSignedVoteCarrier,
+        compareAndLockIntent,
+        readExactOutput,
+        readSignedVoteCarrier,
+    });
 };
 
 export { AuthenticatedRuntimeRecordError as DurableStateWitnessServiceError };

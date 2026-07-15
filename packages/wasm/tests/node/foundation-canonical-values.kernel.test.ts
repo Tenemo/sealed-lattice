@@ -141,18 +141,31 @@ describe('Canonical foundation values in real WASM', () => {
 
         for (const { canonicalBytes, name, schemaIdentifier } of vectors) {
             const expectedHex = bytesToHex(canonicalBytes);
-            const contiguous = kernel.validateCanonicalFoundationValue({
-                canonicalBytesHex: expectedHex,
-                schemaIdentifier,
-            });
-            const fragmented = kernel.validateCanonicalFoundationValue({
-                canonicalByteChunksHex:
-                    createDeterministicCanonicalByteFragments(
-                        canonicalBytes,
-                    ).map(bytesToHex),
-                canonicalByteLength: canonicalBytes.byteLength,
-                schemaIdentifier,
-            });
+            let contiguous: ReturnType<
+                TranscriptCoreKernel['validateCanonicalFoundationValue']
+            >;
+            let fragmented: ReturnType<
+                TranscriptCoreKernel['validateCanonicalFoundationValue']
+            >;
+            try {
+                contiguous = kernel.validateCanonicalFoundationValue({
+                    canonicalBytesHex: expectedHex,
+                    schemaIdentifier,
+                });
+                fragmented = kernel.validateCanonicalFoundationValue({
+                    canonicalByteChunksHex:
+                        createDeterministicCanonicalByteFragments(
+                            canonicalBytes,
+                        ).map(bytesToHex),
+                    canonicalByteLength: canonicalBytes.byteLength,
+                    schemaIdentifier,
+                });
+            } catch (error) {
+                throw new Error(
+                    `Foundation canonical vector ${name} (schema 0x${schemaIdentifier.toString(16)}) was refused.`,
+                    { cause: error },
+                );
+            }
 
             expect(contiguous.canonicalBytesHex, name).toBe(expectedHex);
             expect(fragmented.canonicalBytesHex, name).toBe(expectedHex);

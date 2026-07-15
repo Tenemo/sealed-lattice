@@ -31,9 +31,7 @@ use super::salted_tree::commit_salted_extension_row_pairs;
 use super::witness::{
     LimbWitnessCommitment, build_limb_witness_commitment, validate_witness_support,
 };
-use super::{
-    LEAF_SALT_DOMAIN, LimbProof, PhaseQueryOpening, SuccinctEvaluationKeyProof,
-};
+use super::{LEAF_SALT_DOMAIN, LimbProof, PhaseQueryOpening, SuccinctEvaluationKeyProof};
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::modular_arithmetic::{inverse_mod, mul_mod_fast, sub_mod_fast};
 use crate::bgv::parameters::DATA_PRIMES;
@@ -333,9 +331,8 @@ fn prove_limb(
             }
             accumulated
         };
-        let mut evaluations = Vec::with_capacity(
-            commitment.masked_coefficients.len() + PHASE_TWO_COLUMN_COUNT,
-        );
+        let mut evaluations =
+            Vec::with_capacity(commitment.masked_coefficients.len() + PHASE_TWO_COLUMN_COUNT);
         for coefficients in &commitment.masked_coefficients {
             evaluations.push(evaluate_base(coefficients));
         }

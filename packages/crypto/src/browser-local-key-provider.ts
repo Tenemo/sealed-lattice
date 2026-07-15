@@ -28,7 +28,6 @@ const mlKem768SharedSecretByteLength = 32;
 declare const signingCapabilityBrand: unique symbol;
 declare const mailboxCapabilityBrand: unique symbol;
 declare const freshMailboxSigningPermitBrand: unique symbol;
-declare const resetSafeSetupMailboxSigningPermitBrand: unique symbol;
 
 export type BrowserLocalSigningCapability = Readonly<{
     readonly [signingCapabilityBrand]: true;
@@ -40,10 +39,6 @@ export type BrowserLocalMailboxCapability = Readonly<{
 
 type FreshMailboxSigningPermit = Readonly<{
     readonly [freshMailboxSigningPermitBrand]: true;
-}>;
-
-type ResetSafeSetupMailboxSigningPermit = Readonly<{
-    readonly [resetSafeSetupMailboxSigningPermitBrand]: true;
 }>;
 
 export type BrowserLocalSetupMailboxSlot = Readonly<{
@@ -74,9 +69,9 @@ type BrowserLocalResetSafeSetupMailboxScope = Readonly<
  * Internal bridge implemented by the action-randomness runtime. Each method is
  * fixed to one setup-mailbox role; there is deliberately no family, purpose,
  * counter, generic derivation, or caller-selected raw-randomness operation.
- * Encapsulation coins never cross this bridge. The signing hedge is exposed
- * only to the synchronous signing consumer and is wiped by its owning runtime
- * before control returns.
+ * Encapsulation coins never cross this bridge. Reset-safe signing is omitted
+ * until signing-key custody and action-randomness derivation can be composed
+ * inside one closed operation.
  */
 type BrowserLocalResetSafeSetupMailboxRandomnessOperations =
     BrowserLocalResetSafeSetupMailboxScope &
@@ -90,14 +85,6 @@ type BrowserLocalResetSafeSetupMailboxRandomnessOperations =
                 readonly envelopeAttemptIdentifier: Uint8Array;
                 readonly sharedSecret: Uint8Array;
             }>;
-            withSignatureHedge<Result>(
-                input: {
-                    readonly envelopeHash: ProtocolHash;
-                    readonly setupMailboxSlot: BrowserLocalSetupMailboxSlot;
-                    readonly setupMailboxSlotHash: ProtocolHash;
-                },
-                consume: (hedge: Uint8Array) => Result,
-            ): Result;
             revoke(): void;
         }>;
 
@@ -157,7 +144,6 @@ type BrowserLocalMailboxOperations = Readonly<{
 export type BrowserLocalExternalKeyProviderInput = Readonly<{
     signing: BrowserLocalSigningOperations;
     mailbox: BrowserLocalMailboxOperations;
-    entropy?: (byteLength: number) => Uint8Array;
     /** Omission keeps ordinary key operations available but makes setup-mailbox sealing fail closed. */
     resetSafeSetupMailboxRandomness?: BrowserLocalResetSafeSetupMailboxRandomnessOperations;
 }>;
@@ -169,16 +155,15 @@ type ResetSafeSetupMailboxCacheEntry = {
     readonly setupMailboxSlot: BrowserLocalSetupMailboxSlot;
     readonly setupMailboxSlotHash: ProtocolHash;
     readonly sharedSecret: Uint8Array;
-    envelopeHash: ProtocolHash | undefined;
-    signature: Uint8Array | undefined;
 };
 
 type ProviderState = {
-    entropy: (byteLength: number) => Uint8Array;
     signingOperations: BrowserLocalSigningOperations | undefined;
     signingVerificationKey: Uint8Array | undefined;
     mailboxOperations: BrowserLocalMailboxOperations | undefined;
     mailboxEncapsulationKey: Uint8Array | undefined;
+    mailboxSelfTestCiphertext: Uint8Array | undefined;
+    mailboxSelfTestSharedSecret: Uint8Array | undefined;
     resetSafeSetupMailboxCache: Map<string, ResetSafeSetupMailboxCacheEntry>;
     resetSafeSetupMailboxRandomnessOperations:
         | BrowserLocalResetSafeSetupMailboxRandomnessOperations
@@ -196,22 +181,12 @@ type FreshMailboxSigningPermitState = {
     consumed: boolean;
 };
 
-type ResetSafeSetupMailboxSigningPermitState = Readonly<{
-    entry: ResetSafeSetupMailboxCacheEntry;
-    provider: ProviderState;
-}>;
-
 const signingCapabilityStates = new WeakMap<object, SigningCapabilityState>();
 const mailboxCapabilityStates = new WeakMap<object, MailboxCapabilityState>();
 const freshMailboxSigningPermitStates = new WeakMap<
     object,
     FreshMailboxSigningPermitState
 >();
-const resetSafeSetupMailboxSigningPermitStates = new WeakMap<
-    object,
-    ResetSafeSetupMailboxSigningPermitState
->();
-
 const copyExactBytes = (
     value: Uint8Array,
     expectedByteLength: number,
@@ -234,19 +209,16 @@ const copyExactBytes = (
     return value.slice();
 };
 
-const defaultEntropy = (byteLength: number): Uint8Array =>
+const readProductionEntropy = (byteLength: number): Uint8Array =>
     webCryptoRandomBytes(
         byteLength,
         'Browser-local key operations require Web Crypto getRandomValues.',
     );
 
-const readEntropy = (
-    provider: ProviderState,
-    byteLength: number,
-): Uint8Array => {
+const readEntropy = (byteLength: number): Uint8Array => {
     let bytes: Uint8Array;
     try {
-        bytes = provider.entropy(byteLength);
+        bytes = readProductionEntropy(byteLength);
     } catch (error) {
         throw new BrowserLocalKeyProviderError(
             'EntropyUnavailable',
@@ -264,8 +236,10 @@ const readEntropy = (
     return bytes.slice();
 };
 
-const wipe = (bytes: Uint8Array | undefined): void => {
-    bytes?.fill(0);
+const wipe = (bytes: unknown): void => {
+    if (bytes instanceof Uint8Array) {
+        bytes.fill(0);
+    }
 };
 
 const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
@@ -459,15 +433,35 @@ const wipeResetSafeSetupMailboxEntry = (
     entry.envelopeAttemptIdentifier.fill(0);
     entry.recipientEncapsulationKey.fill(0);
     entry.sharedSecret.fill(0);
-    entry.signature?.fill(0);
-    entry.envelopeHash = undefined;
-    entry.signature = undefined;
 };
 
-const revokeResetSafeSetupMailbox = (
-    provider: ProviderState,
-    revokeExternalOperations = true,
+const throwRevocationFailures = (
+    operation: string,
+    failures: readonly unknown[],
 ): void => {
+    if (failures.length !== 0) {
+        throw new BrowserLocalKeyProviderError(
+            'CapabilityUnavailable',
+            `${operation} invalidated every local capability, but one or more external provider handles could not be released.`,
+            Object.freeze([...failures]),
+        );
+    }
+};
+
+const attemptRevocation = (
+    revoke: (() => void) | undefined,
+    failures: unknown[],
+): void => {
+    try {
+        revoke?.();
+    } catch (error) {
+        failures.push(error);
+    }
+};
+
+const clearResetSafeSetupMailbox = (
+    provider: ProviderState,
+): BrowserLocalResetSafeSetupMailboxRandomnessOperations | undefined => {
     const randomnessOperations =
         provider.resetSafeSetupMailboxRandomnessOperations;
     for (const entry of provider.resetSafeSetupMailboxCache.values()) {
@@ -476,23 +470,29 @@ const revokeResetSafeSetupMailbox = (
     provider.resetSafeSetupMailboxCache.clear();
     provider.resetSafeSetupMailboxRandomnessOperations = undefined;
     provider.resetSafeSetupMailboxScope = undefined;
-    if (revokeExternalOperations) {
-        randomnessOperations?.revoke();
-    }
+    return randomnessOperations;
 };
 
-const revokeSigning = (
-    provider: ProviderState,
-    revokeExternalOperations = true,
-): void => {
+const revokeSigning = (provider: ProviderState): void => {
+    const failures: unknown[] = [];
     const signingOperations = provider.signingOperations;
-    revokeResetSafeSetupMailbox(provider, revokeExternalOperations);
+    const randomnessOperations = clearResetSafeSetupMailbox(provider);
     wipe(provider.signingVerificationKey);
     provider.signingOperations = undefined;
     provider.signingVerificationKey = undefined;
-    if (revokeExternalOperations) {
-        signingOperations?.revoke();
-    }
+    attemptRevocation(
+        randomnessOperations === undefined
+            ? undefined
+            : () => randomnessOperations.revoke(),
+        failures,
+    );
+    attemptRevocation(
+        signingOperations === undefined
+            ? undefined
+            : () => signingOperations.revoke(),
+        failures,
+    );
+    throwRevocationFailures('Signing capability revocation', failures);
 };
 
 const requireResetSafeSetupMailboxProvider = (
@@ -512,17 +512,71 @@ const requireResetSafeSetupMailboxProvider = (
     return provider;
 };
 
-const revokeMailbox = (
-    provider: ProviderState,
-    revokeExternalOperations = true,
-): void => {
+const revokeMailbox = (provider: ProviderState): void => {
+    const failures: unknown[] = [];
     const mailboxOperations = provider.mailboxOperations;
     wipe(provider.mailboxEncapsulationKey);
+    wipe(provider.mailboxSelfTestCiphertext);
+    wipe(provider.mailboxSelfTestSharedSecret);
     provider.mailboxOperations = undefined;
     provider.mailboxEncapsulationKey = undefined;
-    if (revokeExternalOperations) {
-        mailboxOperations?.revoke();
+    provider.mailboxSelfTestCiphertext = undefined;
+    provider.mailboxSelfTestSharedSecret = undefined;
+    attemptRevocation(
+        mailboxOperations === undefined
+            ? undefined
+            : () => mailboxOperations.revoke(),
+        failures,
+    );
+    throwRevocationFailures('Mailbox capability revocation', failures);
+};
+
+const closeProvider = (provider: ProviderState): void => {
+    const failures: unknown[] = [];
+    try {
+        revokeSigning(provider);
+    } catch (error) {
+        failures.push(error);
     }
+    try {
+        revokeMailbox(provider);
+    } catch (error) {
+        failures.push(error);
+    }
+    throwRevocationFailures('Browser-local provider closure', failures);
+};
+
+const throwOpenFailure = (
+    operationFailure: unknown,
+    cleanupFailure: unknown,
+): never => {
+    if (cleanupFailure !== undefined) {
+        throw new BrowserLocalKeyProviderError(
+            'CapabilityUnavailable',
+            'The browser-local provider failed to open and could not release every external provider handle.',
+            Object.freeze([operationFailure, cleanupFailure]),
+        );
+    }
+    throw operationFailure;
+};
+
+const revokeUnopenedInput = (
+    input: BrowserLocalExternalKeyProviderInput,
+): void => {
+    const failures: unknown[] = [];
+    const randomnessOperations = input.resetSafeSetupMailboxRandomness;
+    const keyOperationsAreReused = input.signing === (input.mailbox as unknown);
+    attemptRevocation(
+        randomnessOperations === undefined
+            ? undefined
+            : () => randomnessOperations.revoke(),
+        failures,
+    );
+    attemptRevocation(() => input.signing.revoke(), failures);
+    if (!keyOperationsAreReused) {
+        attemptRevocation(() => input.mailbox.revoke(), failures);
+    }
+    throwRevocationFailures('Failed provider input cleanup', failures);
 };
 
 const requireSigningProvider = (
@@ -588,6 +642,7 @@ const invokeSigningOperation = (
             operationResult,
             mlDsa65SignatureByteLength,
             'signing operation result',
+            'UnsupportedProvider',
         );
     } catch (error) {
         if (error instanceof BrowserLocalKeyProviderError) {
@@ -602,7 +657,7 @@ const invokeSigningOperation = (
         copiedMessage.fill(0);
         copiedContext.fill(0);
         copiedHedge.fill(0);
-        operationResult?.fill(0);
+        wipe(operationResult);
     }
 };
 
@@ -626,6 +681,7 @@ const invokeMailboxDecapsulationOperation = (
             operationResult,
             mlKem768SharedSecretByteLength,
             'mailbox decapsulation result',
+            'UnsupportedProvider',
         );
     } catch (error) {
         if (error instanceof BrowserLocalKeyProviderError) {
@@ -638,13 +694,13 @@ const invokeMailboxDecapsulationOperation = (
         );
     } finally {
         copiedCiphertext.fill(0);
-        operationResult?.fill(0);
+        wipe(operationResult);
     }
 };
 
 const validateSigningKeyPair = (provider: ProviderState): void => {
     const verificationKey = provider.signingVerificationKey!;
-    const hedge = readEntropy(provider, signingHedgeByteLength);
+    const hedge = readEntropy(signingHedgeByteLength);
     const alternateHedge = hedge.slice();
     alternateHedge[alternateHedge.byteLength - 1] ^= 1;
     let firstSignature: Uint8Array | undefined;
@@ -723,10 +779,7 @@ const validateSigningKeyPair = (provider: ProviderState): void => {
 
 const validateMailboxKeyPair = (provider: ProviderState): void => {
     const encapsulationKey = provider.mailboxEncapsulationKey!;
-    const encapsulationCoins = readEntropy(
-        provider,
-        mlKem768EncapsulationCoinByteLength,
-    );
+    const encapsulationCoins = readEntropy(mlKem768EncapsulationCoinByteLength);
     let encapsulation: ReturnType<typeof ml_kem768.encapsulate> | undefined;
     let recoveredSharedSecret: Uint8Array | undefined;
     try {
@@ -752,10 +805,40 @@ const validateMailboxKeyPair = (provider: ProviderState): void => {
                 'The browser-local mailbox operation does not match the frozen roster encapsulation key.',
             );
         }
+        provider.mailboxSelfTestCiphertext = encapsulation.cipherText.slice();
+        provider.mailboxSelfTestSharedSecret =
+            encapsulation.sharedSecret.slice();
     } finally {
         encapsulationCoins.fill(0);
         encapsulation?.cipherText.fill(0);
         encapsulation?.sharedSecret.fill(0);
+        recoveredSharedSecret?.fill(0);
+    }
+};
+
+const validateMailboxKeyContinuity = (provider: ProviderState): void => {
+    const ciphertext = provider.mailboxSelfTestCiphertext;
+    const expectedSharedSecret = provider.mailboxSelfTestSharedSecret;
+    if (ciphertext === undefined || expectedSharedSecret === undefined) {
+        throw new BrowserLocalKeyProviderError(
+            'CapabilityUnavailable',
+            'The browser-local mailbox pairwise-test material is unavailable.',
+        );
+    }
+
+    let recoveredSharedSecret: Uint8Array | undefined;
+    try {
+        recoveredSharedSecret = invokeMailboxDecapsulationOperation(
+            provider,
+            ciphertext,
+        );
+        if (!bytesEqual(expectedSharedSecret, recoveredSharedSecret)) {
+            throw new BrowserLocalKeyProviderError(
+                'KeyMismatch',
+                'The browser-local mailbox operation no longer matches its frozen roster encapsulation key.',
+            );
+        }
+    } finally {
         recoveredSharedSecret?.fill(0);
     }
 };
@@ -771,6 +854,12 @@ export const openBrowserLocalExternalKeyProvider = (
         | BrowserLocalResetSafeSetupMailboxScope
         | undefined;
     try {
+        if (input.signing === (input.mailbox as unknown)) {
+            throw new BrowserLocalKeyProviderError(
+                'UnsupportedProvider',
+                'Signing and mailbox operations must use distinct browser-local capabilities.',
+            );
+        }
         signingVerificationKey = copyExactBytes(
             input.signing.verificationKey,
             mlDsa65PublicKeyByteLength,
@@ -790,14 +879,21 @@ export const openBrowserLocalExternalKeyProvider = (
     } catch (error) {
         signingVerificationKey?.fill(0);
         mailboxEncapsulationKey?.fill(0);
-        throw error;
+        let cleanupFailure: unknown;
+        try {
+            revokeUnopenedInput(input);
+        } catch (cleanupError) {
+            cleanupFailure = cleanupError;
+        }
+        throwOpenFailure(error, cleanupFailure);
     }
     const provider: ProviderState = {
-        entropy: input.entropy ?? defaultEntropy,
         signingOperations: input.signing,
         signingVerificationKey,
         mailboxOperations: input.mailbox,
         mailboxEncapsulationKey,
+        mailboxSelfTestCiphertext: undefined,
+        mailboxSelfTestSharedSecret: undefined,
         resetSafeSetupMailboxCache: new Map(),
         resetSafeSetupMailboxRandomnessOperations,
         resetSafeSetupMailboxScope,
@@ -807,9 +903,13 @@ export const openBrowserLocalExternalKeyProvider = (
         validateSigningKeyPair(provider);
         validateMailboxKeyPair(provider);
     } catch (error) {
-        revokeSigning(provider, false);
-        revokeMailbox(provider, false);
-        throw error;
+        let cleanupFailure: unknown;
+        try {
+            closeProvider(provider);
+        } catch (cleanupError) {
+            cleanupFailure = cleanupError;
+        }
+        throwOpenFailure(error, cleanupFailure);
     }
 
     const signingCapability = Object.freeze(
@@ -830,10 +930,7 @@ export const openBrowserLocalExternalKeyProvider = (
         revokeMailboxCapability: () => {
             revokeMailbox(provider);
         },
-        close: () => {
-            revokeSigning(provider);
-            revokeMailbox(provider);
-        },
+        close: () => closeProvider(provider),
     });
 };
 
@@ -850,7 +947,7 @@ const signClosedMailboxEnvelopeHash = (input: {
             'Closed protocol signature messages must be 64 bytes.',
         );
     }
-    const hedge = readEntropy(provider, signingHedgeByteLength);
+    const hedge = readEntropy(signingHedgeByteLength);
     let signature: Uint8Array | undefined;
     try {
         signature = invokeSigningOperation(
@@ -891,7 +988,18 @@ export const decapsulateClosedMailboxCiphertext = (input: {
         'ciphertext',
     );
     try {
-        return invokeMailboxDecapsulationOperation(provider, ciphertext);
+        validateMailboxKeyContinuity(provider);
+        const sharedSecret = invokeMailboxDecapsulationOperation(
+            provider,
+            ciphertext,
+        );
+        try {
+            requireMailboxProvider(input.capability);
+            return sharedSecret;
+        } catch (error) {
+            sharedSecret.fill(0);
+            throw error;
+        }
     } finally {
         ciphertext.fill(0);
     }
@@ -913,13 +1021,9 @@ export const encapsulateFreshMailbox = (input: {
         'recipientEncapsulationKey',
     );
     const envelopeAttemptIdentifier = readEntropy(
-        provider,
         mailboxAttemptIdentifierByteLength,
     );
-    const encapsulationCoins = readEntropy(
-        provider,
-        mlKem768EncapsulationCoinByteLength,
-    );
+    const encapsulationCoins = readEntropy(mlKem768EncapsulationCoinByteLength);
     try {
         const encapsulation = ml_kem768.encapsulate(
             recipientEncapsulationKey,
@@ -1089,67 +1193,6 @@ const encapsulateWithResetSafeSetupMailboxRandomness = (
     }
 };
 
-const signWithResetSafeSetupMailboxRandomness = (
-    provider: ProviderState,
-    input: Readonly<{
-        readonly envelopeHash: ProtocolHash;
-        readonly setupMailboxSlot: BrowserLocalSetupMailboxSlot;
-        readonly setupMailboxSlotHash: ProtocolHash;
-    }>,
-    message: Uint8Array,
-): Uint8Array => {
-    const operations = provider.resetSafeSetupMailboxRandomnessOperations;
-    if (operations === undefined) {
-        throw new BrowserLocalKeyProviderError(
-            'UnsupportedProvider',
-            'The browser-local provider does not support reset-safe setup-mailbox signing.',
-        );
-    }
-    try {
-        return operations.withSignatureHedge(input, (derivedHedge) => {
-            const hedge = copyExactBytes(
-                derivedHedge,
-                signingHedgeByteLength,
-                'reset-safe setup-mailbox signature hedge',
-                'MalformedRandomness',
-            );
-            try {
-                return invokeSigningOperation(
-                    provider,
-                    message,
-                    mailboxSignatureContext,
-                    hedge,
-                );
-            } finally {
-                hedge.fill(0);
-            }
-        });
-    } catch (error) {
-        if (error instanceof BrowserLocalKeyProviderError) {
-            throw error;
-        }
-        throw new BrowserLocalKeyProviderError(
-            'CapabilityUnavailable',
-            'The reset-safe setup-mailbox signature hedge is unavailable.',
-            error,
-        );
-    }
-};
-
-const createResetSafeSetupMailboxSigningPermit = (
-    provider: ProviderState,
-    entry: ResetSafeSetupMailboxCacheEntry,
-): ResetSafeSetupMailboxSigningPermit => {
-    const signingPermit = Object.freeze(
-        {},
-    ) as ResetSafeSetupMailboxSigningPermit;
-    resetSafeSetupMailboxSigningPermitStates.set(signingPermit, {
-        entry,
-        provider,
-    });
-    return signingPermit;
-};
-
 export const encapsulateResetSafeSetupMailbox = (input: {
     readonly recipientEncapsulationKey: Uint8Array;
     readonly setupMailboxSlot: BrowserLocalSetupMailboxSlot;
@@ -1160,7 +1203,6 @@ export const encapsulateResetSafeSetupMailbox = (input: {
     readonly ciphertext: Uint8Array;
     readonly envelopeAttemptIdentifier: Uint8Array;
     readonly sharedSecret: Uint8Array;
-    readonly signingPermit: ResetSafeSetupMailboxSigningPermit;
 }> => {
     const provider = requireResetSafeSetupMailboxProvider(
         input.signingCapability,
@@ -1212,14 +1254,9 @@ export const encapsulateResetSafeSetupMailbox = (input: {
                 envelopeAttemptIdentifier:
                     cached.envelopeAttemptIdentifier.slice(),
                 sharedSecret: cached.sharedSecret.slice(),
-                signingPermit: createResetSafeSetupMailboxSigningPermit(
-                    provider,
-                    cached,
-                ),
             });
         }
 
-        requireResetSafeSetupMailboxProvider(input.signingCapability);
         const encapsulation = encapsulateWithResetSafeSetupMailboxRandomness(
             provider,
             resetSafeInput,
@@ -1234,8 +1271,6 @@ export const encapsulateResetSafeSetupMailbox = (input: {
                 setupMailboxSlot: resetSafeInput.setupMailboxSlot,
                 setupMailboxSlotHash: resetSafeInput.setupMailboxSlotHash,
                 sharedSecret: encapsulation.sharedSecret.slice(),
-                envelopeHash: undefined,
-                signature: undefined,
             };
             provider.resetSafeSetupMailboxCache.set(producerSlotKey, entry);
             return Object.freeze({
@@ -1243,10 +1278,6 @@ export const encapsulateResetSafeSetupMailbox = (input: {
                 envelopeAttemptIdentifier:
                     entry.envelopeAttemptIdentifier.slice(),
                 sharedSecret: entry.sharedSecret.slice(),
-                signingPermit: createResetSafeSetupMailboxSigningPermit(
-                    provider,
-                    entry,
-                ),
             });
         } finally {
             encapsulation.ciphertext.fill(0);
@@ -1256,82 +1287,5 @@ export const encapsulateResetSafeSetupMailbox = (input: {
     } finally {
         recipientEncapsulationKey.fill(0);
         sourceVerificationKey.fill(0);
-    }
-};
-
-export const signResetSafeSetupMailboxEnvelope = (input: {
-    readonly envelopeHash: ProtocolHash;
-    readonly signingCapability: BrowserLocalSigningCapability;
-    readonly signingPermit: ResetSafeSetupMailboxSigningPermit;
-}): Uint8Array => {
-    const permit = resetSafeSetupMailboxSigningPermitStates.get(
-        input.signingPermit,
-    );
-    if (permit === undefined) {
-        throw new BrowserLocalKeyProviderError(
-            'CapabilityUnavailable',
-            'The reset-safe setup-mailbox signing permit is unavailable.',
-        );
-    }
-    const provider = requireResetSafeSetupMailboxProvider(
-        input.signingCapability,
-    );
-    if (permit.provider !== provider) {
-        throw new BrowserLocalKeyProviderError(
-            'CapabilityUnavailable',
-            'The reset-safe setup-mailbox signing permit belongs to another provider.',
-        );
-    }
-    const envelopeHash = requireLowercaseHex(
-        input.envelopeHash,
-        64,
-        'envelopeHash',
-    );
-    const entry = permit.entry;
-    if (
-        entry.envelopeHash !== undefined &&
-        entry.envelopeHash !== envelopeHash
-    ) {
-        throw new BrowserLocalKeyProviderError(
-            'Equivocation',
-            'The reset-safe setup-mailbox producer slot already signed another envelope.',
-        );
-    }
-    entry.envelopeHash = envelopeHash;
-    if (entry.signature !== undefined) {
-        return entry.signature.slice();
-    }
-
-    let signature: Uint8Array | undefined;
-    const message = hexToBytes(envelopeHash);
-    try {
-        signature = signWithResetSafeSetupMailboxRandomness(
-            provider,
-            {
-                envelopeHash,
-                setupMailboxSlot: entry.setupMailboxSlot,
-                setupMailboxSlotHash: entry.setupMailboxSlotHash,
-            },
-            message,
-        );
-        requireResetSafeSetupMailboxProvider(input.signingCapability);
-        if (
-            !ml_dsa65.verify(
-                signature,
-                message,
-                provider.signingVerificationKey!,
-                { context: mailboxSignatureContext },
-            )
-        ) {
-            throw new BrowserLocalKeyProviderError(
-                'KeyMismatch',
-                'The browser-local signing operation no longer matches its frozen roster verification key.',
-            );
-        }
-        entry.signature = signature.slice();
-        return signature.slice();
-    } finally {
-        message.fill(0);
-        signature?.fill(0);
     }
 };

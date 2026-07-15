@@ -212,13 +212,13 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
 }
 
 pub(super) fn verify_reconstructed_same_secret_bridge_proof(
-    proof_verification_request: &Value,
-    proof_bytes: &SetupProofMaterialBytes,
+    _proof_verification_request: &Value,
+    _proof_bytes: &SetupProofMaterialBytes,
 ) -> CanonicalResult<()> {
-    super::trustee_evaluation_key_proof::verify_same_secret_bridge_proof_source_from_request(
-        proof_verification_request,
-        proof_bytes.as_ref(),
-    )
+    Err(CanonicalError::new(
+        CanonicalErrorCode::InvalidProtocolObject,
+        "same-secret bridge acceptance requires verification by the common proof suite",
+    ))
 }
 
 pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_binding_hash(

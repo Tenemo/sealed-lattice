@@ -274,7 +274,7 @@ impl CommittedMaterialTree {
                 let witness_coefficients =
                     trace_domain.interpolate_base_polynomial(&trace_values)?;
                 let mut derivation = MaterialPrivateDerivation::new(
-                    material_seed.as_ref(),
+                    &material_seed,
                     input.material_context_hash,
                     COLUMN_MASK_PURPOSE,
                     u64::try_from(physical_column_ordinal)
@@ -314,7 +314,7 @@ impl CommittedMaterialTree {
         for leaf_index in 0..leaf_count {
             let canonical_leaf_bytes = canonical_phase_pair_leaf_bytes(
                 input.material_context_hash,
-                material_seed.as_ref(),
+                &material_seed,
                 &extension_columns,
                 leaf_index,
             )?;
@@ -367,7 +367,7 @@ impl CommittedMaterialTree {
     ) -> Result<Vec<u8>, CommittedMaterialError> {
         canonical_phase_pair_leaf_bytes(
             self.material_context_hash,
-            self.material_seed.as_ref(),
+            &self.material_seed,
             &self.extension_columns,
             leaf_index,
         )

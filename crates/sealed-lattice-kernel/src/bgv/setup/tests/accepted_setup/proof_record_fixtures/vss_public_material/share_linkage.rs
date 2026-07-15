@@ -1,70 +1,9 @@
 use super::*;
 
-struct VssShareLinkageProofMaterialIdentity {
-    proof_bytes_hash: String,
-}
-
-struct VssShareLinkageProofMaterialReference {
-    identity: VssShareLinkageProofMaterialIdentity,
-    proof_binding_lease: crate::bgv::setup::CanonicalSetupProofBindingLease,
-}
-
-fn vss_share_linkage_proof_material_identity_from_bytes(
-    proof_bytes: &[u8],
-) -> VssShareLinkageProofMaterialIdentity {
-    let proof_bytes_hash = hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes]);
-    VssShareLinkageProofMaterialIdentity { proof_bytes_hash }
-}
-
-fn verify_and_retain_vss_share_linkage_proof_binding(
-    proof_bytes_hash: &str,
-    request: &serde_json::Value,
-) -> crate::encoding::CanonicalResult<crate::bgv::setup::CanonicalSetupProofBindingLease> {
-    let proof_binding_session =
-        match crate::bgv::setup::begin_accepted_setup_fixture_proof_binding_session() {
-            Ok(proof_binding_session) => proof_binding_session,
-            Err(error) => {
-                crate::bgv::setup::evict_verified_canonical_setup_proof_materials(&[
-                    proof_bytes_hash.to_string(),
-                ]);
-                return Err(error);
-            }
-        };
-    if let Err(error) = crate::bgv::setup::trustee_evaluation_key_proof::verify_and_retain_vss_share_linkage_proof_binding(
-        &proof_binding_session,
-        proof_bytes_hash,
-        request,
-    ) {
-        let _ = crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
-            proof_binding_session.session_handle,
-        );
-        crate::bgv::setup::evict_verified_canonical_setup_proof_materials(&[
-            proof_bytes_hash.to_string(),
-        ]);
-        return Err(error);
-    }
-    match crate::bgv::setup::finish_accepted_setup_fixture_proof_binding_session(
-        proof_binding_session,
-        proof_bytes_hash,
-    ) {
-        Ok(proof_binding_lease) => Ok(proof_binding_lease),
-        Err(error) => {
-            crate::bgv::setup::evict_verified_canonical_setup_proof_materials(&[
-                proof_bytes_hash.to_string()
-            ]);
-            Err(error)
-        }
-    }
-}
-
-// One share-linkage statement already supports a conjunction of independent
-// source-recipient-limb items. Group several RNS limbs for the same source in
-// one proof so the prover does not rebuild the fixed transcript, witness-tree,
-// and low-degree-test machinery seventeen times per source. The four-limb cap
-// reduces the ten-participant profile from 170 proofs to 50 without creating
-// one proof over all seventeen limbs; every source-recipient-limb coordinate
-// remains explicitly listed and is checked by the verifier's existing coverage
-// map.
+// Keep the specified four-limb structural grouping so fixture coverage remains
+// explicit and deterministic. These records carry invalid proof bytes hashes;
+// they do not claim that the grouped relation has passed common-proof
+// verification.
 const VSS_SHARE_LINKAGE_RNS_LIMBS_PER_PROOF_RECORD: usize = 4;
 
 pub(in super::super::super) fn vss_share_linkage_statement_object(
@@ -102,10 +41,7 @@ pub(in super::super::super) fn vss_share_linkage_proof_material_set_object(
                 .map(|fixture| fixture.record.clone())
                 .collect::<Vec<_>>(),
         }),
-        proof_binding_leases: proof_record_fixtures
-            .into_iter()
-            .map(|fixture| fixture.proof_binding_lease)
-            .collect(),
+        proof_binding_leases: Vec::new(),
     }
 }
 
@@ -140,21 +76,25 @@ pub(super) fn vss_share_linkage_proof_record(
     proof_record_index: usize,
     item_records: &[serde_json::Value],
 ) -> VssProofRecordFixture {
-    let proof_material = vss_share_linkage_proof_material_reference(
-        package,
-        item_records,
-        source_trustee_roster_position,
-        proof_record_index,
+    let verification_input = serde_json::json!({
+        "statement": package["vssShareLinkageStatement"],
+        "sourceTrusteeRosterPosition": source_trustee_roster_position,
+        "proofRecordIndex": proof_record_index,
+        "coverage": item_records,
+    });
+    let proof_bytes_hash = invalid_common_proof_fixture_hash(
+        VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
+        &verification_input,
     );
     let proof_record = serde_json::json!({
         "objectType": "VssShareLinkageProofRecord",
         "coverage": item_records,
-        "proofBytesHash": proof_material.identity.proof_bytes_hash,
+        "proofBytesHash": proof_bytes_hash,
     });
 
     VssProofRecordFixture {
         record: proof_record,
-        proof_binding_lease: proof_material.proof_binding_lease,
     }
 }
 
@@ -186,317 +126,6 @@ pub(super) fn vss_share_linkage_item_record(
         "recipientRosterPosition": recipient_roster_position,
         "sourceRnsLimbIndex": rns_limb_index,
     })
-}
-
-fn vss_share_linkage_proof_material_reference(
-    package: &serde_json::Value,
-    coverage_items: &[serde_json::Value],
-    source_trustee_roster_position: u64,
-    proof_record_index: usize,
-) -> VssShareLinkageProofMaterialReference {
-    let participant_count = participant_count_from_package(package) as usize;
-    let trustee_identities = (0..participant_count)
-        .map(|roster_position| format!("trustee-{roster_position}"))
-        .collect::<Vec<_>>();
-    let reconstructed_vss_share_linkage =
-        crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_material_record_statement(
-            crate::bgv::setup::trustee_evaluation_key_proof::VssShareLinkageMaterialRecordStatementInput {
-                coverage_items,
-                statement: &package["vssShareLinkageStatement"],
-                coefficient_commitment_set: &package["vssPublicCoefficientCommitmentSet"],
-                recipient_share_commitment_set: &package["vssPublicRecipientShareCommitmentSet"],
-                participant_count,
-                q_share_rns_limb_count: DATA_PRIMES.len(),
-                threshold_degree: vss_fixture_threshold_degree(package) as usize,
-                trustee_identities: &trustee_identities,
-            },
-        )
-        .expect("reconstruct VSS share-linkage proof statement")
-        .proof_statement;
-    let request = vss_share_linkage_proof_generation_request(
-        package,
-        &reconstructed_vss_share_linkage,
-        source_trustee_roster_position,
-        proof_record_index,
-    );
-    let checkpoint_key = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "VssShareLinkageProofCheckpointKey",
-        "proverRevision": "share-linkage-trit",
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "proofRecordIndex": proof_record_index,
-        "vssShareLinkage": reconstructed_vss_share_linkage,
-    }))
-    .expect("VSS share-linkage proof checkpoint key");
-    if !final_package_checkpoint_resume_enabled() {
-        let generated = generate_vss_share_linkage_proof_from_request(&request)
-            .expect("VSS share-linkage proof");
-        let proof_bytes_hash = generated["proofBytesHash"]
-            .as_str()
-            .expect("VSS share-linkage proof bytes hash");
-        let proof_material_identity = VssShareLinkageProofMaterialIdentity {
-            proof_bytes_hash: proof_bytes_hash.to_string(),
-        };
-        let proof_binding_lease = verify_and_retain_vss_share_linkage_proof_binding(
-            &proof_material_identity.proof_bytes_hash,
-            &request,
-        )
-        .expect("verify VSS share-linkage proof before releasing its bytes");
-
-        return VssShareLinkageProofMaterialReference {
-            identity: proof_material_identity,
-            proof_binding_lease,
-        };
-    }
-
-    let mut resumed_proof_material_reference = None;
-    let proof_bytes = checkpointed_proof_bytes(
-        VSS_SHARE_LINKAGE_PROOF_CHECKPOINT_DIRECTORY,
-        &checkpoint_key,
-        |proof_bytes| {
-            let proof_material_identity =
-                vss_share_linkage_proof_material_identity_from_bytes(proof_bytes);
-            authenticate_setup_proof_material_stream_for_test(
-                VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                &proof_material_identity.proof_bytes_hash,
-                proof_bytes,
-            )?;
-            let proof_binding_lease = verify_and_retain_vss_share_linkage_proof_binding(
-                &proof_material_identity.proof_bytes_hash,
-                &request,
-            )?;
-            resumed_proof_material_reference = Some(VssShareLinkageProofMaterialReference {
-                identity: proof_material_identity,
-                proof_binding_lease,
-            });
-            Ok(())
-        },
-        || {
-            let generated = generate_vss_share_linkage_proof_from_request(&request)
-                .expect("VSS share-linkage proof");
-            let proof_bytes_hash = generated["proofBytesHash"]
-                .as_str()
-                .expect("VSS share-linkage proof bytes hash");
-            let proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
-                VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                proof_bytes_hash,
-            )
-            .expect("VSS share-linkage generated proof material lookup")
-            .expect("VSS share-linkage generated proof material");
-            assert_eq!(
-                proof_material
-                    .hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)
-                    .expect("VSS share-linkage streamed proof bytes hash"),
-                proof_bytes_hash,
-                "generated VSS share-linkage metadata must bind its retained bytes",
-            );
-            match std::sync::Arc::try_unwrap(proof_material) {
-                Ok(proof_material) => proof_material.into_contiguous(),
-                Err(_) => panic!(
-                    "generated VSS share-linkage proof bytes must have one store owner before checkpoint persistence"
-                ),
-            }
-        },
-    );
-    if let Some(proof_material_reference) = resumed_proof_material_reference {
-        return proof_material_reference;
-    }
-    let proof_material_identity =
-        vss_share_linkage_proof_material_identity_from_bytes(&proof_bytes);
-    if crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
-        VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        &proof_material_identity.proof_bytes_hash,
-    )
-    .expect("VSS share-linkage generated proof material lookup")
-    .is_none()
-    {
-        authenticate_setup_proof_material_stream_for_test(
-            VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            &proof_material_identity.proof_bytes_hash,
-            &proof_bytes,
-        )
-        .expect("authenticate VSS share-linkage proof material stream");
-    }
-    let proof_binding_lease = verify_and_retain_vss_share_linkage_proof_binding(
-        &proof_material_identity.proof_bytes_hash,
-        &request,
-    )
-    .expect("verify VSS share-linkage proof before releasing its bytes");
-
-    VssShareLinkageProofMaterialReference {
-        identity: proof_material_identity,
-        proof_binding_lease,
-    }
-}
-
-pub(super) fn vss_share_linkage_statement_items(
-    vss_share_linkage: &serde_json::Value,
-) -> Vec<&serde_json::Value> {
-    let mut items = vec![vss_share_linkage];
-    items.extend(
-        vss_share_linkage["additionalLinkageItems"]
-            .as_array()
-            .expect("VSS additional linkage items")
-            .iter(),
-    );
-
-    items
-}
-
-pub(super) fn vss_share_linkage_coefficient_slots(
-    linkage_items: &[&serde_json::Value],
-    threshold_degree: u64,
-) -> Vec<(usize, u64)> {
-    let mut coefficient_slots = Vec::new();
-    for item in linkage_items {
-        let rns_limb_index = item["sourceRnsLimbIndex"]
-            .as_u64()
-            .expect("linkage item limb") as usize;
-        for shamir_coefficient_index in 0..threshold_degree {
-            let coefficient_slot = (rns_limb_index, shamir_coefficient_index);
-            if !coefficient_slots.contains(&coefficient_slot) {
-                coefficient_slots.push(coefficient_slot);
-            }
-        }
-    }
-
-    coefficient_slots
-}
-
-pub(super) fn vss_share_linkage_proof_generation_request(
-    package: &serde_json::Value,
-    vss_share_linkage: &serde_json::Value,
-    source_trustee_roster_position: u64,
-    proof_record_index: usize,
-) -> serde_json::Value {
-    let statement = &package["vssShareLinkageStatement"];
-    let ring_degree = statement["ringDegree"]
-        .as_u64()
-        .expect("share-linkage ring degree") as usize;
-    let threshold_degree = vss_fixture_threshold_degree(package);
-    let linkage_items = vss_share_linkage_statement_items(vss_share_linkage);
-    let coefficient_slots = vss_share_linkage_coefficient_slots(&linkage_items, threshold_degree);
-    let coefficient_messages_by_shamir_index = coefficient_slots
-        .iter()
-        .map(|(rns_limb_index, shamir_coefficient_index)| {
-            accepted_vss_coefficient_message_fixture(
-                source_trustee_roster_position,
-                *rns_limb_index,
-                *shamir_coefficient_index,
-                DATA_PRIMES[*rns_limb_index],
-                ring_degree,
-            )
-            .into_iter()
-            .map(|value| i64::try_from(value).expect("coefficient message fits i64"))
-            .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    let mut recipient_share_messages_by_item = Vec::new();
-    let mut carry_witnesses_by_item = Vec::new();
-    for item in &linkage_items {
-        let item_source_trustee_roster_position = item["sourceTrusteeRosterPosition"]
-            .as_u64()
-            .expect("linkage item source trustee");
-        assert_eq!(
-            item_source_trustee_roster_position, source_trustee_roster_position,
-            "linkage proof batch must contain one source trustee"
-        );
-        let recipient_roster_position = item["recipientRosterPosition"]
-            .as_u64()
-            .expect("linkage item recipient");
-        let rns_limb_index = item["sourceRnsLimbIndex"]
-            .as_u64()
-            .expect("linkage item limb") as usize;
-        let (share_coefficients, carry_witnesses) = vss_public_recipient_share_values_and_carries(
-            source_trustee_roster_position,
-            recipient_roster_position,
-            rns_limb_index,
-            threshold_degree,
-            DATA_PRIMES[rns_limb_index],
-            ring_degree,
-        );
-        recipient_share_messages_by_item.push(
-            share_coefficients
-                .into_iter()
-                .map(|value| i64::try_from(value).expect("recipient share fits i64"))
-                .collect::<Vec<_>>(),
-        );
-        carry_witnesses_by_item.push(carry_witnesses);
-    }
-    let bound_material_seeds =
-        vss_share_linkage_bound_material_seeds(&linkage_items, &coefficient_slots);
-    let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "VssPublicMaterialFixtureRandomness",
-        "fixture": "vss-share-linkage-proof-randomness",
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "proofRecordIndex": proof_record_index,
-    }))
-    .expect("VSS share-linkage proof randomness seed");
-    serde_json::json!({
-        "context": {
-            "setupContextHash": statement["setupContextHash"],
-            "trusteeIdentity": "vss-share-linkage",
-            "trusteeRosterPosition": 0,
-        },
-        "ringDegree": ring_degree,
-        "vssShareLinkage": vss_share_linkage,
-        "coefficientMessagesByShamirIndex": coefficient_messages_by_shamir_index,
-        "recipientShareMessagesByItem": recipient_share_messages_by_item,
-        "carryWitnessesByItem": carry_witnesses_by_item,
-        "vssCommittedMaterialSeedsByBoundMessage": bound_material_seeds,
-        "proofRandomnessSeedHex": proof_randomness_seed_hex,
-    })
-}
-
-fn vss_share_linkage_bound_material_seeds(
-    linkage_items: &[&serde_json::Value],
-    coefficient_slots: &[(usize, u64)],
-) -> Vec<String> {
-    let mut context_hashes = Vec::with_capacity(coefficient_slots.len() + linkage_items.len());
-    for (rns_limb_index, shamir_coefficient_index) in coefficient_slots {
-        let item = linkage_items
-            .iter()
-            .find(|item| {
-                item["sourceRnsLimbIndex"]
-                    .as_u64()
-                    .expect("linkage item limb") as usize
-                    == *rns_limb_index
-            })
-            .expect("linkage item for coefficient slot limb");
-        let context_hash = item["coefficientCommitments"][*shamir_coefficient_index as usize]
-            ["commitmentContextHash"]
-            .as_str()
-            .expect("coefficient commitment context hash")
-            .to_string();
-        context_hashes.push(context_hash);
-    }
-    for item in linkage_items {
-        context_hashes.push(
-            item["recipientShareCommitment"]["commitmentContextHash"]
-                .as_str()
-                .expect("recipient-share commitment context hash")
-                .to_string(),
-        );
-    }
-    context_hashes
-        .iter()
-        .map(|context_hash| super::accepted_vss_material_seed(context_hash))
-        .collect()
-}
-
-pub(super) fn vss_public_recipient_share_commitment_record_from_package(
-    package: &serde_json::Value,
-    source_trustee_roster_position: u64,
-    recipient_roster_position: u64,
-    rns_limb_index: usize,
-) -> serde_json::Value {
-    let rns_limb_count = DATA_PRIMES.len();
-    let record_index = (recipient_roster_position as usize)
-        .checked_mul(rns_limb_count)
-        .and_then(|offset| offset.checked_add(rns_limb_index))
-        .expect("recipient-share record index");
-    package["vssPublicRecipientShareCommitmentSet"]["sourceTrusteeRecords"]
-        [source_trustee_roster_position as usize]["recipientShareCommitments"][record_index]
-        .clone()
 }
 
 pub(super) fn vss_public_recipient_share_values_and_carries(

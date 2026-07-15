@@ -412,5 +412,8 @@ fn coefficient_vector_hash(coefficients: &[u64]) -> [u8; 64] {
     for coefficient in coefficients {
         bytes.extend_from_slice(&coefficient.to_le_bytes());
     }
-    hash512("sealed-lattice/setup/trustee-evaluation-key/coefficient-vector", &[&bytes])
+    hash512(
+        "sealed-lattice/setup/trustee-evaluation-key/coefficient-vector",
+        &[&bytes],
+    )
 }

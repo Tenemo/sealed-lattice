@@ -5,7 +5,7 @@
 //! prevent a generated plan from committing a secret polynomial with too few
 //! fresh mask coefficients for the complete verifier-visible opening set.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::relation_plan::{
     ProofPrivacyMode, RelationColumnOrigin, RelationMaskKind,
@@ -43,29 +43,34 @@ pub(crate) fn validate_zero_knowledge_mask_image(
         }
         let column_ordinal = u32::try_from(column_ordinal)
             .map_err(|_| RelationPlanError::CountOverflow)?;
-        let deep_opening_count = u64::try_from(
-            variant
-                .ordered_opening_claims()
-                .iter()
-                .filter(|claim| {
-                    claim.source_class() == RelationOpeningSourceClass::TreeColumn
-                        && claim.column_ordinal() == Some(column_ordinal)
-                })
-                .count(),
-        )
-        .map_err(|_| RelationPlanError::CountOverflow)?;
+        let mut deep_opening_count = 0_u64;
+        let mut required_rotations = BTreeSet::new();
+        for claim in variant.ordered_opening_claims().iter().filter(|claim| {
+            claim.source_class() == RelationOpeningSourceClass::TreeColumn
+                && claim.column_ordinal() == Some(column_ordinal)
+        }) {
+            deep_opening_count = deep_opening_count
+                .checked_add(1)
+                .ok_or(RelationPlanError::CountOverflow)?;
+            let opening_point = variant
+                .ordered_opening_points()
+                .get(
+                    usize::try_from(claim.opening_point_ordinal())
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                )
+                .copied()
+                .ok_or(RelationPlanError::InvalidMaskGrammar)?;
+            required_rotations.insert(opening_point.trace_rotation());
+        }
         if deep_opening_count == 0 {
             return Err(RelationPlanError::InvalidMaskGrammar);
         }
-        let deep_base_coordinate_count = deep_opening_count
-            .checked_mul(extension_degree)
-            .ok_or(RelationPlanError::CountOverflow)?;
-        let complete_view_coordinate_count = deep_base_coordinate_count
-            .checked_add(phase_pair_query_coordinate_count)
-            .ok_or(RelationPlanError::CountOverflow)?;
-        let minimum_trace_mask_degree = complete_view_coordinate_count
-            .checked_mul(2)
-            .ok_or(RelationPlanError::CountOverflow)?;
+        let minimum_trace_mask_degree = required_trace_mask_coefficient_count(
+            deep_opening_count,
+            extension_degree,
+            phase_pair_query_coordinate_count,
+            &required_rotations,
+        )?;
         let actual_trace_mask_degree = trace_mask_degree_by_column
             .get(&column_ordinal)
             .copied()
@@ -116,3 +121,126 @@ pub(crate) fn validate_zero_knowledge_mask_image(
     Ok(())
 }
 
+fn required_trace_mask_coefficient_count(
+    deep_opening_count: u64,
+    extension_degree: u64,
+    phase_pair_query_coordinate_count: u64,
+    required_rotations: &BTreeSet<(bool, u64)>,
+) -> Result<u64, RelationPlanError> {
+    // Habock-Al Kindi's DEEP count is a count of sampled centers before the
+    // relation-specific neighboring-row expansion. The checked opening-claim
+    // list already contains that complete expansion, so each claim contributes
+    // one extension-field value here and must not receive another factor two.
+    let deep_base_coordinate_count = deep_opening_count
+        .checked_mul(extension_degree)
+        .ok_or(RelationPlanError::CountOverflow)?;
+    let direct_tree_rotation = (false, 0);
+    let query_rotation_count = u64::try_from(required_rotations.len())
+        .map_err(|_| RelationPlanError::CountOverflow)?
+        .checked_add(u64::from(!required_rotations.contains(&direct_tree_rotation)))
+        .ok_or(RelationPlanError::CountOverflow)?;
+    let query_base_coordinate_count = phase_pair_query_coordinate_count
+        .checked_mul(query_rotation_count)
+        .ok_or(RelationPlanError::CountOverflow)?;
+    deep_base_coordinate_count
+        .checked_add(query_base_coordinate_count)
+        .ok_or(RelationPlanError::CountOverflow)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rotation_set(rotations: &[(bool, u64)]) -> BTreeSet<(bool, u64)> {
+        rotations.iter().copied().collect()
+    }
+
+    #[test]
+    fn one_direct_rotation_counts_each_deep_opening_once() {
+        let required = required_trace_mask_coefficient_count(
+            3,
+            5,
+            14,
+            &rotation_set(&[(false, 0)]),
+        )
+        .expect("mask-image count must fit");
+
+        assert_eq!(required, 3 * 5 + 14);
+    }
+
+    #[test]
+    fn one_translated_rotation_also_counts_direct_query_openings() {
+        let required = required_trace_mask_coefficient_count(
+            3,
+            5,
+            14,
+            &rotation_set(&[(false, 1)]),
+        )
+        .expect("mask-image count must fit");
+
+        assert_eq!(required, 3 * 5 + 2 * 14);
+    }
+
+    #[test]
+    fn two_rotation_deep_claims_are_not_expanded_twice() {
+        let deep_point_count = 3;
+        let extension_degree = 5;
+        let phase_pair_query_coordinate_count = 14;
+        let required = required_trace_mask_coefficient_count(
+            deep_point_count * 2,
+            extension_degree,
+            phase_pair_query_coordinate_count,
+            &rotation_set(&[(false, 0), (false, 1)]),
+        )
+        .expect("mask-image count must fit");
+
+        assert_eq!(
+            required,
+            deep_point_count * 2 * extension_degree
+                + 2 * phase_pair_query_coordinate_count
+        );
+        assert_ne!(
+            required,
+            (deep_point_count * 2 * extension_degree
+                + phase_pair_query_coordinate_count)
+                * 2
+        );
+    }
+
+    #[test]
+    fn more_than_two_rotations_expand_the_complete_query_preimage() {
+        let phase_pair_query_coordinate_count = 200;
+        let required = required_trace_mask_coefficient_count(
+            4,
+            1,
+            phase_pair_query_coordinate_count,
+            &rotation_set(&[(false, 0), (false, 1), (true, 1), (false, 2)]),
+        )
+        .expect("mask-image count must fit");
+
+        assert_eq!(required, 4 + 4 * phase_pair_query_coordinate_count);
+        assert!(required > (4 + phase_pair_query_coordinate_count) * 2);
+    }
+
+    #[test]
+    fn mask_image_count_refuses_arithmetic_overflow() {
+        assert_eq!(
+            required_trace_mask_coefficient_count(
+                u64::MAX,
+                2,
+                2,
+                &rotation_set(&[(false, 0)]),
+            ),
+            Err(RelationPlanError::CountOverflow)
+        );
+        assert_eq!(
+            required_trace_mask_coefficient_count(
+                1,
+                1,
+                u64::MAX,
+                &rotation_set(&[(false, 0), (false, 1)]),
+            ),
+            Err(RelationPlanError::CountOverflow)
+        );
+    }
+}

@@ -32,8 +32,6 @@ enum TranscriptCoreCommand {
     GenerateTrusteeEvaluationKeyProof,
     ComputeSetupCommitmentFromOpening,
     ComputeVssCommittedMaterialCommitment,
-    GenerateVssShareLinkageProof,
-    GenerateSameSecretBridgeProof,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -131,9 +129,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
-        | TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment
-        | TranscriptCoreCommand::GenerateVssShareLinkageProof
-        | TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
+        | TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment => {
             run_bgv_command(command, &request)
         }
     }
@@ -184,12 +180,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment => {
             crate::bgv::setup::compute_vss_committed_material_commitment_request(request)
-        }
-        TranscriptCoreCommand::GenerateVssShareLinkageProof => {
-            crate::bgv::setup::generate_vss_share_linkage_proof_from_request(request)
-        }
-        TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
-            crate::bgv::setup::generate_same_secret_bridge_proof_from_request(request)
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }

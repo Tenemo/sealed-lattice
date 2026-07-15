@@ -265,7 +265,7 @@ export const copyActionStateRecoveryVerificationInput = (
     });
 };
 
-export const copyActionRandomnessRecordContext = (
+const copyActionRandomnessRecordContext = (
     value: unknown,
 ): BrowserActionRandomnessRecordContext => {
     if (!isPlainRecord(value)) {

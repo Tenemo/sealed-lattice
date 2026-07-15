@@ -3,9 +3,6 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     type SetupCommitmentValue,
-    type VssCoefficientCommitmentBundle,
-    type VssCoefficientCommitmentBundleInput,
-    type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningMaterial,
     type VssSourceTrusteeCoefficientCommitmentContributionInput,
     type VssSourceTrusteeCoefficientCommitmentRecord,
@@ -16,22 +13,14 @@ import {
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
-    deriveCollectiveBgvSetupContextHash,
 } from './encoding.js';
 import {
-    assertFullSourceTrusteeReferenceCoverage,
-    loadSourceTrusteeOpeningState,
     openingCoordinateKey,
     openingStateByCoordinate,
-    sortedSourceTrusteeReferences,
-    sourceTrusteeOpeningStateProviderFromInput,
 } from './opening-state.js';
 
 const validateCommitmentCommonInput = (
-    input: Omit<
-        VssCoefficientCommitmentBundleInput,
-        'sourceTrusteeOpeningStates'
-    >,
+    input: VssSourceTrusteeCoefficientCommitmentContributionInput,
 ): void => {
     assertProtocolHash(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
@@ -48,7 +37,7 @@ const validateCommitmentCommonInput = (
     });
 };
 
-const createVssSourceTrusteeCoefficientCommitmentContribution = (
+export const createVssSourceTrusteeCoefficientCommitmentContribution = (
     input: VssSourceTrusteeCoefficientCommitmentContributionInput,
 ): VssSourceTrusteeOpeningMaterial => {
     validateCommitmentCommonInput(input);
@@ -121,54 +110,5 @@ const createVssSourceTrusteeCoefficientCommitmentContribution = (
         sourceTrusteeCoefficientCommitmentRecord: sourceTrusteeRecord,
         coefficientCommitments,
         coefficientOpenings: sourceTrusteePrivateOpenings,
-    };
-};
-
-export const createVssCoefficientCommitmentBundle = (
-    input: VssCoefficientCommitmentBundleInput,
-): VssCoefficientCommitmentBundle => {
-    validateCommitmentCommonInput(input);
-    const setupContextHash = deriveCollectiveBgvSetupContextHash(
-        input.setupContext,
-    );
-    const sourceTrusteeOpeningStateProvider =
-        sourceTrusteeOpeningStateProviderFromInput(input);
-    const sortedReferences = sortedSourceTrusteeReferences(
-        sourceTrusteeOpeningStateProvider.sourceTrusteeReferences,
-    );
-    assertFullSourceTrusteeReferenceCoverage(
-        sortedReferences,
-        input.setupContext.participantCount,
-    );
-
-    const sourceTrusteeContributions = sortedReferences.map(
-        (sourceTrusteeReference) =>
-            createVssSourceTrusteeCoefficientCommitmentContribution({
-                setupContext: input.setupContext,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                setupCommitmentComputer: input.setupCommitmentComputer,
-                qSharePrimes: input.qSharePrimes,
-                ringDegree: input.ringDegree,
-                thresholdDegree: input.thresholdDegree,
-                sourceTrusteeOpeningState: loadSourceTrusteeOpeningState(
-                    sourceTrusteeOpeningStateProvider,
-                    sourceTrusteeReference,
-                ),
-            }),
-    );
-    const sourceTrusteeRecords = sourceTrusteeContributions.map(
-        (contribution) => contribution.sourceTrusteeCoefficientCommitmentRecord,
-    );
-    const privateOpeningMaterialBySourceTrustee = sourceTrusteeContributions;
-
-    const commitmentSet = {
-        objectType: 'VssCoefficientCommitmentSet',
-        setupContextHash,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        sourceTrusteeRecords,
-    } as const satisfies VssCoefficientCommitmentSet;
-    return {
-        commitmentSet,
-        privateOpeningMaterialBySourceTrustee,
     };
 };

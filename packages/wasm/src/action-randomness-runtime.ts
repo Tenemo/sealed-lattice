@@ -1,17 +1,14 @@
 import { hexToBytes } from '@noble/hashes/utils.js';
-import {
-    refusalReasonCodes,
-    type ProtocolHash,
-} from '@sealed-lattice/types';
+import { refusalReasonCodes, type ProtocolHash } from '@sealed-lattice/types';
 
-import {
-    resolveActionRandomnessKernelContext,
-    type ActionRandomnessKernelContext,
-} from './transcript-core-bridge/action-randomness-kernel-context.js';
 import {
     resolveVerifiedStateReservationKernelAuthorization,
     type VerifiedStateReservation,
 } from './state-verifier-runtime.js';
+import {
+    resolveActionRandomnessKernelContext,
+    type ActionRandomnessKernelContext,
+} from './transcript-core-bridge/action-randomness-kernel-context.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 import { bytesToHex } from './transcript-core-bridge/kernel-wasm-hash.js';
 
@@ -37,15 +34,13 @@ const actionRandomnessStatuses = Object.freeze({
     staleHandle: 0x0001_0001,
 } as const);
 
-const resetSafeProofFamiliesWithoutSchedule = [
-    0x1211, 0x1212, 0x1621, 0x2110, 0x2111,
-] as const;
-const resetSafeProofFamiliesWithSchedule = [0x1214, 0x1216, 0x1217] as const;
-
 type ResetSafeProofFamilyWithoutSchedule =
-    (typeof resetSafeProofFamiliesWithoutSchedule)[number];
-type ResetSafeProofFamilyWithSchedule =
-    (typeof resetSafeProofFamiliesWithSchedule)[number];
+    | 0x1211
+    | 0x1212
+    | 0x1621
+    | 0x2110
+    | 0x2111;
+type ResetSafeProofFamilyWithSchedule = 0x1214 | 0x1216 | 0x1217;
 
 export type ActionRandomnessScope = Readonly<{
     readonly actionContextHash: ProtocolHash;
@@ -54,7 +49,7 @@ export type ActionRandomnessScope = Readonly<{
     readonly suiteId: ProtocolHash;
 }>;
 
-export type PersistentProofAttemptInput =
+type PersistentProofAttemptInput =
     | Readonly<{
           readonly applicationStatementHash: ProtocolHash;
           readonly rosterPosition: number;
@@ -67,40 +62,52 @@ export type PersistentProofAttemptInput =
           readonly statementSchemaIdentifier: ResetSafeProofFamilyWithSchedule;
       }>;
 
-export type ProofAttemptBinding = Readonly<{
+type ProofAttemptBinding = Readonly<{
     readonly applicationSlotHash: ProtocolHash;
     readonly attemptIdentifier: Uint8Array<ArrayBuffer>;
 }>;
 
-export type OrdinaryProofAttemptBinding = ProofAttemptBinding &
+type OrdinaryProofAttemptBinding = ProofAttemptBinding &
     Readonly<{
         readonly ordinaryProofAttemptNonce: Uint8Array<ArrayBuffer>;
     }>;
 
-declare const actionRandomnessSessionBrand: unique symbol;
+type OrdinaryProofAttemptInput = Readonly<{
+    readonly applicationStatementHash: ProtocolHash;
+    readonly producerSequence: bigint;
+    readonly rosterPosition: number;
+}>;
 
-export type ActionRandomnessSession = Readonly<{
+type ReservedPersistentProofAttemptInput = PersistentProofAttemptInput &
+    Readonly<{ verifiedReservation: VerifiedStateReservation }>;
+
+type TargetReleaseAttemptInput = Readonly<{
+    readonly rosterPosition: number;
+    readonly verifiedReservation: VerifiedStateReservation;
+}>;
+
+const actionRandomnessSessionBrand: unique symbol = Symbol(
+    'sealed-lattice/action-randomness-session',
+);
+
+type ActionRandomnessSession = Readonly<{
     readonly [actionRandomnessSessionBrand]: true;
     readonly actionRandomnessCommitment: ProtocolHash;
     readonly scope: ActionRandomnessScope;
     beginFreshBallotAttempt(): Uint8Array<ArrayBuffer>;
-    beginOrdinaryProofAttempt(input: {
-        readonly applicationStatementHash: ProtocolHash;
-        readonly producerSequence: bigint;
-        readonly rosterPosition: number;
-    }): OrdinaryProofAttemptBinding;
+    beginOrdinaryProofAttempt(
+        input: OrdinaryProofAttemptInput,
+    ): OrdinaryProofAttemptBinding;
     close(): void;
     derivePersistentProofAttempt(
-        input: PersistentProofAttemptInput &
-            Readonly<{ verifiedReservation: VerifiedStateReservation }>,
+        input: ReservedPersistentProofAttemptInput,
     ): ProofAttemptBinding;
-    deriveTargetReleaseAttempt(input: {
-        readonly rosterPosition: number;
-        readonly verifiedReservation: VerifiedStateReservation;
-    }): ProofAttemptBinding;
+    deriveTargetReleaseAttempt(
+        input: TargetReleaseAttemptInput,
+    ): ProofAttemptBinding;
 }>;
 
-export type ActionRandomnessRuntimeFailureCode =
+type ActionRandomnessRuntimeFailureCode =
     | 'EntropyUnavailable'
     | 'InvalidInput'
     | 'InvalidState'
@@ -303,10 +310,7 @@ const command = (
                 wasm32WordByteLength * 2,
             );
             const status = metadata.getUint32(0, true);
-            outputByteLength = metadata.getUint32(
-                wasm32WordByteLength,
-                true,
-            );
+            outputByteLength = metadata.getUint32(wasm32WordByteLength, true);
             if (status !== 0) {
                 if (outputPointer !== 0 || outputByteLength !== 0) {
                     throw new ActionRandomnessRuntimeError(
@@ -532,8 +536,7 @@ const parseProofAttemptBinding = (
 
 const derivePersistentProofAttempt = (
     session: ActionRandomnessSession,
-    input: PersistentProofAttemptInput &
-        Readonly<{ verifiedReservation: VerifiedStateReservation }>,
+    input: ReservedPersistentProofAttemptInput,
 ): ProofAttemptBinding => {
     const state = requireState(session);
     const statementSchemaIdentifier = requireUnsigned16(
@@ -584,18 +587,16 @@ const derivePersistentProofAttempt = (
 
 const beginOrdinaryProofAttempt = (
     session: ActionRandomnessSession,
-    input: {
-        readonly applicationStatementHash: ProtocolHash;
-        readonly producerSequence: bigint;
-        readonly rosterPosition: number;
-    },
+    input: OrdinaryProofAttemptInput,
 ): OrdinaryProofAttemptBinding => {
     const state = requireState(session);
     const nonce = new Uint8Array(attemptIdentifierByteLength);
     fillEntropy(state.cryptoProvider, nonce, 'ordinary proof attempt');
     const commandInput = concatenateBytes(
         handleBytes(state),
-        encodeUnsigned16(requireUnsigned16(input.rosterPosition, 'rosterPosition')),
+        encodeUnsigned16(
+            requireUnsigned16(input.rosterPosition, 'rosterPosition'),
+        ),
         encodeUnsigned64(
             requireUnsigned64(input.producerSequence, 'producerSequence'),
         ),
@@ -623,7 +624,8 @@ const beginOrdinaryProofAttempt = (
                 'The action-randomness kernel returned malformed ordinary-proof metadata.',
             );
         }
-        const nonceOffset = foundationHashByteLength + attemptIdentifierByteLength;
+        const nonceOffset =
+            foundationHashByteLength + attemptIdentifierByteLength;
         if (!bytesEqual(output.subarray(nonceOffset), nonce)) {
             throw new ActionRandomnessRuntimeError(
                 'KernelUnavailable',
@@ -648,10 +650,7 @@ const beginOrdinaryProofAttempt = (
 
 const deriveTargetReleaseAttempt = (
     session: ActionRandomnessSession,
-    input: {
-        readonly rosterPosition: number;
-        readonly verifiedReservation: VerifiedStateReservation;
-    },
+    input: TargetReleaseAttemptInput,
 ): ProofAttemptBinding => {
     const state = requireState(session);
     const reservationAuthorization = reservationAuthorizationBytes(
@@ -801,9 +800,7 @@ export const openActionRandomnessSession = (input: {
         'open a session',
     );
     try {
-        if (
-            output.byteLength !== handleByteLength + foundationHashByteLength
-        ) {
+        if (output.byteLength !== handleByteLength + foundationHashByteLength) {
             throw new ActionRandomnessRuntimeError(
                 'KernelUnavailable',
                 'The action-randomness kernel returned malformed session metadata.',
@@ -820,21 +817,24 @@ export const openActionRandomnessSession = (input: {
                 'The action-randomness kernel returned a zero session handle.',
             );
         }
-        let session: ActionRandomnessSession;
-        session = Object.freeze({
+        const session: ActionRandomnessSession = Object.freeze({
+            [actionRandomnessSessionBrand]: true as const,
             actionRandomnessCommitment: bytesToHex(
                 output.subarray(handleByteLength),
             ),
             scope,
             beginFreshBallotAttempt: () => beginFreshBallotAttempt(session),
-            beginOrdinaryProofAttempt: (attemptInput) =>
-                beginOrdinaryProofAttempt(session, attemptInput),
+            beginOrdinaryProofAttempt: (
+                attemptInput: OrdinaryProofAttemptInput,
+            ) => beginOrdinaryProofAttempt(session, attemptInput),
             close: () => close(session),
-            derivePersistentProofAttempt: (attemptInput) =>
-                derivePersistentProofAttempt(session, attemptInput),
-            deriveTargetReleaseAttempt: (attemptInput) =>
-                deriveTargetReleaseAttempt(session, attemptInput),
-        }) as ActionRandomnessSession;
+            derivePersistentProofAttempt: (
+                attemptInput: ReservedPersistentProofAttemptInput,
+            ) => derivePersistentProofAttempt(session, attemptInput),
+            deriveTargetReleaseAttempt: (
+                attemptInput: TargetReleaseAttemptInput,
+            ) => deriveTargetReleaseAttempt(session, attemptInput),
+        });
         sessionStates.set(session, {
             closed: false,
             context,

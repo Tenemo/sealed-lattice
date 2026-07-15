@@ -59,10 +59,13 @@ pub(crate) fn compile_same_secret_relation_plan(
             SuiteModulusReference::data(data_modulus_index),
         )?;
     }
-    let opening = builder.add_anchor_opening_witness()?;
     for (root_ordinal, data_modulus_index) in
         input.commitment_data_modulus_indices.iter().copied().enumerate()
     {
+        // Every prime commitment limb owns an independent opening tape. Reusing
+        // one short opening across CRT limbs creates a joint-view hiding gap
+        // even when each individual commitment is hiding.
+        let opening = builder.add_anchor_opening_witness()?;
         let modulus_reference = SuiteModulusReference::data(data_modulus_index);
         let commitments = builder.add_setup_polynomial_root(
             &KeyVerifierSourceKey::StatementRoot {
@@ -461,7 +464,7 @@ pub(super) mod tests {
             evaluation_coset_offset: 7,
             deep_point_count: 2,
             quotient_component_count: 8,
-            quotient_component_degree_bound_exclusive: 4_096,
+            quotient_component_degree_bound_exclusive: 32_768,
             fri_fold_count: 7,
             final_polynomial_degree_bound_exclusive: 256,
             unique_query_count: 168,
@@ -472,53 +475,24 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn same_secret_production_geometry_has_exact_checked_counts() {
+    fn same_secret_current_production_profile_fails_closed_before_degree_fixed_point() {
         let context = production_context(false);
-        let plan = compile_same_secret_relation_plan(
-            &SameSecretRelationPlanInput {
-                ring_degree: 32_768,
-                evaluation_domain_size: 262_144,
-                opening_degree_bound_exclusive: 32_768,
-                material_column_degree_bound_exclusive: 16_384,
-                public_polynomial_column_degree_bound_exclusive: 16_384,
-                sharing_data_modulus_indices: (0..17).collect(),
-                commitment_data_modulus_indices: vec![0, 1, 2],
-                commitment_module_rank: 2,
-                first_mask_purpose: 100,
-            },
-            &context,
-        )
-        .expect("production same-secret plan");
-        let variant = plan
-            .select_variant(None, None)
-            .expect("production same-secret variant");
-        assert_integer_lift_phase_ownership(variant);
-        assert_eq!(variant.ordered_integer_lift_batches.len(), 21);
         assert_eq!(
-            variant
-                .ordered_integer_lift_batches
-                .iter()
-                .map(|batch| batch.ordered_components.len())
-                .sum::<usize>(),
-            126,
+            compile_same_secret_relation_plan(
+                &SameSecretRelationPlanInput {
+                    ring_degree: 32_768,
+                    evaluation_domain_size: 262_144,
+                    opening_degree_bound_exclusive: 32_768,
+                    material_column_degree_bound_exclusive: 16_384,
+                    public_polynomial_column_degree_bound_exclusive: 16_384,
+                    sharing_data_modulus_indices: (0..17).collect(),
+                    commitment_data_modulus_indices: vec![0, 1, 2],
+                    commitment_module_rank: 2,
+                    first_mask_purpose: 100,
+                },
+                &context,
+            ),
+            Err(RelationPlanError::DegreeBoundExceeded),
         );
-        assert_eq!(
-            variant
-                .ordered_integer_lift_batches
-                .iter()
-                .flat_map(|batch| &batch.ordered_components)
-                .map(|component| component.ordered_full_ring_negacyclic_products.len())
-                .sum::<usize>(),
-            336,
-        );
-        assert_eq!(variant.ordered_columns.len(), 4_624);
-        assert_eq!(variant.ordered_constraints.len(), 6_632);
-        assert_eq!(variant.ordered_trees.len(), 22);
-        assert_eq!(proof_tree_width(variant, 1), 2_690);
-        assert_eq!(proof_tree_width(variant, 2), 1_848);
-        assert_eq!(variant.ordered_opening_claims.len(), 13_057);
-        assert!(variant.ordered_masks.iter().filter(|mask| {
-            mask.mask_kind == RelationMaskKind::Trace
-        }).all(|mask| mask.mask_degree_bound_exclusive == 712));
     }
 }

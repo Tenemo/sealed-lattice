@@ -8,9 +8,8 @@ use super::low_degree_proof::{
 };
 use super::merkle_commitment::{
     LEAF_SALT_BYTES, MAIN_LOW_DEGREE_TREE_ORDINAL_BASE, MerkleDigest, QUOTIENT_TREE_ORDINAL_BASE,
-    RESIDUAL_LOW_DEGREE_TREE_ORDINAL_BASE, WITNESS_TREE_ORDINAL_BASE,
-    consistent_sorted_leaves, limb_tree_context, low_degree_tree_context, phase_pair_leaf_hash,
-    verify_merkle_batch,
+    RESIDUAL_LOW_DEGREE_TREE_ORDINAL_BASE, WITNESS_TREE_ORDINAL_BASE, consistent_sorted_leaves,
+    limb_tree_context, low_degree_tree_context, phase_pair_leaf_hash, verify_merkle_batch,
 };
 use super::prover::{
     LimbProof, SuccinctEvaluationKeyProof, barycentric_weights, build_limb_public_vectors,

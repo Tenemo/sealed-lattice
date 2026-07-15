@@ -638,6 +638,9 @@ fn proof_decode_error(error: ProofDecodeError) -> CanonicalError {
         ProofDecodeError::NonCanonicalPackedPadding => {
             "trustee evaluation-key proof contains noncanonical packed padding"
         }
+        ProofDecodeError::NonCanonicalFieldElement => {
+            "trustee evaluation-key proof contains a noncanonical field element"
+        }
         ProofDecodeError::InvalidBitWidth => {
             "trustee evaluation-key proof uses an invalid packed value width"
         }

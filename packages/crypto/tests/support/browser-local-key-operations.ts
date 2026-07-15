@@ -24,7 +24,6 @@ type ResetSafeSetupMailboxScope = Readonly<{
 
 export type ResetSafeSetupMailboxRandomnessObservation = {
     encapsulationConsumptionCount: number;
-    signatureConsumptionCount: number;
 };
 
 export const defaultResetSafeSetupMailboxScope = Object.freeze({
@@ -45,10 +44,7 @@ const createResetSafeSetupMailboxRandomnessOperations = (
 
     return {
         ...scope,
-        encapsulate: ({
-            recipientEncapsulationKey,
-            setupMailboxSlotHash,
-        }) => {
+        encapsulate: ({ recipientEncapsulationKey, setupMailboxSlotHash }) => {
             if (!active) {
                 throw new Error(
                     'The test reset-safe mailbox randomness is revoked.',
@@ -78,22 +74,6 @@ const createResetSafeSetupMailboxRandomnessOperations = (
                 slotHashBytes.fill(0);
                 encapsulation?.cipherText.fill(0);
                 encapsulation?.sharedSecret.fill(0);
-            }
-        },
-        withSignatureHedge: ({ envelopeHash }, consume) => {
-            if (!active) {
-                throw new Error(
-                    'The test reset-safe mailbox randomness is revoked.',
-                );
-            }
-            if (observation !== undefined) {
-                observation.signatureConsumptionCount += 1;
-            }
-            const hedge = hexToBytes(envelopeHash).slice(0, 32);
-            try {
-                return consume(hedge);
-            } finally {
-                hedge.fill(0);
             }
         },
         revoke: () => {

@@ -145,11 +145,6 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
                     EvaluationKeyShareProofFamily::Galois,
                     Some(u64::try_from(galois_element).expect("rotation fits u64")),
                 ),
-                EvaluationKeyShareKind::PublicKeyShare => {
-                    unreachable!(
-                        "the evaluation-key witness fixture never carries a public-key share key"
-                    );
-                }
             };
             (0..=key.level)
                 .map(|digit_index| {

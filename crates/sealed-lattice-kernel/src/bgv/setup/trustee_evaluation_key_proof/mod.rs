@@ -41,13 +41,11 @@ pub(in crate::bgv::setup) use relation::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PrivateVssShareStatement,
     SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE, SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS,
     SameSecretLinkageAtomFieldForms, SameSecretLinkageStatement, SetupProofStatement,
-    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, VssShareLinkageCommitment,
     build_same_secret_linkage_atom_field_forms,
 };
 #[cfg(test)]
-pub(in crate::bgv::setup) use relation::{
-    KeyBearingWitness, SameSecretLinkageWitness,
-};
+pub(in crate::bgv::setup) use relation::{KeyBearingWitness, SameSecretLinkageWitness};
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 
 #[cfg(test)]

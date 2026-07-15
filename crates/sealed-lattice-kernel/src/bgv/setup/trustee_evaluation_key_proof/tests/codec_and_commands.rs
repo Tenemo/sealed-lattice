@@ -2,6 +2,34 @@ use super::*;
 use std::sync::OnceLock;
 
 #[test]
+fn retained_succinct_setup_statement_hash_vectors_match() {
+    let expected_hashes = expected_statement_hash_vectors();
+
+    let trustee_statement = super::super::commands::statement_from_request(
+        &trustee_evaluation_key_statement_hash_vector_request(),
+    )
+    .expect("trustee evaluation-key vector statement");
+    assert_eq!(
+        crate::hashing::to_hex(&trustee_statement.statement_hash()),
+        expected_hashes["trusteeEvaluationKey"]
+            .as_str()
+            .expect("trustee evaluation-key vector hash")
+    );
+
+    let (_, private_vss_statement_hash) =
+        crate::bgv::setup::private_vss::generate_private_vss_share_proof_from_request(
+            &private_vss_statement_hash_vector_request(),
+        )
+        .expect("private VSS vector proof generation");
+    assert_eq!(
+        private_vss_statement_hash,
+        expected_hashes["privateVssShare"]
+            .as_str()
+            .expect("private VSS vector hash")
+    );
+}
+
+#[test]
 fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "cdcdabab",
@@ -150,22 +178,24 @@ fn trustee_proof_commands_reject_noncanonical_public_statement_material() {
 }
 
 #[test]
-fn public_key_share_commands_round_trip() {
-    let generate_request = public_key_share_statement_hash_vector_request();
-    let statement = super::super::commands::statement_from_request(&generate_request)
-        .expect("public-key share statement");
+fn trustee_evaluation_key_commands_round_trip() {
+    let (statement, witness) =
+        generate_development_trustee_instance("aabbccdd", &[round_one(1)], SMALL_RING_DEGREE)
+            .expect("trustee evaluation-key instance");
+    let generate_request = proof_generation_request(&statement, &witness);
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
-        .expect("generate public-key share command");
+        .expect("generate trustee evaluation-key command");
 
     let _proof_bytes = verify_generated_proof(&statement, &generated);
 }
 
 #[test]
 fn proof_command_validates_and_consumes_randomness_seed() {
-    let generate_request = public_key_share_statement_hash_vector_request();
-    let statement = super::super::commands::statement_from_request(&generate_request)
-        .expect("public-key share statement");
+    let (statement, witness) =
+        generate_development_trustee_instance("aabbccde", &[round_one(1)], SMALL_RING_DEGREE)
+            .expect("trustee evaluation-key instance");
+    let generate_request = proof_generation_request(&statement, &witness);
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate with private randomness");
@@ -205,8 +235,8 @@ fn proof_command_validates_and_consumes_randomness_seed() {
 fn proof_codec_round_trips_and_rejects_malformed_bytes() {
     let codec_test_ring_degree = LOW_DEGREE_QUERY_COUNT.next_power_of_two();
     let (statement, witness) =
-        generate_development_public_key_share_instance("c0dec0de", codec_test_ring_degree)
-            .expect("public-key share instance");
+        generate_development_trustee_instance("c0dec0de", &[round_one(0)], codec_test_ring_degree)
+            .expect("trustee evaluation-key instance");
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let bytes = encode_trustee_evaluation_key_proof(&proof);
@@ -253,8 +283,8 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
 fn proof_codec_decodes_chunked_material_across_adversarial_boundaries() {
     let codec_test_ring_degree = LOW_DEGREE_QUERY_COUNT.next_power_of_two();
     let (statement, witness) =
-        generate_development_public_key_share_instance("c0dec0df", codec_test_ring_degree)
-            .expect("public-key share instance");
+        generate_development_trustee_instance("c0dec0df", &[round_one(0)], codec_test_ring_degree)
+            .expect("trustee evaluation-key instance");
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let bytes = encode_trustee_evaluation_key_proof(&proof);
@@ -294,9 +324,12 @@ fn folded_layer_proof_codec_fixture() -> &'static (TrusteeEvaluationKeyStatement
     // smallest ring that still commits a folded Merkle layer.
     static FIXTURE: OnceLock<(TrusteeEvaluationKeyStatement, Vec<u8>)> = OnceLock::new();
     FIXTURE.get_or_init(|| {
-        let (statement, witness) =
-            generate_development_public_key_share_instance("c0dec0de", FOLDED_LAYER_RING_DEGREE)
-                .expect("public-key share instance");
+        let (statement, witness) = generate_development_trustee_instance(
+            "c0dec0de",
+            &[round_one(0)],
+            FOLDED_LAYER_RING_DEGREE,
+        )
+        .expect("trustee evaluation-key instance");
         let canonical_proof =
             prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
         let canonical_proof_bytes = encode_trustee_evaluation_key_proof(&canonical_proof);
@@ -444,22 +477,16 @@ fn heavy_rust_kernel_proof_codec_rejects_noncanonical_values_in_every_encoded_ar
 }
 
 #[test]
-fn proof_codec_rejects_noncanonical_values_for_each_succinct_family_shape() {
-    let family_cases = [
-        super::same_secret_bridge::same_secret_bridge_instance(),
-        generate_development_public_key_share_instance("2222bbbb", SMALL_RING_DEGREE)
-            .expect("public-key share instance"),
-    ];
-
-    for (statement, witness) in family_cases {
-        let mut proof =
-            prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-        proof.limb_proofs[0].masked_consistency_claims[0] = statement.limb_moduli()[0];
-        let encoded = encode_trustee_evaluation_key_proof(&proof);
-        assert!(
-            decode_trustee_evaluation_key_proof(&statement, &encoded).is_err(),
-            "noncanonical proof bytes must reject for {}",
-            statement.family_shape().proof_family()
-        );
-    }
+fn proof_codec_rejects_noncanonical_values_for_retained_trustee_family() {
+    let (statement, witness) =
+        generate_development_trustee_instance("2222bbbb", &[round_one(0)], SMALL_RING_DEGREE)
+            .expect("trustee evaluation-key instance");
+    let mut proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    proof.limb_proofs[0].masked_consistency_claims[0] = statement.limb_moduli()[0];
+    let encoded = encode_trustee_evaluation_key_proof(&proof);
+    assert!(
+        decode_trustee_evaluation_key_proof(&statement, &encoded).is_err(),
+        "noncanonical trustee evaluation-key proof bytes must reject"
+    );
 }

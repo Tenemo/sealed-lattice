@@ -139,8 +139,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
         );
         const reopened = await openSealedWorkerActionRandomness(workerKernel, {
             ...recordContext,
-            actionRandomnessCommitment:
-                created.actionRandomnessCommitment,
+            actionRandomnessCommitment: created.actionRandomnessCommitment,
             canonicalEnvelope: created.canonicalEnvelope,
         });
         expect(reopened.actionRandomnessCommitment).toEqual(
@@ -227,8 +226,7 @@ describe('Local storage-root real-WASM worker kernel', () => {
         await expectCustodyErrorCode(
             openSealedWorkerActionRandomness(workerKernel, {
                 ...recordContext,
-                actionRandomnessCommitment:
-                    created.actionRandomnessCommitment,
+                actionRandomnessCommitment: created.actionRandomnessCommitment,
                 canonicalEnvelope: tamperedEnvelope,
             }),
             'RecordAuthenticationFailed',

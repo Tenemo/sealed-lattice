@@ -1,3 +1,4 @@
+import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { foundationProfile, stateCapabilityKinds } from '@sealed-lattice/types';
 import {
     afterEach,
@@ -9,6 +10,7 @@ import {
     it,
 } from 'vitest';
 
+import { createCanonicalCarrierSigningKeyPairFixtures } from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
 import {
     openDurableStateWitnessService,
     type DurableStateWitnessService,
@@ -32,7 +34,22 @@ import {
     openStateVerifierSession,
     type StateVerifierSession,
     type VerifiedStateDurableBinding,
+    type VerifiedStateOutput,
+    type VerifiedStateReservation,
 } from '#packages/wasm/src/state-verifier-runtime';
+import {
+    asciiItem,
+    canonicalItem,
+    canonicalTuple,
+    emptyHomogeneousListItem,
+    emptyOptionalItem,
+    foundationHash512,
+    hashItem,
+    presentOptionalItem,
+    unsigned16Item,
+    unsigned64Item,
+    variableBytesItem,
+} from '#packages/wasm/tests/canonical-tuple-test-helpers';
 import {
     createStateVerifierTestVector,
     type StateVerifierTestVector,
@@ -42,8 +59,20 @@ const serviceLimits = {
     maximumExactOutputByteLength:
         foundationProfile.streamChunkByteLength + 1_024,
     maximumRecordSealingCount: 256,
+    maximumSignedVoteCarrierByteLength: 8 * 1_024,
     transactionLifetimeMilliseconds: 5_000,
 } as const;
+
+const objectSignatureContext = new TextEncoder().encode(
+    'sealed-lattice/object-signature/v1',
+);
+const stateOutputIntentObjectType = 0x0052;
+const stateWitnessVoteObjectType = 0x0053;
+const stateRecoveryTransitionObjectType = 0x0054;
+
+const byteArraysEqual = (left: Uint8Array, right: Uint8Array): boolean =>
+    left.byteLength === right.byteLength &&
+    left.every((byte, byteIndex) => byte === right[byteIndex]);
 
 const requireValid = <Value>(result: {
     isValid: boolean;
@@ -88,6 +117,141 @@ const descriptorFor = (
     return writer.finish();
 };
 
+const createSignedCarrier = (
+    vector: StateVerifierTestVector,
+    input: {
+        objectType: number;
+        payloadBytes: Uint8Array;
+        predecessorTransitionHash?: Uint8Array;
+        producerParticipantIdentity: Uint8Array;
+        producerRosterPosition: number;
+        producerSequence: bigint;
+        recoveryEpoch: bigint;
+        signatureHedge?: Uint8Array;
+        signaturePurpose: string;
+    },
+): Readonly<{ canonicalCarrier: Uint8Array; objectHash: Uint8Array }> => {
+    const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
+        foundationProfile.participantCount,
+    );
+    try {
+        const canonicalEnvelope = canonicalTuple(
+            0x0100,
+            asciiItem('sealed-lattice'),
+            unsigned16Item(1),
+            hashItem(vector.suiteIdentifier),
+            unsigned16Item(input.objectType),
+            hashItem(vector.ceremonyContextHash),
+            hashItem(vector.actionContextHash),
+            unsigned64Item(input.recoveryEpoch),
+            input.predecessorTransitionHash === undefined
+                ? emptyOptionalItem(0x06)
+                : presentOptionalItem(0x06, input.predecessorTransitionHash),
+            presentOptionalItem(0x07, input.producerParticipantIdentity),
+            unsigned64Item(input.producerSequence),
+            emptyHomogeneousListItem(0x06),
+            variableBytesItem(input.payloadBytes),
+        );
+        const objectHash = foundationHash512(
+            'sealed-lattice/foundation/object/v1',
+            variableBytesItem(canonicalEnvelope),
+        );
+        const signatureMessage = foundationHash512(
+            'sealed-lattice/foundation/signature-message/v1',
+            hashItem(objectHash),
+            hashItem(vector.rosterHash),
+            asciiItem(input.signaturePurpose),
+        );
+        const signature = ml_dsa65.sign(
+            signatureMessage,
+            signingKeyPairs[input.producerRosterPosition].secretKey,
+            {
+                context: objectSignatureContext,
+                extraEntropy: input.signatureHedge ?? false,
+            },
+        );
+        return {
+            canonicalCarrier: canonicalTuple(
+                0x0101,
+                variableBytesItem(canonicalEnvelope),
+                canonicalItem(0x01, signature),
+            ),
+            objectHash,
+        };
+    } finally {
+        for (const { secretKey } of signingKeyPairs) {
+            secretKey.fill(0);
+        }
+    }
+};
+
+const createDroppingRecoveryIntentCarrier = (
+    vector: StateVerifierTestVector,
+): Uint8Array =>
+    createSignedCarrier(vector, {
+        objectType: stateRecoveryTransitionObjectType,
+        payloadBytes: canonicalTuple(
+            0x1614,
+            unsigned16Item(stateCapabilityKinds.targetRelease),
+            emptyOptionalItem(0x06),
+        ),
+        producerParticipantIdentity: vector.subjectParticipantIdentity,
+        producerRosterPosition: 0,
+        producerSequence: 1n,
+        recoveryEpoch: 0n,
+        signaturePurpose: 'state-recovery-transition',
+    }).canonicalCarrier;
+
+const createConflictingOutputIntent = (
+    vector: StateVerifierTestVector,
+): Readonly<{ canonicalCarrier: Uint8Array; exactOutputBytes: Uint8Array }> => {
+    const exactOutputBytes = vector.exactOutputBytes.slice();
+    exactOutputBytes[exactOutputBytes.byteLength - 1] ^= 1;
+    const exactOutputHash = foundationHash512(
+        'sealed-lattice/state/exact-output/v1',
+        unsigned16Item(stateCapabilityKinds.targetRelease),
+        unsigned64Item(BigInt(exactOutputBytes.byteLength)),
+        variableBytesItem(exactOutputBytes),
+    );
+    return {
+        canonicalCarrier: createSignedCarrier(vector, {
+            objectType: stateOutputIntentObjectType,
+            payloadBytes: canonicalTuple(
+                0x1611,
+                hashItem(vector.reservation.objectHash),
+                hashItem(exactOutputHash),
+            ),
+            producerParticipantIdentity: vector.subjectParticipantIdentity,
+            producerRosterPosition: 0,
+            producerSequence: 0n,
+            recoveryEpoch: 0n,
+            signaturePurpose: 'state-output-intent',
+        }).canonicalCarrier,
+        exactOutputBytes,
+    };
+};
+
+const createHedgedReservationVoteCarriers = (
+    vector: StateVerifierTestVector,
+): readonly [Uint8Array, Uint8Array] => {
+    const payloadBytes = canonicalTuple(
+        0x1612,
+        hashItem(vector.reservation.objectHash),
+    );
+    const carrierForHedgeByte = (hedgeByte: number): Uint8Array =>
+        createSignedCarrier(vector, {
+            objectType: stateWitnessVoteObjectType,
+            payloadBytes,
+            producerParticipantIdentity: vector.witnessParticipantIdentity,
+            producerRosterPosition: 1,
+            producerSequence: 1n,
+            recoveryEpoch: 0n,
+            signatureHedge: new Uint8Array(32).fill(hedgeByte),
+            signaturePurpose: 'state-witness-vote',
+        }).canonicalCarrier;
+    return [carrierForHedgeByte(0x35), carrierForHedgeByte(0xa7)];
+};
+
 const openSession = (
     kernel: TranscriptCoreKernel,
     vector: StateVerifierTestVector,
@@ -105,12 +269,11 @@ const openSession = (
         }),
     );
 
-const verifyOutputBinding = (input: {
-    kernel: TranscriptCoreKernel;
+const verifyReservation = (input: {
     session: StateVerifierSession;
     vector: StateVerifierTestVector;
-}): VerifiedStateDurableBinding => {
-    const reservation = requireValid(
+}): VerifiedStateReservation =>
+    requireValid(
         input.session.verifyReservation({
             canonicalReservationIntentCarrier:
                 input.vector.reservation.canonicalIntentCarrier,
@@ -121,10 +284,74 @@ const verifyOutputBinding = (input: {
             subjectParticipantIdentity: input.vector.subjectParticipantIdentity,
         }),
     );
+
+const verifyReservationIntentBinding = (input: {
+    canonicalReservationIntentCarrier?: Uint8Array;
+    expectedAuthorizationHash?: Uint8Array;
+    session: StateVerifierSession;
+    vector: StateVerifierTestVector;
+}): VerifiedStateDurableBinding => {
+    const verifiedReservationIntent = requireValid(
+        input.session.verifyReservationIntent({
+            canonicalReservationIntentCarrier:
+                input.canonicalReservationIntentCarrier ??
+                input.vector.reservation.canonicalIntentCarrier,
+            capabilityKind: stateCapabilityKinds.targetRelease,
+            expectedAuthorizationHash:
+                input.expectedAuthorizationHash ??
+                input.vector.authorizationHash,
+            subjectParticipantIdentity: input.vector.subjectParticipantIdentity,
+        }),
+    );
+    return requireValid(
+        input.session.durableBindingFor(verifiedReservationIntent),
+    );
+};
+
+const verifyOutputBinding = (input: {
+    canonicalOutputIntentCarrier?: Uint8Array;
+    exactOutputBytes?: Uint8Array;
+    kernel: TranscriptCoreKernel;
+    session: StateVerifierSession;
+    vector: StateVerifierTestVector;
+}): VerifiedStateDurableBinding => {
+    const reservation = verifyReservation(input);
+    const exactOutputBytes =
+        input.exactOutputBytes ?? input.vector.exactOutputBytes;
     const output = requireValid(
         input.session.openOutputIntentVerification({
             canonicalOutputIntentCarrier:
+                input.canonicalOutputIntentCarrier ??
                 input.vector.output.canonicalIntentCarrier,
+            exactOutputDescriptorBytes: descriptorFor(
+                input.kernel,
+                canonicalStreamDomains.stateTargetReleaseExactOutput,
+                exactOutputBytes,
+            ),
+            verifiedReservation: reservation,
+        }),
+    );
+    for (const [chunkIndex, chunk] of chunkBuffers(
+        exactOutputBytes,
+    ).entries()) {
+        requireValid(output.absorbChunk(chunkIndex, chunk));
+    }
+    const verifiedOutputIntent = requireValid(output.finish());
+    return requireValid(input.session.durableBindingFor(verifiedOutputIntent));
+};
+
+const verifyCertifiedOutput = (input: {
+    kernel: TranscriptCoreKernel;
+    session: StateVerifierSession;
+    vector: StateVerifierTestVector;
+}): VerifiedStateOutput => {
+    const reservation = verifyReservation(input);
+    const output = requireValid(
+        input.session.openOutputVerification({
+            canonicalOutputIntentCarrier:
+                input.vector.output.canonicalIntentCarrier,
+            canonicalStateCertificate:
+                input.vector.output.canonicalStateCertificate,
             exactOutputDescriptorBytes: descriptorFor(
                 input.kernel,
                 canonicalStreamDomains.stateTargetReleaseExactOutput,
@@ -138,8 +365,7 @@ const verifyOutputBinding = (input: {
     ).entries()) {
         requireValid(output.absorbChunk(chunkIndex, chunk));
     }
-    const verifiedOutputIntent = requireValid(output.finish());
-    return requireValid(input.session.durableBindingFor(verifiedOutputIntent));
+    return requireValid(output.finish());
 };
 
 describe('durable state witness service', () => {
@@ -147,7 +373,9 @@ describe('durable state witness service', () => {
     let vector: StateVerifierTestVector;
     let encryptionKey: CryptoKey;
     let session: StateVerifierSession;
+    let verifiedConflictingReservationBinding: VerifiedStateDurableBinding;
     let verifiedOutputBinding: VerifiedStateDurableBinding;
+    let verifiedReservationBinding: VerifiedStateDurableBinding;
 
     beforeAll(async () => {
         vector = createStateVerifierTestVector();
@@ -157,6 +385,19 @@ describe('durable state witness service', () => {
     beforeEach(async () => {
         encryptionKey = await generateRuntimeStorageEncryptionKey();
         session = openSession(kernel, vector);
+        verifiedReservationBinding = verifyReservationIntentBinding({
+            session,
+            vector,
+        });
+        const conflictingAuthorizationHash = vector.authorizationHash.slice();
+        conflictingAuthorizationHash[0] ^= 0xff;
+        verifiedConflictingReservationBinding = verifyReservationIntentBinding({
+            canonicalReservationIntentCarrier:
+                vector.conflictingReservation.canonicalIntentCarrier,
+            expectedAuthorizationHash: conflictingAuthorizationHash,
+            session,
+            vector,
+        });
         verifiedOutputBinding = verifyOutputBinding({
             kernel,
             session,
@@ -192,19 +433,386 @@ describe('durable state witness service', () => {
         };
     };
 
-    it('exposes only exact-output operations and reports a missing record', async () => {
+    it('exposes the durable witness and exact-output operations with explicit missing records', async () => {
         expectTypeOf<keyof DurableStateWitnessService>().toEqualTypeOf<
-            'cacheExactOutput' | 'readExactOutput'
+            | 'cacheExactOutput'
+            | 'cacheSignedVoteCarrier'
+            | 'compareAndLockIntent'
+            | 'readExactOutput'
+            | 'readSignedVoteCarrier'
         >();
         const { service } = await openService();
         expect(Object.keys(service).sort()).toEqual([
             'cacheExactOutput',
+            'cacheSignedVoteCarrier',
+            'compareAndLockIntent',
             'readExactOutput',
+            'readSignedVoteCarrier',
         ]);
 
         await expect(
+            service.readSignedVoteCarrier({
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'MissingRecord' });
+        await expect(
             service.readExactOutput({ verifiedOutputBinding }),
         ).rejects.toMatchObject({ code: 'MissingRecord' });
+    });
+
+    it('locks reservations and outputs idempotently while refusing every conflicting slot use', async () => {
+        const conflictingOutput = createConflictingOutputIntent(vector);
+        const verifiedConflictingOutputBinding = verifyOutputBinding({
+            canonicalOutputIntentCarrier: conflictingOutput.canonicalCarrier,
+            exactOutputBytes: conflictingOutput.exactOutputBytes,
+            kernel,
+            session,
+            vector,
+        });
+        const { service } = await openService();
+
+        await expect(
+            service.compareAndLockIntent({
+                verifiedIntentBinding: verifiedOutputBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: verifiedReservationBinding,
+        });
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: verifiedReservationBinding,
+        });
+        await expect(
+            service.compareAndLockIntent({
+                verifiedIntentBinding: verifiedConflictingReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: verifiedOutputBinding,
+        });
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: verifiedOutputBinding,
+        });
+        await expect(
+            service.compareAndLockIntent({
+                verifiedIntentBinding: verifiedConflictingOutputBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+    });
+
+    it('resolves concurrent identical locks and allows only one conflicting reservation', async () => {
+        const { service } = await openService();
+
+        await expect(
+            Promise.all([
+                service.compareAndLockIntent({
+                    verifiedIntentBinding: verifiedReservationBinding,
+                }),
+                service.compareAndLockIntent({
+                    verifiedIntentBinding: verifiedReservationBinding,
+                }),
+            ]),
+        ).resolves.toEqual([undefined, undefined]);
+
+        const { service: conflictingService } = await openService();
+        const conflictingResults = await Promise.allSettled([
+            conflictingService.compareAndLockIntent({
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+            conflictingService.compareAndLockIntent({
+                verifiedIntentBinding: verifiedConflictingReservationBinding,
+            }),
+        ]);
+        expect(
+            conflictingResults.filter(
+                (result) => result.status === 'fulfilled',
+            ),
+        ).toHaveLength(1);
+        const rejected = conflictingResults.find(
+            (result) => result.status === 'rejected',
+        );
+        expect(rejected).toMatchObject({
+            reason: { code: 'Conflict' },
+            status: 'rejected',
+        });
+    });
+
+    it('uses separate durable transactions and returns the first complete hedged carrier', async () => {
+        const [firstCarrier, secondCarrier] =
+            createHedgedReservationVoteCarriers(vector);
+        expect(firstCarrier).not.toEqual(secondCarrier);
+        const { adapter, service, store } = await openService();
+
+        await expect(
+            service.cacheSignedVoteCarrier({
+                canonicalSignedVoteCarrier: firstCarrier,
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+
+        adapter.failAtomicMutationAfter(1);
+        await expect(
+            service.compareAndLockIntent({
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'StorageFailure' });
+        await expect(
+            service.readSignedVoteCarrier({
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'MissingRecord' });
+
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: verifiedReservationBinding,
+        });
+        const reopenedService = openDurableStateWitnessService({
+            authorityContext: runtimeAuthorityContext({
+                actionContextHash: vector.actionContextHash,
+                ceremonyContextHash: vector.ceremonyContextHash,
+                suiteIdentifier: vector.suiteIdentifier,
+            }),
+            encryptionKey,
+            limits: serviceLimits,
+            store,
+        });
+
+        adapter.failAtomicMutationAfter(1);
+        await expect(
+            reopenedService.cacheSignedVoteCarrier({
+                canonicalSignedVoteCarrier: firstCarrier,
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'StorageFailure' });
+        await expect(
+            service.readSignedVoteCarrier({
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'MissingRecord' });
+
+        const racedCarriers = await Promise.all([
+            service.cacheSignedVoteCarrier({
+                canonicalSignedVoteCarrier: firstCarrier,
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+            reopenedService.cacheSignedVoteCarrier({
+                canonicalSignedVoteCarrier: secondCarrier,
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ]);
+        expect(racedCarriers[0]).toEqual(racedCarriers[1]);
+        expect(
+            [firstCarrier, secondCarrier].some((carrier) =>
+                byteArraysEqual(carrier, racedCarriers[0]),
+            ),
+        ).toBe(true);
+        const alternateCarrier = byteArraysEqual(racedCarriers[0], firstCarrier)
+            ? secondCarrier
+            : firstCarrier;
+        await expect(
+            service.cacheSignedVoteCarrier({
+                canonicalSignedVoteCarrier: alternateCarrier,
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).resolves.toEqual(racedCarriers[0]);
+        await expect(
+            reopenedService.readSignedVoteCarrier({
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).resolves.toEqual(racedCarriers[0]);
+    });
+
+    it('bounds signed carriers before storage and detects authenticated carrier corruption', async () => {
+        const [carrier] = createHedgedReservationVoteCarriers(vector);
+        const { service: boundedService } = await openService({
+            limits: {
+                ...serviceLimits,
+                maximumSignedVoteCarrierByteLength: carrier.byteLength - 1,
+            },
+        });
+        await expect(
+            boundedService.cacheSignedVoteCarrier({
+                canonicalSignedVoteCarrier: carrier,
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+
+        const { adapter, service } = await openService();
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: verifiedReservationBinding,
+        });
+        await service.cacheSignedVoteCarrier({
+            canonicalSignedVoteCarrier: carrier,
+            verifiedIntentBinding: verifiedReservationBinding,
+        });
+        const carrierObjectKey = adapter
+            .keys()
+            .filter((key) => key.includes('/objects/'))
+            .map((key) => ({
+                byteLength: adapter.rawRead(key)?.byteLength ?? 0,
+                key,
+            }))
+            .sort((left, right) => right.byteLength - left.byteLength)[0]?.key;
+        if (carrierObjectKey === undefined) {
+            throw new Error('signed-vote carrier object is missing');
+        }
+        const corruptCarrierRecord = adapter.rawRead(carrierObjectKey);
+        if (corruptCarrierRecord === undefined) {
+            throw new Error('signed-vote carrier bytes are missing');
+        }
+        corruptCarrierRecord[corruptCarrierRecord.byteLength - 1] ^= 1;
+        adapter.rawWrite(carrierObjectKey, corruptCarrierRecord);
+        await expect(
+            service.readSignedVoteCarrier({
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
+    });
+
+    it('preserves known locks across recovery and only fills missing locks from a verified recovery', async () => {
+        const verifiedOutput = verifyCertifiedOutput({
+            kernel,
+            session,
+            vector,
+        });
+        const preservingRecoveryIntent = requireValid(
+            session.verifyRecoveryIntent({
+                canonicalRecoveryTransitionCarrier:
+                    vector.recoveryPreservingOutput.canonicalIntentCarrier,
+                capabilityKind: stateCapabilityKinds.targetRelease,
+                preservedStateIntent: verifiedOutput,
+                subjectParticipantIdentity: vector.subjectParticipantIdentity,
+            }),
+        );
+        const preservingRecoveryBinding = requireValid(
+            session.durableBindingFor(preservingRecoveryIntent),
+        );
+        const droppingRecoveryIntent = requireValid(
+            session.verifyRecoveryIntent({
+                canonicalRecoveryTransitionCarrier:
+                    createDroppingRecoveryIntentCarrier(vector),
+                capabilityKind: stateCapabilityKinds.targetRelease,
+                subjectParticipantIdentity: vector.subjectParticipantIdentity,
+            }),
+        );
+        const droppingRecoveryBinding = requireValid(
+            session.durableBindingFor(droppingRecoveryIntent),
+        );
+
+        const { service } = await openService();
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: verifiedReservationBinding,
+        });
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: verifiedOutputBinding,
+        });
+        await expect(
+            service.compareAndLockIntent({
+                verifiedIntentBinding: droppingRecoveryBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: preservingRecoveryBinding,
+        });
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: preservingRecoveryBinding,
+        });
+        await expect(
+            service.compareAndLockIntent({
+                verifiedIntentBinding: droppingRecoveryBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+
+        const { service: partiallyInformedService } = await openService();
+        await partiallyInformedService.compareAndLockIntent({
+            verifiedIntentBinding: verifiedReservationBinding,
+        });
+        await partiallyInformedService.compareAndLockIntent({
+            verifiedIntentBinding: preservingRecoveryBinding,
+        });
+        await expect(
+            partiallyInformedService.compareAndLockIntent({
+                verifiedIntentBinding: verifiedOutputBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+
+        const { service: absentLockService } = await openService();
+        await absentLockService.compareAndLockIntent({
+            verifiedIntentBinding: droppingRecoveryBinding,
+        });
+        await absentLockService.compareAndLockIntent({
+            verifiedIntentBinding: droppingRecoveryBinding,
+        });
+    });
+
+    it('advances recovery transitions monotonically and refuses stale replay', async () => {
+        const firstRecovery = requireValid(
+            session.verifyRecovery({
+                canonicalRecoveryTransitionCarrier:
+                    vector.recoveryFirst.canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    vector.recoveryFirst.canonicalStateCertificate,
+                capabilityKind: stateCapabilityKinds.finalitySignature,
+                subjectParticipantIdentity: vector.subjectParticipantIdentity,
+            }),
+        );
+        const firstRecoveryBinding = requireValid(
+            session.durableBindingFor(firstRecovery),
+        );
+        const secondRecoveryIntent = requireValid(
+            session.verifyRecoveryIntent({
+                canonicalRecoveryTransitionCarrier:
+                    vector.recoverySecond.canonicalIntentCarrier,
+                capabilityKind: stateCapabilityKinds.finalitySignature,
+                subjectParticipantIdentity: vector.subjectParticipantIdentity,
+                verifiedPredecessorRecovery: firstRecovery,
+            }),
+        );
+        const secondRecoveryBinding = requireValid(
+            session.durableBindingFor(secondRecoveryIntent),
+        );
+        const { service } = await openService();
+
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: firstRecoveryBinding,
+        });
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: secondRecoveryBinding,
+        });
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: secondRecoveryBinding,
+        });
+        await expect(
+            service.compareAndLockIntent({
+                verifiedIntentBinding: firstRecoveryBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+    });
+
+    it('authenticates the lock record before replay or transition', async () => {
+        const { adapter, service } = await openService();
+        await service.compareAndLockIntent({
+            verifiedIntentBinding: verifiedReservationBinding,
+        });
+        const lockObjectKey = adapter
+            .keys()
+            .find((key) => key.includes('/objects/'));
+        if (lockObjectKey === undefined) {
+            throw new Error('intent-lock object is missing');
+        }
+        const corruptLockRecord = adapter.rawRead(lockObjectKey);
+        if (corruptLockRecord === undefined) {
+            throw new Error('intent-lock bytes are missing');
+        }
+        corruptLockRecord[Math.floor(corruptLockRecord.byteLength / 2)] ^= 1;
+        adapter.rawWrite(lockObjectKey, corruptLockRecord);
+
+        await expect(
+            service.compareAndLockIntent({
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
     });
 
     it('seals, replays, authenticates, and bounds exact output', async () => {
@@ -258,6 +866,9 @@ describe('durable state witness service', () => {
 
     it('refuses forged bindings and bindings from another authority context', async () => {
         const { store } = await openRuntimeTestStore();
+        const forgedBinding = Object.freeze(
+            Object.create(null),
+        ) as VerifiedStateDurableBinding;
         const wrongContextService = openDurableStateWitnessService({
             authorityContext: runtimeAuthorityContext({
                 actionContextHash: new Uint8Array(64).fill(0x99),
@@ -268,6 +879,22 @@ describe('durable state witness service', () => {
         });
 
         await expect(
+            wrongContextService.compareAndLockIntent({
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        await expect(
+            wrongContextService.cacheSignedVoteCarrier({
+                canonicalSignedVoteCarrier: vector.reservationVoteCarriers[0],
+                verifiedIntentBinding: forgedBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        await expect(
+            wrongContextService.readSignedVoteCarrier({
+                verifiedIntentBinding: forgedBinding,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        await expect(
             wrongContextService.cacheExactOutput({
                 exactOutputBytes: vector.exactOutputBytes,
                 verifiedOutputBinding,
@@ -275,9 +902,7 @@ describe('durable state witness service', () => {
         ).rejects.toMatchObject({ code: 'InvalidInput' });
         await expect(
             wrongContextService.readExactOutput({
-                verifiedOutputBinding: Object.freeze(
-                    Object.create(null),
-                ) as VerifiedStateDurableBinding,
+                verifiedOutputBinding: forgedBinding,
             }),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
     });

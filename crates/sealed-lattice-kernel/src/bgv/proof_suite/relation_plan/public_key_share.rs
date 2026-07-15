@@ -43,7 +43,6 @@ pub(crate) fn compile_public_key_share_relation_plan(
     )?;
     let secret = builder.add_reversible_shifted_ternary_vector()?;
     let public_key_error = builder.add_shifted_eta_two_vector()?;
-    let opening = builder.add_anchor_opening_witness()?;
     let data_modulus_references = input
         .data_modulus_indices
         .iter()
@@ -82,6 +81,9 @@ pub(crate) fn compile_public_key_share_relation_plan(
     for (root_ordinal, data_modulus_index) in
         input.commitment_data_modulus_indices.iter().copied().enumerate()
     {
+        // Prime-limb commitments use independent openings while sharing only
+        // the bounded semantic secret proved by the cross-limb relation.
+        let opening = builder.add_anchor_opening_witness()?;
         let modulus_reference = SuiteModulusReference::data(data_modulus_index);
         let commitments = builder.add_setup_polynomial_root(
             &KeyVerifierSourceKey::StatementRoot {
@@ -121,8 +123,8 @@ mod tests {
     use super::*;
     use super::super::same_secret_anchor::tests::{
         TEST_EVALUATION_DOMAIN_SIZE, TEST_OPENING_DEGREE_BOUND_EXCLUSIVE,
-        TEST_RING_DEGREE, application_challenges, assert_integer_lift_phase_ownership,
-        check_context, production_context, proof_tree_width,
+        TEST_RING_DEGREE, application_challenges, check_context, production_context,
+        proof_tree_width,
     };
     use crate::bgv::proof_suite::{
         field::{ProofBaseFieldElement, ProofChallengeExtensionElement},
@@ -201,53 +203,24 @@ mod tests {
     }
 
     #[test]
-    fn public_key_share_production_geometry_has_exact_checked_counts() {
+    fn public_key_share_current_production_profile_fails_closed_before_degree_fixed_point() {
         let context = production_context(true);
-        let plan = compile_public_key_share_relation_plan(
-            &PublicKeyShareRelationPlanInput {
-                ring_degree: 32_768,
-                evaluation_domain_size: 262_144,
-                opening_degree_bound_exclusive: 32_768,
-                public_polynomial_column_degree_bound_exclusive: 16_384,
-                data_modulus_indices: (0..17).collect(),
-                commitment_data_modulus_indices: vec![0, 1, 2],
-                commitment_module_rank: 2,
-                plaintext_modulus: 65_537,
-                first_mask_purpose: 100,
-            },
-            &context,
-        )
-        .expect("production public-key-share plan");
-        let variant = plan
-            .select_variant(None, None)
-            .expect("production public-key-share variant");
-        assert_integer_lift_phase_ownership(variant);
-        assert_eq!(variant.ordered_integer_lift_batches.len(), 119);
         assert_eq!(
-            variant
-                .ordered_integer_lift_batches
-                .iter()
-                .map(|batch| batch.ordered_components.len())
-                .sum::<usize>(),
-            364,
+            compile_public_key_share_relation_plan(
+                &PublicKeyShareRelationPlanInput {
+                    ring_degree: 32_768,
+                    evaluation_domain_size: 262_144,
+                    opening_degree_bound_exclusive: 32_768,
+                    public_polynomial_column_degree_bound_exclusive: 16_384,
+                    data_modulus_indices: (0..17).collect(),
+                    commitment_data_modulus_indices: vec![0, 1, 2],
+                    commitment_module_rank: 2,
+                    plaintext_modulus: 65_537,
+                    first_mask_purpose: 100,
+                },
+                &context,
+            ),
+            Err(RelationPlanError::DegreeBoundExceeded),
         );
-        assert_eq!(
-            variant
-                .ordered_integer_lift_batches
-                .iter()
-                .flat_map(|batch| &batch.ordered_components)
-                .map(|component| component.ordered_full_ring_negacyclic_products.len())
-                .sum::<usize>(),
-            574,
-        );
-        assert_eq!(variant.ordered_columns.len(), 4_874);
-        assert_eq!(variant.ordered_constraints.len(), 8_854);
-        assert_eq!(variant.ordered_trees.len(), 6);
-        assert_eq!(proof_tree_width(variant, 1), 1_070);
-        assert_eq!(proof_tree_width(variant, 2), 3_752);
-        assert_eq!(variant.ordered_opening_claims.len(), 17_433);
-        assert!(variant.ordered_masks.iter().filter(|mask| {
-            mask.mask_kind == RelationMaskKind::Trace
-        }).all(|mask| mask.mask_degree_bound_exclusive == 712));
     }
 }

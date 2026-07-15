@@ -2,13 +2,13 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
-    loadFreshTranscriptCoreKernel,
-    type TranscriptCoreKernel,
-} from '#packages/wasm/src/index';
-import {
     ActionRandomnessRuntimeError,
     openActionRandomnessSession,
 } from '#packages/wasm/src/action-randomness-runtime';
+import {
+    loadFreshTranscriptCoreKernel,
+    type TranscriptCoreKernel,
+} from '#packages/wasm/src/index';
 import {
     openStateVerifierSession,
     stateCapabilityKinds,
@@ -128,7 +128,9 @@ describe('Action-randomness real-WASM runtime in Node', () => {
         }
         const stateSession: StateVerifierSession = openedStateSession.value;
         const verifyReservation = (
-            capabilityKind: typeof stateCapabilityKinds.targetRelease | typeof stateCapabilityKinds.setupDealerSetBranch,
+            capabilityKind:
+                | typeof stateCapabilityKinds.targetRelease
+                | typeof stateCapabilityKinds.setupDealerSetBranch,
         ): VerifiedStateReservation => {
             const certifiedIntent =
                 capabilityKind === stateCapabilityKinds.targetRelease

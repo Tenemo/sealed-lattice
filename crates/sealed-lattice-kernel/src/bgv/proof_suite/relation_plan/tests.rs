@@ -1,3 +1,4 @@
+use super::interpreter::signed_rotation_exponent;
 use super::*;
 
 const TEST_BASE_FIELD: u64 = 65_537;
@@ -26,39 +27,13 @@ fn check_context() -> RelationPlanCheckContext {
     }
 }
 
-fn compiler_input() -> TrusteeEvaluationKeyPlanInput {
-    TrusteeEvaluationKeyPlanInput {
-        schedule_position: 3,
-        ring_degree: 16,
-        trace_domain_size: 16,
-        evaluation_domain_size: 32_768,
-        opening_degree_bound_exclusive: 12_000,
-        data_moduli: vec![97, 193],
-        special_moduli: vec![241],
-        plaintext_modulus: 257,
-        decomposition_blocks: vec![
-            TrusteeEvaluationKeyDecompositionBlock {
-                data_modulus_indices: vec![0],
-            },
-            TrusteeEvaluationKeyDecompositionBlock {
-                data_modulus_indices: vec![1],
-            },
-        ],
-        commitment_data_modulus_indices: vec![0, 1],
-        commitment_module_rank: 1,
-        trace_mask_degree_bound_exclusive: 4,
-        quotient_mask_degree_bound_exclusive: 18,
-        first_mask_purpose: 7,
-    }
-}
-
 fn committed_material_check_context() -> RelationPlanCheckContext {
     let evaluation_domain_size = 256_u64;
     let maximum_two_adic_order = 1_u64 << 32;
     RelationPlanCheckContext {
         base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
-        challenge_extension_degree:
-            crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
+        challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
+            as u16,
         evaluation_blowup_factor: 2,
         evaluation_domain_generator: modular_power(
             crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
@@ -93,96 +68,6 @@ fn committed_material_input() -> CommittedMaterialRelationPlanInput {
         trace_mask_degree_bound_exclusive: 2,
         first_mask_purpose: 100,
     }
-}
-
-#[test]
-fn incomplete_negacyclic_lowering_never_emits_an_accepting_plan() {
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&compiler_input(), &check_context()),
-        Err(RelationPlanError::MissingExactNegacyclicLowering)
-    );
-}
-
-#[test]
-fn decomposition_blocks_must_cover_the_data_basis_once_in_order() {
-    let mut missing_limb = compiler_input();
-    missing_limb.decomposition_blocks.pop();
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&missing_limb, &check_context()),
-        Err(RelationPlanError::NonCanonicalOrder)
-    );
-
-    let mut repeated_limb = compiler_input();
-    repeated_limb.decomposition_blocks[1].data_modulus_indices = vec![0, 1];
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&repeated_limb, &check_context()),
-        Err(RelationPlanError::NonCanonicalOrder)
-    );
-
-    let mut empty_block = compiler_input();
-    empty_block.decomposition_blocks[0].data_modulus_indices.clear();
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&empty_block, &check_context()),
-        Err(RelationPlanError::NonCanonicalOrder)
-    );
-}
-
-#[test]
-fn commitment_primes_are_one_canonical_subset_of_the_data_basis() {
-    let mut repeated_prime = compiler_input();
-    repeated_prime.commitment_data_modulus_indices = vec![0, 0];
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&repeated_prime, &check_context()),
-        Err(RelationPlanError::NonCanonicalOrder)
-    );
-
-    let mut unknown_prime = compiler_input();
-    unknown_prime.commitment_data_modulus_indices = vec![2];
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&unknown_prime, &check_context()),
-        Err(RelationPlanError::NonCanonicalOrder)
-    );
-}
-
-#[test]
-fn every_data_special_and_plaintext_modulus_is_suite_resolved() {
-    let mut wrong_special_modulus = check_context();
-    wrong_special_modulus.resolved_moduli[2].modulus = 337;
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&compiler_input(), &wrong_special_modulus),
-        Err(RelationPlanError::InvalidModulus)
-    );
-
-    let mut unsorted_context = check_context();
-    unsorted_context.resolved_moduli.swap(1, 2);
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&compiler_input(), &unsorted_context),
-        Err(RelationPlanError::NonCanonicalOrder)
-    );
-}
-
-#[test]
-fn exact_relation_geometry_and_common_opening_rank_are_mandatory() {
-    let mut no_special_basis = compiler_input();
-    no_special_basis.special_moduli.clear();
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&no_special_basis, &check_context()),
-        Err(RelationPlanError::InvalidDomain)
-    );
-
-    let mut no_common_opening_rank = compiler_input();
-    no_common_opening_rank.commitment_module_rank = 0;
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&no_common_opening_rank, &check_context()),
-        Err(RelationPlanError::InvalidDomain)
-    );
-
-    let mut mismatched_trace = compiler_input();
-    mismatched_trace.trace_domain_size = 8;
-    assert_eq!(
-        compile_trustee_evaluation_key_relation_plan(&mismatched_trace, &check_context()),
-        Err(RelationPlanError::InvalidDomain)
-    );
 }
 
 fn bound_constraint(
@@ -299,8 +184,7 @@ fn suffix_evaluations(values: &[BigInt], theta: &BigInt) -> Vec<BigInt> {
     let last = values.len() - 1;
     suffixes[last] = values[last].clone();
     for row_ordinal in (0..last).rev() {
-        suffixes[row_ordinal] =
-            &values[row_ordinal] + theta * &suffixes[row_ordinal + 1];
+        suffixes[row_ordinal] = &values[row_ordinal] + theta * &suffixes[row_ordinal + 1];
     }
     suffixes
 }
@@ -322,6 +206,33 @@ fn dense_negacyclic_product(left: &[BigInt], right: &[BigInt]) -> Vec<BigInt> {
         }
     }
     product
+}
+
+#[test]
+fn production_target_share_negacyclic_product_exceeds_the_exact_no_wrap_bound() {
+    let target_modulus = crate::bgv::parameters::DATA_PRIMES[0];
+    let canonical_residue_interval =
+        SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(target_modulus - 1))
+            .expect("the production target modulus defines a valid residue interval");
+    let maximum_coefficient_product = integer_lift_maximum_absolute_product(
+        &canonical_residue_interval,
+        &canonical_residue_interval,
+    )
+    .expect("the production coefficient product bound fits the exact interval model");
+    let full_ring_convolution_bound = BigInt::from(maximum_coefficient_product)
+        * BigInt::from(crate::bgv::parameters::POLYNOMIAL_DEGREE);
+    let exact_product_interval = SignedIntegerInterval::from_bigints(
+        -full_ring_convolution_bound.clone(),
+        full_ring_convolution_bound.clone(),
+    )
+    .expect("the production negacyclic product has a valid exact interval");
+    let proof_base_field_modulus = BigInt::from(crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS);
+
+    // The exact N(q - 1)^2 bound is 109 bits, so it cannot inject into the
+    // 64-bit proof base field before the modular quotient is applied.
+    assert_eq!(full_ring_convolution_bound.bits(), 109);
+    assert_eq!(proof_base_field_modulus.bits(), 64);
+    assert!(!exact_product_interval.is_injective_modulo(&proof_base_field_modulus));
 }
 
 #[test]
@@ -358,10 +269,10 @@ fn full_ring_high_half_low_multiplier_transpose_is_exact_for_dense_small_rings()
         let mut low_multiplier_transpose = vec![BigInt::zero(); half_ring_degree];
         low_multiplier_transpose[half_ring_degree - 1] = high_suffix[0].clone();
         for row_ordinal in (0..half_ring_degree - 1).rev() {
-            low_multiplier_transpose[row_ordinal] =
-                &theta * &low_multiplier_transpose[row_ordinal + 1]
-                    + &multiplicand_low[row_ordinal + 1]
-                    - &theta_to_half * &multiplicand_high[row_ordinal + 1];
+            low_multiplier_transpose[row_ordinal] = &theta
+                * &low_multiplier_transpose[row_ordinal + 1]
+                + &multiplicand_low[row_ordinal + 1]
+                - &theta_to_half * &multiplicand_high[row_ordinal + 1];
         }
 
         let descriptor = RelationIntegerLiftFullRingNegacyclicProductDescriptor {
@@ -375,12 +286,9 @@ fn full_ring_high_half_low_multiplier_transpose_is_exact_for_dense_small_rings()
             reversed_multiplier_high_column_ordinal: 5,
             multiplier_low_offset: 0,
             multiplier_high_offset: 0,
-            multiplicand_low_suffix_evaluation_column_ordinal:
-                MULTIPLICAND_LOW_SUFFIX,
-            multiplicand_high_suffix_evaluation_column_ordinal:
-                MULTIPLICAND_HIGH_SUFFIX,
-            reversed_multiplier_low_transpose_column_ordinal:
-                LOW_MULTIPLIER_TRANSPOSE,
+            multiplicand_low_suffix_evaluation_column_ordinal: MULTIPLICAND_LOW_SUFFIX,
+            multiplicand_high_suffix_evaluation_column_ordinal: MULTIPLICAND_HIGH_SUFFIX,
+            reversed_multiplier_low_transpose_column_ordinal: LOW_MULTIPLIER_TRANSPOSE,
             reversed_multiplier_high_transpose_column_ordinal: 9,
         };
         let programs = integer_lift_full_ring_product_constraint_programs(
@@ -426,16 +334,16 @@ fn full_ring_high_half_low_multiplier_transpose_is_exact_for_dense_small_rings()
         let mut full_multiplier = multiplier_low.clone();
         full_multiplier.extend(vec![BigInt::zero(); half_ring_degree]);
         let direct_product = dense_negacyclic_product(&full_multiplicand, &full_multiplier);
-        let direct_high_evaluation = direct_product[half_ring_degree..]
-            .iter()
-            .enumerate()
-            .fold(BigInt::zero(), |sum, (ordinal, coefficient)| {
+        let direct_high_evaluation = direct_product[half_ring_degree..].iter().enumerate().fold(
+            BigInt::zero(),
+            |sum, (ordinal, coefficient)| {
                 sum + coefficient
                     * integer_power(
                         theta.clone(),
                         u64::try_from(ordinal).expect("coefficient ordinal fits u64"),
                     )
-            });
+            },
+        );
         let transpose_evaluation = low_multiplier_transpose
             .iter()
             .zip(multiplier_low.iter().rev())
@@ -450,10 +358,10 @@ fn full_ring_high_half_low_multiplier_transpose_is_exact_for_dense_small_rings()
 fn signed_magnitudes_are_unique_for_arbitrary_width_bounds() {
     let large_positive = BigInt::one() << 300_u32;
     let large_negative = -large_positive.clone();
-    let positive_tuple = canonical_signed_integer_tuple(&large_positive)
-        .expect("large positive signed magnitude");
-    let negative_tuple = canonical_signed_integer_tuple(&large_negative)
-        .expect("large negative signed magnitude");
+    let positive_tuple =
+        canonical_signed_integer_tuple(&large_positive).expect("large positive signed magnitude");
+    let negative_tuple =
+        canonical_signed_integer_tuple(&large_negative).expect("large negative signed magnitude");
     assert_ne!(
         positive_tuple.encode().expect("positive encoding"),
         negative_tuple.encode().expect("negative encoding")
@@ -527,10 +435,8 @@ fn bound_checker_derives_trinary_and_recomposition_intervals() {
 
 #[test]
 fn bound_checker_rejects_self_attested_or_mismatched_intervals() {
-    let unrelated_constraint = bound_constraint(
-        1,
-        vec![RelationExpressionInstruction::BaseFieldConstant(0)],
-    );
+    let unrelated_constraint =
+        bound_constraint(1, vec![RelationExpressionInstruction::BaseFieldConstant(0)]);
     let self_attested = SemanticCellDescriptor {
         semantic_cell_ordinal: 0,
         column_ordinal: 0,
@@ -571,14 +477,13 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
     let aggregate_plan = compile_aggregate_threshold_share_relation_plan(&input, &context)
         .expect("exact aggregate-threshold-share relation plan");
     assert_eq!(vss_plan.application_statement_schema_identifier(), 0x2110);
-    assert_eq!(aggregate_plan.application_statement_schema_identifier(), 0x2111);
+    assert_eq!(
+        aggregate_plan.application_statement_schema_identifier(),
+        0x2111
+    );
     assert_eq!(
         vss_plan
-            .encode_canonical_tuple(
-                &vss_plan
-                    .canonical_tuple()
-                    .expect("typed VSS plan tuple"),
-            )
+            .encode_canonical_tuple(&vss_plan.canonical_tuple().expect("typed VSS plan tuple"),)
             .expect("encoded typed VSS plan tuple"),
         vss_plan.canonical_bytes().expect("VSS plan bytes")
     );
@@ -596,7 +501,9 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
     );
     assert_ne!(
         vss_plan.canonical_hash().expect("VSS plan hash"),
-        aggregate_plan.canonical_hash().expect("aggregate plan hash")
+        aggregate_plan
+            .canonical_hash()
+            .expect("aggregate plan hash")
     );
 
     let vss_bound_uses = vss_plan.variants()[0]
@@ -662,21 +569,26 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
         aggregate_deterministic_identity_count,
         aggregate_variant.ordered_non_native_moduli.len() * 2
     );
-    assert!(aggregate_variant.ordered_constraints.iter().all(|constraint| {
-        constraint
-            .numerator_postfix_expression
+    assert!(
+        aggregate_variant
+            .ordered_constraints
             .iter()
-            .all(|instruction| {
-                !matches!(
-                    instruction,
-                    RelationExpressionInstruction::TranscriptChallenge {
-                        challenge_role: RelationChallengeRole::NonNativeAlpha
-                            | RelationChallengeRole::NonNativeTheta,
-                        ..
-                    }
-                )
+            .all(|constraint| {
+                constraint
+                    .numerator_postfix_expression
+                    .iter()
+                    .all(|instruction| {
+                        !matches!(
+                            instruction,
+                            RelationExpressionInstruction::TranscriptChallenge {
+                                challenge_role: RelationChallengeRole::NonNativeAlpha
+                                    | RelationChallengeRole::NonNativeTheta,
+                                ..
+                            }
+                        )
+                    })
             })
-    }));
+    );
 }
 
 #[test]
@@ -730,13 +642,15 @@ fn aggregate_plan_checker_rejects_duplicate_or_randomized_half_residuals() {
                 })
         })
         .expect("aggregate plan has deterministic coefficient-local identities");
-    first_deterministic_constraint.numerator_postfix_expression.insert(
-        0,
-        RelationExpressionInstruction::TranscriptChallenge {
-            challenge_role: RelationChallengeRole::NonNativeAlpha,
-            role_coordinates: vec![0, 0, 0],
-        },
-    );
+    first_deterministic_constraint
+        .numerator_postfix_expression
+        .insert(
+            0,
+            RelationExpressionInstruction::TranscriptChallenge {
+                challenge_role: RelationChallengeRole::NonNativeAlpha,
+                role_coordinates: vec![0, 0, 0],
+            },
+        );
     first_deterministic_constraint
         .numerator_postfix_expression
         .push(RelationExpressionInstruction::Multiplication);
@@ -760,8 +674,7 @@ fn generated_plan_checker_rejects_rotated_factor_and_opening_catalog_tampering()
         .flat_map(|residual| residual.residual_postfix_expression.iter_mut())
         .find_map(|instruction| match instruction {
             RelationExpressionInstruction::ColumnValue {
-                rotation_magnitude,
-                ..
+                rotation_magnitude, ..
             } if *rotation_magnitude != 0 => Some(rotation_magnitude),
             _ => None,
         })

@@ -11,11 +11,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{One, Zero};
 
-use crate::{
-    foundation::{
-        CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-        StreamingFoundationTupleHash512,
-    },
+use crate::foundation::{
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
+    StreamingFoundationTupleHash512,
 };
 
 use super::transcript::{
@@ -88,8 +86,7 @@ const COEFFICIENT_LOCAL_RESIDUAL_SCHEMA_IDENTIFIER: u16 = 0x224b;
 const COEFFICIENT_LOCAL_IDENTITY_BATCH_SCHEMA_IDENTIFIER: u16 = 0x224c;
 const SCHEMA_VERSION: u16 = 1;
 const RELATION_PLAN_HASH_DOMAIN: &str = "sealed-lattice/proof/relation-plan/v1";
-const RELATION_PLAN_VARIANT_HASH_DOMAIN: &str =
-    "sealed-lattice/proof/relation-plan-variant/v1";
+const RELATION_PLAN_VARIANT_HASH_DOMAIN: &str = "sealed-lattice/proof/relation-plan-variant/v1";
 
 const PUBLIC_ONLY_FAMILIES: [u16; 3] = [0x1213, 0x1215, 0x1218];
 const SECRET_BEARING_FAMILIES: [u16; 9] = [
@@ -230,7 +227,7 @@ pub(crate) enum RelationEmbeddingKind {
     Centered = 3,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RelationValueLayout {
     element_kind: RelationElementKind,
     residue_modulus: Option<SuiteModulusReference>,
@@ -931,7 +928,8 @@ impl RelationChallengeDescriptor {
                 modulus_selector, ..
             }
             | RelationChallengeSampling::PowerOfProductResidueVectorCoordinate {
-                modulus_selector, ..
+                modulus_selector,
+                ..
             } => modulus_selector,
             RelationChallengeSampling::NonzeroExtensionVectors {
                 base_modulus_selector,
@@ -953,7 +951,8 @@ impl RelationChallengeDescriptor {
                 coordinate_count, ..
             }
             | RelationChallengeSampling::PowerOfProductResidueVectorCoordinate {
-                coordinate_count, ..
+                coordinate_count,
+                ..
             }
             | RelationChallengeSampling::NonzeroExtensionVectors {
                 coordinate_count, ..
@@ -1013,13 +1012,10 @@ impl RelationChallengeDescriptor {
         if resolved_modulus < 2
             || matches!(
                 self.role,
-                RelationChallengeRole::NonNativeTheta
-                    | RelationChallengeRole::NonNativeAlpha
-            ) && BigUint::from(resolved_modulus)
-                .pow(u32::from(
-                    context.non_native_modular_identity_challenge_count,
-                ))
-                >= (BigUint::one() << 512_usize)
+                RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha
+            ) && BigUint::from(resolved_modulus).pow(u32::from(
+                context.non_native_modular_identity_challenge_count,
+            )) >= (BigUint::one() << 512_usize)
         {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
@@ -1496,10 +1492,7 @@ impl SignedIntegerInterval {
     }
 
     fn add(self, other: Self) -> Result<Self, RelationPlanError> {
-        Self::from_bigints(
-            self.minimum + other.minimum,
-            self.maximum + other.maximum,
-        )
+        Self::from_bigints(self.minimum + other.minimum, self.maximum + other.maximum)
     }
 
     fn multiply(self, other: Self) -> Result<Self, RelationPlanError> {
@@ -1730,9 +1723,7 @@ impl RelationBoundCertificate {
     }
 }
 
-fn canonical_unsigned_magnitude_item(
-    value: &BigUint,
-) -> Result<CanonicalItem, RelationPlanError> {
+fn canonical_unsigned_magnitude_item(value: &BigUint) -> Result<CanonicalItem, RelationPlanError> {
     let magnitude = value.to_bytes_be();
     if !magnitude.is_empty() && magnitude[0] == 0 {
         return Err(RelationPlanError::InvalidSignedMagnitude);
@@ -1843,7 +1834,7 @@ impl RelationIntegerLiftCoefficient {
                 INTEGER_LIFT_MODULUS_COEFFICIENT_SCHEMA_IDENTIFIER,
                 SCHEMA_VERSION,
                 vec![
-                    CanonicalItem::nested_tuple(modulus_reference.canonical_tuple())
+                    CanonicalItem::nested_tuple(&modulus_reference.canonical_tuple())
                         .map_err(canonical_encoding_error)?,
                     CanonicalItem::unsigned16(multiplier),
                 ],
@@ -1942,18 +1933,10 @@ impl RelationIntegerLiftFullRingNegacyclicProductDescriptor {
                 CanonicalItem::unsigned32(self.reversed_multiplier_high_column_ordinal),
                 CanonicalItem::unsigned64(self.multiplier_low_offset),
                 CanonicalItem::unsigned64(self.multiplier_high_offset),
-                CanonicalItem::unsigned32(
-                    self.multiplicand_low_suffix_evaluation_column_ordinal,
-                ),
-                CanonicalItem::unsigned32(
-                    self.multiplicand_high_suffix_evaluation_column_ordinal,
-                ),
-                CanonicalItem::unsigned32(
-                    self.reversed_multiplier_low_transpose_column_ordinal,
-                ),
-                CanonicalItem::unsigned32(
-                    self.reversed_multiplier_high_transpose_column_ordinal,
-                ),
+                CanonicalItem::unsigned32(self.multiplicand_low_suffix_evaluation_column_ordinal),
+                CanonicalItem::unsigned32(self.multiplicand_high_suffix_evaluation_column_ordinal),
+                CanonicalItem::unsigned32(self.reversed_multiplier_low_transpose_column_ordinal),
+                CanonicalItem::unsigned32(self.reversed_multiplier_high_transpose_column_ordinal),
             ],
         )
     }
@@ -1981,12 +1964,8 @@ impl RelationIntegerLiftReversedColumnBindingDescriptor {
             vec![
                 CanonicalItem::unsigned32(self.source_column_ordinal),
                 CanonicalItem::unsigned32(self.reversed_column_ordinal),
-                CanonicalItem::unsigned32(
-                    self.source_prefix_evaluation_column_ordinal,
-                ),
-                CanonicalItem::unsigned32(
-                    self.reversed_suffix_evaluation_column_ordinal,
-                ),
+                CanonicalItem::unsigned32(self.source_prefix_evaluation_column_ordinal),
+                CanonicalItem::unsigned32(self.reversed_suffix_evaluation_column_ordinal),
             ],
         )
     }
@@ -2027,8 +2006,7 @@ pub(crate) struct RelationIntegerLiftComponentDescriptor {
     pub(crate) quotient_is_negative: bool,
     pub(crate) quotient_column_ordinal: u32,
     pub(crate) ordered_linear_terms: Vec<RelationIntegerLiftLinearTermDescriptor>,
-    pub(crate) ordered_convolution_products:
-        Vec<RelationIntegerLiftConvolutionProductDescriptor>,
+    pub(crate) ordered_convolution_products: Vec<RelationIntegerLiftConvolutionProductDescriptor>,
     pub(crate) ordered_full_ring_negacyclic_products:
         Vec<RelationIntegerLiftFullRingNegacyclicProductDescriptor>,
     pub(crate) linear_evaluation_column_ordinal: u32,
@@ -2055,11 +2033,9 @@ impl RelationIntegerLiftComponentDescriptor {
                         .map(RelationIntegerLiftConvolutionProductDescriptor::canonical_tuple),
                 )?,
                 canonical_nested_list(
-                    self.ordered_full_ring_negacyclic_products
-                        .iter()
-                        .map(
-                            RelationIntegerLiftFullRingNegacyclicProductDescriptor::canonical_tuple,
-                        ),
+                    self.ordered_full_ring_negacyclic_products.iter().map(
+                        RelationIntegerLiftFullRingNegacyclicProductDescriptor::canonical_tuple,
+                    ),
                 )?,
                 CanonicalItem::unsigned32(self.linear_evaluation_column_ordinal),
                 CanonicalItem::unsigned32(self.product_accumulator_column_ordinal),
@@ -2097,7 +2073,7 @@ impl RelationIntegerLiftBatchDescriptor {
             INTEGER_LIFT_BATCH_SCHEMA_IDENTIFIER,
             SCHEMA_VERSION,
             vec![
-                CanonicalItem::nested_tuple(self.modulus_reference.canonical_tuple())
+                CanonicalItem::nested_tuple(&self.modulus_reference.canonical_tuple())
                     .map_err(canonical_encoding_error)?,
                 CanonicalItem::unsigned16(self.challenge_ordinal),
                 canonical_nested_list(
@@ -2161,7 +2137,7 @@ impl RelationCoefficientLocalIdentityBatchDescriptor {
             COEFFICIENT_LOCAL_IDENTITY_BATCH_SCHEMA_IDENTIFIER,
             SCHEMA_VERSION,
             vec![
-                CanonicalItem::nested_tuple(self.modulus_reference.canonical_tuple())
+                CanonicalItem::nested_tuple(&self.modulus_reference.canonical_tuple())
                     .map_err(canonical_encoding_error)?,
                 CanonicalItem::unsigned16(self.challenge_ordinal),
                 CanonicalItem::unsigned16(self.batch_ordinal),
@@ -2189,8 +2165,7 @@ impl RelationCoefficientLocalIdentityBatchDescriptor {
         let mut expression = Vec::new();
         for (residual_index, residual) in self.ordered_residuals.iter().enumerate() {
             if residual.unit_ordinal
-                != u32::try_from(residual_index)
-                    .map_err(|_| RelationPlanError::CountOverflow)?
+                != u32::try_from(residual_index).map_err(|_| RelationPlanError::CountOverflow)?
                 || residual.residual_postfix_expression.is_empty()
             {
                 return Err(RelationPlanError::InvalidConstraint);
@@ -2230,10 +2205,8 @@ impl RelationIntegerLiftBatchDescriptor {
         evaluation_domain_size: u64,
         context: &RelationPlanCheckContext,
     ) -> Result<Vec<RelationIntegerLiftConstraintProgram>, RelationPlanError> {
-        let theta_expression = integer_lift_theta_expression(
-            modulus_ordinal,
-            self.challenge_ordinal,
-        );
+        let theta_expression =
+            integer_lift_theta_expression(modulus_ordinal, self.challenge_ordinal);
         let last_row = trace_domain_size
             .checked_sub(1)
             .ok_or(RelationPlanError::InvalidDomain)?;
@@ -2243,12 +2216,8 @@ impl RelationIntegerLiftBatchDescriptor {
             evaluation_domain_size,
             context,
         )?;
-        let point_zero = integer_lift_point_zeroifier(
-            0,
-            trace_domain_size,
-            evaluation_domain_size,
-            context,
-        )?;
+        let point_zero =
+            integer_lift_point_zeroifier(0, trace_domain_size, evaluation_domain_size, context)?;
         let except_zero = integer_lift_trace_except_rows_zeroifier(
             &[0],
             trace_domain_size,
@@ -2409,19 +2378,13 @@ fn integer_lift_full_ring_product_constraint_programs(
     }
 
     let mut theta_to_half_ring_degree = theta_expression.to_vec();
-    theta_to_half_ring_degree.push(
-        RelationExpressionInstruction::NonnegativePower(half_ring_degree),
-    );
-    let low_multiplicand_next = integer_lift_column_expression(
-        product.multiplicand_low_column_ordinal,
-        false,
-        1,
-    );
-    let high_multiplicand_next = integer_lift_column_expression(
-        product.multiplicand_high_column_ordinal,
-        false,
-        1,
-    );
+    theta_to_half_ring_degree.push(RelationExpressionInstruction::NonnegativePower(
+        half_ring_degree,
+    ));
+    let low_multiplicand_next =
+        integer_lift_column_expression(product.multiplicand_low_column_ordinal, false, 1);
+    let high_multiplicand_next =
+        integer_lift_column_expression(product.multiplicand_high_column_ordinal, false, 1);
     let theta_to_half_times_low = multiply_integer_lift_expressions(
         theta_to_half_ring_degree.clone(),
         low_multiplicand_next.clone(),
@@ -2443,36 +2406,30 @@ fn integer_lift_full_ring_product_constraint_programs(
     ] {
         let boundary = match (product.selected_half, is_low_multiplier) {
             (RelationIntegerLiftFullRingHalf::Low, true)
-            | (RelationIntegerLiftFullRingHalf::High, false) => {
-                subtract_integer_lift_expressions(
-                    integer_lift_column_expression(transpose, false, 0),
-                    integer_lift_column_expression(
-                        product.multiplicand_low_suffix_evaluation_column_ordinal,
-                        false,
-                        1,
-                    ),
-                )
-            }
-            (RelationIntegerLiftFullRingHalf::Low, false) => {
-                add_integer_lift_expressions(
-                    integer_lift_column_expression(transpose, false, 0),
-                    integer_lift_column_expression(
-                        product.multiplicand_high_suffix_evaluation_column_ordinal,
-                        false,
-                        1,
-                    ),
-                )
-            }
-            (RelationIntegerLiftFullRingHalf::High, true) => {
-                subtract_integer_lift_expressions(
-                    integer_lift_column_expression(transpose, false, 0),
-                    integer_lift_column_expression(
-                        product.multiplicand_high_suffix_evaluation_column_ordinal,
-                        false,
-                        1,
-                    ),
-                )
-            }
+            | (RelationIntegerLiftFullRingHalf::High, false) => subtract_integer_lift_expressions(
+                integer_lift_column_expression(transpose, false, 0),
+                integer_lift_column_expression(
+                    product.multiplicand_low_suffix_evaluation_column_ordinal,
+                    false,
+                    1,
+                ),
+            ),
+            (RelationIntegerLiftFullRingHalf::Low, false) => add_integer_lift_expressions(
+                integer_lift_column_expression(transpose, false, 0),
+                integer_lift_column_expression(
+                    product.multiplicand_high_suffix_evaluation_column_ordinal,
+                    false,
+                    1,
+                ),
+            ),
+            (RelationIntegerLiftFullRingHalf::High, true) => subtract_integer_lift_expressions(
+                integer_lift_column_expression(transpose, false, 0),
+                integer_lift_column_expression(
+                    product.multiplicand_high_suffix_evaluation_column_ordinal,
+                    false,
+                    1,
+                ),
+            ),
         };
         let transpose_minus_theta_next = subtract_integer_lift_expressions(
             integer_lift_column_expression(transpose, false, 0),
@@ -2483,33 +2440,27 @@ fn integer_lift_full_ring_product_constraint_programs(
         );
         let recurrence = match (product.selected_half, is_low_multiplier) {
             (RelationIntegerLiftFullRingHalf::Low, true)
-            | (RelationIntegerLiftFullRingHalf::High, false) => {
+            | (RelationIntegerLiftFullRingHalf::High, false) => add_integer_lift_expressions(
                 add_integer_lift_expressions(
-                    add_integer_lift_expressions(
-                        transpose_minus_theta_next,
-                        theta_to_half_times_low.clone(),
-                    ),
-                    high_multiplicand_next.clone(),
-                )
-            }
-            (RelationIntegerLiftFullRingHalf::Low, false) => {
+                    transpose_minus_theta_next,
+                    theta_to_half_times_low.clone(),
+                ),
+                high_multiplicand_next.clone(),
+            ),
+            (RelationIntegerLiftFullRingHalf::Low, false) => subtract_integer_lift_expressions(
+                add_integer_lift_expressions(
+                    transpose_minus_theta_next,
+                    low_multiplicand_next.clone(),
+                ),
+                theta_to_half_times_high.clone(),
+            ),
+            (RelationIntegerLiftFullRingHalf::High, true) => add_integer_lift_expressions(
                 subtract_integer_lift_expressions(
-                    add_integer_lift_expressions(
-                        transpose_minus_theta_next,
-                        low_multiplicand_next.clone(),
-                    ),
-                    theta_to_half_times_high.clone(),
-                )
-            }
-            (RelationIntegerLiftFullRingHalf::High, true) => {
-                add_integer_lift_expressions(
-                    subtract_integer_lift_expressions(
-                        transpose_minus_theta_next,
-                        low_multiplicand_next.clone(),
-                    ),
-                    theta_to_half_times_high.clone(),
-                )
-            }
+                    transpose_minus_theta_next,
+                    low_multiplicand_next.clone(),
+                ),
+                theta_to_half_times_high.clone(),
+            ),
         };
         programs.push(RelationIntegerLiftConstraintProgram {
             numerator_postfix_expression: boundary,
@@ -2552,9 +2503,9 @@ fn integer_lift_product_constraint_programs(
     );
 
     let mut theta_to_ring_degree_plus_one = theta_expression.to_vec();
-    theta_to_ring_degree_plus_one.push(
-        RelationExpressionInstruction::NonnegativePower(trace_domain_size),
-    );
+    theta_to_ring_degree_plus_one.push(RelationExpressionInstruction::NonnegativePower(
+        trace_domain_size,
+    ));
     theta_to_ring_degree_plus_one.extend([
         RelationExpressionInstruction::BaseFieldConstant(1),
         RelationExpressionInstruction::Addition,
@@ -2589,9 +2540,9 @@ fn integer_lift_product_constraint_programs(
                     integer_lift_column_expression(suffix, false, 1),
                 );
                 let mut theta_to_ring_degree = theta_expression.to_vec();
-                theta_to_ring_degree.push(
-                    RelationExpressionInstruction::NonnegativePower(trace_domain_size),
-                );
+                theta_to_ring_degree.push(RelationExpressionInstruction::NonnegativePower(
+                    trace_domain_size,
+                ));
                 let recurrence = add_integer_lift_expressions(
                     subtract_integer_lift_expressions(
                         integer_lift_column_expression(transpose, false, 0),
@@ -2650,10 +2601,8 @@ fn integer_lift_component_constraint_programs(
     point_last: Vec<RelationExpressionInstruction>,
     except_last: Vec<RelationExpressionInstruction>,
 ) -> Result<Vec<RelationIntegerLiftConstraintProgram>, RelationPlanError> {
-    let coefficient_expression = integer_lift_component_coefficient_expression(
-        component,
-        modulus_reference,
-    )?;
+    let coefficient_expression =
+        integer_lift_component_coefficient_expression(component, modulus_reference)?;
     let linear_evaluation = component.linear_evaluation_column_ordinal;
     let linear_last = subtract_integer_lift_expressions(
         integer_lift_column_expression(linear_evaluation, false, 0),
@@ -2746,11 +2695,7 @@ fn integer_lift_component_product_expression(
                 )],
             );
             let expression = multiply_integer_lift_expressions(
-                integer_lift_column_expression(
-                    product.reversed_transpose_column_ordinal,
-                    false,
-                    0,
-                ),
+                integer_lift_column_expression(product.reversed_transpose_column_ordinal, false, 0),
                 shifted_multiplier,
             );
             if product.negative {
@@ -2848,10 +2793,7 @@ fn integer_lift_theta_expression(
 ) -> Vec<RelationExpressionInstruction> {
     vec![RelationExpressionInstruction::TranscriptChallenge {
         challenge_role: RelationChallengeRole::NonNativeTheta,
-        role_coordinates: vec![
-            u64::from(modulus_ordinal),
-            u64::from(challenge_ordinal),
-        ],
+        role_coordinates: vec![u64::from(modulus_ordinal), u64::from(challenge_ordinal)],
     }]
 }
 
@@ -2956,10 +2898,12 @@ fn integer_lift_trace_except_rows_zeroifier(
     if !strictly_sorted_unique(&ordered_excluded_roots) {
         return Err(RelationPlanError::InvalidZeroifier);
     }
-    Ok(vec![RelationExpressionInstruction::TraceDomainExceptRoots {
-        trace_domain_size,
-        ordered_excluded_roots,
-    }])
+    Ok(vec![
+        RelationExpressionInstruction::TraceDomainExceptRoots {
+            trace_domain_size,
+            ordered_excluded_roots,
+        },
+    ])
 }
 
 fn integer_lift_trace_root(
@@ -2968,8 +2912,7 @@ fn integer_lift_trace_root(
     evaluation_domain_size: u64,
     context: &RelationPlanCheckContext,
 ) -> Result<u64, RelationPlanError> {
-    if row_ordinal >= trace_domain_size
-        || !evaluation_domain_size.is_multiple_of(trace_domain_size)
+    if row_ordinal >= trace_domain_size || !evaluation_domain_size.is_multiple_of(trace_domain_size)
     {
         return Err(RelationPlanError::InvalidDomain);
     }
@@ -3169,10 +3112,7 @@ impl RelationPlanVariant {
     }
 
     pub(crate) fn canonical_hash(&self) -> Result<[u8; 64], RelationPlanError> {
-        hash_generated_variable_bytes(
-            RELATION_PLAN_VARIANT_HASH_DOMAIN,
-            &self.canonical_bytes()?,
-        )
+        hash_generated_variable_bytes(RELATION_PLAN_VARIANT_HASH_DOMAIN, &self.canonical_bytes()?)
     }
 
     pub(crate) const fn schedule_position(&self) -> Option<u32> {
@@ -3219,9 +3159,7 @@ impl RelationPlanVariant {
         &self.ordered_trees
     }
 
-    pub(crate) fn ordered_integer_lift_batches(
-        &self,
-    ) -> &[RelationIntegerLiftBatchDescriptor] {
+    pub(crate) fn ordered_integer_lift_batches(&self) -> &[RelationIntegerLiftBatchDescriptor] {
         &self.ordered_integer_lift_batches
     }
 
@@ -3502,19 +3440,19 @@ impl RelationPlanVariant {
             }
         }
 
-        let mut application_group_inputs = BTreeMap::<
-            CommonProofChallenge,
-            (u64, BTreeSet<u16>),
-        >::new();
-        for descriptor in self.derived_challenge_catalog(context)?.into_iter().filter(
-            |descriptor| {
-                matches!(
-                    descriptor.role,
-                    RelationChallengeRole::NonNativeTheta
-                        | RelationChallengeRole::NonNativeAlpha
-                )
-            },
-        ) {
+        let mut application_group_inputs =
+            BTreeMap::<CommonProofChallenge, (u64, BTreeSet<u16>)>::new();
+        for descriptor in
+            self.derived_challenge_catalog(context)?
+                .into_iter()
+                .filter(|descriptor| {
+                    matches!(
+                        descriptor.role,
+                        RelationChallengeRole::NonNativeTheta
+                            | RelationChallengeRole::NonNativeAlpha
+                    )
+                })
+        {
             let modulus_ordinal = u16::try_from(descriptor.role_coordinates[0])
                 .map_err(|_| RelationPlanError::CountOverflow)?;
             let repetition_ordinal = u16::try_from(descriptor.role_coordinates[1])
@@ -3529,9 +3467,7 @@ impl RelationPlanVariant {
                 _ => return Err(RelationPlanError::InvalidChallengeCatalog),
             };
             let sampling = descriptor.resolved_sampling(self, context)?;
-            if sampling.coordinate_count
-                != context.non_native_modular_identity_challenge_count
-            {
+            if sampling.coordinate_count != context.non_native_modular_identity_challenge_count {
                 return Err(RelationPlanError::InvalidChallengeCatalog);
             }
             let (group_modulus, repetition_ordinals) = application_group_inputs
@@ -3542,9 +3478,8 @@ impl RelationPlanVariant {
             }
             repetition_ordinals.insert(repetition_ordinal);
         }
-        let expected_repetition_ordinals = (0..context
-            .non_native_modular_identity_challenge_count)
-            .collect::<BTreeSet<_>>();
+        let expected_repetition_ordinals =
+            (0..context.non_native_modular_identity_challenge_count).collect::<BTreeSet<_>>();
         let ordered_application_challenge_groups = application_group_inputs
             .into_iter()
             .map(|(challenge, (modulus, repetition_ordinals))| {
@@ -3719,7 +3654,7 @@ impl RelationPlan {
                     self.variants
                         .iter()
                         .map(RelationPlanVariant::canonical_tuple)
-                    .collect::<Result<Vec<_>, _>>()?,
+                        .collect::<Result<Vec<_>, _>>()?,
                 )?,
             ],
         ))
@@ -4015,8 +3950,7 @@ impl<'context> RelationPlanChecker<'context> {
             .opening_degree_bound_exclusive
             .checked_sub(1)
             .ok_or(RelationPlanError::InvalidDomain)?;
-        let final_degree_bound =
-            u64::from(self.context.final_polynomial_degree_bound_exclusive);
+        let final_degree_bound = u64::from(self.context.final_polynomial_degree_bound_exclusive);
         if final_degree_bound >= initial_fri_degree_bound_exclusive {
             return Err(RelationPlanError::InvalidDomain);
         }
@@ -4141,8 +4075,7 @@ impl<'context> RelationPlanChecker<'context> {
             match factor {
                 RelationRadixFactorDescriptor::TranscriptChallengeDigits {
                     challenge_role:
-                        RelationChallengeRole::NonNativeTheta
-                        | RelationChallengeRole::NonNativeAlpha,
+                        RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha,
                     role_coordinates,
                     ..
                 } => {
@@ -4160,8 +4093,7 @@ impl<'context> RelationPlanChecker<'context> {
                     );
                 }
                 RelationRadixFactorDescriptor::NonNativeModulusDigits {
-                    modulus_reference,
-                    ..
+                    modulus_reference, ..
                 } => {
                     used.insert(*modulus_reference);
                 }
@@ -4289,14 +4221,16 @@ impl<'context> RelationPlanChecker<'context> {
                     && (column.value_type != RelationColumnValueType::BaseField
                         || matches!(column.origin, RelationColumnOrigin::Prover)))
             {
-                return Err(if column.source_degree_bound_exclusive == 0
-                    || column.source_degree_bound_exclusive
-                        > variant.opening_degree_bound_exclusive
-                {
-                    RelationPlanError::DegreeBoundExceeded
-                } else {
-                    RelationPlanError::InvalidColumn
-                });
+                return Err(
+                    if column.source_degree_bound_exclusive == 0
+                        || column.source_degree_bound_exclusive
+                            > variant.opening_degree_bound_exclusive
+                    {
+                        RelationPlanError::DegreeBoundExceeded
+                    } else {
+                        RelationPlanError::InvalidColumn
+                    },
+                );
             }
             match column.origin {
                 RelationColumnOrigin::VerifierSequence {
@@ -4424,8 +4358,8 @@ impl<'context> RelationPlanChecker<'context> {
         }
         for (column_ordinal, column) in variant.ordered_columns.iter().enumerate() {
             if let Some(modulus_reference) = column.canonical_residue_modulus {
-                let column_ordinal = u32::try_from(column_ordinal)
-                    .map_err(|_| RelationPlanError::CountOverflow)?;
+                let column_ordinal =
+                    u32::try_from(column_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
                 let modulus = self.context.resolved_modulus(modulus_reference)?;
                 let canonical_interval = match column.origin {
                     RelationColumnOrigin::VerifierSequence {
@@ -4466,10 +4400,13 @@ impl<'context> RelationPlanChecker<'context> {
                         if integer_lift_bound_tree_has_canonical_residue_capability(
                             column_ordinal,
                             variant,
-                        ) => SignedIntegerInterval::from_bigints(
+                        ) =>
+                    {
+                        SignedIntegerInterval::from_bigints(
                             BigInt::zero(),
                             BigInt::from(modulus - 1),
-                        )?,
+                        )?
+                    }
                     RelationColumnOrigin::BoundTree { .. } => continue,
                     RelationColumnOrigin::Prover => {
                         return Err(RelationPlanError::InvalidColumn);
@@ -4506,9 +4443,7 @@ impl<'context> RelationPlanChecker<'context> {
         }
         if referenced_convolutions
             != (0..variant.ordered_radix_convolutions.len())
-                .map(|ordinal| {
-                    u32::try_from(ordinal).map_err(|_| RelationPlanError::CountOverflow)
-                })
+                .map(|ordinal| u32::try_from(ordinal).map_err(|_| RelationPlanError::CountOverflow))
                 .collect::<Result<BTreeSet<_>, _>>()?
         {
             return Err(RelationPlanError::InvalidConstraint);
@@ -4618,15 +4553,12 @@ impl<'context> RelationPlanChecker<'context> {
                                 *multiplier,
                                 self.context,
                             )?;
-                            if *digit_count
-                                != minimum_radix_digit_count(value, convolution.radix)?
+                            if *digit_count != minimum_radix_digit_count(value, convolution.radix)?
                             {
                                 return Err(RelationPlanError::InvalidConstraint);
                             }
                         }
-                        RelationRadixFactorDescriptor::ScalarColumn {
-                            column_ordinal, ..
-                        } => {
+                        RelationRadixFactorDescriptor::ScalarColumn { column_ordinal, .. } => {
                             if semantic_bounds.get(column_ordinal) != Some(&binary_interval) {
                                 return Err(RelationPlanError::InvalidBoundCertificate);
                             }
@@ -4743,10 +4675,8 @@ impl<'context> RelationPlanChecker<'context> {
             }
 
             if constraint.enforce_proof_base_field_no_wrap {
-                let referenced_columns = expression_column_ordinals(
-                    &constraint.numerator_postfix_expression,
-                    variant,
-                )?;
+                let referenced_columns =
+                    expression_column_ordinals(&constraint.numerator_postfix_expression, variant)?;
                 let declared_bounds = referenced_columns
                     .iter()
                     .map(|column_ordinal| {
@@ -4763,9 +4693,7 @@ impl<'context> RelationPlanChecker<'context> {
                     variant,
                     self.context,
                 )?;
-                if !interval
-                    .is_injective_modulo(&BigInt::from(self.context.base_field_modulus))
-                {
+                if !interval.is_injective_modulo(&BigInt::from(self.context.base_field_modulus)) {
                     return Err(RelationPlanError::NoWrapBoundViolated);
                 }
             }
@@ -4774,7 +4702,10 @@ impl<'context> RelationPlanChecker<'context> {
                 .is_empty()
             {
                 if constraint.enforce_proof_base_field_no_wrap
-                    || constraint.ordered_injective_integer_factor_expressions.len() < 2
+                    || constraint
+                        .ordered_injective_integer_factor_expressions
+                        .len()
+                        < 2
                     || constraint.numerator_postfix_expression
                         != ordered_injective_integer_factor_product_expression(
                             &constraint.ordered_injective_integer_factor_expressions,
@@ -4782,9 +4713,7 @@ impl<'context> RelationPlanChecker<'context> {
                 {
                     return Err(RelationPlanError::InvalidConstraint);
                 }
-                for factor_expression in
-                    &constraint.ordered_injective_integer_factor_expressions
-                {
+                for factor_expression in &constraint.ordered_injective_integer_factor_expressions {
                     check_expression(factor_expression, variant, self.context, false)?;
                     let referenced_columns =
                         expression_column_ordinals(factor_expression, variant)?;
@@ -4804,8 +4733,7 @@ impl<'context> RelationPlanChecker<'context> {
                         variant,
                         self.context,
                     )?;
-                    if !interval
-                        .is_injective_modulo(&BigInt::from(self.context.base_field_modulus))
+                    if !interval.is_injective_modulo(&BigInt::from(self.context.base_field_modulus))
                     {
                         return Err(RelationPlanError::NoWrapBoundViolated);
                     }
@@ -4850,10 +4778,7 @@ impl<'context> RelationPlanChecker<'context> {
         semantic_bounds: &BTreeMap<u32, SignedIntegerInterval>,
     ) -> Result<(), RelationPlanError> {
         if application_statement_schema_identifier == 0x2111 {
-            return self.check_deterministic_coefficient_local_identities(
-                variant,
-                semantic_bounds,
-            );
+            return self.check_deterministic_coefficient_local_identities(variant, semantic_bounds);
         }
         let is_coefficient_local_family = application_statement_schema_identifier == 0x2110;
         if !is_coefficient_local_family {
@@ -4889,14 +4814,13 @@ impl<'context> RelationPlanChecker<'context> {
             .iter()
             .copied()
             .flat_map(|modulus_reference| {
-                (0..self
-                    .context
-                    .non_native_modular_identity_challenge_count)
-                    .flat_map(move |challenge_ordinal| {
+                (0..self.context.non_native_modular_identity_challenge_count).flat_map(
+                    move |challenge_ordinal| {
                         (0_u16..2).map(move |batch_ordinal| {
                             (modulus_reference, challenge_ordinal, batch_ordinal)
                         })
-                    })
+                    },
+                )
             })
             .collect::<BTreeSet<_>>();
         let mut seen_batch_coordinates = BTreeSet::new();
@@ -4910,10 +4834,7 @@ impl<'context> RelationPlanChecker<'context> {
                     .map_err(|_| RelationPlanError::MissingModulus)?,
             )
             .map_err(|_| RelationPlanError::CountOverflow)?;
-            if batch.challenge_ordinal
-                >= self
-                    .context
-                    .non_native_modular_identity_challenge_count
+            if batch.challenge_ordinal >= self.context.non_native_modular_identity_challenge_count
                 || batch.batch_ordinal >= 2
                 || batch.ordered_residuals.is_empty()
                 || !seen_batch_coordinates.insert((
@@ -4931,17 +4852,20 @@ impl<'context> RelationPlanChecker<'context> {
                     != u32::try_from(residual_index)
                         .map_err(|_| RelationPlanError::CountOverflow)?
                     || residual.residual_postfix_expression.is_empty()
-                    || residual.residual_postfix_expression.iter().any(|instruction| {
-                        !matches!(
-                            instruction,
-                            RelationExpressionInstruction::BaseFieldConstant(_)
-                                | RelationExpressionInstruction::NonNativeModulusConstant { .. }
-                                | RelationExpressionInstruction::ColumnValue { .. }
-                                | RelationExpressionInstruction::Addition
-                                | RelationExpressionInstruction::Multiplication
-                                | RelationExpressionInstruction::Negation
-                        )
-                    })
+                    || residual
+                        .residual_postfix_expression
+                        .iter()
+                        .any(|instruction| {
+                            !matches!(
+                                instruction,
+                                RelationExpressionInstruction::BaseFieldConstant(_)
+                                    | RelationExpressionInstruction::NonNativeModulusConstant { .. }
+                                    | RelationExpressionInstruction::ColumnValue { .. }
+                                    | RelationExpressionInstruction::Addition
+                                    | RelationExpressionInstruction::Multiplication
+                                    | RelationExpressionInstruction::Negation
+                            )
+                        })
                 {
                     return Err(RelationPlanError::InvalidConstraint);
                 }
@@ -4969,9 +4893,7 @@ impl<'context> RelationPlanChecker<'context> {
                         _ => None,
                     })
                     .collect::<BTreeSet<_>>();
-                if referenced_moduli
-                    != BTreeSet::from([batch.modulus_reference])
-                {
+                if referenced_moduli != BTreeSet::from([batch.modulus_reference]) {
                     return Err(RelationPlanError::InvalidModulus);
                 }
                 check_expression(
@@ -4980,10 +4902,8 @@ impl<'context> RelationPlanChecker<'context> {
                     self.context,
                     false,
                 )?;
-                let referenced_columns = expression_column_ordinals(
-                    &residual.residual_postfix_expression,
-                    variant,
-                )?;
+                let referenced_columns =
+                    expression_column_ordinals(&residual.residual_postfix_expression, variant)?;
                 if referenced_columns.is_empty() {
                     return Err(RelationPlanError::InvalidConstraint);
                 }
@@ -5163,10 +5083,8 @@ impl<'context> RelationPlanChecker<'context> {
                 self.context,
                 false,
             )?;
-            let referenced_columns = expression_column_ordinals(
-                &constraint.numerator_postfix_expression,
-                variant,
-            )?;
+            let referenced_columns =
+                expression_column_ordinals(&constraint.numerator_postfix_expression, variant)?;
             if referenced_columns.is_empty() {
                 return Err(RelationPlanError::InvalidConstraint);
             }
@@ -5260,10 +5178,8 @@ impl<'context> RelationPlanChecker<'context> {
             .iter()
             .map(|cell| cell.column_ordinal)
             .collect::<BTreeSet<_>>();
-        let expected_challenge_ordinals = (0..self
-            .context
-            .non_native_modular_identity_challenge_count)
-            .collect::<BTreeSet<_>>();
+        let expected_challenge_ordinals =
+            (0..self.context.non_native_modular_identity_challenge_count).collect::<BTreeSet<_>>();
         let mut challenge_ordinals_by_modulus =
             BTreeMap::<SuiteModulusReference, BTreeSet<u16>>::new();
         let mut descriptor_auxiliary_columns = BTreeSet::new();
@@ -5280,9 +5196,7 @@ impl<'context> RelationPlanChecker<'context> {
             let modulus = self.context.resolved_modulus(batch.modulus_reference)?;
             if modulus <= variant.trace_domain_size
                 || batch.challenge_ordinal
-                    >= self
-                        .context
-                        .non_native_modular_identity_challenge_count
+                    >= self.context.non_native_modular_identity_challenge_count
                 || batch.ordered_components.is_empty()
                 || !challenge_ordinals_by_modulus
                     .entry(batch.modulus_reference)
@@ -5377,15 +5291,12 @@ impl<'context> RelationPlanChecker<'context> {
                 let full_ring_product_bytes = component
                     .ordered_full_ring_negacyclic_products
                     .iter()
-                    .map(
-                        RelationIntegerLiftFullRingNegacyclicProductDescriptor::canonical_bytes,
-                    )
+                    .map(RelationIntegerLiftFullRingNegacyclicProductDescriptor::canonical_bytes)
                     .collect::<Result<Vec<_>, _>>()?;
                 if linear_term_bytes.is_empty()
                     || (product_bytes.is_empty() && full_ring_product_bytes.is_empty())
                     || !strictly_sorted_unique(&linear_term_bytes)
-                    || (!product_bytes.is_empty()
-                        && !strictly_sorted_unique(&product_bytes))
+                    || (!product_bytes.is_empty() && !strictly_sorted_unique(&product_bytes))
                     || (!full_ring_product_bytes.is_empty()
                         && !strictly_sorted_unique(&full_ring_product_bytes))
                 {
@@ -5404,12 +5315,11 @@ impl<'context> RelationPlanChecker<'context> {
                     &explicitly_certified_columns,
                     self.context,
                 )?;
-                let mut residual_interval = quotient_interval.multiply(
-                    SignedIntegerInterval::from_bigints(
+                let mut residual_interval =
+                    quotient_interval.multiply(SignedIntegerInterval::from_bigints(
                         BigInt::from(modulus),
                         BigInt::from(modulus),
-                    )?,
-                )?;
+                    )?)?;
                 if component.quotient_is_negative {
                     residual_interval = residual_interval.negate()?;
                 }
@@ -5434,16 +5344,13 @@ impl<'context> RelationPlanChecker<'context> {
                         interval.minimum - BigInt::from(term.column_offset),
                         interval.maximum - BigInt::from(term.column_offset),
                     )?;
-                    let coefficient = integer_lift_coefficient_value(
-                        term.coefficient,
-                        self.context,
-                    )?;
-                    let mut term_interval = shifted.multiply(
-                        SignedIntegerInterval::from_bigints(
+                    let coefficient =
+                        integer_lift_coefficient_value(term.coefficient, self.context)?;
+                    let mut term_interval =
+                        shifted.multiply(SignedIntegerInterval::from_bigints(
                             BigInt::from(coefficient),
                             BigInt::from(coefficient),
-                        )?,
-                    )?;
+                        )?)?;
                     if term.negative {
                         term_interval = term_interval.negate()?;
                     }
@@ -5479,13 +5386,10 @@ impl<'context> RelationPlanChecker<'context> {
                         self.context,
                     )?;
                     let shifted_multiplier = SignedIntegerInterval::from_bigints(
-                        multiplier_interval.minimum
-                            - BigInt::from(product.multiplier_offset),
-                        multiplier_interval.maximum
-                            - BigInt::from(product.multiplier_offset),
+                        multiplier_interval.minimum - BigInt::from(product.multiplier_offset),
+                        multiplier_interval.maximum - BigInt::from(product.multiplier_offset),
                     )?;
-                    let coefficient_product =
-                        multiplicand_interval.multiply(shifted_multiplier)?;
+                    let coefficient_product = multiplicand_interval.multiply(shifted_multiplier)?;
                     let maximum_absolute_product = coefficient_product
                         .minimum
                         .magnitude()
@@ -5617,9 +5521,8 @@ impl<'context> RelationPlanChecker<'context> {
                     )?;
                     let diagonal_bound = low_low + high_high;
                     let cross_bound = high_low + low_high;
-                    let convolution_bound = BigInt::from(
-                        diagonal_bound.max(cross_bound),
-                    ) * BigInt::from(variant.trace_domain_size);
+                    let convolution_bound = BigInt::from(diagonal_bound.max(cross_bound))
+                        * BigInt::from(variant.trace_domain_size);
                     let mut product_interval = SignedIntegerInterval::from_bigints(
                         -convolution_bound.clone(),
                         convolution_bound,
@@ -5662,16 +5565,14 @@ impl<'context> RelationPlanChecker<'context> {
                     }
                 }
 
-                if !residual_interval.is_injective_modulo(&BigInt::from(
-                    self.context.base_field_modulus,
-                )) {
+                if !residual_interval
+                    .is_injective_modulo(&BigInt::from(self.context.base_field_modulus))
+                {
                     return Err(RelationPlanError::NoWrapBoundViolated);
                 }
             }
 
-            if used_reversed_bindings
-                != reversed_bindings_by_columns.keys().copied().collect()
-            {
+            if used_reversed_bindings != reversed_bindings_by_columns.keys().copied().collect() {
                 return Err(RelationPlanError::InvalidConstraint);
             }
 
@@ -5734,14 +5635,14 @@ impl<'context> RelationPlanChecker<'context> {
             .collect::<BTreeSet<_>>();
         let expected_points = (0..self.context.deep_point_count)
             .flat_map(|deep_point_ordinal| {
-                required_rotations.iter().map(move |rotation| {
-                    RelationOpeningPointDescriptor {
+                required_rotations
+                    .iter()
+                    .map(move |rotation| RelationOpeningPointDescriptor {
                         deep_point_ordinal,
                         trace_rotation_is_negative: rotation.0,
                         trace_rotation_magnitude: rotation.1,
                         conjugate_index: 0,
-                    }
-                })
+                    })
             })
             .collect::<BTreeSet<_>>();
         let mut points = BTreeSet::new();
@@ -5928,9 +5829,8 @@ impl<'context> RelationPlanChecker<'context> {
                 }
                 (RelationMaskKind::Telescoping, RelationMaskTargetClass::QuotientComponent) => {
                     if mask.target_ordinal + 1 >= self.context.quotient_component_count
-                        || telescoping_degree.is_some_and(|degree| {
-                            degree != mask.mask_degree_bound_exclusive
-                        })
+                        || telescoping_degree
+                            .is_some_and(|degree| degree != mask.mask_degree_bound_exclusive)
                         || !telescoping_targets.insert(mask.target_ordinal)
                     {
                         return Err(RelationPlanError::InvalidMaskGrammar);
@@ -6004,7 +5904,10 @@ fn integer_lift_require_pre_challenge_column(
         .ok_or(RelationPlanError::MissingRoot)?;
     match column.origin {
         RelationColumnOrigin::Prover | RelationColumnOrigin::VerifierSequence { .. }
-            if role == Some(1) => Ok(()),
+            if role == Some(1) =>
+        {
+            Ok(())
+        }
         RelationColumnOrigin::BoundTree { .. } if role.is_none() => Ok(()),
         _ => Err(RelationPlanError::InvalidConstraint),
     }
@@ -6097,10 +6000,7 @@ fn integer_lift_column_interval(
             let modulus = context.resolved_modulus(modulus_reference)?;
             match layout.embedding_kind {
                 RelationEmbeddingKind::LeastNonnegative => {
-                    SignedIntegerInterval::from_bigints(
-                        BigInt::zero(),
-                        BigInt::from(modulus - 1),
-                    )
+                    SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(modulus - 1))
                 }
                 RelationEmbeddingKind::Centered => {
                     let absolute_bound = (modulus - 1) / 2;
@@ -6129,10 +6029,7 @@ fn integer_lift_column_interval(
                 })
                 .ok_or(RelationPlanError::InvalidBoundCertificate)?;
             let modulus = context.resolved_modulus(modulus_reference)?;
-            SignedIntegerInterval::from_bigints(
-                BigInt::zero(),
-                BigInt::from(modulus - 1),
-            )
+            SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(modulus - 1))
         }
         RelationColumnOrigin::Prover => semantic_bounds
             .get(&column_ordinal)
@@ -6257,9 +6154,7 @@ fn derive_semantic_cell_interval<'cell>(
             ordered_digit_column_ordinals,
             ..
         } => {
-            if offset.is_zero()
-                || offset >= &BigUint::from(proof_base_field_modulus)
-            {
+            if offset.is_zero() || offset >= &BigUint::from(proof_base_field_modulus) {
                 return Err(RelationPlanError::InvalidBoundCertificate);
             }
             let maximum = validate_radix_digit_bounds(
@@ -6284,10 +6179,7 @@ fn derive_semantic_cell_interval<'cell>(
                 return Err(RelationPlanError::InvalidBoundCertificate);
             }
             let offset = BigInt::from(offset.clone());
-            SignedIntegerInterval::from_bigints(
-                -offset.clone(),
-                BigInt::from(maximum) - offset,
-            )?
+            SignedIntegerInterval::from_bigints(-offset.clone(), BigInt::from(maximum) - offset)?
         }
         RelationBoundCertificate::CanonicalModulusRecomposition {
             modulus_reference,
@@ -6326,8 +6218,7 @@ fn derive_semantic_cell_interval<'cell>(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            if constraint.ordered_injective_integer_factor_expressions
-                != ordered_factor_expressions
+            if constraint.ordered_injective_integer_factor_expressions != ordered_factor_expressions
                 || constraint.numerator_postfix_expression
                     != ordered_injective_integer_factor_product_expression(
                         &ordered_factor_expressions,
@@ -6377,10 +6268,8 @@ fn validate_radix_digit_bounds<'cell>(
         return Err(RelationPlanError::InvalidBoundCertificate);
     }
 
-    let expected_digit_interval = SignedIntegerInterval::from_bigints(
-        BigInt::zero(),
-        BigInt::from(radix - 1),
-    )?;
+    let expected_digit_interval =
+        SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(radix - 1))?;
     for digit_column_ordinal in ordered_digit_column_ordinals {
         let interval = derive_semantic_cell_interval(
             *digit_column_ordinal,
@@ -6492,10 +6381,8 @@ fn validate_canonical_modulus_recomposition_bound<'cell>(
         return Err(RelationPlanError::InvalidBoundCertificate);
     }
     let maximum_digits = fixed_radix_u64_digits(maximum, digit_count, radix)?;
-    let expected_digit_interval = SignedIntegerInterval::from_bigints(
-        BigInt::zero(),
-        BigInt::from(radix - 1),
-    )?;
+    let expected_digit_interval =
+        SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(radix - 1))?;
     for difference_column_ordinal in ordered_difference_digit_column_ordinals {
         if derive_semantic_cell_interval(
             *difference_column_ordinal,
@@ -6532,7 +6419,7 @@ fn validate_canonical_modulus_recomposition_bound<'cell>(
             .checked_sub(1)
             .map(|ordinal| ordered_borrow_column_ordinals[ordinal]);
         let outgoing_borrow = (digit_ordinal + 1 < digit_count)
-            .then_some(ordered_borrow_column_ordinals[digit_ordinal]);
+            .then(|| ordered_borrow_column_ordinals[digit_ordinal]);
         if !comparator_constraint.enforce_proof_base_field_no_wrap
             || comparator_constraint.zeroifier_postfix_expression
                 != full_trace_zeroifier_expression(trace_domain_size)
@@ -6703,16 +6590,11 @@ pub(crate) fn finite_integer_set_constraint_expressions(
     let ordered_factor_expressions = ordered_values
         .iter()
         .map(|value| {
-            finite_integer_set_factor_expression(
-                column_ordinal,
-                value,
-                proof_base_field_modulus,
-            )
+            finite_integer_set_factor_expression(column_ordinal, value, proof_base_field_modulus)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let product_expression = ordered_injective_integer_factor_product_expression(
-        &ordered_factor_expressions,
-    )?;
+    let product_expression =
+        ordered_injective_integer_factor_product_expression(&ordered_factor_expressions)?;
     Ok((product_expression, ordered_factor_expressions))
 }
 
@@ -6750,13 +6632,14 @@ pub(crate) fn ordered_injective_integer_factor_product_expression(
     {
         return Err(RelationPlanError::InvalidConstraint);
     }
-    let instruction_count = ordered_factor_expressions
-        .iter()
-        .try_fold(ordered_factor_expressions.len() - 1, |count, factor_expression| {
+    let instruction_count = ordered_factor_expressions.iter().try_fold(
+        ordered_factor_expressions.len() - 1,
+        |count, factor_expression| {
             count
                 .checked_add(factor_expression.len())
                 .ok_or(RelationPlanError::CountOverflow)
-        })?;
+        },
+    )?;
     let mut product_expression = Vec::with_capacity(instruction_count);
     for (factor_ordinal, factor_expression) in ordered_factor_expressions.iter().enumerate() {
         product_expression.extend_from_slice(factor_expression);
@@ -6915,11 +6798,7 @@ fn check_expression(
                 if zeroifier {
                     return Err(RelationPlanError::InvalidZeroifier);
                 }
-                let value = resolved_modulus_multiple(
-                    *modulus_reference,
-                    *multiplier,
-                    context,
-                )?;
+                let value = resolved_modulus_multiple(*modulus_reference, *multiplier, context)?;
                 if value >= context.base_field_modulus {
                     return Err(RelationPlanError::NoWrapBoundViolated);
                 }
@@ -7000,11 +6879,8 @@ fn check_expression(
                     || ordered_excluded_roots.iter().any(|root| {
                         *root == 0
                             || *root >= context.base_field_modulus
-                            || modular_power(
-                                *root,
-                                *trace_domain_size,
-                                context.base_field_modulus,
-                            ) != 1
+                            || modular_power(*root, *trace_domain_size, context.base_field_modulus)
+                                != 1
                     })
                 {
                     return Err(RelationPlanError::InvalidZeroifier);
@@ -7145,8 +7021,7 @@ fn radix_convolution_expression_shape(
                         .ok_or(RelationPlanError::DegreeBoundExceeded)?;
                 }
                 RelationRadixFactorDescriptor::TranscriptChallengeDigits {
-                    digit_count,
-                    ..
+                    digit_count, ..
                 } => {
                     maximum_coefficient_ordinal = maximum_coefficient_ordinal
                         .checked_add(u64::from(
@@ -7156,10 +7031,7 @@ fn radix_convolution_expression_shape(
                         ))
                         .ok_or(RelationPlanError::DegreeBoundExceeded)?;
                 }
-                RelationRadixFactorDescriptor::NonNativeModulusDigits {
-                    digit_count,
-                    ..
-                } => {
+                RelationRadixFactorDescriptor::NonNativeModulusDigits { digit_count, .. } => {
                     maximum_coefficient_ordinal = maximum_coefficient_ordinal
                         .checked_add(u64::from(
                             digit_count
@@ -7220,11 +7092,7 @@ fn evaluate_integer_interval(
                 modulus_reference,
                 multiplier,
             } => {
-                let value = resolved_modulus_multiple(
-                    *modulus_reference,
-                    *multiplier,
-                    context,
-                )?;
+                let value = resolved_modulus_multiple(*modulus_reference, *multiplier, context)?;
                 if value >= context.base_field_modulus {
                     return Err(RelationPlanError::NoWrapBoundViolated);
                 }
@@ -7325,8 +7193,8 @@ fn evaluate_radix_convolution_interval(
     variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,
 ) -> Result<SignedIntegerInterval, RelationPlanError> {
-    let coefficient_ordinal = usize::try_from(coefficient_ordinal)
-        .map_err(|_| RelationPlanError::CountOverflow)?;
+    let coefficient_ordinal =
+        usize::try_from(coefficient_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
     let mut sum = SignedIntegerInterval::new(0, 0);
     for term in &convolution.ordered_terms {
         let mut coefficients = vec![SignedIntegerInterval::new(1, 1)];
@@ -7375,11 +7243,8 @@ fn evaluate_radix_convolution_interval(
                     multiplier,
                     digit_count,
                 } => {
-                    let value = resolved_modulus_multiple(
-                        *modulus_reference,
-                        *multiplier,
-                        context,
-                    )?;
+                    let value =
+                        resolved_modulus_multiple(*modulus_reference, *multiplier, context)?;
                     exact_radix_digit_intervals(value, convolution.radix, *digit_count)?
                 }
                 RelationRadixFactorDescriptor::ScalarColumn {
@@ -7418,10 +7283,7 @@ fn evaluate_radix_convolution_interval(
     Ok(sum)
 }
 
-fn minimum_radix_digit_count(
-    maximum_value: u64,
-    radix: u64,
-) -> Result<u16, RelationPlanError> {
+fn minimum_radix_digit_count(maximum_value: u64, radix: u64) -> Result<u16, RelationPlanError> {
     if radix < 2 {
         return Err(RelationPlanError::InvalidConstraint);
     }
@@ -7874,12 +7736,9 @@ fn hash_generated_variable_bytes(
     domain: &str,
     canonical_bytes: &[u8],
 ) -> Result<[u8; 64], RelationPlanError> {
-    let mut hasher = StreamingFoundationTupleHash512::new_variable_bytes(
-        domain,
-        &[],
-        canonical_bytes.len(),
-    )
-    .map_err(|_| RelationPlanError::CanonicalEncoding)?;
+    let mut hasher =
+        StreamingFoundationTupleHash512::new_variable_bytes(domain, &[], canonical_bytes.len())
+            .map_err(|_| RelationPlanError::CanonicalEncoding)?;
     hasher
         .absorb(canonical_bytes)
         .map_err(|_| RelationPlanError::CanonicalEncoding)?;
@@ -7890,6 +7749,7 @@ fn hash_generated_variable_bytes(
 }
 
 mod aggregate_threshold_share;
+mod ballot_validity;
 mod committed_material;
 mod interpreter;
 mod key_relation;
@@ -7900,6 +7760,9 @@ mod trustee_evaluation_key;
 mod vss_share_linkage;
 
 pub(crate) use aggregate_threshold_share::compile_aggregate_threshold_share_relation_plan;
+pub(crate) use ballot_validity::{
+    BallotValidityRelationPlanInput, compile_ballot_validity_relation_plan,
+};
 pub(crate) use committed_material::CommittedMaterialRelationPlanInput;
 pub(crate) use interpreter::{
     RelationApplicationChallengeAssignment, RelationConstraintEvaluation,
@@ -7909,16 +7772,17 @@ pub(crate) use public_aggregate::{
     CollectivePublicKeyAggregatePlanInput, EvaluatorKeyAggregateEntryPlanInput,
     EvaluatorKeyAggregatePlanInput, EvaluatorKeyAggregateVariantInput,
     PublicAggregateRelationGeometry, RkgRoundOneAggregatePlanInput,
-    RkgRoundOneAggregateVariantInput,
-    compile_collective_public_key_aggregate_relation_plan,
-    compile_evaluator_key_aggregate_relation_plan,
-    compile_rkg_round_one_aggregate_relation_plan,
+    RkgRoundOneAggregateVariantInput, compile_collective_public_key_aggregate_relation_plan,
+    compile_evaluator_key_aggregate_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
 };
 pub(crate) use public_key_share::compile_public_key_share_relation_plan;
 pub(crate) use same_secret_anchor::compile_same_secret_relation_plan;
 pub(crate) use trustee_evaluation_key::{
-    TrusteeEvaluationKeyDecompositionBlock, TrusteeEvaluationKeyPlanInput,
-    compile_trustee_evaluation_key_relation_plan,
+    GaloisKeyShareRelationPlanInput, RelinearizationRoundOneRelationPlanInput,
+    RelinearizationRoundTwoRelationPlanInput, TrusteeEvaluationKeyDecompositionBlock,
+    TrusteeEvaluationKeyRelationGeometry, compile_galois_key_share_relation_plan,
+    compile_relinearization_round_one_relation_plan,
+    compile_relinearization_round_two_relation_plan,
 };
 pub(crate) use vss_share_linkage::compile_vss_share_linkage_relation_plan;
 #[cfg(test)]

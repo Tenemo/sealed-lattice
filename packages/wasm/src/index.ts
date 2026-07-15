@@ -2,7 +2,15 @@ import {
     bgvCanonicalStreamFamilies,
     openBgvCanonicalStreamRuntime,
 } from './bgv-canonical-stream-runtime.js';
-import { createWasmBrowserActionStorageWorkerKernel } from './local-storage-root-worker-kernel.js';
+import {
+    foundationObjectTypes,
+    openCanonicalBoardVerifierSession,
+} from './canonical-board-runtime.js';
+import {
+    createWasmBrowserActionStorageWorkerKernel,
+    openClosedWorkerSetupMailboxRandomness,
+    type ClosedWorkerSetupMailboxRandomnessOperations,
+} from './local-storage-root-worker-kernel.js';
 import { openMailboxGcmRuntime } from './mailbox-gcm-runtime.js';
 import {
     createTranscriptCoreKernelLoader,
@@ -24,10 +32,6 @@ import {
     type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernel,
 } from './transcript-core-bridge.js';
-import {
-    foundationObjectTypes,
-    openCanonicalBoardVerifierSession,
-} from './canonical-board-runtime.js';
 
 const transcriptCoreKernelUrl = new URL(
     '../dist/sealed-lattice-kernel.wasm',
@@ -41,12 +45,14 @@ export {
     foundationObjectTypes,
     openBgvCanonicalStreamRuntime,
     openCanonicalBoardVerifierSession,
+    openClosedWorkerSetupMailboxRandomness,
     openMailboxGcmRuntime,
     TranscriptCoreKernelCommandError,
 };
 export type {
     ActionContextInput,
     AcceptedSetupSession,
+    ClosedWorkerSetupMailboxRandomnessOperations,
     TranscriptCoreKernel,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,

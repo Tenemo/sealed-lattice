@@ -4,7 +4,6 @@ import type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
     BgvPublicKeyShareStatementContext,
-    BgvSameSecretBridgeTargets,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
@@ -12,11 +11,7 @@ import type {
     BgvTrusteeEvaluationKeyStatementKey,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
-    BgvSameSecretBridgeProofContext,
-    BgvSameSecretBridgeProofGeneration,
     BgvVssCommittedMaterialCommitmentComputation,
-    BgvVssShareLinkageProofContext,
-    BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
 } from './kernel-types/bgv.js';
 
@@ -24,15 +19,9 @@ export type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
-    BgvSameSecretBridgeTargets,
-    BgvSameSecretBridgeProofContext,
-    BgvSameSecretBridgeProofGeneration,
     BgvVssCommittedMaterialCommitmentComputation,
-    BgvVssShareLinkageProofContext,
-    BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
 } from './kernel-types/bgv.js';
 
@@ -344,26 +333,6 @@ export type TranscriptCoreKernel = {
         readonly messageCoefficients: readonly number[];
         readonly materialSeedHex: string;
     }): BgvVssCommittedMaterialCommitmentComputation;
-    generateVssShareLinkageProof(input: {
-        readonly context: BgvVssShareLinkageProofContext;
-        readonly ringDegree: number;
-        readonly vssShareLinkage: Record<string, unknown>;
-        readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-        readonly recipientShareMessagesByItem: readonly (readonly number[])[];
-        readonly carryWitnessesByItem: readonly (readonly number[])[];
-        readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-        readonly proofRandomnessSeedHex: string;
-    }): BgvVssShareLinkageProofGeneration;
-    generateSameSecretBridgeProof(input: {
-        readonly context: BgvSameSecretBridgeProofContext;
-        readonly ringDegree: number;
-        readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
-        readonly sameSecretBridge: BgvSameSecretBridgeTargets;
-        readonly secretCoefficients: readonly number[];
-        readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
-        readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-        readonly proofRandomnessSeedHex: string;
-    }): BgvSameSecretBridgeProofGeneration;
 };
 
 export type TranscriptCoreKernelContextOwner = object;
@@ -491,14 +460,6 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'ComputeVssCommittedMaterialCommitment',
           'computeVssCommittedMaterialCommitment'
-      >
-    | KernelCommandFromMethod<
-          'GenerateVssShareLinkageProof',
-          'generateVssShareLinkageProof'
-      >
-    | KernelCommandFromMethod<
-          'GenerateSameSecretBridgeProof',
-          'generateSameSecretBridgeProof'
       >;
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {

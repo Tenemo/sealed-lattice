@@ -107,46 +107,46 @@ pub(super) fn key_descriptor_from_value(
         None => Vec::new(),
     };
     let (key_switch_domain, key_switch_seed_hex) = {
-            let same_secret_linkage = request
-                .get("sameSecretLinkage")
-                .ok_or_else(|| invalid_succinct_setup_proof("sameSecretLinkage must be present"))?;
-            let public_matrix_seed_hash = read_string(same_secret_linkage, "publicMatrixSeedHash")?;
-            let context = request
-                .get("context")
-                .ok_or_else(|| invalid_succinct_setup_proof("context must be present"))?;
-            let evaluator_key_schedule_root = read_string(context, "evaluatorKeyScheduleRoot")?;
-            match kind {
-                EvaluationKeyShareKind::RelinearizationRoundOne => (
-                    "relinearization".to_string(),
-                    derive_canonical_object_hash(&json!({
-                        "objectType": "RelinearizationKeySwitchPublicSampleSeed",
-                        "publicMatrixSeedHash": public_matrix_seed_hash,
-                        "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
-                        "round": "round-one",
-                        "level": level,
-                    }))?,
-                ),
-                EvaluationKeyShareKind::RelinearizationRoundTwo => (
-                    "relinearization".to_string(),
-                    derive_canonical_object_hash(&json!({
-                        "objectType": "RelinearizationKeySwitchPublicSampleSeed",
-                        "publicMatrixSeedHash": public_matrix_seed_hash,
-                        "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
-                        "round": "round-two",
-                        "level": level,
-                    }))?,
-                ),
-                EvaluationKeyShareKind::GaloisRotation { galois_element } => (
-                    format!("galois-{galois_element}"),
-                    derive_canonical_object_hash(&json!({
-                        "objectType": "GaloisKeySwitchPublicSampleSeed",
-                        "publicMatrixSeedHash": public_matrix_seed_hash,
-                        "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
-                        "rotation": galois_element,
-                        "level": level,
-                    }))?,
-                ),
-            }
+        let same_secret_linkage = request
+            .get("sameSecretLinkage")
+            .ok_or_else(|| invalid_succinct_setup_proof("sameSecretLinkage must be present"))?;
+        let public_matrix_seed_hash = read_string(same_secret_linkage, "publicMatrixSeedHash")?;
+        let context = request
+            .get("context")
+            .ok_or_else(|| invalid_succinct_setup_proof("context must be present"))?;
+        let evaluator_key_schedule_root = read_string(context, "evaluatorKeyScheduleRoot")?;
+        match kind {
+            EvaluationKeyShareKind::RelinearizationRoundOne => (
+                "relinearization".to_string(),
+                derive_canonical_object_hash(&json!({
+                    "objectType": "RelinearizationKeySwitchPublicSampleSeed",
+                    "publicMatrixSeedHash": public_matrix_seed_hash,
+                    "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
+                    "round": "round-one",
+                    "level": level,
+                }))?,
+            ),
+            EvaluationKeyShareKind::RelinearizationRoundTwo => (
+                "relinearization".to_string(),
+                derive_canonical_object_hash(&json!({
+                    "objectType": "RelinearizationKeySwitchPublicSampleSeed",
+                    "publicMatrixSeedHash": public_matrix_seed_hash,
+                    "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
+                    "round": "round-two",
+                    "level": level,
+                }))?,
+            ),
+            EvaluationKeyShareKind::GaloisRotation { galois_element } => (
+                format!("galois-{galois_element}"),
+                derive_canonical_object_hash(&json!({
+                    "objectType": "GaloisKeySwitchPublicSampleSeed",
+                    "publicMatrixSeedHash": public_matrix_seed_hash,
+                    "evaluatorKeyScheduleRoot": evaluator_key_schedule_root,
+                    "rotation": galois_element,
+                    "level": level,
+                }))?,
+            ),
+        }
     };
 
     Ok(EvaluationKeyShareDescriptor {

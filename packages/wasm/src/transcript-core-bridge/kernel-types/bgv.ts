@@ -92,18 +92,6 @@ export type BgvTrusteeEvaluationKeySameSecretBridge = {
     readonly targetConstantCommitments: readonly unknown[];
 };
 
-export type BgvSameSecretBridgeTargets = {
-    readonly targetConstantCommitments: readonly unknown[];
-};
-
-export type BgvVssShareLinkageProofContext = BgvSuccinctSetupProofContext;
-
-export type BgvSameSecretBridgeProofContext = {
-    readonly setupContextHash: ProtocolHash;
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-};
-
 export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly proofBytesHash: ProtocolHash;
 };
@@ -127,12 +115,4 @@ export type BgvSetupCommitmentOpeningComputation = {
 export type BgvVssCommittedMaterialCommitmentComputation = {
     readonly commitment: Record<string, unknown>;
     readonly openingRoot: ProtocolHash;
-};
-
-export type BgvVssShareLinkageProofGeneration = {
-    readonly proofBytesHash: ProtocolHash;
-};
-
-export type BgvSameSecretBridgeProofGeneration = {
-    readonly proofBytesHash: ProtocolHash;
 };
