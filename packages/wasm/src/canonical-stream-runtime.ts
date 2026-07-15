@@ -7,8 +7,10 @@ import type { TranscriptCoreKernelContextOwner } from './transcript-core-bridge/
 const maximumCanonicalStreamByteLength = 2_147_483_648;
 const maximumCanonicalStreamChunkCount =
     maximumCanonicalStreamByteLength / foundationProfile.streamChunkByteLength;
+const canonicalStreamDescriptorFixedByteLength = 104;
 const maximumCanonicalStreamDescriptorByteLength =
-    34 + 64 * maximumCanonicalStreamChunkCount;
+    canonicalStreamDescriptorFixedByteLength +
+    64 * maximumCanonicalStreamChunkCount;
 const runtimeInternalFailureStatus = 0xffff_ffff;
 const runtimeInvalidSessionStatus = 0xffff_fffe;
 const wasm32WordByteLength = 4;

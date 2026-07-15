@@ -283,9 +283,12 @@ describe('Canonical stream real-WASM runtime', () => {
             streamDomain: canonicalStreamDomains.publicKeyShareProof,
         });
         tampered.absorbChunk(0, chunks[0].slice(0));
-        expect(() => tampered.absorbChunk(1, chunks[1].slice(0))).toThrowError(
+        tampered.absorbChunk(1, chunks[1].slice(0));
+        expect(() => tampered.finish()).toThrowError(
             expect.objectContaining({ refusalReason: 'wrongHashOrRoot' }),
         );
+        expect(tampered.state()).toBe('failed');
+        expect(runtime.counterSnapshot().activeSessionCount).toBe(0);
     });
 
     it('pulls without prefetch, exposes only authenticated bytes, and cleans cancellation', async () => {

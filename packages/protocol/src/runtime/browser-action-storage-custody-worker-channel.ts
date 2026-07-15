@@ -552,6 +552,7 @@ const custodyWorkerCommands: readonly CustodyWorkerCommand[] = [
     'recover',
     'release-state-object',
     'seal-record',
+    'verify-action-randomness-reservation',
     'verify-state-recovery',
     'verify-state-reservation',
 ];
@@ -1393,6 +1394,7 @@ const copyHostCommandResult = (
                 label: 'Worker-derived local-record hash',
             });
         case 'open-state-verifier-session':
+        case 'verify-action-randomness-reservation':
         case 'verify-state-recovery':
         case 'verify-state-reservation':
             return copyWorkerIdentifierVerificationResult(result);

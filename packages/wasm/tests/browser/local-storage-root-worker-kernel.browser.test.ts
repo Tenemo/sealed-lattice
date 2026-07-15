@@ -165,7 +165,13 @@ describe('Local storage-root real-WASM browser worker', () => {
             },
             databaseName: databaseName(),
         });
-        await opened.custody.initialize();
+        const storageSnapshot = await opened.custody.initialize();
+        await opened.custody.openIntoOwnedWorker({
+            expectedSnapshot: storageSnapshot,
+            untrustedExpectedCommitment: {
+                storageRootCommitment: storageSnapshot.storageRootCommitment,
+            },
+        });
         const created = await opened.custody.createAndSealActionRandomness({
             creationRecoveryEpoch: 0n,
             recordVersion: 0n,

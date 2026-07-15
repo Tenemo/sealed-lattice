@@ -161,8 +161,10 @@ describe('Canonical foundation values in real WASM', () => {
                     schemaIdentifier,
                 });
             } catch (error) {
-                throw new Error(
-                    `Foundation canonical vector ${name} (schema 0x${schemaIdentifier.toString(16)}) was refused.`,
+                throw Object.assign(
+                    new Error(
+                        `Foundation canonical vector ${name} (schema 0x${schemaIdentifier.toString(16)}) was refused.`,
+                    ),
                     { cause: error },
                 );
             }

@@ -235,6 +235,7 @@ const createMailboxVectors = (): Readonly<{
         0x1800,
         unsigned64Item(plaintextByteLength),
         hashListItem([repeatedBytes(64, 0xaa)]),
+        hashItem(repeatedBytes(64, 0xbb)),
     );
     return {
         associatedData,
@@ -487,6 +488,7 @@ const createRuntimeVectors = (): readonly FoundationCanonicalTestVector[] => {
                 0x1800,
                 unsigned64Item(19n),
                 hashListItem([repeatedBytes(64, 0x21)]),
+                hashItem(repeatedBytes(64, 0x22)),
             ),
         ),
         vector('runtime asset reference', 0x1801, assets[0]),

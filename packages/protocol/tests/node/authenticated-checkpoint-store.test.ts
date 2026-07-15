@@ -27,6 +27,7 @@ import {
     canonicalTuple,
     concatenateBytes,
     foundationHash512,
+    hashItem,
     unsigned16LittleEndian,
     unsigned32LittleEndian,
     unsigned64Item,
@@ -80,6 +81,14 @@ const deriveChunkDigest = (
         variableBytesItem(chunkBytes),
     );
 
+const deriveFullObjectDigest = (stateBytes: Uint8Array): Uint8Array =>
+    foundationHash512(
+        'sealed-lattice/transport/full-object/v1',
+        asciiItem(stateStreamDomain),
+        unsigned64Item(BigInt(stateBytes.byteLength)),
+        variableBytesItem(stateBytes),
+    );
+
 const streamDescriptorFor = (stateBytes: Uint8Array): Uint8Array => {
     const chunks = chunkState(stateBytes);
     const chunkDigests = chunks.map(deriveChunkDigest);
@@ -94,6 +103,7 @@ const streamDescriptorFor = (stateBytes: Uint8Array): Uint8Array => {
                 ...chunkDigests,
             ),
         ),
+        hashItem(deriveFullObjectDigest(stateBytes)),
     );
 };
 
@@ -273,6 +283,55 @@ describe('Authenticated checkpoint store', () => {
         });
         expect(resumed.operationIdentity.streamAttemptIdentifiers).toEqual([]);
         expect(await restoreBytes(resumed)).toEqual(stateBytes);
+    });
+
+    it('rejects a wrong full-object digest after every chunk digest matches', async () => {
+        const checkpointStore = openStore();
+        const identity = await checkpointStore.beginOperation(0);
+        const stateBytes = stateBytesFor(8);
+        const exactDescriptorBytes = streamDescriptorFor(stateBytes);
+        const wrongFullObjectDigestDescriptorBytes =
+            exactDescriptorBytes.slice();
+        wrongFullObjectDigestDescriptorBytes[
+            wrongFullObjectDigestDescriptorBytes.byteLength - 1
+        ] ^= 1;
+        const boundary: CheckpointBoundary = {
+            ...deterministicBoundaryFor({ stateBytes }),
+            stateStreamDescriptorBytes: wrongFullObjectDigestDescriptorBytes,
+        };
+
+        await expect(
+            checkpointStore.publish({
+                boundary,
+                identity,
+                stateChunks: chunkState(stateBytes),
+            }),
+        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
+        await expect(
+            checkpointStore.resume({
+                checkpointLineageIdentifier:
+                    identity.checkpointLineageIdentifier,
+                expectedBoundary: expectedBoundary(boundary),
+            }),
+        ).rejects.toMatchObject({ code: 'MissingRecord' });
+    });
+
+    it('rejects a checkpoint state ceiling above the canonical stream profile', () => {
+        expect(() =>
+            openAuthenticatedCheckpointStore({
+                authorityContext: runtimeAuthorityContext(),
+                boundaryPolicy,
+                cursorKernel,
+                encryptionKey,
+                limits: {
+                    ...checkpointLimits,
+                    maximumCheckpointStateByteLength: 2_147_483_649,
+                },
+                store,
+            }),
+        ).toThrow(
+            'maximumCheckpointStateByteLength exceeds the canonical stream profile.',
+        );
     });
 
     it('rejects a stale resumed identity after another handle advances the lineage', async () => {
