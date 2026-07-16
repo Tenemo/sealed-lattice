@@ -397,6 +397,68 @@ const requireNonemptyBytes = (value: Uint8Array, label: string): Uint8Array => {
     return value.slice();
 };
 
+const copyAuthenticatedMailboxCarrierBytes = (carrier: unknown): Uint8Array => {
+    if (
+        (typeof carrier !== 'object' && typeof carrier !== 'function') ||
+        carrier === null ||
+        Array.isArray(carrier)
+    ) {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox carrier has the wrong type.',
+        );
+    }
+
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+        descriptor = Object.getOwnPropertyDescriptor(
+            carrier,
+            'canonicalEnvelopeBytes',
+        );
+    } catch {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox carrier cannot be inspected safely.',
+        );
+    }
+    if (descriptor === undefined || !('value' in descriptor)) {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox carrier must contain canonical bytes as an ordinary data property.',
+        );
+    }
+    const canonicalEnvelopeBytes: unknown = descriptor.value;
+    if (!isUint8Array(canonicalEnvelopeBytes)) {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox carrier bytes have the wrong type.',
+        );
+    }
+    if (canonicalEnvelopeBytes.byteLength === 0) {
+        throw new AuthenticatedMailboxRefusalError(
+            'malformedEncoding',
+            'The authenticated mailbox carrier is empty.',
+        );
+    }
+    if (
+        canonicalEnvelopeBytes.byteLength >
+        foundationProfile.maximumCopiedBufferByteLength
+    ) {
+        throw new AuthenticatedMailboxRefusalError(
+            'outsideSupportedProfile',
+            'The authenticated mailbox carrier exceeds the copied-buffer profile.',
+        );
+    }
+    try {
+        return canonicalEnvelopeBytes.slice();
+    } catch {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox carrier bytes are unavailable.',
+        );
+    }
+};
+
 const parseMailboxByteLength = (
     value: string,
     refusalReason: RefusalReason,
@@ -565,6 +627,20 @@ const signatureValid = (
     }
 };
 
+const isCanonicalMailboxDecodeFailure = (error: unknown): boolean => {
+    if (typeof error !== 'object' || error === null) {
+        return false;
+    }
+    try {
+        return (
+            Reflect.get(error, 'name') === 'TranscriptCoreKernelCommandError' &&
+            Reflect.get(error, 'code') === 'InvalidProtocolObject'
+        );
+    } catch {
+        return false;
+    }
+};
+
 const validatedCarrierEnvelope = (
     kernel: AuthenticatedMailboxKernel,
     carrier: AuthenticatedMailboxCarrier,
@@ -581,7 +657,10 @@ const validatedCarrierEnvelope = (
         decodedEnvelope = kernel.decodeSignedMailboxEnvelope({
             canonicalBytesHex: bytesToHex(carrier.canonicalEnvelopeBytes),
         });
-    } catch {
+    } catch (error) {
+        if (!isCanonicalMailboxDecodeFailure(error)) {
+            throw error;
+        }
         throw new AuthenticatedMailboxRefusalError(
             'malformedEncoding',
             'The signed mailbox envelope is not canonical.',
@@ -988,10 +1067,7 @@ export const sealAuthenticatedMailbox = async (
 export const openAuthenticatedMailbox = async (
     input: AuthenticatedMailboxOpenInput,
 ): Promise<VerificationResult<OpenedAuthenticatedMailbox>> => {
-    const canonicalEnvelopeBytes = requireNonemptyBytes(
-        input.carrier.canonicalEnvelopeBytes,
-        'carrier.canonicalEnvelopeBytes',
-    );
+    let canonicalEnvelopeBytes: Uint8Array | undefined;
     let gcmVerifier: MailboxGcmVerifierLease | undefined;
     let inboundSlotLease: AuthenticatedMailboxInboundSlotLease | undefined;
     let inboundSlotCommitted = false;
@@ -1009,6 +1085,9 @@ export const openAuthenticatedMailbox = async (
     let result: VerificationResult<OpenedAuthenticatedMailbox> | undefined;
     let sourceVerificationKey: Uint8Array | undefined;
     try {
+        canonicalEnvelopeBytes = copyAuthenticatedMailboxCarrierBytes(
+            input.carrier,
+        );
         throwIfAborted(input.abortSignal);
         sourceVerificationKey =
             resolveAuthenticatedMailboxFrozenRosterSourceVerificationKey(
@@ -1285,7 +1364,7 @@ export const openAuthenticatedMailbox = async (
             cleanupFailures.push(error);
         }
     }
-    canonicalEnvelopeBytes.fill(0);
+    canonicalEnvelopeBytes?.fill(0);
     kemCiphertext?.fill(0);
     keyAndNonce?.fill(0);
     sharedSecret?.fill(0);

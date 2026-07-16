@@ -1,7 +1,5 @@
 use super::super::evaluation_domain::EvaluationDomainPlan;
 #[cfg(test)]
-use super::super::evaluation_domain::negacyclic_transpose_product;
-#[cfg(test)]
 use super::super::extension_field::CHALLENGE_EXTENSION_DEGREE;
 use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
 use super::super::fiat_shamir_transcript::FiatShamirTranscript;
@@ -163,44 +161,6 @@ pub(super) fn extension_powers(
     }
 
     powers
-}
-
-// Transpose action of the negacyclic matrix of an extension polynomial on an
-// extension vector: expand both operands over the basis pairs, run the base
-// transpose action per pair, and recombine through the tower basis products.
-#[cfg(test)]
-pub(super) fn negacyclic_transpose_product_extension_matrix(
-    tower: &ChallengeExtensionTower,
-    matrix_polynomial: &[ChallengeExtensionElement],
-    vector: &[ChallengeExtensionElement],
-    modulus: u64,
-) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
-    let length = vector.len();
-    let mut result = vec![ChallengeExtensionTower::zero(); length];
-    let mut matrix_coordinate = vec![0_u64; matrix_polynomial.len()];
-    let mut vector_coordinate = vec![0_u64; length];
-    for matrix_basis in 0..CHALLENGE_EXTENSION_DEGREE {
-        for (slot, element) in matrix_coordinate.iter_mut().zip(matrix_polynomial.iter()) {
-            *slot = element[matrix_basis];
-        }
-        let mut matrix_basis_element = ChallengeExtensionTower::zero();
-        matrix_basis_element[matrix_basis] = 1;
-        for vector_basis in 0..CHALLENGE_EXTENSION_DEGREE {
-            for (slot, element) in vector_coordinate.iter_mut().zip(vector.iter()) {
-                *slot = element[vector_basis];
-            }
-            let transposed =
-                negacyclic_transpose_product(&matrix_coordinate, &vector_coordinate, modulus)?;
-            let mut vector_basis_element = ChallengeExtensionTower::zero();
-            vector_basis_element[vector_basis] = 1;
-            let basis_product = tower.mul(&matrix_basis_element, &vector_basis_element);
-            for (target, value) in result.iter_mut().zip(transposed.iter()) {
-                *target = tower.add(target, &tower.scale_base(&basis_product, *value));
-            }
-        }
-    }
-
-    Ok(result)
 }
 
 // Split a logical length-N public vector into trace halves and extend each.

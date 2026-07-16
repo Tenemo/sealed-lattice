@@ -36,6 +36,7 @@ const createFakeSession = (
         description: VerifiedTranscriptObjectDescription;
         object: VerifiedTranscriptObject;
     }>[],
+    input: Readonly<{ closeFailures?: readonly Error[] }> = {},
 ): FakeSession => {
     const descriptions = new WeakMap<
         object,
@@ -47,7 +48,12 @@ const createFakeSession = (
         cachedCarriers.set(entry.object, entry.cachedCarrier);
     }
     let state: 'active' | 'closed' = 'active';
+    const closeFailures = [...(input.closeFailures ?? [])];
     const close = vi.fn(() => {
+        const closeFailure = closeFailures.shift();
+        if (closeFailure !== undefined) {
+            throw closeFailure;
+        }
         state = 'closed';
     });
     const verifyUnorderedCarriers = vi.fn();
@@ -370,6 +376,35 @@ describe('canonical board runtime', () => {
         expect(ownedRuntime.copyContextInput().expectedSuiteIdentifier).toEqual(
             runtimeInput().contextInput.expectedSuiteIdentifier,
         );
+    });
+
+    it('keeps claimed ownership retryable after verifier-session close failures', () => {
+        const firstCloseFailure = new Error(
+            'Injected first verifier-session close failure.',
+        );
+        const secondCloseFailure = new Error(
+            'Injected second verifier-session close failure.',
+        );
+        const fake = createFakeSession([], {
+            closeFailures: [firstCloseFailure, secondCloseFailure],
+        });
+        openCanonicalBoardVerifierSessionMock.mockReturnValue({
+            isValid: true,
+            value: fake.session,
+        });
+        const retainedRuntime = requireValid(
+            openCanonicalBoardRuntime(runtimeInput()),
+        );
+        const ownedRuntime = retainedRuntime.claimExclusiveOwner();
+
+        expect(() => ownedRuntime.close()).toThrow(firstCloseFailure);
+        expect(ownedRuntime.state()).toBe('active');
+        expect(() => ownedRuntime.close()).toThrow(secondCloseFailure);
+        expect(ownedRuntime.state()).toBe('active');
+        expect(() => ownedRuntime.close()).not.toThrow();
+        expect(fake.close).toHaveBeenCalledTimes(3);
+        expect(ownedRuntime.state()).toBe('closed');
+        expect(() => retainedRuntime.copyContextInput()).toThrowError(/stale/u);
     });
 
     it('forwards a verifier-session refusal without minting a runtime', () => {

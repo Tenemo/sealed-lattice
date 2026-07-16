@@ -163,6 +163,7 @@ export type BrowserFoundationOperationOwner = Pick<
                 durableBinding: BrowserFoundationDurableStateBindingHandle;
             },
         ): Promise<Uint8Array>;
+        retire(): Promise<void>;
         releaseFoundationStateReservationIntent(
             intent: BrowserFoundationStateReservationIntentHandle,
         ): Promise<void>;

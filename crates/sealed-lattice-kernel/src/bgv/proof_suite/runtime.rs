@@ -14,12 +14,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use zeroize::Zeroizing;
 
 use crate::foundation::{
-    BrowserWorkerAuthenticatedStorageHeadSource, BrowserWorkerAuthenticatedStorageTransitionSource,
-    CanonicalStreamDomain, CanonicalStreamReadbackVerifier, CanonicalStreamVerifier,
-    CanonicalStreamWriter, FOUNDATION_PROFILE, Hash512, LocalStorageBinding,
-    PreparedActionProofAttemptSource, PrivateRandomCursor, ProofApplicationBinding,
-    ProofApplicationSlotCeilings, RefusalReason, SelectedSuiteCapability, StreamDescriptor,
-    VerifiedBoardApplicationSource, VerifiedCanonicalStreamSummary,
+    AuthenticatedCheckpointContinuationSource, BrowserWorkerAuthenticatedStorageHeadSource,
+    BrowserWorkerAuthenticatedStorageTransitionSource, CanonicalStreamDomain,
+    CanonicalStreamReadbackVerifier, CanonicalStreamVerifier, CanonicalStreamWriter,
+    FOUNDATION_PROFILE, Hash512, LocalStorageBinding, PreparedActionProofAttemptSource,
+    PrivateRandomCursor, ProofApplicationBinding, ProofApplicationSlotCeilings, RefusalReason,
+    SelectedSuiteCapability, StreamDescriptor, VerifiedBoardApplicationSource,
+    VerifiedCanonicalStreamSummary,
 };
 use crate::hashing::hash_framed_parts_512;
 
@@ -88,6 +89,57 @@ pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH: u32 = 4
 /// At most two authenticated input chunks may be resident around an
 /// incremental decoder call.
 pub(crate) const MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS: usize = 2;
+const MAXIMUM_COMMON_PROOF_REGISTRY_ENTRY_COUNT: usize = 64;
+const MAXIMUM_COMMON_PROOF_HEAVY_OPERATION_COUNT: usize = 1;
+
+pub(crate) fn common_proof_registry_entry_count(
+    entry_counts: &[usize],
+) -> Result<usize, CommonProofRuntimeError> {
+    entry_counts
+        .iter()
+        .try_fold(0_usize, |total, count| total.checked_add(*count))
+        .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)
+}
+
+pub(crate) fn require_common_proof_registry_entry_capacity(
+    entry_counts: &[usize],
+) -> Result<(), CommonProofRuntimeError> {
+    if common_proof_registry_entry_count(entry_counts)? >= MAXIMUM_COMMON_PROOF_REGISTRY_ENTRY_COUNT
+    {
+        return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+    }
+    Ok(())
+}
+
+pub(crate) fn require_common_proof_worker_process_admission_capacity(
+    entry_counts: &[usize],
+    heavy_operation_counts: &[usize],
+    admits_heavy_operation: bool,
+) -> Result<(), CommonProofRuntimeError> {
+    let admitted_entry_count = common_proof_registry_entry_count(entry_counts)?
+        .checked_add(1)
+        .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+    let admitted_heavy_operation_count = common_proof_registry_entry_count(heavy_operation_counts)?
+        .checked_add(usize::from(admits_heavy_operation))
+        .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+    require_common_proof_worker_process_ownership_limits(
+        &[admitted_entry_count],
+        &[admitted_heavy_operation_count],
+    )
+}
+
+pub(crate) fn require_common_proof_worker_process_ownership_limits(
+    entry_counts: &[usize],
+    heavy_operation_counts: &[usize],
+) -> Result<(), CommonProofRuntimeError> {
+    if common_proof_registry_entry_count(entry_counts)? > MAXIMUM_COMMON_PROOF_REGISTRY_ENTRY_COUNT
+        || common_proof_registry_entry_count(heavy_operation_counts)?
+            > MAXIMUM_COMMON_PROOF_HEAVY_OPERATION_COUNT
+    {
+        return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CommonProofRuntimeError {
@@ -444,6 +496,12 @@ pub(crate) struct PreparedCommonProofVerification {
     verifier: CommonProofVerificationStateMachine,
     verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
     limits: CommonProofRuntimeLimits,
+}
+
+impl PreparedCommonProofVerification {
+    pub(crate) fn verification_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.verification_binding.binding_hash()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1064,6 +1122,33 @@ pub(crate) struct PreparedCommonProofGeneration {
 }
 
 impl PreparedCommonProofGeneration {
+    pub(crate) fn runtime_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.binding.binding_hash()
+    }
+
+    pub(crate) fn verification_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.binding.verification_binding.binding_hash()
+    }
+
+    pub(crate) const fn proof_attempt_lineage_identifier(&self) -> [u8; 32] {
+        self.binding.attempt_identifier
+    }
+
+    pub(crate) const fn checkpoint_lineage_identifier(&self) -> [u8; 32] {
+        self.binding.checkpoint_lineage_identifier
+    }
+
+    pub(crate) const fn checkpoint_schedule_digest(&self) -> Hash512 {
+        self.binding.checkpoint_schedule_digest
+    }
+
+    pub(crate) fn matches_authenticated_checkpoint(
+        &self,
+        checkpoint: &AuthenticatedCommonProofGenerationCheckpoint,
+    ) -> bool {
+        checkpoint.state.matches_binding(self.binding)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_exact_family_sources(
         attempt_source: PreparedActionProofAttemptSource,
@@ -1221,6 +1306,44 @@ struct CommonProofGenerationCheckpointState {
     position: [u8; 16],
     committed_state_digest: [u8; HASH_BYTE_LENGTH],
     cursor_list_digest: [u8; HASH_BYTE_LENGTH],
+}
+
+/// Canonically decoded continuation state received only after browser-owned
+/// checkpoint custody has authenticated the encrypted record and its exact
+/// boundary. It remains process-local and cannot be serialized as authority.
+pub(crate) struct AuthenticatedCommonProofGenerationCheckpoint {
+    state: CommonProofGenerationCheckpointState,
+}
+
+impl AuthenticatedCommonProofGenerationCheckpoint {
+    pub(crate) fn decode(
+        authenticated_checkpoint_state: &[u8],
+    ) -> Result<Self, CommonProofRuntimeError> {
+        Ok(Self {
+            state: CommonProofGenerationCheckpointState::decode(authenticated_checkpoint_state)?,
+        })
+    }
+
+    pub(crate) const fn stable_attempt_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.state.stable_attempt_binding_hash
+    }
+
+    pub(crate) const fn checkpoint_lineage_identifier(&self) -> [u8; 32] {
+        self.state.checkpoint_lineage_identifier
+    }
+
+    pub(crate) const fn checkpoint_schedule_digest(&self) -> Hash512 {
+        Hash512::from_bytes(self.state.checkpoint_schedule_digest)
+    }
+
+    pub(crate) const fn continuation_source(&self) -> AuthenticatedCheckpointContinuationSource {
+        AuthenticatedCheckpointContinuationSource::from_authenticated_common_proof_checkpoint(
+            self.state.checkpoint_lineage_identifier,
+            Hash512::from_bytes(self.state.checkpoint_schedule_digest),
+            self.state.next_event_index,
+            Hash512::from_bytes(self.state.cumulative_event_digest),
+        )
+    }
 }
 
 impl CommonProofGenerationCheckpointState {
@@ -1927,10 +2050,43 @@ impl Default for CommonProofUpstreamInputRegistry {
 }
 
 impl CommonProofUpstreamInputRegistry {
+    pub(crate) fn entry_count(&self) -> Result<usize, CommonProofRuntimeError> {
+        common_proof_registry_entry_count(&[
+            self.suites.len(),
+            self.applications.len(),
+            self.preverification_application_sources.len(),
+            self.statement_trees.len(),
+            self.evaluator_roots.len(),
+            self.verified_column_evaluators.len(),
+        ])
+    }
+
+    /// Counts proof attempts, not the tree, root, and evaluator handles owned
+    /// by the same application. Those supporting handles are still included in
+    /// `entry_count` and cannot outlive the worker-process ownership ceiling.
+    pub(crate) fn heavy_operation_count(&self) -> Result<usize, CommonProofRuntimeError> {
+        common_proof_registry_entry_count(&[
+            self.applications.len(),
+            self.preverification_application_sources.len(),
+        ])
+    }
+
+    pub(crate) fn require_entry_capacity(&self) -> Result<(), CommonProofRuntimeError> {
+        require_common_proof_registry_entry_capacity(&[
+            self.suites.len(),
+            self.applications.len(),
+            self.preverification_application_sources.len(),
+            self.statement_trees.len(),
+            self.evaluator_roots.len(),
+            self.verified_column_evaluators.len(),
+        ])
+    }
+
     pub(crate) fn install_suite(
         &mut self,
         capability: SelectedSuiteCapability,
     ) -> Result<CommonProofSelectedSuiteCapabilityHandle, CommonProofRuntimeError> {
+        self.require_entry_capacity()?;
         let handle = take_nonrepeating_handle(&mut self.next_suite_handle)?;
         self.suites
             .insert(handle, CommonProofSelectedSuiteEntry { capability });
@@ -2110,6 +2266,7 @@ impl CommonProofUpstreamInputRegistry {
         self.applications
             .get(&application_handle.0)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        self.require_entry_capacity()?;
         let handle = take_nonrepeating_handle(&mut self.next_statement_tree_handle)?;
         self.statement_trees.insert(
             handle,
@@ -2129,6 +2286,7 @@ impl CommonProofUpstreamInputRegistry {
         self.applications
             .get(&application_handle.0)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        self.require_entry_capacity()?;
         let handle = take_nonrepeating_handle(&mut self.next_evaluator_root_handle)?;
         self.evaluator_roots.insert(
             handle,
@@ -2157,6 +2315,7 @@ impl CommonProofUpstreamInputRegistry {
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
+        self.require_entry_capacity()?;
         let handle = take_nonrepeating_handle(&mut self.next_verified_column_evaluator_handle)?;
         self.verified_column_evaluators.insert(
             handle,
@@ -2348,6 +2507,7 @@ impl CommonProofUpstreamInputRegistry {
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
+        self.require_entry_capacity()?;
         let mut statement_bytes = Vec::new();
         statement_bytes
             .try_reserve_exact(canonical_application_statement_bytes.len())
@@ -2819,14 +2979,60 @@ impl Default for CommonProofRuntimeRegistry {
 }
 
 impl CommonProofRuntimeRegistry {
+    pub(crate) fn entry_count(&self) -> Result<usize, CommonProofRuntimeError> {
+        common_proof_registry_entry_count(&[
+            self.operations.len(),
+            self.generation_operations.len(),
+            self.verified_capabilities.len(),
+            self.generated_capabilities.len(),
+            self.authenticated_ledger_heads.len(),
+            self.authenticated_ledger_transitions.len(),
+            self.pending_authorizations.len(),
+        ])
+    }
+
+    pub(crate) fn heavy_operation_count(&self) -> Result<usize, CommonProofRuntimeError> {
+        common_proof_registry_entry_count(&[
+            self.operations.len(),
+            self.generation_operations.len(),
+        ])
+    }
+
+    pub(crate) fn require_entry_capacity(&self) -> Result<(), CommonProofRuntimeError> {
+        require_common_proof_registry_entry_capacity(&[
+            self.operations.len(),
+            self.generation_operations.len(),
+            self.verified_capabilities.len(),
+            self.generated_capabilities.len(),
+            self.authenticated_ledger_heads.len(),
+            self.authenticated_ledger_transitions.len(),
+            self.pending_authorizations.len(),
+        ])
+    }
+
     pub(crate) fn begin_owned_generation(
         &mut self,
         prepared: PreparedCommonProofGeneration,
     ) -> Result<CommonProofGenerationOperationHandle, CommonProofGenerationWorkerError> {
+        let handle = self.preissue_generation_operation_handle()?;
+        self.begin_owned_generation_with_handle(prepared, handle)
+    }
+
+    pub(crate) fn preissue_generation_operation_handle(
+        &mut self,
+    ) -> Result<CommonProofGenerationOperationHandle, CommonProofRuntimeError> {
+        self.require_entry_capacity()?;
+        Ok(CommonProofGenerationOperationHandle(
+            take_nonrepeating_handle(&mut self.next_generation_operation_handle)?,
+        ))
+    }
+
+    pub(crate) fn begin_owned_generation_with_handle(
+        &mut self,
+        prepared: PreparedCommonProofGeneration,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<CommonProofGenerationOperationHandle, CommonProofGenerationWorkerError> {
         let worker = CommonProofGenerationWorker::new(prepared)?;
-        let handle = CommonProofGenerationOperationHandle(take_nonrepeating_handle(
-            &mut self.next_generation_operation_handle,
-        )?);
         self.generation_operations
             .insert(handle, CommonProofGenerationOperationEntry { worker });
         Ok(handle)
@@ -2837,10 +3043,17 @@ impl CommonProofRuntimeRegistry {
         prepared: PreparedCommonProofGeneration,
         authenticated_checkpoint_state: &[u8],
     ) -> Result<CommonProofGenerationOperationHandle, CommonProofGenerationWorkerError> {
+        let handle = self.preissue_generation_operation_handle()?;
+        self.resume_owned_generation_with_handle(prepared, authenticated_checkpoint_state, handle)
+    }
+
+    pub(crate) fn resume_owned_generation_with_handle(
+        &mut self,
+        prepared: PreparedCommonProofGeneration,
+        authenticated_checkpoint_state: &[u8],
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<CommonProofGenerationOperationHandle, CommonProofGenerationWorkerError> {
         let worker = CommonProofGenerationWorker::resume(prepared, authenticated_checkpoint_state)?;
-        let handle = CommonProofGenerationOperationHandle(take_nonrepeating_handle(
-            &mut self.next_generation_operation_handle,
-        )?);
         self.generation_operations
             .insert(handle, CommonProofGenerationOperationEntry { worker });
         Ok(handle)
@@ -3062,13 +3275,16 @@ impl CommonProofRuntimeRegistry {
         &mut self,
         handle: CommonProofGenerationOperationHandle,
     ) -> Result<GeneratedCommonProofCapabilityHandle, CommonProofGenerationWorkerError> {
+        let capability_identifier = take_replacement_handle_before_consuming_source(
+            &self.generation_operations,
+            &handle,
+            &mut self.next_generated_capability_handle,
+        )?;
         let operation = self
             .generation_operations
             .remove(&handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
         let proof = operation.worker.finish()?;
-        let capability_identifier =
-            take_nonrepeating_handle(&mut self.next_generated_capability_handle)?;
         self.generated_capabilities.insert(
             GeneratedCommonProofCapabilityHandle(capability_identifier),
             GeneratedCommonProofCapabilityEntry { proof },
@@ -3090,10 +3306,25 @@ impl CommonProofRuntimeRegistry {
         &mut self,
         prepared: PreparedCommonProofVerification,
     ) -> Result<CommonProofVerificationOperationHandle, CommonProofVerificationWorkerError> {
+        let handle = self.preissue_verification_operation_handle()?;
+        self.begin_owned_verification_with_handle(prepared, handle)
+    }
+
+    pub(crate) fn preissue_verification_operation_handle(
+        &mut self,
+    ) -> Result<CommonProofVerificationOperationHandle, CommonProofRuntimeError> {
+        self.require_entry_capacity()?;
+        Ok(CommonProofVerificationOperationHandle(
+            take_nonrepeating_handle(&mut self.next_operation_handle)?,
+        ))
+    }
+
+    pub(crate) fn begin_owned_verification_with_handle(
+        &mut self,
+        prepared: PreparedCommonProofVerification,
+        handle: CommonProofVerificationOperationHandle,
+    ) -> Result<CommonProofVerificationOperationHandle, CommonProofVerificationWorkerError> {
         let worker = CommonProofVerificationWorker::new(prepared)?;
-        let handle = CommonProofVerificationOperationHandle(take_nonrepeating_handle(
-            &mut self.next_operation_handle,
-        )?);
         self.operations.insert(
             handle,
             CommonProofOperationEntry {
@@ -3116,6 +3347,7 @@ impl CommonProofRuntimeRegistry {
         if binding.relation_plan_hash != relation_plan.relation_plan_hash() {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
+        self.require_entry_capacity()?;
         let handle = CommonProofVerificationOperationHandle(take_nonrepeating_handle(
             &mut self.next_operation_handle,
         )?);
@@ -3214,6 +3446,11 @@ impl CommonProofRuntimeRegistry {
         &mut self,
         handle: CommonProofVerificationOperationHandle,
     ) -> Result<VerifiedCommonProofCapabilityHandle, CommonProofVerificationWorkerError> {
+        let capability_identifier = take_replacement_handle_before_consuming_source(
+            &self.operations,
+            &handle,
+            &mut self.next_verified_capability_handle,
+        )?;
         let worker = {
             let operation = self
                 .operations
@@ -3234,7 +3471,13 @@ impl CommonProofRuntimeRegistry {
                 return Err(error);
             }
         };
-        match self.register_verified_proof(handle, &relation_plan, proof, verified_stream) {
+        match self.register_verified_proof_with_identifier(
+            handle,
+            &relation_plan,
+            proof,
+            verified_stream,
+            capability_identifier,
+        ) {
             Ok(capability_handle) => Ok(capability_handle),
             Err(error) => {
                 self.operations.remove(&handle);
@@ -3295,6 +3538,28 @@ impl CommonProofRuntimeRegistry {
         proof: VerifiedCommonProof,
         verified_stream: VerifiedCanonicalStreamSummary,
     ) -> Result<VerifiedCommonProofCapabilityHandle, CommonProofRuntimeError> {
+        let capability_identifier = take_replacement_handle_before_consuming_source(
+            &self.operations,
+            &handle,
+            &mut self.next_verified_capability_handle,
+        )?;
+        self.register_verified_proof_with_identifier(
+            handle,
+            relation_plan,
+            proof,
+            verified_stream,
+            capability_identifier,
+        )
+    }
+
+    fn register_verified_proof_with_identifier(
+        &mut self,
+        handle: CommonProofVerificationOperationHandle,
+        relation_plan: &CommonProofRelationPlanCapability,
+        proof: VerifiedCommonProof,
+        verified_stream: VerifiedCanonicalStreamSummary,
+        capability_identifier: u32,
+    ) -> Result<VerifiedCommonProofCapabilityHandle, CommonProofRuntimeError> {
         let operation = self.active_operation(handle)?;
         let proof_application = operation.binding.proof_application;
         if operation.cancellation_requested {
@@ -3320,8 +3585,6 @@ impl CommonProofRuntimeRegistry {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
         let binding = operation.binding;
-        let capability_identifier =
-            take_nonrepeating_handle(&mut self.next_verified_capability_handle)?;
         self.operations.remove(&handle);
         self.verified_capabilities.insert(
             VerifiedCommonProofCapabilityHandle(capability_identifier),
@@ -3374,6 +3637,7 @@ impl CommonProofRuntimeRegistry {
         {
             return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
         }
+        self.require_entry_capacity()?;
         let handle = CommonProofAuthenticatedLedgerHeadCapabilityHandle(take_nonrepeating_handle(
             &mut self.next_authenticated_ledger_head_handle,
         )?);
@@ -3395,19 +3659,34 @@ impl CommonProofRuntimeRegistry {
         terminal_capability_handle: &VerifiedCommonProofCapabilityHandle,
         source: &BrowserWorkerAuthenticatedStorageHeadSource,
     ) -> Result<PreparedCommonProofAuthorization, CommonProofRuntimeError> {
-        let predecessor_head_handle =
-            self.retain_authenticated_ledger_head(terminal_capability_handle, source)?;
-        match self.prepare_verified_proof_application(
-            terminal_capability_handle,
-            &predecessor_head_handle,
-        ) {
-            Ok(prepared) => Ok(prepared),
-            Err(error) => {
-                self.authenticated_ledger_heads
-                    .remove(&predecessor_head_handle);
-                Err(error)
-            }
+        let verified_capability = self
+            .verified_capabilities
+            .get(terminal_capability_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        let predecessor_authenticated_storage_head =
+            CommonProofAuthenticatedLedgerHead::from_browser_worker_source(source);
+        if !authenticated_head_matches_binding(
+            predecessor_authenticated_storage_head,
+            verified_capability.binding,
+        ) || self
+            .authenticated_ledger_heads
+            .values()
+            .any(|entry| entry.terminal_capability_handle == terminal_capability_handle.0)
+        {
+            return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
         }
+        let pending_identifier =
+            take_nonrepeating_handle(&mut self.next_pending_authorization_handle)?;
+        let entry = self
+            .verified_capabilities
+            .remove(terminal_capability_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        Ok(self.retain_pending_authorization(
+            pending_identifier,
+            VerifiedCommonProofCapabilityHandle(terminal_capability_handle.0),
+            entry,
+            predecessor_authenticated_storage_head,
+        ))
     }
 
     /// Moves one terminal verifier capability and its authenticated predecessor
@@ -3439,6 +3718,21 @@ impl CommonProofRuntimeRegistry {
             .remove(predecessor_head_handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
             .authenticated_head;
+        Ok(self.retain_pending_authorization(
+            pending_identifier,
+            original_capability_handle,
+            entry,
+            predecessor_authenticated_storage_head,
+        ))
+    }
+
+    fn retain_pending_authorization(
+        &mut self,
+        pending_identifier: u32,
+        original_capability_handle: VerifiedCommonProofCapabilityHandle,
+        entry: VerifiedCommonProofCapabilityEntry,
+        predecessor_authenticated_storage_head: CommonProofAuthenticatedLedgerHead,
+    ) -> PreparedCommonProofAuthorization {
         let durable_authorization_frame = durable_authorization_frame(&entry);
         let durable_authorization_frame_digest =
             durable_authorization_frame_digest(durable_authorization_frame.as_slice());
@@ -3465,7 +3759,7 @@ impl CommonProofRuntimeRegistry {
                 verified_capability: entry,
             },
         );
-        Ok(prepared)
+        prepared
     }
 
     /// Mints one exact transition capability from a freshly authenticated
@@ -3491,6 +3785,7 @@ impl CommonProofRuntimeRegistry {
         {
             return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
         }
+        self.require_entry_capacity()?;
         let handle = CommonProofAuthenticatedLedgerTransitionCapabilityHandle(
             take_nonrepeating_handle(&mut self.next_authenticated_ledger_transition_handle)?,
         );
@@ -3511,16 +3806,23 @@ impl CommonProofRuntimeRegistry {
         pending_handle: &PendingCommonProofAuthorizationHandle,
         source: &BrowserWorkerAuthenticatedStorageTransitionSource,
     ) -> Result<(), CommonProofRuntimeError> {
-        let transition_handle =
-            self.retain_authenticated_ledger_transition(pending_handle, source)?;
-        match self.confirm_verified_proof_application(pending_handle, &transition_handle) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                self.authenticated_ledger_transitions
-                    .remove(&transition_handle);
-                Err(error)
-            }
+        let pending = self
+            .pending_authorizations
+            .get(pending_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        if !authenticated_transition_source_is_valid(
+            pending.predecessor_authenticated_storage_head,
+            pending.durable_authorization_frame_digest,
+            source,
+        ) || self
+            .authenticated_ledger_transitions
+            .values()
+            .any(|entry| entry.pending_authorization_handle == pending_handle.0)
+        {
+            return Err(CommonProofRuntimeError::AuthenticatedStorageHeadMismatch);
         }
+        self.pending_authorizations.remove(pending_handle);
+        Ok(())
     }
 
     /// Consumes retained proof authority only after an exact transition
@@ -3795,6 +4097,17 @@ fn take_nonrepeating_handle(next_handle: &mut u32) -> Result<u32, CommonProofRun
     let handle = *next_handle;
     *next_handle = next_handle.checked_add(1).unwrap_or(0);
     Ok(handle)
+}
+
+fn take_replacement_handle_before_consuming_source<SourceHandle: Ord, SourceEntry>(
+    source_entries: &BTreeMap<SourceHandle, SourceEntry>,
+    source_handle: &SourceHandle,
+    next_destination_handle: &mut u32,
+) -> Result<u32, CommonProofRuntimeError> {
+    if !source_entries.contains_key(source_handle) {
+        return Err(CommonProofRuntimeError::UnknownOrStaleHandle);
+    }
+    take_nonrepeating_handle(next_destination_handle)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4464,6 +4777,158 @@ mod tests {
             MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
         )
         .expect("the fixed worker limits are valid")
+    }
+
+    fn registry_test_verification_binding() -> CommonProofVerificationBinding {
+        let proof_application = CommonProofApplicationBinding::new(
+            [0x11; HASH_BYTE_LENGTH],
+            [0x12; HASH_BYTE_LENGTH],
+            1,
+            [0x13; HASH_BYTE_LENGTH],
+            CanonicalStreamDomain::BallotValidityProof,
+            [0x14; HASH_BYTE_LENGTH],
+            1,
+            1,
+        )
+        .expect("the registry test proof application is bounded");
+        CommonProofVerificationBinding::new(
+            [0x21; HASH_BYTE_LENGTH],
+            [0x22; HASH_BYTE_LENGTH],
+            [0x23; HASH_BYTE_LENGTH],
+            [0x24; HASH_BYTE_LENGTH],
+            proof_application,
+            [0x25; HASH_BYTE_LENGTH],
+        )
+    }
+
+    #[test]
+    fn aggregate_registry_capacity_counts_every_entry_family_and_retries_after_release() {
+        assert_eq!(
+            require_common_proof_registry_entry_capacity(&[32, 32]),
+            Err(CommonProofRuntimeError::AllocationLimitExceeded),
+        );
+        assert_eq!(
+            require_common_proof_registry_entry_capacity(&[usize::MAX, 1]),
+            Err(CommonProofRuntimeError::AllocationLimitExceeded),
+        );
+        require_common_proof_registry_entry_capacity(&[32, 31])
+            .expect("releasing one aggregate slot permits an exact retry");
+
+        let mut registry = CommonProofRuntimeRegistry::default();
+        let verification_binding = registry_test_verification_binding();
+        for identifier in 1..=32 {
+            registry.operations.insert(
+                CommonProofVerificationOperationHandle(identifier),
+                CommonProofOperationEntry {
+                    binding: verification_binding,
+                    limits: limits(),
+                    cancellation_requested: false,
+                    worker: None,
+                },
+            );
+            registry.authenticated_ledger_transitions.insert(
+                CommonProofAuthenticatedLedgerTransitionCapabilityHandle(identifier),
+                CommonProofAuthenticatedLedgerTransitionCapabilityEntry {
+                    pending_authorization_handle: identifier,
+                },
+            );
+        }
+        assert_eq!(
+            registry.require_entry_capacity(),
+            Err(CommonProofRuntimeError::AllocationLimitExceeded),
+        );
+        registry.authenticated_ledger_transitions.remove(
+            &CommonProofAuthenticatedLedgerTransitionCapabilityHandle(32),
+        );
+        registry
+            .require_entry_capacity()
+            .expect("the runtime registry retries after one entry family releases a slot");
+    }
+
+    #[test]
+    fn worker_process_refuses_the_sixty_fifth_mixed_registry_admission() {
+        let mut runtime_registry = CommonProofRuntimeRegistry::default();
+        let mut upstream_registry = CommonProofUpstreamInputRegistry::default();
+        for identifier in 1..=21 {
+            runtime_registry.authenticated_ledger_transitions.insert(
+                CommonProofAuthenticatedLedgerTransitionCapabilityHandle(identifier),
+                CommonProofAuthenticatedLedgerTransitionCapabilityEntry {
+                    pending_authorization_handle: identifier,
+                },
+            );
+            upstream_registry.verified_column_evaluators.insert(
+                identifier,
+                CommonProofVerifiedColumnEvaluatorEntry {
+                    application_handle: identifier,
+                    evaluator: Box::new(RefusingVerifiedColumnEvaluator),
+                },
+            );
+        }
+        let runtime_entry_count = runtime_registry
+            .entry_count()
+            .expect("the runtime fixture entry count is bounded");
+        let upstream_entry_count = upstream_registry
+            .entry_count()
+            .expect("the upstream fixture entry count is bounded");
+
+        require_common_proof_worker_process_ownership_limits(
+            &[22, runtime_entry_count, upstream_entry_count],
+            &[0, 0, 0],
+        )
+        .expect("an exact 64-owner state remains valid for a neutral transfer");
+        assert_eq!(
+            require_common_proof_worker_process_admission_capacity(
+                &[22, runtime_entry_count, upstream_entry_count],
+                &[0, 0, 0],
+                false,
+            ),
+            Err(CommonProofRuntimeError::AllocationLimitExceeded),
+            "the next owner is refused across FFI, runtime, and upstream categories",
+        );
+        require_common_proof_worker_process_admission_capacity(
+            &[21, runtime_entry_count, upstream_entry_count],
+            &[0, 0, 0],
+            false,
+        )
+        .expect("releasing any one mixed-category owner permits the exact retry");
+    }
+
+    #[test]
+    fn worker_process_allows_only_one_heavy_proof_attempt() {
+        require_common_proof_worker_process_admission_capacity(&[0, 0, 0], &[0, 0, 0], true)
+            .expect("the first heavy proof attempt is admitted");
+        assert_eq!(
+            require_common_proof_worker_process_admission_capacity(&[1, 0, 0], &[1, 0, 0], true,),
+            Err(CommonProofRuntimeError::AllocationLimitExceeded),
+        );
+        require_common_proof_worker_process_admission_capacity(&[1, 0, 0], &[1, 0, 0], false)
+            .expect("lightweight ownership may coexist with the one heavy proof attempt");
+    }
+
+    #[test]
+    fn destination_handle_exhaustion_preserves_the_live_source_for_retry() {
+        let source_entries = BTreeMap::from([(7_u32, ())]);
+        let mut exhausted_destination_handle = 0;
+        assert_eq!(
+            take_replacement_handle_before_consuming_source(
+                &source_entries,
+                &7,
+                &mut exhausted_destination_handle,
+            ),
+            Err(CommonProofRuntimeError::AllocationLimitExceeded),
+        );
+        assert!(source_entries.contains_key(&7));
+
+        let mut retry_destination_handle = 19;
+        assert_eq!(
+            take_replacement_handle_before_consuming_source(
+                &source_entries,
+                &7,
+                &mut retry_destination_handle,
+            ),
+            Ok(19),
+        );
+        assert!(source_entries.contains_key(&7));
     }
 
     #[test]

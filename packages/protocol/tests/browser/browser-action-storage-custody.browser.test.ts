@@ -144,6 +144,58 @@ const openWorker = async (input: {
 }): Promise<BrowserFoundationStorageAuthority> =>
     await startOpeningWorker(input).opening;
 
+const runFoundationWitnessStorageBoundaryWorker = (
+    databaseName: string,
+): Promise<void> => {
+    const worker = new Worker(
+        new URL(
+            '../support/foundation-witness-storage-boundary-browser-worker.ts',
+            import.meta.url,
+        ),
+        { type: 'module' },
+    );
+    openedWorkers.add(worker);
+    databaseNames.add(databaseName);
+    return new Promise<void>((resolve, reject) => {
+        worker.addEventListener(
+            'error',
+            (event) => {
+                reject(
+                    event.error instanceof Error
+                        ? event.error
+                        : new Error(
+                              event.message ||
+                                  'The foundation witness boundary worker failed.',
+                          ),
+                );
+            },
+            { once: true },
+        );
+        worker.addEventListener(
+            'message',
+            (event: MessageEvent<unknown>) => {
+                const result = event.data as {
+                    error?: unknown;
+                    success?: unknown;
+                };
+                if (result.success === true) {
+                    resolve();
+                    return;
+                }
+                reject(
+                    new Error(
+                        typeof result.error === 'string'
+                            ? result.error
+                            : 'The foundation witness boundary worker returned a malformed failure.',
+                    ),
+                );
+            },
+            { once: true },
+        );
+        worker.postMessage({ databaseName });
+    });
+};
+
 const closeCustody = async (
     custody: BrowserActionStorageCustody,
 ): Promise<void> => {
@@ -227,6 +279,12 @@ afterEach(async () => {
 });
 
 describe('Browser action-storage custody worker channel', () => {
+    it('enforces the root-backed witness payload budget and retries after a sealed record is abandoned', async () => {
+        await expect(
+            runFoundationWitnessStorageBoundaryWorker(createDatabaseName()),
+        ).resolves.toBeUndefined();
+    }, 30_000);
+
     it('opens the composed operation owner from fresh and exact recovered storage after interruption', async () => {
         const databaseName = createDatabaseName();
         databaseNames.add(databaseName);

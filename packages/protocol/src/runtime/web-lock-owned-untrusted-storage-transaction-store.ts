@@ -1,4 +1,5 @@
 import { sha512 } from '@noble/hashes/sha2.js';
+import { foundationProfile } from '@sealed-lattice/types';
 
 import {
     openAuthenticatedCheckpointStoreWithProtection,
@@ -33,6 +34,8 @@ import {
     takePreparedBrowserFoundationInitializationForAuthenticatedCommit,
 } from './browser-foundation-initialization.js';
 import {
+    commonProofApplicationHandoffLogicalRecordKey,
+    commonProofApplicationHandoffMarkerRecordByteLength,
     deriveCommonProofAttemptLogicalRecordPrefix,
     openCommonProofBrowserCustody,
     type CommonProofBrowserCustody,
@@ -105,6 +108,13 @@ const commonProofOutputLogicalRecordKeyByteLength =
     commonProofAttemptLogicalRecordPrefixByteLength +
     BigInt(textEncoder.encode('canonical-output/').byteLength) +
     128n;
+const commonProofApplicationHandoffLogicalRecordKeyByteLength = BigInt(
+    textEncoder.encode(commonProofApplicationHandoffLogicalRecordKey)
+        .byteLength,
+);
+const commonProofApplicationHandoffStoredValueByteLength = BigInt(
+    commonProofApplicationHandoffMarkerRecordByteLength,
+);
 const commonProofExternalStoredValueByteLength =
     commonProofScratchByteLength +
     commonProofLiveObjectCountBigInt *
@@ -128,7 +138,9 @@ const commonProofMaximumAdditionalStoredValueByteLengthBigInt =
     commonProofExternalStoredValueByteLength +
     commonProofOutputStoredValueByteLength +
     commonProofIndexStoredValueByteLength +
-    commonProofMaximumStagedReplacementByteLength;
+    commonProofMaximumStagedReplacementByteLength +
+    commonProofApplicationHandoffStoredValueByteLength +
+    commonProofMaximumIndexValueByteLength;
 const commonProofMaximumAdditionalAuthenticatedRepairHeadPlaintextByteLengthBigInt =
     commonProofExternalMemoryRecordCountBigInt *
         (authenticatedRepairRecordFixedByteLength +
@@ -137,9 +149,12 @@ const commonProofMaximumAdditionalAuthenticatedRepairHeadPlaintextByteLengthBigI
     commonProofMaximumOutputChunkCount *
         (authenticatedRepairRecordFixedByteLength +
             commonProofOutputLogicalRecordKeyByteLength +
-            commonProofMaximumIndexValueByteLength);
+            commonProofMaximumIndexValueByteLength) +
+    authenticatedRepairRecordFixedByteLength +
+    commonProofApplicationHandoffLogicalRecordKeyByteLength +
+    commonProofMaximumIndexValueByteLength;
 const commonProofMaximumAdditionalOwnedRecordCountBigInt =
-    commonProofLogicalRecordCountBigInt * 2n + 1n;
+    (commonProofLogicalRecordCountBigInt + 1n) * 2n + 1n;
 const commonProofMaximumRecordStorageByteLengthBigInt =
     commonProofCanonicalOutputChunkByteLength +
     commonProofPublicRecordOverheadByteLength;
@@ -160,6 +175,7 @@ if (
     commonProofAttemptLogicalRecordPrefixByteLength !== 150n ||
     commonProofExternalLogicalRecordKeyByteLength !== 294n ||
     commonProofOutputLogicalRecordKeyByteLength !== 295n ||
+    commonProofApplicationHandoffLogicalRecordKeyByteLength !== 28n ||
     commonProofCapacityValues.some(
         (value) => value > BigInt(Number.MAX_SAFE_INTEGER),
     )
@@ -211,6 +227,13 @@ const runtimeRecordProtectedPlaintextMagic = Uint8Array.of(
     0x50,
 );
 const runtimeRecordProtectedPlaintextVersion = 1;
+const runtimeRecordProtectedPlaintextHeaderByteLength =
+    runtimeRecordProtectedPlaintextMagic.byteLength + 2 + 4;
+const foundationWitnessRuntimeRecordPlaintextReserveByteLength = 1_024;
+const foundationWitnessRuntimeRecordStorageReserveByteLength = 4_096;
+const foundationWitnessMaximumPayloadByteLength =
+    foundationProfile.streamChunkByteLength -
+    foundationWitnessRuntimeRecordPlaintextReserveByteLength;
 const foundationWitnessRuntimeRecordEnvelopeMagic = Uint8Array.of(
     0x53,
     0x4c,
@@ -360,6 +383,7 @@ export type WebLockOwnedBrowserActionStorageCustody = Readonly<{
         expectedSnapshot: BrowserDeviceWrappingSnapshot;
         untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
     }): Promise<UntrustedStorageRepairReport>;
+    retire(): Promise<void>;
     close(): Promise<void>;
     state(): WebLockOwnedStorageState;
 }>;
@@ -738,16 +762,14 @@ const encodeRuntimeRecordProtectedPlaintext = (input: {
     associatedData: Uint8Array;
     plaintext: Uint8Array;
 }): Uint8Array => {
-    const headerByteLength =
-        runtimeRecordProtectedPlaintextMagic.byteLength + 2 + 4;
     const encodedByteLength =
-        headerByteLength +
+        runtimeRecordProtectedPlaintextHeaderByteLength +
         input.associatedData.byteLength +
         input.plaintext.byteLength;
     if (
         !Number.isSafeInteger(encodedByteLength) ||
         input.associatedData.byteLength > 0xffff_ffff ||
-        encodedByteLength > 0xffff_ffff
+        encodedByteLength > foundationProfile.streamChunkByteLength
     ) {
         throw new WebLockOwnedStorageError(
             'OpenFailed',
@@ -767,10 +789,14 @@ const encodeRuntimeRecordProtectedPlaintext = (input: {
         input.associatedData.byteLength,
         true,
     );
-    encoded.set(input.associatedData, headerByteLength);
+    encoded.set(
+        input.associatedData,
+        runtimeRecordProtectedPlaintextHeaderByteLength,
+    );
     encoded.set(
         input.plaintext,
-        headerByteLength + input.associatedData.byteLength,
+        runtimeRecordProtectedPlaintextHeaderByteLength +
+            input.associatedData.byteLength,
     );
     return encoded;
 };
@@ -779,12 +805,15 @@ const openRuntimeRecordProtectedPlaintext = (input: {
     associatedData: Uint8Array;
     openedPlaintext: Uint8Array;
 }): Uint8Array => {
-    const headerByteLength =
-        runtimeRecordProtectedPlaintextMagic.byteLength + 2 + 4;
-    if (input.openedPlaintext.byteLength < headerByteLength) {
+    if (
+        input.openedPlaintext.byteLength <
+            runtimeRecordProtectedPlaintextHeaderByteLength ||
+        input.openedPlaintext.byteLength >
+            foundationProfile.streamChunkByteLength
+    ) {
         throw new WebLockOwnedStorageError(
             'OpenFailed',
-            'Root-backed runtime-record plaintext is truncated.',
+            'Root-backed runtime-record plaintext is outside its canonical length profile.',
         );
     }
     const view = new DataView(
@@ -796,7 +825,9 @@ const openRuntimeRecordProtectedPlaintext = (input: {
         runtimeRecordProtectedPlaintextMagic.byteLength + 2,
         true,
     );
-    const plaintextOffset = headerByteLength + associatedDataByteLength;
+    const plaintextOffset =
+        runtimeRecordProtectedPlaintextHeaderByteLength +
+        associatedDataByteLength;
     if (
         !bytesEqual(
             input.openedPlaintext.subarray(
@@ -811,7 +842,10 @@ const openRuntimeRecordProtectedPlaintext = (input: {
         ) !== runtimeRecordProtectedPlaintextVersion ||
         plaintextOffset > input.openedPlaintext.byteLength ||
         !bytesEqual(
-            input.openedPlaintext.subarray(headerByteLength, plaintextOffset),
+            input.openedPlaintext.subarray(
+                runtimeRecordProtectedPlaintextHeaderByteLength,
+                plaintextOffset,
+            ),
             input.associatedData,
         )
     ) {
@@ -1591,6 +1625,28 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
         let checkpointStoreOpeningAttempted = false;
         const runtimeRecordRepairProtectionSessionIdentifiers =
             new Set<string>();
+        let permanentRetirementPersisted = false;
+        let retirementPromise: Promise<void> | undefined;
+        // A failed retirement keeps this owner and its Web Lock live so the
+        // enclosing worker or authority can retry the idempotent tombstone
+        // transition. Permanent-failure cleanup must never close the owner
+        // until this promise has resolved successfully.
+        const retireCombinedOwner = (): Promise<void> => {
+            if (permanentRetirementPersisted) {
+                return Promise.resolve();
+            }
+            retirementPromise ??= custody
+                .retire()
+                .then(() => {
+                    permanentRetirementPersisted = true;
+                })
+                .finally(() => {
+                    if (!permanentRetirementPersisted) {
+                        retirementPromise = undefined;
+                    }
+                });
+            return retirementPromise;
+        };
         let closePromise: Promise<void> | undefined;
         const closeCombinedOwner = (): Promise<void> => {
             closePromise ??= (async () => {
@@ -1945,6 +2001,7 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                 foundationInitializationAttempted = true;
                 let actionRandomnessSessionIdentifier: string | undefined;
                 let committed = false;
+                let commitAttempted = false;
                 let preparedMaterial:
                     | ReturnType<
                           typeof takePreparedBrowserFoundationInitializationForAuthenticatedCommit
@@ -2090,6 +2147,7 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                             }),
                         );
                     }
+                    commitAttempted = true;
                     await transaction.commit();
                     committed = true;
                     for (const record of records) {
@@ -2198,26 +2256,45 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                             cleanupFailures.push(cleanupError);
                         }
                     }
-                    try {
-                        await closeCombinedOwner();
-                    } catch (cleanupError) {
-                        cleanupFailures.push(cleanupError);
+                    const permanentRetirementRequired =
+                        commitAttempted || committed;
+                    let durableRetirementCompleted =
+                        !permanentRetirementRequired;
+                    if (permanentRetirementRequired) {
+                        try {
+                            await retireCombinedOwner();
+                            durableRetirementCompleted = true;
+                        } catch (cleanupError) {
+                            cleanupFailures.push(cleanupError);
+                        }
+                    }
+                    if (durableRetirementCompleted) {
+                        try {
+                            await closeCombinedOwner();
+                        } catch (cleanupError) {
+                            cleanupFailures.push(cleanupError);
+                        }
                     }
                     if (cleanupFailures.length > 0) {
                         throw new WebLockOwnedStorageError(
                             'OpenFailed',
-                            committed
-                                ? 'Foundation initialization committed but exact authentication failed, and retirement also failed.'
-                                : 'Foundation initialization failed before authenticated completion, and retirement also failed.',
+                            permanentRetirementRequired
+                                ? 'Foundation initialization committed but exact authentication failed, and retirement or cleanup also failed.'
+                                : 'Foundation initialization failed before its commit boundary, and cleanup also failed.',
                             [error, ...cleanupFailures],
                         );
                     }
-                    throw normalizeError(
+                    if (permanentRetirementRequired) {
+                        throw normalizeError(
+                            error,
+                            'OpenFailed',
+                            'Foundation initialization crossed its commit boundary without exact authentication; the participant was retired.',
+                        );
+                    }
+                    throw new WebLockOwnedStorageError(
+                        'InvalidConfiguration',
+                        'Foundation initialization failed before its commit boundary; the uncommitted owner was closed.',
                         error,
-                        'OpenFailed',
-                        committed
-                            ? 'Foundation initialization committed but exact authentication failed; the owner was retired.'
-                            : 'Foundation initialization failed before authenticated completion; the owner was retired.',
                     );
                 } finally {
                     storedActionRandomnessRecord?.fill(0);
@@ -2466,15 +2543,24 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                             cleanupFailures.push(cleanupError);
                         }
                     }
+                    let durableRetirementCompleted = false;
                     try {
-                        await closeCombinedOwner();
+                        await retireCombinedOwner();
+                        durableRetirementCompleted = true;
                     } catch (cleanupError) {
                         cleanupFailures.push(cleanupError);
+                    }
+                    if (durableRetirementCompleted) {
+                        try {
+                            await closeCombinedOwner();
+                        } catch (cleanupError) {
+                            cleanupFailures.push(cleanupError);
+                        }
                     }
                     if (cleanupFailures.length > 0) {
                         throw new WebLockOwnedStorageError(
                             'OpenFailed',
-                            'Recovered foundation authentication failed and retirement also failed.',
+                            'Recovered foundation authentication failed and retirement or cleanup also failed.',
                             [error, ...cleanupFailures],
                         );
                     }
@@ -2508,6 +2594,32 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                         'A foundation witness role requires an exactly authenticated initialization batch.',
                     );
                 }
+                // The reserve covers the durable record header, canonical
+                // runtime associated data, Rust local-record envelope, and
+                // outer witness-coordinate frame. The exact plaintext is
+                // checked again before the root-bound WASM call.
+                const maximumConfiguredPayloadByteLength = Math.min(
+                    foundationWitnessMaximumPayloadByteLength,
+                    configuration.limits.maximumLeaseByteLength -
+                        foundationWitnessRuntimeRecordStorageReserveByteLength,
+                    configuration.limits.maximumTransactionByteLength -
+                        foundationWitnessRuntimeRecordStorageReserveByteLength,
+                    configuration.limits.maximumStoredValueByteLength -
+                        foundationWitnessRuntimeRecordStorageReserveByteLength,
+                );
+                if (
+                    maximumConfiguredPayloadByteLength <= 0 ||
+                    roleInput.durableStateLimits.maximumExactOutputByteLength >
+                        maximumConfiguredPayloadByteLength ||
+                    roleInput.durableStateLimits
+                        .maximumSignedVoteCarrierByteLength >
+                        maximumConfiguredPayloadByteLength
+                ) {
+                    throw new WebLockOwnedStorageError(
+                        'OpenFailed',
+                        'Foundation witness durable-record limits exceed the complete root-backed plaintext or transaction framing budget.',
+                    );
+                }
                 const durableStateProtection =
                     createFoundationWitnessRecordProtection(roleInput.record);
                 try {
@@ -2527,6 +2639,7 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                 }
             },
             custody,
+            retire: retireCombinedOwner,
             openCommonProofCustody: async (commonProofInput) => {
                 if (!authenticatedStoreActive) {
                     throw new WebLockOwnedStorageError(
@@ -2543,6 +2656,7 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                     await ownedStorage.store.reserveExclusiveCapacity({
                         initialLogicalRecordKeyPrefixes: [
                             attemptLogicalRecordPrefix,
+                            commonProofApplicationHandoffLogicalRecordKey,
                         ],
                         maximumAdditionalAuthenticatedRepairHeadPlaintextByteLength:
                             commonProofMaximumAdditionalAuthenticatedRepairHeadPlaintextByteLength,
@@ -2604,6 +2718,9 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                     sessionIdentifier,
                 );
                 let closed = false;
+                let runtimeRecordProtectionClosePromise:
+                    | Promise<void>
+                    | undefined;
                 const assertOpen = (): void => {
                     if (closed || ownedStorage.state() !== 'open') {
                         throw new WebLockOwnedStorageError(
@@ -2613,17 +2730,27 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                     }
                 };
                 const session: RuntimeRecordProtectionSession = Object.freeze({
-                    close: async () => {
+                    close: () => {
                         if (closed) {
-                            return;
+                            return Promise.resolve();
                         }
-                        closed = true;
-                        runtimeRecordRepairProtectionSessionIdentifiers.delete(
-                            sessionIdentifier,
-                        );
-                        await configuration.workerKernel.closeAuthenticatedRepairProtection(
-                            sessionIdentifier,
-                        );
+                        runtimeRecordProtectionClosePromise ??=
+                            configuration.workerKernel
+                                .closeAuthenticatedRepairProtection(
+                                    sessionIdentifier,
+                                )
+                                .then(() => {
+                                    closed = true;
+                                    runtimeRecordRepairProtectionSessionIdentifiers.delete(
+                                        sessionIdentifier,
+                                    );
+                                })
+                                .catch((error: unknown) => {
+                                    runtimeRecordProtectionClosePromise =
+                                        undefined;
+                                    throw error;
+                                });
+                        return runtimeRecordProtectionClosePromise;
                     },
                     openCanonicalEnvelope: async (recordInput) => {
                         assertOpen();
@@ -2765,19 +2892,29 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                                 ),
                         });
                     let sessionClosed = false;
+                    let sessionClosePromise: Promise<void> | undefined;
                     const session: RuntimeRecordProtectionSession =
                         Object.freeze({
-                            close: async () => {
+                            close: () => {
                                 if (sessionClosed) {
-                                    return;
+                                    return Promise.resolve();
                                 }
-                                sessionClosed = true;
-                                runtimeRecordRepairProtectionSessionIdentifiers.delete(
-                                    sessionIdentifier,
-                                );
-                                await configuration.workerKernel.closeAuthenticatedRepairProtection(
-                                    sessionIdentifier,
-                                );
+                                sessionClosePromise ??=
+                                    configuration.workerKernel
+                                        .closeAuthenticatedRepairProtection(
+                                            sessionIdentifier,
+                                        )
+                                        .then(() => {
+                                            sessionClosed = true;
+                                            runtimeRecordRepairProtectionSessionIdentifiers.delete(
+                                                sessionIdentifier,
+                                            );
+                                        })
+                                        .catch((error: unknown) => {
+                                            sessionClosePromise = undefined;
+                                            throw error;
+                                        });
+                                return sessionClosePromise;
                             },
                             openCanonicalEnvelope: async (recordInput) => {
                                 const openedPlaintext =
@@ -2978,6 +3115,32 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                             limits: configuration.limits,
                         });
                     authenticatedStoreActive = true;
+                    const interruptedApplicationHandoff =
+                        await ownedStorage.store.readAuthenticated({
+                            authenticate: ({ bytes }) => {
+                                if (
+                                    bytes.byteLength !==
+                                    Number(
+                                        commonProofApplicationHandoffStoredValueByteLength,
+                                    )
+                                ) {
+                                    throw new WebLockOwnedStorageError(
+                                        'OpenFailed',
+                                        'The authenticated common-proof application handoff marker is malformed.',
+                                    );
+                                }
+                            },
+                            logicalRecordKey:
+                                commonProofApplicationHandoffLogicalRecordKey,
+                        });
+                    if (interruptedApplicationHandoff !== undefined) {
+                        interruptedApplicationHandoff.fill(0);
+                        await retireCombinedOwner();
+                        throw new WebLockOwnedStorageError(
+                            'OpenFailed',
+                            'An interrupted common-proof application handoff permanently retired this browser participant.',
+                        );
+                    }
                     return repairReport;
                 } catch (error) {
                     if (
@@ -2988,7 +3151,7 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                         activationAttempted = false;
                         throw error;
                     }
-                    let earlyRepairCloseFailure: unknown;
+                    const cleanupFailures: unknown[] = [];
                     if (
                         repairProtectionSessionIdentifier === undefined &&
                         openedRepairProtection !== undefined
@@ -2998,23 +3161,39 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                                 openedRepairProtection.repairProtectionSessionIdentifier,
                             );
                         } catch (cleanupError) {
-                            earlyRepairCloseFailure = cleanupError;
+                            cleanupFailures.push(cleanupError);
                         }
                     }
-                    try {
-                        await closeCombinedOwner();
-                    } catch (cleanupError) {
-                        throw new WebLockOwnedStorageError(
-                            'OpenFailed',
-                            'Activating root-backed authenticated browser storage failed and retirement also failed.',
-                            [error, cleanupError],
-                        );
+                    const permanentRetirementRequired =
+                        rootActivated ||
+                        (error instanceof BrowserActionStorageCustodyError &&
+                            (error.code === 'RecordAuthenticationFailed' ||
+                                error.code === 'StorageFailure' ||
+                                error.code === 'Unavailable'));
+                    let durableRetirementCompleted =
+                        !permanentRetirementRequired;
+                    if (permanentRetirementRequired) {
+                        try {
+                            await retireCombinedOwner();
+                            durableRetirementCompleted = true;
+                        } catch (cleanupError) {
+                            cleanupFailures.push(cleanupError);
+                        }
                     }
-                    if (earlyRepairCloseFailure !== undefined) {
+                    if (durableRetirementCompleted) {
+                        try {
+                            await closeCombinedOwner();
+                        } catch (cleanupError) {
+                            cleanupFailures.push(cleanupError);
+                        }
+                    }
+                    if (cleanupFailures.length !== 0) {
                         throw new WebLockOwnedStorageError(
                             'OpenFailed',
-                            'Activating root-backed authenticated browser storage failed and early repair-session retirement also failed.',
-                            [error, earlyRepairCloseFailure],
+                            permanentRetirementRequired
+                                ? 'Activating root-backed authenticated browser storage failed and permanent retirement or cleanup also failed.'
+                                : 'Activating root-backed authenticated browser storage failed and cleanup also failed.',
+                            [error, ...cleanupFailures],
                         );
                     }
                     if (

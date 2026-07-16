@@ -12,6 +12,10 @@ import {
 
 import { createCanonicalCarrierSigningKeyPairFixtures } from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
 import {
+    commonProofApplicationHandoffLogicalRecordKey,
+    commonProofApplicationHandoffMarkerRecordByteLength,
+} from '#packages/protocol/src/runtime/common-proof-browser-custody';
+import {
     openDurableStateWitnessService,
     persistCommonProofApplicationAuthorization,
     type DurableStateWitnessService,
@@ -402,9 +406,10 @@ describe('durable state witness service', () => {
 
     it('persists one fixed common-proof authorization frame and rereads the exact authenticated bytes', async () => {
         const { adapter, service } = await openService();
-        const authorizationFrame = Uint8Array.from([
-            1, 3, 3, 7, 9, 2, 5, 8, 9, 7, 9, 3,
-        ]);
+        const authorizationFrame = Uint8Array.from(
+            { length: 746 },
+            (_, byteIndex) => (byteIndex * 149 + 31) & 0xff,
+        );
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x6d);
         const initialMutationCount = adapter.atomicMutationCount;
         let commitAttemptCount = 0;
@@ -434,6 +439,95 @@ describe('durable state witness service', () => {
         ).rejects.toMatchObject({ code: 'Conflict' });
         expect(duplicateCommitAttemptCount).toBe(0);
         expect(adapter.atomicMutationCount).toBe(initialMutationCount + 1);
+    });
+
+    it('atomically replaces the authenticated handoff marker with a durable application that survives service restart', async () => {
+        const { service, store } = await openService();
+        const markerRecordBytes = Uint8Array.from(
+            { length: commonProofApplicationHandoffMarkerRecordByteLength },
+            (_unused, byteIndex) => (byteIndex * 43 + 19) & 0xff,
+        );
+        const markerTransaction = await store.beginTransaction({
+            lifetimeMilliseconds: 10_000,
+        });
+        try {
+            const markerLease = await markerTransaction.issueWriteLease({
+                declaredByteLength: markerRecordBytes.byteLength,
+                expectedCurrentValue: null,
+                logicalRecordKey: commonProofApplicationHandoffLogicalRecordKey,
+            });
+            await markerLease.write(markerRecordBytes);
+            await markerLease.seal(({ bytes }) => {
+                expect(bytes).toEqual(markerRecordBytes);
+            });
+            await markerTransaction.commit();
+        } catch (error) {
+            await markerTransaction.closeAfterFailure();
+            throw error;
+        }
+
+        const authorizationFrame = new Uint8Array(746).fill(0x83);
+        const proofApplicationSlotHash = new Uint8Array(64).fill(0x47);
+        await expect(
+            persistCommonProofApplicationAuthorization(service, {
+                authorizationFrame,
+                handoff: {
+                    canonicalMarkerRecordBytes: markerRecordBytes,
+                    logicalRecordKey:
+                        commonProofApplicationHandoffLogicalRecordKey,
+                },
+                onCommitAttempt: () => undefined,
+                proofApplicationSlotHash,
+            }),
+        ).resolves.toEqual(authorizationFrame);
+        await expect(
+            store.readAuthenticated({
+                authenticate: () => undefined,
+                logicalRecordKey: commonProofApplicationHandoffLogicalRecordKey,
+            }),
+        ).resolves.toBeUndefined();
+        await service.close();
+
+        const reopenedService = openDurableStateWitnessService({
+            authorityContext: runtimeAuthorityContext({
+                actionContextHash: vector.actionContextHash,
+                ceremonyContextHash: vector.ceremonyContextHash,
+                suiteIdentifier: vector.suiteIdentifier,
+            }),
+            encryptionKey,
+            limits: serviceLimits,
+            store,
+        });
+        await expect(
+            persistCommonProofApplicationAuthorization(reopenedService, {
+                authorizationFrame,
+                onCommitAttempt: () => undefined,
+                proofApplicationSlotHash,
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+        await reopenedService.close();
+    });
+
+    it('refuses every noncanonical common-proof authorization-frame length before storage mutation', async () => {
+        for (const authorizationFrameByteLength of [0, 1, 745, 747, 65_536]) {
+            const { adapter, service } = await openService();
+            const initialMutationCount = adapter.atomicMutationCount;
+            let commitAttemptCount = 0;
+
+            await expect(
+                persistCommonProofApplicationAuthorization(service, {
+                    authorizationFrame: new Uint8Array(
+                        authorizationFrameByteLength,
+                    ),
+                    onCommitAttempt: () => {
+                        commitAttemptCount += 1;
+                    },
+                    proofApplicationSlotHash: new Uint8Array(64).fill(0x35),
+                }),
+            ).rejects.toMatchObject({ code: 'InvalidInput' });
+            expect(commitAttemptCount).toBe(0);
+            expect(adapter.atomicMutationCount).toBe(initialMutationCount);
+        }
     });
 
     it('reports the commit boundary before any committed publication or readback failure', async () => {

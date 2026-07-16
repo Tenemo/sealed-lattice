@@ -65,10 +65,7 @@ pub(crate) use canonical_stream_transport::{
     read_bgv_canonical_material_chunk, take_authenticated_canonical_proof_material_bytes,
 };
 #[cfg(test)]
-pub(crate) use commitment::{
-    LatticeAnchorCommitment, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-    lattice_anchor_commitment_canonical_bytes,
-};
+pub(crate) use commitment::{LatticeAnchorCommitment, lattice_anchor_commitment_canonical_bytes};
 pub(crate) use commitment::{
     SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
     SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,

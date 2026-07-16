@@ -223,6 +223,33 @@ fn setup_commitment_matrix_sampler_customization(
     })
 }
 
+pub(in super::super) fn structural_matrix_polynomial_kind(
+    matrix_row_index: usize,
+    randomness_column_index: usize,
+) -> Option<StructuralMatrixPolynomial> {
+    if matrix_row_index < SETUP_COMMITMENT_MODULE_RANK
+        && randomness_column_index > SETUP_COMMITMENT_MODULE_RANK
+    {
+        let identity_column_index = randomness_column_index - SETUP_COMMITMENT_MODULE_RANK - 1;
+        if identity_column_index == matrix_row_index {
+            return Some(StructuralMatrixPolynomial::One);
+        }
+
+        return Some(StructuralMatrixPolynomial::Zero);
+    }
+    if matrix_row_index == SETUP_COMMITMENT_MODULE_RANK
+        && randomness_column_index >= SETUP_COMMITMENT_MODULE_RANK
+    {
+        if randomness_column_index == SETUP_COMMITMENT_MODULE_RANK {
+            return Some(StructuralMatrixPolynomial::One);
+        }
+
+        return Some(StructuralMatrixPolynomial::Zero);
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,31 +357,4 @@ mod tests {
 
         assert!(error.message.contains("does not match"));
     }
-}
-
-pub(in super::super) fn structural_matrix_polynomial_kind(
-    matrix_row_index: usize,
-    randomness_column_index: usize,
-) -> Option<StructuralMatrixPolynomial> {
-    if matrix_row_index < SETUP_COMMITMENT_MODULE_RANK
-        && randomness_column_index > SETUP_COMMITMENT_MODULE_RANK
-    {
-        let identity_column_index = randomness_column_index - SETUP_COMMITMENT_MODULE_RANK - 1;
-        if identity_column_index == matrix_row_index {
-            return Some(StructuralMatrixPolynomial::One);
-        }
-
-        return Some(StructuralMatrixPolynomial::Zero);
-    }
-    if matrix_row_index == SETUP_COMMITMENT_MODULE_RANK
-        && randomness_column_index >= SETUP_COMMITMENT_MODULE_RANK
-    {
-        if randomness_column_index == SETUP_COMMITMENT_MODULE_RANK {
-            return Some(StructuralMatrixPolynomial::One);
-        }
-
-        return Some(StructuralMatrixPolynomial::Zero);
-    }
-
-    None
 }

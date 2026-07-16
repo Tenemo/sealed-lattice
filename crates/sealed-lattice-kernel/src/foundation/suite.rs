@@ -1156,12 +1156,12 @@ mod tests {
         let kind = ArtifactKind::ProofProfileSet;
         let first_tuple = CanonicalTuple::new(
             kind.artifact_schema_identifier(),
-            FOUNDATION_SCHEMA_VERSION,
+            kind.artifact_schema_version(),
             vec![CanonicalItem::unsigned16(1)],
         );
         let second_tuple = CanonicalTuple::new(
             kind.artifact_schema_identifier(),
-            FOUNDATION_SCHEMA_VERSION,
+            kind.artifact_schema_version(),
             vec![CanonicalItem::unsigned16(2)],
         );
         let first = ArtifactReference::from_canonical_artifact_bytes(

@@ -12,6 +12,7 @@ import { openBrowserActionStorageCustodyWorker } from '#packages/protocol/src/ru
 import {
     createWasmBrowserActionStorageWorkerKernel,
     loadFreshTranscriptCoreKernel,
+    openClosedWorkerCommonProofScratchStorage,
 } from '#packages/wasm/src/index';
 import {
     createStateVerifierTestVector,
@@ -387,6 +388,20 @@ describe('Local storage-root real-WASM browser worker', () => {
             'RecordAuthenticationFailed',
         );
         await workerKernel.destroyActiveActionStorageRoot();
+    });
+
+    it('confines common-proof scratch storage to the worker runtime', () => {
+        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
+            kernel: loadFreshTranscriptCoreKernel(),
+        });
+
+        expect(() =>
+            openClosedWorkerCommonProofScratchStorage(workerKernel),
+        ).toThrowError(
+            expect.objectContaining<Partial<BrowserActionStorageCustodyError>>({
+                code: 'Unavailable',
+            }),
+        );
     });
 
     it('reopens local state after a crash and refuses a wrong commitment', async () => {

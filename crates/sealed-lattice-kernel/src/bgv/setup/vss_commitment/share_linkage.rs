@@ -207,6 +207,10 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
 // Each aggregate proof binds the committed threshold share to the modular sum
 // of its source recipient shares at the unit evaluation point.
 #[cfg(test)]
+#[expect(
+    dead_code,
+    reason = "the exact-family refusal test retains the full aggregate statement context while refusing before any field can be consumed"
+)]
 pub(crate) struct VssAggregateThresholdProofContext<'a> {
     pub(crate) setup_context_hash: String,
     pub(crate) public_matrix_seed_hash: &'a str,

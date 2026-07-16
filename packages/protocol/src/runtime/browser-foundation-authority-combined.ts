@@ -45,6 +45,8 @@ import type {
 
 const hashByteLength = 64;
 const maximumProofAttemptIdentifierByteLength = 32;
+const terminalCleanupInitialRetryDelayMilliseconds = 8;
+const terminalCleanupMaximumRetryDelayMilliseconds = 1_000;
 
 declare const browserFoundationActiveCapabilityBrand: unique symbol;
 declare const browserFoundationActionRandomnessBrand: unique symbol;
@@ -105,7 +107,6 @@ export type BrowserFoundationAuthorityState =
 export type BrowserFoundationAuthorityRetirementReason =
     | 'closed'
     | 'localStateAuthenticationFailed'
-    | 'localStateConflict'
     | 'localStateUnavailable'
     | 'stateAuthorityUnavailable'
     | 'witnessStateUnavailable';
@@ -345,6 +346,73 @@ const refused = <Value>(
     refusalReason: RefusalReason,
 ): VerificationResult<Value> =>
     Object.freeze({ isValid: false, refusalReason });
+
+const permanentStorageAuthorityFailureCodes = new Set([
+    'AuthenticationFailed',
+    'CleanupFailed',
+    'OwnedWorkerFailure',
+    'RecordAuthenticationFailed',
+    'StorageFailure',
+    'Unavailable',
+]);
+
+const requiresPermanentLocalRetirement = (error: unknown): boolean => {
+    if (error instanceof BrowserActionStorageCustodyError) {
+        return permanentStorageAuthorityFailureCodes.has(error.code);
+    }
+    return (
+        error instanceof Error &&
+        'code' in error &&
+        permanentStorageAuthorityFailureCodes.has(
+            String((error as { code?: unknown }).code),
+        )
+    );
+};
+
+const waitForTerminalCleanupRetry = (
+    delayMilliseconds: number,
+): Promise<void> =>
+    new Promise((resolve) => {
+        setTimeout(resolve, delayMilliseconds);
+    });
+
+const completeTerminalConstructionCleanup = async (
+    cleanup: () => void | Promise<void>,
+): Promise<void> => {
+    let retryDelayMilliseconds = terminalCleanupInitialRetryDelayMilliseconds;
+    for (;;) {
+        try {
+            await cleanup();
+            return;
+        } catch {
+            // A failed construction cannot return a cleanup owner to its
+            // caller. Keep that owner captured until terminal cleanup can
+            // finish, while yielding so unavailable storage cannot hot-spin
+            // the browser event loop.
+            await waitForTerminalCleanupRetry(retryDelayMilliseconds);
+            retryDelayMilliseconds = Math.min(
+                terminalCleanupMaximumRetryDelayMilliseconds,
+                retryDelayMilliseconds * 2,
+            );
+        }
+    }
+};
+
+const retirementReasonForOwnerFailure = (
+    error: unknown,
+): BrowserFoundationAuthorityRetirementReason => {
+    const errorCode =
+        error instanceof Error && 'code' in error
+            ? String((error as { code?: unknown }).code)
+            : undefined;
+    if (
+        errorCode === 'AuthenticationFailed' ||
+        errorCode === 'RecordAuthenticationFailed'
+    ) {
+        return 'localStateAuthenticationFailed';
+    }
+    return 'localStateUnavailable';
+};
 
 const isUint8Array = (value: unknown): value is Uint8Array => {
     try {
@@ -655,27 +723,24 @@ const prepareAuthority = async (
             witnessRoleRecords: Object.freeze(witnessRoleRecords),
         });
     } catch (failure) {
-        const cleanupFailures: unknown[] = [];
+        const localRetirementRequired =
+            owner !== undefined && requiresPermanentLocalRetirement(failure);
         if (owner !== undefined) {
-            try {
-                await owner.close();
-            } catch (error) {
-                cleanupFailures.push(error);
+            const retainedOperationOwner = owner;
+            if (localRetirementRequired) {
+                await completeTerminalConstructionCleanup(() =>
+                    retainedOperationOwner.retire(),
+                );
             }
+            await completeTerminalConstructionCleanup(() =>
+                retainedOperationOwner.close(),
+            );
         }
         if (board !== undefined) {
-            try {
-                board.close();
-            } catch (error) {
-                cleanupFailures.push(error);
-            }
-        }
-        if (cleanupFailures.length > 0) {
-            throw new BrowserFoundationAuthorityError(
-                'CleanupFailed',
-                'Foundation construction failed and claimed resources could not be closed.',
-                [failure, ...cleanupFailures],
-            );
+            const retainedCanonicalBoard = board;
+            await completeTerminalConstructionCleanup(() => {
+                retainedCanonicalBoard.close();
+            });
         }
         throw failure instanceof Error
             ? failure
@@ -718,7 +783,11 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
     #operationTail: Promise<void> = Promise.resolve();
     #closePromise?: Promise<void>;
     #cleanupPromise?: Promise<void>;
+    #operationOwnerRetirementCompleted = false;
+    #operationOwnerCloseCompleted = false;
+    #boardCloseCompleted = false;
     #closeRequested = false;
+    #localStorageRetirementRequired = false;
     #stateReservationIntents = new WeakMap<
         object,
         StateReservationIntentRecord
@@ -822,9 +891,14 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
                 this.#state = 'active';
                 return this.#state;
             } catch (error) {
+                const localStorageRetirementRequired =
+                    requiresPermanentLocalRetirement(error);
                 await this.#retire(
-                    this.#retirementReasonForOwnerFailure(error),
+                    localStorageRetirementRequired
+                        ? retirementReasonForOwnerFailure(error)
+                        : 'stateAuthorityUnavailable',
                     error,
+                    localStorageRetirementRequired,
                 );
                 throw error;
             }
@@ -938,8 +1012,8 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
                     },
                 );
             } catch (error) {
-                if (this.#isStorageAuthorityFailure(error)) {
-                    await this.#retire('witnessStateUnavailable', error);
+                if (requiresPermanentLocalRetirement(error)) {
+                    await this.#retire('witnessStateUnavailable', error, true);
                 }
                 throw error;
             } finally {
@@ -1342,10 +1416,18 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
         this.#state = 'retired';
         this.#retirementReason ??= 'closed';
         this.#activeCapability = undefined;
-        this.#closePromise ??= this.#operationTail.then(
-            () => this.#retire(this.#retirementReason ?? 'closed'),
-            () => this.#retire(this.#retirementReason ?? 'closed'),
-        );
+        if (this.#closePromise === undefined) {
+            const closeAttempt = this.#operationTail.then(
+                () => this.#retire(this.#retirementReason ?? 'closed'),
+                () => this.#retire(this.#retirementReason ?? 'closed'),
+            );
+            this.#closePromise = closeAttempt;
+            void closeAttempt.catch(() => {
+                if (this.#closePromise === closeAttempt) {
+                    this.#closePromise = undefined;
+                }
+            });
+        }
         return this.#closePromise;
     }
 
@@ -1661,10 +1743,11 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
             try {
                 return await operation();
             } catch (error) {
-                if (this.#isStorageAuthorityFailure(error)) {
+                if (requiresPermanentLocalRetirement(error)) {
                     await this.#retire(
-                        this.#retirementReasonForOwnerFailure(error),
+                        retirementReasonForOwnerFailure(error),
                         error,
+                        true,
                     );
                 }
                 throw error;
@@ -1684,8 +1767,8 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
             try {
                 return await operation(handle);
             } catch (error) {
-                if (this.#isStorageAuthorityFailure(error)) {
-                    await this.#retire('witnessStateUnavailable', error);
+                if (requiresPermanentLocalRetirement(error)) {
+                    await this.#retire('witnessStateUnavailable', error, true);
                 }
                 throw error;
             }
@@ -1705,8 +1788,8 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
                     this.#requireNormalWitnessHandle(witnessRole),
                 );
             } catch (error) {
-                if (this.#isStorageAuthorityFailure(error)) {
-                    await this.#retire('witnessStateUnavailable', error);
+                if (requiresPermanentLocalRetirement(error)) {
+                    await this.#retire('witnessStateUnavailable', error, true);
                 }
                 throw error;
             }
@@ -1726,80 +1809,91 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
         return handle;
     }
 
-    #isStorageAuthorityFailure(error: unknown): boolean {
-        return (
-            error instanceof BrowserActionStorageCustodyError ||
-            (error instanceof Error &&
-                'code' in error &&
-                [
-                    'AuthenticationFailed',
-                    'CleanupFailed',
-                    'Conflict',
-                    'MissingRecord',
-                    'StorageFailure',
-                ].includes(String((error as { code?: unknown }).code)))
-        );
-    }
-
-    #retirementReasonForOwnerFailure(
-        error: unknown,
-    ): BrowserFoundationAuthorityRetirementReason {
-        if (
-            error instanceof BrowserActionStorageCustodyError &&
-            error.code === 'Conflict'
-        ) {
-            return 'localStateConflict';
-        }
-        if (
-            error instanceof BrowserActionStorageCustodyError &&
-            error.code === 'RecordAuthenticationFailed'
-        ) {
-            return 'localStateAuthenticationFailed';
-        }
-        return 'localStateUnavailable';
-    }
-
     async #retire(
         reason: BrowserFoundationAuthorityRetirementReason,
         failureCause?: unknown,
+        localStorageRetirementRequired = false,
     ): Promise<void> {
+        this.#localStorageRetirementRequired ||= localStorageRetirementRequired;
         if (this.#state !== 'retired') {
             this.#state = 'retired';
             this.#retirementReason = reason;
             this.#activeCapability = undefined;
         }
-        this.#cleanupPromise ??= this.#cleanup(failureCause);
+        if (this.#cleanupPromise === undefined) {
+            const cleanupAttempt = this.#cleanup(failureCause);
+            this.#cleanupPromise = cleanupAttempt;
+            void cleanupAttempt.catch(() => {
+                if (this.#cleanupPromise === cleanupAttempt) {
+                    this.#cleanupPromise = undefined;
+                }
+            });
+        }
         return this.#cleanupPromise;
     }
 
     async #cleanup(failureCause?: unknown): Promise<void> {
         const cleanupFailures: unknown[] = [];
+        const throwIfCleanupFailed = (): void => {
+            if (cleanupFailures.length > 0) {
+                throw new BrowserFoundationAuthorityError(
+                    'CleanupFailed',
+                    'The participant is retired, but browser-owned resources could not all be closed.',
+                    Object.freeze({ cleanupFailures, failureCause }),
+                );
+            }
+        };
         this.#activeStateReservationIdentifiers.clear();
         this.#stateVerifierSessionIdentifier = undefined;
-        for (const record of this.#issuedStateReservationIntentRecords) {
-            if (!record.active) {
-                continue;
+        if (this.#localStorageRetirementRequired) {
+            if (!this.#operationOwnerRetirementCompleted) {
+                try {
+                    await this.#operationOwner.retire();
+                    this.#operationOwnerRetirementCompleted = true;
+                } catch (error) {
+                    cleanupFailures.push(error);
+                }
             }
-            try {
-                await this.#operationOwner.releaseFoundationStateReservationIntent(
-                    record.handle,
-                );
+            throwIfCleanupFailed();
+            for (const record of this.#issuedStateReservationIntentRecords) {
                 record.active = false;
+            }
+            this.#issuedStateReservationIntentRecords.clear();
+        } else {
+            for (const record of this.#issuedStateReservationIntentRecords) {
+                if (!record.active) {
+                    continue;
+                }
+                try {
+                    await this.#operationOwner.releaseFoundationStateReservationIntent(
+                        record.handle,
+                    );
+                    record.active = false;
+                } catch (error) {
+                    cleanupFailures.push(error);
+                }
+            }
+            throwIfCleanupFailed();
+            this.#issuedStateReservationIntentRecords.clear();
+        }
+        if (!this.#operationOwnerCloseCompleted) {
+            try {
+                await this.#operationOwner.close();
+                this.#operationOwnerCloseCompleted = true;
             } catch (error) {
                 cleanupFailures.push(error);
             }
         }
-        this.#issuedStateReservationIntentRecords.clear();
-        try {
-            await this.#operationOwner.close();
-        } catch (error) {
-            cleanupFailures.push(error);
+        throwIfCleanupFailed();
+        if (!this.#boardCloseCompleted) {
+            try {
+                this.#board.close();
+                this.#boardCloseCompleted = true;
+            } catch (error) {
+                cleanupFailures.push(error);
+            }
         }
-        try {
-            this.#board.close();
-        } catch (error) {
-            cleanupFailures.push(error);
-        }
+        throwIfCleanupFailed();
         this.#canonicalRosterBytes.fill(0);
         this.#actionRandomnessCapability = undefined;
         this.#actionRandomnessHandle = undefined;
@@ -1822,13 +1916,6 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
         for (const role of this.#witnessRoleRecords) {
             role.normalHandle = undefined;
             role.subjectParticipantIdentity.fill(0);
-        }
-        if (cleanupFailures.length > 0) {
-            throw new BrowserFoundationAuthorityError(
-                'CleanupFailed',
-                'The participant is retired, but browser-owned resources could not all be closed.',
-                Object.freeze({ cleanupFailures, failureCause }),
-            );
         }
     }
 }

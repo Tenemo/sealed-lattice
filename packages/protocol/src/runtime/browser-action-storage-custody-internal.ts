@@ -50,6 +50,9 @@ import {
     copyLocalRecordIdentifierInput,
     copyLocalRecordOpenInput,
     copyLocalRecordSealInput,
+    destroyLocalRecordIdentifierInput,
+    destroyLocalRecordOpenInput,
+    destroyLocalRecordSealInput,
 } from './browser-local-record-validation.js';
 
 export type {
@@ -270,7 +273,7 @@ export const isBrowserDeviceWrappingRetirementTombstone = (
 ): record is BrowserDeviceWrappingRetirementTombstone =>
     'recordKind' in record && record.recordKind === 'retirementTombstone';
 
-export const copyBrowserDeviceWrappingRetirementTombstone = (
+const copyBrowserDeviceWrappingRetirementTombstone = (
     tombstone: BrowserDeviceWrappingRetirementTombstone,
     errorCode: 'InvalidInput' | 'InvalidState' = 'InvalidState',
 ): BrowserDeviceWrappingRetirementTombstone => {
@@ -589,23 +592,27 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         } catch (error) {
             return Promise.reject(normalizeInputError(error));
         }
-
         return this.#runOperation(async () => {
-            const identifier = await this.#workerCall(
-                () =>
-                    this.#workerKernel.deriveActiveLocalRecordIdentifier(
-                        copiedInput,
-                    ),
-                'Deriving a local-record identifier failed inside the owned worker.',
-            );
+            let identifier: Uint8Array | undefined;
+            try {
+                identifier = await this.#workerCall(
+                    () =>
+                        this.#workerKernel.deriveActiveLocalRecordIdentifier(
+                            copiedInput,
+                        ),
+                    'Deriving a local-record identifier failed inside the owned worker.',
+                );
 
-            return copyLocalRecordBytes(identifier, {
-                allowEmpty: false,
-                errorCode: 'OwnedWorkerFailure',
-                exactByteLength: foundationHashByteLength,
-                label: 'Worker-derived local-record identifier',
-            });
-        });
+                return copyLocalRecordBytes(identifier, {
+                    allowEmpty: false,
+                    errorCode: 'OwnedWorkerFailure',
+                    exactByteLength: foundationHashByteLength,
+                    label: 'Worker-derived local-record identifier',
+                });
+            } finally {
+                identifier?.fill(0);
+            }
+        }).finally(() => destroyLocalRecordIdentifierInput(copiedInput));
     }
 
     public sealLocalRecord(
@@ -617,19 +624,23 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         } catch (error) {
             return Promise.reject(normalizeInputError(error));
         }
-
         return this.#runOperation(async () => {
-            const envelope = await this.#workerCall(
-                () => this.#workerKernel.sealActiveLocalRecord(copiedInput),
-                'Sealing a local record failed inside the owned worker.',
-            );
+            let envelope: Uint8Array | undefined;
+            try {
+                envelope = await this.#workerCall(
+                    () => this.#workerKernel.sealActiveLocalRecord(copiedInput),
+                    'Sealing a local record failed inside the owned worker.',
+                );
 
-            return copyLocalRecordBytes(envelope, {
-                allowEmpty: false,
-                errorCode: 'OwnedWorkerFailure',
-                label: 'Worker-produced local-record envelope',
-            });
-        });
+                return copyLocalRecordBytes(envelope, {
+                    allowEmpty: false,
+                    errorCode: 'OwnedWorkerFailure',
+                    label: 'Worker-produced local-record envelope',
+                });
+            } finally {
+                envelope?.fill(0);
+            }
+        }).finally(() => destroyLocalRecordSealInput(copiedInput));
     }
 
     public openLocalRecord(
@@ -641,19 +652,23 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         } catch (error) {
             return Promise.reject(normalizeInputError(error));
         }
-
         return this.#runOperation(async () => {
-            const plaintext = await this.#workerCall(
-                () => this.#workerKernel.openActiveLocalRecord(copiedInput),
-                'Opening a local record failed inside the owned worker.',
-            );
+            let plaintext: Uint8Array | undefined;
+            try {
+                plaintext = await this.#workerCall(
+                    () => this.#workerKernel.openActiveLocalRecord(copiedInput),
+                    'Opening a local record failed inside the owned worker.',
+                );
 
-            return copyLocalRecordBytes(plaintext, {
-                allowEmpty: true,
-                errorCode: 'OwnedWorkerFailure',
-                label: 'Worker-opened local-record plaintext',
-            });
-        });
+                return copyLocalRecordBytes(plaintext, {
+                    allowEmpty: true,
+                    errorCode: 'OwnedWorkerFailure',
+                    label: 'Worker-opened local-record plaintext',
+                });
+            } finally {
+                plaintext?.fill(0);
+            }
+        }).finally(() => destroyLocalRecordOpenInput(copiedInput));
     }
 
     public hashLocalRecordEnvelope(envelope: Uint8Array): Promise<Uint8Array> {
@@ -669,21 +684,26 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         }
 
         return this.#runOperation(async () => {
-            const envelopeHash = await this.#workerCall(
-                () =>
-                    this.#workerKernel.hashActiveLocalRecordEnvelope(
-                        copiedEnvelope,
-                    ),
-                'Hashing a local-record envelope failed inside the owned worker.',
-            );
+            let envelopeHash: Uint8Array | undefined;
+            try {
+                envelopeHash = await this.#workerCall(
+                    () =>
+                        this.#workerKernel.hashActiveLocalRecordEnvelope(
+                            copiedEnvelope,
+                        ),
+                    'Hashing a local-record envelope failed inside the owned worker.',
+                );
 
-            return copyLocalRecordBytes(envelopeHash, {
-                allowEmpty: false,
-                errorCode: 'OwnedWorkerFailure',
-                exactByteLength: foundationHashByteLength,
-                label: 'Worker-derived local-record envelope hash',
-            });
-        });
+                return copyLocalRecordBytes(envelopeHash, {
+                    allowEmpty: false,
+                    errorCode: 'OwnedWorkerFailure',
+                    exactByteLength: foundationHashByteLength,
+                    label: 'Worker-derived local-record envelope hash',
+                });
+            } finally {
+                envelopeHash?.fill(0);
+            }
+        }).finally(() => copiedEnvelope.fill(0));
     }
 
     public prepareBrowserFoundationInitialization(

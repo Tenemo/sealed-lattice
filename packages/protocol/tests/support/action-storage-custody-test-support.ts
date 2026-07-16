@@ -86,6 +86,10 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
     #activeRoot: Uint8Array | undefined;
     #lastDeviceKey: CryptoKey | undefined;
     #lastEnvelopeNonce: Uint8Array | undefined;
+    #lastOpenedLocalRecordEnvelope: Uint8Array | undefined;
+    #lastOpenedLocalRecordPlaintext: Uint8Array | undefined;
+    #lastSealedLocalRecordEnvelope: Uint8Array | undefined;
+    #lastSealedLocalRecordPlaintext: Uint8Array | undefined;
     #nextRepairSessionIdentifier = 1;
     readonly #repairSessions = new Map<
         string,
@@ -275,6 +279,7 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         input: BrowserLocalRecordSealInput,
     ): Promise<Uint8Array> {
         const { plaintext, ...expectedContext } = input;
+        this.#lastSealedLocalRecordPlaintext = plaintext;
         const contextBytes = serializeTestRecordContext(expectedContext);
         const recordKey = await this.#deriveTestLocalRecordKey(contextBytes);
         const nonce = new Uint8Array(nonceByteLength);
@@ -292,7 +297,9 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
                     arrayBufferFromBytes(plaintext),
                 ),
             );
-            return concatenateTestBytes(nonce, ciphertext);
+            const envelope = concatenateTestBytes(nonce, ciphertext);
+            this.#lastSealedLocalRecordEnvelope = envelope;
+            return envelope;
         } finally {
             contextBytes.fill(0);
         }
@@ -302,13 +309,14 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
         input: BrowserLocalRecordOpenInput,
     ): Promise<Uint8Array> {
         const { envelope, ...expectedContext } = input;
+        this.#lastOpenedLocalRecordEnvelope = envelope;
         if (envelope.byteLength <= nonceByteLength + 16) {
             throw new Error('Malformed test local-record envelope.');
         }
         const contextBytes = serializeTestRecordContext(expectedContext);
         const recordKey = await this.#deriveTestLocalRecordKey(contextBytes);
         try {
-            return new Uint8Array(
+            const plaintext = new Uint8Array(
                 await this.#cryptoProvider.subtle.decrypt(
                     {
                         additionalData: arrayBufferFromBytes(contextBytes),
@@ -322,6 +330,8 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
                     arrayBufferFromBytes(envelope.subarray(nonceByteLength)),
                 ),
             );
+            this.#lastOpenedLocalRecordPlaintext = plaintext;
+            return plaintext;
         } finally {
             contextBytes.fill(0);
         }
@@ -785,6 +795,24 @@ export class TestActionStorageWorkerKernel implements BrowserActionStorageWorker
 
     public lastEnvelopeNonce(): Uint8Array | undefined {
         return this.#lastEnvelopeNonce?.slice();
+    }
+
+    public lastOpenedLocalRecordBuffersAreZeroed(): boolean {
+        return (
+            this.#lastOpenedLocalRecordEnvelope !== undefined &&
+            this.#lastOpenedLocalRecordPlaintext !== undefined &&
+            this.#lastOpenedLocalRecordEnvelope.every((byte) => byte === 0) &&
+            this.#lastOpenedLocalRecordPlaintext.every((byte) => byte === 0)
+        );
+    }
+
+    public lastSealedLocalRecordBuffersAreZeroed(): boolean {
+        return (
+            this.#lastSealedLocalRecordEnvelope !== undefined &&
+            this.#lastSealedLocalRecordPlaintext !== undefined &&
+            this.#lastSealedLocalRecordEnvelope.every((byte) => byte === 0) &&
+            this.#lastSealedLocalRecordPlaintext.every((byte) => byte === 0)
+        );
     }
 
     public lastDeviceKeyIsNonExtractable(): boolean {

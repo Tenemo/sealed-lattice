@@ -55,6 +55,15 @@ const canonicalBytesHex = (value: unknown): string =>
 const objectHash = (domain: string, value: unknown): ProtocolHash =>
     hash512Hex(domain, [textEncoder.encode(canonicalJson(value))]);
 
+const malformedKernelCommandError = (): Error => {
+    const error = Object.assign(
+        new Error('The canonical mailbox value is malformed.'),
+        { code: 'InvalidProtocolObject' as const },
+    );
+    error.name = 'TranscriptCoreKernelCommandError';
+    return error;
+};
+
 const unsignedEnvelope = (
     envelope: SignedMailboxEnvelope,
 ): UnsignedMailboxEnvelope => {
@@ -100,9 +109,14 @@ const kernel: AuthenticatedMailboxKernel = {
         ),
     }),
     decodeSignedMailboxEnvelope: (input) => {
-        const value = JSON.parse(
-            textDecoder.decode(hexToBytes(input.canonicalBytesHex)),
-        ) as SignedMailboxEnvelope;
+        let value: SignedMailboxEnvelope;
+        try {
+            value = JSON.parse(
+                textDecoder.decode(hexToBytes(input.canonicalBytesHex)),
+            ) as SignedMailboxEnvelope;
+        } catch {
+            throw malformedKernelCommandError();
+        }
         return {
             value,
             envelopeHash: objectHash(
@@ -1698,6 +1712,7 @@ describe('authenticated mailbox', () => {
             mailboxCapability = recipientProvider.mailboxCapability,
             candidateSourceRoster: AuthenticatedMailboxFrozenRoster = sourceRoster,
             stagingBoundary = makeStagingBoundary().boundary,
+            candidateKernel: AuthenticatedMailboxKernel = kernel,
         ) => {
             const plaintextSink = makePlaintextSinkBoundary();
             return openAuthenticatedMailbox({
@@ -1705,7 +1720,7 @@ describe('authenticated mailbox', () => {
                 expectedAssociatedData: expectation,
                 gcmRuntime: makeGcmRuntime({ authenticationFinished: false }),
                 inboundSlotAuthority: makeInboundSlotAuthority(),
-                kernel,
+                kernel: candidateKernel,
                 plaintextSinkBoundary: plaintextSink.boundary,
                 pullCiphertextChunk: sourceFromChunks(candidateCiphertext),
                 recipientMailboxCapability: mailboxCapability,
@@ -1718,6 +1733,92 @@ describe('authenticated mailbox', () => {
                 result,
             }));
         };
+
+        const emptyCarrier = await open(
+            { canonicalEnvelopeBytes: new Uint8Array() },
+            [],
+        );
+        expect(emptyCarrier).toEqual({
+            plaintextReleaseCount: 0,
+            result: {
+                isValid: false,
+                refusalReason: 'malformedEncoding',
+            },
+        });
+
+        const exactCopiedBufferCeilingCarrier = await open(
+            {
+                canonicalEnvelopeBytes: new Uint8Array(
+                    foundationProfile.maximumCopiedBufferByteLength,
+                ),
+            },
+            [],
+        );
+        expect(exactCopiedBufferCeilingCarrier).toEqual({
+            plaintextReleaseCount: 0,
+            result: {
+                isValid: false,
+                refusalReason: 'malformedEncoding',
+            },
+        });
+
+        const oversizedCarrier = await open(
+            {
+                canonicalEnvelopeBytes: new Uint8Array(
+                    foundationProfile.maximumCopiedBufferByteLength + 1,
+                ),
+            },
+            [],
+        );
+        expect(oversizedCarrier).toEqual({
+            plaintextReleaseCount: 0,
+            result: {
+                isValid: false,
+                refusalReason: 'outsideSupportedProfile',
+            },
+        });
+
+        let carrierAccessorInvocationCount = 0;
+        const accessorCarrier = Object.defineProperty(
+            {},
+            'canonicalEnvelopeBytes',
+            {
+                enumerable: true,
+                get: () => {
+                    carrierAccessorInvocationCount += 1;
+                    return carrier.canonicalEnvelopeBytes;
+                },
+            },
+        ) as AuthenticatedMailboxCarrier;
+        const accessorCarrierRefusal = await open(accessorCarrier, []);
+        expect(accessorCarrierRefusal).toEqual({
+            plaintextReleaseCount: 0,
+            result: {
+                isValid: false,
+                refusalReason: 'wrongTypeOrLength',
+            },
+        });
+        expect(carrierAccessorInvocationCount).toBe(0);
+
+        const injectedKernelFailure = new Error(
+            'Injected trusted mailbox decoder failure.',
+        );
+        await expect(
+            open(
+                carrier,
+                ciphertext,
+                baseExpectation,
+                recipientProvider.mailboxCapability,
+                sourceRoster,
+                makeStagingBoundary().boundary,
+                {
+                    ...kernel,
+                    decodeSignedMailboxEnvelope: () => {
+                        throw injectedKernelFailure;
+                    },
+                },
+            ),
+        ).rejects.toBe(injectedKernelFailure);
 
         const wrongExpectations = [
             { ...baseExpectation, sourceParticipantId: '90'.repeat(64) },

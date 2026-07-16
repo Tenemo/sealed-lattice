@@ -332,7 +332,7 @@ describe('Browser action-storage custody', () => {
     });
 
     it('copies, versions, authenticates, and hashes closed local records through custody', async () => {
-        const { custody } = createCustody({
+        const { custody, workerKernel } = createCustody({
             actionStorageRoot: createTestBytes(
                 testActionStorageRootByteLength,
                 19,
@@ -371,9 +371,11 @@ describe('Browser action-storage custody', () => {
         });
         plaintext.fill(0);
         const envelope = await pendingEnvelope;
+        expect(workerKernel.lastSealedLocalRecordBuffersAreZeroed()).toBe(true);
         await expect(
             custody.openLocalRecord({ ...expectedContext, envelope }),
         ).resolves.toEqual(preservedPlaintext);
+        expect(workerKernel.lastOpenedLocalRecordBuffersAreZeroed()).toBe(true);
         const envelopeHash = await custody.hashLocalRecordEnvelope(envelope);
         expect(envelopeHash).toHaveLength(64);
 

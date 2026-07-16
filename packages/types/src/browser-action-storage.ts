@@ -11,6 +11,7 @@ export const browserActionStorageCustodyErrorCodes = Object.freeze([
     'InvalidCanonicalMaterial',
     'InvalidInput',
     'InvalidState',
+    'MissingRecord',
     'OwnedWorkerFailure',
     'RecordAuthenticationFailed',
     'StorageFailure',
@@ -247,19 +248,6 @@ export type BrowserLocalRecordIdentifierInput =
           chunkDigest: Uint8Array;
           chunkIndex: number;
           recordType: 'checkpointChunk';
-      }>
-    | Readonly<{
-          commonProofEnvironmentIdentifier: Uint8Array;
-          commonProofRuntimeBindingHash: Uint8Array;
-          externalMemoryByteOffset: bigint;
-          externalMemoryChunkOrdinal: number;
-          externalMemoryObjectOrdinal: number;
-          externalMemoryRecordKind:
-              | 'object-header'
-              | 'data-chunk'
-              | 'seal-marker';
-          proofAttemptLineageIdentifier: Uint8Array;
-          recordType: 'commonProofExternalMemory';
       }>;
 
 export type BrowserLocalRecordOpenableIdentifierInput = Exclude<

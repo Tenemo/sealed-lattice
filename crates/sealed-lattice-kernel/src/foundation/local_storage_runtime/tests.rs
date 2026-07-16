@@ -121,6 +121,20 @@ fn record_request_input(
     input
 }
 
+fn record_identifier_input(
+    handle: u32,
+    capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    record_type: LocalRecordType,
+    identifier_context: &[u8],
+) -> Vec<u8> {
+    [
+        lease_input(handle, capability).as_slice(),
+        record_type.canonical_code().to_le_bytes().as_slice(),
+        identifier_context,
+    ]
+    .concat()
+}
+
 fn authenticated_repair_request_input(
     handle: u32,
     capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
@@ -877,6 +891,539 @@ fn active_root_commands_derive_seal_open_hash_and_enforce_one_seal_per_record_ve
 }
 
 #[test]
+fn active_root_record_version_ledger_retains_only_the_highest_successful_version() {
+    reset_registry();
+    let capability = test_capability(181);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &test_binding(183), &test_root(185)),
+    )
+    .expect("root stages");
+    let (handle, _) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("root commits");
+
+    let action_randomness_commitment = [0xe1; HASH_BYTE_LENGTH];
+    let state_key = [0xe2; HASH_BYTE_LENGTH];
+    let initial_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::WitnessState,
+        &state_key,
+        0,
+        None,
+    );
+    let initial_envelope = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD,
+        &[
+            initial_request.as_slice(),
+            [0xe3; 12].as_slice(),
+            b"initial witness state".as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("initial record seals");
+    let record_identifier: [u8; HASH_BYTE_LENGTH] = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER,
+        &record_identifier_input(
+            handle,
+            &capability,
+            LocalRecordType::WitnessState,
+            &state_key,
+        ),
+    )
+    .expect("record identifier derives")
+    .try_into()
+    .expect("record identifier length");
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active.as_ref().expect("active root lease");
+        assert_eq!(lease.sealed_record_highest_versions.len(), 1);
+        assert_eq!(
+            lease.sealed_record_highest_versions.get(&record_identifier),
+            Some(&0),
+        );
+    });
+
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD,
+            &[
+                initial_request.as_slice(),
+                [0xe4; 12].as_slice(),
+                b"reused version".as_slice(),
+            ]
+            .concat(),
+        ),
+        Err(refusal_status(RefusalReason::ConsumedState)),
+    );
+
+    let initial_envelope_hash: [u8; HASH_BYTE_LENGTH] = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_HASH_RECORD_ENVELOPE,
+        &[
+            lease_input(handle, &capability).as_slice(),
+            initial_envelope.as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("initial envelope hash derives")
+    .try_into()
+    .expect("initial envelope hash length");
+    let later_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::WitnessState,
+        &state_key,
+        7,
+        Some(&initial_envelope_hash),
+    );
+    let later_envelope = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD,
+        &[
+            later_request.as_slice(),
+            [0xe5; 12].as_slice(),
+            b"later witness state".as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("higher record version seals without another ledger entry");
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active.as_ref().expect("active root lease");
+        assert_eq!(lease.sealed_record_highest_versions.len(), 1);
+        assert_eq!(
+            lease.sealed_record_highest_versions.get(&record_identifier),
+            Some(&7),
+        );
+    });
+
+    let stale_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::WitnessState,
+        &state_key,
+        3,
+        Some(&initial_envelope_hash),
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD,
+            &[
+                stale_request.as_slice(),
+                [0xe6; 12].as_slice(),
+                b"stale witness state".as_slice(),
+            ]
+            .concat(),
+        ),
+        Err(refusal_status(RefusalReason::ConsumedState)),
+    );
+
+    let invalid_next_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::WitnessState,
+        &state_key,
+        8,
+        None,
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD,
+            &[
+                invalid_next_request.as_slice(),
+                [0xe7; 12].as_slice(),
+                b"invalid successor".as_slice(),
+            ]
+            .concat(),
+        ),
+        Err(refusal_status(RefusalReason::WrongContext)),
+    );
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active.as_ref().expect("active root lease");
+        assert_eq!(
+            lease.sealed_record_highest_versions.get(&record_identifier),
+            Some(&7),
+        );
+    });
+
+    let later_envelope_hash: [u8; HASH_BYTE_LENGTH] = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_HASH_RECORD_ENVELOPE,
+        &[
+            lease_input(handle, &capability).as_slice(),
+            later_envelope.as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("later envelope hash derives")
+    .try_into()
+    .expect("later envelope hash length");
+    let valid_next_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::WitnessState,
+        &state_key,
+        8,
+        Some(&later_envelope_hash),
+    );
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD,
+        &[
+            valid_next_request.as_slice(),
+            [0xe8; 12].as_slice(),
+            b"valid successor".as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("a failed seal does not consume its higher version");
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active.as_ref().expect("active root lease");
+        assert_eq!(lease.sealed_record_highest_versions.len(), 1);
+        assert_eq!(
+            lease.sealed_record_highest_versions.get(&record_identifier),
+            Some(&8),
+        );
+        assert_eq!(lease.local_record_seal_invocation_count, 3);
+    });
+    reset_registry();
+}
+
+#[test]
+fn common_proof_scratch_records_require_dedicated_zero_version_commands() {
+    reset_registry();
+    let capability = test_capability(187);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &test_binding(189), &test_root(191)),
+    )
+    .expect("root stages");
+    let (handle, _) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("root commits");
+
+    let identifier_context = common_proof_external_memory_identifier_context();
+    let identifier_input = record_identifier_input(
+        handle,
+        &capability,
+        LocalRecordType::CommonProofExternalMemory,
+        &identifier_context,
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER,
+            &identifier_input,
+        ),
+        Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+    );
+    let identifier = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_DERIVE_COMMON_PROOF_EXTERNAL_MEMORY_RECORD_IDENTIFIER,
+        &identifier_input,
+    )
+    .expect("worker-internal scratch identifier derives");
+    assert_eq!(identifier.len(), HASH_BYTE_LENGTH);
+    let non_scratch_context = [0xe8; HASH_BYTE_LENGTH];
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_DERIVE_COMMON_PROOF_EXTERNAL_MEMORY_RECORD_IDENTIFIER,
+            &record_identifier_input(
+                handle,
+                &capability,
+                LocalRecordType::WitnessState,
+                &non_scratch_context,
+            ),
+        ),
+        Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+    );
+
+    let action_randomness_commitment = [0xe9; HASH_BYTE_LENGTH];
+    let request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::CommonProofExternalMemory,
+        &identifier_context,
+        0,
+        None,
+    );
+    let plaintext = b"bounded common-proof scratch";
+    let seal_input = [
+        request.as_slice(),
+        [0xea; 12].as_slice(),
+        plaintext.as_slice(),
+    ]
+    .concat();
+    assert_eq!(
+        run_local_storage_root_command(LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD, &seal_input),
+        Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+    );
+    let envelope = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_COMMON_PROOF_EXTERNAL_MEMORY_RECORD,
+        &seal_input,
+    )
+    .expect("worker-internal scratch record seals");
+    let non_scratch_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::WitnessState,
+        &non_scratch_context,
+        0,
+        None,
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_SEAL_COMMON_PROOF_EXTERNAL_MEMORY_RECORD,
+            &[
+                non_scratch_request.as_slice(),
+                [0xeb; 12].as_slice(),
+                plaintext.as_slice(),
+            ]
+            .concat(),
+        ),
+        Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+    );
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active.as_ref().expect("active root lease");
+        assert!(lease.sealed_record_highest_versions.is_empty());
+        assert_eq!(lease.local_record_seal_invocation_count, 1);
+        assert_eq!(
+            lease.local_record_sealed_plaintext_byte_length,
+            u64::try_from(plaintext.len()).expect("plaintext length"),
+        );
+    });
+
+    let open_input = [request.as_slice(), envelope.as_slice()].concat();
+    assert_eq!(
+        run_local_storage_root_command(LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD, &open_input),
+        Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_OPEN_COMMON_PROOF_EXTERNAL_MEMORY_RECORD,
+            &open_input,
+        )
+        .expect("worker-internal scratch record opens"),
+        plaintext,
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_OPEN_COMMON_PROOF_EXTERNAL_MEMORY_RECORD,
+            &[non_scratch_request.as_slice(), envelope.as_slice()].concat(),
+        ),
+        Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+    );
+
+    let versioned_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::CommonProofExternalMemory,
+        &identifier_context,
+        1,
+        Some(&[0xec; HASH_BYTE_LENGTH]),
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_SEAL_COMMON_PROOF_EXTERNAL_MEMORY_RECORD,
+            &[
+                versioned_request.as_slice(),
+                [0xed; 12].as_slice(),
+                plaintext.as_slice(),
+            ]
+            .concat(),
+        ),
+        Err(refusal_status(RefusalReason::WrongContext)),
+    );
+    reset_registry();
+}
+
+#[test]
+fn active_root_identifier_cap_refuses_new_records_but_allows_replacements_and_scratch() {
+    reset_registry();
+    let capability = test_capability(193);
+    let binding = test_binding(195);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &binding, &test_root(197)),
+    )
+    .expect("root stages");
+    let (handle, _) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("root commits");
+
+    let action_randomness_commitment = [0xed; HASH_BYTE_LENGTH];
+    let state_key = [0xee; HASH_BYTE_LENGTH];
+    let initial_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::WitnessState,
+        &state_key,
+        0,
+        None,
+    );
+    let initial_envelope = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD,
+        &[
+            initial_request.as_slice(),
+            [0xef; 12].as_slice(),
+            b"retained witness state".as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("initial record seals");
+    let initial_envelope_hash: [u8; HASH_BYTE_LENGTH] = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_HASH_RECORD_ENVELOPE,
+        &[
+            lease_input(handle, &capability).as_slice(),
+            initial_envelope.as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("initial envelope hash derives")
+    .try_into()
+    .expect("initial envelope hash length");
+
+    let new_identifier_context = [0xf0; HASH_BYTE_LENGTH];
+    let refused_new_identifier: [u8; HASH_BYTE_LENGTH] = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER,
+        &record_identifier_input(
+            handle,
+            &capability,
+            LocalRecordType::ProofAttempt,
+            &new_identifier_context,
+        ),
+    )
+    .expect("prospective identifier derives")
+    .try_into()
+    .expect("prospective identifier length");
+    ROOT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let lease = registry.active.as_mut().expect("active root lease");
+        let mut candidate_ordinal = 0_u64;
+        while lease.sealed_record_highest_versions.len()
+            < maximum_tracked_local_record_identifier_count_per_active_root()
+        {
+            let mut candidate_identifier = [0_u8; HASH_BYTE_LENGTH];
+            candidate_identifier[..8].copy_from_slice(&candidate_ordinal.to_le_bytes());
+            candidate_identifier[HASH_BYTE_LENGTH - 1] = 0xff;
+            candidate_ordinal = candidate_ordinal
+                .checked_add(1)
+                .expect("candidate ordinal remains bounded");
+            if candidate_identifier != refused_new_identifier {
+                lease
+                    .sealed_record_highest_versions
+                    .entry(candidate_identifier)
+                    .or_insert(0);
+            }
+        }
+        assert!(
+            !lease
+                .sealed_record_highest_versions
+                .contains_key(&refused_new_identifier)
+        );
+    });
+
+    let new_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::ProofAttempt,
+        &new_identifier_context,
+        0,
+        None,
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD,
+            &[
+                new_request.as_slice(),
+                [0xf1; 12].as_slice(),
+                b"new record beyond cap".as_slice(),
+            ]
+            .concat(),
+        ),
+        Err(refusal_status(RefusalReason::OutsideSupportedProfile)),
+    );
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active.as_ref().expect("active root lease");
+        assert_eq!(lease.local_record_seal_invocation_count, 1);
+        assert_eq!(
+            lease.sealed_record_highest_versions.len(),
+            maximum_tracked_local_record_identifier_count_per_active_root(),
+        );
+    });
+
+    let replacement_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::WitnessState,
+        &state_key,
+        1,
+        Some(&initial_envelope_hash),
+    );
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD,
+        &[
+            replacement_request.as_slice(),
+            [0xf2; 12].as_slice(),
+            b"replacement at cap".as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("replacement at the identifier cap seals");
+
+    let scratch_context = common_proof_external_memory_identifier_context();
+    let scratch_request = record_request_input(
+        handle,
+        &capability,
+        &action_randomness_commitment,
+        LocalRecordType::CommonProofExternalMemory,
+        &scratch_context,
+        0,
+        None,
+    );
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_COMMON_PROOF_EXTERNAL_MEMORY_RECORD,
+        &[
+            scratch_request.as_slice(),
+            [0xf3; 12].as_slice(),
+            b"scratch outside the retained ledger".as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("worker-internal scratch remains available at the identifier cap");
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active.as_ref().expect("active root lease");
+        assert_eq!(
+            lease.sealed_record_highest_versions.len(),
+            maximum_tracked_local_record_identifier_count_per_active_root(),
+        );
+        assert_eq!(lease.local_record_seal_invocation_count, 3);
+    });
+    reset_registry();
+}
+
+#[test]
 fn record_commands_refuse_invalid_types_contexts_and_version_predecessor_pairs() {
     reset_registry();
     let capability = test_capability(131);
@@ -965,8 +1512,13 @@ fn active_root_derives_common_proof_external_memory_identifiers_from_closed_cont
         COMMON_PROOF_EXTERNAL_MEMORY_IDENTIFIER_CONTEXT_BYTE_LENGTH,
     );
     let derive_identifier = |record_type: LocalRecordType, identifier_context: &[u8]| {
+        let command = if record_type == LocalRecordType::CommonProofExternalMemory {
+            LOCAL_STORAGE_ROOT_COMMAND_DERIVE_COMMON_PROOF_EXTERNAL_MEMORY_RECORD_IDENTIFIER
+        } else {
+            LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER
+        };
         run_local_storage_root_command(
-            LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER,
+            command,
             &[
                 lease_input(handle, &capability).as_slice(),
                 record_type.canonical_code().to_le_bytes().as_slice(),

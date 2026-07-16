@@ -4,14 +4,6 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
-// Checkpoint subdirectories for the expensive proof families. The trustee
-// evaluation-key family already persists its authenticated proof material under a
-// sibling directory; these two cover the other expensive prover outputs so a
-// resumed run skips re-proving every family, not just the trustee one.
-pub(in super::super) const SAME_SECRET_BRIDGE_PROOF_CHECKPOINT_DIRECTORY: &str =
-    "same-secret-bridge-proof-material";
-pub(in super::super) const PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY: &str =
-    "public-key-share-proof-material";
 pub(in super::super) const TRUSTEE_EVALUATION_KEY_PROOF_CHECKPOINT_DIRECTORY: &str =
     "trustee-evaluation-key-proof-material";
 
@@ -65,28 +57,6 @@ pub(in super::super) fn persist_checkpointed_proof_bytes(
     }
     let path = proof_checkpoint_path(family_directory, statement_hash_hex);
     persist_proof_checkpoint(&path, statement_hash_hex, proof_bytes);
-}
-
-// Returns deterministic encoded proof bytes,
-// loading them from an on-disk checkpoint when checkpoint resume is enabled and a
-// matching file exists, and otherwise generating them and persisting them so a
-// later run can skip the prover. The statement hash content-addresses the proof:
-// a changed statement yields a new filename, so a stale proof is never reused,
-// and a witness-only divergence surfaces as a loud verifier rejection rather than
-// a silently accepted wrong proof.
-pub(in super::super) fn checkpointed_proof_bytes(
-    family_directory: &str,
-    statement_hash_hex: &str,
-    verify_resumed_proof_bytes: impl FnOnce(&[u8]) -> crate::encoding::CanonicalResult<()>,
-    generate_proof_bytes: impl FnOnce() -> Vec<u8>,
-) -> Vec<u8> {
-    checkpointed_proof_bytes_with_verification_state(
-        family_directory,
-        statement_hash_hex,
-        verify_resumed_proof_bytes,
-        generate_proof_bytes,
-    )
-    .proof_bytes
 }
 
 pub(in super::super) struct CheckpointedProofBytes {

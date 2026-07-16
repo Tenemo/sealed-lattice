@@ -381,8 +381,13 @@ const makeTransferableCanonicalBoardRuntime = (
                 if (closed) {
                     return;
                 }
-                closed = true;
                 runtime.close();
+                if (runtime.state() !== 'closed') {
+                    throw new TypeError(
+                        'The canonical-board runtime did not close.',
+                    );
+                }
+                closed = true;
             },
             copyCachedCarrier: (snapshot, objectHash) => {
                 assertOwner(owner);

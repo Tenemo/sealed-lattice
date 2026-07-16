@@ -2,8 +2,8 @@ import { shake256 } from '@noble/hashes/sha3.js';
 import {
     BrowserActionStorageCustodyError,
     type BrowserActionStorageWorkerKernel,
-    type BrowserLocalRecordIdentifierInput,
 } from '@sealed-lattice/types';
+import { openClosedWorkerCommonProofScratchStorage } from '@sealed-lattice/wasm';
 import type {
     AuthenticatedCommonProofInputStore,
     CommonProofCanonicalOutputStore,
@@ -11,6 +11,7 @@ import type {
     CommonProofExternalMemoryRequest,
     CommonProofExternalMemoryTransactionExecutor,
     CommonProofGenerationCheckpoint,
+    ClosedWorkerCommonProofScratchRecordIdentifierInput,
 } from '@sealed-lattice/wasm';
 
 import {
@@ -31,12 +32,13 @@ import type {
 
 const foundationHashByteLength = 64;
 const identifierByteLength = 32;
-const localRecordVersion = 0n;
 const maximumCanonicalDataChunkByteLength = 49_152;
 const maximumDeletionBatchRecordCount = 64;
 const canonicalCommonProofOutputChunkByteLength = 1_048_576;
 const maximumCommonProofOutputChunkCount = 5;
 const maximumCommonProofOutputByteLength = 5_242_880;
+const maximumCheckpointCursorCount = 4_096;
+const maximumCheckpointCursorAggregateByteLength = 1_048_576;
 const maximumUnsigned32 = 0xffff_ffff;
 const publicRecordMagic = Uint8Array.of(0x53, 0x4c, 0x43, 0x50);
 const publicRecordVersion = 1;
@@ -55,10 +57,8 @@ const commonProofAttemptStoragePrefixDomain =
 const commonProofGenerationCheckpointOperationKind = 1;
 const textEncoder = new TextEncoder();
 
-type CommonProofExternalMemoryIdentifierInput = Extract<
-    BrowserLocalRecordIdentifierInput,
-    { readonly recordType: 'commonProofExternalMemory' }
->;
+type CommonProofExternalMemoryIdentifierInput =
+    ClosedWorkerCommonProofScratchRecordIdentifierInput;
 
 type ExternalMemoryRecordDescriptor = Readonly<{
     identifierInput: CommonProofExternalMemoryIdentifierInput;
@@ -117,14 +117,14 @@ type CanonicalOutputChunk = Readonly<{
     logicalRecordKey: string;
 }>;
 
-export type CommonProofBrowserCustodyLimits = Readonly<{
+type CommonProofBrowserCustodyLimits = Readonly<{
     maximumExternalMemoryByteLength: bigint;
     maximumExternalMemoryObjectCount: number;
     maximumExternalMemoryRecordCount: number;
     transactionLifetimeMilliseconds: number;
 }>;
 
-export type CommonProofBrowserCustodyInput = Readonly<{
+type CommonProofBrowserCustodyInput = Readonly<{
     actionRandomnessCommitment: Uint8Array;
     capacityReservation: UntrustedStorageExclusiveCapacityReservation;
     commonProofEnvironmentIdentifier: Uint8Array;
@@ -148,6 +148,11 @@ export type CommonProofCheckpointResumeDescriptor = Readonly<{
     stableAttemptBindingHash: Uint8Array;
 }>;
 
+export type CommonProofApplicationHandoff = Readonly<{
+    canonicalMarkerRecordBytes: Uint8Array<ArrayBuffer>;
+    logicalRecordKey: string;
+}>;
+
 type CommonProofCheckpointCustody = Readonly<{
     publishAuthenticatedCheckpoint(
         checkpoint: CommonProofGenerationCheckpoint,
@@ -161,6 +166,7 @@ type CommonProofCheckpointCustody = Readonly<{
  * SDK export.
  */
 export type CommonProofBrowserCustody = Readonly<{
+    armApplicationHandoff(): Promise<CommonProofApplicationHandoff>;
     checkpointCustody?: CommonProofCheckpointCustody;
     completeVerifiedOutput(): Promise<void>;
     copyCheckpointResumeDescriptor():
@@ -261,6 +267,14 @@ export const deriveCommonProofAttemptLogicalRecordPrefix = (input: {
     }
 };
 
+export const commonProofApplicationHandoffLogicalRecordKey =
+    'common-proof-handoff/pending';
+const commonProofApplicationHandoffMarkerPayloadByteLength =
+    foundationHashByteLength;
+export const commonProofApplicationHandoffMarkerRecordByteLength =
+    publicRecordHeaderByteLength +
+    commonProofApplicationHandoffMarkerPayloadByteLength;
+
 const unsigned32Bytes = (value: number): Uint8Array<ArrayBuffer> => {
     const bytes = new Uint8Array(4);
     new DataView(bytes.buffer).setUint32(0, value, true);
@@ -305,6 +319,29 @@ const copyCheckpointResumeDescriptor = (
             'InvalidInput',
             'The common-proof checkpoint resume descriptor is malformed.',
         );
+    }
+    if (
+        value.orderedPrivateRandomCursorBytes.length >
+        maximumCheckpointCursorCount
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            `The common-proof checkpoint resume descriptor exceeds the ${String(maximumCheckpointCursorCount)}-cursor limit.`,
+        );
+    }
+    let cursorAggregateByteLength = 0;
+    for (const cursorBytes of value.orderedPrivateRandomCursorBytes) {
+        if (
+            cursorBytes.byteLength >
+            maximumCheckpointCursorAggregateByteLength -
+                cursorAggregateByteLength
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                `The common-proof checkpoint resume descriptor exceeds the ${String(maximumCheckpointCursorAggregateByteLength)}-byte cursor budget.`,
+            );
+        }
+        cursorAggregateByteLength += cursorBytes.byteLength;
     }
     let checkpointLineageIdentifier = new Uint8Array(0);
     let commonProofEnvironmentIdentifier = new Uint8Array(0);
@@ -613,12 +650,16 @@ export const openCommonProofBrowserCustody = (
             'Common-proof browser custody requires a configuration object.',
         );
     }
+    const scratchStorage = openClosedWorkerCommonProofScratchStorage(
+        input.workerKernel,
+    );
     let actionRandomnessCommitment = new Uint8Array(0);
     let commonProofEnvironmentIdentifier = new Uint8Array(0);
     let commonProofRuntimeBindingHash = new Uint8Array(0);
     let proofAttemptLineageIdentifier = new Uint8Array(0);
     let limits: CommonProofBrowserCustodyLimits;
     let attemptLogicalRecordPrefix = '';
+    let applicationHandoffLogicalRecordKey = '';
     let latestCheckpointResumeDescriptor:
         | CommonProofCheckpointResumeDescriptor
         | undefined;
@@ -650,6 +691,8 @@ export const openCommonProofBrowserCustody = (
                 commonProofRuntimeBindingHash,
                 proofAttemptLineageIdentifier,
             });
+        applicationHandoffLogicalRecordKey =
+            commonProofApplicationHandoffLogicalRecordKey;
         latestCheckpointResumeDescriptor =
             input.checkpoint?.resumeDescriptor === undefined
                 ? undefined
@@ -685,7 +728,17 @@ export const openCommonProofBrowserCustody = (
     let outputByteLength = 0;
     let outputSealed = false;
     let outputTerminalChunkIndex: number | undefined;
+    let capacityReservationReleased = false;
+    let checkpointEvictionCompleted = false;
+    let durableProofRecordsDeleted = false;
+    let terminalCheckpointLineageIdentifier:
+        | Uint8Array<ArrayBuffer>
+        | undefined;
+    let terminalCheckpointOperationIdentity:
+        | CheckpointOperationIdentity
+        | undefined;
     let retirementCleanupCompleted = false;
+    let applicationHandoffArmed = false;
     let state: 'open' | 'releasing-external-memory' | 'retiring' | 'retired' =
         'open';
     let checkpointOperationIdentity: CheckpointOperationIdentity | undefined;
@@ -699,7 +752,35 @@ export const openCommonProofBrowserCustody = (
         }
     };
 
-    const permanentlyRetireInMemory = (): void => {
+    const preserveCheckpointLineageForTerminalCleanup = (): void => {
+        if (
+            checkpointEvictionCompleted ||
+            terminalCheckpointLineageIdentifier !== undefined
+        ) {
+            return;
+        }
+        if (input.checkpoint === undefined) {
+            checkpointEvictionCompleted = true;
+            return;
+        }
+        terminalCheckpointOperationIdentity ??= checkpointOperationIdentity;
+        const checkpointLineageIdentifier =
+            latestCheckpointResumeDescriptor?.checkpointLineageIdentifier ??
+            terminalCheckpointOperationIdentity?.checkpointLineageIdentifier;
+        if (checkpointLineageIdentifier === undefined) {
+            checkpointEvictionCompleted = true;
+            return;
+        }
+        terminalCheckpointLineageIdentifier =
+            checkpointLineageIdentifier.slice();
+    };
+
+    const permanentlyRetireInMemory = (
+        preserveCheckpointForCleanup = true,
+    ): void => {
+        if (preserveCheckpointForCleanup) {
+            preserveCheckpointLineageForTerminalCleanup();
+        }
         state = 'retired';
         actionRandomnessCommitment.fill(0);
         commonProofEnvironmentIdentifier.fill(0);
@@ -708,13 +789,7 @@ export const openCommonProofBrowserCustody = (
         for (const object of objects.values()) {
             destroyExternalMemoryObjectInMemory(object);
         }
-        if (checkpointOperationIdentity !== undefined) {
-            checkpointOperationIdentity.checkpointLineageIdentifier.fill(0);
-            for (const identifier of checkpointOperationIdentity.streamAttemptIdentifiers) {
-                identifier.fill(0);
-            }
-            checkpointOperationIdentity = undefined;
-        }
+        checkpointOperationIdentity = undefined;
         if (latestCheckpointResumeDescriptor !== undefined) {
             destroyCheckpointResumeDescriptor(latestCheckpointResumeDescriptor);
             latestCheckpointResumeDescriptor = undefined;
@@ -953,42 +1028,15 @@ export const openCommonProofBrowserCustody = (
                                   }
                               }
                           } catch (error) {
-                              const checkpointLineageIdentifier =
-                                  latestCheckpointResumeDescriptor?.checkpointLineageIdentifier.slice();
+                              state = 'retiring';
+                              const cleanupFailures =
+                                  await cleanupTerminalProofAuthority();
                               permanentlyRetireInMemory();
-                              const cleanupResults = await Promise.allSettled([
-                                  ...(checkpointLineageIdentifier === undefined
-                                      ? []
-                                      : [
-                                            input.checkpoint!.store.evict(
-                                                checkpointLineageIdentifier,
-                                            ),
-                                        ]),
-                                  cleanupDurableProofRecords(),
-                              ]);
-                              checkpointLineageIdentifier?.fill(0);
-                              const cleanupFailures = cleanupResults
-                                  .filter(
-                                      (
-                                          result,
-                                      ): result is PromiseRejectedResult =>
-                                          result.status === 'rejected',
-                                  )
-                                  .map((result) => result.reason as unknown);
                               if (cleanupFailures.length !== 0) {
                                   throw new BrowserActionStorageCustodyError(
                                       'StorageFailure',
                                       'Common-proof checkpoint restoration failed and durable retirement was incomplete.',
                                       [error, ...cleanupFailures],
-                                  );
-                              }
-                              try {
-                                  await input.capacityReservation.release();
-                              } catch (releaseError) {
-                                  throw new BrowserActionStorageCustodyError(
-                                      'StorageFailure',
-                                      'Common-proof checkpoint restoration failed and its exclusive storage reservation could not be released.',
-                                      [error, releaseError],
                                   );
                               }
                               throw error;
@@ -1034,9 +1082,7 @@ export const openCommonProofBrowserCustody = (
         let identifier: Uint8Array = new Uint8Array(0);
         try {
             identifier =
-                await input.workerKernel.deriveActiveLocalRecordIdentifier(
-                    recordInput,
-                );
+                await scratchStorage.deriveRecordIdentifier(recordInput);
             if (
                 !(identifier instanceof Uint8Array) ||
                 identifier.byteLength !== foundationHashByteLength
@@ -1067,11 +1113,10 @@ export const openCommonProofBrowserCustody = (
             descriptor.identifierInput,
         );
         try {
-            const plaintext = await input.workerKernel.openActiveLocalRecord({
+            const plaintext = await scratchStorage.openRecord({
                 actionRandomnessCommitment: commitmentCopy,
                 envelope: envelopeCopy,
                 identifierInput: identifierInputCopy,
-                recordVersion: localRecordVersion,
             });
             if (!(plaintext instanceof Uint8Array)) {
                 throw new BrowserActionStorageCustodyError(
@@ -1111,11 +1156,10 @@ export const openCommonProofBrowserCustody = (
         );
         const plaintextCopy = payload.slice();
         try {
-            const envelope = await input.workerKernel.sealActiveLocalRecord({
+            const envelope = await scratchStorage.sealRecord({
                 actionRandomnessCommitment: commitmentCopy,
                 identifierInput: identifierInputCopy,
                 plaintext: plaintextCopy,
-                recordVersion: localRecordVersion,
             });
             if (
                 !(envelope instanceof Uint8Array) ||
@@ -1484,7 +1528,7 @@ export const openCommonProofBrowserCustody = (
             await transaction.stageDeletion(logicalRecordKey);
             await transaction.commit();
         } catch (error) {
-            await closeTransactionAfterFailure(transaction, error);
+            return await closeTransactionAfterFailure(transaction, error);
         }
     };
 
@@ -2216,6 +2260,9 @@ export const openCommonProofBrowserCustody = (
     };
 
     async function cleanupDurableProofRecords(): Promise<void> {
+        if (durableProofRecordsDeleted) {
+            return;
+        }
         try {
             await input.capacityReservation.deleteAuthenticatedLogicalRecords(
                 attemptLogicalRecordPrefix,
@@ -2227,6 +2274,7 @@ export const openCommonProofBrowserCustody = (
                 error,
             );
         }
+        durableProofRecordsDeleted = true;
         for (const object of objects.values()) {
             destroyExternalMemoryObjectInMemory(object);
         }
@@ -2235,10 +2283,176 @@ export const openCommonProofBrowserCustody = (
         externalMemoryRecordCount = 0;
         outputChunks.clear();
         outputByteLength = 0;
+        outputSealed = false;
         outputTerminalChunkIndex = undefined;
     }
 
+    async function evictTerminalCheckpoint(): Promise<void> {
+        if (checkpointEvictionCompleted) {
+            return;
+        }
+        preserveCheckpointLineageForTerminalCleanup();
+        if (checkpointEvictionCompleted) {
+            return;
+        }
+        const checkpointLineageIdentifier = terminalCheckpointLineageIdentifier;
+        if (
+            checkpointLineageIdentifier === undefined ||
+            input.checkpoint === undefined
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'Common-proof terminal checkpoint cleanup lost its retained lineage identifier.',
+            );
+        }
+        await input.checkpoint.store.evict(checkpointLineageIdentifier);
+        if (terminalCheckpointOperationIdentity !== undefined) {
+            await input.checkpoint.store.releaseOperationIdentity(
+                terminalCheckpointOperationIdentity,
+            );
+            terminalCheckpointOperationIdentity = undefined;
+        }
+        checkpointEvictionCompleted = true;
+        checkpointLineageIdentifier.fill(0);
+        terminalCheckpointLineageIdentifier = undefined;
+    }
+
+    async function releaseTerminalCapacityReservation(): Promise<void> {
+        if (capacityReservationReleased) {
+            return;
+        }
+        await input.capacityReservation.release();
+        capacityReservationReleased = true;
+    }
+
+    async function cleanupTerminalProofAuthority(): Promise<unknown[]> {
+        preserveCheckpointLineageForTerminalCleanup();
+        const failures: unknown[] = [];
+        try {
+            await cleanupDurableProofRecords();
+        } catch (error) {
+            failures.push(error);
+        }
+        try {
+            await evictTerminalCheckpoint();
+        } catch (error) {
+            failures.push(error);
+        }
+        if (durableProofRecordsDeleted) {
+            try {
+                await releaseTerminalCapacityReservation();
+            } catch (error) {
+                failures.push(error);
+            }
+        }
+        retirementCleanupCompleted =
+            durableProofRecordsDeleted &&
+            checkpointEvictionCompleted &&
+            capacityReservationReleased;
+        return failures;
+    }
+
+    const armApplicationHandoff =
+        async (): Promise<CommonProofApplicationHandoff> => {
+            assertOpen();
+            if (
+                applicationHandoffArmed ||
+                !outputSealed ||
+                outputByteLength === 0 ||
+                objects.size !== 0 ||
+                externalMemoryByteLength !== 0n ||
+                externalMemoryRecordCount !== 0
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'Common-proof application handoff requires one sealed output with released scratch authority.',
+                );
+            }
+            const markerPayload = hexToExactBytes(
+                attemptLogicalRecordPrefix.slice(
+                    'common-proof-attempt/'.length,
+                    -1,
+                ),
+                foundationHashByteLength,
+                'Common-proof application handoff attempt identifier',
+            );
+            const canonicalMarkerRecordBytes = encodePublicRecord(
+                applicationHandoffLogicalRecordKey,
+                markerPayload,
+            );
+            const transaction = await input.store.beginTransaction({
+                lifetimeMilliseconds: limits.transactionLifetimeMilliseconds,
+            });
+            let committedRecord: Uint8Array | undefined;
+            try {
+                const lease = await transaction.issueWriteLease({
+                    declaredByteLength: canonicalMarkerRecordBytes.byteLength,
+                    expectedCurrentValue: null,
+                    logicalRecordKey: applicationHandoffLogicalRecordKey,
+                });
+                await lease.write(canonicalMarkerRecordBytes);
+                await lease.seal(({ bytes }) => {
+                    const opened = decodePublicRecord(
+                        applicationHandoffLogicalRecordKey,
+                        bytes,
+                    );
+                    try {
+                        if (!bytesEqual(opened, markerPayload)) {
+                            throw new BrowserActionStorageCustodyError(
+                                'RecordAuthenticationFailed',
+                                'The staged common-proof handoff marker changed before commit.',
+                            );
+                        }
+                    } finally {
+                        opened.fill(0);
+                    }
+                });
+                await transaction.commit();
+                committedRecord = await input.store.readAuthenticated({
+                    authenticate: ({ bytes }) => {
+                        const opened = decodePublicRecord(
+                            applicationHandoffLogicalRecordKey,
+                            bytes,
+                        );
+                        try {
+                            if (!bytesEqual(opened, markerPayload)) {
+                                throw new BrowserActionStorageCustodyError(
+                                    'RecordAuthenticationFailed',
+                                    'The committed common-proof handoff marker changed during readback.',
+                                );
+                            }
+                        } finally {
+                            opened.fill(0);
+                        }
+                    },
+                    logicalRecordKey: applicationHandoffLogicalRecordKey,
+                });
+                if (
+                    committedRecord === undefined ||
+                    !bytesEqual(committedRecord, canonicalMarkerRecordBytes)
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'RecordAuthenticationFailed',
+                        'The committed common-proof handoff marker is unavailable or differs from its exact bytes.',
+                    );
+                }
+                applicationHandoffArmed = true;
+                return Object.freeze({
+                    canonicalMarkerRecordBytes:
+                        canonicalMarkerRecordBytes.slice(),
+                    logicalRecordKey: applicationHandoffLogicalRecordKey,
+                });
+            } catch (error) {
+                return await closeTransactionAfterFailure(transaction, error);
+            } finally {
+                markerPayload.fill(0);
+                canonicalMarkerRecordBytes.fill(0);
+                committedRecord?.fill(0);
+            }
+        };
+
     return Object.freeze({
+        armApplicationHandoff,
         ...(configuredCheckpointCustody === undefined
             ? {}
             : { checkpointCustody: configuredCheckpointCustody }),
@@ -2257,32 +2471,8 @@ export const openCommonProofBrowserCustody = (
                 );
             }
             state = 'retiring';
-            const checkpointLineageIdentifier =
-                latestCheckpointResumeDescriptor?.checkpointLineageIdentifier.slice();
-            const completionResults = await Promise.allSettled([
-                input.capacityReservation.release(),
-                ...(checkpointLineageIdentifier === undefined ||
-                input.checkpoint === undefined
-                    ? []
-                    : [
-                          input.checkpoint.store.evict(
-                              checkpointLineageIdentifier,
-                          ),
-                      ]),
-            ]);
-            checkpointLineageIdentifier?.fill(0);
-            outputChunks.clear();
-            outputByteLength = 0;
-            outputSealed = false;
-            outputTerminalChunkIndex = undefined;
+            const completionFailures = await cleanupTerminalProofAuthority();
             permanentlyRetireInMemory();
-            retirementCleanupCompleted = true;
-            const completionFailures = completionResults
-                .filter(
-                    (result): result is PromiseRejectedResult =>
-                        result.status === 'rejected',
-                )
-                .map((result) => result.reason as unknown);
             if (completionFailures.length !== 0) {
                 throw new BrowserActionStorageCustodyError(
                     'StorageFailure',
@@ -2337,35 +2527,8 @@ export const openCommonProofBrowserCustody = (
                 return;
             }
             state = 'retiring';
-            const checkpointLineageIdentifier =
-                latestCheckpointResumeDescriptor?.checkpointLineageIdentifier.slice();
-            const cleanupResults = await Promise.allSettled([
-                cleanupDurableProofRecords(),
-                ...(checkpointLineageIdentifier === undefined ||
-                input.checkpoint === undefined
-                    ? []
-                    : [
-                          input.checkpoint.store.evict(
-                              checkpointLineageIdentifier,
-                          ),
-                      ]),
-            ]);
-            checkpointLineageIdentifier?.fill(0);
-            const cleanupFailures = cleanupResults
-                .filter(
-                    (result): result is PromiseRejectedResult =>
-                        result.status === 'rejected',
-                )
-                .map((result) => result.reason as unknown);
-            if (cleanupFailures.length === 0) {
-                try {
-                    await input.capacityReservation.release();
-                } catch (error) {
-                    cleanupFailures.push(error);
-                }
-            }
+            const cleanupFailures = await cleanupTerminalProofAuthority();
             permanentlyRetireInMemory();
-            retirementCleanupCompleted = true;
             if (cleanupFailures.length !== 0) {
                 throw new BrowserActionStorageCustodyError(
                     'StorageFailure',
@@ -2392,7 +2555,19 @@ export const openCommonProofBrowserCustody = (
                     'Common-proof custody cannot suspend without an authenticated checkpoint.',
                 );
             }
-            await input.capacityReservation.release();
+            if (checkpointOperationIdentity !== undefined) {
+                if (input.checkpoint === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidState',
+                        'Common-proof checkpoint identity cleanup lost its authenticated store.',
+                    );
+                }
+                await input.checkpoint.store.releaseOperationIdentity(
+                    checkpointOperationIdentity,
+                );
+                checkpointOperationIdentity = undefined;
+            }
+            await releaseTerminalCapacityReservation();
             for (const object of objects.values()) {
                 destroyExternalMemoryObjectInMemory(object);
             }
@@ -2403,7 +2578,7 @@ export const openCommonProofBrowserCustody = (
             outputByteLength = 0;
             outputSealed = false;
             outputTerminalChunkIndex = undefined;
-            permanentlyRetireInMemory();
+            permanentlyRetireInMemory(false);
             retirementCleanupCompleted = true;
         },
     });

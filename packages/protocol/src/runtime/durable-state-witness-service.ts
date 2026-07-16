@@ -13,6 +13,7 @@ import {
     bytesEqual,
     bytesToHex,
     copyBoundedBytes,
+    copyExactBytes,
     copyRuntimeRecordProtectionAuthorityContext,
     copyRuntimeStorageAuthorityContext,
     createRuntimeRecordProtection,
@@ -23,6 +24,11 @@ import {
     type RuntimeRecordProtection,
     type RuntimeStorageAuthorityContext,
 } from './authenticated-runtime-record.js';
+import {
+    commonProofApplicationHandoffLogicalRecordKey,
+    commonProofApplicationHandoffMarkerRecordByteLength,
+    type CommonProofApplicationHandoff,
+} from './common-proof-browser-custody.js';
 import {
     ExclusiveResourceLifecycle,
     type ExclusiveResourceOwnerToken,
@@ -47,7 +53,7 @@ const intentLockRecordByteLength = 262;
 const signedVoteCarrierRecordHeaderByteLength = 214;
 const exactOutputRecordHeaderByteLength = 204;
 const proofApplicationSlotHashByteLength = 64;
-const maximumCommonProofAuthorizationFrameByteLength = 1_048_576;
+const commonProofAuthorizationFrameByteLength = 746;
 const textEncoder = new TextEncoder();
 const validStateCapabilityKinds = new Set<number>(
     Object.values(stateCapabilityKinds),
@@ -123,6 +129,7 @@ export type TransferableDurableStateWitnessService =
 
 type PersistCommonProofApplicationInput = Readonly<{
     authorizationFrame: Uint8Array;
+    handoff?: CommonProofApplicationHandoff;
     onCommitAttempt(): void;
     proofApplicationSlotHash: Uint8Array;
 }>;
@@ -1256,6 +1263,7 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
     const persistCommonProofApplication: PersistCommonProofApplicationOperation =
         async ({
             authorizationFrame,
+            handoff,
             onCommitAttempt,
             proofApplicationSlotHash,
         }) => {
@@ -1265,25 +1273,38 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
                     'Common-proof persistence requires a commit-attempt boundary callback.',
                 );
             }
-            const copiedAuthorizationFrame = copyBoundedBytes(
+            const copiedAuthorizationFrame = copyExactBytes(
                 authorizationFrame,
-                maximumCommonProofAuthorizationFrameByteLength,
+                commonProofAuthorizationFrameByteLength,
                 'Common-proof authorization frame',
             );
-            const copiedApplicationSlotHash = copyBoundedBytes(
+            const copiedApplicationSlotHash = copyExactBytes(
                 proofApplicationSlotHash,
                 proofApplicationSlotHashByteLength,
                 'Common-proof application slot hash',
             );
-            if (
-                copiedApplicationSlotHash.byteLength !==
-                proofApplicationSlotHashByteLength
-            ) {
-                copiedAuthorizationFrame.fill(0);
-                copiedApplicationSlotHash.fill(0);
-                throw new AuthenticatedRuntimeRecordError(
-                    'InvalidInput',
-                    'Common-proof application slot hash must be exactly 64 bytes.',
+            let handoffLogicalRecordKey: string | undefined;
+            let copiedHandoffMarkerRecordBytes: Uint8Array | undefined;
+            if (handoff !== undefined) {
+                if (
+                    typeof handoff !== 'object' ||
+                    handoff === null ||
+                    typeof handoff.logicalRecordKey !== 'string' ||
+                    handoff.logicalRecordKey !==
+                        commonProofApplicationHandoffLogicalRecordKey
+                ) {
+                    copiedAuthorizationFrame.fill(0);
+                    copiedApplicationSlotHash.fill(0);
+                    throw new AuthenticatedRuntimeRecordError(
+                        'InvalidInput',
+                        'Common-proof persistence received a malformed application handoff marker.',
+                    );
+                }
+                handoffLogicalRecordKey = handoff.logicalRecordKey;
+                copiedHandoffMarkerRecordBytes = copyExactBytes(
+                    handoff.canonicalMarkerRecordBytes,
+                    commonProofApplicationHandoffMarkerRecordByteLength,
+                    'Common-proof application handoff marker',
                 );
             }
 
@@ -1293,6 +1314,44 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
             let transaction: UntrustedStorageTransaction | undefined;
             let stagedSealedBytes: Uint8Array | undefined;
             try {
+                if (
+                    handoffLogicalRecordKey !== undefined &&
+                    copiedHandoffMarkerRecordBytes !== undefined
+                ) {
+                    const committedHandoffMarker =
+                        await input.store.readAuthenticated({
+                            authenticate: ({ bytes }) => {
+                                if (
+                                    !bytesEqual(
+                                        bytes,
+                                        copiedHandoffMarkerRecordBytes,
+                                    )
+                                ) {
+                                    throw new AuthenticatedRuntimeRecordError(
+                                        'AuthenticationFailed',
+                                        'The common-proof application handoff marker differs from its worker-owned bytes.',
+                                    );
+                                }
+                            },
+                            logicalRecordKey: handoffLogicalRecordKey,
+                        });
+                    try {
+                        if (
+                            committedHandoffMarker === undefined ||
+                            !bytesEqual(
+                                committedHandoffMarker,
+                                copiedHandoffMarkerRecordBytes,
+                            )
+                        ) {
+                            throw new AuthenticatedRuntimeRecordError(
+                                'MissingRecord',
+                                'The common-proof application handoff marker is unavailable.',
+                            );
+                        }
+                    } finally {
+                        committedHandoffMarker?.fill(0);
+                    }
+                }
                 const existing = await readRuntimeRecord({
                     logicalRecordKey,
                     operationDomain:
@@ -1324,6 +1383,15 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
                         protection,
                         transaction,
                     });
+                    if (
+                        handoffLogicalRecordKey !== undefined &&
+                        copiedHandoffMarkerRecordBytes !== undefined
+                    ) {
+                        await transaction.stageDeletion(
+                            handoffLogicalRecordKey,
+                            copiedHandoffMarkerRecordBytes,
+                        );
+                    }
                 } catch (error) {
                     throw await closeTransactionAfterFailure(
                         transaction,
@@ -1361,6 +1429,37 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
                         'The committed common-proof application frame is unavailable.',
                     );
                 }
+                if (
+                    handoffLogicalRecordKey !== undefined &&
+                    copiedHandoffMarkerRecordBytes !== undefined
+                ) {
+                    const remainingHandoffMarker =
+                        await input.store.readAuthenticated({
+                            authenticate: ({ bytes }) => {
+                                if (
+                                    !bytesEqual(
+                                        bytes,
+                                        copiedHandoffMarkerRecordBytes,
+                                    )
+                                ) {
+                                    throw new AuthenticatedRuntimeRecordError(
+                                        'AuthenticationFailed',
+                                        'The common-proof handoff marker changed instead of being consumed.',
+                                    );
+                                }
+                            },
+                            logicalRecordKey: handoffLogicalRecordKey,
+                        });
+                    if (remainingHandoffMarker !== undefined) {
+                        remainingHandoffMarker.fill(0);
+                        committed.plaintext.fill(0);
+                        committed.sealedBytes.fill(0);
+                        throw new AuthenticatedRuntimeRecordError(
+                            'AuthenticationFailed',
+                            'The durable common-proof application committed without consuming its handoff marker.',
+                        );
+                    }
+                }
                 try {
                     if (
                         !bytesEqual(
@@ -1381,6 +1480,7 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
             } finally {
                 copiedAuthorizationFrame.fill(0);
                 copiedApplicationSlotHash.fill(0);
+                copiedHandoffMarkerRecordBytes?.fill(0);
                 stagedSealedBytes?.fill(0);
             }
         };

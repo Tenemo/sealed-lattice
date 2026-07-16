@@ -1685,6 +1685,108 @@ impl CommonChallengeStream {
     }
 }
 
+/// Shared distinct-query sampler for proof transcript tests. The caller
+/// supplies a deterministic 64-byte challenge
+/// block for one logical output and counter. Every output starts at counter
+/// zero, and rejected or duplicate candidates consume its draw ceiling.
+#[cfg(test)]
+pub(crate) fn sample_distinct_query_positions_with_blocks(
+    query_orbit_count: usize,
+    query_count: usize,
+    maximum_candidate_draws_per_output: u32,
+    mut challenge_block: impl FnMut(usize, u64) -> Option<[u8; 64]>,
+) -> Result<Vec<usize>, DistinctQuerySamplingError> {
+    if query_orbit_count == 0 {
+        return Err(DistinctQuerySamplingError::InvalidQueryDomain);
+    }
+    if query_count > query_orbit_count {
+        return Err(DistinctQuerySamplingError::QueryCountExceedsDomain);
+    }
+    if maximum_candidate_draws_per_output == 0 {
+        return Err(DistinctQuerySamplingError::CandidateDrawsExhausted { output_index: 0 });
+    }
+
+    let modulus = u64::try_from(query_orbit_count)
+        .map_err(|_| DistinctQuerySamplingError::InvalidQueryDomain)?;
+    let candidate_byte_length = usize::try_from((64 - modulus.leading_zeros()).div_ceil(8))
+        .map_err(|_| DistinctQuerySamplingError::InvalidQueryDomain)?;
+    let candidate_space = 1_u128 << (8 * candidate_byte_length);
+    let acceptance_limit = candidate_space / u128::from(modulus) * u128::from(modulus);
+    let mut positions = BTreeSet::new();
+    for output_index in 0..query_count {
+        let mut block = [0_u8; 64];
+        let mut block_offset = block.len();
+        let mut squeeze_counter = 0_u64;
+        let mut selected = None;
+        for _ in 0..maximum_candidate_draws_per_output {
+            let mut candidate_bytes = [0_u8; 8];
+            for candidate_byte in &mut candidate_bytes[..candidate_byte_length] {
+                if block_offset == block.len() {
+                    block = challenge_block(output_index, squeeze_counter).ok_or(
+                        DistinctQuerySamplingError::ChallengeBlockUnavailable { output_index },
+                    )?;
+                    squeeze_counter = squeeze_counter.checked_add(1).ok_or(
+                        DistinctQuerySamplingError::ChallengeBlockUnavailable { output_index },
+                    )?;
+                    block_offset = 0;
+                }
+                *candidate_byte = block[block_offset];
+                block_offset += 1;
+            }
+            let candidate = u128::from(u64::from_le_bytes(candidate_bytes));
+            if candidate >= acceptance_limit {
+                continue;
+            }
+            let candidate = usize::try_from(candidate % u128::from(modulus))
+                .map_err(|_| DistinctQuerySamplingError::InvalidQueryDomain)?;
+            if positions.insert(candidate) {
+                selected = Some(candidate);
+                break;
+            }
+        }
+        if selected.is_none() {
+            return Err(DistinctQuerySamplingError::CandidateDrawsExhausted { output_index });
+        }
+    }
+    Ok(positions.into_iter().collect())
+}
+
+#[cfg(test)]
+pub(super) fn sample_distinct_query_positions_from_values(
+    values: &[u64],
+    query_orbit_count: usize,
+    query_count: usize,
+    maximum_candidate_draws_per_output: u32,
+) -> Result<Vec<usize>, DistinctQuerySamplingError> {
+    if query_orbit_count == 0 {
+        return Err(DistinctQuerySamplingError::InvalidQueryDomain);
+    }
+    if query_count > query_orbit_count {
+        return Err(DistinctQuerySamplingError::QueryCountExceedsDomain);
+    }
+    let mut value_position = 0_usize;
+    let mut positions = BTreeSet::new();
+    for output_index in 0..query_count {
+        let mut selected = false;
+        for _ in 0..maximum_candidate_draws_per_output {
+            let candidate = *values
+                .get(value_position)
+                .ok_or(DistinctQuerySamplingError::CandidateDrawsExhausted { output_index })?;
+            value_position += 1;
+            let candidate = usize::try_from(candidate % query_orbit_count as u64)
+                .map_err(|_| DistinctQuerySamplingError::InvalidQueryDomain)?;
+            if positions.insert(candidate) {
+                selected = true;
+                break;
+            }
+        }
+        if !selected {
+            return Err(DistinctQuerySamplingError::CandidateDrawsExhausted { output_index });
+        }
+    }
+    Ok(positions.into_iter().collect())
+}
+
 #[cfg(test)]
 mod common_challenge_chain_tests {
     use num_bigint::BigUint;
@@ -1972,106 +2074,4 @@ mod common_challenge_chain_tests {
         );
         assert_eq!(stream.current_candidate_seed, block);
     }
-}
-
-/// Shared distinct-query sampler for proof transcript tests. The caller
-/// supplies a deterministic 64-byte challenge
-/// block for one logical output and counter. Every output starts at counter
-/// zero, and rejected or duplicate candidates consume its draw ceiling.
-#[cfg(test)]
-pub(crate) fn sample_distinct_query_positions_with_blocks(
-    query_orbit_count: usize,
-    query_count: usize,
-    maximum_candidate_draws_per_output: u32,
-    mut challenge_block: impl FnMut(usize, u64) -> Option<[u8; 64]>,
-) -> Result<Vec<usize>, DistinctQuerySamplingError> {
-    if query_orbit_count == 0 {
-        return Err(DistinctQuerySamplingError::InvalidQueryDomain);
-    }
-    if query_count > query_orbit_count {
-        return Err(DistinctQuerySamplingError::QueryCountExceedsDomain);
-    }
-    if maximum_candidate_draws_per_output == 0 {
-        return Err(DistinctQuerySamplingError::CandidateDrawsExhausted { output_index: 0 });
-    }
-
-    let modulus = u64::try_from(query_orbit_count)
-        .map_err(|_| DistinctQuerySamplingError::InvalidQueryDomain)?;
-    let candidate_byte_length = usize::try_from((64 - modulus.leading_zeros()).div_ceil(8))
-        .map_err(|_| DistinctQuerySamplingError::InvalidQueryDomain)?;
-    let candidate_space = 1_u128 << (8 * candidate_byte_length);
-    let acceptance_limit = candidate_space / u128::from(modulus) * u128::from(modulus);
-    let mut positions = BTreeSet::new();
-    for output_index in 0..query_count {
-        let mut block = [0_u8; 64];
-        let mut block_offset = block.len();
-        let mut squeeze_counter = 0_u64;
-        let mut selected = None;
-        for _ in 0..maximum_candidate_draws_per_output {
-            let mut candidate_bytes = [0_u8; 8];
-            for candidate_byte in &mut candidate_bytes[..candidate_byte_length] {
-                if block_offset == block.len() {
-                    block = challenge_block(output_index, squeeze_counter).ok_or(
-                        DistinctQuerySamplingError::ChallengeBlockUnavailable { output_index },
-                    )?;
-                    squeeze_counter = squeeze_counter.checked_add(1).ok_or(
-                        DistinctQuerySamplingError::ChallengeBlockUnavailable { output_index },
-                    )?;
-                    block_offset = 0;
-                }
-                *candidate_byte = block[block_offset];
-                block_offset += 1;
-            }
-            let candidate = u128::from(u64::from_le_bytes(candidate_bytes));
-            if candidate >= acceptance_limit {
-                continue;
-            }
-            let candidate = usize::try_from(candidate % u128::from(modulus))
-                .map_err(|_| DistinctQuerySamplingError::InvalidQueryDomain)?;
-            if positions.insert(candidate) {
-                selected = Some(candidate);
-                break;
-            }
-        }
-        if selected.is_none() {
-            return Err(DistinctQuerySamplingError::CandidateDrawsExhausted { output_index });
-        }
-    }
-    Ok(positions.into_iter().collect())
-}
-
-#[cfg(test)]
-pub(super) fn sample_distinct_query_positions_from_values(
-    values: &[u64],
-    query_orbit_count: usize,
-    query_count: usize,
-    maximum_candidate_draws_per_output: u32,
-) -> Result<Vec<usize>, DistinctQuerySamplingError> {
-    if query_orbit_count == 0 {
-        return Err(DistinctQuerySamplingError::InvalidQueryDomain);
-    }
-    if query_count > query_orbit_count {
-        return Err(DistinctQuerySamplingError::QueryCountExceedsDomain);
-    }
-    let mut value_position = 0_usize;
-    let mut positions = BTreeSet::new();
-    for output_index in 0..query_count {
-        let mut selected = false;
-        for _ in 0..maximum_candidate_draws_per_output {
-            let candidate = *values
-                .get(value_position)
-                .ok_or(DistinctQuerySamplingError::CandidateDrawsExhausted { output_index })?;
-            value_position += 1;
-            let candidate = usize::try_from(candidate % query_orbit_count as u64)
-                .map_err(|_| DistinctQuerySamplingError::InvalidQueryDomain)?;
-            if positions.insert(candidate) {
-                selected = true;
-                break;
-            }
-        }
-        if !selected {
-            return Err(DistinctQuerySamplingError::CandidateDrawsExhausted { output_index });
-        }
-    }
-    Ok(positions.into_iter().collect())
 }

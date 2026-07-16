@@ -36,4 +36,31 @@ describe('exclusive resource lifecycle', () => {
         expect(cleanupStarted).toBe(true);
         expect(lifecycle.close(owner)).toBe(close);
     });
+
+    it('keeps work closed while allowing cleanup to be retried after failure', async () => {
+        let cleanupAttemptCount = 0;
+        const lifecycle = new ExclusiveResourceLifecycle({
+            cleanup: () => {
+                cleanupAttemptCount += 1;
+                return cleanupAttemptCount === 1
+                    ? Promise.reject(new Error('Injected cleanup failure.'))
+                    : Promise.resolve();
+            },
+            createInvalidStateError: (message) =>
+                new AuthenticatedRuntimeRecordError('InvalidState', message),
+        });
+        const owner = lifecycle.initialOwner();
+
+        const failedClose = lifecycle.close(owner);
+        await expect(failedClose).rejects.toThrow('Injected cleanup failure.');
+        expect(() =>
+            lifecycle.run(owner, () => Promise.resolve()),
+        ).toThrowError(expect.objectContaining({ code: 'InvalidState' }));
+
+        const successfulClose = lifecycle.close(owner);
+        expect(successfulClose).not.toBe(failedClose);
+        await expect(successfulClose).resolves.toBeUndefined();
+        expect(cleanupAttemptCount).toBe(2);
+        expect(lifecycle.close(owner)).toBe(successfulClose);
+    });
 });

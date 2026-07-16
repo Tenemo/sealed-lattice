@@ -102,17 +102,6 @@ fn round_one(level: usize) -> (EvaluationKeyShareKind, usize) {
     (EvaluationKeyShareKind::RelinearizationRoundOne, level)
 }
 
-fn round_two(level: usize) -> (EvaluationKeyShareKind, usize) {
-    (EvaluationKeyShareKind::RelinearizationRoundTwo, level)
-}
-
-fn rotation(galois_element: usize, level: usize) -> (EvaluationKeyShareKind, usize) {
-    (
-        EvaluationKeyShareKind::GaloisRotation { galois_element },
-        level,
-    )
-}
-
 fn repeated_hash(byte_pair: &str) -> String {
     byte_pair.repeat(64)
 }

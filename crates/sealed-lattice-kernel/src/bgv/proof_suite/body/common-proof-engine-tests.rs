@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use crate::bgv::{
     parameters::POLYNOMIAL_DEGREE,
@@ -23,8 +25,9 @@ use super::super::{
     BoundedCommonProofByteSink, CheckpointableCommonProofPrivateCoinSource,
     CollectivePublicKeyAggregatePlanInput, CommittedMaterialBoundOpeningProvider,
     CommittedMaterialProfile, CommittedMaterialTree, CommittedMaterialTreeInput,
-    CommonProofApplicationBinding, CommonProofGenerationInitializationError,
-    CommonProofGenerationInput, CommonProofGenerationOperationHandle, CommonProofGenerationSources,
+    CommonProofApplicationBinding, CommonProofGenerationError,
+    CommonProofGenerationInitializationError, CommonProofGenerationInput,
+    CommonProofGenerationOperationHandle, CommonProofGenerationSources,
     CommonProofGenerationStateMachine, CommonProofGenerationWorkerError,
     CommonProofGenerationWorkerPoll, CommonProofPrivateCoinSource, CommonProofProverError,
     CommonProofRelationPlanCapability, CommonProofResidentMemoryPhase, CommonProofRuntimeError,
@@ -45,7 +48,7 @@ use super::super::{
     PreparedCommonProofVerification, ProofBaseFieldElement, ProofBodyError, ProofDecodeError,
     ProofEvaluationDomain, ProofExternalMemory, ProofExternalMemoryObject,
     ProofExternalMemoryProtection, ProofExternalMemoryTransactionOperation,
-    ProofExternalMemoryTransactionRequest, ProofLeafVisibility, ProofTreeRole,
+    ProofExternalMemoryTransactionRequest, ProofLeafVisibility, ProofProfileError, ProofTreeRole,
     PublicAggregateRelationGeometry, RelationPlanCheckContext, RelationProofTreeInput,
     ResidentCommonProofByteSource, ResidentCommonProofInputChunk, ResolvedSuiteModulus,
     RkgRoundOneAggregatePlanInput, RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput,
@@ -53,9 +56,9 @@ use super::super::{
     SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput, StatementOwnedProofTreeInput,
     SuiteModulusReference, TargetReleaseModulusWitness, TargetReleaseRelationPlanInput,
     TargetReleaseRoleWitness, TargetReleaseWitness, VerifiedCommonProof,
-    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, VerifiedTargetReleaseModulusInput,
-    VerifiedTargetReleaseProof, canonical_proof_object_header_bytes,
-    compile_collective_public_key_aggregate_relation_plan,
+    VerifiedCommonProofCapabilityHandle, VerifiedRelationColumnEvaluator,
+    VerifiedStatementOwnedTree, VerifiedTargetReleaseModulusInput,
+    canonical_proof_object_header_bytes, compile_collective_public_key_aggregate_relation_plan,
     compile_evaluator_key_aggregate_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
     compile_same_secret_relation_plan, compile_target_release_relation,
     durable_authorization_frame_digest, generate_common_proof, verified_application_statement_hash,
@@ -68,8 +71,9 @@ const RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1215;
 const EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1218;
 const TARGET_RELEASE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1621;
 const EVALUATION_DOMAIN_SIZE: u64 = 4_096;
-const TARGET_TEST_EVALUATION_DOMAIN_SIZE: u64 = 1_024;
-const TARGET_TEST_RING_DEGREE: usize = 8;
+const TARGET_TEST_EVALUATION_DOMAIN_SIZE: u64 = 2_048;
+const TARGET_TEST_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 256;
+const TARGET_TEST_RING_DEGREE: usize = 64;
 const OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 258;
 const MAXIMUM_PROOF_BYTE_LENGTH: usize = 16 * 1_024 * 1_024;
 const MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH: usize = 64 * 1_024 * 1_024;
@@ -574,7 +578,7 @@ fn target_relation_context() -> RelationPlanCheckContext {
         quotient_component_degree_bound_exclusive: 128,
         fri_fold_count: 5,
         final_polynomial_degree_bound_exclusive: 8,
-        unique_query_count: 8,
+        unique_query_count: 5,
         non_native_modular_identity_challenge_count: 1,
         maximum_fiat_shamir_candidate_draws_per_output:
             PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
@@ -1216,11 +1220,54 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
 }
 
 #[test]
-fn wasm_boundary_discards_each_unstarted_prepared_operation_exactly_once() {
+fn wasm_family_adapters_derive_bindings_and_discard_unstarted_preparations_once() {
     let (prepared_generation, _) = prepared_generation_worker_fixture();
-    let generation_handle =
-        super::super::runtime_ffi::retain_prepared_common_proof_generation(prepared_generation)
-            .expect("the exact-family prover preparation is retained");
+    let expected_runtime_binding_hash = prepared_generation.runtime_binding_hash();
+    let expected_verification_binding_hash = prepared_generation.verification_binding_hash();
+    let expected_lineage_identifier = prepared_generation.proof_attempt_lineage_identifier();
+    let generation_adapter =
+        super::super::runtime_ffi::CommonProofGenerationFamilyAdapter::fresh(prepared_generation);
+    let generation_adapter_handle =
+        super::super::runtime_ffi::retain_common_proof_generation_family_adapter(
+            generation_adapter,
+        )
+        .expect("the exact-family prover adapter is retained");
+    let mut described_runtime_binding_hash = [0_u8; 64];
+    let mut described_verification_binding_hash = [0_u8; 64];
+    let mut described_lineage_identifier = [0_u8; 32];
+    let mut status = u32::MAX;
+    assert_eq!(
+        unsafe {
+            super::super::runtime_ffi::sealed_lattice_common_proof_describe_generation_family_adapter(
+                generation_adapter_handle,
+                described_runtime_binding_hash.as_mut_ptr(),
+                described_verification_binding_hash.as_mut_ptr(),
+                described_lineage_identifier.as_mut_ptr(),
+                &mut status,
+            )
+        },
+        0,
+    );
+    assert_eq!(status, 0);
+    assert_eq!(
+        described_runtime_binding_hash,
+        expected_runtime_binding_hash
+    );
+    assert_eq!(
+        described_verification_binding_hash,
+        expected_verification_binding_hash
+    );
+    assert_eq!(described_lineage_identifier, expected_lineage_identifier);
+    let generation_handle = unsafe {
+        super::super::runtime_ffi::sealed_lattice_common_proof_prepare_generation_family_adapter(
+            generation_adapter_handle,
+            core::ptr::null(),
+            0,
+            &mut status,
+        )
+    };
+    assert_ne!(generation_handle, 0);
+    assert_eq!(status, 0);
     assert_eq!(
         super::super::runtime_ffi::sealed_lattice_common_proof_discard_prepared_generation(
             generation_handle,
@@ -1235,10 +1282,39 @@ fn wasm_boundary_discards_each_unstarted_prepared_operation_exactly_once() {
         "a discarded prover preparation remains permanently stale",
     );
 
-    let verification_handle = super::super::runtime_ffi::retain_prepared_common_proof_verification(
-        prepared_verification_worker_fixture(),
-    )
-    .expect("the exact-family verifier preparation is retained");
+    let prepared_verification = prepared_verification_worker_fixture();
+    let expected_verification_binding_hash = prepared_verification.verification_binding_hash();
+    let verification_adapter =
+        super::super::runtime_ffi::CommonProofVerificationFamilyAdapter::new(prepared_verification);
+    let verification_adapter_handle =
+        super::super::runtime_ffi::retain_common_proof_verification_family_adapter(
+            verification_adapter,
+        )
+        .expect("the exact-family verifier adapter is retained");
+    let mut described_verification_binding_hash = [0_u8; 64];
+    assert_eq!(
+        unsafe {
+            super::super::runtime_ffi::sealed_lattice_common_proof_describe_verification_family_adapter(
+                verification_adapter_handle,
+                described_verification_binding_hash.as_mut_ptr(),
+                &mut status,
+            )
+        },
+        0,
+    );
+    assert_eq!(status, 0);
+    assert_eq!(
+        described_verification_binding_hash,
+        expected_verification_binding_hash
+    );
+    let verification_handle = unsafe {
+        super::super::runtime_ffi::sealed_lattice_common_proof_prepare_verification_family_adapter(
+            verification_adapter_handle,
+            &mut status,
+        )
+    };
+    assert_ne!(verification_handle, 0);
+    assert_eq!(status, 0);
     assert_eq!(
         super::super::runtime_ffi::sealed_lattice_common_proof_discard_prepared_verification(
             verification_handle,
@@ -1251,6 +1327,156 @@ fn wasm_boundary_discards_each_unstarted_prepared_operation_exactly_once() {
         ),
         RefusalReason::ConsumedState.canonical_code() as u32,
         "a discarded verifier preparation remains permanently stale",
+    );
+}
+
+#[test]
+fn family_terminal_consumer_refuses_before_positive_verification() {
+    let mut consumer_called = false;
+    let result = super::super::runtime_ffi::consume_verified_common_proof_with_family_terminal(
+        &VerifiedCommonProofCapabilityHandle::from_identifier(0),
+        |_capability| {
+            consumer_called = true;
+            Ok(())
+        },
+    );
+    assert_eq!(result, Err(CommonProofRuntimeError::UnknownOrStaleHandle));
+    assert!(
+        !consumer_called,
+        "decoded bytes cannot invoke a family consumer"
+    );
+}
+
+#[test]
+fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_preparation() {
+    let refused_callback_count = Rc::new(Cell::new(0_u32));
+    let refused_callback_observation = Rc::clone(&refused_callback_count);
+    let refused_adapter = super::super::runtime_ffi::CommonProofGenerationFamilyAdapter::resume(
+        super::super::runtime_ffi::CommonProofGenerationFamilyAdapterDescription::new(
+            [0x11; 64], [0x22; 64], [0x33; 32],
+        ),
+        [0x44; 32],
+        Hash512::from_bytes([0x55; 64]),
+        Box::new(move |_continuation| {
+            refused_callback_observation.set(refused_callback_observation.get() + 1);
+            Err(CommonProofRuntimeError::WrongVerificationBinding.into())
+        }),
+    );
+    let refused_adapter_handle =
+        super::super::runtime_ffi::retain_common_proof_generation_family_adapter(refused_adapter)
+            .expect("the malformed-checkpoint adapter is retained");
+    let malformed_checkpoint_state = [0x91_u8; 7];
+    let mut status = u32::MAX;
+    let prepared_handle = unsafe {
+        super::super::runtime_ffi::sealed_lattice_common_proof_prepare_generation_family_adapter(
+            refused_adapter_handle,
+            malformed_checkpoint_state.as_ptr(),
+            malformed_checkpoint_state.len(),
+            &mut status,
+        )
+    };
+    assert_eq!(prepared_handle, 0);
+    assert_ne!(status, 0);
+    assert_eq!(
+        refused_callback_count.get(),
+        0,
+        "canonical checkpoint decoding precedes exact-family continuation authority"
+    );
+
+    let (authenticated_checkpoint_state, _, _, _) = capture_first_generation_checkpoint();
+    let (prepared, _) =
+        prepared_generation_worker_fixture_for_checkpoint(Some(&authenticated_checkpoint_state), 0)
+            .expect("the authenticated checkpoint prepares the exact resumed attempt");
+    let expected_runtime_binding_hash = prepared.runtime_binding_hash();
+    let expected_verification_binding_hash = prepared.verification_binding_hash();
+    let expected_lineage_identifier = prepared.proof_attempt_lineage_identifier();
+    let checkpoint_lineage_identifier = prepared.checkpoint_lineage_identifier();
+    let checkpoint_schedule_digest = prepared.checkpoint_schedule_digest();
+
+    let wrong_binding_callback_count = Rc::new(Cell::new(0_u32));
+    let wrong_binding_callback_observation = Rc::clone(&wrong_binding_callback_count);
+    let wrong_binding_adapter =
+        super::super::runtime_ffi::CommonProofGenerationFamilyAdapter::resume(
+            super::super::runtime_ffi::CommonProofGenerationFamilyAdapterDescription::new(
+                expected_runtime_binding_hash,
+                expected_verification_binding_hash,
+                expected_lineage_identifier,
+            ),
+            checkpoint_lineage_identifier,
+            checkpoint_schedule_digest,
+            Box::new(move |_continuation| {
+                wrong_binding_callback_observation
+                    .set(wrong_binding_callback_observation.get() + 1);
+                Err(CommonProofRuntimeError::WrongVerificationBinding.into())
+            }),
+        );
+    let wrong_binding_adapter_handle =
+        super::super::runtime_ffi::retain_common_proof_generation_family_adapter(
+            wrong_binding_adapter,
+        )
+        .expect("the wrong-binding resume adapter is retained");
+    let mut wrong_binding_checkpoint_state = authenticated_checkpoint_state.clone();
+    wrong_binding_checkpoint_state[12] ^= 1;
+    status = u32::MAX;
+    let wrong_binding_prepared_handle = unsafe {
+        super::super::runtime_ffi::sealed_lattice_common_proof_prepare_generation_family_adapter(
+            wrong_binding_adapter_handle,
+            wrong_binding_checkpoint_state.as_ptr(),
+            wrong_binding_checkpoint_state.len(),
+            &mut status,
+        )
+    };
+    assert_eq!(wrong_binding_prepared_handle, 0);
+    assert_ne!(status, 0);
+    assert_eq!(
+        wrong_binding_callback_count.get(),
+        0,
+        "the authenticated stable-attempt binding is checked before exact-family continuation authority"
+    );
+
+    let callback_count = Rc::new(Cell::new(0_u32));
+    let callback_observation = Rc::clone(&callback_count);
+    let adapter = super::super::runtime_ffi::CommonProofGenerationFamilyAdapter::resume(
+        super::super::runtime_ffi::CommonProofGenerationFamilyAdapterDescription::new(
+            expected_runtime_binding_hash,
+            expected_verification_binding_hash,
+            expected_lineage_identifier,
+        ),
+        checkpoint_lineage_identifier,
+        checkpoint_schedule_digest,
+        Box::new(move |continuation| {
+            assert_eq!(
+                continuation.checkpoint_lineage_identifier(),
+                checkpoint_lineage_identifier
+            );
+            assert_eq!(
+                continuation.checkpoint_schedule_digest(),
+                checkpoint_schedule_digest
+            );
+            assert!(continuation.next_event_index() > 0);
+            callback_observation.set(callback_observation.get() + 1);
+            Ok(prepared)
+        }),
+    );
+    let adapter_handle =
+        super::super::runtime_ffi::retain_common_proof_generation_family_adapter(adapter)
+            .expect("the authenticated resume adapter is retained");
+    let prepared_handle = unsafe {
+        super::super::runtime_ffi::sealed_lattice_common_proof_prepare_generation_family_adapter(
+            adapter_handle,
+            authenticated_checkpoint_state.as_ptr(),
+            authenticated_checkpoint_state.len(),
+            &mut status,
+        )
+    };
+    assert_ne!(prepared_handle, 0);
+    assert_eq!(status, 0);
+    assert_eq!(callback_count.get(), 1);
+    assert_eq!(
+        super::super::runtime_ffi::sealed_lattice_common_proof_discard_prepared_generation(
+            prepared_handle,
+        ),
+        0
     );
 }
 
@@ -1794,7 +2020,15 @@ fn owned_generation_worker_replays_an_in_flight_transaction_before_cancellation_
             .poll_owned_generation(operation)
             .expect("generation reaches one bounded storage request")
         {
-            CommonProofGenerationWorkerPoll::Progress { .. } => {}
+            CommonProofGenerationWorkerPoll::Progress {
+                checkpoint_ready, ..
+            } => {
+                if checkpoint_ready {
+                    registry.discard_generation_checkpoint(operation).expect(
+                        "an unpersisted checkpoint is explicitly discarded before cancellation",
+                    );
+                }
+            }
             CommonProofGenerationWorkerPoll::StorageRequestReady { .. } => break,
             unexpected => {
                 panic!("generation yielded {unexpected:?} before its first storage request")
@@ -3213,7 +3447,7 @@ fn every_public_aggregate_family_uses_the_generated_prover_and_capability_verifi
         verified_evaluator.application_statement_schema_identifier(),
         EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
     );
-    assert_eq!(verified_evaluator.schedule_position(), None);
+    assert_eq!(verified_evaluator.schedule_position(), Some(0));
     assert_eq!(verified_evaluator.top_count(), Some(1));
     assert_ne!(
         verified_rkg.application_statement_hash(),
@@ -3222,7 +3456,7 @@ fn every_public_aggregate_family_uses_the_generated_prover_and_capability_verifi
 }
 
 #[test]
-fn target_release_uses_the_same_generated_engine_and_public_only_verifier_adapter() {
+fn compiled_compact_target_relation_is_refused_before_proving() {
     let relation_context = target_relation_context();
     let material_profile = CommittedMaterialProfile::for_common_proof_evaluation_domain(
         TARGET_TEST_RING_DEGREE,
@@ -3242,7 +3476,7 @@ fn target_release_uses_the_same_generated_engine_and_public_only_verifier_adapte
         &TargetReleaseRelationPlanInput {
             ring_degree: TARGET_TEST_RING_DEGREE as u64,
             evaluation_domain_size: TARGET_TEST_EVALUATION_DOMAIN_SIZE,
-            opening_degree_bound_exclusive: 512,
+            opening_degree_bound_exclusive: TARGET_TEST_OPENING_DEGREE_BOUND_EXCLUSIVE,
             material_column_degree_bound_exclusive: material_profile
                 .material_column_degree_bound_exclusive()
                 as u64,
@@ -3256,8 +3490,21 @@ fn target_release_uses_the_same_generated_engine_and_public_only_verifier_adapte
         &relation_context,
     )
     .expect("the compact target relation compiles for the bounded engine fixture");
-    let converted_identifier = vec![1, 3, 5, 7, 9, 11, 13, 15];
-    let converted_order = vec![2, 4, 6, 8, 10, 12, 14, 16];
+    let target_modulus = relation_context
+        .resolved_modulus(SuiteModulusReference::target(0))
+        .expect("the compact target modulus is resolved");
+    let converted_identifier = (0..TARGET_TEST_RING_DEGREE)
+        .map(|coefficient_index| {
+            (u64::try_from(coefficient_index).expect("the coefficient index fits u64") * 2 + 1)
+                % target_modulus
+        })
+        .collect::<Vec<_>>();
+    let converted_order = (0..TARGET_TEST_RING_DEGREE)
+        .map(|coefficient_index| {
+            (u64::try_from(coefficient_index).expect("the coefficient index fits u64") * 2 + 2)
+                % target_modulus
+        })
+        .collect::<Vec<_>>();
     let partial_identifier = vec![0_u64; TARGET_TEST_RING_DEGREE];
     let partial_order = vec![0_u64; TARGET_TEST_RING_DEGREE];
     let flooding_identifier = vec![0_i64; TARGET_TEST_RING_DEGREE];
@@ -3283,10 +3530,10 @@ fn target_release_uses_the_same_generated_engine_and_public_only_verifier_adapte
             moduli: std::slice::from_ref(&modulus_witness),
         })
         .expect("the typed target witness supplies the common prover");
-    let mut verified_column_evaluator = compilation
+    let _verified_column_evaluator = compilation
         .verified_column_evaluator(&[VerifiedTargetReleaseModulusInput { roles }])
         .expect("the verifier independently rebuilds only public target columns");
-    let (relation_trees, verified_trees, bound_tree_catalog_index) =
+    let (relation_trees, _verified_trees, bound_tree_catalog_index) =
         target_relation_tree_inputs(&compilation, &committed_material);
     let canonical_statement = canonical_target_release_statement(committed_material.root());
     let mut bound_openings = CommittedMaterialBoundOpeningProvider::new([(
@@ -3300,7 +3547,7 @@ fn target_release_uses_the_same_generated_engine_and_public_only_verifier_adapte
         BoundedDeterministicTestPrivateCoins::new(1_000_000, 64 * 1_024 * 1_024);
     let mut sink = BoundedCommonProofByteSink::new(maximum_proof_byte_length)
         .expect("the target proof sink initializes");
-    generate_common_proof(
+    let generation_error = generate_common_proof(
         CommonProofGenerationInput {
             protocol_version: 1,
             suite_identifier: [0x11; 64],
@@ -3321,63 +3568,12 @@ fn target_release_uses_the_same_generated_engine_and_public_only_verifier_adapte
         &mut sink,
         &mut bound_openings,
     )
-    .expect("the target relation uses the generated common prover");
-    let proof_bytes = sink.finish();
-    let verified_common_proof = verify_common_proof(
-        CommonProofVerificationInput {
-            protocol_version: 1,
-            suite_identifier: [0x11; 64],
-            canonical_application_statement_bytes: &canonical_statement,
-            relation_plan: compilation.relation_plan(),
-            relation_context: &relation_context,
-            schedule_position: None,
-            top_count: None,
-            statement_owned_trees: &verified_trees,
-            evaluator_auxiliary_roots: &[],
-            proof_source: proof_bytes.as_slice(),
-            declared_proof_byte_length: proof_bytes.len(),
-            proof_byte_ceiling: maximum_proof_byte_length,
-        },
-        &mut verified_column_evaluator,
-    )
-    .expect("the generated target proof verifies through the common verifier");
-    let verified_target = VerifiedTargetReleaseProof::from_common_proof(verified_common_proof)
-        .expect("the common verifier capability has the target family and selector shape");
-    assert_ne!(verified_target.application_statement_hash(), [0_u8; 64]);
-    assert_ne!(verified_target.relation_plan_variant_hash(), [0_u8; 64]);
-
-    let mut changed_converted_identifier = converted_identifier.clone();
-    changed_converted_identifier[0] += 1;
-    let mut changed_verified_column_evaluator = compilation
-        .verified_column_evaluator(&[VerifiedTargetReleaseModulusInput {
-            roles: [
-                TargetReleaseRoleWitness {
-                    converted_a: &changed_converted_identifier,
-                    partial_decryption: &partial_identifier,
-                },
-                roles[1],
-            ],
-        }])
-        .expect("the changed public target still has a canonical shape");
-    assert!(
-        verify_common_proof(
-            CommonProofVerificationInput {
-                protocol_version: 1,
-                suite_identifier: [0x11; 64],
-                canonical_application_statement_bytes: &canonical_statement,
-                relation_plan: compilation.relation_plan(),
-                relation_context: &relation_context,
-                schedule_position: None,
-                top_count: None,
-                statement_owned_trees: &verified_trees,
-                evaluator_auxiliary_roots: &[],
-                proof_source: proof_bytes.as_slice(),
-                declared_proof_byte_length: proof_bytes.len(),
-                proof_byte_ceiling: maximum_proof_byte_length,
-            },
-            &mut changed_verified_column_evaluator,
-        )
-        .is_err(),
-        "changing a verifier-owned target stream must invalidate the proof",
-    );
+    .expect_err("the compact target relation must not bypass the selected proof profile");
+    assert!(matches!(
+        generation_error,
+        CommonProofGenerationError::Profile(ProofProfileError::InvalidSchedule)
+    ));
+    assert!(sink.finish().is_empty());
+    assert!(external_memory.transaction.is_none());
+    assert!(external_memory.committed.is_empty());
 }

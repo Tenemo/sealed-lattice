@@ -1042,8 +1042,8 @@ mod tests {
     use num_bigint::BigUint;
 
     use super::{
-        CANONICAL_TARGET_CIPHERTEXT_LEVEL, SELECTED_EVALUATOR_WORKING_LEVEL,
-        SymbolicCiphertextBound, direct_ballot_target_noise_bounds,
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL, SymbolicCiphertextBound,
+        direct_ballot_target_noise_bounds,
     };
     use crate::bgv::parameters::POLYNOMIAL_DEGREE;
 
@@ -1109,19 +1109,21 @@ mod tests {
     }
 
     #[test]
-    fn one_ballot_all_target_schedule_exposes_its_level_underflow() {
-        let error = direct_ballot_target_noise_bounds(10, 1, 20, 1, 10)
-            .expect_err("the one-ballot rank-lookup schedule currently switches below level zero");
-        assert!(
-            error
-                .message
-                .contains("modulus switching requires a two-component bound above level zero")
-        );
+    fn one_ballot_all_target_schedule_uses_the_canonical_levels() {
+        let bounds = direct_ballot_target_noise_bounds(10, 1, 20, 1, 10)
+            .expect("the canonical working level supports the one-ballot schedule");
 
-        let full_roster = direct_ballot_target_noise_bounds(10, 10, 20, 1, 10).unwrap();
-        assert_eq!(full_roster.len(), 20);
-        assert!(full_roster.iter().all(|bound| bound.target_identifier.level
-            <= SELECTED_EVALUATOR_WORKING_LEVEL
-            && bound.target_order.level <= SELECTED_EVALUATOR_WORKING_LEVEL));
+        assert_eq!(bounds.len(), 20);
+        assert_eq!(
+            bounds
+                .iter()
+                .map(|bound| bound.top_count)
+                .collect::<Vec<_>>(),
+            (1..=20).collect::<Vec<_>>()
+        );
+        assert!(bounds.iter().all(|bound| {
+            bound.target_identifier.level == CANONICAL_TARGET_CIPHERTEXT_LEVEL
+                && bound.target_order.level == CANONICAL_TARGET_CIPHERTEXT_LEVEL
+        }));
     }
 }

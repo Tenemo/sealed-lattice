@@ -264,6 +264,7 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
         const configuration = configurationFor(databaseName);
         const lockName = deriveWebLockStorageNamespaceName(configuration);
         const handle = await openOwnedStore(configuration);
+        const retainedStore = handle.store;
         let releaseStolenLock: (() => void) | undefined;
         const stolenLockRelease = new Promise<void>((resolve) => {
             releaseStolenLock = resolve;
@@ -294,8 +295,14 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
             name: 'WebLockOwnedStorageError',
         });
         expect(handle.state()).toBe('failed');
+        expect(() => handle.store).toThrowError(
+            expect.objectContaining({
+                code: 'Unavailable',
+                name: 'WebLockOwnedStorageError',
+            }),
+        );
         await expect(
-            handle.store.beginTransaction({ lifetimeMilliseconds: 1_000 }),
+            retainedStore.beginTransaction({ lifetimeMilliseconds: 1_000 }),
         ).rejects.toMatchObject({
             code: 'Closed',
             name: 'IndexedDbUntrustedStorageAdapterError',

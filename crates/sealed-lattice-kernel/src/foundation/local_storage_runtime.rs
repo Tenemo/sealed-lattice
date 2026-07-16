@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
@@ -34,6 +34,10 @@ pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DERIVE_REPAIR_IDENTITY: u32 = 18;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_SEAL_REPAIR_HEAD: u32 = 19;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_OPEN_REPAIR_HEAD: u32 = 20;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DIGEST_REPAIR_HEAD: u32 = 21;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DERIVE_COMMON_PROOF_EXTERNAL_MEMORY_RECORD_IDENTIFIER:
+    u32 = 22;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_SEAL_COMMON_PROOF_EXTERNAL_MEMORY_RECORD: u32 = 23;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_OPEN_COMMON_PROOF_EXTERNAL_MEMORY_RECORD: u32 = 24;
 
 pub(crate) const LOCAL_STORAGE_ROOT_STATUS_RESOURCE_LIMIT: u32 = 0x0001_0000;
 pub(crate) const LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE: u32 = 0x0001_0001;
@@ -51,6 +55,14 @@ const HANDLE_BYTE_LENGTH: usize = 4;
 const MAXIMUM_CHECKPOINT_SOURCE_DIGEST_COUNT: usize = 4_096;
 const MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT: u64 = 1 << 30;
 const MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT: u64 = 1 << 40;
+
+// One active browser-foundation root owns at most one default canonical
+// foundation collection of long-lived local-record identifiers. Common-proof
+// scratch coordinates have a separate worker-internal one-write path and are
+// not retained in this version ledger.
+fn maximum_tracked_local_record_identifier_count_per_active_root() -> usize {
+    CanonicalDecodeLimits::default().maximum_item_count
+}
 
 /// Opaque storage coordinate minted only inside the browser worker after the
 /// authenticated store has re-read its current head and the local storage-root
@@ -183,7 +195,7 @@ struct RootLease {
     local_record_seal_invocation_count: u64,
     local_record_sealed_plaintext_byte_length: u64,
     root: ActionStorageRoot,
-    sealed_record_versions: HashSet<([u8; HASH_BYTE_LENGTH], u64)>,
+    sealed_record_highest_versions: HashMap<[u8; HASH_BYTE_LENGTH], u64>,
 }
 
 #[derive(Default)]
@@ -220,7 +232,7 @@ impl RootRegistry {
             local_record_seal_invocation_count: 0,
             local_record_sealed_plaintext_byte_length: 0,
             root,
-            sealed_record_versions: HashSet::new(),
+            sealed_record_highest_versions: HashMap::new(),
         });
         Ok(handle)
     }
@@ -350,6 +362,15 @@ pub(crate) fn run_local_storage_root_command(command: u32, input: &[u8]) -> Runt
         LOCAL_STORAGE_ROOT_COMMAND_SEAL_REPAIR_HEAD => seal_repair_head(input),
         LOCAL_STORAGE_ROOT_COMMAND_OPEN_REPAIR_HEAD => open_repair_head(input),
         LOCAL_STORAGE_ROOT_COMMAND_DIGEST_REPAIR_HEAD => digest_repair_head(input),
+        LOCAL_STORAGE_ROOT_COMMAND_DERIVE_COMMON_PROOF_EXTERNAL_MEMORY_RECORD_IDENTIFIER => {
+            derive_common_proof_external_memory_record_identifier(input)
+        }
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_COMMON_PROOF_EXTERNAL_MEMORY_RECORD => {
+            seal_common_proof_external_memory_record(input)
+        }
+        LOCAL_STORAGE_ROOT_COMMAND_OPEN_COMMON_PROOF_EXTERNAL_MEMORY_RECORD => {
+            open_common_proof_external_memory_record(input)
+        }
         _ => Err(malformed_status()),
     }
 }
@@ -490,19 +511,53 @@ fn reset(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     Ok(Vec::new())
 }
 
-fn derive_record_identifier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+struct RecordIdentifierRequest<'input> {
+    handle: u32,
+    capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    record_type: LocalRecordType,
+    identifier_context: &'input [u8],
+}
+
+fn read_record_identifier_request(input: &[u8]) -> RuntimeResult<RecordIdentifierRequest<'_>> {
     let mut reader = InputReader::new(input);
     let handle = reader.read_u32()?;
     let capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH] = reader.read_array()?;
     let record_type = read_record_type(&mut reader)?;
     let identifier_context = reader.read_remaining();
+    Ok(RecordIdentifierRequest {
+        handle,
+        capability,
+        record_type,
+        identifier_context,
+    })
+}
+
+fn derive_record_identifier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let request = read_record_identifier_request(input)?;
+    if request.record_type == LocalRecordType::CommonProofExternalMemory {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    derive_record_identifier_for_request(&request)
+}
+
+fn derive_common_proof_external_memory_record_identifier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let request = read_record_identifier_request(input)?;
+    if request.record_type != LocalRecordType::CommonProofExternalMemory {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    derive_record_identifier_for_request(&request)
+}
+
+fn derive_record_identifier_for_request(
+    request: &RecordIdentifierRequest<'_>,
+) -> RuntimeResult<Vec<u8>> {
     ROOT_REGISTRY.with(|registry| {
         let registry = registry.borrow();
-        let lease = registry.active(handle, &capability)?;
+        let lease = registry.active(request.handle, &request.capability)?;
         Ok(derive_record_identifier_from_context(
             lease.root.binding(),
-            record_type,
-            identifier_context,
+            request.record_type,
+            request.identifier_context,
         )?
         .as_bytes()
         .to_vec())
@@ -512,7 +567,10 @@ fn derive_record_identifier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
 fn seal_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let mut reader = InputReader::new(input);
     let request = read_record_request(&mut reader)?;
-    if request.record_type == LocalRecordType::ActionRandomness {
+    if matches!(
+        request.record_type,
+        LocalRecordType::ActionRandomness | LocalRecordType::CommonProofExternalMemory
+    ) {
         return Err(refusal_status(RefusalReason::WrongTypeOrLength));
     }
     let nonce = reader.read_array()?;
@@ -533,13 +591,68 @@ fn seal_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     })
 }
 
+fn seal_common_proof_external_memory_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let request = read_record_request(&mut reader)?;
+    require_common_proof_external_memory_record_request(&request)?;
+    let nonce = reader.read_array()?;
+    let plaintext = reader.read_remaining();
+    ROOT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let lease = registry.active_mut(request.handle, &request.capability)?;
+        let record_identifier = derive_record_identifier_from_context(
+            lease.root.binding(),
+            request.record_type,
+            request.identifier_context,
+        )?;
+        seal_record_with_identifier_and_active_lease_budget(
+            lease,
+            request.action_randomness_commitment,
+            request.record_type,
+            record_identifier,
+            request.record_version,
+            request.predecessor_record_hash,
+            nonce,
+            plaintext,
+        )
+    })
+}
+
 fn open_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let mut reader = InputReader::new(input);
     let request = read_record_request(&mut reader)?;
-    if request.record_type == LocalRecordType::ActionRandomness {
+    if matches!(
+        request.record_type,
+        LocalRecordType::ActionRandomness | LocalRecordType::CommonProofExternalMemory
+    ) {
         return Err(refusal_status(RefusalReason::WrongTypeOrLength));
     }
-    let envelope_bytes = reader.read_remaining();
+    open_record_request(&request, reader.read_remaining())
+}
+
+fn open_common_proof_external_memory_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let request = read_record_request(&mut reader)?;
+    require_common_proof_external_memory_record_request(&request)?;
+    open_record_request(&request, reader.read_remaining())
+}
+
+fn require_common_proof_external_memory_record_request(
+    request: &RecordRequest<'_>,
+) -> RuntimeResult<()> {
+    if request.record_type != LocalRecordType::CommonProofExternalMemory {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    if request.record_version != 0 || request.predecessor_record_hash.is_some() {
+        return Err(refusal_status(RefusalReason::WrongContext));
+    }
+    Ok(())
+}
+
+fn open_record_request(
+    request: &RecordRequest<'_>,
+    envelope_bytes: &[u8],
+) -> RuntimeResult<Vec<u8>> {
     if envelope_bytes.is_empty() {
         return Err(malformed_status());
     }
@@ -577,10 +690,55 @@ fn seal_record_with_active_lease(
         record_type,
         identifier_context,
     )?;
-    let record_version_key = (record_identifier.into_bytes(), record_version);
-    if lease.sealed_record_versions.contains(&record_version_key) {
-        return Err(refusal_status(RefusalReason::ConsumedState));
+    let record_identifier_bytes = record_identifier.into_bytes();
+    let is_new_identifier = match lease
+        .sealed_record_highest_versions
+        .get(&record_identifier_bytes)
+    {
+        Some(highest_record_version) if record_version <= *highest_record_version => {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
+        Some(_) => false,
+        None => true,
+    };
+    if is_new_identifier {
+        if lease.sealed_record_highest_versions.len()
+            >= maximum_tracked_local_record_identifier_count_per_active_root()
+        {
+            return Err(outside_supported_profile_status());
+        }
+        lease
+            .sealed_record_highest_versions
+            .try_reserve(1)
+            .map_err(|_| LOCAL_STORAGE_ROOT_STATUS_RESOURCE_LIMIT)?;
     }
+    let encoded_envelope = seal_record_with_identifier_and_active_lease_budget(
+        lease,
+        action_randomness_commitment,
+        record_type,
+        record_identifier,
+        record_version,
+        predecessor_record_hash,
+        nonce,
+        plaintext,
+    )?;
+    lease
+        .sealed_record_highest_versions
+        .insert(record_identifier_bytes, record_version);
+    Ok(encoded_envelope)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn seal_record_with_identifier_and_active_lease_budget(
+    lease: &mut RootLease,
+    action_randomness_commitment: Hash512,
+    record_type: LocalRecordType,
+    record_identifier: Hash512,
+    record_version: u64,
+    predecessor_record_hash: Option<Hash512>,
+    nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+    plaintext: &[u8],
+) -> RuntimeResult<Vec<u8>> {
     let next_seal_invocation_count = lease
         .local_record_seal_invocation_count
         .checked_add(1)
@@ -610,7 +768,6 @@ fn seal_record_with_active_lease(
         })
         .map_err(schema_status)?;
     let encoded_envelope = envelope.encode().map_err(schema_status)?;
-    lease.sealed_record_versions.insert(record_version_key);
     lease.local_record_seal_invocation_count = next_seal_invocation_count;
     lease.local_record_sealed_plaintext_byte_length = next_sealed_plaintext_byte_length;
     Ok(encoded_envelope)

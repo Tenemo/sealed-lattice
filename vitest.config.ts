@@ -61,6 +61,7 @@ const desktopBrowserTestGlobs = [
     'packages/*/tests/browser/**/*.browser.test.ts',
 ] as const;
 const mobileBrowserTestGlobs = [
+    'packages/crypto/tests/browser/authenticated-mailbox-runtime.browser.test.ts',
     'packages/wasm/tests/browser/accepted-setup-session-runtime.browser.test.ts',
     'packages/wasm/tests/browser/action-randomness-runtime.browser.test.ts',
     'packages/wasm/tests/browser/canonical-stream-runtime.browser.test.ts',

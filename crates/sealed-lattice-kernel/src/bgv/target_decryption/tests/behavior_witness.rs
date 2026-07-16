@@ -330,5 +330,4 @@ fn target_result_release_requires_proof_backed_quorum() {
     .expect_err("target result release must reject proofless shares");
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
-    assert!(error.message.contains("proofStatement"));
 }

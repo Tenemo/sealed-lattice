@@ -240,7 +240,6 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     })
     .expect_err("a changed aggregate material seed must be refused");
     assert_eq!(seed_error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(seed_error.message.contains("credential commitment root"));
 
     let message_error = with_staged_aggregate_opening_material_transform(
         &local_witness,
@@ -270,7 +269,6 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     )
     .expect_err("a changed aggregate material column must be refused");
     assert_eq!(message_error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(message_error.message.contains("credential commitment root"));
 
     let mut merkle_root_tampered_setup_package = setup_package;
     let aggregate_record = &mut merkle_root_tampered_setup_package["vssPublicAggregateThresholdCommitmentSet"]

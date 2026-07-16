@@ -17,7 +17,7 @@ fn foundation_setup_parameters_hash_is_byte_stable() {
         setup_parameters["setupParametersHash"]
             .as_str()
             .expect("setup parameters hash"),
-        "2da920eaf7ed9a6c15902c6e72edf4c299d2f53bd982539f2cc99fb829d7486d0acdffe73f1d1a93f626e6152ce2a1e66c8a240b6d1a4edd3beb78011bff0cb4",
+        "faf7e7a20ec6c45c08aa0083a5c596ae45a06c703c22653cac5d1672cdcc8667e8e2da7def0edd14224747ac9842de7286043e83e92f86b899bed8a91605d9b7",
     );
 }
 

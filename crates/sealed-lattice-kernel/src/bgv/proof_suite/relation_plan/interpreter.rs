@@ -641,118 +641,6 @@ impl RelationPlanVariant {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::bgv::proof_suite::relation_plan::{
-        CommittedMaterialRelationPlanInput, RelationPlanCheckContext, ResolvedSuiteModulus,
-        SuiteModulusReference, compile_vss_share_linkage_relation_plan,
-    };
-    use crate::bgv::proof_suite::{
-        PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
-        PROOF_CHALLENGE_EXTENSION_DEGREE,
-    };
-
-    fn vss_linkage_interpreter_fixture() -> (RelationPlanVariant, RelationPlanCheckContext) {
-        let evaluation_domain_size = 256_u64;
-        let context = RelationPlanCheckContext {
-            base_field_modulus: PROOF_BASE_FIELD_MODULUS,
-            challenge_extension_degree: PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
-            evaluation_blowup_factor: 2,
-            evaluation_domain_generator: modular_power(
-                PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
-                (1_u64 << 32) / evaluation_domain_size,
-                PROOF_BASE_FIELD_MODULUS,
-            ),
-            evaluation_coset_offset: 7,
-            deep_point_count: 1,
-            quotient_component_count: 4,
-            quotient_component_degree_bound_exclusive: 64,
-            fri_fold_count: 4,
-            final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: 1,
-            non_native_modular_identity_challenge_count: 1,
-            maximum_fiat_shamir_candidate_draws_per_output: 128,
-            resolved_moduli: vec![ResolvedSuiteModulus::new(
-                SuiteModulusReference::data(0),
-                97,
-            )],
-        };
-        let input = CommittedMaterialRelationPlanInput {
-            ring_degree: 32,
-            evaluation_domain_size,
-            opening_degree_bound_exclusive: 128,
-            material_column_degree_bound_exclusive: 10,
-            participant_count: 3,
-            threshold: 2,
-            sharing_data_modulus_indices: vec![0],
-            trace_mask_degree_bound_exclusive: 14,
-            first_mask_purpose: 100,
-        };
-        let compiled = compile_vss_share_linkage_relation_plan(&input, &context)
-            .expect("exact VSS share-linkage plan");
-        (compiled.variants()[0].clone(), context)
-    }
-
-    #[test]
-    fn vss_linkage_alpha_group_uses_goldilocks_powers_of_one_sample() {
-        let (variant, context) = vss_linkage_interpreter_fixture();
-        let alpha_assignment = RelationApplicationChallengeAssignment::new(
-            CommonProofChallenge::Alpha { modulus_ordinal: 0 },
-            0,
-            96,
-        )
-        .expect("alpha assignment");
-        let challenges = CheckedApplicationChallenges::new(&variant, &context, &[alpha_assignment])
-            .expect("one alpha sample resolves the complete coefficient group");
-
-        let weights = (0_u64..3)
-            .map(|unit_ordinal| {
-                challenges
-                    .get_u64(RelationChallengeRole::NonNativeAlpha, &[0, 0, unit_ordinal])
-                    .expect("grouped alpha power")
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(weights, vec![1, 96, 9_216]);
-        assert_ne!(weights[2], modular_power(96, 2, 97));
-
-        assert!(matches!(
-            CheckedApplicationChallenges::new(&variant, &context, &[]),
-            Err(RelationPlanError::InvalidChallengeCatalog)
-        ));
-        assert!(matches!(
-            CheckedApplicationChallenges::new(
-                &variant,
-                &context,
-                &[alpha_assignment, alpha_assignment],
-            ),
-            Err(RelationPlanError::InvalidChallengeCatalog)
-        ));
-    }
-
-    #[test]
-    fn deep_sampler_requires_full_degree_disjoint_frobenius_orbits() {
-        let (variant, context) = vss_linkage_interpreter_fixture();
-        let base_field_candidate = ProofChallengeExtensionElement::from_base(
-            ProofBaseFieldElement::from_canonical(17).expect("canonical base-field candidate"),
-        );
-        assert!(
-            variant
-                .deep_point_candidate_is_forbidden(&context, 0, base_field_candidate, &[])
-                .expect("base-field membership is decidable")
-        );
-
-        let full_degree_candidate =
-            ProofChallengeExtensionElement::from_canonical_coordinates([0, 1, 0, 0, 0])
-                .expect("canonical extension generator");
-        assert!(
-            !variant
-                .deep_point_candidate_is_forbidden(&context, 0, full_degree_candidate, &[])
-                .expect("full-degree candidate is decidable")
-        );
-    }
-}
-
 pub(super) fn signed_rotation_exponent(
     rotation_is_negative: bool,
     rotation_magnitude: u64,
@@ -1083,4 +971,116 @@ fn convolve_extension_coefficients(
         }
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bgv::proof_suite::relation_plan::{
+        CommittedMaterialRelationPlanInput, RelationPlanCheckContext, ResolvedSuiteModulus,
+        SuiteModulusReference, compile_vss_share_linkage_relation_plan,
+    };
+    use crate::bgv::proof_suite::{
+        PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
+        PROOF_CHALLENGE_EXTENSION_DEGREE,
+    };
+
+    fn vss_linkage_interpreter_fixture() -> (RelationPlanVariant, RelationPlanCheckContext) {
+        let evaluation_domain_size = 256_u64;
+        let context = RelationPlanCheckContext {
+            base_field_modulus: PROOF_BASE_FIELD_MODULUS,
+            challenge_extension_degree: PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
+            evaluation_blowup_factor: 2,
+            evaluation_domain_generator: modular_power(
+                PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
+                (1_u64 << 32) / evaluation_domain_size,
+                PROOF_BASE_FIELD_MODULUS,
+            ),
+            evaluation_coset_offset: 7,
+            deep_point_count: 1,
+            quotient_component_count: 4,
+            quotient_component_degree_bound_exclusive: 64,
+            fri_fold_count: 4,
+            final_polynomial_degree_bound_exclusive: 8,
+            unique_query_count: 1,
+            non_native_modular_identity_challenge_count: 1,
+            maximum_fiat_shamir_candidate_draws_per_output: 128,
+            resolved_moduli: vec![ResolvedSuiteModulus::new(
+                SuiteModulusReference::data(0),
+                97,
+            )],
+        };
+        let input = CommittedMaterialRelationPlanInput {
+            ring_degree: 32,
+            evaluation_domain_size,
+            opening_degree_bound_exclusive: 128,
+            material_column_degree_bound_exclusive: 10,
+            participant_count: 3,
+            threshold: 2,
+            sharing_data_modulus_indices: vec![0],
+            trace_mask_degree_bound_exclusive: 14,
+            first_mask_purpose: 100,
+        };
+        let compiled = compile_vss_share_linkage_relation_plan(&input, &context)
+            .expect("exact VSS share-linkage plan");
+        (compiled.variants()[0].clone(), context)
+    }
+
+    #[test]
+    fn vss_linkage_alpha_group_uses_goldilocks_powers_of_one_sample() {
+        let (variant, context) = vss_linkage_interpreter_fixture();
+        let alpha_assignment = RelationApplicationChallengeAssignment::new(
+            CommonProofChallenge::Alpha { modulus_ordinal: 0 },
+            0,
+            96,
+        )
+        .expect("alpha assignment");
+        let challenges = CheckedApplicationChallenges::new(&variant, &context, &[alpha_assignment])
+            .expect("one alpha sample resolves the complete coefficient group");
+
+        let weights = (0_u64..3)
+            .map(|unit_ordinal| {
+                challenges
+                    .get_u64(RelationChallengeRole::NonNativeAlpha, &[0, 0, unit_ordinal])
+                    .expect("grouped alpha power")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(weights, vec![1, 96, 9_216]);
+        assert_ne!(weights[2], modular_power(96, 2, 97));
+
+        assert!(matches!(
+            CheckedApplicationChallenges::new(&variant, &context, &[]),
+            Err(RelationPlanError::InvalidChallengeCatalog)
+        ));
+        assert!(matches!(
+            CheckedApplicationChallenges::new(
+                &variant,
+                &context,
+                &[alpha_assignment, alpha_assignment],
+            ),
+            Err(RelationPlanError::InvalidChallengeCatalog)
+        ));
+    }
+
+    #[test]
+    fn deep_sampler_requires_full_degree_disjoint_frobenius_orbits() {
+        let (variant, context) = vss_linkage_interpreter_fixture();
+        let base_field_candidate = ProofChallengeExtensionElement::from_base(
+            ProofBaseFieldElement::from_canonical(17).expect("canonical base-field candidate"),
+        );
+        assert!(
+            variant
+                .deep_point_candidate_is_forbidden(&context, 0, base_field_candidate, &[])
+                .expect("base-field membership is decidable")
+        );
+
+        let full_degree_candidate =
+            ProofChallengeExtensionElement::from_canonical_coordinates([0, 1, 0, 0, 0])
+                .expect("canonical extension generator");
+        assert!(
+            !variant
+                .deep_point_candidate_is_forbidden(&context, 0, full_degree_candidate, &[])
+                .expect("full-degree candidate is decidable")
+        );
+    }
 }

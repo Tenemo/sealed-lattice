@@ -58,11 +58,13 @@ const witnessSubjectParticipantIdentities =
     orderedRosterParticipantIdentities.slice(1);
 
 let runtimeBuildAuthorityBinding: RuntimeBuildAuthorityBinding;
-let runtimeBuildManifestHash = new Uint8Array();
-let suiteIdentifier = new Uint8Array();
+let runtimeBuildManifestHash: Uint8Array = new Uint8Array();
+let suiteIdentifier: Uint8Array = new Uint8Array();
 
 type CanonicalBoardTestState = {
+    closeAttemptCount?: number;
     closeCount: number;
+    closeFailures?: Error[];
 };
 
 const createCanonicalBoardRuntime = (
@@ -73,6 +75,11 @@ const createCanonicalBoardRuntime = (
     const verifiedObject = opaque<VerifiedTranscriptObject>();
     const runtime: CanonicalBoardRuntime = {
         close: () => {
+            state.closeAttemptCount = (state.closeAttemptCount ?? 0) + 1;
+            const closeFailure = state.closeFailures?.shift();
+            if (closeFailure !== undefined) {
+                throw closeFailure;
+            }
             state.closeCount += 1;
         },
         copyCachedCarrier: () => ({
@@ -135,19 +142,32 @@ const copyInitializationInput = (
 type OperationOwnerTestState = {
     activateFreshCount: number;
     activateRecoveredCount: number;
+    closeAttemptCount: number;
     closeCount: number;
     commitCount: number;
     committedInput?: BrowserFoundationInitializationInput;
+    lifecycleEvents: string[];
     openRecoveredCount: number;
+    retireCount: number;
     witnessVoteCount: number;
+};
+
+type DeviceWrappingRetirementTestStorage = {
+    retirementTombstonePresent: boolean;
 };
 
 const createOperationOwner = (
     input: Readonly<{
+        closeFailures?: readonly Error[];
         crossWireActivatedWitnesses?: boolean;
         failClaim?: boolean;
-        failRecoveredOpen?: boolean;
-        failWitnessVote?: boolean;
+        freshCommitFailure?: Error;
+        freshCommitFailureAfterRetirementAttempt?: Error;
+        recoveredOpenFailure?: Error;
+        recoveredOpenFailureAfterRetirementAttempt?: Error;
+        retirementCompareAndSwapFailures?: readonly Error[];
+        retirementStorage?: DeviceWrappingRetirementTestStorage;
+        witnessVoteFailure?: Error;
     }> = {},
 ): Readonly<{
     owner: TransferableBrowserFoundationOperationOwner;
@@ -156,11 +176,18 @@ const createOperationOwner = (
     const state: OperationOwnerTestState = {
         activateFreshCount: 0,
         activateRecoveredCount: 0,
+        closeAttemptCount: 0,
         closeCount: 0,
         commitCount: 0,
+        lifecycleEvents: [],
         openRecoveredCount: 0,
+        retireCount: 0,
         witnessVoteCount: 0,
     };
+    const closeFailures = [...(input.closeFailures ?? [])];
+    const retirementCompareAndSwapFailures = [
+        ...(input.retirementCompareAndSwapFailures ?? []),
+    ];
     const normalHandles = witnessSubjectParticipantIdentities.map(() =>
         opaque<BrowserFoundationNormalWitnessRoleHandle>(),
     );
@@ -188,6 +215,18 @@ const createOperationOwner = (
     };
     let closed = false;
     let reservationOrdinal = 0;
+    const attemptDurableRetirement = (): Promise<void> => {
+        state.retireCount += 1;
+        state.lifecycleEvents.push('retire');
+        const injectedFailure = retirementCompareAndSwapFailures.shift();
+        if (injectedFailure !== undefined) {
+            return Promise.reject(injectedFailure);
+        }
+        if (input.retirementStorage !== undefined) {
+            input.retirementStorage.retirementTombstonePresent = true;
+        }
+        return Promise.resolve();
+    };
     const activatedHandles = () =>
         input.crossWireActivatedWitnesses === true
             ? [...normalHandles].reverse()
@@ -213,6 +252,12 @@ const createOperationOwner = (
         cacheWitnessSignedVoteCarrier: (_role, cacheInput) =>
             Promise.resolve(cacheInput.canonicalSignedVoteCarrier.slice()),
         close: () => {
+            state.closeAttemptCount += 1;
+            state.lifecycleEvents.push('close');
+            const closeFailure = closeFailures.shift();
+            if (closeFailure !== undefined) {
+                return Promise.reject(closeFailure);
+            }
             if (!closed) {
                 closed = true;
                 state.closeCount += 1;
@@ -224,6 +269,39 @@ const createOperationOwner = (
         commitFreshFoundationInitialization: (initializationInput) => {
             state.commitCount += 1;
             state.committedInput = copyInitializationInput(initializationInput);
+            if (input.retirementStorage?.retirementTombstonePresent === true) {
+                return Promise.reject(
+                    new BrowserActionStorageCustodyError(
+                        'Unavailable',
+                        'The participant has a durable retirement tombstone.',
+                    ),
+                );
+            }
+            if (input.freshCommitFailure !== undefined) {
+                return Promise.reject(input.freshCommitFailure);
+            }
+            if (input.freshCommitFailureAfterRetirementAttempt !== undefined) {
+                const commitFailure =
+                    input.freshCommitFailureAfterRetirementAttempt;
+                return attemptDurableRetirement().then(
+                    () =>
+                        Promise.reject(
+                            new BrowserActionStorageCustodyError(
+                                'OwnedWorkerFailure',
+                                'Fresh foundation construction failed after durable retirement.',
+                                commitFailure,
+                            ),
+                        ),
+                    (retirementFailure: unknown) =>
+                        Promise.reject(
+                            new BrowserActionStorageCustodyError(
+                                'OwnedWorkerFailure',
+                                'Fresh foundation construction and its first durable-retirement attempt failed.',
+                                [commitFailure, retirementFailure],
+                            ),
+                        ),
+                );
+            }
             return Promise.resolve({ committedBatch });
         },
         compareAndLockWitnessIntent: () => Promise.resolve(),
@@ -260,13 +338,32 @@ const createOperationOwner = (
             Promise.resolve({ isValid: true, value: 'state-verifier' }),
         openRecoveredFoundationInitialization: () => {
             state.openRecoveredCount += 1;
-            if (input.failRecoveredOpen === true) {
-                return Promise.reject(
-                    new BrowserActionStorageCustodyError(
-                        'RecordAuthenticationFailed',
-                        'Injected recovered-record authentication failure.',
-                    ),
+            if (
+                input.recoveredOpenFailureAfterRetirementAttempt !== undefined
+            ) {
+                const openFailure =
+                    input.recoveredOpenFailureAfterRetirementAttempt;
+                return attemptDurableRetirement().then(
+                    () =>
+                        Promise.reject(
+                            new BrowserActionStorageCustodyError(
+                                'OwnedWorkerFailure',
+                                'Recovered foundation construction failed after durable retirement.',
+                                openFailure,
+                            ),
+                        ),
+                    (retirementFailure: unknown) =>
+                        Promise.reject(
+                            new BrowserActionStorageCustodyError(
+                                'OwnedWorkerFailure',
+                                'Recovered foundation construction and its first durable-retirement attempt failed.',
+                                [openFailure, retirementFailure],
+                            ),
+                        ),
                 );
+            }
+            if (input.recoveredOpenFailure !== undefined) {
+                return Promise.reject(input.recoveredOpenFailure);
             }
             return Promise.resolve({ recoveredBatch });
         },
@@ -285,6 +382,7 @@ const createOperationOwner = (
         readWitnessSignedVoteCarrier: () => Promise.resolve(Uint8Array.of(3)),
         releaseActionStateObject: () => Promise.resolve(),
         releaseFoundationStateReservationIntent: () => Promise.resolve(),
+        retire: attemptDurableRetirement,
         restoreCheckpointState: () => Promise.resolve(),
         resumeCheckpoint: () =>
             Promise.resolve(opaque<BrowserFoundationCheckpointHandle>()),
@@ -304,13 +402,8 @@ const createOperationOwner = (
         },
         voteForFoundationActionRandomnessReservationIntent: () => {
             state.witnessVoteCount += 1;
-            if (input.failWitnessVote === true) {
-                return Promise.reject(
-                    new BrowserActionStorageCustodyError(
-                        'StorageFailure',
-                        'Injected durable witness write failure.',
-                    ),
-                );
+            if (input.witnessVoteFailure !== undefined) {
+                return Promise.reject(input.witnessVoteFailure);
             }
             return Promise.resolve({
                 isValid: true,
@@ -332,13 +425,12 @@ const createOperationOwner = (
     });
 };
 
-const createAuthorityHarness = async (
+const openTestAuthority = (
     initializationMode: 'fresh' | 'recovered',
-    ownerInput: Parameters<typeof createOperationOwner>[0] = {},
-) => {
-    const boardState: CanonicalBoardTestState = { closeCount: 0 };
-    const operation = createOperationOwner(ownerInput);
-    const authority = await openBrowserFoundationAuthority({
+    operationOwner: TransferableBrowserFoundationOperationOwner,
+    boardState: CanonicalBoardTestState,
+) =>
+    openBrowserFoundationAuthority({
         canonicalBoardRuntime: createCanonicalBoardRuntime(
             {
                 actionIdentifier: 'action',
@@ -355,9 +447,21 @@ const createAuthorityHarness = async (
             boardState,
         ),
         initializationMode,
-        operationOwner: operation.owner,
+        operationOwner,
         runtimeBuildAuthorityBinding,
     });
+
+const createAuthorityHarness = async (
+    initializationMode: 'fresh' | 'recovered',
+    ownerInput: Parameters<typeof createOperationOwner>[0] = {},
+) => {
+    const boardState: CanonicalBoardTestState = { closeCount: 0 };
+    const operation = createOperationOwner(ownerInput);
+    const authority = await openTestAuthority(
+        initializationMode,
+        operation.owner,
+        boardState,
+    );
     return Object.freeze({ authority, boardState, operation });
 };
 
@@ -438,7 +542,12 @@ describe('combined browser foundation authority', () => {
 
     it('fails closed when recovered local records do not authenticate', async () => {
         const boardState: CanonicalBoardTestState = { closeCount: 0 };
-        const operation = createOperationOwner({ failRecoveredOpen: true });
+        const operation = createOperationOwner({
+            recoveredOpenFailure: new BrowserActionStorageCustodyError(
+                'RecordAuthenticationFailed',
+                'Injected recovered-record authentication failure.',
+            ),
+        });
         await expect(
             openBrowserFoundationAuthority({
                 canonicalBoardRuntime: createCanonicalBoardRuntime(
@@ -463,13 +572,131 @@ describe('combined browser foundation authority', () => {
                 runtimeBuildAuthorityBinding,
             }),
         ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
+        expect(operation.state.retireCount).toBe(1);
         expect(operation.state.closeCount).toBe(1);
+        expect(operation.state.lifecycleEvents).toEqual(['retire', 'close']);
         expect(boardState.closeCount).toBe(1);
     });
 
-    it('retires the participant when a durable witness write fails', async () => {
+    it.each([
+        new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'Injected invalid input.',
+        ),
+        new BrowserActionStorageCustodyError(
+            'InvalidState',
+            'Injected invalid state.',
+        ),
+        new BrowserActionStorageCustodyError(
+            'CommitmentMismatch',
+            'Injected commitment mismatch.',
+        ),
+        Object.assign(new Error('Injected semantic conflict.'), {
+            code: 'Conflict',
+        }),
+        Object.assign(new Error('Injected missing record.'), {
+            code: 'MissingRecord',
+        }),
+    ])(
+        'keeps healthy local authority active after nonterminal witness failure %#',
+        async (witnessVoteFailure) => {
+            const harness = await createAuthorityHarness('fresh', {
+                witnessVoteFailure,
+            });
+            await harness.authority.startup();
+            const capability = harness.authority.activeCapability();
+            const witnessRole = (await harness.authority.witnessRoles())[0];
+
+            await expect(
+                harness.authority.voteForActionRandomnessReservationIntent(
+                    capability,
+                    witnessRole,
+                    Uint8Array.of(0x73),
+                ),
+            ).rejects.toBe(witnessVoteFailure);
+            expect(harness.authority.state()).toBe('active');
+            expect(harness.authority.retirementReason()).toBeUndefined();
+            expect(harness.operation.state.retireCount).toBe(0);
+            expect(harness.operation.state.closeCount).toBe(0);
+            expect(harness.boardState.closeCount).toBe(0);
+
+            await harness.authority.close();
+            expect(harness.operation.state.retireCount).toBe(0);
+            expect(harness.operation.state.lifecycleEvents).toEqual(['close']);
+        },
+    );
+
+    it.each([
+        Object.assign(new Error('Injected authentication failure.'), {
+            code: 'AuthenticationFailed',
+        }),
+        new BrowserActionStorageCustodyError(
+            'RecordAuthenticationFailed',
+            'Injected record authentication failure.',
+        ),
+        new BrowserActionStorageCustodyError(
+            'StorageFailure',
+            'Injected storage failure.',
+        ),
+        new BrowserActionStorageCustodyError(
+            'Unavailable',
+            'Injected unavailable storage.',
+        ),
+        new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'Injected worker failure.',
+        ),
+    ])(
+        'retires local custody exactly once before close after permanent witness failure %#',
+        async (witnessVoteFailure) => {
+            const harness = await createAuthorityHarness('fresh', {
+                witnessVoteFailure,
+            });
+            await harness.authority.startup();
+            const capability = harness.authority.activeCapability();
+            const witnessRole = (await harness.authority.witnessRoles())[0];
+
+            await expect(
+                harness.authority.voteForActionRandomnessReservationIntent(
+                    capability,
+                    witnessRole,
+                    Uint8Array.of(0x73),
+                ),
+            ).rejects.toBe(witnessVoteFailure);
+            expect(harness.authority.state()).toBe('retired');
+            expect(harness.authority.retirementReason()).toBe(
+                'witnessStateUnavailable',
+            );
+            expect(harness.operation.state.retireCount).toBe(1);
+            expect(harness.operation.state.closeCount).toBe(1);
+            expect(harness.operation.state.lifecycleEvents).toEqual([
+                'retire',
+                'close',
+            ]);
+            expect(harness.boardState.closeCount).toBe(1);
+
+            await harness.authority.close();
+            expect(harness.operation.state.retireCount).toBe(1);
+            expect(harness.operation.state.closeCount).toBe(1);
+        },
+    );
+
+    it('keeps durable retirement retryable after its compare-and-swap fails', async () => {
+        const retirementStorage: DeviceWrappingRetirementTestStorage = {
+            retirementTombstonePresent: false,
+        };
         const harness = await createAuthorityHarness('fresh', {
-            failWitnessVote: true,
+            retirementCompareAndSwapFailures: [
+                new BrowserActionStorageCustodyError(
+                    'StorageFailure',
+                    'Injected retirement compare-and-swap failure.',
+                ),
+            ],
+            retirementStorage,
+            witnessVoteFailure: new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                'Injected permanent witness storage failure.',
+            ),
         });
         await harness.authority.startup();
         const capability = harness.authority.activeCapability();
@@ -481,14 +708,148 @@ describe('combined browser foundation authority', () => {
                 witnessRole,
                 Uint8Array.of(0x73),
             ),
-        ).rejects.toMatchObject({ code: 'StorageFailure' });
+        ).rejects.toMatchObject({ code: 'CleanupFailed' });
+        expect(retirementStorage.retirementTombstonePresent).toBe(false);
         expect(harness.authority.state()).toBe('retired');
-        expect(harness.authority.retirementReason()).toBe(
-            'witnessStateUnavailable',
-        );
+        expect(harness.operation.state.lifecycleEvents).toEqual(['retire']);
+        expect(harness.operation.state.closeCount).toBe(0);
+        expect(harness.boardState.closeCount).toBe(0);
+
+        await expect(harness.authority.close()).resolves.toBeUndefined();
+        expect(retirementStorage.retirementTombstonePresent).toBe(true);
+        expect(harness.operation.state.retireCount).toBe(2);
         expect(harness.operation.state.closeCount).toBe(1);
+        expect(harness.operation.state.lifecycleEvents).toEqual([
+            'retire',
+            'retire',
+            'close',
+        ]);
         expect(harness.boardState.closeCount).toBe(1);
+
+        await expect(
+            createAuthorityHarness('fresh', { retirementStorage }),
+        ).rejects.toMatchObject({ code: 'Unavailable' });
     });
+
+    it.each(['fresh', 'recovered'] as const)(
+        'completes fail-once durable retirement before failed %s construction releases ownership',
+        async (initializationMode) => {
+            const retirementStorage: DeviceWrappingRetirementTestStorage = {
+                retirementTombstonePresent: false,
+            };
+            const boardState: CanonicalBoardTestState = { closeCount: 0 };
+            const constructionFailure = new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                `Injected ${initializationMode} foundation authentication failure.`,
+            );
+            const operation = createOperationOwner({
+                ...(initializationMode === 'fresh'
+                    ? {
+                          freshCommitFailureAfterRetirementAttempt:
+                              constructionFailure,
+                      }
+                    : {
+                          recoveredOpenFailureAfterRetirementAttempt:
+                              constructionFailure,
+                      }),
+                retirementCompareAndSwapFailures: [
+                    new BrowserActionStorageCustodyError(
+                        'StorageFailure',
+                        'Injected first retirement compare-and-swap failure.',
+                    ),
+                ],
+                retirementStorage,
+            });
+
+            await expect(
+                openTestAuthority(
+                    initializationMode,
+                    operation.owner,
+                    boardState,
+                ),
+            ).rejects.toMatchObject({ code: 'OwnedWorkerFailure' });
+            expect(retirementStorage.retirementTombstonePresent).toBe(true);
+            expect(operation.state.retireCount).toBe(2);
+            expect(operation.state.closeCount).toBe(1);
+            expect(operation.state.lifecycleEvents).toEqual([
+                'retire',
+                'retire',
+                'close',
+            ]);
+            expect(boardState.closeCount).toBe(1);
+
+            await expect(
+                createAuthorityHarness('fresh', { retirementStorage }),
+            ).rejects.toMatchObject({ code: 'Unavailable' });
+        },
+    );
+
+    it.each(['fresh', 'recovered'] as const)(
+        'retains failed %s construction ownership through repeated terminal cleanup failures',
+        async (initializationMode) => {
+            const retirementStorage: DeviceWrappingRetirementTestStorage = {
+                retirementTombstonePresent: false,
+            };
+            const boardState: CanonicalBoardTestState = {
+                closeAttemptCount: 0,
+                closeCount: 0,
+                closeFailures: [
+                    new Error('Injected first canonical-board close failure.'),
+                    new Error('Injected second canonical-board close failure.'),
+                ],
+            };
+            const constructionFailure = new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                `Injected ${initializationMode} foundation construction failure.`,
+            );
+            const operation = createOperationOwner({
+                closeFailures: [
+                    new Error('Injected first operation-owner close failure.'),
+                    new Error('Injected second operation-owner close failure.'),
+                ],
+                ...(initializationMode === 'fresh'
+                    ? { freshCommitFailure: constructionFailure }
+                    : { recoveredOpenFailure: constructionFailure }),
+                retirementCompareAndSwapFailures: [
+                    new BrowserActionStorageCustodyError(
+                        'StorageFailure',
+                        'Injected first retirement compare-and-swap failure.',
+                    ),
+                    new BrowserActionStorageCustodyError(
+                        'StorageFailure',
+                        'Injected second retirement compare-and-swap failure.',
+                    ),
+                ],
+                retirementStorage,
+            });
+
+            await expect(
+                openTestAuthority(
+                    initializationMode,
+                    operation.owner,
+                    boardState,
+                ),
+            ).rejects.toBe(constructionFailure);
+            expect(retirementStorage.retirementTombstonePresent).toBe(true);
+            expect(operation.state.retireCount).toBe(3);
+            expect(operation.state.closeAttemptCount).toBe(3);
+            expect(operation.state.closeCount).toBe(1);
+            expect(operation.state.lifecycleEvents).toEqual([
+                'retire',
+                'retire',
+                'retire',
+                'close',
+                'close',
+                'close',
+            ]);
+            expect(boardState.closeAttemptCount).toBe(3);
+            expect(boardState.closeCount).toBe(1);
+
+            await expect(
+                createAuthorityHarness('fresh', { retirementStorage }),
+            ).rejects.toMatchObject({ code: 'Unavailable' });
+        },
+    );
 
     it('rejects cross-wired activated witness roles', async () => {
         const harness = await createAuthorityHarness('fresh', {

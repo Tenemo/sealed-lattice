@@ -66,6 +66,7 @@ installBrowserActionStorageCustodyWorkerHost({
             }),
         },
         limits: {
+            maximumActiveOperationIdentityCount: 64,
             maximumCheckpointStateByteLength: 1_048_576,
             maximumManifestByteLength: 65_536,
             maximumRandomCursorCount: 32,
@@ -77,9 +78,9 @@ installBrowserActionStorageCustodyWorkerHost({
     },
     foundationWitnessRuntime: {
         durableStateLimits: {
-            maximumExactOutputByteLength: 65_536,
+            maximumExactOutputByteLength: 61_440,
             maximumRecordSealingCount: 128,
-            maximumSignedVoteCarrierByteLength: 65_536,
+            maximumSignedVoteCarrierByteLength: 61_440,
             transactionLifetimeMilliseconds: 10_000,
         },
         openWitnessCryptography: () => ({

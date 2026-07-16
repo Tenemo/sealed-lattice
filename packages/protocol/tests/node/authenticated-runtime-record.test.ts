@@ -167,6 +167,44 @@ describe('authenticated runtime records', () => {
         ).rejects.toMatchObject({ code: 'InvalidState' });
     });
 
+    it('retries failed session cleanup while keeping record protection unavailable', async () => {
+        let closeAttemptCount = 0;
+        const protection = createRuntimeRecordProtectionFromSession({
+            authorityContext: runtimeAuthorityContext(),
+            session: Object.freeze({
+                close: () => {
+                    closeAttemptCount += 1;
+                    return closeAttemptCount === 1
+                        ? Promise.reject(
+                              new Error('Injected session cleanup failure.'),
+                          )
+                        : Promise.resolve();
+                },
+                openCanonicalEnvelope: () =>
+                    Promise.reject(new Error('Not used by this test.')),
+                sampleIdentifier: ({ byteLength }) =>
+                    new Uint8Array(byteLength).fill(0x4d),
+                sealPlaintext: () => Promise.resolve(new Uint8Array([1])),
+            }),
+        });
+
+        await expect(
+            releaseRuntimeRecordProtection(protection),
+        ).rejects.toThrow('Injected session cleanup failure.');
+        expect(() =>
+            sampleRuntimeIdentifier(
+                protection,
+                new Set<string>(),
+                'unavailable identifier',
+            ),
+        ).toThrowError(expect.objectContaining({ code: 'InvalidState' }));
+
+        await expect(
+            releaseRuntimeRecordProtection(protection),
+        ).resolves.toBeUndefined();
+        expect(closeAttemptCount).toBe(2);
+    });
+
     it('rejects invalid worker-session outputs without retaining them', async () => {
         let invalidIdentifier: Uint8Array | undefined;
         const protection = createRuntimeRecordProtectionFromSession({

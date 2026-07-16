@@ -453,7 +453,7 @@ fn resource_count_overflow() -> FoundationSchemaError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::foundation::{CanonicalItem, CanonicalTuple, SuiteByteLimits};
+    use crate::foundation::{CanonicalItem, CanonicalTuple};
 
     fn selected_candidate_suite_record() -> SuiteRecord {
         SuiteRecord::new(

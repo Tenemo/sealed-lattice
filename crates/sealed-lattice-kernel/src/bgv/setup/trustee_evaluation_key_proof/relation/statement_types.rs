@@ -184,14 +184,6 @@ impl TrusteeEvaluationKeyWitness {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn secret_coefficients_mut(&mut self) -> &mut [i64] {
-        match self {
-            Self::PrivateVssShare { .. } => &mut [],
-            Self::TrusteeEvaluationKey { key, .. } => &mut key.secret_coefficients,
-        }
-    }
-
     pub(crate) fn error_coefficients_by_key(&self) -> &[Vec<Vec<i64>>] {
         match self {
             Self::PrivateVssShare { .. } => &[],
@@ -206,16 +198,6 @@ impl TrusteeEvaluationKeyWitness {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn negative_indicator_coefficients_mut(&mut self) -> &mut [i64] {
-        match self {
-            Self::PrivateVssShare { .. } => &mut [],
-            Self::TrusteeEvaluationKey { linkage, .. } => {
-                &mut linkage.negative_indicator_coefficients
-            }
-        }
-    }
-
     pub(crate) fn opening_randomness_by_source_limb_and_commitment_limb(
         &self,
     ) -> &[Vec<Vec<Vec<i64>>>] {
@@ -223,18 +205,6 @@ impl TrusteeEvaluationKeyWitness {
             Self::PrivateVssShare { .. } => &[],
             Self::TrusteeEvaluationKey { linkage, .. } => {
                 &linkage.opening_randomness_by_source_limb_and_commitment_limb
-            }
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn opening_randomness_by_source_limb_and_commitment_limb_mut(
-        &mut self,
-    ) -> &mut [Vec<Vec<Vec<i64>>>] {
-        match self {
-            Self::PrivateVssShare { .. } => &mut [],
-            Self::TrusteeEvaluationKey { linkage, .. } => {
-                &mut linkage.opening_randomness_by_source_limb_and_commitment_limb
             }
         }
     }

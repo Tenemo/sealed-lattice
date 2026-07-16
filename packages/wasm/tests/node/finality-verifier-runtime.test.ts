@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    issueVerifiedEvaluatorReplayCapability,
     openFinalityVerifierSession,
     registerFinalityVerifierKernelContext,
-    revokeVerifiedEvaluatorReplayCapability,
     type FinalityVerifierConfiguration,
     type FinalityVerifierKernelContext,
     type VerifiedEvaluatorReplay,
@@ -69,7 +67,7 @@ const createFakeKernel = (): Readonly<{
 };
 
 describe('Finality verifier capability boundary', () => {
-    it('does not promote raw or forged replay data into evaluator evidence', () => {
+    it('does not promote decoded replay metadata or a raw handle into evaluator evidence', () => {
         const fake = createFakeKernel();
         const opened = openFinalityVerifierSession({
             configuration: configuration(),
@@ -80,9 +78,11 @@ describe('Finality verifier capability boundary', () => {
             throw new Error(opened.refusalReason);
         }
         try {
-            const forgedReplay = Object.freeze(
-                Object.create(null),
-            ) as VerifiedEvaluatorReplay;
+            const forgedReplay = Object.freeze({
+                handle: 7,
+                kernel: fake.kernel,
+                replayObjectHash: new Uint8Array(64).fill(0x44),
+            }) as unknown as VerifiedEvaluatorReplay;
             expect(
                 opened.value.verify({
                     canonicalCertificate: Uint8Array.of(1),
@@ -100,18 +100,6 @@ describe('Finality verifier capability boundary', () => {
             opened.value.cancel();
         }
         expect(fake.allocations.size).toBe(0);
-    });
-
-    it('invalidates an evaluator capability at its owning runtime boundary', () => {
-        const fake = createFakeKernel();
-        const replay = issueVerifiedEvaluatorReplayCapability({
-            handle: 7,
-            kernel: fake.kernel,
-        });
-        revokeVerifiedEvaluatorReplayCapability(replay);
-        expect(() => revokeVerifiedEvaluatorReplayCapability(replay)).toThrow(
-            'unavailable',
-        );
     });
 
     it('refuses malformed configuration before opening a WASM session', () => {

@@ -45,9 +45,18 @@ const bytesToHex = (bytes: Uint8Array): string =>
 
 const workerNamePrefix = 'sealed-lattice-roster-position:';
 const workerName = workerScope.name;
-const localRosterPositionText = workerName.startsWith(workerNamePrefix)
+const workerDescription = workerName.startsWith(workerNamePrefix)
     ? workerName.slice(workerNamePrefix.length)
     : '0';
+const [localRosterPositionText = '', workerFaultMode, unexpectedWorkerField] =
+    workerDescription.split(':');
+if (
+    unexpectedWorkerField !== undefined ||
+    (workerFaultMode !== undefined &&
+        workerFaultMode !== 'fail-first-retirement-write')
+) {
+    throw new Error('The browser worker fault mode is invalid.');
+}
 const localRosterPosition = Number.parseInt(localRosterPositionText, 10);
 if (
     !Number.isSafeInteger(localRosterPosition) ||
@@ -56,6 +65,42 @@ if (
     localRosterPosition >= foundationProfile.participantCount
 ) {
     throw new Error('The browser worker roster position is invalid.');
+}
+if (workerFaultMode === 'fail-first-retirement-write') {
+    const originalPut = Object.getOwnPropertyDescriptor(
+        IDBObjectStore.prototype,
+        'put',
+    )?.value as unknown;
+    if (typeof originalPut !== 'function') {
+        throw new Error('The IndexedDB put operation is unavailable.');
+    }
+    let retirementWriteFailurePending = true;
+    IDBObjectStore.prototype.put = function (
+        value: unknown,
+        key?: IDBValidKey,
+    ): IDBRequest<IDBValidKey> {
+        if (
+            retirementWriteFailurePending &&
+            typeof value === 'object' &&
+            value !== null &&
+            'recordKind' in value &&
+            value.recordKind === 'sealed-lattice-device-wrapping-retirement'
+        ) {
+            retirementWriteFailurePending = false;
+            throw new DOMException(
+                'Injected first retirement write failure.',
+                'UnknownError',
+            );
+        }
+        return key === undefined
+            ? (Reflect.apply(originalPut, this, [
+                  value,
+              ]) as IDBRequest<IDBValidKey>)
+            : (Reflect.apply(originalPut, this, [
+                  value,
+                  key,
+              ]) as IDBRequest<IDBValidKey>);
+    };
 }
 const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
     foundationProfile.participantCount,
@@ -87,9 +132,9 @@ const transcriptCoreKernelPromise = loadFreshTranscriptCoreKernel();
 installBrowserActionStorageCustodyWorkerHost({
     foundationWitnessRuntime: {
         durableStateLimits: {
-            maximumExactOutputByteLength: 4_194_304,
+            maximumExactOutputByteLength: 61_440,
             maximumRecordSealingCount: 256,
-            maximumSignedVoteCarrierByteLength: 65_536,
+            maximumSignedVoteCarrierByteLength: 61_440,
             transactionLifetimeMilliseconds: 10_000,
         },
         openWitnessCryptography: ({ canonicalRosterBytes }) => {

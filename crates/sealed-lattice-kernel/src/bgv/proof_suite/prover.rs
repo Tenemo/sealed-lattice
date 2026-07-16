@@ -1923,7 +1923,9 @@ pub(crate) fn construct_composed_quotient_polynomial(
             .map_err(|_| CommonProofProverError::CountOverflow)?
         || evaluation_domain.generator().canonical() != context.evaluation_domain_generator
         || evaluation_domain.coset_offset().canonical() != context.evaluation_coset_offset
-        || variant.evaluation_domain_size() % variant.trace_domain_size() != 0
+        || !variant
+            .evaluation_domain_size()
+            .is_multiple_of(variant.trace_domain_size())
     {
         return Err(CommonProofProverError::InvalidQuotient);
     }
@@ -5133,6 +5135,17 @@ type CommonProofGenerationPollResult<StorageError, CoinError, SinkError, BoundOp
         CommonProofGenerationPoll,
         CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError>,
     >;
+
+#[cfg(test)]
+type CompletedCommonProofGenerationResult<Storage, Coins, Sink, BoundOpenings> = Result<
+    (),
+    CommonProofGenerationError<
+        <Storage as ProofExternalMemory>::Error,
+        <Coins as CommonProofPrivateCoinSource>::Error,
+        <Sink as CommonProofByteSink>::Error,
+        <BoundOpenings as CommonProofBoundOpeningProvider>::Error,
+    >,
+>;
 
 struct GeneratedCommonProofStoragePlan {
     external_memory_plan: ProofExternalMemoryPlan,
@@ -9651,10 +9664,7 @@ pub(crate) fn generate_common_proof<Storage, Coins, Sink, BoundOpenings>(
     coins: &mut Coins,
     sink: &mut Sink,
     bound_openings: &mut BoundOpenings,
-) -> Result<
-    (),
-    CommonProofGenerationError<Storage::Error, Coins::Error, Sink::Error, BoundOpenings::Error>,
->
+) -> CompletedCommonProofGenerationResult<Storage, Coins, Sink, BoundOpenings>
 where
     Storage: ProofExternalMemory,
     Coins: CommonProofPrivateCoinSource,

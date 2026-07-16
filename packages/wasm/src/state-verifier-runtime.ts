@@ -219,11 +219,11 @@ export type VerifiedStateReservation = Readonly<{
     readonly [verifiedStateReservationBrand]: true;
 }>;
 
-export type StateObjectSignatureOperation = Readonly<{
+type StateObjectSignatureOperation = Readonly<{
     signStateObjectMessage(signatureMessageHash: Uint8Array): Uint8Array;
 }>;
 
-export type ProducedStateReservationIntent = Readonly<{
+type ProducedStateReservationIntent = Readonly<{
     canonicalReservationIntentCarrier: Uint8Array;
     verifiedIntent: VerifiedStateReservationIntent;
 }>;

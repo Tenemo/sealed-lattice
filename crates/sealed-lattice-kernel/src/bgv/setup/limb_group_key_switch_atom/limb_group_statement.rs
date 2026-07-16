@@ -38,6 +38,8 @@ use super::wide_unsigned::{
     add_in_place, is_less_than, multiply_word_accumulate, multiply_word_in_place, remainder_word,
     shift_right_one_in_place, subtract_in_place,
 };
+#[cfg(test)]
+use crate::bgv::key_switch_topology::KEY_SWITCH_SPECIAL_PRIMES;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 /// A limb group with its CRT constants over a proof field. The reduced CRT
@@ -253,6 +255,9 @@ pub(crate) enum DigitAtomSource<'a> {
         aggregate_residues: &'a [u64],
         signed_polynomial: &'a [i64],
     },
+    /// Hybrid block decomposition: every data limb in the block carries the
+    /// same small source multiplied by the complete special-basis product.
+    BlockWideSignedPolynomial(&'a [i64]),
     /// The atom's limb group does not contain the digit's diagonal limb.
     NoDiagonal,
 }
@@ -284,6 +289,8 @@ pub(crate) struct LimbGroupDigitAtomReport {
 /// N terms), |t * e| <= 2t, and the diagonal term is either
 /// |G * source| <= Q/2 (signed source, |source| <= 1 after centering G) or
 /// |P * s| <= N * Q/2 (round two, P centered modulo Q before the product).
+/// A hybrid block-wide signed source also stays below Q/2 because the complete
+/// special-basis product is centered modulo Q before multiplying by {-1,0,1}.
 /// So |D| < Q * (N + 1/2) + 2t for the largest round-two shape and the exact
 /// carry c = D / Q satisfies |c| <= N + 1. The proof field is checked with
 /// p > Q * (2N + 1) + 4t, so the mod-p computation of D equals the integer D
@@ -317,7 +324,7 @@ pub(crate) fn verify_limb_group_digit_atom<const LIMB_COUNT: usize>(
         .domain
         .negacyclic_product(&public_sample, &secret_field);
 
-    let diagonal_term = diagonal_term(&input)?;
+    let source_term = source_term(&input)?;
 
     let carry_bound = ring_degree as u64 + 1;
     let mut maximum_carry_magnitude = 0_u64;
@@ -330,7 +337,7 @@ pub(crate) fn verify_limb_group_digit_atom<const LIMB_COUNT: usize>(
             input.error_coefficients[coefficient_index] * plaintext_modulus,
         );
         difference = parameters.subtract(&difference, &scaled_error);
-        if let Some(term) = &diagonal_term {
+        if let Some(term) = &source_term {
             difference = parameters.subtract(&difference, &term[coefficient_index]);
         }
 
@@ -406,7 +413,7 @@ fn plaintext_modulus_i64() -> i64 {
 }
 
 #[cfg(test)]
-fn diagonal_term<const LIMB_COUNT: usize>(
+fn source_term<const LIMB_COUNT: usize>(
     input: &LimbGroupDigitAtomInput<'_, LIMB_COUNT>,
 ) -> CanonicalResult<Option<Vec<[u64; LIMB_COUNT]>>> {
     let parameters = input.domain.parameters;
@@ -460,6 +467,37 @@ fn diagonal_term<const LIMB_COUNT: usize>(
                     .domain
                     .negacyclic_product(&scaled_aggregate, &signed_field),
             ))
+        }
+        (DigitAtomSource::BlockWideSignedPolynomial(source), None) => {
+            validate_signed_support(source, ring_degree, 1, "block source")?;
+            let source_residues_by_limb = input
+                .group
+                .group_primes
+                .iter()
+                .map(|prime| {
+                    let special_basis_residue = key_switch_special_basis_residue(*prime);
+                    source
+                        .iter()
+                        .map(|value| {
+                            let magnitude = word_multiply_mod(
+                                special_basis_residue,
+                                value.unsigned_abs(),
+                                *prime,
+                            );
+                            if *value < 0 && magnitude != 0 {
+                                *prime - magnitude
+                            } else {
+                                magnitude
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            Ok(Some(input.group.recombine_centered(
+                parameters,
+                &source_residues_by_limb,
+                ring_degree,
+            )?))
         }
         _ => Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -529,6 +567,15 @@ fn reduce_by_shifted_modulus<const LIMB_COUNT: usize>(
 
 fn word_multiply_mod(left: u64, right: u64, modulus: u64) -> u64 {
     (u128::from(left) * u128::from(right) % u128::from(modulus)) as u64
+}
+
+#[cfg(test)]
+fn key_switch_special_basis_residue(modulus: u64) -> u64 {
+    KEY_SWITCH_SPECIAL_PRIMES
+        .iter()
+        .fold(1_u64, |product, special_prime| {
+            word_multiply_mod(product, *special_prime % modulus, modulus)
+        })
 }
 
 /// Fermat inverse of a word modulo a word prime.
@@ -996,7 +1043,7 @@ mod tests {
     fn kernel_galois_keygen_material_satisfies_the_limb_group_atom() {
         use crate::bgv::evaluator::engine::DevelopmentBgvKey;
         use crate::bgv::evaluator::key_switch::generate_galois_key;
-        use crate::bgv::parameters::{POLYNOMIAL_DEGREE, SPECIAL_PRIMES};
+        use crate::bgv::parameters::POLYNOMIAL_DEGREE;
 
         let parameters = sixteen_limb_group_field_parameters();
         let level = 1;
@@ -1025,18 +1072,23 @@ mod tests {
             }
             rotated
         };
-        for (digit_index, component) in galois_key.components.iter().enumerate() {
+        assert_eq!(
+            galois_key.components.len(),
+            1,
+            "the selected hybrid topology carries this active data-prime prefix in one block"
+        );
+        for (block_index, component) in galois_key.components.iter().enumerate() {
             let component_b = component
                 .component_b_coefficients()
                 .expect("generated component b converts from NTT form");
             let component_b = component_b[..group_primes.len()].to_vec();
-            let digit_bytes = (digit_index as u64).to_le_bytes();
+            let block_bytes = (block_index as u64).to_le_bytes();
             let error = DeterministicSampler::new(
                 KEY_SWITCH_ERROR_DOMAIN,
                 &[
                     key_switch_domain.as_bytes(),
                     seed_hex.as_bytes(),
-                    &digit_bytes,
+                    &block_bytes,
                 ],
             )
             .centered_binomial_eta2(POLYNOMIAL_DEGREE);
@@ -1049,31 +1101,60 @@ mod tests {
                         &[
                             key_switch_domain.as_bytes(),
                             seed_hex.as_bytes(),
-                            &digit_bytes,
+                            &block_bytes,
                             &modulus_bytes,
                         ],
                     )
                     .uniform_residues(*modulus, POLYNOMIAL_DEGREE)
                 })
                 .collect::<Vec<_>>();
-            let mut special_prime_polynomial = vec![0_u64; POLYNOMIAL_DEGREE];
-            special_prime_polynomial[0] = SPECIAL_PRIMES[0] % group_primes[digit_index];
 
-            let report = verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
-                group: &group,
-                domain: &domain,
-                diagonal_group_position: Some(digit_index),
-                component_b_by_limb: &component_b,
-                public_sample_by_limb: &public_sample_by_limb,
-                secret_coefficients: key.secret(),
-                error_coefficients: &error,
-                source: DigitAtomSource::DiagonalPublicProduct {
-                    aggregate_residues: &special_prime_polynomial,
-                    signed_polynomial: &rotated_secret,
-                },
-            })
-            .expect("kernel-generated digit material satisfies the limb-group atom");
+            let verify = |candidate_component_b: &[Vec<u64>], candidate_source: &[i64]| {
+                verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
+                    group: &group,
+                    domain: &domain,
+                    diagonal_group_position: None,
+                    component_b_by_limb: candidate_component_b,
+                    public_sample_by_limb: &public_sample_by_limb,
+                    secret_coefficients: key.secret(),
+                    error_coefficients: &error,
+                    source: DigitAtomSource::BlockWideSignedPolynomial(candidate_source),
+                })
+            };
+
+            let report = verify(&component_b, &rotated_secret)
+                .expect("kernel-generated block material satisfies the limb-group atom");
             assert!(report.maximum_carry_magnitude <= report.carry_bound);
+
+            let mutation_limb_index = group_primes.len() - 1;
+            let mutation_coefficient_index = POLYNOMIAL_DEGREE / 3;
+            let mut mutated_component_b = component_b.clone();
+            mutated_component_b[mutation_limb_index][mutation_coefficient_index] =
+                (mutated_component_b[mutation_limb_index][mutation_coefficient_index] + 1)
+                    % group_primes[mutation_limb_index];
+            let mutated_component_error = match verify(&mutated_component_b, &rotated_secret) {
+                Ok(_) => panic!("a changed production component residue must not satisfy the atom"),
+                Err(error) => error,
+            };
+            assert_eq!(
+                mutated_component_error.code,
+                CanonicalErrorCode::ComponentMismatch
+            );
+
+            let mut mutated_source = rotated_secret.clone();
+            let mutation_source_index = mutated_source
+                .iter()
+                .position(|value| *value != 0)
+                .expect("rotated source has a nonzero coefficient");
+            mutated_source[mutation_source_index] = -mutated_source[mutation_source_index];
+            let mutated_source_error = match verify(&component_b, &mutated_source) {
+                Ok(_) => panic!("a changed block source must not satisfy the atom"),
+                Err(error) => error,
+            };
+            assert_eq!(
+                mutated_source_error.code,
+                CanonicalErrorCode::ComponentMismatch
+            );
         }
     }
 }

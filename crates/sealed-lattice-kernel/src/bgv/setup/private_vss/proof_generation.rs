@@ -215,16 +215,18 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     )
     .map_err(private_vss_refusal_to_error)?;
     let bound_proof_randomness_seed_hex = statement_bound_private_vss_proof_randomness_seed_hex(
-        setup_context,
-        public_matrix_seed_hash,
-        private_envelope_aad_hash,
-        source_trustee_binding.source_trustee_roster_position,
-        &source_trustee_binding.source_trustee_commitment_root,
-        recipient_roster_position,
-        rns_limb_index,
-        &coefficient_commitment_roots,
-        &share_values,
-        proof_randomness_seed_hex,
+        &PrivateVssProofRandomnessBindingInput {
+            setup_context,
+            public_matrix_seed_hash,
+            private_envelope_aad_hash,
+            source_trustee_roster_position: source_trustee_binding.source_trustee_roster_position,
+            source_trustee_commitment_root: &source_trustee_binding.source_trustee_commitment_root,
+            recipient_roster_position,
+            rns_limb_index,
+            coefficient_commitment_roots: &coefficient_commitment_roots,
+            share_values: &share_values,
+            proof_randomness_seed_hex,
+        },
     )?;
     let witness = PrivateVssShareSuccinctProofWitness {
         coefficient_messages_by_shamir_index,
@@ -271,35 +273,39 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     ))
 }
 
-fn statement_bound_private_vss_proof_randomness_seed_hex(
-    setup_context: &Value,
-    public_matrix_seed_hash: &str,
-    private_envelope_aad_hash: &str,
+struct PrivateVssProofRandomnessBindingInput<'input> {
+    setup_context: &'input Value,
+    public_matrix_seed_hash: &'input str,
+    private_envelope_aad_hash: &'input str,
     source_trustee_roster_position: u64,
-    source_trustee_commitment_root: &str,
+    source_trustee_commitment_root: &'input str,
     recipient_roster_position: u64,
     rns_limb_index: usize,
-    coefficient_commitment_roots: &[String],
-    share_values: &[u64],
-    proof_randomness_seed_hex: &str,
+    coefficient_commitment_roots: &'input [String],
+    share_values: &'input [u64],
+    proof_randomness_seed_hex: &'input str,
+}
+
+fn statement_bound_private_vss_proof_randomness_seed_hex(
+    input: &PrivateVssProofRandomnessBindingInput<'_>,
 ) -> CanonicalResult<String> {
     validate_exact_randomness_hex(
-        proof_randomness_seed_hex,
+        input.proof_randomness_seed_hex,
         PROOF_RANDOMNESS_SEED_BYTES,
         "proofRandomnessSeedHex",
     )?;
     derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareProofRandomnessBinding",
-        "setupContext": setup_context,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "privateEnvelopeAadHash": private_envelope_aad_hash,
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
-        "recipientRosterPosition": recipient_roster_position,
-        "rnsLimbIndex": rns_limb_index,
-        "shareValues": share_values,
-        "coefficientCommitmentRoots": coefficient_commitment_roots,
-        "proofRandomnessSeedHex": proof_randomness_seed_hex,
+        "setupContext": input.setup_context,
+        "publicMatrixSeedHash": input.public_matrix_seed_hash,
+        "privateEnvelopeAadHash": input.private_envelope_aad_hash,
+        "sourceTrusteeRosterPosition": input.source_trustee_roster_position,
+        "sourceTrusteeCommitmentRoot": input.source_trustee_commitment_root,
+        "recipientRosterPosition": input.recipient_roster_position,
+        "rnsLimbIndex": input.rns_limb_index,
+        "shareValues": input.share_values,
+        "coefficientCommitmentRoots": input.coefficient_commitment_roots,
+        "proofRandomnessSeedHex": input.proof_randomness_seed_hex,
     }))
 }
 

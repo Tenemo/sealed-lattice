@@ -141,36 +141,6 @@ const verifiedEvaluatorReplayRecords = new WeakMap<
 >();
 const verifiedFinalityRecords = new WeakMap<object, VerifiedFinalityRecord>();
 
-/**
- * Internal handoff for the evaluator runtime after Rust has retained a live
- * `VerifiedEvaluatorReplay`. This function is intentionally absent from the
- * package entry point and accepts no replay bytes, hashes, or descriptors.
- */
-export const issueVerifiedEvaluatorReplayCapability = (input: {
-    handle: number;
-    kernel: TranscriptCoreKernel;
-}): VerifiedEvaluatorReplay => {
-    requireWasm32Handle(input.handle, 'evaluator replay handle');
-    const capability = Object.freeze(Object.create(null) as object);
-    verifiedEvaluatorReplayRecords.set(capability, {
-        active: true,
-        handle: input.handle,
-        kernel: input.kernel,
-    });
-    return capability as VerifiedEvaluatorReplay;
-};
-
-/** Internal terminal handoff used by the owning evaluator runtime. */
-export const revokeVerifiedEvaluatorReplayCapability = (
-    capability: VerifiedEvaluatorReplay,
-): void => {
-    const record = verifiedEvaluatorReplayRecords.get(capability);
-    if (record === undefined || !record.active) {
-        throw new TypeError('The verified evaluator replay is unavailable.');
-    }
-    record.active = false;
-};
-
 class FinalityVerifierInternalError extends Error {
     public readonly failureCause: unknown;
 

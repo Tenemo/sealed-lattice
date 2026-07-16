@@ -62,12 +62,19 @@ export class ExclusiveResourceLifecycle {
         if (this.#closePromise !== undefined) {
             return this.#closePromise;
         }
+        if (this.#state === 'closed') {
+            return Promise.resolve();
+        }
         this.#state = 'closing';
         const operationsToDrain = [...this.#inFlightOperations];
         this.#closePromise = Promise.allSettled(operationsToDrain)
             .then(() => this.#cleanup())
-            .finally(() => {
+            .then(() => {
                 this.#state = 'closed';
+            })
+            .catch((error: unknown) => {
+                this.#closePromise = undefined;
+                throw error;
             });
         return this.#closePromise;
     }

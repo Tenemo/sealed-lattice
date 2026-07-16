@@ -73,6 +73,24 @@ pub(crate) struct AuthenticatedCheckpointContinuationSource {
 }
 
 impl AuthenticatedCheckpointContinuationSource {
+    /// Constructs the continuation authority decoded from one checkpoint that
+    /// the browser-owned custody path has already authenticated. This remains
+    /// crate-private so transported fields cannot construct prover authority
+    /// through the generated-WASM command surface.
+    pub(crate) const fn from_authenticated_common_proof_checkpoint(
+        checkpoint_lineage_identifier: [u8; 32],
+        checkpoint_schedule_digest: Hash512,
+        next_event_index: u64,
+        cumulative_event_digest: Hash512,
+    ) -> Self {
+        Self {
+            checkpoint_lineage_identifier,
+            checkpoint_schedule_digest,
+            next_event_index,
+            cumulative_event_digest,
+        }
+    }
+
     pub(crate) const fn checkpoint_lineage_identifier(&self) -> [u8; 32] {
         self.checkpoint_lineage_identifier
     }

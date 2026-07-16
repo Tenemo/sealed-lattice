@@ -533,6 +533,34 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         preparedGenerationHandle: number,
         statusPointer: number,
     ) => number;
+    sealed_lattice_common_proof_describe_generation_family_adapter?: (
+        adapterHandle: number,
+        runtimeBindingHashOutputPointer: number,
+        verificationBindingHashOutputPointer: number,
+        proofAttemptLineageIdentifierOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_describe_verification_family_adapter?: (
+        adapterHandle: number,
+        verificationBindingHashOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_prepare_generation_family_adapter?: (
+        adapterHandle: number,
+        authenticatedCheckpointStatePointer: number,
+        authenticatedCheckpointStateByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_prepare_verification_family_adapter?: (
+        adapterHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_discard_generation_family_adapter?: (
+        adapterHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_discard_verification_family_adapter?: (
+        adapterHandle: number,
+    ) => number;
     sealed_lattice_common_proof_discard_prepared_generation?: (
         handle: number,
     ) => number;

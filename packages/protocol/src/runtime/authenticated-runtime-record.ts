@@ -89,7 +89,7 @@ export type RuntimeRecordProtection = Readonly<{
 type RuntimeRecordProtectionRecord = {
     authorityContext: RuntimeStorageAuthorityContext;
     releasePromise: Promise<void> | undefined;
-    released: boolean;
+    state: 'open' | 'releasing' | 'released';
     session: RuntimeRecordProtectionSession;
 };
 
@@ -229,7 +229,7 @@ const requireRuntimeRecordProtection = (
         typeof protection === 'object' && protection !== null
             ? runtimeRecordProtectionRecords.get(protection)
             : undefined;
-    if (record === undefined || record.released) {
+    if (record === undefined || record.state !== 'open') {
         throw new AuthenticatedRuntimeRecordError(
             'InvalidState',
             'Runtime record protection is unavailable or released.',
@@ -261,7 +261,7 @@ export const createRuntimeRecordProtectionFromSession = (input: {
             input.authorityContext,
         ),
         releasePromise: undefined,
-        released: false,
+        state: 'open',
         session: input.session,
     });
     return protection;
@@ -289,15 +289,24 @@ export const releaseRuntimeRecordProtection = (
     if (record.releasePromise !== undefined) {
         return record.releasePromise;
     }
-    record.released = true;
-    record.authorityContext.actionContextHash.fill(0);
-    record.authorityContext.ceremonyContextHash.fill(0);
-    record.authorityContext.ownerParticipantIdentity.fill(0);
-    record.authorityContext.runtimeBuildManifestHash.fill(0);
-    record.authorityContext.suiteIdentifier.fill(0);
-    record.releasePromise = Promise.resolve().then(() =>
-        record.session.close(),
-    );
+    if (record.state === 'released') {
+        return Promise.resolve();
+    }
+    record.state = 'releasing';
+    record.releasePromise = Promise.resolve()
+        .then(() => record.session.close())
+        .then(() => {
+            record.authorityContext.actionContextHash.fill(0);
+            record.authorityContext.ceremonyContextHash.fill(0);
+            record.authorityContext.ownerParticipantIdentity.fill(0);
+            record.authorityContext.runtimeBuildManifestHash.fill(0);
+            record.authorityContext.suiteIdentifier.fill(0);
+            record.state = 'released';
+        })
+        .catch((error: unknown) => {
+            record.releasePromise = undefined;
+            throw error;
+        });
     return record.releasePromise;
 };
 

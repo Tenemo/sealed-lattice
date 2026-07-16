@@ -16,7 +16,10 @@ import {
     openCommonProofBrowserCustody,
     type CommonProofBrowserCustody,
 } from '#packages/protocol/src/runtime/common-proof-browser-custody';
-import type { UntrustedStorageTransactionStore } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
+import type {
+    UntrustedStorageExclusiveCapacityReservation,
+    UntrustedStorageTransactionStore,
+} from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
 import {
     commonProofStorageCapacityProfile,
     requireCommonProofStorageCapacity,
@@ -37,6 +40,7 @@ import {
 
 const cryptoProvider = webcrypto as unknown as Crypto;
 const checkpointLimits = {
+    maximumActiveOperationIdentityCount: 64,
     maximumCheckpointStateByteLength: 1_048_576,
     maximumManifestByteLength: 16_384,
     maximumRandomCursorCount: 8,
@@ -255,6 +259,9 @@ describe('Common-proof browser custody', () => {
 
     const openFixture = async (input?: {
         adapter?: InMemoryRuntimeStorageAdapter;
+        decorateCapacityReservation?: (
+            reservation: UntrustedStorageExclusiveCapacityReservation,
+        ) => UntrustedStorageExclusiveCapacityReservation;
         checkpointStore?: TransferableAuthenticatedCheckpointStore;
         commonProofEnvironmentIdentifier?: Uint8Array;
         resumeDescriptor?: ReturnType<
@@ -298,11 +305,14 @@ describe('Common-proof browser custody', () => {
             maximumAdditionalStoredValueByteLength: 16_777_216,
             maximumDeletionBatchRecordCount: 8,
         });
+        const ownedCapacityReservation =
+            input?.decorateCapacityReservation?.(capacityReservation) ??
+            capacityReservation;
         let custody: CommonProofBrowserCustody;
         try {
             custody = openCommonProofBrowserCustody({
                 actionRandomnessCommitment,
-                capacityReservation,
+                capacityReservation: ownedCapacityReservation,
                 ...(input?.checkpointStore === undefined
                     ? {}
                     : {
@@ -330,12 +340,71 @@ describe('Common-proof browser custody', () => {
                 workerKernel,
             });
         } catch (error) {
-            await capacityReservation.release();
+            await ownedCapacityReservation.release();
             throw error;
         }
         openedCustodies.push(custody);
         return { adapter, custody, store, workerKernel };
     };
+
+    it('rejects hostile checkpoint cursor counts and aggregate bytes before custody opens', async () => {
+        const checkpointStorage = await openRuntimeTestStore({
+            namespace: 'common-proof-hostile-checkpoint-descriptor-test',
+        });
+        const checkpointStore = openAuthenticatedCheckpointStore({
+            authorityContext: runtimeAuthorityContext(),
+            boundaryPolicy,
+            cryptoProvider,
+            cursorKernel: transcriptCoreKernel,
+            encryptionKey: await generateRuntimeStorageEncryptionKey(),
+            limits: checkpointLimits,
+            store: checkpointStorage.store,
+        });
+        openedCheckpointStores.push(checkpointStore);
+        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
+            kernel: await loadFreshTranscriptCoreKernel(),
+        });
+        await workerKernel.createAndStageDeviceWrappingState({ binding });
+        await workerKernel.commitStagedActionStorageRoot();
+        const descriptorBase = {
+            checkpointLineageIdentifier: new Uint8Array(32).fill(0x12),
+            commonProofEnvironmentIdentifier: new Uint8Array(32).fill(0x99),
+            safeBoundaryOrdinal: 1,
+            stableAttemptBindingHash: new Uint8Array(64).fill(0x34),
+        } as const;
+
+        await expect(
+            openFixture({
+                checkpointStore,
+                resumeDescriptor: {
+                    ...descriptorBase,
+                    orderedPrivateRandomCursorBytes: Array.from(
+                        { length: 4_097 },
+                        () => Uint8Array.of(1),
+                    ),
+                },
+                workerKernel,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+
+        const firstOversizedCursor = new Uint8Array(524_289).fill(0x56);
+        const secondOversizedCursor = new Uint8Array(524_288).fill(0x78);
+        await expect(
+            openFixture({
+                checkpointStore,
+                resumeDescriptor: {
+                    ...descriptorBase,
+                    orderedPrivateRandomCursorBytes: [
+                        firstOversizedCursor,
+                        secondOversizedCursor,
+                    ],
+                },
+                workerKernel,
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        expect(firstOversizedCursor[0]).toBe(0x56);
+        expect(secondOversizedCursor[0]).toBe(0x78);
+    });
 
     it('persists encrypted and public objects through create, append, seal, ordered read, and delete', async () => {
         const { adapter, custody } = await openFixture();
@@ -949,6 +1018,196 @@ describe('Common-proof browser custody', () => {
         await custody.retire();
         openedCustodies.splice(openedCustodies.indexOf(custody), 1);
         expect(ownedStorageRecordKeys(adapter)).toEqual([]);
+    });
+
+    it('deletes verified output records before releasing successful capacity', async () => {
+        const { adapter, custody, store } = await openFixture();
+        await custody.outputStore.commitChunk(
+            0,
+            new Uint8Array(8_193).fill(0x4d),
+        );
+        custody.sealCanonicalOutput();
+        expect(ownedStorageRecordKeys(adapter).length).toBeGreaterThan(0);
+
+        await custody.completeVerifiedOutput();
+        openedCustodies.splice(openedCustodies.indexOf(custody), 1);
+        expect(ownedStorageRecordKeys(adapter)).toEqual([]);
+
+        const releasedTransaction = await store.beginTransaction({
+            lifetimeMilliseconds: 5_000,
+        });
+        const releasedLease = await releasedTransaction.issueWriteLease({
+            declaredByteLength: 1,
+            logicalRecordKey: 'foundation/verified-output-cleanup-released',
+        });
+        await releasedLease.write(Uint8Array.of(1));
+        await releasedLease.seal(() => undefined);
+        await releasedTransaction.commit();
+    });
+
+    it('retries only unfinished record deletion and capacity-release steps', async () => {
+        let deleteAttemptCount = 0;
+        let releaseAttemptCount = 0;
+        const { adapter, custody, store } = await openFixture({
+            decorateCapacityReservation: (reservation) =>
+                Object.freeze({
+                    copyAuthenticatedLogicalRecordKeys: (prefix) =>
+                        reservation.copyAuthenticatedLogicalRecordKeys(prefix),
+                    deleteAuthenticatedLogicalRecords: async (prefix) => {
+                        deleteAttemptCount += 1;
+                        if (deleteAttemptCount === 1) {
+                            throw new Error(
+                                'Injected terminal record-deletion failure.',
+                            );
+                        }
+                        return reservation.deleteAuthenticatedLogicalRecords(
+                            prefix,
+                        );
+                    },
+                    release: async () => {
+                        releaseAttemptCount += 1;
+                        if (releaseAttemptCount === 1) {
+                            throw new Error(
+                                'Injected terminal capacity-release failure.',
+                            );
+                        }
+                        await reservation.release();
+                    },
+                }),
+        });
+        await custody.outputStore.commitChunk(
+            0,
+            new Uint8Array(7_111).fill(0x5e),
+        );
+        custody.sealCanonicalOutput();
+
+        await expect(custody.completeVerifiedOutput()).rejects.toMatchObject({
+            code: 'StorageFailure',
+        });
+        expect(deleteAttemptCount).toBe(1);
+        expect(releaseAttemptCount).toBe(0);
+        expect(ownedStorageRecordKeys(adapter).length).toBeGreaterThan(0);
+
+        await expect(custody.retire()).rejects.toMatchObject({
+            code: 'StorageFailure',
+        });
+        expect(deleteAttemptCount).toBe(2);
+        expect(releaseAttemptCount).toBe(1);
+        expect(ownedStorageRecordKeys(adapter)).toEqual([]);
+
+        await expect(custody.retire()).resolves.toBeUndefined();
+        openedCustodies.splice(openedCustodies.indexOf(custody), 1);
+        expect(deleteAttemptCount).toBe(2);
+        expect(releaseAttemptCount).toBe(2);
+
+        const releasedTransaction = await store.beginTransaction({
+            lifetimeMilliseconds: 5_000,
+        });
+        const releasedLease = await releasedTransaction.issueWriteLease({
+            declaredByteLength: 1,
+            logicalRecordKey: 'foundation/retried-proof-cleanup-released',
+        });
+        await releasedLease.write(Uint8Array.of(1));
+        await releasedLease.seal(() => undefined);
+        await releasedTransaction.commit();
+    });
+
+    it('retries checkpoint eviction and identity release without repeating completed proof cleanup', async () => {
+        const checkpointAdapter = new InMemoryRuntimeStorageAdapter();
+        const checkpointStorage = await openRuntimeTestStore({
+            adapter: checkpointAdapter,
+            namespace: 'common-proof-completion-checkpoint-retry-test',
+        });
+        const checkpointStore = openAuthenticatedCheckpointStore({
+            authorityContext: runtimeAuthorityContext(),
+            boundaryPolicy,
+            cryptoProvider,
+            cursorKernel: transcriptCoreKernel,
+            encryptionKey: await generateRuntimeStorageEncryptionKey(),
+            limits: checkpointLimits,
+            store: checkpointStorage.store,
+        });
+        openedCheckpointStores.push(checkpointStore);
+        let checkpointEvictionAttemptCount = 0;
+        let checkpointIdentityReleaseAttemptCount = 0;
+        const retryingCheckpointStore: TransferableAuthenticatedCheckpointStore =
+            Object.freeze({
+                ...checkpointStore,
+                evict: async (checkpointLineageIdentifier) => {
+                    checkpointEvictionAttemptCount += 1;
+                    if (checkpointEvictionAttemptCount === 1) {
+                        throw new Error(
+                            'Injected terminal checkpoint-eviction failure.',
+                        );
+                    }
+                    await checkpointStore.evict(checkpointLineageIdentifier);
+                },
+                releaseOperationIdentity: async (identity) => {
+                    checkpointIdentityReleaseAttemptCount += 1;
+                    if (checkpointIdentityReleaseAttemptCount === 1) {
+                        throw new Error(
+                            'Injected terminal checkpoint-identity release failure.',
+                        );
+                    }
+                    await checkpointStore.releaseOperationIdentity(identity);
+                },
+            });
+        let deleteAttemptCount = 0;
+        let releaseAttemptCount = 0;
+        const { adapter, custody } = await openFixture({
+            checkpointStore: retryingCheckpointStore,
+            decorateCapacityReservation: (reservation) =>
+                Object.freeze({
+                    copyAuthenticatedLogicalRecordKeys: (prefix) =>
+                        reservation.copyAuthenticatedLogicalRecordKeys(prefix),
+                    deleteAuthenticatedLogicalRecords: async (prefix) => {
+                        deleteAttemptCount += 1;
+                        return reservation.deleteAuthenticatedLogicalRecords(
+                            prefix,
+                        );
+                    },
+                    release: async () => {
+                        releaseAttemptCount += 1;
+                        await reservation.release();
+                    },
+                }),
+        });
+        await custody.checkpointCustody?.publishAuthenticatedCheckpoint({
+            canonicalStateBytes: new Uint8Array(97).fill(0x61),
+            orderedPrivateRandomCursorBytes: [],
+            safeBoundaryOrdinal: 4,
+            stableAttemptBindingHash: new Uint8Array(64).fill(0x72),
+        });
+        await custody.outputStore.commitChunk(
+            0,
+            new Uint8Array(5_333).fill(0x83),
+        );
+        custody.sealCanonicalOutput();
+
+        await expect(custody.completeVerifiedOutput()).rejects.toMatchObject({
+            code: 'StorageFailure',
+        });
+        expect(checkpointEvictionAttemptCount).toBe(1);
+        expect(checkpointIdentityReleaseAttemptCount).toBe(0);
+        expect(deleteAttemptCount).toBe(1);
+        expect(releaseAttemptCount).toBe(1);
+        expect(ownedStorageRecordKeys(adapter)).toEqual([]);
+
+        await expect(custody.retire()).rejects.toMatchObject({
+            code: 'StorageFailure',
+        });
+        expect(checkpointEvictionAttemptCount).toBe(2);
+        expect(checkpointIdentityReleaseAttemptCount).toBe(1);
+        expect(deleteAttemptCount).toBe(1);
+        expect(releaseAttemptCount).toBe(1);
+
+        await expect(custody.retire()).resolves.toBeUndefined();
+        openedCustodies.splice(openedCustodies.indexOf(custody), 1);
+        expect(checkpointEvictionAttemptCount).toBe(3);
+        expect(checkpointIdentityReleaseAttemptCount).toBe(2);
+        expect(deleteAttemptCount).toBe(1);
+        expect(releaseAttemptCount).toBe(1);
+        expect(ownedStorageRecordKeys(checkpointAdapter)).toEqual([]);
     });
 
     it('enforces canonical output chunk segmentation and the five-chunk ceiling', async () => {

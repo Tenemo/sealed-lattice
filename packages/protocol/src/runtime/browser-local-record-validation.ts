@@ -278,66 +278,6 @@ export const copyLocalRecordIdentifierInput = (
                 ),
                 recordType: value.recordType,
             });
-        case 'commonProofExternalMemory': {
-            if (
-                value.externalMemoryRecordKind !== 'object-header' &&
-                value.externalMemoryRecordKind !== 'data-chunk' &&
-                value.externalMemoryRecordKind !== 'seal-marker'
-            ) {
-                throw malformed(
-                    errorCode,
-                    'Common-proof external-memory record kind is unsupported.',
-                );
-            }
-            return Object.freeze({
-                commonProofEnvironmentIdentifier: copyLocalRecordBytes(
-                    value.commonProofEnvironmentIdentifier,
-                    {
-                        allowEmpty: false,
-                        errorCode,
-                        exactByteLength: identifierByteLength,
-                        label: 'Common-proof environment identifier',
-                    },
-                ),
-                commonProofRuntimeBindingHash: copyLocalRecordBytes(
-                    value.commonProofRuntimeBindingHash,
-                    {
-                        allowEmpty: false,
-                        errorCode,
-                        exactByteLength: foundationHashByteLength,
-                        label: 'Common-proof runtime-binding hash',
-                    },
-                ),
-                externalMemoryByteOffset: copyUnsigned64(
-                    value.externalMemoryByteOffset,
-                    'Common-proof external-memory byte offset',
-                    errorCode,
-                ),
-                externalMemoryChunkOrdinal: copyUnsignedNumber(
-                    value.externalMemoryChunkOrdinal,
-                    maximumUnsigned32,
-                    'Common-proof external-memory chunk ordinal',
-                    errorCode,
-                ),
-                externalMemoryObjectOrdinal: copyUnsignedNumber(
-                    value.externalMemoryObjectOrdinal,
-                    maximumUnsigned32,
-                    'Common-proof external-memory object ordinal',
-                    errorCode,
-                ),
-                externalMemoryRecordKind: value.externalMemoryRecordKind,
-                proofAttemptLineageIdentifier: copyLocalRecordBytes(
-                    value.proofAttemptLineageIdentifier,
-                    {
-                        allowEmpty: false,
-                        errorCode,
-                        exactByteLength: identifierByteLength,
-                        label: 'Proof-attempt lineage identifier',
-                    },
-                ),
-                recordType: value.recordType,
-            });
-        }
         default:
             throw malformed(errorCode, 'Local-record type is unsupported.');
     }
@@ -443,4 +383,67 @@ export const copyLocalRecordOpenInput = (
             label: 'Local-record envelope',
         }),
     });
+};
+
+export const destroyLocalRecordIdentifierInput = (
+    input: BrowserLocalRecordIdentifierInput,
+): void => {
+    switch (input.recordType) {
+        case 'actionRandomness':
+        case 'publicCoinPrivateMaterial':
+            return;
+        case 'sourceVssMaterial':
+            input.materialContextHash.fill(0);
+            return;
+        case 'aggregateThresholdShare':
+            input.recipientInputRoot.fill(0);
+            return;
+        case 'proofAttempt':
+            input.applicationSlotHash.fill(0);
+            return;
+        case 'ballotAttempt':
+            input.ballotEncryptionAttemptIdentifier.fill(0);
+            input.canonicalBallotStatementBytes.fill(0);
+            return;
+        case 'exactOutputChunk':
+            input.exactOutputHash.fill(0);
+            return;
+        case 'subjectState':
+        case 'witnessState':
+            input.stateKey.fill(0);
+            return;
+        case 'checkpointManifest':
+            input.checkpointLineageIdentifier.fill(0);
+            input.runtimeBuildManifestHash.fill(0);
+            for (const digest of input.orderedSourceDigests) {
+                digest.fill(0);
+            }
+            return;
+        case 'checkpointChunk':
+            input.checkpointIdentifier.fill(0);
+            input.chunkDigest.fill(0);
+            return;
+    }
+};
+
+const destroyLocalRecordExpectedContext = (
+    input: BrowserLocalRecordExpectedContext,
+): void => {
+    input.actionRandomnessCommitment.fill(0);
+    input.predecessorRecordHash?.fill(0);
+    destroyLocalRecordIdentifierInput(input.identifierInput);
+};
+
+export const destroyLocalRecordSealInput = (
+    input: BrowserLocalRecordSealInput,
+): void => {
+    destroyLocalRecordExpectedContext(input);
+    input.plaintext.fill(0);
+};
+
+export const destroyLocalRecordOpenInput = (
+    input: BrowserLocalRecordOpenInput,
+): void => {
+    destroyLocalRecordExpectedContext(input);
+    input.envelope.fill(0);
 };

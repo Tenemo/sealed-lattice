@@ -8,27 +8,32 @@
 
 use core::slice;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::foundation::{
-    CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH,
-    RefusalReason, SuiteRecord, resolve_browser_worker_authenticated_storage_head_source,
+    AuthenticatedCheckpointContinuationSource, CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512,
+    LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH, RefusalReason, SuiteRecord,
+    resolve_browser_worker_authenticated_storage_head_source,
     resolve_browser_worker_authenticated_storage_transition_source, select_suite_record,
 };
 
+use super::runtime::{
+    common_proof_registry_entry_count, require_common_proof_worker_process_admission_capacity,
+    require_common_proof_worker_process_ownership_limits,
+};
 use super::{
-    COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, CommonProofGenerationOperationHandle,
+    AuthenticatedCommonProofGenerationCheckpoint, COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH,
+    CommonProofGenerationOperationHandle, CommonProofGenerationPreparationError,
     CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll, CommonProofRuntimeError,
     CommonProofRuntimeRegistry, CommonProofUpstreamInputRegistry,
     CommonProofVerificationOperationHandle, CommonProofVerificationWorkerError,
-    CommonProofVerificationWorkerPoll, DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH,
-    GeneratedCommonProofCapabilityHandle, PendingCommonProofAuthorizationHandle,
-    PreparedCommonProofGeneration, PreparedCommonProofVerification,
-    VerifiedCommonProofCapabilityHandle, durable_authorization_frame_digest,
+    CommonProofVerificationWorkerPoll, ConsumedVerifiedCommonProofCapability,
+    DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH, GeneratedCommonProofCapabilityHandle,
+    PendingCommonProofAuthorizationHandle, PreparedCommonProofGeneration,
+    PreparedCommonProofVerification, VerifiedCommonProofCapabilityHandle,
+    durable_authorization_frame_digest,
 };
 
-const MAXIMUM_RETAINED_PREPARED_GENERATION_COUNT: usize = 64;
-const MAXIMUM_RETAINED_PREPARED_VERIFICATION_COUNT: usize = 64;
 const NO_SECOND_POLL_VALUE: u32 = u32::MAX;
 const VERIFICATION_POLL_NEEDS_READBACK: u32 = 1;
 const VERIFICATION_POLL_PREFIX_ACCEPTED: u32 = 2;
@@ -49,16 +54,149 @@ pub const extern "C" fn sealed_lattice_common_proof_generation_checkpoint_state_
     COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH as u32
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofGenerationFamilyAdapterDescription {
+    common_proof_runtime_binding_hash: [u8; 64],
+    common_proof_verification_binding_hash: [u8; 64],
+    proof_attempt_lineage_identifier: [u8; 32],
+}
+
+impl CommonProofGenerationFamilyAdapterDescription {
+    pub(crate) const fn new(
+        common_proof_runtime_binding_hash: [u8; 64],
+        common_proof_verification_binding_hash: [u8; 64],
+        proof_attempt_lineage_identifier: [u8; 32],
+    ) -> Self {
+        Self {
+            common_proof_runtime_binding_hash,
+            common_proof_verification_binding_hash,
+            proof_attempt_lineage_identifier,
+        }
+    }
+}
+
+type ResumeCommonProofGenerationPreparation = Box<
+    dyn FnOnce(
+        AuthenticatedCheckpointContinuationSource,
+    ) -> Result<PreparedCommonProofGeneration, CommonProofGenerationPreparationError>,
+>;
+
+pub(crate) struct ResumeCommonProofGenerationFamilyAdapter {
+    checkpoint_lineage_identifier: [u8; 32],
+    checkpoint_schedule_digest: Hash512,
+    description: CommonProofGenerationFamilyAdapterDescription,
+    prepare: ResumeCommonProofGenerationPreparation,
+}
+
+/// Deferred exact-family prover preparation retained entirely inside Rust.
+/// Resume adapters receive continuation authority only after the browser store
+/// authenticates and the generic boundary canonically decodes the checkpoint.
+pub(crate) enum CommonProofGenerationFamilyAdapter {
+    Fresh {
+        prepared: Box<PreparedCommonProofGeneration>,
+    },
+    Resume(Box<ResumeCommonProofGenerationFamilyAdapter>),
+}
+
+impl CommonProofGenerationFamilyAdapter {
+    pub(crate) fn fresh(prepared: PreparedCommonProofGeneration) -> Self {
+        Self::Fresh {
+            prepared: Box::new(prepared),
+        }
+    }
+
+    pub(crate) fn resume(
+        description: CommonProofGenerationFamilyAdapterDescription,
+        checkpoint_lineage_identifier: [u8; 32],
+        checkpoint_schedule_digest: Hash512,
+        prepare: ResumeCommonProofGenerationPreparation,
+    ) -> Self {
+        Self::Resume(Box::new(ResumeCommonProofGenerationFamilyAdapter {
+            checkpoint_lineage_identifier,
+            checkpoint_schedule_digest,
+            description,
+            prepare,
+        }))
+    }
+
+    fn description(&self) -> CommonProofGenerationFamilyAdapterDescription {
+        match self {
+            Self::Fresh { prepared } => CommonProofGenerationFamilyAdapterDescription::new(
+                prepared.runtime_binding_hash(),
+                prepared.verification_binding_hash(),
+                prepared.proof_attempt_lineage_identifier(),
+            ),
+            Self::Resume(adapter) => adapter.description,
+        }
+    }
+
+    fn prepare(
+        self,
+        authenticated_checkpoint: Option<AuthenticatedCommonProofGenerationCheckpoint>,
+    ) -> Result<PreparedCommonProofGeneration, CommonProofGenerationPreparationError> {
+        let description = self.description();
+        let prepared = match (self, authenticated_checkpoint) {
+            (Self::Fresh { prepared }, None) => *prepared,
+            (Self::Resume(adapter), Some(checkpoint)) => {
+                if checkpoint.stable_attempt_binding_hash()
+                    != description.common_proof_runtime_binding_hash
+                    || checkpoint.checkpoint_lineage_identifier()
+                        != adapter.checkpoint_lineage_identifier
+                    || checkpoint.checkpoint_schedule_digest() != adapter.checkpoint_schedule_digest
+                {
+                    return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
+                }
+                let prepared = (adapter.prepare)(checkpoint.continuation_source())?;
+                if !prepared.matches_authenticated_checkpoint(&checkpoint) {
+                    return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
+                }
+                prepared
+            }
+            _ => return Err(CommonProofRuntimeError::WrongVerificationBinding.into()),
+        };
+        if prepared.runtime_binding_hash() != description.common_proof_runtime_binding_hash
+            || prepared.verification_binding_hash()
+                != description.common_proof_verification_binding_hash
+            || prepared.proof_attempt_lineage_identifier()
+                != description.proof_attempt_lineage_identifier
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
+        }
+        Ok(prepared)
+    }
+}
+
+/// Exact-family verifier preparation retained until the generic worker starts
+/// positive verification over the authenticated committed proof stream.
+pub(crate) struct CommonProofVerificationFamilyAdapter {
+    prepared: PreparedCommonProofVerification,
+}
+
+impl CommonProofVerificationFamilyAdapter {
+    pub(crate) const fn new(prepared: PreparedCommonProofVerification) -> Self {
+        Self { prepared }
+    }
+
+    fn verification_binding_hash(&self) -> [u8; 64] {
+        self.prepared.verification_binding_hash()
+    }
+}
+
 thread_local! {
     static COMMON_PROOF_WASM_RUNTIME_REGISTRY: RefCell<CommonProofWasmRuntimeRegistry> =
         RefCell::new(CommonProofWasmRuntimeRegistry::default());
 }
 
 struct CommonProofWasmRuntimeRegistry {
+    next_generation_family_adapter_handle: u32,
+    next_verification_family_adapter_handle: u32,
     next_prepared_generation_handle: u32,
     next_prepared_verification_handle: u32,
+    generation_family_adapters: BTreeMap<u32, CommonProofGenerationFamilyAdapter>,
+    verification_family_adapters: BTreeMap<u32, CommonProofVerificationFamilyAdapter>,
     prepared_generations: BTreeMap<u32, PreparedCommonProofGeneration>,
     prepared_verifications: BTreeMap<u32, PreparedCommonProofVerification>,
+    generation_preparation_reservations: BTreeSet<u32>,
     runtime: CommonProofRuntimeRegistry,
     upstream_inputs: CommonProofUpstreamInputRegistry,
 }
@@ -66,10 +204,15 @@ struct CommonProofWasmRuntimeRegistry {
 impl Default for CommonProofWasmRuntimeRegistry {
     fn default() -> Self {
         Self {
+            next_generation_family_adapter_handle: 1,
+            next_verification_family_adapter_handle: 1,
             next_prepared_generation_handle: 1,
             next_prepared_verification_handle: 1,
+            generation_family_adapters: BTreeMap::new(),
+            verification_family_adapters: BTreeMap::new(),
             prepared_generations: BTreeMap::new(),
             prepared_verifications: BTreeMap::new(),
+            generation_preparation_reservations: BTreeSet::new(),
             runtime: CommonProofRuntimeRegistry::default(),
             upstream_inputs: CommonProofUpstreamInputRegistry::default(),
         }
@@ -77,59 +220,416 @@ impl Default for CommonProofWasmRuntimeRegistry {
 }
 
 impl CommonProofWasmRuntimeRegistry {
-    fn retain_prepared_generation(
-        &mut self,
-        prepared: PreparedCommonProofGeneration,
-    ) -> Result<u32, CommonProofRuntimeError> {
-        if self.prepared_generations.len() >= MAXIMUM_RETAINED_PREPARED_GENERATION_COUNT {
+    fn ffi_entry_count(&self) -> Result<usize, CommonProofRuntimeError> {
+        common_proof_registry_entry_count(&[
+            self.generation_family_adapters.len(),
+            self.verification_family_adapters.len(),
+            self.prepared_generations.len(),
+            self.prepared_verifications.len(),
+            self.generation_preparation_reservations.len(),
+        ])
+    }
+
+    fn ffi_heavy_operation_count(&self) -> Result<usize, CommonProofRuntimeError> {
+        self.ffi_entry_count()
+    }
+
+    fn require_new_entry_capacity(
+        &self,
+        admits_heavy_operation: bool,
+    ) -> Result<(), CommonProofRuntimeError> {
+        require_common_proof_worker_process_admission_capacity(
+            &[
+                self.ffi_entry_count()?,
+                self.runtime.entry_count()?,
+                self.upstream_inputs.entry_count()?,
+            ],
+            &[
+                self.ffi_heavy_operation_count()?,
+                self.runtime.heavy_operation_count()?,
+                self.upstream_inputs.heavy_operation_count()?,
+            ],
+            admits_heavy_operation,
+        )
+    }
+
+    fn require_neutral_transfer_capacity(&self) -> Result<(), CommonProofRuntimeError> {
+        require_common_proof_worker_process_ownership_limits(
+            &[
+                self.ffi_entry_count()?,
+                self.runtime.entry_count()?,
+                self.upstream_inputs.entry_count()?,
+            ],
+            &[
+                self.ffi_heavy_operation_count()?,
+                self.runtime.heavy_operation_count()?,
+                self.upstream_inputs.heavy_operation_count()?,
+            ],
+        )
+    }
+
+    fn issue_prepared_generation_handle(&mut self) -> Result<u32, CommonProofRuntimeError> {
+        let handle = self.next_prepared_generation_handle;
+        if handle == 0 {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
         }
-        let handle = self.next_prepared_generation_handle;
         self.next_prepared_generation_handle = self
             .next_prepared_generation_handle
             .checked_add(1)
             .filter(|next| *next != 0)
             .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
-        self.prepared_generations.insert(handle, prepared);
         Ok(handle)
     }
 
-    fn retain_prepared_verification(
-        &mut self,
-        prepared: PreparedCommonProofVerification,
-    ) -> Result<u32, CommonProofRuntimeError> {
-        if self.prepared_verifications.len() >= MAXIMUM_RETAINED_PREPARED_VERIFICATION_COUNT {
+    fn issue_prepared_verification_handle(&mut self) -> Result<u32, CommonProofRuntimeError> {
+        let handle = self.next_prepared_verification_handle;
+        if handle == 0 {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
         }
-        let handle = self.next_prepared_verification_handle;
         self.next_prepared_verification_handle = self
             .next_prepared_verification_handle
             .checked_add(1)
             .filter(|next| *next != 0)
             .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
-        self.prepared_verifications.insert(handle, prepared);
+        Ok(handle)
+    }
+
+    fn retain_generation_family_adapter(
+        &mut self,
+        adapter: CommonProofGenerationFamilyAdapter,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        self.require_new_entry_capacity(true)?;
+        let handle = self.next_generation_family_adapter_handle;
+        if handle == 0 {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        self.next_generation_family_adapter_handle = self
+            .next_generation_family_adapter_handle
+            .checked_add(1)
+            .filter(|next| *next != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        self.generation_family_adapters.insert(handle, adapter);
+        Ok(handle)
+    }
+
+    fn retain_verification_family_adapter(
+        &mut self,
+        adapter: CommonProofVerificationFamilyAdapter,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        self.require_new_entry_capacity(true)?;
+        let handle = self.next_verification_family_adapter_handle;
+        if handle == 0 {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        self.next_verification_family_adapter_handle = self
+            .next_verification_family_adapter_handle
+            .checked_add(1)
+            .filter(|next| *next != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        self.verification_family_adapters.insert(handle, adapter);
         Ok(handle)
     }
 }
 
-/// Retains one exact-family prepared prover for the generated-WASM worker.
-/// There is intentionally no exported producer: family code must first join
-/// its authenticated action attempt, real witness columns, and bound trees.
-pub(crate) fn retain_prepared_common_proof_generation(
-    prepared: PreparedCommonProofGeneration,
+/// Retains a deferred exact-family prover adapter. The generic worker can
+/// describe it before storage routing, but only authenticated checkpoint state
+/// can activate a resume adapter.
+pub(crate) fn retain_common_proof_generation_family_adapter(
+    adapter: CommonProofGenerationFamilyAdapter,
 ) -> Result<u32, CommonProofRuntimeError> {
-    COMMON_PROOF_WASM_RUNTIME_REGISTRY
-        .with(|registry| registry.borrow_mut().retain_prepared_generation(prepared))
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .retain_generation_family_adapter(adapter)
+    })
 }
 
-/// Retains one exact-family prepared verifier for the generated-WASM worker.
-/// There is intentionally no exported producer for this handle; an exact
-/// family adapter must first consume its verified board/tree/root sources.
-pub(crate) fn retain_prepared_common_proof_verification(
-    prepared: PreparedCommonProofVerification,
+/// Retains one exact-family verifier adapter assembled from positive upstream
+/// capabilities. Proof bytes cannot construct this adapter.
+pub(crate) fn retain_common_proof_verification_family_adapter(
+    adapter: CommonProofVerificationFamilyAdapter,
 ) -> Result<u32, CommonProofRuntimeError> {
-    COMMON_PROOF_WASM_RUNTIME_REGISTRY
-        .with(|registry| registry.borrow_mut().retain_prepared_verification(prepared))
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .retain_verification_family_adapter(adapter)
+    })
+}
+
+/// Transfers one genuinely completed verifier capability into an exact-family
+/// terminal consumer. The callback receives process-local authority, never
+/// decoded proof bytes or a caller-supplied verification claim. A callback
+/// error is terminal: the consumed verifier authority is not restored.
+pub(crate) fn consume_verified_common_proof_with_family_terminal<Output>(
+    handle: &VerifiedCommonProofCapabilityHandle,
+    consume: impl FnOnce(
+        ConsumedVerifiedCommonProofCapability,
+    ) -> Result<Output, CommonProofRuntimeError>,
+) -> Result<Output, CommonProofRuntimeError> {
+    let capability = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .consume_verified_proof_for_protocol(handle)
+    })?;
+    consume(capability)
+}
+
+/// Copies the Rust-derived routing description for one live prover adapter.
+///
+/// # Safety
+///
+/// Each output pointer must name its complete fixed-size writable range. A
+/// non-null status pointer must name one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_describe_generation_family_adapter(
+    adapter_handle: u32,
+    runtime_binding_hash_output_pointer: *mut u8,
+    verification_binding_hash_output_pointer: *mut u8,
+    proof_attempt_lineage_identifier_output_pointer: *mut u8,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let description = registry
+            .generation_family_adapters
+            .get(&adapter_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+            .map_err(runtime_error_status)?
+            .description();
+        unsafe {
+            copy_exact_output_bytes(
+                runtime_binding_hash_output_pointer,
+                description.common_proof_runtime_binding_hash.len(),
+                &description.common_proof_runtime_binding_hash,
+            )?;
+            copy_exact_output_bytes(
+                verification_binding_hash_output_pointer,
+                description.common_proof_verification_binding_hash.len(),
+                &description.common_proof_verification_binding_hash,
+            )?;
+            copy_exact_output_bytes(
+                proof_attempt_lineage_identifier_output_pointer,
+                description.proof_attempt_lineage_identifier.len(),
+                &description.proof_attempt_lineage_identifier,
+            )?;
+        }
+        Ok::<(), u32>(())
+    });
+    match result {
+        Ok(()) => {
+            unsafe { write_status(status_pointer, 0) };
+            0
+        }
+        Err(status) => {
+            unsafe { write_status(status_pointer, status) };
+            status
+        }
+    }
+}
+
+/// Copies the Rust-derived public verification binding for one verifier
+/// adapter.
+///
+/// # Safety
+///
+/// The output pointer must name 64 writable bytes. A non-null status pointer
+/// must name one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_describe_verification_family_adapter(
+    adapter_handle: u32,
+    verification_binding_hash_output_pointer: *mut u8,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let verification_binding_hash = registry
+            .verification_family_adapters
+            .get(&adapter_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+            .map_err(runtime_error_status)?
+            .verification_binding_hash();
+        unsafe {
+            copy_exact_output_bytes(
+                verification_binding_hash_output_pointer,
+                verification_binding_hash.len(),
+                &verification_binding_hash,
+            )
+        }
+    });
+    match result {
+        Ok(()) => {
+            unsafe { write_status(status_pointer, 0) };
+            0
+        }
+        Err(status) => {
+            unsafe { write_status(status_pointer, status) };
+            status
+        }
+    }
+}
+
+/// Consumes one prover adapter. Empty checkpoint input selects its fresh path;
+/// nonempty input must be the exact canonical state returned by authenticated
+/// checkpoint custody before any exact-family resume preparation runs.
+///
+/// # Safety
+///
+/// The checkpoint pointer must name its declared readable range. A non-null
+/// status pointer must name one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_prepare_generation_family_adapter(
+    adapter_handle: u32,
+    authenticated_checkpoint_state_pointer: *const u8,
+    authenticated_checkpoint_state_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let adapter_and_prepared_handle = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry.require_neutral_transfer_capacity()?;
+        if !registry
+            .generation_family_adapters
+            .contains_key(&adapter_handle)
+        {
+            return Err(CommonProofRuntimeError::UnknownOrStaleHandle);
+        }
+        let prepared_handle = registry.issue_prepared_generation_handle()?;
+        let adapter = registry
+            .generation_family_adapters
+            .remove(&adapter_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        if !registry
+            .generation_preparation_reservations
+            .insert(prepared_handle)
+        {
+            registry
+                .generation_family_adapters
+                .insert(adapter_handle, adapter);
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        Ok((adapter, prepared_handle))
+    });
+    let result = adapter_and_prepared_handle
+        .map_err(CommonProofGenerationPreparationError::Runtime)
+        .and_then(|(adapter, prepared_handle)| {
+            let preparation_result = (|| {
+                let authenticated_checkpoint_state = unsafe {
+                    input_bytes(
+                        authenticated_checkpoint_state_pointer,
+                        authenticated_checkpoint_state_byte_length,
+                    )
+                };
+                let checkpoint = if authenticated_checkpoint_state.is_empty() {
+                    None
+                } else {
+                    Some(AuthenticatedCommonProofGenerationCheckpoint::decode(
+                        authenticated_checkpoint_state,
+                    )?)
+                };
+                adapter.prepare(checkpoint)
+            })();
+            COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+                let mut registry = registry.borrow_mut();
+                if !registry
+                    .generation_preparation_reservations
+                    .remove(&prepared_handle)
+                {
+                    return Err(CommonProofGenerationPreparationError::Runtime(
+                        CommonProofRuntimeError::WrongOperationPhase,
+                    ));
+                }
+                preparation_result.map(|prepared| {
+                    registry
+                        .prepared_generations
+                        .insert(prepared_handle, prepared);
+                    prepared_handle
+                })
+            })
+        });
+    match result {
+        Ok(prepared_handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            prepared_handle
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, generation_preparation_error_status(error)) };
+            0
+        }
+    }
+}
+
+/// Consumes one verifier adapter and moves its positive exact-family inputs
+/// into the generic persistent verifier registry.
+///
+/// # Safety
+///
+/// A non-null status pointer must name one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_prepare_verification_family_adapter(
+    adapter_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry.require_neutral_transfer_capacity()?;
+        if !registry
+            .verification_family_adapters
+            .contains_key(&adapter_handle)
+        {
+            return Err(CommonProofRuntimeError::UnknownOrStaleHandle);
+        }
+        let prepared_handle = registry.issue_prepared_verification_handle()?;
+        let adapter = registry
+            .verification_family_adapters
+            .remove(&adapter_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        registry
+            .prepared_verifications
+            .insert(prepared_handle, adapter.prepared);
+        Ok(prepared_handle)
+    });
+    match result {
+        Ok(prepared_handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            prepared_handle
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_common_proof_discard_generation_family_adapter(
+    adapter_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .generation_family_adapters
+            .remove(&adapter_handle)
+            .map_or_else(
+                || runtime_error_status(CommonProofRuntimeError::UnknownOrStaleHandle),
+                |_| 0,
+            )
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_common_proof_discard_verification_family_adapter(
+    adapter_handle: u32,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .verification_family_adapters
+            .remove(&adapter_handle)
+            .map_or_else(
+                || runtime_error_status(CommonProofRuntimeError::UnknownOrStaleHandle),
+                |_| 0,
+            )
+    })
 }
 
 /// Permanently discards one exact-family prover preparation that never entered
@@ -229,8 +729,11 @@ fn select_canonical_suite_record(canonical_suite_record_bytes: &[u8]) -> Result<
     let selected_suite =
         select_suite_record(&suite_record).map_err(|error| refusal_status(error.refusal_reason))?;
     COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
         registry
-            .borrow_mut()
+            .require_new_entry_capacity(false)
+            .map_err(runtime_error_status)?;
+        registry
             .upstream_inputs
             .install_suite(selected_suite)
             .map(|handle| handle.get())
@@ -282,6 +785,15 @@ fn generation_worker_error_status(error: CommonProofGenerationWorkerError) -> u3
         CommonProofGenerationWorkerError::Runtime(error) => runtime_error_status(error),
         CommonProofGenerationWorkerError::Generation { .. }
         | CommonProofGenerationWorkerError::Cleanup(_) => {
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+    }
+}
+
+fn generation_preparation_error_status(error: CommonProofGenerationPreparationError) -> u32 {
+    match error {
+        CommonProofGenerationPreparationError::Runtime(error) => runtime_error_status(error),
+        CommonProofGenerationPreparationError::Generation(_) => {
             refusal_status(RefusalReason::OutsideSupportedProfile)
         }
     }
@@ -340,12 +852,21 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_begin_generation(
 ) -> u32 {
     let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
+        registry
+            .require_neutral_transfer_capacity()
+            .map_err(CommonProofGenerationWorkerError::Runtime)?;
+        let operation_handle = registry
+            .runtime
+            .preissue_generation_operation_handle()
+            .map_err(CommonProofGenerationWorkerError::Runtime)?;
         let prepared = registry
             .prepared_generations
             .remove(&prepared_generation_handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
             .map_err(CommonProofGenerationWorkerError::Runtime)?;
-        registry.runtime.begin_owned_generation(prepared)
+        registry
+            .runtime
+            .begin_owned_generation_with_handle(prepared, operation_handle)
     });
     match result {
         Ok(handle) => {
@@ -387,14 +908,23 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_resume_generation(
     };
     let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
+        registry
+            .require_neutral_transfer_capacity()
+            .map_err(CommonProofGenerationWorkerError::Runtime)?;
+        let operation_handle = registry
+            .runtime
+            .preissue_generation_operation_handle()
+            .map_err(CommonProofGenerationWorkerError::Runtime)?;
         let prepared = registry
             .prepared_generations
             .remove(&prepared_generation_handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
             .map_err(CommonProofGenerationWorkerError::Runtime)?;
-        registry
-            .runtime
-            .resume_owned_generation(prepared, authenticated_checkpoint_state)
+        registry.runtime.resume_owned_generation_with_handle(
+            prepared,
+            authenticated_checkpoint_state,
+            operation_handle,
+        )
     });
     match result {
         Ok(handle) => {
@@ -882,12 +1412,21 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_begin_verification(
 ) -> u32 {
     let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
+        registry
+            .require_neutral_transfer_capacity()
+            .map_err(CommonProofVerificationWorkerError::Runtime)?;
+        let operation_handle = registry
+            .runtime
+            .preissue_verification_operation_handle()
+            .map_err(CommonProofVerificationWorkerError::Runtime)?;
         let prepared = registry
             .prepared_verifications
             .remove(&prepared_verification_handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
             .map_err(CommonProofVerificationWorkerError::Runtime)?;
-        registry.runtime.begin_owned_verification(prepared)
+        registry
+            .runtime
+            .begin_owned_verification_with_handle(prepared, operation_handle)
     });
     match result {
         Ok(handle) => {
@@ -1289,4 +1828,120 @@ pub extern "C" fn sealed_lattice_common_proof_verification_cancel(operation_hand
             ))
             .map_or_else(runtime_error_status, |()| 0)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct IsolatedCommonProofWasmRuntimeRegistry;
+
+    impl IsolatedCommonProofWasmRuntimeRegistry {
+        fn new() -> Self {
+            reset_common_proof_wasm_runtime_registry();
+            Self
+        }
+    }
+
+    impl Drop for IsolatedCommonProofWasmRuntimeRegistry {
+        fn drop(&mut self) {
+            reset_common_proof_wasm_runtime_registry();
+        }
+    }
+
+    fn reset_common_proof_wasm_runtime_registry() {
+        COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            *registry.borrow_mut() = CommonProofWasmRuntimeRegistry::default();
+        });
+    }
+
+    fn refusing_generation_family_adapter() -> CommonProofGenerationFamilyAdapter {
+        CommonProofGenerationFamilyAdapter::resume(
+            CommonProofGenerationFamilyAdapterDescription::new([0x11; 64], [0x22; 64], [0x33; 32]),
+            [0x44; 32],
+            Hash512::from_bytes([0x55; 64]),
+            Box::new(|_| Err(CommonProofRuntimeError::WrongVerificationBinding.into())),
+        )
+    }
+
+    #[test]
+    fn failed_release_keeps_the_original_adapter_and_aggregate_occupancy_live() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        let adapter_handle =
+            retain_common_proof_generation_family_adapter(refusing_generation_family_adapter())
+                .expect("the first heavy adapter is retained");
+        let occupancy_before_release = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .ffi_entry_count()
+                .expect("the retained occupancy is bounded")
+        });
+
+        assert_eq!(
+            sealed_lattice_common_proof_discard_generation_family_adapter(adapter_handle + 1),
+            refusal_status(RefusalReason::ConsumedState),
+        );
+        COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            assert!(
+                registry
+                    .generation_family_adapters
+                    .contains_key(&adapter_handle),
+                "a failed release cannot consume a different live adapter",
+            );
+            assert_eq!(
+                registry
+                    .ffi_entry_count()
+                    .expect("the retained occupancy remains bounded"),
+                occupancy_before_release,
+                "a failed release cannot free aggregate capacity",
+            );
+        });
+        assert_eq!(
+            sealed_lattice_common_proof_discard_generation_family_adapter(adapter_handle),
+            0,
+        );
+    }
+
+    #[test]
+    fn destination_handle_refusal_preserves_the_adapter_source_for_release() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        let adapter_handle =
+            retain_common_proof_generation_family_adapter(refusing_generation_family_adapter())
+                .expect("the source adapter is retained");
+        COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            registry.borrow_mut().next_prepared_generation_handle = 0;
+        });
+        let mut status = 0;
+
+        assert_eq!(
+            unsafe {
+                sealed_lattice_common_proof_prepare_generation_family_adapter(
+                    adapter_handle,
+                    core::ptr::null(),
+                    0,
+                    &mut status,
+                )
+            },
+            0,
+        );
+        assert_eq!(
+            status,
+            refusal_status(RefusalReason::OutsideSupportedProfile),
+        );
+        COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            assert!(
+                registry
+                    .generation_family_adapters
+                    .contains_key(&adapter_handle),
+                "destination-handle refusal leaves the source owned for an exact retry or release",
+            );
+            assert!(registry.generation_preparation_reservations.is_empty());
+        });
+        assert_eq!(
+            sealed_lattice_common_proof_discard_generation_family_adapter(adapter_handle),
+            0,
+        );
+    }
 }

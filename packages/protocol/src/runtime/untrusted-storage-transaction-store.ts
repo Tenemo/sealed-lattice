@@ -170,7 +170,7 @@ export type UntrustedStorageExclusiveCapacityReservation = Readonly<{
     release(): Promise<void>;
 }>;
 
-export type UntrustedStorageExclusiveCapacityReservationInput = Readonly<{
+type UntrustedStorageExclusiveCapacityReservationInput = Readonly<{
     initialLogicalRecordKeyPrefixes: readonly string[];
     maximumAdditionalAuthenticatedRepairHeadPlaintextByteLength: number;
     maximumAdditionalOwnedRecordCount: number;

@@ -130,6 +130,9 @@ const localStorageRootCommands = Object.freeze({
     sealRepairHead: 19,
     openRepairHead: 20,
     digestRepairHead: 21,
+    deriveCommonProofExternalMemoryRecordIdentifier: 22,
+    sealCommonProofExternalMemoryRecord: 23,
+    openCommonProofExternalMemoryRecord: 24,
     stageNew: 1,
     stageOpened: 2,
 } as const);
@@ -153,6 +156,41 @@ type RootLease = {
     handle: number;
     storageRootCommitment: Uint8Array<ArrayBuffer>;
 };
+
+export type ClosedWorkerCommonProofScratchRecordIdentifierInput = Readonly<{
+    commonProofEnvironmentIdentifier: Uint8Array;
+    commonProofRuntimeBindingHash: Uint8Array;
+    externalMemoryByteOffset: bigint;
+    externalMemoryChunkOrdinal: number;
+    externalMemoryObjectOrdinal: number;
+    externalMemoryRecordKind: 'object-header' | 'data-chunk' | 'seal-marker';
+    proofAttemptLineageIdentifier: Uint8Array;
+    recordType: 'commonProofExternalMemory';
+}>;
+
+type ClosedWorkerCommonProofScratchRecordSealInput = Readonly<{
+    actionRandomnessCommitment: Uint8Array;
+    identifierInput: ClosedWorkerCommonProofScratchRecordIdentifierInput;
+    plaintext: Uint8Array;
+}>;
+
+type ClosedWorkerCommonProofScratchRecordOpenInput = Readonly<{
+    actionRandomnessCommitment: Uint8Array;
+    envelope: Uint8Array;
+    identifierInput: ClosedWorkerCommonProofScratchRecordIdentifierInput;
+}>;
+
+export type ClosedWorkerCommonProofScratchStorage = Readonly<{
+    deriveRecordIdentifier(
+        input: ClosedWorkerCommonProofScratchRecordIdentifierInput,
+    ): Promise<Uint8Array>;
+    openRecord(
+        input: ClosedWorkerCommonProofScratchRecordOpenInput,
+    ): Promise<Uint8Array>;
+    sealRecord(
+        input: ClosedWorkerCommonProofScratchRecordSealInput,
+    ): Promise<Uint8Array>;
+}>;
 
 type WorkerActionRandomnessRecordContext = BrowserActionRandomnessRecordContext;
 
@@ -334,6 +372,37 @@ const workerCommonProofApplicationRunners = new WeakMap<
     BrowserActionStorageWorkerKernel,
     WorkerCommonProofApplicationRunner
 >();
+
+const closedWorkerCommonProofScratchStorage = new WeakMap<
+    BrowserActionStorageWorkerKernel,
+    ClosedWorkerCommonProofScratchStorage
+>();
+
+const requireClosedWorkerCommonProofScratchStorage = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+): ClosedWorkerCommonProofScratchStorage => {
+    const scratchStorage =
+        closedWorkerCommonProofScratchStorage.get(workerKernel);
+    if (scratchStorage === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The action storage worker has no closed common-proof scratch storage.',
+        );
+    }
+    return scratchStorage;
+};
+
+export const openClosedWorkerCommonProofScratchStorage = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+): ClosedWorkerCommonProofScratchStorage => {
+    if (typeof document !== 'undefined') {
+        throw new BrowserActionStorageCustodyError(
+            'Unavailable',
+            'Common-proof scratch storage is available only inside the worker runtime.',
+        );
+    }
+    return requireClosedWorkerCommonProofScratchStorage(workerKernel);
+};
 
 type DecodedDeviceEnvelope = Readonly<{
     canonicalAssociatedData: Uint8Array<ArrayBuffer>;
@@ -714,7 +783,9 @@ type EncodedLocalRecordIdentifierInput = Readonly<{
 }>;
 
 const encodeLocalRecordIdentifierInput = (
-    input: BrowserLocalRecordIdentifierInput,
+    input:
+        | BrowserLocalRecordIdentifierInput
+        | ClosedWorkerCommonProofScratchRecordIdentifierInput,
 ): EncodedLocalRecordIdentifierInput => {
     if (typeof input !== 'object' || input === null) {
         throw new BrowserActionStorageCustodyError(
@@ -956,7 +1027,14 @@ const encodeLocalRecordIdentifierInput = (
 };
 
 const encodeLocalRecordExpectedContext = (
-    input: BrowserLocalRecordExpectedContext,
+    input:
+        | BrowserLocalRecordExpectedContext
+        | Readonly<{
+              actionRandomnessCommitment: Uint8Array;
+              identifierInput: ClosedWorkerCommonProofScratchRecordIdentifierInput;
+              predecessorRecordHash?: Uint8Array;
+              recordVersion: bigint;
+          }>,
 ): Uint8Array<ArrayBuffer> => {
     if (typeof input !== 'object' || input === null) {
         throw new BrowserActionStorageCustodyError(
@@ -1160,6 +1238,14 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         this.#context = input.context;
         this.#cryptoProvider = input.cryptoProvider;
         this.#kernel = input.kernel;
+        closedWorkerCommonProofScratchStorage.set(this, {
+            deriveRecordIdentifier: (operationInput) =>
+                this.#deriveCommonProofScratchRecordIdentifier(operationInput),
+            openRecord: (operationInput) =>
+                this.#openCommonProofScratchRecord(operationInput),
+            sealRecord: (operationInput) =>
+                this.#sealCommonProofScratchRecord(operationInput),
+        });
     }
 
     public createAndStageDeviceWrappingState(input: {
@@ -1204,6 +1290,39 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         input: BrowserLocalRecordOpenInput,
     ): Promise<Uint8Array<ArrayBuffer>> {
         return this.#enqueue(() => this.#openLocalRecord(input));
+    }
+
+    #deriveCommonProofScratchRecordIdentifier(
+        input: ClosedWorkerCommonProofScratchRecordIdentifierInput,
+    ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() =>
+            this.#deriveLocalRecordIdentifier(
+                input,
+                localStorageRootCommands.deriveCommonProofExternalMemoryRecordIdentifier,
+            ),
+        );
+    }
+
+    #sealCommonProofScratchRecord(
+        input: ClosedWorkerCommonProofScratchRecordSealInput,
+    ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() =>
+            this.#sealLocalRecord(
+                { ...input, recordVersion: 0n as const },
+                localStorageRootCommands.sealCommonProofExternalMemoryRecord,
+            ),
+        );
+    }
+
+    #openCommonProofScratchRecord(
+        input: ClosedWorkerCommonProofScratchRecordOpenInput,
+    ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() =>
+            this.#openLocalRecord(
+                { ...input, recordVersion: 0n as const },
+                localStorageRootCommands.openCommonProofExternalMemoryRecord,
+            ),
+        );
     }
 
     public hashActiveLocalRecordEnvelope(
@@ -3178,12 +3297,15 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     }
 
     #deriveLocalRecordIdentifier(
-        input: BrowserLocalRecordIdentifierInput,
+        input:
+            | BrowserLocalRecordIdentifierInput
+            | ClosedWorkerCommonProofScratchRecordIdentifierInput,
+        command: number = localStorageRootCommands.deriveRecordIdentifier,
     ): Uint8Array<ArrayBuffer> {
         const activeLease = this.#requireActiveLease();
         const encodedIdentifier = encodeLocalRecordIdentifierInput(input);
         const identifier = this.#runCommand(
-            localStorageRootCommands.deriveRecordIdentifier,
+            command,
             this.#leaseCommandInput(
                 activeLease,
                 encodeCanonicalUnsigned16(
@@ -3207,7 +3329,11 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     }
 
     #sealLocalRecord(
-        input: BrowserLocalRecordSealInput,
+        input:
+            | BrowserLocalRecordSealInput
+            | (ClosedWorkerCommonProofScratchRecordSealInput &
+                  Readonly<{ recordVersion: 0n }>),
+        command: number = localStorageRootCommands.sealRecord,
     ): Uint8Array<ArrayBuffer> {
         if (
             typeof input !== 'object' ||
@@ -3227,7 +3353,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         );
         try {
             const envelope = this.#runCommand(
-                localStorageRootCommands.sealRecord,
+                command,
                 this.#leaseCommandInput(
                     activeLease,
                     encodeLocalRecordExpectedContext(input),
@@ -3251,7 +3377,11 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     }
 
     #openLocalRecord(
-        input: BrowserLocalRecordOpenInput,
+        input:
+            | BrowserLocalRecordOpenInput
+            | (ClosedWorkerCommonProofScratchRecordOpenInput &
+                  Readonly<{ recordVersion: 0n }>),
+        command: number = localStorageRootCommands.openRecord,
     ): Uint8Array<ArrayBuffer> {
         if (
             typeof input !== 'object' ||
@@ -3268,7 +3398,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         const activeLease = this.#requireActiveLease();
 
         return this.#runCommand(
-            localStorageRootCommands.openRecord,
+            command,
             this.#leaseCommandInput(
                 activeLease,
                 encodeLocalRecordExpectedContext(input),
@@ -4702,6 +4832,20 @@ class DeferredWasmBrowserActionStorageWorkerKernel implements BrowserActionStora
         workerKernel: Promise<BrowserActionStorageWorkerKernel>,
     ) {
         this.#workerKernel = workerKernel;
+        closedWorkerCommonProofScratchStorage.set(this, {
+            deriveRecordIdentifier: async (operationInput) =>
+                requireClosedWorkerCommonProofScratchStorage(
+                    await this.#workerKernel,
+                ).deriveRecordIdentifier(operationInput),
+            openRecord: async (operationInput) =>
+                requireClosedWorkerCommonProofScratchStorage(
+                    await this.#workerKernel,
+                ).openRecord(operationInput),
+            sealRecord: async (operationInput) =>
+                requireClosedWorkerCommonProofScratchStorage(
+                    await this.#workerKernel,
+                ).sealRecord(operationInput),
+        });
     }
 
     public async createAndStageDeviceWrappingState(input: {

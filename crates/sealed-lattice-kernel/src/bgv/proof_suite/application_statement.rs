@@ -972,7 +972,7 @@ mod tests {
             ),
             (
                 ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                None,
+                Some(0),
                 Some(1),
             ),
             (

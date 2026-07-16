@@ -3,12 +3,9 @@
 mod authenticated_mailbox;
 mod board_ingestion;
 mod board_ingestion_ffi;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the board runtime keeps opaque application-source resolution compiled for later exact-family adapters"
-    )
+#[expect(
+    dead_code,
+    reason = "the board runtime keeps opaque application-source resolution compiled for later exact-family adapters"
 )]
 mod board_ingestion_runtime;
 mod canonical_stream;
@@ -23,12 +20,9 @@ mod ceremony;
     )
 )]
 mod finality;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the finality runtime keeps the later evaluator-replay capability bridge compiled while that operation remains unavailable"
-    )
+#[expect(
+    dead_code,
+    reason = "the finality runtime keeps the later evaluator-replay capability bridge compiled while that operation remains unavailable"
 )]
 mod finality_runtime;
 mod hash;
@@ -38,12 +32,9 @@ mod mailbox_gcm;
 mod mailbox_gcm_runtime;
 mod participant_identity;
 mod private_randomness;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the randomness runtime keeps the opaque exact-family proof-attempt source compiled while no family adapter can consume it"
-    )
+#[expect(
+    dead_code,
+    reason = "the randomness runtime keeps the opaque exact-family proof-attempt source compiled while no family adapter can consume it"
 )]
 mod private_randomness_runtime;
 mod proof_application;
@@ -159,8 +150,8 @@ pub use private_randomness::{
     SetupStructuredCommitmentOpeningContext,
 };
 pub(crate) use private_randomness_runtime::{
-    PreparedActionProofAttemptSource, resolve_setup_action_randomness_reservation_source,
-    run_action_randomness_command,
+    AuthenticatedCheckpointContinuationSource, PreparedActionProofAttemptSource,
+    resolve_setup_action_randomness_reservation_source, run_action_randomness_command,
 };
 pub use proof_application::{
     PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,

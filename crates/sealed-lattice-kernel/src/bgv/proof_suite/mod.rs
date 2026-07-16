@@ -163,8 +163,8 @@ pub(crate) use relation_plan::{
     merge_checked_relation_plan_variants,
 };
 pub(crate) use runtime::{
-    COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, CommonProofApplicationBinding,
-    CommonProofApplicationInputCapabilityHandle,
+    AuthenticatedCommonProofGenerationCheckpoint, COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH,
+    CommonProofApplicationBinding, CommonProofApplicationInputCapabilityHandle,
     CommonProofAuthenticatedLedgerHeadCapabilityHandle,
     CommonProofAuthenticatedLedgerTransitionCapabilityHandle,
     CommonProofEvaluatorAuxiliaryRootCapabilityHandle, CommonProofGenerationOperationHandle,
@@ -190,6 +190,7 @@ pub(crate) use runtime::{
 };
 #[cfg(test)]
 pub(crate) use runtime::{ResidentCommonProofByteSource, ResidentCommonProofInputChunk};
+pub(crate) use runtime_ffi::consume_verified_common_proof_with_family_terminal;
 #[cfg(test)]
 pub(crate) use selected_accounting::{
     SelectedProofAccountingError, SelectedProofByteAccounting, SelectedProofVariantByteCeiling,
