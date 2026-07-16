@@ -7,7 +7,7 @@ use sha3::{
 
 use crate::transcript_core::decode_hex;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 
 // These JSON setup paths do not receive suite-provided sampling limits, so a
@@ -124,6 +124,7 @@ pub(super) fn candidate_draw_limit_exhausted_error() -> CanonicalError {
     )
 }
 
+#[cfg(test)]
 pub(super) fn first_accepted_candidate_from_block(
     output: &[u8; 64],
     modulus: u64,
@@ -161,6 +162,7 @@ pub(super) fn dense_public_residues(
 // Same per-position framing as `dense_public_residues` over an explicit
 // degree, so reduced development rings derive a prefix of the full-ring
 // residues instead of a differently framed vector.
+#[cfg(test)]
 pub(super) fn dense_public_residues_with_degree(
     seed_hash: &str,
     label: &str,
@@ -202,6 +204,7 @@ pub(super) fn negacyclic_product_mod(
     Ok(left_ntt)
 }
 
+#[cfg(test)]
 pub(super) fn sample_residue(
     seed_hash: &str,
     label: &str,
@@ -246,6 +249,7 @@ pub(super) fn sample_residue(
     Err(candidate_draw_limit_exhausted_error())
 }
 
+#[cfg(test)]
 pub(super) fn reduce_unbiased_u64(candidate: u64, modulus: u64) -> Option<u64> {
     if modulus == 0 {
         return None;

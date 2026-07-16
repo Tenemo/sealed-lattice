@@ -297,7 +297,7 @@ pub(crate) fn verify_collective_bgv_setup_package_in_session_from_request(
 ) -> CanonicalResult<Value> {
     let setup_package = request.get("setupPackage").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupPackage is required",
         )
     })?;

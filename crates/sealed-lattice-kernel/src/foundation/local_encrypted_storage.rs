@@ -24,6 +24,7 @@ pub const LOCAL_RECORD_KEY_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0304;
 pub const DEVICE_WRAPPED_STORAGE_ROOT_SCHEMA_IDENTIFIER: u16 = 0x0305;
 pub const LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER: u16 = 0x0306;
 pub const ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0308;
+pub const AUTHENTICATED_REPAIR_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x0309;
 
 pub const ACTION_STORAGE_ROOT_BYTE_LENGTH: usize = 48;
 pub const DEVICE_WRAPPED_STORAGE_ROOT_NONCE_BYTE_LENGTH: usize = 12;
@@ -34,10 +35,12 @@ pub const MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH: usize =
     FOUNDATION_PROFILE.stream_chunk_byte_length;
 
 const FOUNDATION_PROTOCOL_VERSION: u16 = 1;
+const FOUNDATION_HASH_BYTE_LENGTH: usize = 64;
 const ACTION_STORAGE_KEY_MATERIAL_BYTE_LENGTH: usize = 128;
 const STORAGE_ROOT_COMMITMENT_PREIMAGE_BYTE_LENGTH: usize = 64;
 const STORAGE_RECORD_KEY_DERIVATION_KEY_BYTE_LENGTH: usize = 64;
 const LOCAL_RECORD_KEY_BYTE_LENGTH: usize = 32;
+const AUTHENTICATED_REPAIR_KEY_BYTE_LENGTH: usize = 32;
 const DEVICE_WRAPPED_STORAGE_ROOT_PLAINTEXT_BYTE_LENGTH: u64 = 48;
 const ACTION_STORAGE_DERIVATION_INPUT_MAXIMUM_BYTE_LENGTH: usize = 400;
 const STORAGE_ROOT_COMMITMENT_PAYLOAD_MAXIMUM_BYTE_LENGTH: usize = 78;
@@ -52,6 +55,11 @@ const LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH: usize = MAXIMUM_LOCAL_RECORD_PL
 const ACTION_STORAGE_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/local-storage/key-hierarchy/v1";
 const LOCAL_RECORD_KEY_CUSTOMIZATION: &[u8] = b"sealed-lattice/local-record-key/v1";
+const AUTHENTICATED_REPAIR_KEY_CUSTOMIZATION: &[u8] = b"sealed-lattice/authenticated-repair-key/v1";
+const AUTHENTICATED_REPAIR_IDENTITY_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/authenticated-repair-identity/v1";
+const AUTHENTICATED_REPAIR_DIGEST_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/authenticated-repair-digest/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
@@ -66,6 +74,7 @@ pub enum LocalRecordType {
     WitnessState = 9,
     CheckpointManifest = 10,
     CheckpointChunk = 11,
+    CommonProofExternalMemory = 12,
 }
 
 impl LocalRecordType {
@@ -85,7 +94,45 @@ impl LocalRecordType {
             9 => Some(Self::WitnessState),
             10 => Some(Self::CheckpointManifest),
             11 => Some(Self::CheckpointChunk),
+            12 => Some(Self::CommonProofExternalMemory),
             _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum CommonProofExternalMemoryRecordKind {
+    ObjectHeader = 1,
+    DataChunk = 2,
+    SealMarker = 3,
+}
+
+impl CommonProofExternalMemoryRecordKind {
+    pub const fn canonical_code(self) -> u16 {
+        self as u16
+    }
+
+    pub const fn from_canonical_code(code: u16) -> Option<Self> {
+        match code {
+            1 => Some(Self::ObjectHeader),
+            2 => Some(Self::DataChunk),
+            3 => Some(Self::SealMarker),
+            _ => None,
+        }
+    }
+
+    fn validate_coordinates(self, chunk_ordinal: u32, byte_offset: u64) -> SchemaResult<()> {
+        match self {
+            Self::ObjectHeader if chunk_ordinal != 0 || byte_offset != 0 => Err(schema_error(
+                RefusalReason::WrongContext,
+                "a common-proof external-memory object header must use chunk ordinal and byte offset zero",
+            )),
+            Self::DataChunk | Self::SealMarker if chunk_ordinal == 0 => Err(schema_error(
+                RefusalReason::WrongContext,
+                "a common-proof external-memory data or seal record must use a nonzero chunk ordinal",
+            )),
+            _ => Ok(()),
         }
     }
 }
@@ -129,6 +176,15 @@ pub enum LocalRecordIdentifierInput<'input> {
         chunk_index: u32,
         chunk_digest: Hash512,
     },
+    CommonProofExternalMemory {
+        common_proof_environment_identifier: [u8; 32],
+        common_proof_runtime_binding_hash: Hash512,
+        proof_attempt_lineage_identifier: [u8; 32],
+        record_kind: CommonProofExternalMemoryRecordKind,
+        object_ordinal: u32,
+        chunk_ordinal: u32,
+        byte_offset: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -165,6 +221,7 @@ impl LocalRecordIdentifierInput<'_> {
             Self::WitnessState { .. } => LocalRecordType::WitnessState,
             Self::CheckpointManifest { .. } => LocalRecordType::CheckpointManifest,
             Self::CheckpointChunk { .. } => LocalRecordType::CheckpointChunk,
+            Self::CommonProofExternalMemory { .. } => LocalRecordType::CommonProofExternalMemory,
         }
     }
 }
@@ -389,6 +446,35 @@ pub fn derive_local_record_identifier(
                 CanonicalItem::hash512(chunk_digest.into_bytes()),
             ],
         ),
+        LocalRecordIdentifierInput::CommonProofExternalMemory {
+            common_proof_environment_identifier,
+            common_proof_runtime_binding_hash,
+            proof_attempt_lineage_identifier,
+            record_kind,
+            object_ordinal,
+            chunk_ordinal,
+            byte_offset,
+        } => {
+            record_kind.validate_coordinates(chunk_ordinal, byte_offset)?;
+            let mut items = Vec::from(binding_items);
+            items.push(CanonicalItem::fixed_bytes(
+                common_proof_environment_identifier,
+            )?);
+            items.push(CanonicalItem::hash512(
+                common_proof_runtime_binding_hash.into_bytes(),
+            ));
+            items.push(CanonicalItem::fixed_bytes(
+                proof_attempt_lineage_identifier,
+            )?);
+            items.push(CanonicalItem::unsigned16(record_kind.canonical_code()));
+            items.push(CanonicalItem::unsigned32(object_ordinal));
+            items.push(CanonicalItem::unsigned32(chunk_ordinal));
+            items.push(CanonicalItem::unsigned64(byte_offset));
+            (
+                "sealed-lattice/local-record-id/common-proof-external-memory/v1",
+                items,
+            )
+        }
     };
     Ok(hash512(domain, &items)?)
 }
@@ -433,6 +519,165 @@ impl ActionStorageRoot {
 
     pub fn device_wrapping_associated_data(&self) -> DeviceWrappingAssociatedData {
         DeviceWrappingAssociatedData::new(self.binding, self.storage_root_commitment)
+    }
+
+    pub(crate) fn authenticated_repair_identity(
+        &self,
+        runtime_build_manifest_hash: Hash512,
+        namespace: &[u8],
+    ) -> SchemaResult<Hash512> {
+        let context = self.authenticated_repair_context(runtime_build_manifest_hash, namespace)?;
+        Ok(Hash512::from_bytes(kmac256(
+            self.storage_record_key_derivation_key.as_ref(),
+            &context,
+            AUTHENTICATED_REPAIR_IDENTITY_CUSTOMIZATION,
+        )))
+    }
+
+    pub(crate) fn seal_authenticated_repair_head(
+        &self,
+        runtime_build_manifest_hash: Hash512,
+        namespace: &[u8],
+        nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+        plaintext: &[u8],
+    ) -> SchemaResult<Vec<u8>> {
+        validate_local_record_plaintext_length(plaintext.len())?;
+        let context = self.authenticated_repair_context(runtime_build_manifest_hash, namespace)?;
+        let repair_key = self.authenticated_repair_key(&context);
+        let cipher = Aes256GcmSiv::new_from_slice(repair_key.as_ref()).map_err(|_| {
+            schema_error(
+                RefusalReason::UnsupportedVersionOrSuite,
+                "AES-256-GCM-SIV rejected the authenticated-repair key length",
+            )
+        })?;
+        let mut ciphertext = Zeroizing::new(plaintext.to_vec());
+        let tag = cipher
+            .encrypt_in_place_detached(Nonce::from_slice(&nonce), &context, ciphertext.as_mut())
+            .map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "AES-256-GCM-SIV refused the bounded authenticated-repair head",
+                )
+            })?;
+        let mut envelope = Vec::with_capacity(
+            LOCAL_RECORD_NONCE_BYTE_LENGTH + plaintext.len() + LOCAL_RECORD_TAG_BYTE_LENGTH,
+        );
+        envelope.extend_from_slice(&nonce);
+        envelope.extend_from_slice(ciphertext.as_ref());
+        envelope.extend_from_slice(tag.as_slice());
+        Ok(envelope)
+    }
+
+    pub(crate) fn open_authenticated_repair_head(
+        &self,
+        runtime_build_manifest_hash: Hash512,
+        namespace: &[u8],
+        envelope: &[u8],
+    ) -> VerificationResult<Zeroizing<Vec<u8>>> {
+        let fixed_overhead = LOCAL_RECORD_NONCE_BYTE_LENGTH + LOCAL_RECORD_TAG_BYTE_LENGTH;
+        if envelope.len() < fixed_overhead
+            || envelope.len() > MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH + fixed_overhead
+        {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        }
+        let context =
+            match self.authenticated_repair_context(runtime_build_manifest_hash, namespace) {
+                Ok(context) => context,
+                Err(error) => return VerificationResult::refused(error.refusal_reason),
+            };
+        let repair_key = self.authenticated_repair_key(&context);
+        let cipher = match Aes256GcmSiv::new_from_slice(repair_key.as_ref()) {
+            Ok(cipher) => cipher,
+            Err(_) => {
+                return VerificationResult::refused(RefusalReason::UnsupportedVersionOrSuite);
+            }
+        };
+        let (nonce, ciphertext_and_tag) = envelope.split_at(LOCAL_RECORD_NONCE_BYTE_LENGTH);
+        let ciphertext_byte_length = ciphertext_and_tag.len() - LOCAL_RECORD_TAG_BYTE_LENGTH;
+        let (ciphertext, tag) = ciphertext_and_tag.split_at(ciphertext_byte_length);
+        let mut plaintext = Zeroizing::new(ciphertext.to_vec());
+        if cipher
+            .decrypt_in_place_detached(
+                Nonce::from_slice(nonce),
+                &context,
+                plaintext.as_mut(),
+                Tag::from_slice(tag),
+            )
+            .is_err()
+        {
+            return VerificationResult::refused(RefusalReason::WrongHashOrRoot);
+        }
+        VerificationResult::valid(plaintext)
+    }
+
+    pub(crate) fn derive_authenticated_repair_head_digest(
+        &self,
+        runtime_build_manifest_hash: Hash512,
+        namespace: &[u8],
+        sealed_head_bytes: &[u8],
+    ) -> SchemaResult<Hash512> {
+        let context = self.authenticated_repair_context(runtime_build_manifest_hash, namespace)?;
+        let repair_key = self.authenticated_repair_key(&context);
+        let mut digest = [0u8; FOUNDATION_HASH_BYTE_LENGTH];
+        let mut kmac = Kmac::v256(
+            repair_key.as_ref(),
+            AUTHENTICATED_REPAIR_DIGEST_CUSTOMIZATION,
+        );
+        kmac.update(
+            &(u64::try_from(context.len()).map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the authenticated-repair context length does not fit u64",
+                )
+            })?)
+            .to_le_bytes(),
+        );
+        kmac.update(&context);
+        kmac.update(
+            &(u64::try_from(sealed_head_bytes.len()).map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the authenticated-repair head length does not fit u64",
+                )
+            })?)
+            .to_le_bytes(),
+        );
+        kmac.update(sealed_head_bytes);
+        kmac.finalize(&mut digest);
+        Ok(Hash512::from_bytes(digest))
+    }
+
+    fn authenticated_repair_context(
+        &self,
+        runtime_build_manifest_hash: Hash512,
+        namespace: &[u8],
+    ) -> SchemaResult<Vec<u8>> {
+        Ok(CanonicalTuple::new(
+            AUTHENTICATED_REPAIR_CONTEXT_SCHEMA_IDENTIFIER,
+            FOUNDATION_PROTOCOL_VERSION,
+            vec![
+                CanonicalItem::unsigned16(FOUNDATION_PROTOCOL_VERSION),
+                CanonicalItem::hash512(self.binding.suite_id.into_bytes()),
+                CanonicalItem::hash512(self.binding.ceremony_context_hash.into_bytes()),
+                CanonicalItem::hash512(self.binding.action_context_hash.into_bytes()),
+                CanonicalItem::participant_identity(self.binding.participant_id.into_bytes()),
+                CanonicalItem::hash512(self.storage_root_commitment.into_bytes()),
+                CanonicalItem::hash512(runtime_build_manifest_hash.into_bytes()),
+                CanonicalItem::variable_bytes(namespace)?,
+            ],
+        )
+        .encode()?)
+    }
+
+    fn authenticated_repair_key(
+        &self,
+        canonical_context: &[u8],
+    ) -> Zeroizing<[u8; AUTHENTICATED_REPAIR_KEY_BYTE_LENGTH]> {
+        Zeroizing::new(kmac256(
+            self.storage_record_key_derivation_key.as_ref(),
+            canonical_context,
+            AUTHENTICATED_REPAIR_KEY_CUSTOMIZATION,
+        ))
     }
 
     pub fn seal_local_record(

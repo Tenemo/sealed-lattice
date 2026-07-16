@@ -158,6 +158,7 @@ export default defineConfig(
     {
         files: ['packages/*/src/**/*.ts'],
         rules: {
+            'import-x/no-relative-packages': 'error',
             'no-restricted-imports': [
                 'error',
                 { patterns: packageSourceImportPatterns },

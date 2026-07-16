@@ -58,14 +58,14 @@ fn committed_material_check_context() -> RelationPlanCheckContext {
 
 fn committed_material_input() -> CommittedMaterialRelationPlanInput {
     CommittedMaterialRelationPlanInput {
-        ring_degree: 16,
+        ring_degree: 32,
         evaluation_domain_size: 256,
         opening_degree_bound_exclusive: 128,
         material_column_degree_bound_exclusive: 10,
         participant_count: 3,
         threshold: 2,
         sharing_data_modulus_indices: vec![0],
-        trace_mask_degree_bound_exclusive: 7,
+        trace_mask_degree_bound_exclusive: 14,
         first_mask_purpose: 100,
     }
 }
@@ -187,6 +187,106 @@ fn suffix_evaluations(values: &[BigInt], theta: &BigInt) -> Vec<BigInt> {
         suffixes[row_ordinal] = &values[row_ordinal] + theta * &suffixes[row_ordinal + 1];
     }
     suffixes
+}
+
+#[test]
+fn trace_subgroup_zeroifier_grammar_is_recognized_exactly() {
+    let context = committed_material_check_context();
+    let trace_domain_size = 16;
+    let evaluation_domain_size = 256;
+    let trace_generator = modular_power(
+        context.evaluation_domain_generator,
+        evaluation_domain_size / trace_domain_size,
+        context.base_field_modulus,
+    );
+    let trace_root = modular_power(trace_generator, 5, context.base_field_modulus);
+
+    assert!(zeroifier_roots_are_confined_to_trace_domain(
+        &full_trace_zeroifier_expression(trace_domain_size),
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+    assert!(zeroifier_roots_are_confined_to_trace_domain(
+        &[
+            RelationExpressionInstruction::EvaluationVariable,
+            RelationExpressionInstruction::BaseFieldConstant(trace_root),
+            RelationExpressionInstruction::Negation,
+            RelationExpressionInstruction::Addition,
+        ],
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+    let mut excluded_roots = vec![1, trace_root];
+    excluded_roots.sort_unstable();
+    assert!(zeroifier_roots_are_confined_to_trace_domain(
+        &[RelationExpressionInstruction::TraceDomainExceptRoots {
+            trace_domain_size,
+            ordered_excluded_roots: excluded_roots,
+        }],
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+
+    assert!(!zeroifier_roots_are_confined_to_trace_domain(
+        &full_trace_zeroifier_expression(trace_domain_size / 2),
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+    let non_trace_root = (2..context.base_field_modulus)
+        .find(|candidate| {
+            modular_power(*candidate, trace_domain_size, context.base_field_modulus) != 1
+        })
+        .expect("the base field contains an element outside the trace subgroup");
+    assert!(!zeroifier_roots_are_confined_to_trace_domain(
+        &[
+            RelationExpressionInstruction::EvaluationVariable,
+            RelationExpressionInstruction::BaseFieldConstant(non_trace_root),
+            RelationExpressionInstruction::Negation,
+            RelationExpressionInstruction::Addition,
+        ],
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+}
+
+#[test]
+fn trace_zeroifier_fast_path_refuses_a_colliding_coset() {
+    let mut context = committed_material_check_context();
+    context.evaluation_coset_offset = 1;
+    let checker = RelationPlanChecker::new(&context);
+    assert_eq!(
+        checker.check_zeroifier_on_coset(&full_trace_zeroifier_expression(16), 16, 256),
+        Err(RelationPlanError::ZeroifierVanishesOnEvaluationCoset),
+    );
+}
+
+#[test]
+fn oversized_arbitrary_zeroifier_fails_closed() {
+    let mut context = committed_material_check_context();
+    let evaluation_domain_size = MAXIMUM_EXHAUSTIVE_ZEROIFIER_COSET_CHECK_DOMAIN_SIZE * 2;
+    context.evaluation_domain_generator = modular_power(
+        crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
+        (1_u64 << 32) / evaluation_domain_size,
+        context.base_field_modulus,
+    );
+    let non_trace_root = (2..context.base_field_modulus)
+        .find(|candidate| modular_power(*candidate, 16, context.base_field_modulus) != 1)
+        .expect("the base field contains an element outside the trace subgroup");
+    let arbitrary_zeroifier = [
+        RelationExpressionInstruction::EvaluationVariable,
+        RelationExpressionInstruction::BaseFieldConstant(non_trace_root),
+        RelationExpressionInstruction::Negation,
+        RelationExpressionInstruction::Addition,
+    ];
+
+    assert_eq!(
+        RelationPlanChecker::new(&context).check_zeroifier_on_coset(
+            &arbitrary_zeroifier,
+            16,
+            evaluation_domain_size,
+        ),
+        Err(RelationPlanError::InvalidZeroifier),
+    );
 }
 
 fn dense_negacyclic_product(left: &[BigInt], right: &[BigInt]) -> Vec<BigInt> {

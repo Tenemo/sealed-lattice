@@ -1,14 +1,55 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
+    foundationProfile,
     isParticipantIdentity,
     isProtocolHash,
     parseParticipantIdentity,
+    refusalReasonCodes,
     type ParticipantIdentity,
     type ProtocolHash,
 } from '@sealed-lattice/types';
 
 describe('foundation contract', () => {
+    it('pins the complete supported foundation profile', () => {
+        expect(foundationProfile).toEqual({
+            activeFaultBound: 3,
+            finalityQuorum: 7,
+            maximumCanonicalStreamByteLength: 2_147_483_648,
+            maximumCopiedBufferByteLength: 1_572_864,
+            maximumIdentifierByteLength: 128,
+            maximumScore: 10,
+            maximumWasmMemoryByteLength: 402_653_184,
+            minimumScore: 1,
+            optionCount: 20,
+            participantCount: 10,
+            protocolName: 'sealed-lattice',
+            protocolVersion: 1,
+            reconstructionThreshold: 4,
+            stateWitnessQuorum: 7,
+            streamChunkByteLength: 1_048_576,
+        });
+    });
+
+    it('matches the shared refusal-reason registry', async () => {
+        const vectorUrl = new URL(
+            '../../../../test-vectors/foundation-refusal-reasons.json',
+            import.meta.url,
+        );
+        const expected = JSON.parse(
+            await readFile(vectorUrl, 'utf8'),
+        ) as readonly Readonly<{ code: number; name: string }>[];
+
+        expect(
+            Object.entries(refusalReasonCodes).map(([name, code]) => ({
+                code,
+                name,
+            })),
+        ).toEqual(expected);
+    });
+
     it('recognizes only canonical protocol hashes', () => {
         for (const canonicalHash of [
             '0'.repeat(128),

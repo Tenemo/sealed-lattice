@@ -4,7 +4,8 @@ use super::committed_material::{
 };
 use super::{CompiledRelationPlan, RelationPlanCheckContext, RelationPlanError};
 
-const VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x2110;
+const VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER: u16 =
+    crate::foundation::ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
 const COEFFICIENT_MATERIAL_ROOTS_FIELD_ORDINAL: u64 = 8;
 const RECIPIENT_SHARE_MATERIAL_ROOTS_FIELD_ORDINAL: u64 = 9;
 

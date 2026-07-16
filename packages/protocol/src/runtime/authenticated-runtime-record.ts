@@ -8,6 +8,7 @@ import {
 } from './untrusted-storage-transaction-store.js';
 
 const textEncoder = new TextEncoder();
+const fatalTextDecoder = new TextDecoder('utf-8', { fatal: true });
 const runtimeRecordVersion = 1;
 const aesGcmNonceByteLength = 12;
 const aesGcmTagByteLength = 16;
@@ -57,14 +58,40 @@ export class AuthenticatedRuntimeRecordError extends Error {
     }
 }
 
-type RuntimeRecordProtection = Readonly<{
-    authorityContext: RuntimeStorageAuthorityContext;
-    encryptionKey: CryptoKey;
-    cryptoProvider: Crypto;
-    keySealingState: RuntimeRecordKeySealingState;
-    localSealingState: RuntimeRecordLocalSealingState;
-    maximumRecordSealingCount: number;
+declare const runtimeRecordProtectionBrand: unique symbol;
+
+/**
+ * Internal worker-owned record protection session. The caller supplies exact
+ * canonical associated-data bytes, while the session owns all key material,
+ * nonces, invocation accounting, and envelope authentication.
+ */
+export type RuntimeRecordProtectionSession = Readonly<{
+    close(): Promise<void> | void;
+    openCanonicalEnvelope(input: {
+        associatedData: Uint8Array;
+        canonicalEnvelope: Uint8Array;
+    }): Promise<Uint8Array>;
+    sampleIdentifier(input: {
+        byteLength: number;
+        purpose: string;
+    }): Uint8Array;
+    sealPlaintext(input: {
+        associatedData: Uint8Array;
+        plaintext: Uint8Array;
+        predecessorCanonicalEnvelope?: Uint8Array;
+    }): Promise<Uint8Array>;
 }>;
+
+export type RuntimeRecordProtection = Readonly<{
+    readonly [runtimeRecordProtectionBrand]: true;
+}>;
+
+type RuntimeRecordProtectionRecord = {
+    authorityContext: RuntimeStorageAuthorityContext;
+    releasePromise: Promise<void> | undefined;
+    released: boolean;
+    session: RuntimeRecordProtectionSession;
+};
 
 type RuntimeRecordKeySealingState = {
     issuedNonces: Set<string>;
@@ -78,6 +105,10 @@ type RuntimeRecordLocalSealingState = {
 const runtimeRecordKeySealingStates = new WeakMap<
     CryptoKey,
     RuntimeRecordKeySealingState
+>();
+const runtimeRecordProtectionRecords = new WeakMap<
+    object,
+    RuntimeRecordProtectionRecord
 >();
 
 type OpenedRuntimeRecord = Readonly<{
@@ -191,48 +222,83 @@ const requireEncryptionKey = (key: CryptoKey): void => {
     }
 };
 
-export const createRuntimeRecordProtection = (input: {
-    authorityContext: RuntimeStorageAuthorityContext;
-    cryptoProvider?: Crypto;
-    encryptionKey: CryptoKey;
-    maximumRecordSealingCount: number;
-}): RuntimeRecordProtection => {
-    const cryptoProvider = input.cryptoProvider ?? globalThis.crypto;
-    if (cryptoProvider?.subtle === undefined) {
+const requireRuntimeRecordProtection = (
+    protection: RuntimeRecordProtection,
+): RuntimeRecordProtectionRecord => {
+    const record =
+        typeof protection === 'object' && protection !== null
+            ? runtimeRecordProtectionRecords.get(protection)
+            : undefined;
+    if (record === undefined || record.released) {
         throw new AuthenticatedRuntimeRecordError(
-            'InvalidConfiguration',
-            'Runtime storage requires browser Web Crypto.',
+            'InvalidState',
+            'Runtime record protection is unavailable or released.',
         );
     }
-    requireEncryptionKey(input.encryptionKey);
+    return record;
+};
+
+export const createRuntimeRecordProtectionFromSession = (input: {
+    authorityContext: RuntimeStorageAuthorityContext;
+    session: RuntimeRecordProtectionSession;
+}): RuntimeRecordProtection => {
     if (
-        !Number.isSafeInteger(input.maximumRecordSealingCount) ||
-        input.maximumRecordSealingCount <= 0 ||
-        input.maximumRecordSealingCount >
-            maximumAesGcmRandomNonceInvocationCount
+        typeof input.session?.close !== 'function' ||
+        typeof input.session?.openCanonicalEnvelope !== 'function' ||
+        typeof input.session?.sampleIdentifier !== 'function' ||
+        typeof input.session?.sealPlaintext !== 'function'
     ) {
         throw new AuthenticatedRuntimeRecordError(
             'InvalidConfiguration',
-            'maximumRecordSealingCount must be a positive safe integer no greater than the AES-GCM random-nonce invocation ceiling.',
+            'Runtime record protection requires a complete owned session.',
         );
     }
-    let keySealingState = runtimeRecordKeySealingStates.get(
-        input.encryptionKey,
-    );
-    if (keySealingState === undefined) {
-        keySealingState = { issuedNonces: new Set<string>(), sealingCount: 0 };
-        runtimeRecordKeySealingStates.set(input.encryptionKey, keySealingState);
-    }
-    return Object.freeze({
+    const protection = Object.freeze(
+        Object.create(null),
+    ) as RuntimeRecordProtection;
+    runtimeRecordProtectionRecords.set(protection, {
         authorityContext: copyRuntimeStorageAuthorityContext(
             input.authorityContext,
         ),
-        cryptoProvider,
-        encryptionKey: input.encryptionKey,
-        keySealingState,
-        localSealingState: { sealingCount: 0 },
-        maximumRecordSealingCount: input.maximumRecordSealingCount,
+        releasePromise: undefined,
+        released: false,
+        session: input.session,
     });
+    return protection;
+};
+
+export const copyRuntimeRecordProtectionAuthorityContext = (
+    protection: RuntimeRecordProtection,
+): RuntimeStorageAuthorityContext =>
+    copyRuntimeStorageAuthorityContext(
+        requireRuntimeRecordProtection(protection).authorityContext,
+    );
+
+export const releaseRuntimeRecordProtection = (
+    protection: RuntimeRecordProtection,
+): Promise<void> => {
+    const record = runtimeRecordProtectionRecords.get(protection);
+    if (record === undefined) {
+        return Promise.reject(
+            new AuthenticatedRuntimeRecordError(
+                'InvalidState',
+                'Runtime record protection was not issued by this runtime.',
+            ),
+        );
+    }
+    if (record.releasePromise !== undefined) {
+        return record.releasePromise;
+    }
+    record.released = true;
+    record.authorityContext.actionContextHash.fill(0);
+    record.authorityContext.ceremonyContextHash.fill(0);
+    record.authorityContext.ownerParticipantIdentity.fill(0);
+    record.authorityContext.runtimeBuildManifestHash.fill(0);
+    record.authorityContext.suiteIdentifier.fill(0);
+    record.releasePromise = Promise.resolve().then(() =>
+        record.session.close(),
+    );
+    return record.releasePromise;
 };
 
 const concatenateBytes = (parts: readonly Uint8Array[]): Uint8Array => {
@@ -297,14 +363,19 @@ const recordAssociatedData = (input: {
     const operationDomainBytes = textEncoder.encode(input.operationDomain);
     if (
         logicalRecordKeyBytes.byteLength === 0 ||
-        operationDomainBytes.byteLength === 0
+        operationDomainBytes.byteLength === 0 ||
+        fatalTextDecoder.decode(logicalRecordKeyBytes) !==
+            input.logicalRecordKey ||
+        fatalTextDecoder.decode(operationDomainBytes) !== input.operationDomain
     ) {
         throw new AuthenticatedRuntimeRecordError(
             'InvalidInput',
-            'Runtime record domain and logical key must be nonempty.',
+            'Runtime record domain and logical key must be nonempty well-formed strings.',
         );
     }
-    const { authorityContext } = input.protection;
+    const { authorityContext } = requireRuntimeRecordProtection(
+        input.protection,
+    );
     return concatenateBytes([
         unsigned16LittleEndian(runtimeRecordVersion),
         encodeVariableBytes(operationDomainBytes),
@@ -318,14 +389,13 @@ const recordAssociatedData = (input: {
 };
 
 const sampleRandomBytes = (
-    protection: RuntimeRecordProtection,
+    cryptoProvider: Crypto,
     byteLength: number,
-    issuedValues: Set<string>,
     label: string,
 ): Uint8Array => {
     const bytes = new Uint8Array(byteLength);
     try {
-        protection.cryptoProvider.getRandomValues(bytes);
+        cryptoProvider.getRandomValues(bytes);
     } catch (error) {
         throw new AuthenticatedRuntimeRecordError(
             'EntropyFailure',
@@ -333,15 +403,13 @@ const sampleRandomBytes = (
             error,
         );
     }
-    const encoded = bytesToHex(bytes);
-    if (bytes.every((byte) => byte === 0) || issuedValues.has(encoded)) {
+    if (bytes.every((byte) => byte === 0)) {
         bytes.fill(0);
         throw new AuthenticatedRuntimeRecordError(
             'EntropyFailure',
-            `${label} sampling returned an invalid or reused value.`,
+            `${label} sampling returned an invalid value.`,
         );
     }
-    issuedValues.add(encoded);
     return bytes;
 };
 
@@ -349,84 +417,91 @@ export const sampleRuntimeIdentifier = (
     protection: RuntimeRecordProtection,
     issuedIdentifiers: Set<string>,
     label: string,
-): Uint8Array =>
-    sampleRandomBytes(
-        protection,
-        identifierByteLength,
-        issuedIdentifiers,
-        label,
-    );
+): Uint8Array => {
+    const { session } = requireRuntimeRecordProtection(protection);
+    let sampled: Uint8Array | undefined;
+    try {
+        sampled = session.sampleIdentifier({
+            byteLength: identifierByteLength,
+            purpose: label,
+        });
+        if (
+            !isUint8Array(sampled) ||
+            sampled.byteLength !== identifierByteLength
+        ) {
+            throw new AuthenticatedRuntimeRecordError(
+                'EntropyFailure',
+                `${label} sampling returned an invalid byte length.`,
+            );
+        }
+        const encoded = bytesToHex(sampled);
+        if (
+            sampled.every((byte) => byte === 0) ||
+            issuedIdentifiers.has(encoded)
+        ) {
+            throw new AuthenticatedRuntimeRecordError(
+                'EntropyFailure',
+                `${label} sampling returned an invalid or reused value.`,
+            );
+        }
+        issuedIdentifiers.add(encoded);
+        return sampled.slice();
+    } catch (error) {
+        if (error instanceof AuthenticatedRuntimeRecordError) {
+            throw error;
+        }
+        throw new AuthenticatedRuntimeRecordError(
+            'EntropyFailure',
+            `${label} sampling failed.`,
+            error,
+        );
+    } finally {
+        sampled?.fill(0);
+    }
+};
 
 export const sealRuntimeRecord = async (input: {
     logicalRecordKey: string;
     operationDomain: string;
     plaintext: Uint8Array;
+    predecessorCanonicalEnvelope?: Uint8Array;
     protection: RuntimeRecordProtection;
 }): Promise<Uint8Array> => {
-    if (
-        input.protection.localSealingState.sealingCount >=
-        input.protection.maximumRecordSealingCount
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'ResourceLimit',
-            'The runtime-record protection reached its configured sealing limit.',
-        );
-    }
-    if (
-        input.protection.keySealingState.sealingCount >=
-        maximumAesGcmRandomNonceInvocationCount
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'ResourceLimit',
-            'The runtime-record key reached the AES-GCM random-nonce invocation ceiling.',
-        );
-    }
+    const { session } = requireRuntimeRecordProtection(input.protection);
     const plaintext = copyBoundedBytes(
         input.plaintext,
         0xffff_ffff - aesGcmTagByteLength,
         'runtime record plaintext',
         true,
     );
-    const nonce = sampleRandomBytes(
-        input.protection,
-        aesGcmNonceByteLength,
-        input.protection.keySealingState.issuedNonces,
-        'AES-GCM nonce',
-    );
-    input.protection.localSealingState.sealingCount += 1;
-    input.protection.keySealingState.sealingCount += 1;
     const associatedData = recordAssociatedData(input);
-    const cryptoNonce = copyToArrayBufferView(nonce);
-    const cryptoAssociatedData = copyToArrayBufferView(associatedData);
-    const cryptoPlaintext = copyToArrayBufferView(plaintext);
+    let canonicalEnvelope: Uint8Array | undefined;
+    const sessionAssociatedData = associatedData.slice();
+    const sessionPlaintext = plaintext.slice();
+    const sessionPredecessorCanonicalEnvelope =
+        input.predecessorCanonicalEnvelope?.slice();
     try {
-        const ciphertext = new Uint8Array(
-            await input.protection.cryptoProvider.subtle.encrypt(
-                {
-                    additionalData: cryptoAssociatedData,
-                    iv: cryptoNonce,
-                    name: 'AES-GCM',
-                    tagLength: 128,
-                },
-                input.protection.encryptionKey,
-                cryptoPlaintext,
-            ),
-        );
+        canonicalEnvelope = await session.sealPlaintext({
+            associatedData: sessionAssociatedData,
+            plaintext: sessionPlaintext,
+            ...(sessionPredecessorCanonicalEnvelope === undefined
+                ? {}
+                : {
+                      predecessorCanonicalEnvelope:
+                          sessionPredecessorCanonicalEnvelope,
+                  }),
+        });
         if (
-            ciphertext.byteLength !==
-            plaintext.byteLength + aesGcmTagByteLength
+            !isUint8Array(canonicalEnvelope) ||
+            canonicalEnvelope.byteLength === 0 ||
+            canonicalEnvelope.byteLength > 0xffff_ffff
         ) {
             throw new AuthenticatedRuntimeRecordError(
                 'StorageFailure',
-                'AES-GCM returned a runtime record with an unexpected length.',
+                'The owned runtime-record session returned an invalid canonical envelope.',
             );
         }
-        return concatenateBytes([
-            unsigned16LittleEndian(runtimeRecordVersion),
-            nonce,
-            unsigned32LittleEndian(ciphertext.byteLength),
-            ciphertext,
-        ]);
+        return canonicalEnvelope.slice();
     } catch (error) {
         if (error instanceof AuthenticatedRuntimeRecordError) {
             throw error;
@@ -437,10 +512,12 @@ export const sealRuntimeRecord = async (input: {
             error,
         );
     } finally {
-        cryptoAssociatedData.fill(0);
-        cryptoNonce.fill(0);
-        cryptoPlaintext.fill(0);
+        associatedData.fill(0);
+        canonicalEnvelope?.fill(0);
         plaintext.fill(0);
+        sessionAssociatedData.fill(0);
+        sessionPlaintext.fill(0);
+        sessionPredecessorCanonicalEnvelope?.fill(0);
     }
 };
 
@@ -450,70 +527,305 @@ const openRuntimeRecord = async (input: {
     protection: RuntimeRecordProtection;
     sealedBytes: Uint8Array;
 }): Promise<Uint8Array> => {
+    const { session } = requireRuntimeRecordProtection(input.protection);
     const sealedBytes = copyBoundedBytes(
         input.sealedBytes,
         0xffff_ffff,
         'sealed runtime record',
     );
-    const minimumByteLength =
-        2 + aesGcmNonceByteLength + 4 + aesGcmTagByteLength;
-    if (sealedBytes.byteLength < minimumByteLength) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            'Sealed runtime record is truncated.',
-        );
-    }
-    const view = new DataView(
-        sealedBytes.buffer,
-        sealedBytes.byteOffset,
-        sealedBytes.byteLength,
-    );
-    const version = view.getUint16(0, true);
-    const ciphertextByteLength = view.getUint32(
-        2 + aesGcmNonceByteLength,
-        true,
-    );
-    if (
-        version !== runtimeRecordVersion ||
-        ciphertextByteLength < aesGcmTagByteLength ||
-        ciphertextByteLength !== sealedBytes.byteLength - 18
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            'Sealed runtime record has noncanonical framing.',
-        );
-    }
-    const nonce = sealedBytes.slice(2, 2 + aesGcmNonceByteLength);
-    const ciphertext = sealedBytes.slice(18);
     const associatedData = recordAssociatedData(input);
-    const cryptoNonce = copyToArrayBufferView(nonce);
-    const cryptoAssociatedData = copyToArrayBufferView(associatedData);
-    const cryptoCiphertext = copyToArrayBufferView(ciphertext);
+    let plaintext: Uint8Array | undefined;
+    const sessionAssociatedData = associatedData.slice();
+    const sessionCanonicalEnvelope = sealedBytes.slice();
     try {
-        return new Uint8Array(
-            await input.protection.cryptoProvider.subtle.decrypt(
-                {
-                    additionalData: cryptoAssociatedData,
-                    iv: cryptoNonce,
-                    name: 'AES-GCM',
-                    tagLength: 128,
-                },
-                input.protection.encryptionKey,
-                cryptoCiphertext,
-            ),
-        );
+        plaintext = await session.openCanonicalEnvelope({
+            associatedData: sessionAssociatedData,
+            canonicalEnvelope: sessionCanonicalEnvelope,
+        });
+        if (!isUint8Array(plaintext) || plaintext.byteLength > 0xffff_ffff) {
+            throw new AuthenticatedRuntimeRecordError(
+                'AuthenticationFailed',
+                'The owned runtime-record session returned invalid plaintext.',
+            );
+        }
+        return plaintext.slice();
     } catch (error) {
+        if (error instanceof AuthenticatedRuntimeRecordError) {
+            throw error;
+        }
         throw new AuthenticatedRuntimeRecordError(
             'AuthenticationFailed',
             'Sealed runtime record authentication failed.',
             error,
         );
     } finally {
-        cryptoAssociatedData.fill(0);
-        cryptoCiphertext.fill(0);
-        cryptoNonce.fill(0);
+        associatedData.fill(0);
+        plaintext?.fill(0);
+        sealedBytes.fill(0);
+        sessionAssociatedData.fill(0);
+        sessionCanonicalEnvelope.fill(0);
     }
 };
+
+const createAesGcmRuntimeRecordProtectionSession = (input: {
+    cryptoProvider?: Crypto;
+    encryptionKey: CryptoKey;
+    maximumRecordSealingCount: number;
+}): RuntimeRecordProtectionSession => {
+    const cryptoProvider = input.cryptoProvider ?? globalThis.crypto;
+    if (cryptoProvider?.subtle === undefined) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidConfiguration',
+            'Runtime storage requires browser Web Crypto.',
+        );
+    }
+    requireEncryptionKey(input.encryptionKey);
+    if (
+        !Number.isSafeInteger(input.maximumRecordSealingCount) ||
+        input.maximumRecordSealingCount <= 0 ||
+        input.maximumRecordSealingCount >
+            maximumAesGcmRandomNonceInvocationCount
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidConfiguration',
+            'maximumRecordSealingCount must be a positive safe integer no greater than the AES-GCM random-nonce invocation ceiling.',
+        );
+    }
+    let keySealingState = runtimeRecordKeySealingStates.get(
+        input.encryptionKey,
+    );
+    if (keySealingState === undefined) {
+        keySealingState = { issuedNonces: new Set<string>(), sealingCount: 0 };
+        runtimeRecordKeySealingStates.set(input.encryptionKey, keySealingState);
+    }
+    const retainedKeySealingState = keySealingState;
+    const localSealingState: RuntimeRecordLocalSealingState = {
+        sealingCount: 0,
+    };
+    const encryptionKeyReference: { encryptionKey?: CryptoKey } = {
+        encryptionKey: input.encryptionKey,
+    };
+    const requireKey = (): CryptoKey => {
+        const encryptionKey = encryptionKeyReference.encryptionKey;
+        if (encryptionKey === undefined) {
+            throw new AuthenticatedRuntimeRecordError(
+                'InvalidState',
+                'Runtime record protection was released.',
+            );
+        }
+        return encryptionKey;
+    };
+
+    return Object.freeze({
+        close: () => {
+            encryptionKeyReference.encryptionKey = undefined;
+        },
+        openCanonicalEnvelope: async ({
+            associatedData: untrustedAssociatedData,
+            canonicalEnvelope: untrustedCanonicalEnvelope,
+        }): Promise<Uint8Array> => {
+            const encryptionKey = requireKey();
+            const associatedData = copyBoundedBytes(
+                untrustedAssociatedData,
+                0xffff_ffff,
+                'runtime record associated data',
+            );
+            const canonicalEnvelope = copyBoundedBytes(
+                untrustedCanonicalEnvelope,
+                0xffff_ffff,
+                'sealed runtime record',
+            );
+            const minimumByteLength =
+                2 + aesGcmNonceByteLength + 4 + aesGcmTagByteLength;
+            if (canonicalEnvelope.byteLength < minimumByteLength) {
+                associatedData.fill(0);
+                canonicalEnvelope.fill(0);
+                throw new AuthenticatedRuntimeRecordError(
+                    'AuthenticationFailed',
+                    'Sealed runtime record is truncated.',
+                );
+            }
+            const view = new DataView(
+                canonicalEnvelope.buffer,
+                canonicalEnvelope.byteOffset,
+                canonicalEnvelope.byteLength,
+            );
+            const version = view.getUint16(0, true);
+            const ciphertextByteLength = view.getUint32(
+                2 + aesGcmNonceByteLength,
+                true,
+            );
+            if (
+                version !== runtimeRecordVersion ||
+                ciphertextByteLength < aesGcmTagByteLength ||
+                ciphertextByteLength !== canonicalEnvelope.byteLength - 18
+            ) {
+                associatedData.fill(0);
+                canonicalEnvelope.fill(0);
+                throw new AuthenticatedRuntimeRecordError(
+                    'AuthenticationFailed',
+                    'Sealed runtime record has noncanonical framing.',
+                );
+            }
+            const nonce = canonicalEnvelope.slice(2, 2 + aesGcmNonceByteLength);
+            const ciphertext = canonicalEnvelope.slice(18);
+            const cryptoNonce = copyToArrayBufferView(nonce);
+            const cryptoAssociatedData = copyToArrayBufferView(associatedData);
+            const cryptoCiphertext = copyToArrayBufferView(ciphertext);
+            try {
+                return new Uint8Array(
+                    await cryptoProvider.subtle.decrypt(
+                        {
+                            additionalData: cryptoAssociatedData,
+                            iv: cryptoNonce,
+                            name: 'AES-GCM',
+                            tagLength: 128,
+                        },
+                        encryptionKey,
+                        cryptoCiphertext,
+                    ),
+                );
+            } catch (error) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'AuthenticationFailed',
+                    'Sealed runtime record authentication failed.',
+                    error,
+                );
+            } finally {
+                associatedData.fill(0);
+                canonicalEnvelope.fill(0);
+                ciphertext.fill(0);
+                cryptoAssociatedData.fill(0);
+                cryptoCiphertext.fill(0);
+                cryptoNonce.fill(0);
+                nonce.fill(0);
+                untrustedAssociatedData.fill(0);
+                untrustedCanonicalEnvelope.fill(0);
+            }
+        },
+        sampleIdentifier: ({ byteLength, purpose }) => {
+            requireKey();
+            return sampleRandomBytes(cryptoProvider, byteLength, purpose);
+        },
+        sealPlaintext: async ({
+            associatedData: untrustedAssociatedData,
+            plaintext: untrustedPlaintext,
+        }): Promise<Uint8Array> => {
+            const encryptionKey = requireKey();
+            if (
+                localSealingState.sealingCount >=
+                input.maximumRecordSealingCount
+            ) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'ResourceLimit',
+                    'The runtime-record protection reached its configured sealing limit.',
+                );
+            }
+            if (
+                retainedKeySealingState.sealingCount >=
+                maximumAesGcmRandomNonceInvocationCount
+            ) {
+                throw new AuthenticatedRuntimeRecordError(
+                    'ResourceLimit',
+                    'The runtime-record key reached the AES-GCM random-nonce invocation ceiling.',
+                );
+            }
+            const associatedData = copyBoundedBytes(
+                untrustedAssociatedData,
+                0xffff_ffff,
+                'runtime record associated data',
+            );
+            const plaintext = copyBoundedBytes(
+                untrustedPlaintext,
+                0xffff_ffff - aesGcmTagByteLength,
+                'runtime record plaintext',
+                true,
+            );
+            const nonce = sampleRandomBytes(
+                cryptoProvider,
+                aesGcmNonceByteLength,
+                'AES-GCM nonce',
+            );
+            const encodedNonce = bytesToHex(nonce);
+            if (retainedKeySealingState.issuedNonces.has(encodedNonce)) {
+                nonce.fill(0);
+                associatedData.fill(0);
+                plaintext.fill(0);
+                throw new AuthenticatedRuntimeRecordError(
+                    'EntropyFailure',
+                    'AES-GCM nonce sampling returned a reused value.',
+                );
+            }
+            retainedKeySealingState.issuedNonces.add(encodedNonce);
+            localSealingState.sealingCount += 1;
+            retainedKeySealingState.sealingCount += 1;
+            const cryptoNonce = copyToArrayBufferView(nonce);
+            const cryptoAssociatedData = copyToArrayBufferView(associatedData);
+            const cryptoPlaintext = copyToArrayBufferView(plaintext);
+            try {
+                const ciphertext = new Uint8Array(
+                    await cryptoProvider.subtle.encrypt(
+                        {
+                            additionalData: cryptoAssociatedData,
+                            iv: cryptoNonce,
+                            name: 'AES-GCM',
+                            tagLength: 128,
+                        },
+                        encryptionKey,
+                        cryptoPlaintext,
+                    ),
+                );
+                if (
+                    ciphertext.byteLength !==
+                    plaintext.byteLength + aesGcmTagByteLength
+                ) {
+                    ciphertext.fill(0);
+                    throw new AuthenticatedRuntimeRecordError(
+                        'StorageFailure',
+                        'AES-GCM returned a runtime record with an unexpected length.',
+                    );
+                }
+                const canonicalEnvelope = concatenateBytes([
+                    unsigned16LittleEndian(runtimeRecordVersion),
+                    nonce,
+                    unsigned32LittleEndian(ciphertext.byteLength),
+                    ciphertext,
+                ]);
+                ciphertext.fill(0);
+                return canonicalEnvelope;
+            } catch (error) {
+                if (error instanceof AuthenticatedRuntimeRecordError) {
+                    throw error;
+                }
+                throw new AuthenticatedRuntimeRecordError(
+                    'StorageFailure',
+                    'Runtime record encryption failed.',
+                    error,
+                );
+            } finally {
+                associatedData.fill(0);
+                cryptoAssociatedData.fill(0);
+                cryptoNonce.fill(0);
+                cryptoPlaintext.fill(0);
+                nonce.fill(0);
+                plaintext.fill(0);
+                untrustedAssociatedData.fill(0);
+                untrustedPlaintext.fill(0);
+            }
+        },
+    });
+};
+
+export const createRuntimeRecordProtection = (input: {
+    authorityContext: RuntimeStorageAuthorityContext;
+    cryptoProvider?: Crypto;
+    encryptionKey: CryptoKey;
+    maximumRecordSealingCount: number;
+}): RuntimeRecordProtection =>
+    createRuntimeRecordProtectionFromSession({
+        authorityContext: input.authorityContext,
+        session: createAesGcmRuntimeRecordProtectionSession(input),
+    });
 
 export const createRuntimeRecordAuthenticatedRepairProtection = (input: {
     authorityContext: RuntimeStorageAuthorityContext;
@@ -522,20 +834,33 @@ export const createRuntimeRecordAuthenticatedRepairProtection = (input: {
     maximumRecordSealingCount: number;
 }): UntrustedStorageAuthenticatedRepairProtection => {
     const protection = createRuntimeRecordProtection(input);
-    const repairIdentity = sha512(
-        concatenateBytes([
+    const authorityContext =
+        copyRuntimeRecordProtectionAuthorityContext(protection);
+    let repairIdentityInput: Uint8Array | undefined;
+    let repairIdentity: Uint8Array | undefined;
+    let configuredRepairIdentity: Uint8Array;
+    try {
+        repairIdentityInput = concatenateBytes([
             encodeVariableBytes(
                 textEncoder.encode(authenticatedRepairIdentityDomain),
             ),
-            protection.authorityContext.runtimeBuildManifestHash,
-            protection.authorityContext.suiteIdentifier,
-            protection.authorityContext.ceremonyContextHash,
-            protection.authorityContext.actionContextHash,
-            protection.authorityContext.ownerParticipantIdentity,
-        ]),
-    );
-    const configuredRepairIdentity = repairIdentity.slice();
-    repairIdentity.fill(0);
+            authorityContext.runtimeBuildManifestHash,
+            authorityContext.suiteIdentifier,
+            authorityContext.ceremonyContextHash,
+            authorityContext.actionContextHash,
+            authorityContext.ownerParticipantIdentity,
+        ]);
+        repairIdentity = sha512(repairIdentityInput);
+        configuredRepairIdentity = repairIdentity.slice();
+    } finally {
+        authorityContext.actionContextHash.fill(0);
+        authorityContext.ceremonyContextHash.fill(0);
+        authorityContext.ownerParticipantIdentity.fill(0);
+        authorityContext.runtimeBuildManifestHash.fill(0);
+        authorityContext.suiteIdentifier.fill(0);
+        repairIdentityInput?.fill(0);
+        repairIdentity?.fill(0);
+    }
 
     return Object.freeze({
         deriveDigest: (bytes: Uint8Array): Uint8Array => {
@@ -591,17 +916,6 @@ export const readRuntimeRecord = async (input: {
                     protection: input.protection,
                     sealedBytes: bytes,
                 });
-                if (
-                    authenticatedPlaintext !== undefined &&
-                    !bytesEqual(authenticatedPlaintext, plaintext)
-                ) {
-                    plaintext.fill(0);
-                    throw new AuthenticatedRuntimeRecordError(
-                        'AuthenticationFailed',
-                        'Repeated runtime-record authentication produced different plaintext.',
-                    );
-                }
-                authenticatedPlaintext?.fill(0);
                 authenticatedPlaintext = plaintext;
             },
             logicalRecordKey: input.logicalRecordKey,
@@ -646,7 +960,15 @@ export const stageRuntimeRecordWrite = async (input: {
     protection: RuntimeRecordProtection;
     transaction: UntrustedStorageTransaction;
 }): Promise<Uint8Array> => {
-    const sealedBytes = await sealRuntimeRecord(input);
+    const sealedBytes = await sealRuntimeRecord({
+        ...input,
+        ...(input.expectedCurrentSealedBytes instanceof Uint8Array
+            ? {
+                  predecessorCanonicalEnvelope:
+                      input.expectedCurrentSealedBytes,
+              }
+            : {}),
+    });
     try {
         const lease = await input.transaction.issueWriteLease({
             declaredByteLength: sealedBytes.byteLength,

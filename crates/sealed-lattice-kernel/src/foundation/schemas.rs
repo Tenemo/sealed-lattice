@@ -532,7 +532,7 @@ impl ObjectEnvelope {
                 CanonicalItem::optional(CanonicalItemType::ParticipantIdentity, producer.as_ref())?,
                 CanonicalItem::unsigned64(self.producer_sequence),
                 CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &prerequisites)?,
-                CanonicalItem::variable_bytes(self.payload_bytes.clone())?,
+                CanonicalItem::variable_bytes(&self.payload_bytes)?,
             ],
         )
         .encode()?)

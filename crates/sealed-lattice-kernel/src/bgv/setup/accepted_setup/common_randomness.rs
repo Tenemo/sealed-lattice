@@ -32,7 +32,7 @@ pub(super) fn verify_common_randomness(
 
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupContext was required before common randomness verification",
         )
     })?;
@@ -179,7 +179,7 @@ fn verify_common_randomness_commit_record(
     )?;
     let Some(reveal_hash) = commit_record.get("revealHash").and_then(Value::as_str) else {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "CommonRandomnessCommit.revealHash is required",
         ));
     };
@@ -214,7 +214,7 @@ fn verify_common_randomness_reveal_record(
     )?;
     let Some(reveal_hex) = reveal_record.get("revealHex").and_then(Value::as_str) else {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "CommonRandomnessReveal.revealHex is required",
         ));
     };
@@ -250,31 +250,31 @@ fn verify_common_randomness_participant_record_shape(
     let roster = super::accepted_roster_from_setup_context(setup_context)?;
     if !record.is_object() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_path} entries must be objects"),
         ));
     }
     if record.get("objectType").and_then(Value::as_str) != Some(object_type) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_path} entries must use {object_type}"),
         ));
     }
     let Some(roster_position) = record.get("rosterPosition").and_then(Value::as_u64) else {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_type}.rosterPosition is required"),
         ));
     };
     if roster_position >= roster.participant_count {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_type}.rosterPosition is outside the first accepted roster"),
         ));
     }
     let Some(registration) = trustee_registrations.get(&roster_position) else {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_type}.rosterPosition is missing from setupIntent registrations"),
         ));
     };
@@ -328,7 +328,7 @@ fn verify_common_randomness_signature(
         .get(&participant.roster_position)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!(
                     "{}.rosterPosition is missing from setupIntent registrations",
                     expectation.object_type,
@@ -337,7 +337,7 @@ fn verify_common_randomness_signature(
         })?;
     let signature_envelope = record.get("signatureEnvelope").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{}.signatureEnvelope is required", expectation.object_type),
         )
     })?;
@@ -352,7 +352,7 @@ fn verify_common_randomness_signature(
     match verification {
         Ok(()) => Ok(()),
         Err(failure) => Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             failure.message,
         )),
     }
@@ -361,7 +361,7 @@ fn verify_common_randomness_signature(
 fn validate_common_randomness_reveal_hex(reveal_hex: &str) -> CanonicalResult<()> {
     if reveal_hex.len() != 64 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "common-randomness revealHex must contain 64 lowercase hex characters",
         ));
     }
@@ -370,7 +370,7 @@ fn validate_common_randomness_reveal_hex(reveal_hex: &str) -> CanonicalResult<()
         .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "common-randomness revealHex must be lowercase hexadecimal",
         ));
     }

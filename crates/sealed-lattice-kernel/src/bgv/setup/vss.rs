@@ -408,5 +408,5 @@ fn homomorphic_randomness_bound(
 
 #[cfg(test)]
 fn invalid_vss_input(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }

@@ -13,9 +13,11 @@ import {
 import { createCanonicalCarrierSigningKeyPairFixtures } from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
 import {
     openDurableStateWitnessService,
+    persistCommonProofApplicationAuthorization,
     type DurableStateWitnessService,
     type DurableStateWitnessServiceLimits,
-} from '#packages/protocol/src/index';
+    type TransferableDurableStateWitnessService,
+} from '#packages/protocol/src/runtime/durable-state-witness-service';
 import {
     generateRuntimeStorageEncryptionKey,
     openRuntimeTestStore,
@@ -356,7 +358,7 @@ describe('durable state witness service', () => {
         limits?: DurableStateWitnessServiceLimits;
     }): Promise<{
         adapter: Awaited<ReturnType<typeof openRuntimeTestStore>>['adapter'];
-        service: DurableStateWitnessService;
+        service: TransferableDurableStateWitnessService;
         store: Awaited<ReturnType<typeof openRuntimeTestStore>>['store'];
     }> => {
         const { adapter, store } = await openRuntimeTestStore();
@@ -380,6 +382,7 @@ describe('durable state witness service', () => {
         expectTypeOf<keyof DurableStateWitnessService>().toEqualTypeOf<
             | 'cacheExactOutput'
             | 'cacheSignedVoteCarrier'
+            | 'close'
             | 'compareAndLockIntent'
             | 'copyAuthorityContext'
             | 'readExactOutput'
@@ -395,6 +398,96 @@ describe('durable state witness service', () => {
         await expect(
             service.readExactOutput({ verifiedOutputBinding }),
         ).rejects.toMatchObject({ code: 'MissingRecord' });
+    });
+
+    it('persists one fixed common-proof authorization frame and rereads the exact authenticated bytes', async () => {
+        const { adapter, service } = await openService();
+        const authorizationFrame = Uint8Array.from([
+            1, 3, 3, 7, 9, 2, 5, 8, 9, 7, 9, 3,
+        ]);
+        const proofApplicationSlotHash = new Uint8Array(64).fill(0x6d);
+        const initialMutationCount = adapter.atomicMutationCount;
+        let commitAttemptCount = 0;
+
+        const authenticatedFrame =
+            await persistCommonProofApplicationAuthorization(service, {
+                authorizationFrame,
+                onCommitAttempt: () => {
+                    commitAttemptCount += 1;
+                },
+                proofApplicationSlotHash,
+            });
+
+        expect([...authenticatedFrame]).toEqual([...authorizationFrame]);
+        expect(commitAttemptCount).toBe(1);
+        expect(adapter.atomicMutationCount).toBe(initialMutationCount + 1);
+
+        let duplicateCommitAttemptCount = 0;
+        await expect(
+            persistCommonProofApplicationAuthorization(service, {
+                authorizationFrame,
+                onCommitAttempt: () => {
+                    duplicateCommitAttemptCount += 1;
+                },
+                proofApplicationSlotHash,
+            }),
+        ).rejects.toMatchObject({ code: 'Conflict' });
+        expect(duplicateCommitAttemptCount).toBe(0);
+        expect(adapter.atomicMutationCount).toBe(initialMutationCount + 1);
+    });
+
+    it('reports the commit boundary before any committed publication or readback failure', async () => {
+        const { adapter, service } = await openService();
+        const authorizationFrame = new Uint8Array(746).fill(0x8e);
+        const proofApplicationSlotHash = new Uint8Array(64).fill(0x4c);
+        let commitAttemptCount = 0;
+        adapter.afterNextAtomicMutation = (mutation) => {
+            const committedIndex = mutation.writes.find((write) =>
+                write.key.includes('/index/'),
+            );
+            if (committedIndex === undefined) {
+                throw new Error(
+                    'The authenticated transaction did not publish an index.',
+                );
+            }
+            adapter.rawDelete(committedIndex.key);
+        };
+
+        await expect(
+            persistCommonProofApplicationAuthorization(service, {
+                authorizationFrame,
+                onCommitAttempt: () => {
+                    commitAttemptCount += 1;
+                },
+                proofApplicationSlotHash,
+            }),
+        ).rejects.toMatchObject({ code: 'StorageFailure' });
+        expect(commitAttemptCount).toBe(1);
+        expect(adapter.atomicMutationCount).toBeGreaterThan(0);
+    });
+
+    it('transfers exclusive ownership and blocks every operation after close', async () => {
+        const { service: retainedService } = await openService();
+        const ownedService = retainedService.claimExclusiveOwner();
+
+        expect(() => retainedService.copyAuthorityContext()).toThrowError(
+            expect.objectContaining({ code: 'InvalidState' }),
+        );
+        expect(() => retainedService.claimExclusiveOwner()).toThrowError(
+            expect.objectContaining({ code: 'InvalidState' }),
+        );
+
+        const firstClose = ownedService.close();
+        expect(ownedService.close()).toBe(firstClose);
+        await firstClose;
+        expect(() =>
+            ownedService.compareAndLockIntent({
+                verifiedIntentBinding: verifiedReservationBinding,
+            }),
+        ).toThrowError(expect.objectContaining({ code: 'InvalidState' }));
+        expect(() => ownedService.copyAuthorityContext()).toThrowError(
+            expect.objectContaining({ code: 'InvalidState' }),
+        );
     });
 
     it('locks reservations and outputs idempotently while refusing every conflicting slot use', async () => {

@@ -9,13 +9,16 @@
 //! because p = 1 mod 2^64 for every even-base generalized Fermat prime with
 //! exponent 64.
 
-use super::wide_unsigned::{is_less_than, shift_right_one_in_place, subtract_in_place};
+#[cfg(test)]
+use super::wide_unsigned::shift_right_one_in_place;
+use super::wide_unsigned::{is_less_than, subtract_in_place};
 
 /// Field parameters plus derived Montgomery constants. `LIMB_COUNT` is the
 /// number of 64-bit limbs; the modulus must satisfy p < 2^(64 * LIMB_COUNT).
 #[derive(Clone)]
 pub(crate) struct ProofFieldParameters<const LIMB_COUNT: usize> {
     pub(crate) modulus: [u64; LIMB_COUNT],
+    #[cfg(test)]
     pub(crate) modulus_half_floor: [u64; LIMB_COUNT],
     montgomery_radix_squared: [u64; LIMB_COUNT],
     negated_modulus_inverse_word: u64,
@@ -136,10 +139,15 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
         montgomery_radix_squared: [u64; LIMB_COUNT],
         primitive_65536th_root: [u64; LIMB_COUNT],
     ) -> Self {
-        let mut modulus_half_floor = modulus;
-        shift_right_one_in_place(&mut modulus_half_floor);
+        #[cfg(test)]
+        let modulus_half_floor = {
+            let mut modulus_half_floor = modulus;
+            shift_right_one_in_place(&mut modulus_half_floor);
+            modulus_half_floor
+        };
         Self {
             modulus,
+            #[cfg(test)]
             modulus_half_floor,
             montgomery_radix_squared,
             negated_modulus_inverse_word: negated_inverse_word(modulus[0]),
@@ -162,6 +170,7 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
     }
 
     /// Converts a Montgomery-form element back to its canonical residue.
+    #[cfg(test)]
     pub(crate) fn to_raw_value(&self, element: &[u64; LIMB_COUNT]) -> [u64; LIMB_COUNT] {
         let mut one_raw = [0_u64; LIMB_COUNT];
         one_raw[0] = 1;
@@ -176,6 +185,7 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
 
     /// Maps a signed word to its centered residue: negative values become
     /// p - |value|.
+    #[cfg(test)]
     pub(crate) fn signed_word_to_element(&self, value: i64) -> [u64; LIMB_COUNT] {
         if value >= 0 {
             return self.unsigned_word_to_element(value as u64);
@@ -308,6 +318,7 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
 
     /// Lifts a Montgomery element to its centered integer representative,
     /// returned as (is_negative, magnitude limbs).
+    #[cfg(test)]
     pub(crate) fn centered_raw(&self, element: &[u64; LIMB_COUNT]) -> (bool, [u64; LIMB_COUNT]) {
         let raw = self.to_raw_value(element);
         if is_less_than(&self.modulus_half_floor, &raw) {

@@ -9,14 +9,21 @@ import {
     bytesToHex,
     copyBoundedBytes,
     copyExactBytes,
+    copyRuntimeRecordProtectionAuthorityContext,
     copyRuntimeStorageAuthorityContext,
     createRuntimeRecordProtection,
     mapStorageError,
     readRuntimeRecord,
+    releaseRuntimeRecordProtection,
     sampleRuntimeIdentifier,
     stageRuntimeRecordWrite,
+    type RuntimeRecordProtection,
     type RuntimeStorageAuthorityContext,
 } from './authenticated-runtime-record.js';
+import {
+    ExclusiveResourceLifecycle,
+    type ExclusiveResourceOwnerToken,
+} from './exclusive-resource-lifecycle.js';
 import type {
     UntrustedStorageTransaction,
     UntrustedStorageTransactionStore,
@@ -44,6 +51,7 @@ const fatalTextDecoder = new TextDecoder('utf-8', { fatal: true });
 const checkpointOperationIdentityBrand = Symbol(
     'checkpoint-operation-identity',
 );
+const storedCheckpointManifestHeaderByteLength = 2 + identifierByteLength + 4;
 
 export type CheckpointRandomCursor = Readonly<{
     derivationContextHash: Uint8Array;
@@ -127,7 +135,9 @@ export type ResumedCheckpoint = Readonly<{
 }>;
 
 export type AuthenticatedCheckpointStore = Readonly<{
+    close(): Promise<void>;
     copyAuthorityContext(): RuntimeStorageAuthorityContext;
+    copyStorageInstanceIdentity(): Uint8Array;
     beginOperation(
         streamAttemptIdentifiers: readonly Uint8Array[],
     ): Promise<CheckpointOperationIdentity>;
@@ -144,23 +154,24 @@ export type AuthenticatedCheckpointStore = Readonly<{
     }): Promise<ResumedCheckpoint>;
 }>;
 
+export type TransferableAuthenticatedCheckpointStore =
+    AuthenticatedCheckpointStore &
+        Readonly<{
+            claimExclusiveOwner(): AuthenticatedCheckpointStore;
+        }>;
+
 type StreamDescriptor = Readonly<{
     fullObjectDigest: Uint8Array;
     orderedChunkDigests: readonly Uint8Array[];
     totalByteLength: number;
 }>;
 
-type StoredCheckpointManifest = Readonly<{
-    canonicalManifest: string;
+type DecodedCheckpointManifest = Readonly<{
+    canonicalManifestBytes: Uint8Array;
+    chunkRecordKeys: readonly string[];
     publicationIdentifier: string;
-    recordVersion: number;
+    stateStreamDescriptorBytes: Uint8Array;
 }>;
-
-type DecodedCheckpointManifest = StoredCheckpointManifest &
-    Readonly<{
-        chunkRecordKeys: readonly string[];
-        stateStreamDescriptorBytes: Uint8Array;
-    }>;
 
 type StoredCheckpointJournal = Readonly<{
     checkpointLineageIdentifier: string;
@@ -196,15 +207,6 @@ const requireSafePositiveInteger = (value: number, label: string): void => {
         throw new AuthenticatedRuntimeRecordError(
             'InvalidConfiguration',
             `${label} must be a positive safe integer.`,
-        );
-    }
-};
-
-const requireSafeNonnegativeInteger = (value: number, label: string): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new AuthenticatedRuntimeRecordError(
-            'InvalidInput',
-            `${label} must be a non-negative safe integer.`,
         );
     }
 };
@@ -837,6 +839,79 @@ const authenticateFullObjectDigest = (
     }
 };
 
+/**
+ * Canonical descriptor producer shared by worker-owned checkpoint publishers.
+ * Keeping this beside the accepting parser prevents a second descriptor
+ * representation from drifting away from checkpoint verification.
+ */
+export const describeAuthenticatedCheckpointStateStream = (input: {
+    stateBytes: Uint8Array;
+    stateStreamDomain: string;
+}): Uint8Array => {
+    if (
+        !(input.stateBytes instanceof Uint8Array) ||
+        input.stateBytes.byteLength === 0 ||
+        input.stateBytes.byteLength >
+            foundationProfile.maximumCanonicalStreamByteLength ||
+        typeof input.stateStreamDomain !== 'string' ||
+        input.stateStreamDomain.length === 0 ||
+        textEncoder.encode(input.stateStreamDomain).byteLength >
+            maximumStateStreamDomainByteLength
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'Checkpoint state cannot be described within the canonical stream profile.',
+        );
+    }
+    const orderedChunkDigests: Uint8Array[] = [];
+    const fullObjectDigestHasher = createFullObjectDigestHasher({
+        stateStreamDomain: input.stateStreamDomain,
+        totalByteLength: input.stateBytes.byteLength,
+    });
+    try {
+        for (
+            let chunkOffset = 0, chunkIndex = 0;
+            chunkOffset < input.stateBytes.byteLength;
+            chunkOffset += foundationProfile.streamChunkByteLength,
+                chunkIndex += 1
+        ) {
+            const chunkBytes = input.stateBytes.subarray(
+                chunkOffset,
+                Math.min(
+                    input.stateBytes.byteLength,
+                    chunkOffset + foundationProfile.streamChunkByteLength,
+                ),
+            );
+            orderedChunkDigests.push(
+                deriveChunkDigest({
+                    chunkBytes,
+                    chunkIndex,
+                    stateStreamDomain: input.stateStreamDomain,
+                }),
+            );
+            fullObjectDigestHasher.update(chunkBytes);
+        }
+        const fullObjectDigest = fullObjectDigestHasher.digest();
+        try {
+            return encodeCanonicalTuple(streamDescriptorSchemaIdentifier, [
+                fixedCanonicalItem(
+                    0x05,
+                    unsigned64LittleEndian(BigInt(input.stateBytes.byteLength)),
+                ),
+                homogeneousListCanonicalItem(0x06, orderedChunkDigests),
+                fixedCanonicalItem(0x06, fullObjectDigest),
+            ]);
+        } finally {
+            fullObjectDigest.fill(0);
+        }
+    } finally {
+        fullObjectDigestHasher.destroy();
+        for (const digest of orderedChunkDigests) {
+            digest.fill(0);
+        }
+    }
+};
+
 const expectedChunkByteLength = (
     descriptor: StreamDescriptor,
     chunkIndex: number,
@@ -1048,22 +1123,45 @@ const decodeStoredManifest = (
     limits: AuthenticatedCheckpointStoreLimits,
     lineageIdentifier: Uint8Array,
 ): DecodedCheckpointManifest => {
-    const value = parseCanonicalJsonRecord(bytes, 'checkpoint manifest record');
-    requireExactKeys(
-        value,
-        ['canonicalManifest', 'publicationIdentifier', 'recordVersion'],
-        'checkpoint manifest record',
-    );
-    if (value.recordVersion !== checkpointRecordVersion) {
+    if (
+        bytes.byteLength < storedCheckpointManifestHeaderByteLength ||
+        bytes.byteLength >
+            storedCheckpointManifestHeaderByteLength +
+                limits.maximumManifestByteLength
+    ) {
         throw new AuthenticatedRuntimeRecordError(
             'AuthenticationFailed',
-            'Checkpoint manifest record has an unsupported version.',
+            'Checkpoint manifest storage record has an invalid byte length.',
         );
     }
-    const canonicalManifestBytes = decodeCanonicalHex(
-        value.canonicalManifest,
-        limits.maximumManifestByteLength,
-        'canonicalManifest',
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const recordVersion = view.getUint16(0, true);
+    const canonicalManifestByteLength = view.getUint32(
+        2 + identifierByteLength,
+        true,
+    );
+    if (
+        recordVersion !== checkpointRecordVersion ||
+        canonicalManifestByteLength === 0 ||
+        canonicalManifestByteLength > limits.maximumManifestByteLength ||
+        storedCheckpointManifestHeaderByteLength +
+            canonicalManifestByteLength !==
+            bytes.byteLength
+    ) {
+        throw new AuthenticatedRuntimeRecordError(
+            'AuthenticationFailed',
+            'Checkpoint manifest storage record has noncanonical framing.',
+        );
+    }
+    const publicationIdentifierBytes = bytes.slice(2, 2 + identifierByteLength);
+    if (publicationIdentifierBytes.every((byte) => byte === 0)) {
+        throw new AuthenticatedRuntimeRecordError(
+            'AuthenticationFailed',
+            'Checkpoint manifest storage record has an invalid publication identifier.',
+        );
+    }
+    const canonicalManifestBytes = bytes.slice(
+        storedCheckpointManifestHeaderByteLength,
     );
     const manifestReferences = parseCheckpointManifestReferences(
         canonicalManifestBytes,
@@ -1083,14 +1181,9 @@ const decodeStoredManifest = (
         manifestReferences.stateStreamDescriptorBytes,
         limits,
     );
-    const publicationIdentifierBytes = decodeExactHex(
-        value.publicationIdentifier,
-        identifierByteLength,
-        'publicationIdentifier',
-    );
     const publicationIdentifier = bytesToHex(publicationIdentifierBytes);
     return {
-        canonicalManifest: bytesToHex(canonicalManifestBytes),
+        canonicalManifestBytes,
         chunkRecordKeys: descriptor.orderedChunkDigests.map(
             (chunkDigest, chunkIndex) =>
                 chunkRecordKey({
@@ -1101,10 +1194,33 @@ const decodeStoredManifest = (
                 }),
         ),
         publicationIdentifier,
-        recordVersion: checkpointRecordVersion,
         stateStreamDescriptorBytes:
             manifestReferences.stateStreamDescriptorBytes,
     };
+};
+
+const encodeStoredManifest = (input: {
+    canonicalManifestBytes: Uint8Array;
+    publicationIdentifier: Uint8Array;
+}): Uint8Array => {
+    const canonicalManifestByteLength = input.canonicalManifestBytes.byteLength;
+    if (canonicalManifestByteLength === 0) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'Canonical checkpoint manifest must not be empty.',
+        );
+    }
+    const publicationIdentifier = copyExactBytes(
+        input.publicationIdentifier,
+        identifierByteLength,
+        'publicationIdentifier',
+    );
+    return concatenateBytes([
+        unsigned16LittleEndian(checkpointRecordVersion),
+        publicationIdentifier,
+        unsigned32LittleEndian(canonicalManifestByteLength),
+        input.canonicalManifestBytes,
+    ]);
 };
 
 const decodeStoredJournal = (
@@ -1277,40 +1393,34 @@ const runCheckpointLineageExclusive = async <Result>(
     }
 };
 
-export const openAuthenticatedCheckpointStore = (input: {
-    authorityContext: RuntimeStorageAuthorityContext;
-    boundaryPolicy: CheckpointBoundaryPolicy;
-    cryptoProvider?: Crypto;
-    cursorKernel: CheckpointRandomCursorKernel;
-    encryptionKey: CryptoKey;
-    limits: AuthenticatedCheckpointStoreLimits;
-    store: UntrustedStorageTransactionStore;
-}): AuthenticatedCheckpointStore => {
+const validateAuthenticatedCheckpointStoreLimits = (
+    limits: AuthenticatedCheckpointStoreLimits,
+): AuthenticatedCheckpointStoreLimits => {
     for (const [value, label] of [
         [
-            input.limits.maximumCheckpointStateByteLength,
+            limits.maximumCheckpointStateByteLength,
             'maximumCheckpointStateByteLength',
         ],
-        [input.limits.maximumManifestByteLength, 'maximumManifestByteLength'],
-        [input.limits.maximumRandomCursorCount, 'maximumRandomCursorCount'],
-        [input.limits.maximumRecordSealingCount, 'maximumRecordSealingCount'],
-        [input.limits.maximumSourceDigestCount, 'maximumSourceDigestCount'],
-        [input.limits.maximumStreamAttemptCount, 'maximumStreamAttemptCount'],
+        [limits.maximumManifestByteLength, 'maximumManifestByteLength'],
+        [limits.maximumRandomCursorCount, 'maximumRandomCursorCount'],
+        [limits.maximumRecordSealingCount, 'maximumRecordSealingCount'],
+        [limits.maximumSourceDigestCount, 'maximumSourceDigestCount'],
+        [limits.maximumStreamAttemptCount, 'maximumStreamAttemptCount'],
         [
-            input.limits.transactionLifetimeMilliseconds,
+            limits.transactionLifetimeMilliseconds,
             'transactionLifetimeMilliseconds',
         ],
     ] as const) {
         requireSafePositiveInteger(value, label);
     }
-    if (input.limits.maximumRecordSealingCount > 0x1_0000_0000) {
+    if (limits.maximumRecordSealingCount > 0x1_0000_0000) {
         throw new AuthenticatedRuntimeRecordError(
             'InvalidConfiguration',
             'maximumRecordSealingCount exceeds the AES-GCM random-nonce invocation ceiling.',
         );
     }
     if (
-        input.limits.maximumCheckpointStateByteLength >
+        limits.maximumCheckpointStateByteLength >
         foundationProfile.maximumCanonicalStreamByteLength
     ) {
         throw new AuthenticatedRuntimeRecordError(
@@ -1318,18 +1428,27 @@ export const openAuthenticatedCheckpointStore = (input: {
             'maximumCheckpointStateByteLength exceeds the canonical stream profile.',
         );
     }
-    const limits = Object.freeze({ ...input.limits });
-    const protection = createRuntimeRecordProtection({
-        authorityContext: input.authorityContext,
-        cryptoProvider: input.cryptoProvider,
-        encryptionKey: input.encryptionKey,
-        maximumRecordSealingCount: limits.maximumRecordSealingCount,
-    });
+    return Object.freeze({ ...limits });
+};
+
+export const openAuthenticatedCheckpointStoreWithProtection = (input: {
+    boundaryPolicy: CheckpointBoundaryPolicy;
+    cursorKernel: CheckpointRandomCursorKernel;
+    limits: AuthenticatedCheckpointStoreLimits;
+    protection: RuntimeRecordProtection;
+    store: UntrustedStorageTransactionStore;
+}): TransferableAuthenticatedCheckpointStore => {
+    const limits = validateAuthenticatedCheckpointStoreLimits(input.limits);
+    const protection = input.protection;
+    const authorityContext =
+        copyRuntimeRecordProtectionAuthorityContext(protection);
     const issuedIdentifiers = new Set<string>();
-    const operationIdentities = new WeakMap<
+    let operationIdentities = new WeakMap<
         CheckpointOperationIdentity,
         CheckpointOperationIdentityRecord
     >();
+    const issuedOperationIdentityRecords =
+        new Set<CheckpointOperationIdentityRecord>();
 
     const createOperationIdentity = (
         checkpointLineageIdentifier: Uint8Array,
@@ -1354,7 +1473,7 @@ export const openAuthenticatedCheckpointStore = (input: {
                 );
             },
         });
-        operationIdentities.set(identity, {
+        const identityRecord: CheckpointOperationIdentityRecord = {
             checkpointLineageIdentifier: lineageIdentifier,
             ...(resumedPublication === undefined
                 ? {}
@@ -1374,7 +1493,9 @@ export const openAuthenticatedCheckpointStore = (input: {
                           resumedPublication.boundary.stateStreamDomain,
                   }),
             streamAttemptIdentifiers: Object.freeze(attemptIdentifiers),
-        });
+        };
+        operationIdentities.set(identity, identityRecord);
+        issuedOperationIdentityRecords.add(identityRecord);
         return identity;
     };
 
@@ -1772,11 +1893,7 @@ export const openAuthenticatedCheckpointStore = (input: {
         const previousCanonicalManifestBytes =
             previousManifest === undefined
                 ? undefined
-                : decodeCanonicalHex(
-                      previousManifest.record.canonicalManifest,
-                      limits.maximumManifestByteLength,
-                      'canonicalManifest',
-                  );
+                : previousManifest.record.canonicalManifestBytes.slice();
         if (
             (issuedIdentity.lastCanonicalManifestBytes === undefined) !==
                 (previousCanonicalManifestBytes === undefined) ||
@@ -1793,7 +1910,7 @@ export const openAuthenticatedCheckpointStore = (input: {
             );
         }
         const canonicalManifestBytes = encodeCheckpointManifest({
-            authorityContext: protection.authorityContext,
+            authorityContext,
             boundary,
             checkpointLineageIdentifier: lineageIdentifier,
             cursorKernel: input.cursorKernel,
@@ -1942,12 +2059,11 @@ export const openAuthenticatedCheckpointStore = (input: {
             fullObjectDigestHasher.destroy();
         }
 
-        const storedManifest: StoredCheckpointManifest = {
-            canonicalManifest: bytesToHex(canonicalManifestBytes),
-            publicationIdentifier: bytesToHex(publicationIdentifier),
-            recordVersion: checkpointRecordVersion,
-        };
-        const manifestPlaintext = encodeCanonicalJson(storedManifest);
+        const storedPublicationIdentifier = bytesToHex(publicationIdentifier);
+        const manifestPlaintext = encodeStoredManifest({
+            canonicalManifestBytes,
+            publicationIdentifier,
+        });
         const manifestTransaction = await input.store.beginTransaction({
             lifetimeMilliseconds: limits.transactionLifetimeMilliseconds,
         });
@@ -1976,9 +2092,11 @@ export const openAuthenticatedCheckpointStore = (input: {
             const observedManifest = await readManifest(lineageIdentifier);
             if (
                 observedManifest?.record.publicationIdentifier ===
-                    storedManifest.publicationIdentifier &&
-                observedManifest.record.canonicalManifest ===
-                    storedManifest.canonicalManifest
+                    storedPublicationIdentifier &&
+                bytesEqual(
+                    observedManifest.record.canonicalManifestBytes,
+                    canonicalManifestBytes,
+                )
             ) {
                 issuedIdentity.lastCanonicalManifestBytes =
                     canonicalManifestBytes.slice();
@@ -2047,17 +2165,14 @@ export const openAuthenticatedCheckpointStore = (input: {
             manifest.record.stateStreamDescriptorBytes.slice();
         const descriptor = parseStreamDescriptor(descriptorBytes, limits);
         const expectedCanonicalManifest = encodeCheckpointManifest({
-            authorityContext: protection.authorityContext,
+            authorityContext,
             boundary: expectedBoundary,
             checkpointLineageIdentifier: lineageIdentifier,
             cursorKernel: input.cursorKernel,
             stateStreamDescriptorBytes: descriptorBytes,
         });
-        const storedCanonicalManifest = decodeCanonicalHex(
-            manifest.record.canonicalManifest,
-            limits.maximumManifestByteLength,
-            'canonicalManifest',
-        );
+        const storedCanonicalManifest =
+            manifest.record.canonicalManifestBytes.slice();
         manifest.opened.plaintext.fill(0);
         if (!bytesEqual(storedCanonicalManifest, expectedCanonicalManifest)) {
             throw new AuthenticatedRuntimeRecordError(
@@ -2281,14 +2396,97 @@ export const openAuthenticatedCheckpointStore = (input: {
         );
     };
 
+    const lifecycle = new ExclusiveResourceLifecycle({
+        cleanup: async () => {
+            operationIdentities = new WeakMap();
+            issuedIdentifiers.clear();
+            for (const identityRecord of issuedOperationIdentityRecords) {
+                identityRecord.checkpointLineageIdentifier.fill(0);
+                identityRecord.lastCanonicalManifestBytes?.fill(0);
+                for (const sourceDigest of identityRecord.lastPublishedBoundary
+                    ?.orderedSourceDigests ?? []) {
+                    sourceDigest.fill(0);
+                }
+                identityRecord.lastPublishedBoundary?.stateStreamDescriptorBytes.fill(
+                    0,
+                );
+                for (const randomCursor of identityRecord.lastPublishedBoundary
+                    ?.orderedRandomCursors ?? []) {
+                    randomCursor.derivationContextHash.fill(0);
+                    randomCursor.streamAttemptIdentifier.fill(0);
+                }
+                for (const attemptIdentifier of identityRecord.streamAttemptIdentifiers) {
+                    attemptIdentifier.fill(0);
+                }
+            }
+            issuedOperationIdentityRecords.clear();
+            authorityContext.actionContextHash.fill(0);
+            authorityContext.ceremonyContextHash.fill(0);
+            authorityContext.ownerParticipantIdentity.fill(0);
+            authorityContext.runtimeBuildManifestHash.fill(0);
+            authorityContext.suiteIdentifier.fill(0);
+            await releaseRuntimeRecordProtection(protection);
+        },
+        createInvalidStateError: (message) =>
+            new AuthenticatedRuntimeRecordError('InvalidState', message),
+    });
+    const initialOwner = lifecycle.initialOwner();
+    const createOwnedStore = (
+        owner: ExclusiveResourceOwnerToken,
+    ): AuthenticatedCheckpointStore =>
+        Object.freeze({
+            beginOperation: (streamAttemptIdentifiers) =>
+                lifecycle.run(owner, () =>
+                    beginOperation(streamAttemptIdentifiers),
+                ),
+            close: () => lifecycle.close(owner),
+            copyAuthorityContext: () => {
+                lifecycle.assertOpen(owner);
+                return copyRuntimeStorageAuthorityContext(authorityContext);
+            },
+            copyStorageInstanceIdentity: () => {
+                lifecycle.assertOpen(owner);
+                return input.store.copyStorageInstanceIdentity();
+            },
+            evict: (checkpointLineageIdentifier) =>
+                lifecycle.run(owner, () => evict(checkpointLineageIdentifier)),
+            publish: (publication) =>
+                lifecycle.run(owner, () => publish(publication)),
+            repair: (checkpointLineageIdentifier) =>
+                lifecycle.run(owner, () => repair(checkpointLineageIdentifier)),
+            resume: (resumeInput) =>
+                lifecycle.run(owner, () => resume(resumeInput)),
+        });
+    const initialStore = createOwnedStore(initialOwner);
     return Object.freeze({
-        beginOperation,
-        copyAuthorityContext: () =>
-            copyRuntimeStorageAuthorityContext(protection.authorityContext),
-        evict,
-        publish,
-        repair,
-        resume,
+        ...initialStore,
+        claimExclusiveOwner: () =>
+            createOwnedStore(lifecycle.claim(initialOwner)),
+    });
+};
+
+/** Local-key constructor retained only for focused storage tests. */
+export const openAuthenticatedCheckpointStore = (input: {
+    authorityContext: RuntimeStorageAuthorityContext;
+    boundaryPolicy: CheckpointBoundaryPolicy;
+    cryptoProvider?: Crypto;
+    cursorKernel: CheckpointRandomCursorKernel;
+    encryptionKey: CryptoKey;
+    limits: AuthenticatedCheckpointStoreLimits;
+    store: UntrustedStorageTransactionStore;
+}): TransferableAuthenticatedCheckpointStore => {
+    const limits = validateAuthenticatedCheckpointStoreLimits(input.limits);
+    return openAuthenticatedCheckpointStoreWithProtection({
+        boundaryPolicy: input.boundaryPolicy,
+        cursorKernel: input.cursorKernel,
+        limits,
+        protection: createRuntimeRecordProtection({
+            authorityContext: input.authorityContext,
+            cryptoProvider: input.cryptoProvider,
+            encryptionKey: input.encryptionKey,
+            maximumRecordSealingCount: limits.maximumRecordSealingCount,
+        }),
+        store: input.store,
     });
 };
 

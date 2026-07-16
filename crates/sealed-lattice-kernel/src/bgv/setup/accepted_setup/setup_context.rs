@@ -173,7 +173,7 @@ fn compare_expected_hash(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("setupContext.{context_field_name} must be a protocol hash"),
             )
         })?;

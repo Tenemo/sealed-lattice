@@ -4,7 +4,7 @@ use super::committed_material::{
 };
 use super::{CompiledRelationPlan, RelationPlanCheckContext, RelationPlanError};
 
-const AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x2111;
+const AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 = crate::foundation::ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
 const ORDERED_SOURCE_SHARE_ROOTS_FIELD_ORDINAL: u64 = 8;
 const AGGREGATE_THRESHOLD_SHARE_ROOTS_FIELD_ORDINAL: u64 = 9;
 

@@ -1,4 +1,3 @@
-import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 type RelinearizationLevelScheduleEntry = Readonly<{
@@ -18,15 +17,3 @@ export type EvaluatorKeySchedule = Readonly<{
     readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
     readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
 }>;
-
-export const deriveEvaluatorKeyScheduleRoot = (
-    schedule: EvaluatorKeySchedule,
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        objectType: schedule.objectType,
-        setupContextHash: schedule.setupContextHash,
-        publicMatrixSeedHash: schedule.publicMatrixSeedHash,
-        publicKeyShareSetRoot: schedule.publicKeyShareSetRoot,
-        relinearizationLevelSchedule: schedule.relinearizationLevelSchedule,
-        requiredGaloisKeySchedule: schedule.requiredGaloisKeySchedule,
-    });

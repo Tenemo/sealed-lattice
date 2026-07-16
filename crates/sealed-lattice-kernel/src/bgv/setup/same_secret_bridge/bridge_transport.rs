@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::bgv::setup::setup_proof::take_verified_setup_proof_material_bytes;
+use crate::bgv::setup::setup_proof::take_authenticated_setup_proof_material_bytes;
 
 #[derive(Debug)]
 pub(super) struct ValidatedSameSecretBridgeProofReference {
@@ -20,7 +20,7 @@ pub(super) fn resolve_same_secret_bridge_proof_bytes(
     reference: ValidatedSameSecretBridgeProofReference,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    let proof_bytes = take_verified_setup_proof_material_bytes(
+    let proof_bytes = take_authenticated_setup_proof_material_bytes(
         SAME_SECRET_BRIDGE_PROOF_FAMILY,
         &reference.proof_bytes_hash,
         "same-secret bridge proofBytesHash",

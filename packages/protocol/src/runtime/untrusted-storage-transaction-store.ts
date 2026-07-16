@@ -1,14 +1,29 @@
+import { sha512 } from '@noble/hashes/sha2.js';
+
 const textEncoder = new TextEncoder();
 const fatalTextDecoder = new TextDecoder('utf-8', { fatal: true });
 const maximumLogicalRecordKeyByteLength = 1024;
 const identifierByteLength = 32;
 const encodedIdentifierCharacterLength = identifierByteLength * 2;
 const identifierPattern = /^[0-9a-f]{64}$/u;
-const hashPattern = /^[0-9a-f]{128}$/u;
 const namespacePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
-const canonicalUnsignedDecimalPattern = /^(?:0|[1-9][0-9]*)$/u;
 const maximumUnsigned64 = 0xffff_ffff_ffff_ffffn;
 const authenticatedRepairHeadRecordVersion = 1;
+const authenticatedRepairHeadMagic = Uint8Array.of(0x53, 0x4c, 0x52, 0x48);
+const authenticatedRepairHeadFixedByteLength =
+    authenticatedRepairHeadMagic.byteLength +
+    2 +
+    8 +
+    identifierByteLength +
+    64 +
+    64 +
+    4;
+const authorizedEmptyHeadDigestDomain = textEncoder.encode(
+    'sealed-lattice/authenticated-storage-empty-head/v1',
+);
+const storageInstanceIdentityDomain = textEncoder.encode(
+    'sealed-lattice/authenticated-storage-instance/v1',
+);
 
 export type UntrustedStorageTransactionErrorCode =
     | 'AdapterFailure'
@@ -66,6 +81,15 @@ export type UntrustedStorageAdapter = Readonly<{
     write(key: string, value: Uint8Array): Promise<void>;
     delete(key: string): Promise<void>;
     listKeys(prefix: string): Promise<readonly string[]>;
+    /**
+     * Atomically verifies that none of the current values below indexPrefix
+     * reference an objectKey, then deletes every supplied object key. Returns
+     * false without deleting anything when a reference is present.
+     */
+    deleteUnreferencedObjects(input: {
+        indexPrefix: string;
+        objectKeys: readonly string[];
+    }): Promise<boolean>;
     applyAtomicMutation(
         mutation: UntrustedStorageAtomicMutation,
     ): Promise<boolean>;
@@ -130,6 +154,28 @@ export type UntrustedStorageRepairReport = Readonly<{
 export type UntrustedStorageTransactionStoreOpenResult = Readonly<{
     repairReport: UntrustedStorageRepairReport;
     store: UntrustedStorageTransactionStore;
+}>;
+
+export type UntrustedStorageAuthenticatedHeadSnapshot = Readonly<{
+    authenticatedHeadDigest: Uint8Array;
+    namespaceSequence: bigint;
+    storageInstanceIdentity: Uint8Array;
+}>;
+
+export type UntrustedStorageExclusiveCapacityReservation = Readonly<{
+    copyAuthenticatedLogicalRecordKeys(
+        prefix: string,
+    ): Promise<readonly string[]>;
+    deleteAuthenticatedLogicalRecords(prefix: string): Promise<number>;
+    release(): Promise<void>;
+}>;
+
+export type UntrustedStorageExclusiveCapacityReservationInput = Readonly<{
+    initialLogicalRecordKeyPrefixes: readonly string[];
+    maximumAdditionalAuthenticatedRepairHeadPlaintextByteLength: number;
+    maximumAdditionalOwnedRecordCount: number;
+    maximumAdditionalStoredValueByteLength: number;
+    maximumDeletionBatchRecordCount: number;
 }>;
 
 type IdentifierKind = 'lease' | 'transaction';
@@ -224,6 +270,7 @@ type TransactionState =
 
 type TransactionRecord = {
     authenticatedRepairPublication: AuthenticatedRepairPublication | undefined;
+    capacityReservationIdentifier: symbol | undefined;
     changes: Map<string, TransactionChange>;
     expiresAtMilliseconds: number;
     identifier: string;
@@ -232,44 +279,202 @@ type TransactionRecord = {
     totalDeclaredByteLength: number;
 };
 
-const hasExactKeys = (
-    value: Record<string, unknown>,
-    expectedKeys: readonly string[],
-): boolean => {
-    const keys = Object.keys(value);
-
-    return (
-        keys.length === expectedKeys.length &&
-        keys.every((key, index) => key === expectedKeys[index])
-    );
+type ExclusiveCapacityReservationRecord = {
+    readonly identifier: symbol;
+    readonly logicalRecordKeyPrefixes: Set<string>;
+    readonly maximumDeletionBatchRecordCount: number;
+    released: boolean;
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isUint8Array = (value: unknown): value is Uint8Array =>
     ArrayBuffer.isView(value) &&
     Object.prototype.toString.call(value) === '[object Uint8Array]';
 
+const hexToExactBytes = (
+    encodedBytes: string,
+    expectedByteLength: number,
+    label: string,
+): Uint8Array => {
+    if (
+        !Number.isInteger(expectedByteLength) ||
+        expectedByteLength < 0 ||
+        encodedBytes.length !== expectedByteLength * 2 ||
+        !/^[0-9a-f]+$/u.test(encodedBytes)
+    ) {
+        throw new UntrustedStorageTransactionError(
+            'AuthenticationFailed',
+            `${label} is not canonical lowercase hexadecimal bytes.`,
+        );
+    }
+    const bytes = new Uint8Array(expectedByteLength);
+    for (let byteIndex = 0; byteIndex < bytes.byteLength; byteIndex += 1) {
+        bytes[byteIndex] = Number.parseInt(
+            encodedBytes.slice(byteIndex * 2, byteIndex * 2 + 2),
+            16,
+        );
+    }
+    return bytes;
+};
+
+const compareBytesLexicographically = (
+    left: Uint8Array,
+    right: Uint8Array,
+): number => {
+    const sharedLength = Math.min(left.byteLength, right.byteLength);
+    for (let byteIndex = 0; byteIndex < sharedLength; byteIndex += 1) {
+        const difference = left[byteIndex] - right[byteIndex];
+        if (difference !== 0) {
+            return difference;
+        }
+    }
+    return left.byteLength - right.byteLength;
+};
+
 const encodeAuthenticatedRepairHead = (
     head: StoredAuthenticatedRepairHeadRecord,
-): Uint8Array =>
-    textEncoder.encode(
-        JSON.stringify({
-            lastTransactionIdentifier: head.lastTransactionIdentifier,
-            predecessorHeadDigest: head.predecessorHeadDigest,
-            recordVersion: head.recordVersion,
-            records: [...head.records.entries()].map(
-                ([encodedLogicalRecordKey, record]) => ({
-                    logicalRecordKeyHex: encodedLogicalRecordKey,
-                    objectKey: record.objectKey,
-                    sealedValueDigest: record.sealedValueDigest,
-                }),
-            ),
-            repairIdentity: head.repairIdentity,
-            transitionSequence: head.transitionSequence.toString(10),
-        }),
+): Uint8Array => {
+    if (
+        head.recordVersion !== authenticatedRepairHeadRecordVersion ||
+        head.transitionSequence === 0n ||
+        head.transitionSequence > maximumUnsigned64 ||
+        head.records.size > 0xffff_ffff
+    ) {
+        throw new UntrustedStorageTransactionError(
+            'AuthenticationFailed',
+            'authenticated repair head fields are outside the binary profile.',
+        );
+    }
+    const lastTransactionIdentifier = hexToExactBytes(
+        head.lastTransactionIdentifier,
+        identifierByteLength,
+        'authenticated repair transaction identifier',
     );
+    const predecessorHeadDigest = hexToExactBytes(
+        head.predecessorHeadDigest,
+        64,
+        'authenticated repair predecessor digest',
+    );
+    const repairIdentity = hexToExactBytes(
+        head.repairIdentity,
+        64,
+        'authenticated repair identity',
+    );
+    let previousLogicalRecordKey: Uint8Array | undefined;
+    const encodedRecords = [...head.records.entries()].map(
+        ([logicalRecordKeyHex, record]) => {
+            const logicalRecordKey = hexToExactBytes(
+                logicalRecordKeyHex,
+                logicalRecordKeyHex.length / 2,
+                'authenticated repair logical record key',
+            );
+            const objectKey = textEncoder.encode(record.objectKey);
+            let decodedLogicalRecordKey: string;
+            try {
+                decodedLogicalRecordKey =
+                    fatalTextDecoder.decode(logicalRecordKey);
+            } catch (error) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated repair logical record key is not valid UTF-8.',
+                    error,
+                );
+            }
+            if (
+                logicalRecordKey.byteLength === 0 ||
+                logicalRecordKey.byteLength >
+                    maximumLogicalRecordKeyByteLength ||
+                objectKey.byteLength === 0 ||
+                objectKey.byteLength > 0xffff ||
+                !bytesEqual(
+                    textEncoder.encode(decodedLogicalRecordKey),
+                    logicalRecordKey,
+                ) ||
+                fatalTextDecoder.decode(objectKey) !== record.objectKey
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated repair record keys are outside the binary profile.',
+                );
+            }
+            if (
+                previousLogicalRecordKey !== undefined &&
+                compareBytesLexicographically(
+                    previousLogicalRecordKey,
+                    logicalRecordKey,
+                ) >= 0
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated repair records are not strictly ordered.',
+                );
+            }
+            previousLogicalRecordKey = logicalRecordKey;
+            const sealedValueDigest = hexToExactBytes(
+                record.sealedValueDigest,
+                64,
+                'authenticated repair sealed-value digest',
+            );
+            return {
+                logicalRecordKey,
+                objectKey,
+                sealedValueDigest,
+            };
+        },
+    );
+    let byteLength = authenticatedRepairHeadFixedByteLength;
+    for (const record of encodedRecords) {
+        byteLength +=
+            2 +
+            record.logicalRecordKey.byteLength +
+            2 +
+            record.objectKey.byteLength +
+            record.sealedValueDigest.byteLength;
+        if (!Number.isSafeInteger(byteLength)) {
+            throw new UntrustedStorageTransactionError(
+                'MalformedLength',
+                'authenticated repair head byte length overflowed.',
+            );
+        }
+    }
+    const bytes = new Uint8Array(byteLength);
+    const view = new DataView(bytes.buffer);
+    let offset = 0;
+    bytes.set(authenticatedRepairHeadMagic, offset);
+    offset += authenticatedRepairHeadMagic.byteLength;
+    view.setUint16(offset, head.recordVersion, true);
+    offset += 2;
+    view.setBigUint64(offset, head.transitionSequence, true);
+    offset += 8;
+    bytes.set(lastTransactionIdentifier, offset);
+    offset += lastTransactionIdentifier.byteLength;
+    bytes.set(predecessorHeadDigest, offset);
+    offset += predecessorHeadDigest.byteLength;
+    bytes.set(repairIdentity, offset);
+    offset += repairIdentity.byteLength;
+    view.setUint32(offset, encodedRecords.length, true);
+    offset += 4;
+    for (const record of encodedRecords) {
+        view.setUint16(offset, record.logicalRecordKey.byteLength, true);
+        offset += 2;
+        bytes.set(record.logicalRecordKey, offset);
+        offset += record.logicalRecordKey.byteLength;
+        view.setUint16(offset, record.objectKey.byteLength, true);
+        offset += 2;
+        bytes.set(record.objectKey, offset);
+        offset += record.objectKey.byteLength;
+        bytes.set(record.sealedValueDigest, offset);
+        offset += record.sealedValueDigest.byteLength;
+    }
+    lastTransactionIdentifier.fill(0);
+    predecessorHeadDigest.fill(0);
+    repairIdentity.fill(0);
+    for (const record of encodedRecords) {
+        record.logicalRecordKey.fill(0);
+        record.objectKey.fill(0);
+        record.sealedValueDigest.fill(0);
+    }
+    return bytes;
+};
 
 const assertSafeNonNegativeInteger = (value: number, label: string): void => {
     if (!Number.isSafeInteger(value) || value < 0) {
@@ -399,11 +604,12 @@ const assertLogicalRecordKey = (logicalRecordKey: string): Uint8Array => {
     const keyBytes = textEncoder.encode(logicalRecordKey);
     if (
         keyBytes.byteLength === 0 ||
-        keyBytes.byteLength > maximumLogicalRecordKeyByteLength
+        keyBytes.byteLength > maximumLogicalRecordKeyByteLength ||
+        fatalTextDecoder.decode(keyBytes) !== logicalRecordKey
     ) {
         throw new UntrustedStorageTransactionError(
             'MalformedLength',
-            `logicalRecordKey must encode between 1 and ${maximumLogicalRecordKeyByteLength} UTF-8 bytes.`,
+            `logicalRecordKey must be a well-formed string encoding between 1 and ${maximumLogicalRecordKeyByteLength} UTF-8 bytes.`,
         );
     }
 
@@ -413,99 +619,222 @@ const assertLogicalRecordKey = (logicalRecordKey: string): Uint8Array => {
 const logicalRecordKeyHex = (logicalRecordKey: string): string =>
     bytesToHex(assertLogicalRecordKey(logicalRecordKey));
 
+const logicalRecordKeyFromHex = (encodedLogicalRecordKey: string): string => {
+    const encodedByteLength = encodedLogicalRecordKey.length / 2;
+    const logicalRecordKeyBytes = hexToExactBytes(
+        encodedLogicalRecordKey,
+        encodedByteLength,
+        'authenticated repair logical record key',
+    );
+    try {
+        const logicalRecordKey = fatalTextDecoder.decode(logicalRecordKeyBytes);
+        if (
+            !bytesEqual(
+                textEncoder.encode(logicalRecordKey),
+                logicalRecordKeyBytes,
+            ) ||
+            logicalRecordKeyHex(logicalRecordKey) !== encodedLogicalRecordKey
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated repair logical record key is not canonical UTF-8.',
+            );
+        }
+        return logicalRecordKey;
+    } catch (error) {
+        if (error instanceof UntrustedStorageTransactionError) {
+            throw error;
+        }
+        throw new UntrustedStorageTransactionError(
+            'AuthenticationFailed',
+            'authenticated repair logical record key is not valid UTF-8.',
+            error,
+        );
+    } finally {
+        logicalRecordKeyBytes.fill(0);
+    }
+};
+
 const decodeAuthenticatedRepairHead = (input: {
     bytes: Uint8Array;
     maximumRecordCount: number;
+    maximumObjectKeyByteLength: number;
 }): StoredAuthenticatedRepairHeadRecord => {
-    let value: unknown;
-    try {
-        value = JSON.parse(fatalTextDecoder.decode(input.bytes));
-    } catch (error) {
+    if (input.bytes.byteLength < authenticatedRepairHeadFixedByteLength) {
         throw new UntrustedStorageTransactionError(
             'AuthenticationFailed',
-            'authenticated repair head is not valid JSON.',
-            error,
+            'authenticated repair head is truncated.',
         );
     }
+    const view = new DataView(
+        input.bytes.buffer,
+        input.bytes.byteOffset,
+        input.bytes.byteLength,
+    );
+    let offset = 0;
+    const readBytes = (byteLength: number, label: string): Uint8Array => {
+        if (
+            !Number.isSafeInteger(byteLength) ||
+            byteLength < 0 ||
+            offset + byteLength > input.bytes.byteLength
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                `authenticated repair head ${label} is truncated.`,
+            );
+        }
+        const bytes = input.bytes.slice(offset, offset + byteLength);
+        offset += byteLength;
+        return bytes;
+    };
+    const magic = readBytes(authenticatedRepairHeadMagic.byteLength, 'magic');
+    if (!bytesEqual(magic, authenticatedRepairHeadMagic)) {
+        throw new UntrustedStorageTransactionError(
+            'AuthenticationFailed',
+            'authenticated repair head has the wrong binary type.',
+        );
+    }
+    const recordVersion = view.getUint16(offset, true);
+    offset += 2;
+    const transitionSequence = view.getBigUint64(offset, true);
+    offset += 8;
+    const lastTransactionIdentifier = bytesToHex(
+        readBytes(identifierByteLength, 'transaction identifier'),
+    );
+    const predecessorHeadDigest = bytesToHex(
+        readBytes(64, 'predecessor digest'),
+    );
+    const repairIdentity = bytesToHex(readBytes(64, 'repair identity'));
+    const recordCount = view.getUint32(offset, true);
+    offset += 4;
     if (
-        !isRecord(value) ||
-        !hasExactKeys(value, [
-            'lastTransactionIdentifier',
-            'predecessorHeadDigest',
-            'recordVersion',
-            'records',
-            'repairIdentity',
-            'transitionSequence',
-        ]) ||
-        value.recordVersion !== authenticatedRepairHeadRecordVersion ||
-        typeof value.lastTransactionIdentifier !== 'string' ||
-        !identifierPattern.test(value.lastTransactionIdentifier) ||
-        typeof value.predecessorHeadDigest !== 'string' ||
-        !hashPattern.test(value.predecessorHeadDigest) ||
-        typeof value.repairIdentity !== 'string' ||
-        !hashPattern.test(value.repairIdentity) ||
-        typeof value.transitionSequence !== 'string' ||
-        !canonicalUnsignedDecimalPattern.test(value.transitionSequence) ||
-        !Array.isArray(value.records) ||
-        value.records.length > input.maximumRecordCount
+        recordVersion !== authenticatedRepairHeadRecordVersion ||
+        transitionSequence === 0n ||
+        recordCount > input.maximumRecordCount
     ) {
         throw new UntrustedStorageTransactionError(
             'AuthenticationFailed',
-            'authenticated repair head has a noncanonical shape.',
-        );
-    }
-    const transitionSequence = BigInt(value.transitionSequence);
-    if (transitionSequence === 0n || transitionSequence > maximumUnsigned64) {
-        throw new UntrustedStorageTransactionError(
-            'AuthenticationFailed',
-            'authenticated repair head transition sequence is invalid.',
+            'authenticated repair head is outside the binary profile.',
         );
     }
     const records = new Map<
         string,
         Readonly<{ objectKey: string; sealedValueDigest: string }>
     >();
-    let previousLogicalRecordKeyHex: string | undefined;
-    for (const record of value.records) {
+    let previousLogicalRecordKey: Uint8Array | undefined;
+    for (let recordIndex = 0; recordIndex < recordCount; recordIndex += 1) {
+        if (offset + 2 > input.bytes.byteLength) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated repair head record key length is truncated.',
+            );
+        }
+        const logicalRecordKeyByteLength = view.getUint16(offset, true);
+        offset += 2;
         if (
-            !isRecord(record) ||
-            !hasExactKeys(record, [
-                'logicalRecordKeyHex',
-                'objectKey',
-                'sealedValueDigest',
-            ]) ||
-            typeof record.logicalRecordKeyHex !== 'string' ||
-            record.logicalRecordKeyHex.length === 0 ||
-            record.logicalRecordKeyHex.length >
-                maximumLogicalRecordKeyByteLength * 2 ||
-            record.logicalRecordKeyHex.length % 2 !== 0 ||
-            !/^[0-9a-f]+$/u.test(record.logicalRecordKeyHex) ||
-            typeof record.objectKey !== 'string' ||
-            typeof record.sealedValueDigest !== 'string' ||
-            !hashPattern.test(record.sealedValueDigest) ||
-            (previousLogicalRecordKeyHex !== undefined &&
-                record.logicalRecordKeyHex <= previousLogicalRecordKeyHex)
+            logicalRecordKeyByteLength === 0 ||
+            logicalRecordKeyByteLength > maximumLogicalRecordKeyByteLength
         ) {
             throw new UntrustedStorageTransactionError(
                 'AuthenticationFailed',
-                'authenticated repair head record inventory is not canonical.',
+                'authenticated repair head record key length is invalid.',
             );
         }
+        const logicalRecordKey = readBytes(
+            logicalRecordKeyByteLength,
+            'logical record key',
+        );
+        if (
+            previousLogicalRecordKey !== undefined &&
+            compareBytesLexicographically(
+                previousLogicalRecordKey,
+                logicalRecordKey,
+            ) >= 0
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated repair head record inventory is not strictly ordered.',
+            );
+        }
+        let logicalRecordKeyText: string;
+        try {
+            logicalRecordKeyText = fatalTextDecoder.decode(logicalRecordKey);
+        } catch (error) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated repair head record key is not valid UTF-8.',
+                error,
+            );
+        }
+        if (
+            !bytesEqual(
+                textEncoder.encode(logicalRecordKeyText),
+                logicalRecordKey,
+            )
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated repair head record key is not canonical UTF-8.',
+            );
+        }
+        if (offset + 2 > input.bytes.byteLength) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated repair head object-key length is truncated.',
+            );
+        }
+        const objectKeyByteLength = view.getUint16(offset, true);
+        offset += 2;
+        if (
+            objectKeyByteLength === 0 ||
+            objectKeyByteLength > input.maximumObjectKeyByteLength
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated repair head object-key length is invalid.',
+            );
+        }
+        const objectKeyBytes = readBytes(objectKeyByteLength, 'object key');
+        let objectKey: string;
+        try {
+            objectKey = fatalTextDecoder.decode(objectKeyBytes);
+        } catch (error) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated repair head object key is not valid UTF-8.',
+                error,
+            );
+        }
+        if (!bytesEqual(textEncoder.encode(objectKey), objectKeyBytes)) {
+            throw new UntrustedStorageTransactionError(
+                'AuthenticationFailed',
+                'authenticated repair head object key is not canonical UTF-8.',
+            );
+        }
+        const decodedLogicalRecordKeyHex = bytesToHex(logicalRecordKey);
         records.set(
-            record.logicalRecordKeyHex,
+            decodedLogicalRecordKeyHex,
             Object.freeze({
-                objectKey: record.objectKey,
-                sealedValueDigest: record.sealedValueDigest,
+                objectKey,
+                sealedValueDigest: bytesToHex(
+                    readBytes(64, 'sealed-value digest'),
+                ),
             }),
         );
-        previousLogicalRecordKeyHex = record.logicalRecordKeyHex;
+        previousLogicalRecordKey = logicalRecordKey;
+    }
+    if (offset !== input.bytes.byteLength) {
+        throw new UntrustedStorageTransactionError(
+            'AuthenticationFailed',
+            'authenticated repair head has trailing bytes.',
+        );
     }
     const head = Object.freeze({
-        lastTransactionIdentifier: value.lastTransactionIdentifier,
-        predecessorHeadDigest: value.predecessorHeadDigest,
-        recordVersion: value.recordVersion,
+        lastTransactionIdentifier,
+        predecessorHeadDigest,
+        recordVersion,
         records,
-        repairIdentity: value.repairIdentity,
+        repairIdentity,
         transitionSequence,
     });
     if (!bytesEqual(input.bytes, encodeAuthenticatedRepairHead(head))) {
@@ -570,8 +899,12 @@ export class UntrustedStorageTransactionStore {
             lease: new Set<string>(),
             transaction: new Set<string>(),
         };
+    #exclusiveCapacityReservation:
+        | ExclusiveCapacityReservationRecord
+        | undefined;
     #exclusiveOperationTail: Promise<void> = Promise.resolve();
     readonly #authenticatedRepair: AuthenticatedRepairRuntime | undefined;
+    readonly #storageInstanceIdentity: Uint8Array | undefined;
 
     public constructor(
         configuration:
@@ -616,6 +949,22 @@ export class UntrustedStorageTransactionStore {
                 : createAuthenticatedRepairRuntime(
                       configuration.authenticatedRepairProtection,
                   );
+        this.#storageInstanceIdentity =
+            this.#authenticatedRepair === undefined
+                ? undefined
+                : this.#deriveStorageInstanceIdentity(
+                      this.#authenticatedRepair.protection.repairIdentity,
+                  );
+    }
+
+    public copyStorageInstanceIdentity(): Uint8Array {
+        if (this.#storageInstanceIdentity === undefined) {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'A storage instance identity requires authenticated repair protection.',
+            );
+        }
+        return this.#storageInstanceIdentity.slice();
     }
 
     public async repair(): Promise<UntrustedStorageRepairReport> {
@@ -714,7 +1063,7 @@ export class UntrustedStorageTransactionStore {
             );
             const authenticatedHeadIsPresent = repairKeys.length === 1;
             if (!authenticatedHeadIsPresent) {
-                await this.#deleteKeys(
+                await this.#deleteUnreferencedObjects(
                     unreferencedObjectKeys,
                     'repair cleanup',
                 );
@@ -731,6 +1080,253 @@ export class UntrustedStorageTransactionStore {
                 storedValueByteLength:
                     await this.#measureStoredValueByteLength(),
             };
+        });
+    }
+
+    public async reserveExclusiveCapacity(
+        input: UntrustedStorageExclusiveCapacityReservationInput,
+    ): Promise<UntrustedStorageExclusiveCapacityReservation> {
+        const reservation = await this.#runExclusive(async () => {
+            await this.#ensureAuthenticatedRepairReady();
+            if (
+                this.#authenticatedRepair === undefined ||
+                this.#authenticatedRepair.currentHead === undefined ||
+                this.#authenticatedRepair.currentSealedHeadBytes === undefined
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'InvalidState',
+                    'exclusive capacity reservation requires an authenticated repair head.',
+                );
+            }
+            if (
+                this.#exclusiveCapacityReservation !== undefined ||
+                this.#transactions.size !== 0
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'Conflict',
+                    'exclusive capacity reservation requires no other reservation or live transaction.',
+                );
+            }
+            assertSafeNonNegativeInteger(
+                input.maximumAdditionalAuthenticatedRepairHeadPlaintextByteLength,
+                'maximumAdditionalAuthenticatedRepairHeadPlaintextByteLength',
+            );
+            assertSafeNonNegativeInteger(
+                input.maximumAdditionalOwnedRecordCount,
+                'maximumAdditionalOwnedRecordCount',
+            );
+            assertSafeNonNegativeInteger(
+                input.maximumAdditionalStoredValueByteLength,
+                'maximumAdditionalStoredValueByteLength',
+            );
+            assertSafePositiveInteger(
+                input.maximumDeletionBatchRecordCount,
+                'maximumDeletionBatchRecordCount',
+            );
+            if (
+                input.maximumDeletionBatchRecordCount >
+                this.#limits.maximumLeaseCountPerTransaction
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'QuotaExceeded',
+                    'exclusive deletion batches exceed maximumLeaseCountPerTransaction.',
+                );
+            }
+            const untrustedLogicalRecordKeyPrefixes: unknown =
+                input.initialLogicalRecordKeyPrefixes;
+            if (
+                !Array.isArray(untrustedLogicalRecordKeyPrefixes) ||
+                untrustedLogicalRecordKeyPrefixes.length === 0
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'MalformedLength',
+                    'exclusive capacity reservation requires at least one logical-record prefix.',
+                );
+            }
+            const prefixes = new Set<string>();
+            for (const prefix of untrustedLogicalRecordKeyPrefixes) {
+                if (typeof prefix !== 'string') {
+                    throw new UntrustedStorageTransactionError(
+                        'MalformedLength',
+                        'exclusive capacity reservation prefixes must be strings.',
+                    );
+                }
+                this.#assertLogicalRecordKeyPrefix(prefix);
+                prefixes.add(prefix);
+            }
+            if (prefixes.size !== untrustedLogicalRecordKeyPrefixes.length) {
+                throw new UntrustedStorageTransactionError(
+                    'MalformedLength',
+                    'exclusive capacity reservation prefixes must be distinct.',
+                );
+            }
+
+            const repair = this.#authenticatedRepair;
+            const currentHead = repair.currentHead;
+            const currentSealedHeadBytes = repair.currentSealedHeadBytes;
+            if (
+                currentHead === undefined ||
+                currentSealedHeadBytes === undefined
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'InvalidState',
+                    'exclusive capacity reservation lost its authenticated repair head.',
+                );
+            }
+            const matchingRecordKeys = this.#authenticatedLogicalRecordKeys(
+                repair,
+                prefixes,
+            );
+            let matchingStoredValueByteLength = 0;
+            for (const logicalRecordKey of matchingRecordKeys) {
+                const indexValue = await this.#readOwnedIndexValue(
+                    this.#indexKey(logicalRecordKey),
+                );
+                let objectValue: Uint8Array | undefined;
+                try {
+                    this.#assertAuthenticatedRepairMapping(
+                        logicalRecordKey,
+                        indexValue,
+                    );
+                    if (indexValue === undefined) {
+                        throw new UntrustedStorageTransactionError(
+                            'AuthenticationFailed',
+                            'authenticated capacity inventory references a missing index.',
+                        );
+                    }
+                    const objectKey = this.#decodeIndexValue(indexValue);
+                    objectValue = await this.#readOwnedObjectValue(objectKey);
+                    if (objectValue === undefined) {
+                        throw new UntrustedStorageTransactionError(
+                            'AuthenticationFailed',
+                            'authenticated capacity inventory references a missing object.',
+                        );
+                    }
+                    await this.#assertAuthenticatedRepairObjectDigest(
+                        logicalRecordKey,
+                        objectValue,
+                    );
+                    matchingStoredValueByteLength = checkedAdd(
+                        matchingStoredValueByteLength,
+                        checkedAdd(
+                            indexValue.byteLength,
+                            objectValue.byteLength,
+                            'authenticated capacity inventory record bytes',
+                        ),
+                        'authenticated capacity inventory bytes',
+                    );
+                } finally {
+                    indexValue?.fill(0);
+                    objectValue?.fill(0);
+                }
+            }
+
+            const filteredRecords = new Map(currentHead.records);
+            for (const logicalRecordKey of matchingRecordKeys) {
+                filteredRecords.delete(logicalRecordKeyHex(logicalRecordKey));
+            }
+            const filteredHead = Object.freeze({
+                ...currentHead,
+                records: new Map(
+                    [...filteredRecords].sort(([left], [right]) =>
+                        left.localeCompare(right),
+                    ),
+                ),
+            });
+            const currentHeadPlaintext =
+                encodeAuthenticatedRepairHead(currentHead);
+            const filteredHeadPlaintext =
+                encodeAuthenticatedRepairHead(filteredHead);
+            const sealedHeadOverheadByteLength =
+                currentSealedHeadBytes.byteLength -
+                currentHeadPlaintext.byteLength;
+            currentHeadPlaintext.fill(0);
+            if (sealedHeadOverheadByteLength < 0) {
+                filteredHeadPlaintext.fill(0);
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated repair protection shortened the canonical head.',
+                );
+            }
+            const reservedHeadByteLength = checkedAdd(
+                checkedAdd(
+                    filteredHeadPlaintext.byteLength,
+                    sealedHeadOverheadByteLength,
+                    'reserved authenticated repair head envelope',
+                ),
+                input.maximumAdditionalAuthenticatedRepairHeadPlaintextByteLength,
+                'reserved authenticated repair head bytes',
+            );
+            filteredHeadPlaintext.fill(0);
+            const currentStoredValueByteLength =
+                await this.#measureStoredValueByteLength();
+            const baselineNonHeadStoredValueByteLength =
+                currentStoredValueByteLength -
+                matchingStoredValueByteLength -
+                currentSealedHeadBytes.byteLength;
+            if (baselineNonHeadStoredValueByteLength < 0) {
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated capacity inventory exceeds the measured namespace.',
+                );
+            }
+            const requiredStoredValueByteLength = checkedAdd(
+                checkedAdd(
+                    baselineNonHeadStoredValueByteLength,
+                    input.maximumAdditionalStoredValueByteLength,
+                    'exclusive stored-value reservation',
+                ),
+                reservedHeadByteLength,
+                'exclusive stored-value reservation',
+            );
+            const currentOwnedRecordCount = (
+                await this.#listedKeys(this.#rootPrefix)
+            ).length;
+            const baselineOwnedRecordCount =
+                currentOwnedRecordCount - matchingRecordKeys.length * 2;
+            const requiredOwnedRecordCount = checkedAdd(
+                baselineOwnedRecordCount,
+                input.maximumAdditionalOwnedRecordCount,
+                'exclusive owned-record reservation',
+            );
+            if (
+                requiredStoredValueByteLength >
+                    this.#limits.maximumStoredValueByteLength ||
+                requiredOwnedRecordCount > this.#limits.maximumOwnedRecordCount
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'QuotaExceeded',
+                    'live storage availability cannot satisfy the exclusive capacity reservation.',
+                );
+            }
+            const record: ExclusiveCapacityReservationRecord = {
+                identifier: Symbol('exclusive-capacity-reservation'),
+                logicalRecordKeyPrefixes: prefixes,
+                maximumDeletionBatchRecordCount:
+                    input.maximumDeletionBatchRecordCount,
+                released: false,
+            };
+            this.#exclusiveCapacityReservation = record;
+            return record;
+        });
+
+        return Object.freeze({
+            copyAuthenticatedLogicalRecordKeys: (prefix) =>
+                this.#runExclusive(() =>
+                    this.#copyExclusiveCapacityReservationRecordKeys(
+                        reservation,
+                        prefix,
+                    ),
+                ),
+            deleteAuthenticatedLogicalRecords: (prefix) =>
+                this.#deleteExclusiveCapacityReservationRecords(
+                    reservation,
+                    prefix,
+                ),
+            release: () =>
+                this.#runExclusive(() =>
+                    this.#releaseExclusiveCapacityReservation(reservation),
+                ),
         });
     }
 
@@ -784,6 +1380,8 @@ export class UntrustedStorageTransactionStore {
             }
             const transaction: TransactionRecord = {
                 authenticatedRepairPublication: undefined,
+                capacityReservationIdentifier:
+                    this.#exclusiveCapacityReservation?.identifier,
                 changes: new Map(),
                 expiresAtMilliseconds,
                 identifier,
@@ -842,6 +1440,65 @@ export class UntrustedStorageTransactionStore {
         });
     }
 
+    /**
+     * Reauthenticates the current committed namespace coordinate. The empty
+     * coordinate is explicitly domain-bound; every committed transaction then
+     * uses the authenticated repair transition sequence and sealed-head digest.
+     */
+    public async authenticateCurrentHead(): Promise<UntrustedStorageAuthenticatedHeadSnapshot> {
+        return this.#runExclusive(async () => {
+            await this.#ensureAuthenticatedRepairReady();
+            const repair = this.#authenticatedRepair;
+            if (repair === undefined) {
+                throw new UntrustedStorageTransactionError(
+                    'InvalidState',
+                    'authenticated namespace snapshots require authenticated repair protection.',
+                );
+            }
+            await this.#assertAuthenticatedRepairHeadUnchanged();
+            const digestInput =
+                repair.currentSealedHeadBytes === undefined
+                    ? this.#authorizedEmptyHeadDigestInput(repair)
+                    : repair.currentSealedHeadBytes.slice();
+            let callbackInput: Uint8Array | undefined;
+            let derivedDigest: Uint8Array | undefined;
+            try {
+                callbackInput = digestInput.slice();
+                derivedDigest =
+                    await repair.protection.deriveDigest(callbackInput);
+                if (
+                    !isUint8Array(derivedDigest) ||
+                    derivedDigest.byteLength !== 64
+                ) {
+                    throw new UntrustedStorageTransactionError(
+                        'AuthenticationFailed',
+                        'authenticated namespace head digest has an invalid length.',
+                    );
+                }
+                await this.#assertAuthenticatedRepairHeadUnchanged();
+                return Object.freeze({
+                    authenticatedHeadDigest: derivedDigest.slice(),
+                    namespaceSequence:
+                        repair.currentHead?.transitionSequence ?? 0n,
+                    storageInstanceIdentity: this.copyStorageInstanceIdentity(),
+                });
+            } catch (error) {
+                if (error instanceof UntrustedStorageTransactionError) {
+                    throw error;
+                }
+                throw new UntrustedStorageTransactionError(
+                    'AuthenticationFailed',
+                    'authenticated namespace head digest derivation failed.',
+                    error,
+                );
+            } finally {
+                digestInput.fill(0);
+                callbackInput?.fill(0);
+                derivedDigest?.fill(0);
+            }
+        });
+    }
+
     public async cleanupExpiredTransactions(): Promise<number> {
         return this.#runExclusive(async () => {
             await this.#ensureAuthenticatedRepairReady();
@@ -863,6 +1520,187 @@ export class UntrustedStorageTransactionStore {
 
             return expiredTransactions.length;
         });
+    }
+
+    #assertLogicalRecordKeyPrefix(prefix: string): void {
+        if (typeof prefix !== 'string') {
+            throw new UntrustedStorageTransactionError(
+                'MalformedLength',
+                'logical-record prefix must be a string.',
+            );
+        }
+        const prefixBytes = assertLogicalRecordKey(prefix);
+        prefixBytes.fill(0);
+    }
+
+    #authenticatedLogicalRecordKeys(
+        repair: AuthenticatedRepairRuntime,
+        prefixes: ReadonlySet<string>,
+        maximumRecordCount = Number.MAX_SAFE_INTEGER,
+    ): string[] {
+        const head = repair.currentHead;
+        if (head === undefined) {
+            return [];
+        }
+        const logicalRecordKeys: string[] = [];
+        for (const encodedLogicalRecordKey of head.records.keys()) {
+            const logicalRecordKey = logicalRecordKeyFromHex(
+                encodedLogicalRecordKey,
+            );
+            if (
+                [...prefixes].some((prefix) =>
+                    logicalRecordKey.startsWith(prefix),
+                )
+            ) {
+                logicalRecordKeys.push(logicalRecordKey);
+                if (logicalRecordKeys.length === maximumRecordCount) {
+                    break;
+                }
+            }
+        }
+        return logicalRecordKeys.sort();
+    }
+
+    #assertActiveExclusiveCapacityReservation(
+        reservation: ExclusiveCapacityReservationRecord,
+    ): void {
+        if (
+            reservation.released ||
+            this.#exclusiveCapacityReservation !== reservation
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'exclusive capacity reservation is no longer active.',
+            );
+        }
+    }
+
+    async #copyExclusiveCapacityReservationRecordKeys(
+        reservation: ExclusiveCapacityReservationRecord,
+        prefix: string,
+        maximumRecordCount = Number.MAX_SAFE_INTEGER,
+    ): Promise<readonly string[]> {
+        this.#assertActiveExclusiveCapacityReservation(reservation);
+        this.#assertLogicalRecordKeyPrefix(prefix);
+        if (!reservation.logicalRecordKeyPrefixes.has(prefix)) {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'authenticated inventory requires an exact registered reservation prefix.',
+            );
+        }
+        await this.#ensureAuthenticatedRepairReady();
+        const repair = this.#authenticatedRepair;
+        if (repair === undefined) {
+            throw new UntrustedStorageTransactionError(
+                'InvalidState',
+                'authenticated inventory requires authenticated repair protection.',
+            );
+        }
+        await this.#assertAuthenticatedRepairHeadUnchanged();
+        return Object.freeze(
+            this.#authenticatedLogicalRecordKeys(
+                repair,
+                new Set([prefix]),
+                maximumRecordCount,
+            ),
+        );
+    }
+
+    async #deleteExclusiveCapacityReservationRecords(
+        reservation: ExclusiveCapacityReservationRecord,
+        prefix: string,
+    ): Promise<number> {
+        let deletedRecordCount = 0;
+        while (true) {
+            const logicalRecordKeys = await this.#runExclusive(() =>
+                this.#copyExclusiveCapacityReservationRecordKeys(
+                    reservation,
+                    prefix,
+                    reservation.maximumDeletionBatchRecordCount,
+                ),
+            );
+            if (logicalRecordKeys.length === 0) {
+                return deletedRecordCount;
+            }
+            const deletionBatch = logicalRecordKeys;
+            const transaction = await this.beginTransaction({
+                lifetimeMilliseconds:
+                    this.#limits.maximumTransactionLifetimeMilliseconds,
+            });
+            try {
+                for (const logicalRecordKey of deletionBatch) {
+                    await transaction.stageDeletion(logicalRecordKey);
+                }
+                await transaction.commit();
+                deletedRecordCount += deletionBatch.length;
+            } catch (error) {
+                try {
+                    await transaction.closeAfterFailure();
+                } catch (cleanupError) {
+                    throw new UntrustedStorageTransactionError(
+                        'CleanupFailed',
+                        'authenticated prefix deletion failed and could not close its transaction.',
+                        { cleanupError, operationError: error },
+                    );
+                }
+                throw error;
+            }
+        }
+    }
+
+    async #releaseExclusiveCapacityReservation(
+        reservation: ExclusiveCapacityReservationRecord,
+    ): Promise<void> {
+        if (reservation.released) {
+            return;
+        }
+        this.#assertActiveExclusiveCapacityReservation(reservation);
+        const ownedTransactions = [...this.#transactions.values()].filter(
+            (transaction) =>
+                transaction.capacityReservationIdentifier ===
+                reservation.identifier,
+        );
+        for (const transaction of ownedTransactions) {
+            await this.#abortTransaction(transaction);
+        }
+        reservation.released = true;
+        reservation.logicalRecordKeyPrefixes.clear();
+        this.#exclusiveCapacityReservation = undefined;
+    }
+
+    #assertTransactionCapacityReservationAccess(
+        transaction: TransactionRecord,
+        logicalRecordKey: string,
+    ): void {
+        const reservation = this.#exclusiveCapacityReservation;
+        if (
+            transaction.capacityReservationIdentifier === undefined ||
+            reservation === undefined ||
+            transaction.capacityReservationIdentifier !==
+                reservation.identifier ||
+            reservation.released
+        ) {
+            if (
+                transaction.capacityReservationIdentifier !== undefined ||
+                reservation !== undefined
+            ) {
+                throw new UntrustedStorageTransactionError(
+                    'Conflict',
+                    'storage transaction is outside the active exclusive capacity reservation.',
+                );
+            }
+            return;
+        }
+        if (
+            ![...reservation.logicalRecordKeyPrefixes].some((prefix) =>
+                logicalRecordKey.startsWith(prefix),
+            )
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'Conflict',
+                'storage mutation is outside the exclusive capacity reservation prefixes.',
+            );
+        }
     }
 
     #transactionHandle(
@@ -908,6 +1746,10 @@ export class UntrustedStorageTransactionStore {
         },
     ): Promise<UntrustedStorageWriteLease> {
         this.#assertActiveTransaction(transaction);
+        this.#assertTransactionCapacityReservationAccess(
+            transaction,
+            input.logicalRecordKey,
+        );
         assertSafeNonNegativeInteger(
             input.declaredByteLength,
             'declaredByteLength',
@@ -1142,6 +1984,10 @@ export class UntrustedStorageTransactionStore {
         expectedCurrentValue: Uint8Array | null | undefined,
     ): Promise<void> {
         this.#assertActiveTransaction(transaction);
+        this.#assertTransactionCapacityReservationAccess(
+            transaction,
+            logicalRecordKey,
+        );
         if (
             transaction.changes.size >=
             this.#limits.maximumLeaseCountPerTransaction
@@ -1572,7 +2418,20 @@ export class UntrustedStorageTransactionStore {
             'committed replacement cleanup',
         );
         transaction.pendingCleanupObjectKeys.clear();
+        this.#clearTransactionRetainedBytes(transaction);
         this.#transactions.delete(transaction.identifier);
+    }
+
+    #clearTransactionRetainedBytes(transaction: TransactionRecord): void {
+        for (const change of transaction.changes.values()) {
+            const record =
+                change.kind === 'write' ? change.lease : change.deletion;
+            record.expectedExistingObjectValue?.fill(0);
+            record.expectedIndexValue?.fill(0);
+        }
+        transaction.authenticatedRepairPublication?.sealedHeadBytes.fill(0);
+        transaction.authenticatedRepairPublication = undefined;
+        transaction.changes.clear();
     }
 
     async #abortTransaction(transaction: TransactionRecord): Promise<void> {
@@ -1609,6 +2468,7 @@ export class UntrustedStorageTransactionStore {
             }
         }
         transaction.state = 'aborted';
+        this.#clearTransactionRetainedBytes(transaction);
         this.#transactions.delete(transaction.identifier);
     }
 
@@ -1623,6 +2483,7 @@ export class UntrustedStorageTransactionStore {
                 await this.#abortTransaction(transaction);
             } catch (error) {
                 transaction.state = 'closed-after-failure';
+                this.#clearTransactionRetainedBytes(transaction);
                 this.#transactions.delete(transaction.identifier);
                 throw error;
             }
@@ -1633,6 +2494,7 @@ export class UntrustedStorageTransactionStore {
             transaction.state === 'committed'
         ) {
             transaction.state = 'closed-after-failure';
+            this.#clearTransactionRetainedBytes(transaction);
             this.#transactions.delete(transaction.identifier);
         }
     }
@@ -1697,7 +2559,7 @@ export class UntrustedStorageTransactionStore {
                     'authenticated repair head is missing for committed storage records.',
                 );
             }
-            await this.#deleteKeys(
+            await this.#deleteUnreferencedObjects(
                 objectKeys,
                 'authenticated repair abandoned-write cleanup',
             );
@@ -1761,7 +2623,7 @@ export class UntrustedStorageTransactionStore {
         const unreferencedObjectKeys = objectKeys.filter(
             (objectKey) => !referencedObjectKeys.has(objectKey),
         );
-        await this.#deleteKeys(
+        await this.#deleteUnreferencedObjects(
             unreferencedObjectKeys,
             'authenticated repair abandoned-write cleanup',
         );
@@ -1770,6 +2632,53 @@ export class UntrustedStorageTransactionStore {
         repair.initialized = true;
 
         return unreferencedObjectKeys.length;
+    }
+
+    #authorizedEmptyHeadDigestInput(
+        repair: AuthenticatedRepairRuntime,
+    ): Uint8Array {
+        return this.#storageBoundDigestInput(
+            authorizedEmptyHeadDigestDomain,
+            repair.protection.repairIdentity,
+        );
+    }
+
+    #deriveStorageInstanceIdentity(repairIdentity: Uint8Array): Uint8Array {
+        const digestInput = this.#storageBoundDigestInput(
+            storageInstanceIdentityDomain,
+            repairIdentity,
+        );
+        try {
+            return sha512(digestInput);
+        } finally {
+            digestInput.fill(0);
+        }
+    }
+
+    #storageBoundDigestInput(
+        domain: Uint8Array,
+        repairIdentity: Uint8Array,
+    ): Uint8Array {
+        const namespaceBytes = textEncoder.encode(this.#rootPrefix);
+        const input = new Uint8Array(
+            domain.byteLength +
+                1 +
+                namespaceBytes.byteLength +
+                1 +
+                repairIdentity.byteLength,
+        );
+        let offset = 0;
+        input.set(domain, offset);
+        offset += domain.byteLength;
+        input[offset] = 0;
+        offset += 1;
+        input.set(namespaceBytes, offset);
+        offset += namespaceBytes.byteLength;
+        input[offset] = 0;
+        offset += 1;
+        input.set(repairIdentity, offset);
+        namespaceBytes.fill(0);
+        return input;
     }
 
     async #assertAuthenticatedRepairHeadUnchanged(): Promise<void> {
@@ -1862,6 +2771,8 @@ export class UntrustedStorageTransactionStore {
             return decodeAuthenticatedRepairHead({
                 bytes: plaintext,
                 maximumRecordCount: this.#limits.maximumOwnedRecordCount,
+                maximumObjectKeyByteLength:
+                    this.#maximumOwnedKeyCharacterLength,
             });
         } catch (error) {
             if (error instanceof UntrustedStorageTransactionError) {
@@ -2319,6 +3230,35 @@ export class UntrustedStorageTransactionStore {
                 'CleanupFailed',
                 `${operation} failed for ${failedKeys.length} storage object(s).`,
                 failures,
+            );
+        }
+    }
+
+    async #deleteUnreferencedObjects(
+        objectKeys: readonly string[],
+        operation: string,
+    ): Promise<void> {
+        const uniqueObjectKeys = [...new Set(objectKeys)].sort();
+        if (uniqueObjectKeys.length === 0) {
+            return;
+        }
+        let deleted: boolean;
+        try {
+            deleted = await this.#adapter.deleteUnreferencedObjects({
+                indexPrefix: this.#indexPrefix,
+                objectKeys: uniqueObjectKeys,
+            });
+        } catch (error) {
+            throw new UntrustedStorageTransactionError(
+                'CleanupFailed',
+                `${operation} failed for ${uniqueObjectKeys.length} storage object(s).`,
+                error,
+            );
+        }
+        if (!deleted) {
+            throw new UntrustedStorageTransactionError(
+                'Conflict',
+                `${operation} stopped because a candidate object became committed.`,
             );
         }
     }

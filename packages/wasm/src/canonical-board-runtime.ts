@@ -4,14 +4,10 @@ import { foundationProfile } from '@sealed-lattice/types';
 import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 
-const boardVerifierConfigurationVersion = 2;
 const boardVerifierCapabilityByteLength = 32;
 const hashByteLength = 64;
 const wasm32WordByteLength = 4;
 const verifiedObjectDescriptionByteLength = 2 + 2 + hashByteLength;
-const fixedConfigurationByteLength = 2 + 3 * hashByteLength + 8 + 8 + 4 + 4 + 4;
-const maximumUnorderedCarrierCountConfigurationOffset =
-    2 + 3 * hashByteLength + 8 + 8;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
 const maximumCanonicalBoardBatchCarrierCount = 4_096;
 
@@ -40,8 +36,26 @@ export type FoundationObjectType =
 export type CanonicalBoardKernelContext = Readonly<{
     allocate(length: number): number;
     begin(
-        configurationPointer: number,
-        configurationLength: number,
+        canonicalSuiteRecordPointer: number,
+        canonicalSuiteRecordLength: number,
+        canonicalManifestPointer: number,
+        canonicalManifestLength: number,
+        canonicalRosterPointer: number,
+        canonicalRosterLength: number,
+        canonicalActionDefinitionPointer: number,
+        canonicalActionDefinitionLength: number,
+        canonicalBoardPolicyPointer: number,
+        canonicalBoardPolicyLength: number,
+        ceremonyIdentifierPointer: number,
+        ceremonyIdentifierLength: number,
+        actionIdentifierPointer: number,
+        actionIdentifierLength: number,
+        expectedSuiteIdentifierPointer: number,
+        expectedSuiteIdentifierLength: number,
+        expectedCeremonyContextHashPointer: number,
+        expectedCeremonyContextHashLength: number,
+        expectedActionContextHashPointer: number,
+        expectedActionContextHashLength: number,
         capabilityPointer: number,
         capabilityLength: number,
         statusPointer: number,
@@ -126,15 +140,17 @@ export type UntrustedCanonicalBoardCarrier = Readonly<{
     canonicalCarrier: Uint8Array;
 }>;
 
-export type CanonicalBoardVerifierConfiguration = Readonly<{
-    actionContextHash: Uint8Array;
+export type CanonicalBoardContextInput = Readonly<{
+    actionIdentifier: string;
+    canonicalActionDefinitionBytes: Uint8Array;
+    canonicalBoardPolicyBytes: Uint8Array;
+    canonicalManifestBytes: Uint8Array;
     canonicalRosterBytes: Uint8Array;
-    ceremonyContextHash: Uint8Array;
-    maximumBallotAttemptsPerParticipant: number;
-    maximumRetainedCanonicalCarrierByteLength: number;
-    maximumRetainedTranscriptObjects: number;
-    maximumUnorderedCarriersPerBatch: number;
-    suiteIdentifier: Uint8Array;
+    canonicalSuiteRecordBytes: Uint8Array;
+    ceremonyIdentifier: string;
+    expectedActionContextHash: Uint8Array;
+    expectedCeremonyContextHash: Uint8Array;
+    expectedSuiteIdentifier: Uint8Array;
 }>;
 
 export type CanonicalBoardVerifierSessionState = 'active' | 'closed';
@@ -271,131 +287,81 @@ const requireCopiedBytes = (
     return undefined;
 };
 
-const requirePositiveSafeInteger = (value: unknown, maximum: number): void => {
-    if (
-        typeof value !== 'number' ||
-        !Number.isSafeInteger(value) ||
-        value <= 0 ||
-        value > maximum
-    ) {
-        throw new CanonicalBoardRefusalError('outsideSupportedProfile');
+type EncodedCanonicalBoardContextInput = Readonly<{
+    actionIdentifierBytes: Uint8Array<ArrayBuffer>;
+    canonicalActionDefinitionBytes: Uint8Array<ArrayBuffer>;
+    canonicalBoardPolicyBytes: Uint8Array<ArrayBuffer>;
+    canonicalManifestBytes: Uint8Array<ArrayBuffer>;
+    canonicalRosterBytes: Uint8Array<ArrayBuffer>;
+    canonicalSuiteRecordBytes: Uint8Array<ArrayBuffer>;
+    ceremonyIdentifierBytes: Uint8Array<ArrayBuffer>;
+    expectedActionContextHash: Uint8Array<ArrayBuffer>;
+    expectedCeremonyContextHash: Uint8Array<ArrayBuffer>;
+    expectedSuiteIdentifier: Uint8Array<ArrayBuffer>;
+}>;
+
+const copyRequiredBytes = (
+    value: unknown,
+    expectedByteLength?: number,
+): Uint8Array<ArrayBuffer> => {
+    const refusalReason = requireCopiedBytes(value, expectedByteLength);
+    if (refusalReason !== undefined) {
+        throw new CanonicalBoardRefusalError(refusalReason);
     }
+    return (value as Uint8Array).slice();
 };
 
-const encodeConfiguration = (
-    input: CanonicalBoardVerifierConfiguration,
-): Uint8Array<ArrayBuffer> => {
+const encodeIdentifier = (value: unknown): Uint8Array<ArrayBuffer> => {
+    if (typeof value !== 'string') {
+        throw new CanonicalBoardRefusalError('wrongTypeOrLength');
+    }
+    return copyRequiredBytes(new TextEncoder().encode(value));
+};
+
+const copyCanonicalBoardContextInput = (
+    input: CanonicalBoardContextInput,
+): EncodedCanonicalBoardContextInput => {
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
         throw new CanonicalBoardRefusalError('wrongTypeOrLength');
     }
-    let configuration: CanonicalBoardVerifierConfiguration;
+    let copiedInput: EncodedCanonicalBoardContextInput;
     try {
-        configuration = {
-            actionContextHash: input.actionContextHash,
-            canonicalRosterBytes: input.canonicalRosterBytes,
-            ceremonyContextHash: input.ceremonyContextHash,
-            maximumBallotAttemptsPerParticipant:
-                input.maximumBallotAttemptsPerParticipant,
-            maximumRetainedCanonicalCarrierByteLength:
-                input.maximumRetainedCanonicalCarrierByteLength,
-            maximumRetainedTranscriptObjects:
-                input.maximumRetainedTranscriptObjects,
-            maximumUnorderedCarriersPerBatch:
-                input.maximumUnorderedCarriersPerBatch,
-            suiteIdentifier: input.suiteIdentifier,
+        copiedInput = {
+            actionIdentifierBytes: encodeIdentifier(input.actionIdentifier),
+            canonicalActionDefinitionBytes: copyRequiredBytes(
+                input.canonicalActionDefinitionBytes,
+            ),
+            canonicalBoardPolicyBytes: copyRequiredBytes(
+                input.canonicalBoardPolicyBytes,
+            ),
+            canonicalManifestBytes: copyRequiredBytes(
+                input.canonicalManifestBytes,
+            ),
+            canonicalRosterBytes: copyRequiredBytes(input.canonicalRosterBytes),
+            canonicalSuiteRecordBytes: copyRequiredBytes(
+                input.canonicalSuiteRecordBytes,
+            ),
+            ceremonyIdentifierBytes: encodeIdentifier(input.ceremonyIdentifier),
+            expectedActionContextHash: copyRequiredBytes(
+                input.expectedActionContextHash,
+                hashByteLength,
+            ),
+            expectedCeremonyContextHash: copyRequiredBytes(
+                input.expectedCeremonyContextHash,
+                hashByteLength,
+            ),
+            expectedSuiteIdentifier: copyRequiredBytes(
+                input.expectedSuiteIdentifier,
+                hashByteLength,
+            ),
         };
-    } catch {
+    } catch (error) {
+        if (error instanceof CanonicalBoardRefusalError) {
+            throw error;
+        }
         throw new CanonicalBoardRefusalError('wrongTypeOrLength');
     }
-    for (const hash of [
-        configuration.suiteIdentifier,
-        configuration.ceremonyContextHash,
-        configuration.actionContextHash,
-    ]) {
-        const refusalReason = requireCopiedBytes(hash, hashByteLength);
-        if (refusalReason !== undefined) {
-            throw new CanonicalBoardRefusalError(refusalReason);
-        }
-    }
-    const rosterRefusal = requireCopiedBytes(
-        configuration.canonicalRosterBytes,
-    );
-    if (rosterRefusal !== undefined) {
-        throw new CanonicalBoardRefusalError(rosterRefusal);
-    }
-    requirePositiveSafeInteger(
-        configuration.maximumBallotAttemptsPerParticipant,
-        0xffff,
-    );
-    requirePositiveSafeInteger(
-        configuration.maximumRetainedCanonicalCarrierByteLength,
-        Number.MAX_SAFE_INTEGER,
-    );
-    requirePositiveSafeInteger(
-        configuration.maximumUnorderedCarriersPerBatch,
-        maximumCanonicalBoardBatchCarrierCount,
-    );
-    requirePositiveSafeInteger(
-        configuration.maximumRetainedTranscriptObjects,
-        maximumWasm32UnsignedInteger,
-    );
-    if (
-        configuration.maximumUnorderedCarriersPerBatch >
-        configuration.maximumRetainedTranscriptObjects
-    ) {
-        throw new CanonicalBoardRefusalError('outsideSupportedProfile');
-    }
-
-    const byteLength =
-        fixedConfigurationByteLength +
-        configuration.canonicalRosterBytes.byteLength;
-    if (
-        byteLength > foundationProfile.maximumCopiedBufferByteLength ||
-        byteLength > maximumWasm32UnsignedInteger
-    ) {
-        throw new CanonicalBoardRefusalError('outsideSupportedProfile');
-    }
-    const bytes = new Uint8Array(byteLength);
-    const view = new DataView(bytes.buffer);
-    let offset = 0;
-    view.setUint16(offset, boardVerifierConfigurationVersion, true);
-    offset += 2;
-    for (const hash of [
-        configuration.suiteIdentifier,
-        configuration.ceremonyContextHash,
-        configuration.actionContextHash,
-    ]) {
-        bytes.set(hash, offset);
-        offset += hashByteLength;
-    }
-    view.setBigUint64(
-        offset,
-        BigInt(configuration.maximumBallotAttemptsPerParticipant),
-        true,
-    );
-    offset += 8;
-    view.setBigUint64(
-        offset,
-        BigInt(configuration.maximumRetainedCanonicalCarrierByteLength),
-        true,
-    );
-    offset += 8;
-    view.setUint32(
-        offset,
-        configuration.maximumUnorderedCarriersPerBatch,
-        true,
-    );
-    offset += wasm32WordByteLength;
-    view.setUint32(
-        offset,
-        configuration.maximumRetainedTranscriptObjects,
-        true,
-    );
-    offset += wasm32WordByteLength;
-    view.setUint32(offset, configuration.canonicalRosterBytes.byteLength, true);
-    offset += wasm32WordByteLength;
-    bytes.set(configuration.canonicalRosterBytes, offset);
-    return bytes;
+    return copiedInput;
 };
 
 const frameCarriers = (
@@ -1040,16 +1006,16 @@ class CanonicalBoardVerifierSessionImplementation implements CanonicalBoardVerif
 }
 
 export const openCanonicalBoardVerifierSession = (input: {
-    readonly configuration: CanonicalBoardVerifierConfiguration;
+    readonly contextInput: CanonicalBoardContextInput;
     readonly kernel: TranscriptCoreKernel;
 }): VerificationResult<CanonicalBoardVerifierSession> => {
     if (typeof input !== 'object' || input === null || Array.isArray(input)) {
         return refused('wrongTypeOrLength');
     }
-    let inputConfiguration: CanonicalBoardVerifierConfiguration;
+    let rawContextInput: CanonicalBoardContextInput;
     let inputKernel: TranscriptCoreKernel;
     try {
-        inputConfiguration = input.configuration;
+        rawContextInput = input.contextInput;
         inputKernel = input.kernel;
     } catch {
         return refused('wrongTypeOrLength');
@@ -1060,21 +1026,77 @@ export const openCanonicalBoardVerifierSession = (input: {
             'The transcript-core kernel has no registered canonical-board boundary.',
         );
     }
-    let configuration = new Uint8Array();
+    const allocatedInputs: Array<
+        Readonly<{
+            bytes: Uint8Array<ArrayBuffer>;
+            pointer: number;
+        }>
+    > = [];
     let capabilityPointer = 0;
-    let configurationPointer = 0;
     let statusPointer = 0;
     let handle = 0;
     let sessionActivated = false;
     try {
-        configuration = encodeConfiguration(inputConfiguration);
+        const contextInput = copyCanonicalBoardContextInput(rawContextInput);
+        const allocateInput = (bytes: Uint8Array<ArrayBuffer>): number => {
+            const pointer = allocateAndCopy(context, bytes);
+            allocatedInputs.push({ bytes, pointer });
+            return pointer;
+        };
+        const canonicalSuiteRecordPointer = allocateInput(
+            contextInput.canonicalSuiteRecordBytes,
+        );
+        const canonicalManifestPointer = allocateInput(
+            contextInput.canonicalManifestBytes,
+        );
+        const canonicalRosterPointer = allocateInput(
+            contextInput.canonicalRosterBytes,
+        );
+        const canonicalActionDefinitionPointer = allocateInput(
+            contextInput.canonicalActionDefinitionBytes,
+        );
+        const canonicalBoardPolicyPointer = allocateInput(
+            contextInput.canonicalBoardPolicyBytes,
+        );
+        const ceremonyIdentifierPointer = allocateInput(
+            contextInput.ceremonyIdentifierBytes,
+        );
+        const actionIdentifierPointer = allocateInput(
+            contextInput.actionIdentifierBytes,
+        );
+        const expectedSuiteIdentifierPointer = allocateInput(
+            contextInput.expectedSuiteIdentifier,
+        );
+        const expectedCeremonyContextHashPointer = allocateInput(
+            contextInput.expectedCeremonyContextHash,
+        );
+        const expectedActionContextHashPointer = allocateInput(
+            contextInput.expectedActionContextHash,
+        );
         capabilityPointer = createCapability(context);
-        configurationPointer = allocateAndCopy(context, configuration);
         statusPointer = allocateZeroed(context, wasm32WordByteLength);
         handle = context.runExclusive('canonical-board verifier begin', () =>
             context.begin(
-                configurationPointer,
-                configuration.byteLength,
+                canonicalSuiteRecordPointer,
+                contextInput.canonicalSuiteRecordBytes.byteLength,
+                canonicalManifestPointer,
+                contextInput.canonicalManifestBytes.byteLength,
+                canonicalRosterPointer,
+                contextInput.canonicalRosterBytes.byteLength,
+                canonicalActionDefinitionPointer,
+                contextInput.canonicalActionDefinitionBytes.byteLength,
+                canonicalBoardPolicyPointer,
+                contextInput.canonicalBoardPolicyBytes.byteLength,
+                ceremonyIdentifierPointer,
+                contextInput.ceremonyIdentifierBytes.byteLength,
+                actionIdentifierPointer,
+                contextInput.actionIdentifierBytes.byteLength,
+                expectedSuiteIdentifierPointer,
+                contextInput.expectedSuiteIdentifier.byteLength,
+                expectedCeremonyContextHashPointer,
+                contextInput.expectedCeremonyContextHash.byteLength,
+                expectedActionContextHashPointer,
+                contextInput.expectedActionContextHash.byteLength,
                 capabilityPointer,
                 boardVerifierCapabilityByteLength,
                 statusPointer,
@@ -1105,14 +1127,7 @@ export const openCanonicalBoardVerifierSession = (input: {
                 context,
                 handle,
                 capabilityPointer,
-                new DataView(
-                    configuration.buffer,
-                    configuration.byteOffset,
-                    configuration.byteLength,
-                ).getUint32(
-                    maximumUnorderedCarrierCountConfigurationOffset,
-                    true,
-                ),
+                maximumCanonicalBoardBatchCarrierCount,
             ),
         );
         sessionActivated = true;
@@ -1145,10 +1160,17 @@ export const openCanonicalBoardVerifierSession = (input: {
         }
         throw operationFailure;
     } finally {
-        configuration.fill(0);
-        if (configurationPointer !== 0) {
-            zeroMemory(context, configurationPointer, configuration.byteLength);
-            context.deallocate(configurationPointer, configuration.byteLength);
+        for (const allocatedInput of allocatedInputs) {
+            allocatedInput.bytes.fill(0);
+            zeroMemory(
+                context,
+                allocatedInput.pointer,
+                allocatedInput.bytes.byteLength,
+            );
+            context.deallocate(
+                allocatedInput.pointer,
+                allocatedInput.bytes.byteLength,
+            );
         }
         if (statusPointer !== 0) {
             zeroMemory(context, statusPointer, wasm32WordByteLength);

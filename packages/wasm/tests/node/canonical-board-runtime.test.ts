@@ -7,19 +7,21 @@ import {
     registerCanonicalBoardKernelContext,
     resolveVerifiedTranscriptObjectKernelAuthorization,
     type CanonicalBoardKernelContext,
-    type CanonicalBoardVerifierConfiguration,
+    type CanonicalBoardContextInput,
 } from '../../src/canonical-board-runtime.js';
 import type { TranscriptCoreKernel } from '../../src/transcript-core-bridge/kernel-types.js';
 
-const configuration = (): CanonicalBoardVerifierConfiguration => ({
-    actionContextHash: new Uint8Array(64).fill(0x33),
+const contextInput = (): CanonicalBoardContextInput => ({
+    actionIdentifier: 'action',
+    canonicalActionDefinitionBytes: Uint8Array.of(0xa1),
+    canonicalBoardPolicyBytes: Uint8Array.of(0xb1),
+    canonicalManifestBytes: Uint8Array.of(0xc1),
     canonicalRosterBytes: Uint8Array.of(0xaa, 0xbb),
-    ceremonyContextHash: new Uint8Array(64).fill(0x22),
-    maximumBallotAttemptsPerParticipant: 4,
-    maximumRetainedCanonicalCarrierByteLength: 1_048_576,
-    maximumRetainedTranscriptObjects: 32,
-    maximumUnorderedCarriersPerBatch: 8,
-    suiteIdentifier: new Uint8Array(64).fill(0x11),
+    canonicalSuiteRecordBytes: Uint8Array.of(0xd1),
+    ceremonyIdentifier: 'ceremony',
+    expectedActionContextHash: new Uint8Array(64).fill(0x33),
+    expectedCeremonyContextHash: new Uint8Array(64).fill(0x22),
+    expectedSuiteIdentifier: new Uint8Array(64).fill(0x11),
 });
 
 const requireValid = <Value>(result: {
@@ -61,13 +63,11 @@ const createFakeKernel = (verifyStatus = 0): FakeKernel => {
             allocations.set(pointer, byteLength);
             return pointer;
         },
-        begin: (
-            _configurationPointer,
-            _configurationLength,
-            _capabilityPointer,
-            _capabilityLength,
-            statusPointer,
-        ) => {
+        begin: (...parameters) => {
+            const statusPointer = parameters[parameters.length - 1];
+            if (statusPointer === undefined) {
+                throw new Error('test begin did not receive a status pointer');
+            }
             new DataView(memory.buffer).setUint32(statusPointer, 0, true);
             return 1;
         },
@@ -185,7 +185,7 @@ describe('canonical board WASM runtime', () => {
         const fake = createFakeKernel();
         const session = requireValid(
             openCanonicalBoardVerifierSession({
-                configuration: configuration(),
+                contextInput: contextInput(),
                 kernel: fake.kernel,
             }),
         );
@@ -261,7 +261,7 @@ describe('canonical board WASM runtime', () => {
         const fake = createFakeKernel(9);
         const session = requireValid(
             openCanonicalBoardVerifierSession({
-                configuration: configuration(),
+                contextInput: contextInput(),
                 kernel: fake.kernel,
             }),
         );
@@ -295,7 +295,7 @@ describe('canonical board WASM runtime', () => {
         const fake = createFakeKernel();
         const session = requireValid(
             openCanonicalBoardVerifierSession({
-                configuration: configuration(),
+                contextInput: contextInput(),
                 kernel: fake.kernel,
             }),
         );

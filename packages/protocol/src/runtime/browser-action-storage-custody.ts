@@ -6,15 +6,20 @@ import type {
     BrowserActionStateVerifierSessionInput,
     BrowserActionStorageRootBinding,
     BrowserOpenedActionRandomnessSession,
-    BrowserPersistentProofAttemptInput,
     BrowserSealedActionRandomnessSession,
     BrowserTargetReleaseAttemptInput,
     BrowserLocalRecordIdentifierInput,
     BrowserLocalRecordOpenInput,
     BrowserLocalRecordSealInput,
+    BrowserFoundationInitializationPreparationInput,
     UntrustedExpectedStorageRootCommitment,
     VerificationResult,
 } from '@sealed-lattice/types';
+
+import type {
+    CheckpointBoundary,
+    ExpectedCheckpointBoundary,
+} from './authenticated-checkpoint-store.js';
 
 export { BrowserActionStorageCustodyError } from '@sealed-lattice/types';
 export type {
@@ -26,15 +31,53 @@ export type {
     BrowserActionStateReservationVerificationInput,
     BrowserActionStateVerifierSessionInput,
     BrowserOpenedActionRandomnessSession,
-    BrowserPersistentProofAttemptInput,
     BrowserSealedActionRandomnessSession,
     BrowserTargetReleaseAttemptInput,
     BrowserLocalRecordIdentifierInput,
     BrowserLocalRecordOpenInput,
     BrowserLocalRecordSealInput,
+    BrowserFoundationInitializationPreparationInput,
     UntrustedExpectedStorageRootCommitment,
     VerificationResult,
 } from '@sealed-lattice/types';
+
+declare const preparedBrowserFoundationInitializationBrand: unique symbol;
+declare const committedBrowserFoundationInitializationBatchBrand: unique symbol;
+declare const browserFoundationCheckpointHandleBrand: unique symbol;
+
+export type PreparedBrowserFoundationInitialization = Readonly<{
+    readonly [preparedBrowserFoundationInitializationBrand]: true;
+}>;
+
+export type CommittedBrowserFoundationInitializationBatch = Readonly<{
+    readonly [committedBrowserFoundationInitializationBatchBrand]: true;
+}>;
+
+/**
+ * Authenticated local-head metadata for optimistic concurrency inside the
+ * currently retained storage instance. It is rollbackable with that storage
+ * and is not a recency certificate, quorum decision, or release authority.
+ */
+export type BrowserFoundationFreshnessCoordinate = Readonly<{
+    authenticatedHeadDigest: Uint8Array;
+    freshnessSequence: bigint;
+    storageInstanceIdentity: Uint8Array;
+}>;
+
+export type BrowserFoundationCheckpointHandle = Readonly<{
+    readonly [browserFoundationCheckpointHandleBrand]: true;
+}>;
+
+export type BrowserFoundationCheckpointDescription = Readonly<{
+    canonicalManifestBytes?: Uint8Array;
+    checkpointLineageIdentifier: Uint8Array;
+    stateStreamDescriptorBytes?: Uint8Array;
+}>;
+
+export type BrowserFreshFoundationInitializationCommit = Readonly<{
+    committedBatch: CommittedBrowserFoundationInitializationBatch;
+    freshnessCoordinate: BrowserFoundationFreshnessCoordinate;
+}>;
 
 /**
  * Optimistic-concurrency metadata for one local wrapping pair. This snapshot
@@ -91,12 +134,52 @@ export type BrowserActionStorageCustody = Readonly<{
             }>,
     ): Promise<BrowserOpenedActionRandomnessSession>;
     closeActionRandomness(identifier: string): Promise<void>;
-    derivePersistentProofAttempt(
-        input: BrowserPersistentProofAttemptInput,
-    ): Promise<BrowserActionProofAttemptBinding>;
     deriveTargetReleaseAttempt(
         input: BrowserTargetReleaseAttemptInput,
     ): Promise<BrowserActionProofAttemptBinding>;
     delete(expectedSnapshot: BrowserDeviceWrappingSnapshot): Promise<void>;
+    /** Permanently replaces this action's local wrapping state with a tombstone. */
+    retire(): Promise<void>;
     close(): Promise<void>;
 }>;
+
+export type BrowserFoundationStorageAuthority = BrowserActionStorageCustody &
+    Readonly<{
+        authenticateFoundationHead(): Promise<BrowserFoundationFreshnessCoordinate>;
+        beginCheckpoint(
+            streamAttemptIdentifiers: readonly Uint8Array[],
+        ): Promise<BrowserFoundationCheckpointHandle>;
+        copyCheckpointDescription(
+            checkpoint: BrowserFoundationCheckpointHandle,
+        ): Promise<BrowserFoundationCheckpointDescription>;
+        commitFreshFoundationInitialization(
+            input: BrowserFoundationInitializationPreparationInput,
+        ): Promise<BrowserFreshFoundationInitializationCommit>;
+        evictCheckpoint(
+            checkpoint: BrowserFoundationCheckpointHandle,
+        ): Promise<void>;
+        publishCheckpoint(
+            checkpoint: BrowserFoundationCheckpointHandle,
+            input: {
+                boundary: CheckpointBoundary;
+                stateChunks: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
+            },
+        ): Promise<Uint8Array>;
+        restoreCheckpointState(
+            checkpoint: BrowserFoundationCheckpointHandle,
+            consumeChunk: (
+                chunkIndex: number,
+                chunkBytes: Uint8Array,
+            ) => Promise<void> | void,
+        ): Promise<void>;
+        resumeCheckpoint(input: {
+            checkpointLineageIdentifier: Uint8Array;
+            expectedBoundary: ExpectedCheckpointBoundary;
+        }): Promise<BrowserFoundationCheckpointHandle>;
+    }>;
+
+export type TransferableBrowserFoundationStorageAuthority =
+    BrowserFoundationStorageAuthority &
+        Readonly<{
+            claimExclusiveOwner(): BrowserFoundationStorageAuthority;
+        }>;

@@ -1,4 +1,3 @@
-#[cfg(test)]
 use crate::encoding::{CanonicalError, CanonicalErrorCode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,10 +83,9 @@ impl PrivateVssRefusal {
     }
 }
 
-#[cfg(test)]
 pub(super) fn private_vss_refusal_to_error(refusal: PrivateVssRefusal) -> CanonicalError {
     CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
+        CanonicalErrorCode::InvalidProtocolObject,
         format!("{}: {}", refusal.reason_code, refusal.message),
     )
 }

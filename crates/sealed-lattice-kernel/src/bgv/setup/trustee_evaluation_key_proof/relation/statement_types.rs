@@ -1,11 +1,11 @@
 use super::super::invalid_succinct_setup_proof;
 use super::family_shape_and_validation::validate_context_token;
-use super::key_relation_algebra::public_key_switch_sample;
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue,
 };
 use crate::encoding::CanonicalResult;
+use crate::foundation::ProofApplicationSlotCeilings;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum EvaluationKeyShareKind {
@@ -61,10 +61,7 @@ pub(crate) struct PrivateVssShareStatement {
 }
 
 #[derive(Clone)]
-pub(crate) struct VssShareLinkageCommitment {
-    pub(crate) commitment_context_hash: String,
-    pub(crate) material_root: super::super::merkle_commitment::MerkleDigest,
-}
+pub(crate) struct VssShareLinkageCommitment;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct SuccinctSetupProofContext {
@@ -90,22 +87,29 @@ pub(crate) struct TrusteeEvaluationKeyStatement {
 impl TrusteeEvaluationKeyStatement {
     pub(crate) fn application_statement_schema_identifier(&self) -> u16 {
         match &self.proof {
-            SetupProofStatement::PrivateVssShare(_) => 0x2110,
-            SetupProofStatement::TrusteeEvaluationKey { .. } => 0x1216,
+            SetupProofStatement::PrivateVssShare(_) => {
+                ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            }
+            SetupProofStatement::TrusteeEvaluationKey { .. } => {
+                ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+            }
         }
     }
 }
 
+#[cfg(test)]
 pub(crate) struct KeyBearingWitness {
     pub(crate) secret_coefficients: Vec<i64>,
     pub(crate) error_coefficients_by_key: Vec<Vec<Vec<i64>>>,
 }
 
+#[cfg(test)]
 pub(crate) struct SameSecretLinkageWitness {
     pub(crate) negative_indicator_coefficients: Vec<i64>,
     pub(crate) opening_randomness_by_source_limb_and_commitment_limb: Vec<Vec<Vec<Vec<i64>>>>,
 }
 
+#[cfg(test)]
 pub(crate) enum TrusteeEvaluationKeyWitness {
     PrivateVssShare {
         coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
@@ -171,6 +175,7 @@ impl TrusteeEvaluationKeyStatement {
     }
 }
 
+#[cfg(test)]
 impl TrusteeEvaluationKeyWitness {
     pub(crate) fn secret_coefficients(&self) -> &[i64] {
         match self {
@@ -350,21 +355,6 @@ impl EvaluationKeyShareDescriptor {
         }
         Ok(())
     }
-
-    pub(crate) fn public_sample(
-        &self,
-        digit_index: usize,
-        modulus: u64,
-        ring_degree: usize,
-    ) -> CanonicalResult<Vec<u64>> {
-        Ok(public_key_switch_sample(
-            &self.key_switch_domain,
-            &self.key_switch_seed_hex,
-            digit_index,
-            modulus,
-            ring_degree,
-        ))
-    }
 }
 
 impl TrusteeEvaluationKeyStatement {
@@ -395,6 +385,7 @@ impl TrusteeEvaluationKeyStatement {
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) fn proof_limb_count(&self) -> usize {
         self.limb_count()
     }

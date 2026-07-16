@@ -24,12 +24,14 @@ fn invalid_codec(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::MalformedLength, message)
 }
 
+#[cfg(test)]
 pub(super) struct Writer {
     // Exposed to sibling `family_backend` modules so they can reuse this
     // canonical writer and take the finished byte buffer.
     pub(super) bytes: Vec<u8>,
 }
 
+#[cfg(test)]
 impl Writer {
     pub(super) fn new() -> Self {
         Self {
@@ -177,6 +179,7 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn write_fri<const LIMB_COUNT: usize>(
     writer: &mut Writer,
     fri: &FriProof<LIMB_COUNT>,
@@ -229,6 +232,7 @@ pub(super) fn read_fri<const LIMB_COUNT: usize>(
     })
 }
 
+#[cfg(test)]
 pub(super) fn write_column_opening<const LIMB_COUNT: usize>(
     writer: &mut Writer,
     opening: &ColumnOpening<LIMB_COUNT>,
@@ -268,6 +272,7 @@ pub(super) fn read_column_opening<const LIMB_COUNT: usize>(
     })
 }
 
+#[cfg(test)]
 pub(super) fn encode_key_proof<const LIMB_COUNT: usize>(
     proof: &KeyFriProof<LIMB_COUNT>,
 ) -> CanonicalResult<Vec<u8>> {

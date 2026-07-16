@@ -1,5 +1,5 @@
 import { hexToBytes } from '@noble/hashes/utils.js';
-import type { ProtocolHash } from '@sealed-lattice/types';
+import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
 
 import {
     bytesToHex,
@@ -80,6 +80,74 @@ export type FoundationCeremonyRuntime = Readonly<{
 
 const maximumUnsigned64 = (1n << 64n) - 1n;
 
+const snapshotDataProperty = (
+    container: unknown,
+    propertyName: string,
+    containerName: string,
+): unknown => {
+    if (
+        container === null ||
+        (typeof container !== 'object' && typeof container !== 'function')
+    ) {
+        throw new TypeError(`${containerName} must be an object.`);
+    }
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+        descriptor = Object.getOwnPropertyDescriptor(container, propertyName);
+    } catch {
+        throw new TypeError(
+            `${containerName}.${propertyName} must be an ordinary data property.`,
+        );
+    }
+    if (descriptor === undefined || !('value' in descriptor)) {
+        throw new TypeError(
+            `${containerName}.${propertyName} must be an ordinary data property.`,
+        );
+    }
+    return descriptor.value;
+};
+
+const snapshotProtocolHash = (
+    value: unknown,
+    fieldName: string,
+): ProtocolHash => {
+    if (typeof value !== 'string') {
+        throw new TypeError(`${fieldName} must be a string.`);
+    }
+    return value;
+};
+
+const snapshotSafeInteger = (value: unknown, fieldName: string): number => {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+        throw new TypeError(`${fieldName} must be a safe integer.`);
+    }
+    return value;
+};
+
+const isUint8Array = (value: unknown): value is Uint8Array => {
+    try {
+        return (
+            ArrayBuffer.isView(value) &&
+            Object.prototype.toString.call(value) === '[object Uint8Array]'
+        );
+    } catch {
+        return false;
+    }
+};
+
+const copyCanonicalBytes = (value: unknown, fieldName: string): Uint8Array => {
+    if (!isUint8Array(value)) {
+        throw new TypeError(`${fieldName} must be a Uint8Array.`);
+    }
+    try {
+        return Uint8Array.from(value);
+    } catch {
+        throw new TypeError(
+            `${fieldName} must reference an attached Uint8Array.`,
+        );
+    }
+};
+
 const isWellFormedString = (value: string): boolean => {
     for (
         let codeUnitIndex = 0;
@@ -104,15 +172,15 @@ const isWellFormedString = (value: string): boolean => {
     return true;
 };
 
-const requireWellFormedString = (value: string, fieldName: string): string => {
+const requireWellFormedString = (value: unknown, fieldName: string): string => {
     if (typeof value !== 'string' || !isWellFormedString(value)) {
         throw new TypeError(`${fieldName} must be a well-formed string.`);
     }
     return value;
 };
 
-const canonicalBytesHex = (value: Uint8Array): string =>
-    bytesToHex(Uint8Array.from(value));
+const canonicalBytesHex = (value: unknown, fieldName: string): string =>
+    bytesToHex(copyCanonicalBytes(value, fieldName));
 
 const displayTextHex = (value: string, fieldName: string): string =>
     bytesToHex(textEncoder.encode(requireWellFormedString(value, fieldName)));
@@ -120,15 +188,90 @@ const displayTextHex = (value: string, fieldName: string): string =>
 const decodeCanonicalOutput = (value: string): Uint8Array =>
     Uint8Array.from(hexToBytes(value));
 
+const snapshotManifestInput = (input: unknown): FoundationManifestInput => {
+    const displayTitle = requireWellFormedString(
+        snapshotDataProperty(input, 'displayTitle', 'input'),
+        'displayTitle',
+    );
+    const optionDefinitionsValue = snapshotDataProperty(
+        input,
+        'optionDefinitions',
+        'input',
+    );
+    if (!Array.isArray(optionDefinitionsValue)) {
+        throw new TypeError('optionDefinitions must be an array.');
+    }
+    const optionDefinitionCount = snapshotSafeInteger(
+        snapshotDataProperty(
+            optionDefinitionsValue,
+            'length',
+            'optionDefinitions',
+        ),
+        'optionDefinitions.length',
+    );
+    if (optionDefinitionCount !== foundationProfile.optionCount) {
+        throw new RangeError(
+            `optionDefinitions must contain exactly ${String(foundationProfile.optionCount)} entries.`,
+        );
+    }
+    const optionDefinitions = Array.from(
+        { length: optionDefinitionCount },
+        (_unused, optionPosition) => {
+            const optionName = `optionDefinitions[${String(optionPosition)}]`;
+            const optionDefinition = snapshotDataProperty(
+                optionDefinitionsValue,
+                String(optionPosition),
+                'optionDefinitions',
+            );
+            return Object.freeze({
+                displayLabel: requireWellFormedString(
+                    snapshotDataProperty(
+                        optionDefinition,
+                        'displayLabel',
+                        optionName,
+                    ),
+                    `${optionName}.displayLabel`,
+                ),
+                optionIdentifier: requireWellFormedString(
+                    snapshotDataProperty(
+                        optionDefinition,
+                        'optionIdentifier',
+                        optionName,
+                    ),
+                    `${optionName}.optionIdentifier`,
+                ),
+                optionIndex: snapshotSafeInteger(
+                    snapshotDataProperty(
+                        optionDefinition,
+                        'optionIndex',
+                        optionName,
+                    ),
+                    `${optionName}.optionIndex`,
+                ),
+            });
+        },
+    );
+    return Object.freeze({ displayTitle, optionDefinitions });
+};
+
 /** Opens the typed byte boundary backed by one already loaded Rust/WASM kernel. */
 export const openFoundationCeremonyRuntime = (
     kernel: PublishedSdkKernel,
 ): FoundationCeremonyRuntime => ({
     encodeActionDefinition: (input) => {
+        const submissionCutoffUnixMilliseconds = snapshotDataProperty(
+            input,
+            'submissionCutoffUnixMilliseconds',
+            'input',
+        );
+        const topCount = snapshotSafeInteger(
+            snapshotDataProperty(input, 'topCount', 'input'),
+            'topCount',
+        );
         if (
-            typeof input.submissionCutoffUnixMilliseconds !== 'bigint' ||
-            input.submissionCutoffUnixMilliseconds < 0n ||
-            input.submissionCutoffUnixMilliseconds > maximumUnsigned64
+            typeof submissionCutoffUnixMilliseconds !== 'bigint' ||
+            submissionCutoffUnixMilliseconds < 0n ||
+            submissionCutoffUnixMilliseconds > maximumUnsigned64
         ) {
             throw new RangeError(
                 'submissionCutoffUnixMilliseconds must fit an unsigned 64-bit integer.',
@@ -136,8 +279,8 @@ export const openFoundationCeremonyRuntime = (
         }
         const encoded = kernel.encodeFoundationActionDefinition({
             submissionCutoffUnixMilliseconds:
-                input.submissionCutoffUnixMilliseconds.toString(10),
-            topCount: input.topCount,
+                submissionCutoffUnixMilliseconds.toString(10),
+            topCount,
         });
         return Object.freeze({
             actionDefinitionHash: encoded.actionDefinitionHash,
@@ -145,11 +288,12 @@ export const openFoundationCeremonyRuntime = (
         });
     },
     encodeBoardPolicy: (input) => {
+        const boardOriginIdentifier = requireWellFormedString(
+            snapshotDataProperty(input, 'boardOriginIdentifier', 'input'),
+            'boardOriginIdentifier',
+        );
         const encoded = kernel.encodeFoundationBoardPolicy({
-            boardOriginIdentifier: requireWellFormedString(
-                input.boardOriginIdentifier,
-                'boardOriginIdentifier',
-            ),
+            boardOriginIdentifier,
         });
         return Object.freeze({
             boardPolicyHash: encoded.boardPolicyHash,
@@ -157,12 +301,13 @@ export const openFoundationCeremonyRuntime = (
         });
     },
     encodeManifest: (input) => {
+        const snapshot = snapshotManifestInput(input);
         const encoded = kernel.encodeFoundationManifest({
             displayTitleUtf8Hex: displayTextHex(
-                input.displayTitle,
+                snapshot.displayTitle,
                 'displayTitle',
             ),
-            optionDefinitions: input.optionDefinitions.map(
+            optionDefinitions: snapshot.optionDefinitions.map(
                 (optionDefinition, optionPosition) => ({
                     displayLabelUtf8Hex: displayTextHex(
                         optionDefinition.displayLabel,
@@ -181,65 +326,114 @@ export const openFoundationCeremonyRuntime = (
             manifestHash: encoded.manifestHash,
         });
     },
-    verifyActionContext: (input) =>
-        kernel.verifyFoundationActionContext({
-            actionIdentifier: requireWellFormedString(
-                input.actionIdentifier,
-                'actionIdentifier',
+    verifyActionContext: (input) => {
+        const actionIdentifier = requireWellFormedString(
+            snapshotDataProperty(input, 'actionIdentifier', 'input'),
+            'actionIdentifier',
+        );
+        const canonicalActionDefinitionBytesHex = canonicalBytesHex(
+            snapshotDataProperty(
+                input,
+                'canonicalActionDefinitionBytes',
+                'input',
             ),
-            canonicalActionDefinitionBytesHex: canonicalBytesHex(
-                input.canonicalActionDefinitionBytes,
-            ),
-            canonicalBoardPolicyBytesHex: canonicalBytesHex(
-                input.canonicalBoardPolicyBytes,
-            ),
-            canonicalManifestBytesHex: canonicalBytesHex(
-                input.canonicalManifestBytes,
-            ),
-            canonicalRosterBytesHex: canonicalBytesHex(
-                input.canonicalRosterBytes,
-            ),
-            canonicalSuiteRecordBytesHex: canonicalBytesHex(
-                input.canonicalSuiteRecordBytes,
-            ),
-            ceremonyIdentifier: requireWellFormedString(
-                input.ceremonyIdentifier,
-                'ceremonyIdentifier',
-            ),
-            expectedCeremonyContextHash: input.expectedCeremonyContextHash,
-            expectedSuiteId: input.expectedSuiteId,
-        }),
+            'canonicalActionDefinitionBytes',
+        );
+        const canonicalBoardPolicyBytesHex = canonicalBytesHex(
+            snapshotDataProperty(input, 'canonicalBoardPolicyBytes', 'input'),
+            'canonicalBoardPolicyBytes',
+        );
+        const canonicalManifestBytesHex = canonicalBytesHex(
+            snapshotDataProperty(input, 'canonicalManifestBytes', 'input'),
+            'canonicalManifestBytes',
+        );
+        const canonicalRosterBytesHex = canonicalBytesHex(
+            snapshotDataProperty(input, 'canonicalRosterBytes', 'input'),
+            'canonicalRosterBytes',
+        );
+        const canonicalSuiteRecordBytesHex = canonicalBytesHex(
+            snapshotDataProperty(input, 'canonicalSuiteRecordBytes', 'input'),
+            'canonicalSuiteRecordBytes',
+        );
+        const ceremonyIdentifier = requireWellFormedString(
+            snapshotDataProperty(input, 'ceremonyIdentifier', 'input'),
+            'ceremonyIdentifier',
+        );
+        const expectedCeremonyContextHash = snapshotProtocolHash(
+            snapshotDataProperty(input, 'expectedCeremonyContextHash', 'input'),
+            'expectedCeremonyContextHash',
+        );
+        const expectedSuiteId = snapshotProtocolHash(
+            snapshotDataProperty(input, 'expectedSuiteId', 'input'),
+            'expectedSuiteId',
+        );
+        return kernel.verifyFoundationActionContext({
+            actionIdentifier,
+            canonicalActionDefinitionBytesHex,
+            canonicalBoardPolicyBytesHex,
+            canonicalManifestBytesHex,
+            canonicalRosterBytesHex,
+            canonicalSuiteRecordBytesHex,
+            ceremonyIdentifier,
+            expectedCeremonyContextHash,
+            expectedSuiteId,
+        });
+    },
     verifyActionDefinition: (canonicalBytes) =>
         kernel.verifyFoundationActionDefinition({
-            canonicalBytesHex: canonicalBytesHex(canonicalBytes),
+            canonicalBytesHex: canonicalBytesHex(
+                canonicalBytes,
+                'canonicalBytes',
+            ),
         }),
     verifyBoardPolicy: (canonicalBytes) =>
         kernel.verifyFoundationBoardPolicy({
-            canonicalBytesHex: canonicalBytesHex(canonicalBytes),
+            canonicalBytesHex: canonicalBytesHex(
+                canonicalBytes,
+                'canonicalBytes',
+            ),
         }),
-    verifyCeremonyContext: (input) =>
-        kernel.verifyFoundationCeremonyContext({
-            canonicalManifestBytesHex: canonicalBytesHex(
-                input.canonicalManifestBytes,
-            ),
-            canonicalRosterBytesHex: canonicalBytesHex(
-                input.canonicalRosterBytes,
-            ),
-            canonicalSuiteRecordBytesHex: canonicalBytesHex(
-                input.canonicalSuiteRecordBytes,
-            ),
-            ceremonyIdentifier: requireWellFormedString(
-                input.ceremonyIdentifier,
-                'ceremonyIdentifier',
-            ),
-            expectedSuiteId: input.expectedSuiteId,
-        }),
+    verifyCeremonyContext: (input) => {
+        const canonicalManifestBytesHex = canonicalBytesHex(
+            snapshotDataProperty(input, 'canonicalManifestBytes', 'input'),
+            'canonicalManifestBytes',
+        );
+        const canonicalRosterBytesHex = canonicalBytesHex(
+            snapshotDataProperty(input, 'canonicalRosterBytes', 'input'),
+            'canonicalRosterBytes',
+        );
+        const canonicalSuiteRecordBytesHex = canonicalBytesHex(
+            snapshotDataProperty(input, 'canonicalSuiteRecordBytes', 'input'),
+            'canonicalSuiteRecordBytes',
+        );
+        const ceremonyIdentifier = requireWellFormedString(
+            snapshotDataProperty(input, 'ceremonyIdentifier', 'input'),
+            'ceremonyIdentifier',
+        );
+        const expectedSuiteId = snapshotProtocolHash(
+            snapshotDataProperty(input, 'expectedSuiteId', 'input'),
+            'expectedSuiteId',
+        );
+        return kernel.verifyFoundationCeremonyContext({
+            canonicalManifestBytesHex,
+            canonicalRosterBytesHex,
+            canonicalSuiteRecordBytesHex,
+            ceremonyIdentifier,
+            expectedSuiteId,
+        });
+    },
     verifyManifest: (canonicalBytes) =>
         kernel.verifyFoundationManifest({
-            canonicalBytesHex: canonicalBytesHex(canonicalBytes),
+            canonicalBytesHex: canonicalBytesHex(
+                canonicalBytes,
+                'canonicalBytes',
+            ),
         }),
     verifySuiteRecord: (canonicalBytes) =>
         kernel.verifyFoundationSuiteRecord({
-            canonicalBytesHex: canonicalBytesHex(canonicalBytes),
+            canonicalBytesHex: canonicalBytesHex(
+                canonicalBytes,
+                'canonicalBytes',
+            ),
         }),
 });

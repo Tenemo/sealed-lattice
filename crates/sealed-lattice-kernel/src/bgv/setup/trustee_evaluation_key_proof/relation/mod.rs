@@ -15,7 +15,6 @@ mod statement_types;
 
 pub(crate) use column_layout::*;
 pub(crate) use constraint_kernels::*;
-pub(crate) use family_shape_and_validation::*;
 pub(crate) use key_relation_algebra::*;
 pub(crate) use linkage_and_vss_vectors::*;
 pub(crate) use statement_types::*;

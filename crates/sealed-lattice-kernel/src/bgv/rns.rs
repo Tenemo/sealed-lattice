@@ -18,7 +18,7 @@ impl RnsPolynomial {
     ) -> CanonicalResult<Self> {
         basis_kind.moduli_for_level(level).ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "requested BGV-RNS basis level is outside the selected parameters",
             )
         })?;
@@ -38,7 +38,7 @@ impl RnsPolynomial {
             .moduli_for_level(self.level)
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "BGV-RNS object level is outside the selected basis",
                 )
             })?;
@@ -58,7 +58,7 @@ impl RnsPolynomial {
             let modulus = expected_moduli[modulus_index];
             if residues.iter().any(|residue| *residue >= modulus) {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "BGV-RNS residue limb contains a non-canonical residue",
                 ));
             }
@@ -71,7 +71,7 @@ impl RnsPolynomial {
 #[cfg(test)]
 mod tests {
     use super::RnsPolynomial;
-    use crate::bgv::parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME};
+    use crate::bgv::parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIMES};
 
     #[test]
     fn coefficient_domain_object_validates_selected_basis() {
@@ -98,23 +98,29 @@ mod tests {
 
         let extended = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Extended,
-            DATA_PRIMES.len(),
+            DATA_PRIMES.len() + SPECIAL_PRIMES.len() - 1,
             DATA_PRIMES
                 .iter()
-                .chain([SPECIAL_PRIME].iter())
+                .chain(SPECIAL_PRIMES.iter())
                 .map(|modulus| vec![modulus - 1; POLYNOMIAL_DEGREE])
                 .collect(),
         )
         .expect("extended basis object");
-        assert_eq!(extended.residues_by_modulus.len(), DATA_PRIMES.len() + 1);
+        assert_eq!(
+            extended.residues_by_modulus.len(),
+            DATA_PRIMES.len() + SPECIAL_PRIMES.len()
+        );
 
         let special = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Special,
-            0,
-            vec![vec![SPECIAL_PRIME - 1; POLYNOMIAL_DEGREE]],
+            SPECIAL_PRIMES.len() - 1,
+            SPECIAL_PRIMES
+                .iter()
+                .map(|modulus| vec![modulus - 1; POLYNOMIAL_DEGREE])
+                .collect(),
         )
         .expect("special basis object");
-        assert_eq!(special.residues_by_modulus.len(), 1);
+        assert_eq!(special.residues_by_modulus.len(), SPECIAL_PRIMES.len());
     }
 
     #[test]

@@ -208,7 +208,7 @@ impl CanonicalProofTranscript {
                     CanonicalItem::unsigned16(protocol_version),
                     CanonicalItem::hash512(suite_id),
                     CanonicalItem::unsigned16(application_statement_schema_identifier),
-                    CanonicalItem::variable_bytes(canonical_proof_object_header_bytes.to_vec())
+                    CanonicalItem::variable_bytes(canonical_proof_object_header_bytes)
                         .map_err(|_| TranscriptError::CanonicalEncoding)?,
                 ],
             )?,
@@ -254,7 +254,7 @@ impl CanonicalProofTranscript {
                 CanonicalItem::hash512(self.state),
                 CanonicalItem::nonempty_ascii(&round_tag)
                     .map_err(|_| TranscriptError::CanonicalEncoding)?,
-                CanonicalItem::variable_bytes(canonical_round_message_bytes.to_vec())
+                CanonicalItem::variable_bytes(canonical_round_message_bytes)
                     .map_err(|_| TranscriptError::CanonicalEncoding)?,
             ],
         )?;
@@ -311,7 +311,7 @@ impl CanonicalProofTranscript {
             );
         }
         response_items.push(
-            CanonicalItem::variable_bytes(canonical_round_message_bytes.to_vec())
+            CanonicalItem::variable_bytes(canonical_round_message_bytes)
                 .map_err(|_| TranscriptError::CanonicalEncoding)?,
         );
         self.state = transcript_hash(TRANSCRIPT_ABSORB_DOMAIN, response_items)?;
@@ -620,7 +620,7 @@ pub(crate) enum CommonProofChallenge {
     Alpha { modulus_ordinal: u16 },
     Composition { constraint_ordinal: u16 },
     DeepPoint { point_ordinal: u16 },
-    OpeningBatch { claim_ordinal: u16 },
+    OpeningBatch { claim_ordinal: u32 },
     FriFold { fold_ordinal: u16 },
     QueryVector,
 }
@@ -714,7 +714,7 @@ pub(crate) struct CommonProofTranscriptSchedule {
     composition_challenge_count: u16,
     quotient_component_count: u16,
     deep_point_count: u16,
-    opening_claim_count: u16,
+    opening_claim_count: u32,
     fri_fold_count: u16,
     terminal_coefficient_count: u32,
     unique_query_count: u32,
@@ -732,7 +732,7 @@ impl CommonProofTranscriptSchedule {
         composition_challenge_count: u16,
         quotient_component_count: u16,
         deep_point_count: u16,
-        opening_claim_count: u16,
+        opening_claim_count: u32,
         fri_fold_count: u16,
         terminal_coefficient_count: u32,
         unique_query_count: u32,
@@ -815,7 +815,7 @@ impl CommonProofTranscriptSchedule {
         self.quotient_component_count
     }
 
-    pub(crate) const fn opening_claim_count(&self) -> u16 {
+    pub(crate) const fn opening_claim_count(&self) -> u32 {
         self.opening_claim_count
     }
 
@@ -1006,7 +1006,7 @@ enum CommonProofProgress {
     DeepPoints(u16),
     DeepValues,
     OpeningBatchMaskRoot,
-    OpeningBatchChallenges(u16),
+    OpeningBatchChallenges(u32),
     FriFoldChallenge(u16),
     FriLayerRoot(u16),
     FriTerminal,
@@ -1222,7 +1222,7 @@ impl CommonProofTranscript {
         deep_evaluations: &[ProofChallengeExtensionElement],
     ) -> Result<(), TranscriptError> {
         if self.progress != CommonProofProgress::DeepValues
-            || deep_evaluations.len() != usize::from(self.schedule.opening_claim_count)
+            || u32::try_from(deep_evaluations.len()).ok() != Some(self.schedule.opening_claim_count)
         {
             return Err(TranscriptError::UnexpectedCommonProofRound);
         }
@@ -1252,7 +1252,7 @@ impl CommonProofTranscript {
 
     pub(crate) fn sample_opening_batch_challenge(
         &mut self,
-        claim_ordinal: u16,
+        claim_ordinal: u32,
     ) -> Result<ProofChallengeExtensionElement, TranscriptError> {
         let CommonProofProgress::OpeningBatchChallenges(next_ordinal) = self.progress else {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);

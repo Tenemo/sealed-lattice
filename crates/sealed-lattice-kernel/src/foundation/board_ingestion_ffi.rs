@@ -2,10 +2,10 @@ use core::{ptr, slice};
 
 use super::RefusalReason;
 use super::board_ingestion_runtime::{
-    BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, begin_board_verifier_session,
-    cached_board_carrier_byte_length, cancel_board_verifier_session, copy_cached_board_carrier,
-    describe_verified_transcript_object, release_verified_transcript_object,
-    verify_unordered_board_carriers,
+    BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, BoardVerifierCanonicalContextInput,
+    begin_board_verifier_session, cached_board_carrier_byte_length, cancel_board_verifier_session,
+    copy_cached_board_carrier, describe_verified_transcript_object,
+    release_verified_transcript_object, verify_unordered_board_carriers,
 };
 
 const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
@@ -87,14 +87,82 @@ unsafe fn write_exact_output(
 /// Every input pointer must name its declared readable range. A non-null status
 /// pointer must name one writable `u32` in WASM memory.
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn sealed_lattice_board_verifier_begin(
-    configuration_pointer: *const u8,
-    configuration_byte_length: usize,
+    canonical_suite_record_pointer: *const u8,
+    canonical_suite_record_byte_length: usize,
+    canonical_manifest_pointer: *const u8,
+    canonical_manifest_byte_length: usize,
+    canonical_roster_pointer: *const u8,
+    canonical_roster_byte_length: usize,
+    canonical_action_definition_pointer: *const u8,
+    canonical_action_definition_byte_length: usize,
+    canonical_board_policy_pointer: *const u8,
+    canonical_board_policy_byte_length: usize,
+    ceremony_identifier_pointer: *const u8,
+    ceremony_identifier_byte_length: usize,
+    action_identifier_pointer: *const u8,
+    action_identifier_byte_length: usize,
+    expected_suite_identifier_pointer: *const u8,
+    expected_suite_identifier_byte_length: usize,
+    expected_ceremony_context_hash_pointer: *const u8,
+    expected_ceremony_context_hash_byte_length: usize,
+    expected_action_context_hash_pointer: *const u8,
+    expected_action_context_hash_byte_length: usize,
     capability_pointer: *const u8,
     capability_byte_length: usize,
     status_pointer: *mut u32,
 ) -> u32 {
-    let configuration = unsafe { input_bytes(configuration_pointer, configuration_byte_length) };
+    let context_input = BoardVerifierCanonicalContextInput {
+        canonical_suite_record_bytes: unsafe {
+            input_bytes(
+                canonical_suite_record_pointer,
+                canonical_suite_record_byte_length,
+            )
+        },
+        canonical_manifest_bytes: unsafe {
+            input_bytes(canonical_manifest_pointer, canonical_manifest_byte_length)
+        },
+        canonical_roster_bytes: unsafe {
+            input_bytes(canonical_roster_pointer, canonical_roster_byte_length)
+        },
+        canonical_action_definition_bytes: unsafe {
+            input_bytes(
+                canonical_action_definition_pointer,
+                canonical_action_definition_byte_length,
+            )
+        },
+        canonical_board_policy_bytes: unsafe {
+            input_bytes(
+                canonical_board_policy_pointer,
+                canonical_board_policy_byte_length,
+            )
+        },
+        ceremony_identifier_bytes: unsafe {
+            input_bytes(ceremony_identifier_pointer, ceremony_identifier_byte_length)
+        },
+        action_identifier_bytes: unsafe {
+            input_bytes(action_identifier_pointer, action_identifier_byte_length)
+        },
+        expected_suite_identifier_bytes: unsafe {
+            input_bytes(
+                expected_suite_identifier_pointer,
+                expected_suite_identifier_byte_length,
+            )
+        },
+        expected_ceremony_context_hash_bytes: unsafe {
+            input_bytes(
+                expected_ceremony_context_hash_pointer,
+                expected_ceremony_context_hash_byte_length,
+            )
+        },
+        expected_action_context_hash_bytes: unsafe {
+            input_bytes(
+                expected_action_context_hash_pointer,
+                expected_action_context_hash_byte_length,
+            )
+        },
+    };
     let capability = unsafe { input_bytes(capability_pointer, capability_byte_length) };
     let Ok(capability): Result<[u8; BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH], _> =
         capability.try_into()
@@ -107,7 +175,7 @@ pub unsafe extern "C" fn sealed_lattice_board_verifier_begin(
         }
         return 0;
     };
-    match begin_board_verifier_session(configuration, capability) {
+    match begin_board_verifier_session(context_input, capability) {
         Ok(handle) => {
             unsafe {
                 write_status(status_pointer, 0);

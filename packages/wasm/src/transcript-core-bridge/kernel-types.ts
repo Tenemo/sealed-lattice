@@ -22,28 +22,15 @@ export type {
 import type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
-    BgvLatticeAnchorCommitmentComputation,
-    BgvPublicKeyShareStatementContext,
-    BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeySameSecretBridge,
-    BgvTrusteeEvaluationKeySameSecretLinkage,
-    BgvTrusteeEvaluationKeyStatementContext,
-    BgvTrusteeEvaluationKeyStatementKey,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
-    BgvVssCommittedMaterialCommitmentComputation,
-    BgvSetupCommitmentOpeningComputation,
 } from './kernel-types/bgv.js';
 
 export type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
-    BgvLatticeAnchorCommitmentComputation,
-    BgvTrusteeEvaluationKeyProofGeneration,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
-    BgvVssCommittedMaterialCommitmentComputation,
-    BgvSetupCommitmentOpeningComputation,
 } from './kernel-types/bgv.js';
 
 export type BgvCollectiveSetupVerificationInput = Readonly<{
@@ -51,22 +38,6 @@ export type BgvCollectiveSetupVerificationInput = Readonly<{
     readonly expectedSetupPackageHash?: ProtocolHash;
     readonly expectedManifestHash?: ProtocolHash;
     readonly expectedRosterHash?: ProtocolHash;
-}>;
-
-export type DecodedProofApplicationBinding = Readonly<{
-    readonly canonicalBytesHex: string;
-    readonly applicationSlotCanonicalBytesHex: string;
-    readonly applicationSlotHash: ProtocolHash;
-    readonly suiteIdentifier: ProtocolHash;
-    readonly ceremonyContextHash: ProtocolHash;
-    readonly actionContextHash: ProtocolHash;
-    readonly applicationStatementSchemaIdentifier: number;
-    readonly rosterPosition: number | null;
-    readonly schedulePosition: number | null;
-    readonly producerSequence: string | null;
-    readonly proofHeaderHash: ProtocolHash;
-    readonly proofStreamDescriptorCanonicalBytesHex: string;
-    readonly proofByteLength: string;
 }>;
 
 export type FoundationOptionDefinitionIngress = Readonly<{
@@ -182,73 +153,6 @@ export type AcceptedSetupSession = Readonly<{
     ): BgvCollectiveSetupVerification;
 }>;
 
-type BgvTrusteeEvaluationKeyContext = BgvTrusteeEvaluationKeyStatementContext;
-
-type BgvEvaluationKeyStatementKey = Exclude<
-    BgvTrusteeEvaluationKeyStatementKey,
-    { readonly proofFamily: 'public-key-share' }
->;
-
-type BgvPublicKeyShareStatementKey = Extract<
-    BgvTrusteeEvaluationKeyStatementKey,
-    { readonly proofFamily: 'public-key-share' }
->;
-
-type BgvTrusteeEvaluationKeyStatementCommonInput<Context, Key> = Readonly<{
-    readonly context: Context;
-    readonly keys: readonly Key[];
-}>;
-
-type BgvTrusteeEvaluationKeyStatementInput =
-    | Readonly<
-          BgvTrusteeEvaluationKeyStatementCommonInput<
-              BgvTrusteeEvaluationKeyContext,
-              BgvEvaluationKeyStatementKey
-          > & {
-              readonly statementFamily: 'trustee-evaluation-key';
-              readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
-          }
-      >
-    | Readonly<
-          Omit<
-              BgvTrusteeEvaluationKeyStatementCommonInput<
-                  BgvPublicKeyShareStatementContext,
-                  BgvPublicKeyShareStatementKey
-              >,
-              'keys'
-          > & {
-              readonly statementFamily: 'public-key-share';
-              readonly keys: readonly [BgvPublicKeyShareStatementKey];
-              readonly sameSecretBridge: BgvTrusteeEvaluationKeySameSecretBridge;
-          }
-      >;
-
-type BgvTrusteeEvaluationKeyProofCommonInput = Readonly<{
-    readonly secretCoefficients: readonly number[];
-    readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
-    readonly proofRandomnessSeedHex: string;
-}>;
-
-type BgvTrusteeEvaluationKeyProofInput =
-    | Readonly<
-          Extract<
-              BgvTrusteeEvaluationKeyStatementInput,
-              { readonly statementFamily: 'trustee-evaluation-key' }
-          > &
-              BgvTrusteeEvaluationKeyProofCommonInput & {
-                  readonly openingRandomnessBySourceLimbAndCommitmentLimb: readonly (readonly (readonly (readonly number[])[])[])[];
-              }
-      >
-    | Readonly<
-          Extract<
-              BgvTrusteeEvaluationKeyStatementInput,
-              { readonly statementFamily: 'public-key-share' }
-          > &
-              BgvTrusteeEvaluationKeyProofCommonInput & {
-                  readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-              }
-      >;
-
 export type TranscriptCoreKernel = {
     beginAcceptedSetupSession(): AcceptedSetupSession;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
@@ -293,9 +197,6 @@ export type TranscriptCoreKernel = {
         readonly expectedCeremonyContextHash: ProtocolHash;
         readonly expectedSuiteId: ProtocolHash;
     }): FoundationActionContextVerification;
-    decodeProofApplicationBinding(input: {
-        readonly canonicalBytesHex: string;
-    }): DecodedProofApplicationBinding;
     encodeMailboxKeyScheduleInput(input: {
         readonly kemCiphertextHex: string;
         readonly value: MailboxKeyScheduleInput;
@@ -341,30 +242,6 @@ export type TranscriptCoreKernel = {
         readonly privateEnvelope: unknown;
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
     }): BgvPrivateVssShareEnvelopeVerification;
-    generateTrusteeEvaluationKeyProof(
-        input: BgvTrusteeEvaluationKeyProofInput,
-    ): BgvTrusteeEvaluationKeyProofGeneration;
-    computeLatticeAnchorCommitmentFromOpening(input: {
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly commitmentDataPrimeIndex: number;
-        readonly secretContributionCoefficients: readonly number[];
-        readonly openingPolynomials: readonly (readonly number[])[];
-    }): BgvLatticeAnchorCommitmentComputation;
-    computeSetupCommitmentFromOpening(input: {
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly sourceRnsLimbIndex: number;
-        readonly shamirCoefficientIndex: number;
-        readonly messageCoefficients: readonly number[];
-        readonly randomnessByCommitmentLimb: readonly (readonly (readonly number[])[])[];
-        readonly ringDegree: number;
-    }): BgvSetupCommitmentOpeningComputation;
-    computeVssCommittedMaterialCommitment(input: {
-        readonly commitmentRole: string;
-        readonly commitmentContext: Record<string, unknown>;
-        readonly rnsLimbIndex: number;
-        readonly messageCoefficients: readonly number[];
-        readonly materialSeedHex: string;
-    }): BgvVssCommittedMaterialCommitmentComputation;
 };
 
 export type TranscriptCoreKernelContextOwner = object;
@@ -443,10 +320,6 @@ type TranscriptCoreKernelCommand =
           'VerifyFoundationActionContext',
           'verifyFoundationActionContext'
       >
-    | KernelCommandFromMethod<
-          'DecodeProofApplicationBinding',
-          'decodeProofApplicationBinding'
-      >
     | Readonly<{
           readonly command: 'EncodeMailboxKeyScheduleInput';
           readonly kemCiphertextHex: string;
@@ -511,22 +384,6 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'VerifyPrivateVssShareEnvelope',
           'verifyPrivateVssShareEnvelope'
-      >
-    | KernelCommandFromMethod<
-          'GenerateTrusteeEvaluationKeyProof',
-          'generateTrusteeEvaluationKeyProof'
-      >
-    | KernelCommandFromMethod<
-          'ComputeLatticeAnchorCommitmentFromOpening',
-          'computeLatticeAnchorCommitmentFromOpening'
-      >
-    | KernelCommandFromMethod<
-          'ComputeSetupCommitmentFromOpening',
-          'computeSetupCommitmentFromOpening'
-      >
-    | KernelCommandFromMethod<
-          'ComputeVssCommittedMaterialCommitment',
-          'computeVssCommittedMaterialCommitment'
       >;
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
@@ -672,6 +529,175 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         tagLength: number,
     ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
+    sealed_lattice_common_proof_begin_generation?: (
+        preparedGenerationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_discard_prepared_generation?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_common_proof_discard_prepared_verification?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_common_proof_resume_generation?: (
+        preparedGenerationHandle: number,
+        authenticatedCheckpointStatePointer: number,
+        authenticatedCheckpointStateByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_checkpoint_state_byte_length?: () => number;
+    sealed_lattice_common_proof_generation_describe_checkpoint?: (
+        operationHandle: number,
+        safeBoundaryOrdinalPointer: number,
+        stateByteLengthPointer: number,
+        cursorCountPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_checkpoint_state?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_checkpoint_cursor_byte_length?: (
+        operationHandle: number,
+        cursorIndex: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_checkpoint_cursor?: (
+        operationHandle: number,
+        cursorIndex: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_checkpoint_stable_attempt_binding_hash?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_acknowledge_checkpoint?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_discard_checkpoint?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_acknowledge_output_chunk?: (
+        operationHandle: number,
+        expectedChunkIndex: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_confirm_output_readback?: (
+        operationHandle: number,
+        chunkIndex: number,
+        readbackPointer: number,
+        readbackLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_output_chunk?: (
+        operationHandle: number,
+        expectedChunkIndex: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_storage_request?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_finish?: (
+        operationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_poll?: (
+        operationHandle: number,
+        pollKindPointer: number,
+        primaryValuePointer: number,
+        secondaryValuePointer: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_release_cancelled?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_retire_failed?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_request_cancellation?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_supply_storage_response?: (
+        operationHandle: number,
+        responsePointer: number,
+        responseLength: number,
+    ) => number;
+    sealed_lattice_common_proof_release_generated_proof?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_common_proof_application_frame_byte_length?: () => number;
+    sealed_lattice_common_proof_prepare_application?: (
+        terminalCapabilityHandle: number,
+        storageRootHandle: number,
+        storageRootCapabilityPointer: number,
+        predecessorNamespaceSequence: bigint,
+        predecessorAuthenticatedHeadDigestPointer: number,
+        storageInstanceIdentityPointer: number,
+        durableFrameOutputPointer: number,
+        durableFrameOutputByteLength: number,
+        proofApplicationSlotHashOutputPointer: number,
+        proofApplicationSlotHashOutputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_confirm_application?: (
+        pendingHandle: number,
+        storageRootHandle: number,
+        storageRootCapabilityPointer: number,
+        predecessorNamespaceSequence: bigint,
+        predecessorAuthenticatedHeadDigestPointer: number,
+        successorNamespaceSequence: bigint,
+        successorAuthenticatedHeadDigestPointer: number,
+        storageInstanceIdentityPointer: number,
+        authenticatedDurableFramePointer: number,
+        authenticatedDurableFrameByteLength: number,
+    ) => number;
+    sealed_lattice_common_proof_abort_application?: (
+        pendingHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_release_suite?: (handle: number) => number;
+    sealed_lattice_common_proof_select_suite?: (
+        canonicalSuiteRecordPointer: number,
+        canonicalSuiteRecordLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_begin_verification?: (
+        preparedVerificationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_discard_verified_proof?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_absorb_input_chunk?: (
+        operationHandle: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_cancel?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_finish?: (
+        operationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_finish_input?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_poll?: (
+        operationHandle: number,
+        pollKindPointer: number,
+        primaryValuePointer: number,
+        secondaryValuePointer: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_supply_readback_chunk?: (
+        operationHandle: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
     sealed_lattice_local_storage_root_command?: (
         command: number,
         inputPointer: number,
@@ -680,8 +706,26 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         outputLengthPointer: number,
     ) => number;
     sealed_lattice_board_verifier_begin?: (
-        configurationPointer: number,
-        configurationLength: number,
+        canonicalSuiteRecordPointer: number,
+        canonicalSuiteRecordLength: number,
+        canonicalManifestPointer: number,
+        canonicalManifestLength: number,
+        canonicalRosterPointer: number,
+        canonicalRosterLength: number,
+        canonicalActionDefinitionPointer: number,
+        canonicalActionDefinitionLength: number,
+        canonicalBoardPolicyPointer: number,
+        canonicalBoardPolicyLength: number,
+        ceremonyIdentifierPointer: number,
+        ceremonyIdentifierLength: number,
+        actionIdentifierPointer: number,
+        actionIdentifierLength: number,
+        expectedSuiteIdentifierPointer: number,
+        expectedSuiteIdentifierLength: number,
+        expectedCeremonyContextHashPointer: number,
+        expectedCeremonyContextHashLength: number,
+        expectedActionContextHashPointer: number,
+        expectedActionContextHashLength: number,
         capabilityPointer: number,
         capabilityLength: number,
         statusPointer: number,
@@ -865,6 +909,13 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         canonicalStateCertificatePointer: number,
         canonicalStateCertificateLength: number,
         statusPointer: number,
+    ) => number;
+    sealed_lattice_state_producer_command?: (
+        command: number,
+        inputPointer: number,
+        inputLength: number,
+        statusPointer: number,
+        outputLengthPointer: number,
     ) => number;
     sealed_lattice_transcript_core_command_with_length?: (
         pointer: number,

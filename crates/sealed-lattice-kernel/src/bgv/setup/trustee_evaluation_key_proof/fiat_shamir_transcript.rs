@@ -7,6 +7,8 @@ use crate::bgv::setup::transcript_order_audit::{
     TranscriptOrderAuditRecorder, active_transcript_order_audit_recorder,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+#[cfg(test)]
+use crate::foundation::ProofApplicationSlotCeilings;
 
 fn transcript_error(message: &'static str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
@@ -98,7 +100,7 @@ impl HashChainTranscriptCore {
     }
 
     #[cfg(test)]
-    fn exhaust_squeeze_counter(&mut self) {
+    pub(in crate::bgv::setup) fn exhaust_squeeze_counter(&mut self) {
         self.squeeze_counter = u64::MAX;
     }
 }
@@ -118,7 +120,11 @@ impl FiatShamirTranscript {
         protocol_label: &str,
         maximum_candidate_draws_per_output: u32,
     ) -> CanonicalResult<Self> {
-        Self::new_for_schema(protocol_label, 0x1216, maximum_candidate_draws_per_output)
+        Self::new_for_schema(
+            protocol_label,
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+            maximum_candidate_draws_per_output,
+        )
     }
 
     pub(super) fn new_for_schema(

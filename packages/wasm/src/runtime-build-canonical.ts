@@ -402,19 +402,52 @@ export const requireCanonicalRuntimePath = (path: string): string => {
 };
 
 const privateProofSaltPurpose = 0xfffe;
-const proofRandomnessPurposeRanges: ReadonlyMap<
-    number,
-    readonly [firstPurpose: number, lastPurpose: number]
-> = new Map([
-    [0x1211, [1, 2]],
-    [0x1212, [3, 4]],
-    [0x1214, [5, 6]],
-    [0x1216, [7, 8]],
-    [0x1217, [9, 40]],
-    [0x1302, [41, 42]],
-    [0x1621, [43, 44]],
-    [0x2110, [45, 46]],
-    [0x2111, [47, 48]],
+export const proofRandomnessPurposeRanges = Object.freeze([
+    Object.freeze({
+        familySchemaIdentifier: 0x1211,
+        firstPurpose: 1,
+        lastPurpose: 2,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: 0x1212,
+        firstPurpose: 3,
+        lastPurpose: 4,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: 0x1214,
+        firstPurpose: 5,
+        lastPurpose: 6,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: 0x1216,
+        firstPurpose: 7,
+        lastPurpose: 8,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: 0x1217,
+        firstPurpose: 9,
+        lastPurpose: 40,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: 0x1302,
+        firstPurpose: 41,
+        lastPurpose: 42,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: 0x1621,
+        firstPurpose: 43,
+        lastPurpose: 44,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: 0x2110,
+        firstPurpose: 45,
+        lastPurpose: 46,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: 0x2111,
+        firstPurpose: 47,
+        lastPurpose: 48,
+    }),
 ]);
 
 const isAssignedRandomUse = (family: number, purpose: number): boolean => {
@@ -436,12 +469,14 @@ const isAssignedRandomUse = (family: number, purpose: number): boolean => {
     if (family === 0x1630) {
         return purpose <= 2;
     }
-    const proofPurposeRange = proofRandomnessPurposeRanges.get(family);
+    const proofPurposeRange = proofRandomnessPurposeRanges.find(
+        (range) => range.familySchemaIdentifier === family,
+    );
     return (
         proofPurposeRange !== undefined &&
         (purpose === privateProofSaltPurpose ||
-            (purpose >= proofPurposeRange[0] &&
-                purpose <= proofPurposeRange[1]))
+            (purpose >= proofPurposeRange.firstPurpose &&
+                purpose <= proofPurposeRange.lastPurpose))
     );
 };
 

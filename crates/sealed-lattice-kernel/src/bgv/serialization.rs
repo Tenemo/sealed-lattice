@@ -1,9 +1,11 @@
 #[cfg(test)]
+use crate::bgv::parameters::BgvBasisKind;
+#[cfg(test)]
 use crate::encoding::CanonicalReader;
 #[cfg(test)]
 use crate::transcript_core::encode_hex;
 use crate::{
-    bgv::{parameters::BgvBasisKind, rns::RnsPolynomial},
+    bgv::rns::RnsPolynomial,
     encoding::{
         CanonicalError, CanonicalErrorCode, CanonicalResult, append_string, append_varuint,
     },
@@ -112,7 +114,7 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
     // bytes to match exactly, rejecting any non-canonical input encoding.
     if serialize_bgv_object(object.object_kind, &object.components)? != bytes {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "BGV object is not canonical because it does not reserialize byte-identically",
         ));
     }
@@ -161,7 +163,7 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
     })?;
     let moduli = basis_kind.moduli_for_level(level).ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "BGV-RNS object level is outside the selected basis",
         )
     })?;

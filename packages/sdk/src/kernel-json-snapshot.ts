@@ -1,4 +1,5 @@
 const maximumKernelInputValueCount = 1_000_000;
+const maximumKernelInputNestingDepth = 64;
 
 export type KernelJsonSnapshotState = {
     valueCount: number;
@@ -26,9 +27,56 @@ export const chargeKernelJsonSnapshotValues = (
 
 export const snapshotKernelJsonValue = (
     value: unknown,
-    _valuePath: string,
-    _state: KernelJsonSnapshotState,
-): unknown => structuredClone(value);
+    valuePath: string,
+    state: KernelJsonSnapshotState,
+): unknown => {
+    const activeObjects = new Set<object>();
+
+    const chargeValue = (
+        currentValue: unknown,
+        currentPath: string,
+        nestingDepth: number,
+    ): void => {
+        if (nestingDepth > maximumKernelInputNestingDepth) {
+            throw new RangeError(
+                `${currentPath} exceeds the accepted nesting depth.`,
+            );
+        }
+        chargeKernelJsonSnapshotValues(state, 1);
+        if (typeof currentValue !== 'object' || currentValue === null) {
+            return;
+        }
+        if (activeObjects.has(currentValue)) {
+            throw new TypeError(`${currentPath} cannot contain a cycle.`);
+        }
+
+        activeObjects.add(currentValue);
+        try {
+            const descriptors = Object.getOwnPropertyDescriptors(currentValue);
+            for (const propertyName of Object.keys(descriptors)) {
+                const descriptor = descriptors[propertyName];
+                if (
+                    descriptor === undefined ||
+                    descriptor.enumerable !== true
+                ) {
+                    continue;
+                }
+                const propertyPath = `${currentPath}.${propertyName}`;
+                if ('get' in descriptor || 'set' in descriptor) {
+                    throw new TypeError(
+                        `${propertyPath} cannot be an accessor property.`,
+                    );
+                }
+                chargeValue(descriptor.value, propertyPath, nestingDepth + 1);
+            }
+        } finally {
+            activeObjects.delete(currentValue);
+        }
+    };
+
+    chargeValue(value, valuePath, 0);
+    return structuredClone(value);
+};
 
 export const plainRecordDescriptors = (
     value: unknown,

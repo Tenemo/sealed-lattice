@@ -8,7 +8,6 @@ import {
     type BrowserActionStateReservationVerificationInput,
     type BrowserActionStateVerifierSessionInput,
     type BrowserOpenedActionRandomnessSession,
-    type BrowserPersistentProofAttemptInput,
     type BrowserSealedActionRandomnessSession,
     type BrowserTargetReleaseAttemptInput,
     type RefusalReason,
@@ -277,51 +276,6 @@ export const copyOpenSealedActionRandomnessInput = (
         canonicalEnvelope: copyBytes(
             value.canonicalEnvelope,
             'Sealed action-randomness envelope',
-        ),
-    });
-};
-
-export const copyPersistentProofAttemptInput = (
-    value: unknown,
-): BrowserPersistentProofAttemptInput => {
-    if (!isPlainRecord(value)) {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'The persistent proof-attempt input is malformed.',
-        );
-    }
-
-    return Object.freeze({
-        actionRandomnessSessionIdentifier: copyOpaqueWorkerIdentifier(
-            value.actionRandomnessSessionIdentifier,
-            'Action-randomness session identifier',
-        ),
-        applicationStatementHash: copyBytes(
-            value.applicationStatementHash,
-            'Application statement hash',
-            foundationHashByteLength,
-        ),
-        rosterPosition: copyUnsignedInteger(
-            value.rosterPosition,
-            0xffff,
-            'Proof roster position',
-        ),
-        schedulePosition:
-            value.schedulePosition === undefined
-                ? undefined
-                : copyUnsignedInteger(
-                      value.schedulePosition,
-                      0xffff_ffff,
-                      'Proof schedule position',
-                  ),
-        stateReservationIdentifier: copyOpaqueWorkerIdentifier(
-            value.stateReservationIdentifier,
-            'State-reservation identifier',
-        ),
-        statementSchemaIdentifier: copyUnsignedInteger(
-            value.statementSchemaIdentifier,
-            0xffff,
-            'Proof statement schema identifier',
         ),
     });
 };

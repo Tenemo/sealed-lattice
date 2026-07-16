@@ -138,7 +138,7 @@ fn verify_vss_public_material_binding(
 }
 
 fn public_material_error(message: &'static str) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 fn vss_public_material_refusal(

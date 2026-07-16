@@ -20,7 +20,7 @@ pub(super) fn verify_stored_public_key_share_material_set(
     )?
     .ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "public-key share material was not accepted by the canonical stream verifier",
         )
     })?;

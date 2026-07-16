@@ -1,14 +1,14 @@
+import { createRuntimeRecordAuthenticatedRepairProtection } from '#packages/protocol/src/runtime/authenticated-runtime-record';
+import type { RuntimeStorageAuthorityContext } from '#packages/protocol/src/runtime/durable-state-witness-service';
 import {
-    createRuntimeRecordAuthenticatedRepairProtection,
     openUntrustedStorageTransactionStore,
-    type RuntimeStorageAuthorityContext,
     type UntrustedStorageAdapter,
     type UntrustedStorageAuthenticatedRepairProtection,
     type UntrustedStorageAtomicMutation,
     type UntrustedStorageRepairReport,
     type UntrustedStorageTransactionLimits,
     type UntrustedStorageTransactionStore,
-} from '#packages/protocol/src/index';
+} from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
 
 const bytesEqual = (
     left: Uint8Array | undefined,
@@ -62,6 +62,29 @@ export class InMemoryRuntimeStorageAdapter implements UntrustedStorageAdapter {
                 .filter((key) => key.startsWith(prefix))
                 .sort(),
         );
+    }
+
+    public deleteUnreferencedObjects(input: {
+        indexPrefix: string;
+        objectKeys: readonly string[];
+    }): Promise<boolean> {
+        const decoder = new TextDecoder('utf-8', { fatal: true });
+        const referencedObjectKeys = new Set(
+            [...this.#values.entries()]
+                .filter(([key]) => key.startsWith(input.indexPrefix))
+                .map(([, value]) => decoder.decode(value)),
+        );
+        if (
+            input.objectKeys.some((objectKey) =>
+                referencedObjectKeys.has(objectKey),
+            )
+        ) {
+            return Promise.resolve(false);
+        }
+        for (const objectKey of input.objectKeys) {
+            this.#values.delete(objectKey);
+        }
+        return Promise.resolve(true);
     }
 
     public applyAtomicMutation(

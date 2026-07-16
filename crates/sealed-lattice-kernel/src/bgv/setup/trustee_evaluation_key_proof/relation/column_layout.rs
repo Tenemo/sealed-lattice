@@ -1,9 +1,8 @@
-use super::super::{LINCHECK_REPETITIONS, TRACE_SPLIT, invalid_succinct_setup_proof};
+use super::super::{TRACE_SPLIT, invalid_succinct_setup_proof};
 use super::family_shape_and_validation::SuccinctSetupProofFamilyShape;
 use super::statement_types::TrusteeEvaluationKeyStatement;
 use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-    SETUP_COMMITMENT_ROW_COUNT,
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_ROW_COUNT,
 };
 use crate::encoding::CanonicalResult;
 
@@ -14,13 +13,10 @@ pub(crate) const QUOTIENT_COLUMN_SUMCHECK_RESIDUAL: usize = 3;
 pub(crate) const PHASE_TWO_COLUMN_COUNT: usize = 4;
 
 pub(crate) struct LimbColumnLayout {
-    pub(crate) limb_index: usize,
-    pub(crate) base_ring_degree: usize,
     pub(crate) ring_degree: usize,
     pub(crate) trace_size: usize,
     pub(crate) family_shape: SuccinctSetupProofFamilyShape,
     pub(crate) consistency_repetitions: usize,
-    pub(crate) active_keys: Vec<(usize, usize)>,
     pub(crate) total_error_columns: usize,
     pub(crate) private_vss_coefficient_columns: usize,
     pub(crate) linkage_randomness_columns: usize,
@@ -87,13 +83,10 @@ impl LimbColumnLayout {
         let mask_column_count = mask_slot_count.div_ceil(ring_degree);
 
         Ok(Self {
-            limb_index,
-            base_ring_degree,
             ring_degree,
             trace_size: ring_degree / TRACE_SPLIT,
             family_shape,
             consistency_repetitions,
-            active_keys,
             total_error_columns,
             private_vss_coefficient_columns,
             linkage_randomness_columns,
@@ -142,16 +135,6 @@ impl LimbColumnLayout {
 
     pub(crate) fn claim_count(&self) -> usize {
         self.consistency_vector_count() * self.consistency_repetitions
-    }
-
-    pub(crate) fn linkage_relation_count(&self) -> usize {
-        if self.linkage_active() {
-            let commitment_count =
-                self.linkage_randomness_columns / SETUP_COMMITMENT_RANDOMNESS_WIDTH;
-            commitment_count * SETUP_COMMITMENT_ROW_COUNT * LINCHECK_REPETITIONS
-        } else {
-            0
-        }
     }
 
     pub(crate) fn physical_secret(&self, half: usize) -> usize {

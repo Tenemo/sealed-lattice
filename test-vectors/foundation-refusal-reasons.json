@@ -1,0 +1,15 @@
+[
+    { "name": "malformedEncoding", "code": 1 },
+    { "name": "unsupportedVersionOrSuite", "code": 2 },
+    { "name": "outsideSupportedProfile", "code": 3 },
+    { "name": "wrongContext", "code": 4 },
+    { "name": "wrongTypeOrLength", "code": 5 },
+    { "name": "wrongHashOrRoot", "code": 6 },
+    { "name": "invalidSignature", "code": 7 },
+    { "name": "duplicateIdentity", "code": 8 },
+    { "name": "equivocation", "code": 9 },
+    { "name": "missingPrerequisite", "code": 10 },
+    { "name": "invalidProof", "code": 11 },
+    { "name": "invalidArithmeticRelation", "code": 12 },
+    { "name": "consumedState", "code": 13 }
+]

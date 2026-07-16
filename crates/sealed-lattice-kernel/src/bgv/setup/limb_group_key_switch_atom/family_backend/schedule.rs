@@ -16,26 +16,35 @@ use rayon::prelude::*;
 
 use super::super::limb_group_statement::LimbGroupContext;
 use super::super::negacyclic_transform::NegacyclicDomain;
-use super::super::proof_field::{ProofFieldParameters, sixteen_limb_group_field_parameters};
+#[cfg(test)]
+use super::super::proof_field::ProofFieldParameters;
+use super::super::proof_field::sixteen_limb_group_field_parameters;
 use super::key_proof::{
-    KeyFriProofParameters, LinkageStatement, LinkageWitness, key_fri_proof_decoding_shape,
-    prove_key_fri_with_negacyclic_domain, verify_key_fri_with_negacyclic_domain,
+    KeyFriProofParameters, LinkageStatement, key_fri_proof_decoding_shape,
+    verify_key_fri_with_negacyclic_domain,
 };
+#[cfg(test)]
+use super::key_proof::{LinkageWitness, prove_key_fri_with_negacyclic_domain};
+#[cfg(test)]
 use super::private_randomness::PrivateProofRandomness;
-use super::proof_codec::{decode_key_proof, encode_key_proof};
-use super::statement_bridge::{
-    BridgeKeyMaterialInput, BridgeKeyPublicInput, BridgedKeyKind, bridge_key_material,
-    bridge_key_public,
-};
+use super::proof_codec::decode_key_proof;
+#[cfg(test)]
+use super::proof_codec::encode_key_proof;
+#[cfg(test)]
+use super::statement_bridge::{BridgeKeyMaterialInput, bridge_key_material};
+use super::statement_bridge::{BridgeKeyPublicInput, BridgedKeyKind, bridge_key_public};
 use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS};
 use crate::bgv::setup::ProofByteSource;
+#[cfg(test)]
+use crate::bgv::setup::trustee_evaluation_key_proof::TrusteeEvaluationKeyWitness;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, TrusteeEvaluationKeyStatement,
-    TrusteeEvaluationKeyWitness, public_key_switch_sample,
+    public_key_switch_sample,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 const SCHEDULE_MAGIC: &[u8; 8] = b"SLKSATS2";
+#[cfg(test)]
 const SCHEDULE_RANDOMNESS_DOMAIN: &str =
     "sealed-lattice/setup/key-switch-atom/schedule-private-randomness/v1";
 pub(crate) const SCHEDULE_QUERY_COUNT: usize = 80;
@@ -52,6 +61,7 @@ fn invalid_schedule(message: &str) -> CanonicalError {
 }
 // Per-column mask degree for scheduled proofs; N/4 stays inside the quotient
 // degree budget.
+#[cfg(test)]
 fn schedule_mask_degree(ring_degree: usize) -> usize {
     ring_degree / 4
 }
@@ -110,6 +120,7 @@ pub(crate) fn statement_is_key_bearing(statement: &TrusteeEvaluationKeyStatement
 
 // Each scheduled proof gets a distinct private mask/salt stream. The caller's
 // fresh seed is already bound to the statement, trustee, and setup context.
+#[cfg(test)]
 fn key_private_randomness(
     statement_hash: &[u8; 64],
     proof_randomness_seed_hex: &str,
@@ -219,6 +230,7 @@ fn bridged_kind<'a>(key: &'a EvaluationKeyShareDescriptor) -> CanonicalResult<Br
 
 // Prove every scheduled key with the atom family backend, returning the
 // container bytes.
+#[cfg(test)]
 pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
@@ -249,6 +261,7 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
     let negacyclic_domain = NegacyclicDomain::new(&parameters, ring_degree)?;
     let proof_parameters = KeyFriProofParameters {
         query_count: SCHEDULE_QUERY_COUNT,
+        #[cfg(test)]
         mask_degree: schedule_mask_degree(ring_degree),
     };
 
@@ -307,6 +320,7 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
     Ok(container)
 }
 
+#[cfg(test)]
 struct ProveOneKey<'a, const LIMB_COUNT: usize> {
     parameters: &'a ProofFieldParameters<LIMB_COUNT>,
     statement_hash: &'a [u8; 64],
@@ -323,6 +337,7 @@ struct ProveOneKey<'a, const LIMB_COUNT: usize> {
     proof_parameters: &'a KeyFriProofParameters,
 }
 
+#[cfg(test)]
 fn prove_one_key<const LIMB_COUNT: usize>(
     input: ProveOneKey<'_, LIMB_COUNT>,
 ) -> CanonicalResult<Vec<u8>> {
@@ -406,6 +421,7 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
     let negacyclic_domain = NegacyclicDomain::new(&parameters, ring_degree)?;
     let proof_parameters = KeyFriProofParameters {
         query_count: SCHEDULE_QUERY_COUNT,
+        #[cfg(test)]
         mask_degree: schedule_mask_degree(ring_degree),
     };
 

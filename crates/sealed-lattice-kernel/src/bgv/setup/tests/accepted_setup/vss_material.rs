@@ -437,7 +437,7 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
                 aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"][0] =
                     serde_json::json!(17);
             },
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             None,
         ),
     ];

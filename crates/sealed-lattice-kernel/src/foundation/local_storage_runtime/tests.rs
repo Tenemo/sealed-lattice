@@ -74,6 +74,22 @@ fn checkpoint_manifest_identifier_context() -> Vec<u8> {
     .concat()
 }
 
+fn common_proof_external_memory_identifier_context() -> Vec<u8> {
+    [
+        [0xb1; 32].as_slice(),
+        [0xb2; HASH_BYTE_LENGTH].as_slice(),
+        [0xb3; 32].as_slice(),
+        CommonProofExternalMemoryRecordKind::DataChunk
+            .canonical_code()
+            .to_le_bytes()
+            .as_slice(),
+        17_u32.to_le_bytes().as_slice(),
+        19_u32.to_le_bytes().as_slice(),
+        23_u64.to_le_bytes().as_slice(),
+    ]
+    .concat()
+}
+
 fn record_request_input(
     handle: u32,
     capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
@@ -103,6 +119,194 @@ fn record_request_input(
         }
     }
     input
+}
+
+fn authenticated_repair_request_input(
+    handle: u32,
+    capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    runtime_build_manifest_hash: &[u8; HASH_BYTE_LENGTH],
+    namespace: &[u8],
+) -> Vec<u8> {
+    [
+        lease_input(handle, capability).as_slice(),
+        runtime_build_manifest_hash.as_slice(),
+        u32::try_from(namespace.len())
+            .expect("namespace length")
+            .to_le_bytes()
+            .as_slice(),
+        namespace,
+    ]
+    .concat()
+}
+
+#[test]
+fn authenticated_repair_commands_bind_root_build_namespace_and_exact_envelope() {
+    reset_registry();
+    let capability = test_capability(201);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &test_binding(203), &test_root(205)),
+    )
+    .expect("root stages");
+    let (handle, _) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("root commits");
+
+    let runtime_build_manifest_hash = [0xd1; HASH_BYTE_LENGTH];
+    let request = authenticated_repair_request_input(
+        handle,
+        &capability,
+        &runtime_build_manifest_hash,
+        b"foundation-0",
+    );
+    let repair_identity =
+        run_local_storage_root_command(LOCAL_STORAGE_ROOT_COMMAND_DERIVE_REPAIR_IDENTITY, &request)
+            .expect("repair identity derives");
+    assert_eq!(repair_identity.len(), HASH_BYTE_LENGTH);
+    assert_ne!(repair_identity, vec![0; HASH_BYTE_LENGTH]);
+
+    let different_namespace_request = authenticated_repair_request_input(
+        handle,
+        &capability,
+        &runtime_build_manifest_hash,
+        b"foundation-1",
+    );
+    assert_ne!(
+        repair_identity,
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_DERIVE_REPAIR_IDENTITY,
+            &different_namespace_request,
+        )
+        .expect("different namespace identity derives"),
+    );
+    let different_build_request = authenticated_repair_request_input(
+        handle,
+        &capability,
+        &[0xd2; HASH_BYTE_LENGTH],
+        b"foundation-0",
+    );
+    assert_ne!(
+        repair_identity,
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_DERIVE_REPAIR_IDENTITY,
+            &different_build_request,
+        )
+        .expect("different build identity derives"),
+    );
+
+    let plaintext = b"exact authenticated repair head";
+    let envelope = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_REPAIR_HEAD,
+        &[request.as_slice(), [0xd3; 12].as_slice(), plaintext].concat(),
+    )
+    .expect("repair head seals");
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_OPEN_REPAIR_HEAD,
+            &[request.as_slice(), envelope.as_slice()].concat(),
+        )
+        .expect("repair head opens"),
+        plaintext,
+    );
+    let digest = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_DIGEST_REPAIR_HEAD,
+        &[request.as_slice(), envelope.as_slice()].concat(),
+    )
+    .expect("repair head digest derives");
+    assert_eq!(digest.len(), HASH_BYTE_LENGTH);
+    assert_eq!(
+        digest,
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_DIGEST_REPAIR_HEAD,
+            &[request.as_slice(), envelope.as_slice()].concat(),
+        )
+        .expect("repair head digest is deterministic"),
+    );
+
+    for wrong_context_request in [&different_namespace_request, &different_build_request] {
+        assert_eq!(
+            run_local_storage_root_command(
+                LOCAL_STORAGE_ROOT_COMMAND_OPEN_REPAIR_HEAD,
+                &[wrong_context_request.as_slice(), envelope.as_slice()].concat(),
+            ),
+            Err(refusal_status(RefusalReason::WrongHashOrRoot)),
+        );
+    }
+    let mut tampered_envelope = envelope.clone();
+    *tampered_envelope.last_mut().expect("envelope is nonempty") ^= 1;
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_OPEN_REPAIR_HEAD,
+            &[request.as_slice(), tampered_envelope.as_slice()].concat(),
+        ),
+        Err(refusal_status(RefusalReason::WrongHashOrRoot)),
+    );
+    let wrong_capability_request = authenticated_repair_request_input(
+        handle,
+        &test_capability(211),
+        &runtime_build_manifest_hash,
+        b"foundation-0",
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_DERIVE_REPAIR_IDENTITY,
+            &wrong_capability_request,
+        ),
+        Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH),
+    );
+    reset_registry();
+}
+
+#[test]
+fn authenticated_repair_commands_reject_noncanonical_namespaces_without_panicking() {
+    reset_registry();
+    let capability = test_capability(213);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &test_binding(215), &test_root(217)),
+    )
+    .expect("root stages");
+    let (handle, _) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("root commits");
+    for namespace in [
+        b"".as_slice(),
+        b"-leading".as_slice(),
+        b"trailing-".as_slice(),
+        b"double--hyphen".as_slice(),
+        b"Uppercase".as_slice(),
+        [b'a'; 65].as_slice(),
+    ] {
+        assert_eq!(
+            run_local_storage_root_command(
+                LOCAL_STORAGE_ROOT_COMMAND_DERIVE_REPAIR_IDENTITY,
+                &authenticated_repair_request_input(
+                    handle,
+                    &capability,
+                    &[0xe1; HASH_BYTE_LENGTH],
+                    namespace,
+                ),
+            ),
+            Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+        );
+    }
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_DERIVE_REPAIR_IDENTITY,
+        &authenticated_repair_request_input(
+            handle,
+            &capability,
+            &[0xe2; HASH_BYTE_LENGTH],
+            b"0-valid-numeric-prefix",
+        ),
+    )
+    .expect("numeric namespace prefix is canonical");
+    reset_registry();
 }
 
 #[test]
@@ -190,6 +394,217 @@ fn root_registry_runs_device_wrapping_and_cleanup_without_exporting_root_bytes()
         ),
         Err(LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE)
     );
+    reset_registry();
+}
+
+#[test]
+fn authenticated_storage_head_source_requires_the_live_worker_root_capability() {
+    reset_registry();
+    let capability = test_capability(4);
+    let binding_bytes = test_binding(18);
+    let root = test_root(72);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &binding_bytes, &root),
+    )
+    .expect("stage root");
+    let (handle, commitment_bytes) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("commit root");
+
+    let mut binding_reader = InputReader::new(&binding_bytes);
+    let expected_binding = read_binding(&mut binding_reader).expect("decode binding");
+    binding_reader.finish().expect("finish binding");
+    let authenticated_head_digest = Hash512::from_bytes([0xa5; HASH_BYTE_LENGTH]);
+    let storage_instance_identity = Hash512::from_bytes([0xb6; HASH_BYTE_LENGTH]);
+    let source = resolve_browser_worker_authenticated_storage_head_source(
+        handle,
+        &capability,
+        17,
+        authenticated_head_digest,
+        storage_instance_identity,
+    )
+    .expect("resolve authenticated head source");
+    assert_eq!(source.local_storage_binding(), expected_binding);
+    assert_eq!(
+        source.storage_root_commitment(),
+        Hash512::from_bytes(commitment_bytes)
+    );
+    assert_eq!(source.namespace_sequence(), 17);
+    assert_eq!(
+        source.authenticated_head_digest(),
+        authenticated_head_digest
+    );
+    assert_eq!(
+        source.storage_instance_identity(),
+        storage_instance_identity
+    );
+
+    assert_eq!(
+        resolve_browser_worker_authenticated_storage_head_source(
+            handle,
+            &test_capability(5),
+            17,
+            authenticated_head_digest,
+            storage_instance_identity,
+        ),
+        Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH)
+    );
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_DESTROY,
+        &lease_input(handle, &capability),
+    )
+    .expect("destroy root");
+    assert_eq!(
+        resolve_browser_worker_authenticated_storage_head_source(
+            handle,
+            &capability,
+            17,
+            authenticated_head_digest,
+            storage_instance_identity,
+        ),
+        Err(LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE)
+    );
+    reset_registry();
+}
+
+#[test]
+fn authenticated_storage_transition_source_requires_the_live_worker_root_capability() {
+    reset_registry();
+    let capability = test_capability(6);
+    let binding_bytes = test_binding(28);
+    let root = test_root(92);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &binding_bytes, &root),
+    )
+    .expect("stage root");
+    let (handle, commitment_bytes) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("commit root");
+
+    let mut binding_reader = InputReader::new(&binding_bytes);
+    let expected_binding = read_binding(&mut binding_reader).expect("decode binding");
+    binding_reader.finish().expect("finish binding");
+    let predecessor_head_digest = Hash512::from_bytes([0xa7; HASH_BYTE_LENGTH]);
+    let successor_head_digest = Hash512::from_bytes([0xb8; HASH_BYTE_LENGTH]);
+    let storage_instance_identity = Hash512::from_bytes([0xc9; HASH_BYTE_LENGTH]);
+    let authenticated_record_digest = Hash512::from_bytes([0xda; HASH_BYTE_LENGTH]);
+    let source = resolve_browser_worker_authenticated_storage_transition_source(
+        handle,
+        &capability,
+        41,
+        predecessor_head_digest,
+        42,
+        successor_head_digest,
+        storage_instance_identity,
+        authenticated_record_digest,
+    )
+    .expect("resolve authenticated transition source");
+    assert_eq!(source.local_storage_binding(), expected_binding);
+    assert_eq!(
+        source.storage_root_commitment(),
+        Hash512::from_bytes(commitment_bytes)
+    );
+    assert_eq!(source.predecessor_namespace_sequence(), 41);
+    assert_eq!(
+        source.predecessor_authenticated_head_digest(),
+        predecessor_head_digest
+    );
+    assert_eq!(source.successor_namespace_sequence(), 42);
+    assert_eq!(
+        source.successor_authenticated_head_digest(),
+        successor_head_digest
+    );
+    assert_eq!(
+        source.storage_instance_identity(),
+        storage_instance_identity
+    );
+    assert_eq!(
+        source.authenticated_record_digest(),
+        authenticated_record_digest
+    );
+
+    assert_eq!(
+        resolve_browser_worker_authenticated_storage_transition_source(
+            handle,
+            &test_capability(7),
+            41,
+            predecessor_head_digest,
+            42,
+            successor_head_digest,
+            storage_instance_identity,
+            authenticated_record_digest,
+        ),
+        Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH)
+    );
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_DESTROY,
+        &lease_input(handle, &capability),
+    )
+    .expect("destroy root");
+    assert_eq!(
+        resolve_browser_worker_authenticated_storage_transition_source(
+            handle,
+            &capability,
+            41,
+            predecessor_head_digest,
+            42,
+            successor_head_digest,
+            storage_instance_identity,
+            authenticated_record_digest,
+        ),
+        Err(LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE)
+    );
+    reset_registry();
+}
+
+#[test]
+fn authenticated_storage_transition_source_rejects_nonconsecutive_sequences() {
+    reset_registry();
+    let capability = test_capability(8);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &test_binding(38), &test_root(102)),
+    )
+    .expect("stage root");
+    let (handle, _) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("commit root");
+    let digest = Hash512::from_bytes([0xeb; HASH_BYTE_LENGTH]);
+
+    for (predecessor_sequence, successor_sequence) in
+        [(9, 9), (9, 11), (u64::MAX, 0), (u64::MAX, u64::MAX)]
+    {
+        assert_eq!(
+            resolve_browser_worker_authenticated_storage_transition_source(
+                handle,
+                &capability,
+                predecessor_sequence,
+                digest,
+                successor_sequence,
+                digest,
+                digest,
+                digest,
+            ),
+            Err(refusal_status(RefusalReason::WrongTypeOrLength))
+        );
+    }
+
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_DESTROY,
+        &lease_input(handle, &capability),
+    )
+    .expect("destroy root");
     reset_registry();
 }
 
@@ -482,7 +897,7 @@ fn record_commands_refuse_invalid_types_contexts_and_version_predecessor_pairs()
             LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER,
             &[
                 lease_input(handle, &capability).as_slice(),
-                12_u16.to_le_bytes().as_slice(),
+                13_u16.to_le_bytes().as_slice(),
             ]
             .concat(),
         ),
@@ -524,6 +939,150 @@ fn record_commands_refuse_invalid_types_contexts_and_version_predecessor_pairs()
             .concat(),
         ),
         Err(refusal_status(RefusalReason::WrongContext)),
+    );
+    reset_registry();
+}
+
+#[test]
+fn active_root_derives_common_proof_external_memory_identifiers_from_closed_contexts() {
+    reset_registry();
+    let capability = test_capability(141);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &test_binding(143), &test_root(145)),
+    )
+    .expect("root stages");
+    let (handle, _) = stage_output(&staged);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &commit_input(handle, &capability),
+    )
+    .expect("root commits");
+
+    let context = common_proof_external_memory_identifier_context();
+    assert_eq!(
+        context.len(),
+        COMMON_PROOF_EXTERNAL_MEMORY_IDENTIFIER_CONTEXT_BYTE_LENGTH,
+    );
+    let derive_identifier = |record_type: LocalRecordType, identifier_context: &[u8]| {
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER,
+            &[
+                lease_input(handle, &capability).as_slice(),
+                record_type.canonical_code().to_le_bytes().as_slice(),
+                identifier_context,
+            ]
+            .concat(),
+        )
+    };
+    let identifier = derive_identifier(LocalRecordType::CommonProofExternalMemory, &context)
+        .expect("common-proof external-memory identifier derives");
+    assert_eq!(identifier.len(), HASH_BYTE_LENGTH);
+
+    const RUNTIME_BINDING_HASH_OFFSET: usize = 32;
+    const PROOF_ATTEMPT_LINEAGE_IDENTIFIER_OFFSET: usize =
+        RUNTIME_BINDING_HASH_OFFSET + HASH_BYTE_LENGTH;
+    const RECORD_KIND_OFFSET: usize = PROOF_ATTEMPT_LINEAGE_IDENTIFIER_OFFSET + 32;
+    const OBJECT_ORDINAL_OFFSET: usize = RECORD_KIND_OFFSET + core::mem::size_of::<u16>();
+    const CHUNK_ORDINAL_OFFSET: usize = OBJECT_ORDINAL_OFFSET + core::mem::size_of::<u32>();
+    const BYTE_OFFSET_OFFSET: usize = CHUNK_ORDINAL_OFFSET + core::mem::size_of::<u32>();
+    assert_eq!(
+        BYTE_OFFSET_OFFSET + core::mem::size_of::<u64>(),
+        COMMON_PROOF_EXTERNAL_MEMORY_IDENTIFIER_CONTEXT_BYTE_LENGTH,
+    );
+    for (coordinate_name, coordinate_offset) in [
+        ("environment identifier", 0),
+        ("runtime-binding hash", RUNTIME_BINDING_HASH_OFFSET),
+        (
+            "proof-attempt lineage identifier",
+            PROOF_ATTEMPT_LINEAGE_IDENTIFIER_OFFSET,
+        ),
+        ("record kind", RECORD_KIND_OFFSET),
+        ("object ordinal", OBJECT_ORDINAL_OFFSET),
+        ("chunk ordinal", CHUNK_ORDINAL_OFFSET),
+        ("byte offset", BYTE_OFFSET_OFFSET),
+    ] {
+        let mut changed_context = context.clone();
+        changed_context[coordinate_offset] ^= 1;
+        let changed_identifier =
+            derive_identifier(LocalRecordType::CommonProofExternalMemory, &changed_context)
+                .expect(coordinate_name);
+        assert_ne!(identifier, changed_identifier, "{coordinate_name}");
+    }
+
+    let mut invalid_kind_context = context.clone();
+    invalid_kind_context[RECORD_KIND_OFFSET..OBJECT_ORDINAL_OFFSET]
+        .copy_from_slice(&4_u16.to_le_bytes());
+    assert_eq!(
+        derive_identifier(
+            LocalRecordType::CommonProofExternalMemory,
+            &invalid_kind_context,
+        ),
+        Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+    );
+
+    let mut canonical_header_context = context.clone();
+    canonical_header_context[RECORD_KIND_OFFSET..OBJECT_ORDINAL_OFFSET].copy_from_slice(
+        &CommonProofExternalMemoryRecordKind::ObjectHeader
+            .canonical_code()
+            .to_le_bytes(),
+    );
+    canonical_header_context[CHUNK_ORDINAL_OFFSET..BYTE_OFFSET_OFFSET]
+        .copy_from_slice(&0_u32.to_le_bytes());
+    canonical_header_context[BYTE_OFFSET_OFFSET..].copy_from_slice(&0_u64.to_le_bytes());
+    derive_identifier(
+        LocalRecordType::CommonProofExternalMemory,
+        &canonical_header_context,
+    )
+    .expect("canonical object-header coordinates derive");
+    let mut invalid_header_chunk_context = canonical_header_context.clone();
+    invalid_header_chunk_context[CHUNK_ORDINAL_OFFSET..BYTE_OFFSET_OFFSET]
+        .copy_from_slice(&1_u32.to_le_bytes());
+    let mut invalid_header_offset_context = canonical_header_context.clone();
+    invalid_header_offset_context[BYTE_OFFSET_OFFSET..].copy_from_slice(&1_u64.to_le_bytes());
+    let mut invalid_data_chunk_context = context.clone();
+    invalid_data_chunk_context[CHUNK_ORDINAL_OFFSET..BYTE_OFFSET_OFFSET]
+        .copy_from_slice(&0_u32.to_le_bytes());
+    let mut invalid_seal_marker_context = invalid_data_chunk_context.clone();
+    invalid_seal_marker_context[RECORD_KIND_OFFSET..OBJECT_ORDINAL_OFFSET].copy_from_slice(
+        &CommonProofExternalMemoryRecordKind::SealMarker
+            .canonical_code()
+            .to_le_bytes(),
+    );
+    for invalid_coordinate_context in [
+        invalid_header_chunk_context,
+        invalid_header_offset_context,
+        invalid_data_chunk_context,
+        invalid_seal_marker_context,
+    ] {
+        assert_eq!(
+            derive_identifier(
+                LocalRecordType::CommonProofExternalMemory,
+                &invalid_coordinate_context,
+            ),
+            Err(refusal_status(RefusalReason::WrongContext)),
+        );
+    }
+
+    assert_eq!(
+        derive_identifier(
+            LocalRecordType::CommonProofExternalMemory,
+            &context[..context.len() - 1],
+        ),
+        Err(refusal_status(RefusalReason::MalformedEncoding)),
+    );
+    let mut extended_context = context.clone();
+    extended_context.push(0);
+    assert_eq!(
+        derive_identifier(
+            LocalRecordType::CommonProofExternalMemory,
+            &extended_context,
+        ),
+        Err(refusal_status(RefusalReason::MalformedEncoding)),
+    );
+    assert_eq!(
+        derive_identifier(LocalRecordType::CheckpointChunk, &context),
+        Err(refusal_status(RefusalReason::MalformedEncoding)),
     );
     reset_registry();
 }

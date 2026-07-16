@@ -52,9 +52,7 @@ fn heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluati
     // evaluation-key objects were accepted before it. A profile-ring boundary
     // refusal, or a clean accept on a full-ring package, are both consistent with
     // the evaluation-key phase having passed.
-    if result["isValid"] == true {
-        assert_eq!(result["value"], serde_json::json!({}), "{}", context());
-    } else {
+    if result["isValid"] != true {
         assert_eq!(
             result["refusalReason"],
             "outsideSupportedProfile",

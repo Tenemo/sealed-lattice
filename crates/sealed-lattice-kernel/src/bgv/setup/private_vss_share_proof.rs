@@ -1,7 +1,8 @@
 use serde_json::Value;
 
 #[cfg(test)]
-use crate::hashing::{hash512_hex, to_hex};
+use crate::hashing::hash512_hex;
+use crate::hashing::to_hex;
 
 use crate::{
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
@@ -11,7 +12,7 @@ use crate::{
 use super::{
     accepted_setup::setup_context_hash,
     commitment::{SetupCommitmentValue, setup_commitment_root},
-    setup_proof::{SetupProofMaterialBytes, take_verified_setup_proof_material_bytes},
+    setup_proof::{SetupProofMaterialBytes, take_authenticated_setup_proof_material_bytes},
     trustee_evaluation_key_proof::{
         PRIVATE_VSS_SHARE_PROOF_FAMILY, PrivateVssShareStatement, SetupProofStatement,
         SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
@@ -145,7 +146,7 @@ fn validate_private_vss_share_statement_material(
 fn private_vss_share_succinct_proof_bytes_from_hash(
     input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    take_verified_setup_proof_material_bytes(
+    take_authenticated_setup_proof_material_bytes(
         PRIVATE_VSS_SHARE_PROOF_FAMILY,
         input.proof_bytes_hash,
         "privateVssShareProofBytesHash",
@@ -179,6 +180,15 @@ fn private_vss_share_succinct_statement(
     statement.validate_shape()?;
 
     Ok(statement)
+}
+
+pub(super) fn private_vss_share_succinct_statement_hash(
+    input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
+) -> CanonicalResult<String> {
+    validate_private_vss_share_statement_material(input)?;
+    Ok(to_hex(
+        &private_vss_share_succinct_statement(input)?.statement_hash(),
+    ))
 }
 
 #[cfg(test)]
@@ -224,7 +234,7 @@ fn validate_hash(hash: &str, field_name: &str) -> CanonicalResult<()> {
 }
 
 fn invalid_private_vss_share_proof(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 #[cfg(test)]
@@ -323,29 +333,6 @@ pub(super) fn private_vss_share_succinct_proof_bytes_hash_for_tests(
         proof_bytes,
     )?;
     Ok(proof_bytes_hash)
-}
-
-#[cfg(test)]
-pub(super) fn private_vss_share_succinct_statement_hash(
-    input: PrivateVssShareSuccinctProofGenerationInput<'_>,
-) -> CanonicalResult<String> {
-    let verification_input = PrivateVssShareSuccinctProofVerificationInput {
-        setup_context: input.setup_context,
-        public_matrix_seed_hash: input.public_matrix_seed_hash,
-        private_envelope_aad_hash: input.private_envelope_aad_hash,
-        source_trustee_roster_position: input.source_trustee_roster_position,
-        recipient_roster_position: input.recipient_roster_position,
-        source_trustee_commitment_root: input.source_trustee_commitment_root,
-        rns_limb_index: input.rns_limb_index,
-        coefficient_commitment_roots: input.coefficient_commitment_roots,
-        share_values: input.share_values,
-        coefficient_commitments: input.coefficient_commitments,
-        proof_bytes_hash: "",
-    };
-    validate_private_vss_share_statement_material(&verification_input)?;
-    Ok(to_hex(
-        &private_vss_share_succinct_statement(&verification_input)?.statement_hash(),
-    ))
 }
 
 #[cfg(test)]

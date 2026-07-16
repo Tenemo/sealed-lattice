@@ -587,26 +587,25 @@ fn test_committed_material_commitment(
         }),
         _ => {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "unsupported test commitment role",
             ));
         }
     };
-    let response = crate::bgv::setup::compute_vss_committed_material_commitment_request(&json!({
-        "commitmentRole": commitment_role,
-        "commitmentContext": commitment_context,
-        "rnsLimbIndex": rns_limb_index,
-        "ringDegree": test_ring_degree(),
-        "messageCoefficients": message_coefficients,
-        "materialSeedHex": test_committed_material_seed(seed),
-    }))?;
+    let material_seed_hex = test_committed_material_seed(seed);
+    let response = crate::bgv::setup::compute_vss_committed_material_commitment(
+        crate::bgv::setup::VssCommittedMaterialCommitmentInput {
+            commitment_role,
+            commitment_context: &commitment_context,
+            rns_limb_index,
+            message_coefficients,
+            material_seed_hex: &material_seed_hex,
+        },
+    )?;
 
     Ok(TestVssCommitmentComputation {
-        commitment: response["commitment"].clone(),
-        opening_root: response["openingRoot"]
-            .as_str()
-            .expect("opening root")
-            .to_string(),
+        commitment: response.commitment,
+        opening_root: response.opening_root,
     })
 }
 

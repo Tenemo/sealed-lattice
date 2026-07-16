@@ -22,6 +22,7 @@ pub(in super::super) fn verify_round_one_key_fri<const LIMB_COUNT: usize>(
     )
 }
 
+#[cfg(test)]
 pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     ring_degree: usize,
@@ -118,34 +119,37 @@ pub(in super::super) fn verify_key_fri_with_negacyclic_domain<const LIMB_COUNT: 
         }
         None => None,
     };
-    let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree);
-    let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count);
-    let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1);
+    let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree)?;
+    let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count)?;
+    let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1)?;
     let mu = lookup_challenge[0];
     transcript.absorb_digest("key-aux-root", &proof.aux_root);
     transcript.absorb_field_elements("key-lookup-terminal", &[proof.lookup_terminal]);
     transcript.absorb_field_elements("key-table-terminals", &proof.table_terminals);
-    let linkage_weights = linkage_public_forms.as_ref().map(|_| {
-        transcript.challenge_field_elements(
-            parameters,
-            "key-linkage-omega",
-            linkage::linkage_claim_count(),
-        )
-    });
+    let linkage_weights = linkage_public_forms
+        .as_ref()
+        .map(|_| {
+            transcript.challenge_field_elements(
+                parameters,
+                "key-linkage-omega",
+                linkage::linkage_claim_count(),
+            )
+        })
+        .transpose()?;
     let sum_batch =
-        transcript.challenge_field_elements(parameters, "key-sum-batch", 1 + table_count);
+        transcript.challenge_field_elements(parameters, "key-sum-batch", 1 + table_count)?;
     let alpha = transcript.challenge_field_elements(
         parameters,
         "key-support-alpha",
         support_constraint_count(ring_degree, digit_count, linkage_layout_data.as_ref()),
-    );
+    )?;
 
     transcript.absorb_digest("key-quotient-root", &proof.quotient_root);
     let weights = transcript.challenge_field_elements(
         parameters,
         "key-combination",
         base_count + material_count + aux_count + QUOTIENT_COLUMN_COUNT + 1,
-    );
+    )?;
 
     let fri_parameters = FriParameters {
         blowup: FRI_RATE_BLOWUP,
@@ -165,7 +169,7 @@ pub(in super::super) fn verify_key_fri_with_negacyclic_domain<const LIMB_COUNT: 
         "key-query",
         layout.coset_size,
         proof_parameters.query_count,
-    );
+    )?;
     if !fri_verify_queries(parameters, &verification, &proof.fri, &query_positions) {
         return Ok(false);
     }

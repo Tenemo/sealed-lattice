@@ -3,19 +3,40 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type {
     BrowserActionStorageCustody,
     BrowserActionStorageRootBinding,
+    BrowserFoundationCheckpointHandle,
+    BrowserFoundationStorageAuthority,
     UntrustedExpectedStorageRootCommitment,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody';
-import { openBrowserActionStorageCustodyWorker } from '#packages/protocol/src/runtime/browser-action-storage-custody-worker-channel';
+import {
+    openBrowserActionStorageCustodyWorker,
+    openBrowserFoundationOperationOwnerWorker,
+} from '#packages/protocol/src/runtime/browser-action-storage-custody-worker-channel';
+import type {
+    BrowserFoundationInitializationInput,
+    BrowserFoundationOperationOwner,
+} from '#packages/protocol/src/runtime/browser-foundation-operation-owner';
 import { deriveWebLockStorageNamespaceName } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store';
 import { createTestBytes } from '#packages/protocol/tests/support/action-storage-custody-test-support';
+import {
+    asciiItem,
+    canonicalItem,
+    canonicalTuple,
+    concatenateBytes,
+    foundationHash512,
+    hashItem,
+    unsigned16LittleEndian,
+    unsigned32LittleEndian,
+    unsigned64Item,
+    variableBytesItem,
+} from '#packages/wasm/tests/canonical-tuple-test-helpers';
 
 const transactionLimits = {
     maximumActiveTransactionCount: 2,
-    maximumLeaseByteLength: 64,
-    maximumLeaseCountPerTransaction: 2,
-    maximumOwnedRecordCount: 32,
-    maximumStoredValueByteLength: 4_096,
-    maximumTransactionByteLength: 128,
+    maximumLeaseByteLength: 65_536,
+    maximumLeaseCountPerTransaction: 32,
+    maximumOwnedRecordCount: 256,
+    maximumStoredValueByteLength: 4_194_304,
+    maximumTransactionByteLength: 1_048_576,
     maximumTransactionLifetimeMilliseconds: 10_000,
 } as const;
 const testBinding: BrowserActionStorageRootBinding = Object.freeze({
@@ -24,6 +45,38 @@ const testBinding: BrowserActionStorageRootBinding = Object.freeze({
     participantId: createTestBytes(64, 59),
     suiteId: createTestBytes(64, 7),
 });
+const runtimeBuildManifestHash = createTestBytes(64, 83);
+const checkpointStateStreamDomain =
+    'sealed-lattice/test/browser-checkpoint-state/v1';
+
+const checkpointStateDescriptor = (stateBytes: Uint8Array): Uint8Array => {
+    const chunkDigest = foundationHash512(
+        'sealed-lattice/transport/chunk/v1',
+        asciiItem(checkpointStateStreamDomain),
+        canonicalItem(0x04, unsigned32LittleEndian(0)),
+        canonicalItem(0x04, unsigned32LittleEndian(stateBytes.byteLength)),
+        variableBytesItem(stateBytes),
+    );
+    const fullObjectDigest = foundationHash512(
+        'sealed-lattice/transport/full-object/v1',
+        asciiItem(checkpointStateStreamDomain),
+        unsigned64Item(BigInt(stateBytes.byteLength)),
+        variableBytesItem(stateBytes),
+    );
+    return canonicalTuple(
+        0x1800,
+        unsigned64Item(BigInt(stateBytes.byteLength)),
+        canonicalItem(
+            0x0e,
+            concatenateBytes(
+                unsigned16LittleEndian(0x06),
+                unsigned32LittleEndian(1),
+                chunkDigest,
+            ),
+        ),
+        hashItem(fullObjectDigest),
+    );
+};
 
 const untrustedExpectedCommitment = (
     storageRootCommitment: Uint8Array,
@@ -31,11 +84,12 @@ const untrustedExpectedCommitment = (
     Object.freeze({ storageRootCommitment: storageRootCommitment.slice() });
 
 type OpeningWorker = Readonly<{
-    opening: Promise<BrowserActionStorageCustody>;
+    opening: Promise<BrowserFoundationStorageAuthority>;
     worker: Worker;
 }>;
 
 const openedCustodies = new Set<BrowserActionStorageCustody>();
+const openedOperationOwners = new Set<BrowserFoundationOperationOwner>();
 const openedWorkers = new Set<Worker>();
 const databaseNames = new Set<string>();
 
@@ -71,6 +125,7 @@ const startOpeningWorker = (input: {
             knownStorageRootCommitment: input.knownStorageRootCommitment,
             limits: transactionLimits,
             namespace: 'browser-custody',
+            runtimeBuildManifestHash,
         },
         worker,
     });
@@ -86,7 +141,7 @@ const openWorker = async (input: {
     binding?: BrowserActionStorageRootBinding;
     databaseName: string;
     knownStorageRootCommitment?: Uint8Array;
-}): Promise<BrowserActionStorageCustody> =>
+}): Promise<BrowserFoundationStorageAuthority> =>
     await startOpeningWorker(input).opening;
 
 const closeCustody = async (
@@ -126,36 +181,33 @@ const deleteDatabase = (databaseName: string): Promise<void> =>
         );
     });
 
-const waitForLockCounts = async (input: {
-    heldCount: number;
-    lockName: string;
-    pendingCount: number;
-}): Promise<void> => {
-    const deadlineMilliseconds = performance.now() + 2_000;
-    while (true) {
-        const snapshot = await navigator.locks.query();
-        const heldCount = snapshot.held?.filter(
-            (lock) => lock.name === input.lockName,
-        ).length;
-        const pendingCount = snapshot.pending?.filter(
-            (lock) => lock.name === input.lockName,
-        ).length;
-        if (
-            heldCount === input.heldCount &&
-            pendingCount === input.pendingCount
-        ) {
-            return;
-        }
-        if (performance.now() >= deadlineMilliseconds) {
-            throw new Error(
-                `Custody Web Lock did not reach ${input.heldCount} held and ${input.pendingCount} pending requests.`,
-            );
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+const exclusiveLockIsAvailable = async (lockName: string): Promise<boolean> => {
+    let lockWasAvailable: boolean | undefined;
+    await navigator.locks.request(
+        lockName,
+        { ifAvailable: true, mode: 'exclusive' },
+        (lock) => {
+            lockWasAvailable = lock !== null;
+        },
+    );
+    if (lockWasAvailable === undefined) {
+        throw new Error('The custody Web Lock availability probe did not run.');
     }
+    return lockWasAvailable;
 };
 
+const waitForExclusiveLockRelease = (lockName: string): Promise<void> =>
+    navigator.locks.request(lockName, { mode: 'exclusive' }, () => undefined);
+
 afterEach(async () => {
+    for (const operationOwner of [...openedOperationOwners]) {
+        try {
+            await operationOwner.close();
+        } catch {
+            // The worker is terminated below even if orderly close failed.
+        }
+    }
+    openedOperationOwners.clear();
     for (const custody of [...openedCustodies]) {
         try {
             await custody.close();
@@ -175,6 +227,137 @@ afterEach(async () => {
 });
 
 describe('Browser action-storage custody worker channel', () => {
+    it('opens the composed operation owner from fresh and exact recovered storage after interruption', async () => {
+        const databaseName = createDatabaseName();
+        databaseNames.add(databaseName);
+        const orderedWitnessBindings = Array.from(
+            { length: 9 },
+            (_unused, witnessIndex) => ({
+                subjectParticipantIdentity: createTestBytes(
+                    64,
+                    101 + witnessIndex,
+                ),
+                witnessParticipantIdentity: testBinding.participantId.slice(),
+            }),
+        );
+        const initializationInput: BrowserFoundationInitializationInput =
+            Object.freeze({
+                actionRandomnessRecordContext: { recordVersion: 0n },
+                canonicalRosterBytes: createTestBytes(640, 11),
+                orderedWitnessBindings,
+                runtimeBuildManifestHash,
+            });
+        const freshWorker = new Worker(
+            new URL(
+                '../support/action-storage-custody-browser-worker.ts',
+                import.meta.url,
+            ),
+            { type: 'module' },
+        );
+        openedWorkers.add(freshWorker);
+        const freshOpening = await openBrowserFoundationOperationOwnerWorker({
+            configuration: {
+                acquisitionDeadlineEpochMilliseconds: undefined,
+                binding: testBinding,
+                databaseName,
+                limits: transactionLimits,
+                namespace: 'browser-custody',
+                runtimeBuildManifestHash,
+            },
+            rootOpening: { mode: 'fresh' },
+            worker: freshWorker,
+        });
+        openedOperationOwners.add(freshOpening.operationOwner);
+        const committed =
+            await freshOpening.operationOwner.commitFreshFoundationInitialization(
+                initializationInput,
+            );
+        const freshActivated =
+            await freshOpening.operationOwner.activateFreshFoundationInitialization(
+                committed.committedBatch,
+            );
+        expect(freshActivated.orderedWitnessRoleHandles).toHaveLength(9);
+        const firstFreshRole = freshActivated.orderedWitnessRoleHandles[0];
+        if (firstFreshRole === undefined) {
+            throw new Error('The fresh operation owner returned no role.');
+        }
+        await expect(
+            freshOpening.operationOwner.copyWitnessSubjectParticipantIdentity(
+                firstFreshRole,
+            ),
+        ).resolves.toEqual(
+            orderedWitnessBindings[0]?.subjectParticipantIdentity,
+        );
+        openedOperationOwners.delete(freshOpening.operationOwner);
+        openedWorkers.delete(freshWorker);
+        freshWorker.terminate();
+        await waitForExclusiveLockRelease(
+            deriveWebLockStorageNamespaceName({
+                databaseName,
+                namespace: 'browser-custody',
+            }),
+        );
+
+        const recoveredWorker = new Worker(
+            new URL(
+                '../support/action-storage-custody-browser-worker.ts',
+                import.meta.url,
+            ),
+            { type: 'module' },
+        );
+        openedWorkers.add(recoveredWorker);
+        const recoveredOpening =
+            await openBrowserFoundationOperationOwnerWorker({
+                configuration: {
+                    acquisitionDeadlineEpochMilliseconds: undefined,
+                    binding: testBinding,
+                    databaseName,
+                    knownStorageRootCommitment:
+                        freshOpening.deviceWrappingSnapshot
+                            .storageRootCommitment,
+                    limits: transactionLimits,
+                    namespace: 'browser-custody',
+                    runtimeBuildManifestHash,
+                },
+                rootOpening: {
+                    expectedSnapshot: freshOpening.deviceWrappingSnapshot,
+                    mode: 'recovered',
+                    untrustedExpectedCommitment: untrustedExpectedCommitment(
+                        freshOpening.deviceWrappingSnapshot
+                            .storageRootCommitment,
+                    ),
+                },
+                worker: recoveredWorker,
+            });
+        openedOperationOwners.add(recoveredOpening.operationOwner);
+        const recovered =
+            await recoveredOpening.operationOwner.openRecoveredFoundationInitialization(
+                initializationInput,
+            );
+        const recoveredActivated =
+            await recoveredOpening.operationOwner.activateRecoveredFoundationInitialization(
+                recovered.recoveredBatch,
+            );
+        await expect(
+            Promise.all(
+                recoveredActivated.orderedWitnessRoleHandles.map((role) =>
+                    recoveredOpening.operationOwner.copyWitnessSubjectParticipantIdentity(
+                        role,
+                    ),
+                ),
+            ),
+        ).resolves.toEqual(
+            orderedWitnessBindings.map(
+                (binding) => binding.subjectParticipantIdentity,
+            ),
+        );
+        await recoveredOpening.operationOwner.closeFoundationActionRandomness(
+            recoveredActivated.actionRandomnessHandle,
+        );
+        await recoveredOpening.operationOwner.close();
+        openedOperationOwners.delete(recoveredOpening.operationOwner);
+    }, 30_000);
+
     it('persists, reopens, and deletes custody state', async () => {
         const databaseName = createDatabaseName();
         const firstCustody = await openWorker({
@@ -214,6 +397,42 @@ describe('Browser action-storage custody worker channel', () => {
         await expect(
             secondCustody.openIntoOwnedWorker({
                 expectedSnapshot: initialSnapshot,
+                untrustedExpectedCommitment: commitment,
+            }),
+        ).rejects.toMatchObject({ code: 'Unavailable' });
+    });
+
+    it('persists retirement without retaining wrapping material and refuses every reopening mode', async () => {
+        const databaseName = createDatabaseName();
+        const firstCustody = await openWorker({ databaseName });
+        const snapshot = await firstCustody.initialize();
+        const commitment = untrustedExpectedCommitment(
+            snapshot.storageRootCommitment,
+        );
+        await firstCustody.openIntoOwnedWorker({
+            expectedSnapshot: snapshot,
+            untrustedExpectedCommitment: commitment,
+        });
+
+        await firstCustody.retire();
+        await expect(firstCustody.currentSnapshot()).rejects.toMatchObject({
+            code: 'Unavailable',
+        });
+        await closeCustody(firstCustody);
+
+        const freshCustody = await openWorker({ databaseName });
+        await expect(freshCustody.initialize()).rejects.toMatchObject({
+            code: 'Unavailable',
+        });
+        await closeCustody(freshCustody);
+
+        const recoveredCustody = await openWorker({
+            databaseName,
+            knownStorageRootCommitment: snapshot.storageRootCommitment,
+        });
+        await expect(
+            recoveredCustody.openIntoOwnedWorker({
+                expectedSnapshot: snapshot,
                 untrustedExpectedCommitment: commitment,
             }),
         ).rejects.toMatchObject({ code: 'Unavailable' });
@@ -263,6 +482,97 @@ describe('Browser action-storage custody worker channel', () => {
                 plaintext,
             }),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
+    });
+
+    it('keeps bounded checkpoint writes on a distinct authenticated worker-owned head', async () => {
+        const custody = await openWorker({
+            databaseName: createDatabaseName(),
+        });
+        const snapshot = await custody.initialize();
+        await custody.openIntoOwnedWorker({
+            expectedSnapshot: snapshot,
+            untrustedExpectedCommitment: untrustedExpectedCommitment(
+                snapshot.storageRootCommitment,
+            ),
+        });
+        const committed = await custody.commitFreshFoundationInitialization({
+            actionRandomnessRecordContext: { recordVersion: 0n },
+            orderedWitnessBindings: Array.from(
+                { length: 9 },
+                (_unused, witnessIndex) => ({
+                    subjectParticipantIdentity: createTestBytes(
+                        64,
+                        101 + witnessIndex,
+                    ),
+                    witnessParticipantIdentity:
+                        testBinding.participantId.slice(),
+                }),
+            ),
+            runtimeBuildManifestHash,
+        });
+        const foundationHeadBeforeCheckpoint =
+            await custody.authenticateFoundationHead();
+        expect(committed.freshnessCoordinate).toEqual(
+            foundationHeadBeforeCheckpoint,
+        );
+
+        const checkpoint = await custody.beginCheckpoint([]);
+        await expect(
+            custody.copyCheckpointDescription(
+                Object.freeze({}) as BrowserFoundationCheckpointHandle,
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        const boundary = {
+            operationKind: 1,
+            orderedRandomCursors: [],
+            orderedSourceDigests: [],
+            safeBoundaryOrdinal: 0,
+            stateStreamDescriptorBytes: checkpointStateDescriptor(
+                Uint8Array.of(0x5a),
+            ),
+            stateStreamDomain: checkpointStateStreamDomain,
+        } as const;
+        const canonicalManifestBytes = await custody.publishCheckpoint(
+            checkpoint,
+            { boundary, stateChunks: [Uint8Array.of(0x5a)] },
+        );
+        expect(canonicalManifestBytes.byteLength).toBeGreaterThan(0);
+        expect(await custody.authenticateFoundationHead()).toEqual(
+            foundationHeadBeforeCheckpoint,
+        );
+
+        const description = await custody.copyCheckpointDescription(checkpoint);
+        const resumed = await custody.resumeCheckpoint({
+            checkpointLineageIdentifier:
+                description.checkpointLineageIdentifier,
+            expectedBoundary: {
+                operationKind: boundary.operationKind,
+                orderedRandomCursors: boundary.orderedRandomCursors,
+                orderedSourceDigests: boundary.orderedSourceDigests,
+                safeBoundaryOrdinal: boundary.safeBoundaryOrdinal,
+                stateStreamDomain: boundary.stateStreamDomain,
+            },
+        });
+        const consumerFailure = new Error(
+            'The checkpoint consumer rejected restored state.',
+        );
+        await expect(
+            custody.restoreCheckpointState(resumed, () => {
+                throw consumerFailure;
+            }),
+        ).rejects.toBe(consumerFailure);
+
+        const restoredChunks: Uint8Array[] = [];
+        await custody.restoreCheckpointState(
+            resumed,
+            (_chunkIndex, chunkBytes) => {
+                restoredChunks.push(chunkBytes);
+            },
+        );
+        expect(restoredChunks).toEqual([Uint8Array.of(0x5a)]);
+        expect(await custody.authenticateFoundationHead()).toEqual(
+            foundationHeadBeforeCheckpoint,
+        );
     });
 
     it('isolates persisted wrapping state by the complete action binding', async () => {
@@ -320,18 +630,10 @@ describe('Browser action-storage custody worker channel', () => {
             namespace: 'browser-custody',
         });
 
-        await waitForLockCounts({
-            heldCount: 1,
-            lockName,
-            pendingCount: 1,
-        });
+        expect(await exclusiveLockIsAvailable(lockName)).toBe(false);
         await closeCustody(firstCustody);
         const secondCustody = await secondOpening.opening;
-        await waitForLockCounts({
-            heldCount: 1,
-            lockName,
-            pendingCount: 0,
-        });
+        expect(await exclusiveLockIsAvailable(lockName)).toBe(false);
         expect(await secondCustody.currentSnapshot()).toEqual(snapshot);
         await secondCustody.openIntoOwnedWorker({
             expectedSnapshot: snapshot,
@@ -370,10 +672,6 @@ describe('Browser action-storage custody worker channel', () => {
             repeatedFailure = error;
         }
         expect(repeatedFailure).toBe(firstFailure);
-        await waitForLockCounts({
-            heldCount: 0,
-            lockName,
-            pendingCount: 0,
-        });
-    });
+        await waitForExclusiveLockRelease(lockName);
+    }, 15_000);
 });

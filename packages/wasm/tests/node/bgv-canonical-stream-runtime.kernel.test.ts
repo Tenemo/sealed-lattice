@@ -314,13 +314,22 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
             materialRoot: '41'.repeat(64),
         });
 
-        expect(() =>
+        let overlappingOwnershipFailure: unknown;
+        try {
             secondRuntime.openVerifier({
                 descriptorBytes: descriptor,
                 family: bgvCanonicalStreamFamilies.publicKeyShare,
                 materialRoot: '42'.repeat(64),
-            }),
-        ).toThrowError(CanonicalStreamResourceError);
+            });
+        } catch (error) {
+            overlappingOwnershipFailure = error;
+        }
+        expect(overlappingOwnershipFailure).toBeInstanceOf(
+            CanonicalStreamRefusalError,
+        );
+        expect(overlappingOwnershipFailure).toMatchObject({
+            refusalReason: 'consumedState',
+        });
         expect(() => first.absorbChunk(0, chunks[0])).not.toThrow();
         expect(() => first.finish()).not.toThrow();
         expect(first.state()).toBe('completed');

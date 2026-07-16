@@ -369,7 +369,7 @@ fn authenticated_slot_conflicts_are_equivocation_but_forged_conflicts_are_not() 
     let conflicting = fixture.setup_intent(0, 0x12);
     assert_eq!(
         verifier
-            .verify_unordered_carriers(&[conflicting.clone()])
+            .verify_unordered_carriers(std::slice::from_ref(&conflicting))
             .into_result()
             .expect_err("conflicting authenticated producer slot refuses"),
         RefusalReason::Equivocation
@@ -825,7 +825,7 @@ fn retained_carrier_limit_is_exact_and_semantic_replay_costs_no_extra_bytes() {
         .verifier_with_retained_carrier_limit(maximum_retained_canonical_carrier_byte_length);
 
     verifier
-        .verify_unordered_carriers(&[first.clone()])
+        .verify_unordered_carriers(std::slice::from_ref(&first))
         .into_result()
         .expect("one carrier exactly at the retained-byte limit verifies");
     assert_eq!(

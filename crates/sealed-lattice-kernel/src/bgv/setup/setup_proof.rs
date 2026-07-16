@@ -6,7 +6,7 @@ pub(crate) use self::material_transport::authenticate_setup_proof_material_strea
 pub(in crate::bgv::setup) use self::material_transport::authenticate_setup_proof_material_stream_in_session_for_test;
 pub(crate) use self::material_transport::{BgvProofMaterialBytes, CanonicalProofMaterialBytes};
 pub(in crate::bgv::setup) use self::material_transport::{
-    SetupProofMaterialBytes, take_verified_setup_proof_material_bytes,
+    SetupProofMaterialBytes, take_authenticated_setup_proof_material_bytes,
 };
 pub(crate) use crate::bgv::proof_suite::ProofByteSource;
 

@@ -1,3 +1,6 @@
+import { resolve as resolvePath } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
 import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
@@ -5,6 +8,7 @@ import {
     loadFreshTranscriptCoreKernel,
     openFoundationCeremonyRuntime,
 } from '#packages/wasm/src/index';
+import { instantiateTranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
 import {
     canonicalItem,
     canonicalTuple,
@@ -35,6 +39,26 @@ const dataPrimes = [
     139_541_321_678_849n,
     139_451_125_989_377n,
     139_399_585_595_393n,
+] as const;
+
+const specialPrimes = [
+    140_737_487_306_753n,
+    140_737_486_716_929n,
+    140_737_486_520_321n,
+    140_737_485_864_961n,
+    140_737_484_685_313n,
+    140_737_483_898_881n,
+    140_737_482_981_377n,
+    140_737_481_801_729n,
+    140_737_481_342_977n,
+    140_737_480_949_761n,
+    140_737_480_359_937n,
+    140_737_479_639_041n,
+    140_737_476_100_097n,
+    140_737_472_299_009n,
+    140_737_471_971_329n,
+    140_737_471_774_721n,
+    140_737_471_578_113n,
 ] as const;
 
 const unsigned32Item = (value: number): Uint8Array =>
@@ -93,9 +117,7 @@ const createCanonicalSuiteRecordBytes = (
         unsigned32Item(polynomialDegree),
         unsigned64Item(65_537n),
         homogeneousListItem(0x05, dataPrimes.map(unsigned64LittleEndian)),
-        homogeneousListItem(0x05, [
-            unsigned64LittleEndian(140_737_471_512_577n),
-        ]),
+        homogeneousListItem(0x05, specialPrimes.map(unsigned64LittleEndian)),
         homogeneousListItem(0x03, [0, 1].map(unsigned16LittleEndian)),
         homogeneousListItem(
             0x03,
@@ -104,7 +126,7 @@ const createCanonicalSuiteRecordBytes = (
             ),
         ),
         unsigned16Item(1),
-        unsigned16Item(1),
+        unsigned16Item(17),
         unsigned16Item(1),
         unsigned16Item(3),
         unsigned16Item(10),
@@ -124,6 +146,17 @@ const createCanonicalSuiteRecordBytes = (
     );
 };
 
+const commonProofRawAuthorityExportFragments = [
+    'attempt_binding',
+    'authenticated_storage_head',
+    'relation_plan',
+    'storage_callback',
+    'verified_capability',
+] as const;
+const permittedOpaqueBindingExports = new Set([
+    'sealed_lattice_common_proof_generation_copy_checkpoint_stable_attempt_binding_hash',
+]);
+
 const manifestInput = () => ({
     displayTitle: 'Wybór priorytetów',
     optionDefinitions: Array.from({ length: 20 }, (_value, optionIndex) => ({
@@ -138,6 +171,112 @@ const differentHash = (hash: ProtocolHash): ProtocolHash =>
     `${hash[0] === '0' ? '1' : '0'}${hash.slice(1)}`;
 
 describe('foundation ceremony Rust/WASM boundary', () => {
+    it('keeps schema-valid suite bytes below the operative common-proof capability boundary', async () => {
+        const commandRuntime =
+            await instantiateTranscriptCoreKernelCommandRuntime(
+                pathToFileURL(
+                    resolvePath(
+                        'packages/wasm/dist/sealed-lattice-kernel.wasm',
+                    ),
+                ),
+                { allowUnpinnedKernel: true },
+            );
+        const commonProofExportNames = Object.keys(commandRuntime.wasmExports)
+            .filter((exportName) =>
+                exportName.startsWith('sealed_lattice_common_proof_'),
+            )
+            .sort();
+        expect(commonProofExportNames).toEqual([
+            'sealed_lattice_common_proof_abort_application',
+            'sealed_lattice_common_proof_application_frame_byte_length',
+            'sealed_lattice_common_proof_begin_generation',
+            'sealed_lattice_common_proof_begin_verification',
+            'sealed_lattice_common_proof_confirm_application',
+            'sealed_lattice_common_proof_discard_verified_proof',
+            'sealed_lattice_common_proof_generation_acknowledge_checkpoint',
+            'sealed_lattice_common_proof_generation_acknowledge_output_chunk',
+            'sealed_lattice_common_proof_generation_checkpoint_cursor_byte_length',
+            'sealed_lattice_common_proof_generation_checkpoint_state_byte_length',
+            'sealed_lattice_common_proof_generation_confirm_output_readback',
+            'sealed_lattice_common_proof_generation_copy_checkpoint_cursor',
+            'sealed_lattice_common_proof_generation_copy_checkpoint_stable_attempt_binding_hash',
+            'sealed_lattice_common_proof_generation_copy_checkpoint_state',
+            'sealed_lattice_common_proof_generation_copy_output_chunk',
+            'sealed_lattice_common_proof_generation_copy_storage_request',
+            'sealed_lattice_common_proof_generation_describe_checkpoint',
+            'sealed_lattice_common_proof_generation_discard_checkpoint',
+            'sealed_lattice_common_proof_generation_finish',
+            'sealed_lattice_common_proof_generation_poll',
+            'sealed_lattice_common_proof_generation_release_cancelled',
+            'sealed_lattice_common_proof_generation_request_cancellation',
+            'sealed_lattice_common_proof_generation_retire_failed',
+            'sealed_lattice_common_proof_generation_supply_storage_response',
+            'sealed_lattice_common_proof_prepare_application',
+            'sealed_lattice_common_proof_release_generated_proof',
+            'sealed_lattice_common_proof_release_suite',
+            'sealed_lattice_common_proof_resume_generation',
+            'sealed_lattice_common_proof_select_suite',
+            'sealed_lattice_common_proof_verification_absorb_input_chunk',
+            'sealed_lattice_common_proof_verification_cancel',
+            'sealed_lattice_common_proof_verification_finish',
+            'sealed_lattice_common_proof_verification_finish_input',
+            'sealed_lattice_common_proof_verification_poll',
+            'sealed_lattice_common_proof_verification_supply_readback_chunk',
+        ]);
+        expect(
+            commonProofExportNames.some((exportName) =>
+                permittedOpaqueBindingExports.has(exportName)
+                    ? false
+                    : commonProofRawAuthorityExportFragments.some((fragment) =>
+                          exportName.includes(fragment),
+                      ),
+            ),
+        ).toBe(false);
+
+        const selectSuite =
+            commandRuntime.wasmExports.sealed_lattice_common_proof_select_suite;
+        expect(selectSuite).toBeTypeOf('function');
+        if (selectSuite === undefined) {
+            throw new Error(
+                'The generated kernel omitted the common-proof suite selector.',
+            );
+        }
+        const suiteRecordBytes = createCanonicalSuiteRecordBytes();
+        commandRuntime.runExclusive('select common-proof suite', () => {
+            const suiteRecordPointer = commandRuntime.allocate(
+                suiteRecordBytes.byteLength,
+            );
+            const statusPointer = commandRuntime.allocate(4);
+            try {
+                new Uint8Array(commandRuntime.memory.buffer).set(
+                    suiteRecordBytes,
+                    suiteRecordPointer,
+                );
+                new DataView(commandRuntime.memory.buffer).setUint32(
+                    statusPointer,
+                    0,
+                    true,
+                );
+                const selectedSuiteHandle = selectSuite(
+                    suiteRecordPointer,
+                    suiteRecordBytes.byteLength,
+                    statusPointer,
+                );
+                const refusalCode = new DataView(
+                    commandRuntime.memory.buffer,
+                ).getUint32(statusPointer, true);
+                expect(selectedSuiteHandle).toBe(0);
+                expect(refusalCode).toBe(2);
+            } finally {
+                commandRuntime.deallocate(statusPointer, 4);
+                commandRuntime.deallocate(
+                    suiteRecordPointer,
+                    suiteRecordBytes.byteLength,
+                );
+            }
+        });
+    });
+
     it('encodes normalized manifest bytes and refuses malformed canonical bytes', async () => {
         const runtime = openFoundationCeremonyRuntime(
             await loadFreshTranscriptCoreKernel(),

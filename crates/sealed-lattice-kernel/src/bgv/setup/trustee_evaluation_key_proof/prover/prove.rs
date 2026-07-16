@@ -595,21 +595,6 @@ pub(crate) fn prove_evaluation_key_share(
     )
 }
 
-#[cfg(test)]
-pub(crate) fn prove_evaluation_key_share_with_test_limb_batch_size(
-    statement: &TrusteeEvaluationKeyStatement,
-    witness: &TrusteeEvaluationKeyWitness,
-    proof_randomness_seed_hex: &str,
-    requested_limb_batch_size: usize,
-) -> CanonicalResult<SuccinctEvaluationKeyProof> {
-    prove_evaluation_key_share_with_limb_batch_size(
-        statement,
-        witness,
-        proof_randomness_seed_hex,
-        requested_limb_batch_size,
-    )
-}
-
 fn prove_evaluation_key_share_with_limb_batch_size(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,

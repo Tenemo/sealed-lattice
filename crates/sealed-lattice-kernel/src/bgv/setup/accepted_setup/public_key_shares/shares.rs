@@ -111,7 +111,7 @@ pub(in crate::bgv::setup) fn derive_public_key_share_root(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "public-key share coefficient hashes are required to derive the share root",
             )
         })?;
@@ -129,7 +129,7 @@ pub(in crate::bgv::setup) fn derive_public_key_share_set_root(
 ) -> CanonicalResult<String> {
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupContext is required to derive the public-key share set root",
         )
     })?;
@@ -139,7 +139,7 @@ pub(in crate::bgv::setup) fn derive_public_key_share_set_root(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "publicMatrixSeedHash is required to derive the public-key share set root",
             )
         })?;
@@ -149,7 +149,7 @@ pub(in crate::bgv::setup) fn derive_public_key_share_set_root(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "public-key share records are required to derive the share set root",
             )
         })?;
@@ -188,7 +188,7 @@ fn verify_public_key_share_limb_hashes(
         validate_hash_string(
             limb_hash.as_str().ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "public-key share coefficient hashes must be strings",
                 )
             })?,
@@ -208,7 +208,7 @@ pub(in super::super) fn public_key_share_records_by_roster_position(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "publicKeyShares.shareRecords were required before public-key share succinct proof verification",
             )
         })?;
@@ -278,7 +278,7 @@ mod tests {
             limb_hashes[DATA_PRIMES.len() - 1] = serde_json::json!(malformed_hash);
             let error = verify_public_key_share_limb_hashes(Some(&limb_hashes))
                 .expect_err("malformed coefficient hash must fail closed");
-            assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+            assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
             assert!(error.message.contains("hash"));
         }
     }

@@ -37,6 +37,7 @@ class DeterministicInMemoryStorageAdapter implements UntrustedStorageAdapter {
     #values = new Map<string, Uint8Array>();
     public afterNextAtomicMutation: (() => void) | undefined;
     public beforeNextAtomicMutation: (() => void) | undefined;
+    public beforeNextUnreferencedObjectDeletion: (() => void) | undefined;
     public failNextAtomicMutationCount = 0;
     public failNextDeleteCount = 0;
     public forceNextAtomicConflict = false;
@@ -72,6 +73,31 @@ class DeterministicInMemoryStorageAdapter implements UntrustedStorageAdapter {
                 .filter((key) => key.startsWith(prefix))
                 .sort(),
         );
+    }
+
+    public deleteUnreferencedObjects(input: {
+        indexPrefix: string;
+        objectKeys: readonly string[];
+    }): Promise<boolean> {
+        const beforeDeletion = this.beforeNextUnreferencedObjectDeletion;
+        this.beforeNextUnreferencedObjectDeletion = undefined;
+        beforeDeletion?.();
+        const referencedObjectKeys = new Set(
+            [...this.#values.entries()]
+                .filter(([key]) => key.startsWith(input.indexPrefix))
+                .map(([, value]) => textDecoder.decode(value)),
+        );
+        if (
+            input.objectKeys.some((objectKey) =>
+                referencedObjectKeys.has(objectKey),
+            )
+        ) {
+            return Promise.resolve(false);
+        }
+        for (const objectKey of input.objectKeys) {
+            this.#values.delete(objectKey);
+        }
+        return Promise.resolve(true);
     }
 
     public applyAtomicMutation(
@@ -888,6 +914,47 @@ describe('untrusted storage transaction store', () => {
         await secondTransaction.abort();
     });
 
+    it('rejects lone UTF-16 surrogates without rejecting valid supplementary characters', async () => {
+        const { store } = await openTestStore();
+        const transaction = await store.beginTransaction({
+            lifetimeMilliseconds: 100,
+        });
+        for (const malformedLogicalRecordKey of [
+            '\ud800',
+            '\udc00',
+            'prefix-\ud800-suffix',
+            '\ud800\ud800',
+        ]) {
+            await expectStorageError(
+                transaction.issueWriteLease({
+                    declaredByteLength: 1,
+                    logicalRecordKey: malformedLogicalRecordKey,
+                }),
+                'MalformedLength',
+            );
+        }
+
+        const validLogicalRecordKey = 'supplementary-\ud83d\ude42';
+        const lease = await transaction.issueWriteLease({
+            declaredByteLength: 1,
+            logicalRecordKey: validLogicalRecordKey,
+        });
+        await lease.write(new Uint8Array([7]));
+        await lease.seal(
+            exactAuthenticator(validLogicalRecordKey, new Uint8Array([7])),
+        );
+        await transaction.commit();
+        expect(
+            await store.readAuthenticated({
+                authenticate: exactAuthenticator(
+                    validLogicalRecordKey,
+                    new Uint8Array([7]),
+                ),
+                logicalRecordKey: validLogicalRecordKey,
+            }),
+        ).toEqual(new Uint8Array([7]));
+    });
+
     it('expires only after the exact deadline and cleans staged objects idempotently', async () => {
         let currentTimeMilliseconds = 0.25;
         const { adapter, store } = await openTestStore({
@@ -1133,6 +1200,34 @@ describe('untrusted storage transaction store', () => {
                 namespace,
             }),
             'AdapterFailure',
+        );
+    });
+
+    it('does not delete an object that becomes committed after the repair listing', async () => {
+        const adapter = new DeterministicInMemoryStorageAdapter();
+        const namespace = 'repair-publication-race';
+        const objectKey =
+            `sealed-lattice-runtime-store/${namespace}/objects/` +
+            `${identifierFilledWithByte(9)}/${identifierFilledWithByte(10)}`;
+        const committedIndexKey = indexKey(namespace, 'newly-committed');
+        adapter.rawWrite(objectKey, new Uint8Array([4, 5, 6]));
+        adapter.beforeNextUnreferencedObjectDeletion = () => {
+            adapter.rawWrite(committedIndexKey, textEncoder.encode(objectKey));
+        };
+
+        await expectStorageError(
+            openPositivelyVerifiedStorageTransactionStore({
+                adapter,
+                createIdentifier: createDeterministicIdentifierFactory(),
+                limits: defaultLimits,
+                monotonicClockMilliseconds: () => 0,
+                namespace,
+            }),
+            'Conflict',
+        );
+        expect(adapter.rawRead(objectKey)).toEqual(new Uint8Array([4, 5, 6]));
+        expect(adapter.rawRead(committedIndexKey)).toEqual(
+            textEncoder.encode(objectKey),
         );
     });
 

@@ -16,7 +16,7 @@ pub(crate) fn lift_plaintext_coefficients_to_basis(
         .any(|coefficient| *coefficient >= PLAINTEXT_MODULUS)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "plaintext coefficient is outside GF(65537)",
         ));
     }
@@ -24,7 +24,7 @@ pub(crate) fn lift_plaintext_coefficients_to_basis(
         .moduli_for_level(target_level)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "target basis level is outside the selected parameters",
             )
         })?;
@@ -63,7 +63,7 @@ pub(crate) fn convert_plaintext_lifted_basis(
         .moduli_for_level(source.level)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "source basis level is outside the selected parameters",
             )
         })?;
@@ -71,20 +71,20 @@ pub(crate) fn convert_plaintext_lifted_basis(
         let field_value = *first_limb_coefficient;
         if field_value >= PLAINTEXT_MODULUS {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "source basis is not a canonical plaintext-lifted BGV-RNS object",
             ));
         }
         for (modulus_index, modulus) in source_moduli.iter().enumerate() {
             if source.residues_by_modulus[modulus_index][coefficient_index] != field_value {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "source basis is not a consistent plaintext-lifted BGV-RNS object",
                 ));
             }
             if source.residues_by_modulus[modulus_index][coefficient_index] >= *modulus {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "source basis contains a non-canonical residue",
                 ));
             }

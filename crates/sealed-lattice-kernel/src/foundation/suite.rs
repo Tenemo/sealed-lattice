@@ -14,7 +14,7 @@ use crate::bgv::{
     evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     key_switch_topology::KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
     parameters::{
-        DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
+        DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES,
         root_parameters_for_modulus, validate_supported_algebraic_parameters,
     },
 };
@@ -29,7 +29,7 @@ const KEY_SWITCH_METHOD: u16 = 1;
 const KEY_SWITCH_BASIS_CONVERTER: u16 = 1;
 const SUITE_HASH_DOMAIN: &str = "sealed-lattice/foundation/suite/v1";
 const SUITE_ARTIFACT_HASH_DOMAIN: &str = "sealed-lattice/foundation/suite-artifact/v1";
-const ORDERED_SPECIAL_PRIMES: [u64; 1] = [SPECIAL_PRIME];
+const ORDERED_SPECIAL_PRIMES: [u64; SPECIAL_PRIMES.len()] = SPECIAL_PRIMES;
 const ORDERED_TARGET_DATA_PRIME_INDEXES: [u16; 2] = [0, 1];
 const ORDERED_SHARING_DATA_PRIME_INDEXES: [u16; DATA_PRIMES.len()] =
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
@@ -246,6 +246,17 @@ impl ArtifactKind {
         }
     }
 
+    pub const fn artifact_schema_version(self) -> u16 {
+        match self {
+            Self::LatticeCommitmentProfile => 3,
+            Self::ProofProfileSet => 2,
+            Self::EncoderAndBallotLayout
+            | Self::VerifiableSecretSharingProfile
+            | Self::EvaluatorProgramSet
+            | Self::TargetDecryptionProfile => FOUNDATION_SCHEMA_VERSION,
+        }
+    }
+
     fn from_canonical_code(code: u16) -> SchemaResult<Self> {
         Self::ALL
             .into_iter()
@@ -297,7 +308,7 @@ impl ArtifactReference {
                 "suite artifact has the wrong canonical schema",
             ));
         }
-        if artifact_tuple.schema_version != FOUNDATION_SCHEMA_VERSION {
+        if artifact_tuple.schema_version != artifact_kind.artifact_schema_version() {
             return Err(FoundationSchemaError::new(
                 RefusalReason::UnsupportedVersionOrSuite,
                 "suite artifact schema version is unsupported",
@@ -358,7 +369,7 @@ pub struct SuiteCountLimits {
 }
 
 impl SuiteCountLimits {
-    pub fn new(
+    pub(crate) fn new(
         maximum_ballot_attempts_per_participant: u16,
         maximum_target_share_submissions: u16,
         maximum_private_sampler_candidate_draws_per_output: u32,
@@ -449,7 +460,7 @@ pub struct SuiteByteLimits {
 }
 
 impl SuiteByteLimits {
-    pub fn new(
+    pub(crate) fn new(
         maximum_candidate_bytes_per_participant: u64,
         maximum_candidate_bytes_per_action: u64,
         maximum_setup_bytes_per_participant: u64,
@@ -525,7 +536,7 @@ pub struct SuiteRecord {
 }
 
 impl SuiteRecord {
-    pub fn new(
+    pub(crate) fn new(
         count_limits: SuiteCountLimits,
         byte_limits: SuiteByteLimits,
         artifacts: Vec<ArtifactReference>,
@@ -1016,7 +1027,7 @@ mod tests {
     fn sample_artifact_reference(artifact_kind: ArtifactKind) -> ArtifactReference {
         let artifact_tuple = CanonicalTuple::new(
             artifact_kind.artifact_schema_identifier(),
-            FOUNDATION_SCHEMA_VERSION,
+            artifact_kind.artifact_schema_version(),
             vec![CanonicalItem::unsigned16(artifact_kind.canonical_code())],
         );
         let artifact_bytes = artifact_tuple.encode().expect("test artifact encodes");
@@ -1183,6 +1194,42 @@ mod tests {
     }
 
     #[test]
+    fn lattice_commitment_reference_accepts_only_the_selected_version_three_artifact() {
+        let artifact_bytes =
+            crate::foundation::suite_artifacts::LatticeCommitmentProfile::selected()
+                .and_then(|profile| profile.encode())
+                .expect("selected lattice commitment artifact");
+        let reference = ArtifactReference::from_canonical_artifact_bytes(
+            ArtifactKind::LatticeCommitmentProfile,
+            &artifact_bytes,
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect("selected lattice commitment reference");
+        assert_eq!(
+            reference.artifact_kind(),
+            ArtifactKind::LatticeCommitmentProfile
+        );
+
+        for retired_version in [1_u16, 2] {
+            let mut retired =
+                CanonicalTuple::decode(&artifact_bytes, &CanonicalDecodeLimits::default())
+                    .expect("selected lattice commitment tuple");
+            retired.schema_version = retired_version;
+            let retired_bytes = retired.encode().expect("retired artifact bytes");
+            assert_eq!(
+                ArtifactReference::from_canonical_artifact_bytes(
+                    ArtifactKind::LatticeCommitmentProfile,
+                    &retired_bytes,
+                    &CanonicalDecodeLimits::default(),
+                )
+                .expect_err("retired lattice commitment artifact must refuse")
+                .refusal_reason,
+                RefusalReason::UnsupportedVersionOrSuite
+            );
+        }
+    }
+
+    #[test]
     fn resource_caps_refuse_zero_inconsistent_and_unreachable_boundaries() {
         assert_eq!(
             SuiteCountLimits::new(0, 10, 64, 128, 10, 100)
@@ -1235,8 +1282,10 @@ mod tests {
     #[test]
     fn suite_decode_honors_caller_limits_before_nested_allocation() {
         let encoded = sample_suite().encode().expect("suite encodes");
-        let mut limits = CanonicalDecodeLimits::default();
-        limits.maximum_item_count = 28;
+        let limits = CanonicalDecodeLimits {
+            maximum_item_count: 28,
+            ..CanonicalDecodeLimits::default()
+        };
         assert_eq!(
             SuiteRecord::decode(&encoded, &limits)
                 .expect_err("item limit must refuse")

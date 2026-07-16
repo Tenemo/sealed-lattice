@@ -113,7 +113,7 @@ pub(super) fn compute_aggregate_opening(
 fn take_aggregate_opening_message_values(
     aggregate_opening_root: &str,
 ) -> CanonicalResult<Vec<u64>> {
-    let material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+    let material = crate::bgv::setup::take_authenticated_canonical_proof_material_bytes(
         crate::bgv::setup::TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY,
         aggregate_opening_root,
     )?

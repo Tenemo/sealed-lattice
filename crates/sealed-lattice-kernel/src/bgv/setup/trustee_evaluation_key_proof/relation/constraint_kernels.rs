@@ -15,10 +15,12 @@ pub(crate) trait CompositionColumnDomain {
     ) -> ChallengeExtensionElement;
 }
 
+#[cfg(test)]
 pub(crate) struct BaseColumnDomain {
     pub(crate) tower: ChallengeExtensionTower,
 }
 
+#[cfg(test)]
 impl CompositionColumnDomain for BaseColumnDomain {
     type Value = u64;
 

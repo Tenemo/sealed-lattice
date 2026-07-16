@@ -8,8 +8,8 @@ const transcriptCoreKernelUrl = new URL(
     import.meta.url,
 );
 // The package build replaces this identifier with the normalized hash of the
-// exact WASM bytes copied into the published package. Source-level execution
-// remains deliberately unpinned and is useful only to the build and test tools.
+// exact WASM bytes copied into the published package. An unreplaced source
+// build has no hash and the published loader therefore refuses to load it.
 declare const __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__:
     | string
     | undefined;

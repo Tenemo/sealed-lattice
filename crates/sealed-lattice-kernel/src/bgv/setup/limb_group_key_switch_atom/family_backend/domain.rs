@@ -30,7 +30,9 @@ const PRECOMPUTED_ROOT_ORDER: usize = 65_536;
 pub(super) struct CyclicDomain<'a, const LIMB_COUNT: usize> {
     pub(super) parameters: &'a ProofFieldParameters<LIMB_COUNT>,
     pub(super) size: usize,
+    #[cfg(test)]
     generator: [u64; LIMB_COUNT],
+    #[cfg(test)]
     forward_twiddles: Option<Vec<[u64; LIMB_COUNT]>>,
     inverse_twiddles: Option<Vec<[u64; LIMB_COUNT]>>,
     size_inverse: Option<[u64; LIMB_COUNT]>,
@@ -92,6 +94,7 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomainGeometry<'a, LIMB_COUNT> {
 }
 
 impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
+    #[cfg(test)]
     pub(super) fn new(
         parameters: &'a ProofFieldParameters<LIMB_COUNT>,
         size: usize,
@@ -99,6 +102,7 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
         Self::with_transform_directions(parameters, size, true, true)
     }
 
+    #[cfg(test)]
     pub(super) fn for_evaluation(
         parameters: &'a ProofFieldParameters<LIMB_COUNT>,
         size: usize,
@@ -142,13 +146,16 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
         Ok(Self {
             parameters,
             size,
+            #[cfg(test)]
             generator,
+            #[cfg(test)]
             forward_twiddles,
             inverse_twiddles,
             size_inverse,
         })
     }
 
+    #[cfg(test)]
     pub(super) fn point(&self, index: usize) -> [u64; LIMB_COUNT] {
         assert!(
             index < self.size,
@@ -180,6 +187,7 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
 
     // Evaluate a coefficient vector (low to high, length <= size, zero-padded)
     // on this subgroup.
+    #[cfg(test)]
     pub(super) fn evaluate(&self, coefficients: &[[u64; LIMB_COUNT]]) -> Vec<[u64; LIMB_COUNT]> {
         debug_assert!(coefficients.len() <= self.size);
         let mut values = vec![self.parameters.zero(); self.size];
@@ -191,6 +199,7 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
     // Evaluate one full, zero-padded coefficient buffer in place. Hot prover
     // paths reuse this storage across columns rather than allocating and
     // copying another domain-sized vector for every low-degree extension.
+    #[cfg(test)]
     pub(super) fn evaluate_in_place(&self, values: &mut [[u64; LIMB_COUNT]]) {
         debug_assert_eq!(values.len(), self.size);
         let forward_twiddles = self
@@ -243,6 +252,7 @@ pub(super) fn coset_low_degree_extension<const LIMB_COUNT: usize>(
 // coset `offset * K` of the given `coset_domain`. Used for committing quotient
 // and masked columns whose coefficients are known directly (they exceed the
 // trace subgroup size, so `coset_low_degree_extension` does not apply).
+#[cfg(test)]
 pub(super) fn coset_evaluate_coefficients<const LIMB_COUNT: usize>(
     coset_domain: &CyclicDomain<'_, LIMB_COUNT>,
     coset_offset: &[u64; LIMB_COUNT],
@@ -256,6 +266,7 @@ pub(super) fn coset_evaluate_coefficients<const LIMB_COUNT: usize>(
 // Evaluate coefficients into a reusable full-domain buffer. The prefix is
 // overwritten and the unused tail is cleared before the in-place transform,
 // so values left by a longer preceding column cannot affect this evaluation.
+#[cfg(test)]
 pub(super) fn coset_evaluate_coefficients_into<const LIMB_COUNT: usize>(
     coset_domain: &CyclicDomain<'_, LIMB_COUNT>,
     coset_offset: &[u64; LIMB_COUNT],
@@ -277,6 +288,7 @@ pub(super) fn coset_evaluate_coefficients_into<const LIMB_COUNT: usize>(
 
 // Shift one full coefficient buffer onto the coset and evaluate it in place.
 // This is used after the prover has formed a weighted coefficient combination.
+#[cfg(test)]
 pub(super) fn coset_evaluate_coefficients_in_place<const LIMB_COUNT: usize>(
     coset_domain: &CyclicDomain<'_, LIMB_COUNT>,
     coset_offset: &[u64; LIMB_COUNT],

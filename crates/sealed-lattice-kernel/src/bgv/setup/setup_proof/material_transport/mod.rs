@@ -5,6 +5,7 @@ use crate::foundation::FOUNDATION_PROFILE;
 use std::sync::Arc;
 
 enum CanonicalProofMaterialBacking {
+    #[cfg(test)]
     Contiguous(Vec<u8>),
     StreamChunks(Vec<Vec<u8>>),
 }
@@ -19,6 +20,7 @@ pub(crate) struct CanonicalProofMaterialBytes {
 }
 
 impl CanonicalProofMaterialBytes {
+    #[cfg(test)]
     pub(crate) fn from_contiguous(bytes: Vec<u8>) -> CanonicalResult<Self> {
         if bytes.is_empty() {
             return Err(setup_proof_error(
@@ -73,6 +75,7 @@ impl CanonicalProofMaterialBytes {
 
     pub(crate) fn chunk(&self, chunk_index: usize) -> Option<&[u8]> {
         match &self.backing {
+            #[cfg(test)]
             CanonicalProofMaterialBacking::Contiguous(bytes) => bytes
                 .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
                 .nth(chunk_index),
@@ -141,7 +144,7 @@ impl ProofByteSource for CanonicalProofMaterialBytes {
 pub(crate) type BgvProofMaterialBytes = Arc<CanonicalProofMaterialBytes>;
 pub(in crate::bgv::setup) type SetupProofMaterialBytes = BgvProofMaterialBytes;
 
-pub(in crate::bgv::setup) fn take_verified_setup_proof_material_bytes(
+pub(in crate::bgv::setup) fn take_authenticated_setup_proof_material_bytes(
     proof_family: &str,
     expected_proof_bytes_hash: &str,
     proof_material_path: &str,
@@ -160,7 +163,7 @@ pub(in crate::bgv::setup) fn take_verified_setup_proof_material_bytes(
             proof_family,
             expected_proof_bytes_hash,
         ),
-        None => crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        None => crate::bgv::setup::take_authenticated_canonical_proof_material_bytes(
             proof_family,
             expected_proof_bytes_hash,
         ),

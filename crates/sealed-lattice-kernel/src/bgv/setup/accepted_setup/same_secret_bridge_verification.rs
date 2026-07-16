@@ -9,12 +9,7 @@ const SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD: &str = "sameSecretBridgeProof
 
 #[derive(Clone)]
 pub(in crate::bgv::setup) struct SameSecretBridgeStatement {
-    pub(in crate::bgv::setup) public_matrix_seed_hash: String,
-    pub(in crate::bgv::setup) source_trustee_identity: String,
-    pub(in crate::bgv::setup) source_trustee_roster_position: u64,
     pub(in crate::bgv::setup) target_constant_commitment_roots: Vec<String>,
-    pub(in crate::bgv::setup) target_constant_commitments:
-        Vec<crate::bgv::setup::trustee_evaluation_key_proof::VssShareLinkageCommitment>,
 }
 
 pub(super) enum SameSecretBridgeVerification {
@@ -205,11 +200,10 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                 threshold_degree,
             )?;
         let mut target_constant_commitment_roots = Vec::with_capacity(authoritative_targets.len());
-        let mut target_constant_commitments = Vec::with_capacity(authoritative_targets.len());
         for (target_rns_limb_index, target) in authoritative_targets.iter().enumerate() {
             let target_constant_commitment_root =
                 crate::hashing::derive_canonical_object_hash(target.commitment_body)?;
-            let commitment = vss_share_linkage_commitment_from_value(
+            vss_share_linkage_commitment_from_value(
                 target.commitment_body,
                 VssPublicCommandCommitmentExpectation {
                     field_name: format!(
@@ -220,7 +214,6 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                 },
             )?;
             target_constant_commitment_roots.push(target_constant_commitment_root);
-            target_constant_commitments.push(commitment);
         }
 
         let source_constant_commitments = super::super::source_constant_commitments::canonical_source_constant_commitments_from_bridge_statement(
@@ -238,11 +231,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                 commitments: source_constant_commitments.commitments,
             },
             statement: SameSecretBridgeStatement {
-                public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
-                source_trustee_identity: trustee_identity,
-                source_trustee_roster_position: trustee_roster_position,
                 target_constant_commitment_roots,
-                target_constant_commitments,
             },
         };
         if statements_by_roster_position
@@ -283,7 +272,7 @@ fn same_secret_bridge_verification_request(
 }
 
 fn same_secret_bridge_error(message: &'static str) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 fn same_secret_bridge_refusal(

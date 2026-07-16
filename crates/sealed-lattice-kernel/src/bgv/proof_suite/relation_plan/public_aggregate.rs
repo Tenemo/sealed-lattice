@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 
-const COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1213;
-const RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1215;
-const EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1218;
+const COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = crate::foundation::ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+const RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = crate::foundation::ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+const EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = crate::foundation::ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
 const AGGREGATE_CONSTRAINT_ROLE: u16 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,8 +44,8 @@ pub(crate) struct EvaluatorKeyAggregateEntryPlanInput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EvaluatorKeyAggregateVariantInput {
     pub(crate) top_count: u16,
-    pub(crate) relinearization_entry_count: u16,
-    pub(crate) ordered_entries: Vec<EvaluatorKeyAggregateEntryPlanInput>,
+    pub(crate) entry_ordinal: u32,
+    pub(crate) entry: EvaluatorKeyAggregateEntryPlanInput,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -237,12 +237,19 @@ pub(crate) fn compile_evaluator_key_aggregate_relation_plan(
     context: &RelationPlanCheckContext,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
     input.geometry.validate(context)?;
-    if input.ordered_variants.len() != 20
+    if input.ordered_variants.is_empty()
+        || input.ordered_variants[0].top_count != 1
+        || input.ordered_variants[0].entry_ordinal != 0
         || input
             .ordered_variants
-            .iter()
-            .enumerate()
-            .any(|(ordinal, variant)| variant.top_count != ordinal as u16 + 1)
+            .last()
+            .map(|variant| variant.top_count)
+            != Some(20)
+        || !input.ordered_variants.windows(2).all(|window| {
+            (window[1].top_count == window[0].top_count
+                && window[1].entry_ordinal == window[0].entry_ordinal + 1)
+                || (window[1].top_count == window[0].top_count + 1 && window[1].entry_ordinal == 0)
+        })
     {
         return Err(RelationPlanError::InvalidVariantSelector);
     }
@@ -251,43 +258,28 @@ pub(crate) fn compile_evaluator_key_aggregate_relation_plan(
         .ordered_variants
         .iter()
         .map(|variant| {
-            validate_evaluator_entry_order(variant)?;
-            let components = variant
-                .ordered_entries
-                .iter()
-                .enumerate()
-                .map(|(entry_ordinal, entry)| {
-                    input.geometry.validate_component_moduli(
-                        &entry.ordered_runtime_component_moduli,
-                        context,
-                    )?;
-                    Ok(AggregateComponent {
-                        source_root_paths: (0..participant_count)
-                            .map(|source_ordinal| {
-                                root_in_evaluator_entry_source_list_path(
-                                    entry_ordinal,
-                                    source_ordinal,
-                                )
-                                .ok_or(RelationPlanError::CountOverflow)
-                            })
-                            .collect::<Result<Vec<_>, _>>()?,
-                        aggregate_root_path: root_in_evaluator_entry_aggregate_list_path(
-                            entry_ordinal,
-                            0,
-                        )
-                        .ok_or(RelationPlanError::CountOverflow)?,
-                        ordered_moduli: entry.ordered_runtime_component_moduli.clone(),
-                        constraint_role_coordinates: vec![
-                            u64::try_from(entry_ordinal)
-                                .map_err(|_| RelationPlanError::CountOverflow)?,
-                            u64::from(entry.schedule_position),
-                        ],
+            let entry = &variant.entry;
+            input
+                .geometry
+                .validate_component_moduli(&entry.ordered_runtime_component_moduli, context)?;
+            let components = [AggregateComponent {
+                source_root_paths: (0..participant_count)
+                    .map(|source_ordinal| {
+                        root_in_evaluator_entry_source_list_path(0, source_ordinal)
+                            .ok_or(RelationPlanError::CountOverflow)
                     })
-                })
-                .collect::<Result<Vec<_>, RelationPlanError>>()?;
+                    .collect::<Result<Vec<_>, _>>()?,
+                aggregate_root_path: root_in_evaluator_entry_aggregate_list_path(0, 0)
+                    .ok_or(RelationPlanError::CountOverflow)?,
+                ordered_moduli: entry.ordered_runtime_component_moduli.clone(),
+                constraint_role_coordinates: vec![
+                    u64::from(variant.entry_ordinal),
+                    u64::from(entry.schedule_position),
+                ],
+            }];
             compile_public_aggregate_variant(
                 &input.geometry,
-                None,
+                Some(variant.entry_ordinal),
                 Some(variant.top_count),
                 &components,
                 context,
@@ -299,24 +291,6 @@ pub(crate) fn compile_evaluator_key_aggregate_relation_plan(
         variants,
         context,
     )
-}
-
-fn validate_evaluator_entry_order(
-    variant: &EvaluatorKeyAggregateVariantInput,
-) -> Result<(), RelationPlanError> {
-    let relinearization_entry_count = usize::from(variant.relinearization_entry_count);
-    if variant.ordered_entries.is_empty()
-        || relinearization_entry_count > variant.ordered_entries.len()
-        || !variant.ordered_entries[..relinearization_entry_count]
-            .windows(2)
-            .all(|window| window[0].schedule_position < window[1].schedule_position)
-        || !variant.ordered_entries[relinearization_entry_count..]
-            .windows(2)
-            .all(|window| window[0].schedule_position < window[1].schedule_position)
-    {
-        return Err(RelationPlanError::NonCanonicalOrder);
-    }
-    Ok(())
 }
 
 fn finish_plan(
@@ -535,15 +509,14 @@ fn logical_roots(
     Ok(roots)
 }
 
+type OrderedRootSourceCatalog = (
+    Vec<RelationVerifierSource>,
+    BTreeMap<Vec<RelationSelectorPathStep>, u32>,
+);
+
 fn ordered_root_sources(
     roots: &[LogicalRoot],
-) -> Result<
-    (
-        Vec<RelationVerifierSource>,
-        BTreeMap<Vec<RelationSelectorPathStep>, u32>,
-    ),
-    RelationPlanError,
-> {
+) -> Result<OrderedRootSourceCatalog, RelationPlanError> {
     let mut entries = roots
         .iter()
         .map(|root| {
@@ -881,19 +854,27 @@ mod tests {
         assert_eq!(rkg_plan.variants()[1].schedule_position(), Some(7));
 
         let evaluator_variants = (1..=20)
-            .map(|top_count| EvaluatorKeyAggregateVariantInput {
-                top_count,
-                relinearization_entry_count: 1,
-                ordered_entries: vec![
-                    EvaluatorKeyAggregateEntryPlanInput {
-                        schedule_position: 3,
-                        ordered_runtime_component_moduli: vec![SuiteModulusReference::data(0)],
+            .flat_map(|top_count| {
+                [
+                    EvaluatorKeyAggregateVariantInput {
+                        top_count,
+                        entry_ordinal: 0,
+                        entry: EvaluatorKeyAggregateEntryPlanInput {
+                            schedule_position: 3,
+                            ordered_runtime_component_moduli: vec![SuiteModulusReference::data(0)],
+                        },
                     },
-                    EvaluatorKeyAggregateEntryPlanInput {
-                        schedule_position: 1,
-                        ordered_runtime_component_moduli: vec![SuiteModulusReference::special(0)],
+                    EvaluatorKeyAggregateVariantInput {
+                        top_count,
+                        entry_ordinal: 1,
+                        entry: EvaluatorKeyAggregateEntryPlanInput {
+                            schedule_position: 1,
+                            ordered_runtime_component_moduli: vec![SuiteModulusReference::special(
+                                0,
+                            )],
+                        },
                     },
-                ],
+                ]
             })
             .collect::<Vec<_>>();
         let evaluator_plan = compile_evaluator_key_aggregate_relation_plan(
@@ -904,11 +885,14 @@ mod tests {
             &context,
         )
         .expect("exact action-selected evaluator aggregate plan");
-        assert_eq!(evaluator_plan.variants().len(), 20);
+        assert_eq!(evaluator_plan.variants().len(), 40);
+        assert_eq!(evaluator_plan.variants()[0].schedule_position(), Some(0));
         assert_eq!(evaluator_plan.variants()[0].top_count(), Some(1));
-        assert_eq!(evaluator_plan.variants()[19].top_count(), Some(20));
+        assert_eq!(evaluator_plan.variants()[39].schedule_position(), Some(1));
+        assert_eq!(evaluator_plan.variants()[39].top_count(), Some(20));
 
         let mut incomplete_variants = evaluator_variants;
+        incomplete_variants.pop();
         incomplete_variants.pop();
         assert_eq!(
             compile_evaluator_key_aggregate_relation_plan(

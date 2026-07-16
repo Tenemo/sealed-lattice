@@ -58,7 +58,7 @@ pub(super) fn verify_setup_intent(
     };
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupContext was required before setup-intent verification",
         )
     })?;
@@ -250,7 +250,7 @@ pub(super) fn setup_context_string<'a>(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("setupContext.{field_name} must be a string"),
             )
         })
@@ -265,7 +265,7 @@ pub(super) fn setup_intent_trustee_registrations_from_package(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "setupIntent.trusteeRegistrations was required before trustee registration extraction",
             )
         })?;
@@ -279,7 +279,7 @@ pub(super) fn setup_intent_trustee_registrations_from_package(
         })?;
         let signature_envelope = registration_value.get("signatureEnvelope").ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "setup-intent registration signatureEnvelope is required",
             )
         })?;
@@ -332,7 +332,7 @@ pub(super) fn verify_setup_intent_roster_hash(
 ) -> CanonicalResult<Option<Refusals>> {
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupContext was required before setup roster hash verification",
         )
     })?;

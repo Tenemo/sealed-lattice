@@ -12,19 +12,17 @@ pub(crate) const POLYNOMIAL_DEGREE: usize = 32_768;
 pub(crate) const PLAINTEXT_MODULUS: u64 = 65_537;
 pub(crate) const LOGICAL_SLOT_GENERATOR: usize = 3;
 pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis";
+#[cfg(test)]
 pub(crate) const EXTENDED_BASIS_ID: &str = "sealed-lattice-bgv-rns-extended-basis";
+#[cfg(test)]
 pub(crate) const SPECIAL_BASIS_ID: &str = "sealed-lattice-bgv-rns-special-basis";
 
 mod parameter_generation;
 mod root_parameters;
 
-pub(crate) use parameter_generation::{
-    ParameterGenerationError, regenerate_supported_data_root_parameters,
-    validate_supported_algebraic_parameters, verify_data_root_parameters,
-    verify_ntt_root_parameters,
-};
+pub(crate) use parameter_generation::validate_supported_algebraic_parameters;
 pub(crate) use root_parameters::{
-    BgvBasisKind, DATA_PRIMES, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIME,
+    BgvBasisKind, DATA_PRIMES, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIMES,
     root_parameters_for_modulus,
 };
 // The single canonical identity for the fixed BGV parameter set. It binds the
@@ -35,7 +33,7 @@ pub(crate) fn bgv_parameters_value() -> Value {
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,
         "dataPrimes": DATA_PRIMES,
-        "specialPrime": SPECIAL_PRIME,
+        "specialPrimes": SPECIAL_PRIMES,
         "nttRootParameters": ROOT_PARAMETERS.iter().map(|parameters| json!({
             "modulus": parameters.modulus,
             "primitiveGenerator": parameters.primitive_generator,
@@ -57,7 +55,7 @@ pub(crate) fn bgv_parameters_value() -> Value {
 pub(crate) fn bgv_parameters_hash() -> CanonicalResult<String> {
     validate_supported_algebraic_parameters().map_err(|error| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("BGV algebraic parameter certificate failed: {error}"),
         )
     })?;
@@ -67,7 +65,7 @@ pub(crate) fn bgv_parameters_hash() -> CanonicalResult<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
+        BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES,
         root_parameters_for_modulus,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
@@ -114,7 +112,7 @@ mod tests {
             is_prime_for_tests(PLAINTEXT_MODULUS),
             "the selected plaintext modulus must reproduce as prime"
         );
-        for modulus in DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]) {
+        for modulus in DATA_PRIMES.into_iter().chain(SPECIAL_PRIMES) {
             assert_eq!((modulus - 1) % (2 * POLYNOMIAL_DEGREE as u64), 0);
             assert!(is_prime_for_tests(modulus));
             assert!(root_parameters_for_modulus(modulus).is_some());
@@ -250,9 +248,26 @@ mod tests {
             BgvBasisKind::Special
                 .moduli_for_level(0)
                 .expect("special basis level zero"),
-            vec![SPECIAL_PRIME]
+            vec![SPECIAL_PRIMES[0]]
         );
-        assert!(BgvBasisKind::Special.moduli_for_level(1).is_none());
+        assert_eq!(
+            BgvBasisKind::Special
+                .moduli_for_level(SPECIAL_PRIMES.len() - 1)
+                .expect("full special basis"),
+            SPECIAL_PRIMES
+        );
+        assert!(
+            BgvBasisKind::Special
+                .moduli_for_level(SPECIAL_PRIMES.len())
+                .is_none()
+        );
+        assert_eq!(
+            BgvBasisKind::Extended
+                .moduli_for_level(DATA_PRIMES.len() + SPECIAL_PRIMES.len() - 1)
+                .expect("full extended basis")
+                .len(),
+            DATA_PRIMES.len() + SPECIAL_PRIMES.len()
+        );
         assert!(BgvBasisKind::Special.moduli_for_level(99).is_none());
     }
 }

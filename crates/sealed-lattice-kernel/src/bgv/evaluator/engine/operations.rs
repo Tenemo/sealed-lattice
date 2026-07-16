@@ -7,7 +7,7 @@ use crate::bgv::{
 fn require_same_level(left: &Ciphertext, right: &Ciphertext) -> CanonicalResult<()> {
     if left.level != right.level {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "BGV evaluator operation requires ciphertexts at the same modulus level",
         ));
     }
@@ -19,7 +19,7 @@ fn require_same_shape(left: &Ciphertext, right: &Ciphertext) -> CanonicalResult<
     require_same_level(left, right)?;
     if left.decrypt_scaling != right.decrypt_scaling {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "BGV evaluator addition requires ciphertexts with the same scaling factor",
         ));
     }
@@ -310,7 +310,7 @@ fn ciphertext_tensor_limb(
 pub(crate) fn modulus_switch(ciphertext: &Ciphertext) -> CanonicalResult<Ciphertext> {
     if ciphertext.level == 0 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "BGV evaluator cannot modulus switch below the smallest level",
         ));
     }

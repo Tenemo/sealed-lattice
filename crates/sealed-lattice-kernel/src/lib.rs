@@ -38,7 +38,7 @@ use foundation::{
     finish_mailbox_gcm_authentication, finish_mailbox_gcm_decryptor, finish_mailbox_gcm_encryptor,
     finish_state_output_intent_verification, finish_state_output_verification,
     release_verified_finality, release_verified_state_object, run_action_randomness_command,
-    run_local_storage_root_command, run_namespace_freshness_command, verify_finality,
+    run_local_storage_root_command, run_state_producer_command, verify_finality,
     verify_state_reservation, verify_state_reservation_intent,
 };
 
@@ -49,7 +49,7 @@ pub use encoding::run_transcript_core_command;
 pub fn evaluator_candidate_search_probe(axis: &str) -> String {
     use num_traits::Signed;
 
-    let input = bgv::evaluator::suite_closure::EvaluatorCandidateInput::implemented()
+    let input = bgv::evaluator::candidate_evidence::EvaluatorCandidateInput::implemented()
         .expect("implemented evaluator input derives");
     let (minimum_ballot_count, maximum_ballot_count) = match axis {
         "single" => (1, 1),
@@ -206,7 +206,7 @@ unsafe fn canonical_stream_input_mut<'input>(pointer: *mut u8, length: usize) ->
 }
 
 fn decode_u32_list(bytes: &[u8]) -> Option<Vec<u32>> {
-    if bytes.is_empty() || bytes.len() % size_of::<u32>() != 0 {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(size_of::<u32>()) {
         return None;
     }
     bytes
@@ -1376,6 +1376,51 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_cancel(
     cancel_state_verifier_session(session_handle, capability).map_or_else(|status| status, |()| 0)
 }
 
+/// Runs one bounded state-intent producer operation against the active state
+/// verifier and action-randomness registries.
+///
+/// Candidate, verified-intent, and reservation handles remain meaningful only
+/// in this WASM instance. Returned bytes contain only fixed signature messages
+/// or canonical public carriers and certificates. The returned allocation must
+/// be released with `sealed_lattice_deallocate` and the reported length.
+///
+/// # Safety
+///
+/// `input_pointer` must name its declared readable byte range. Every non-null
+/// output pointer must point to the corresponding writable value in WASM
+/// memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_state_producer_command(
+    command: u32,
+    input_pointer: *const u8,
+    input_length: usize,
+    status_pointer: *mut u32,
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let input = unsafe { canonical_stream_input(input_pointer, input_length) };
+    match run_state_producer_command(command, input) {
+        Ok(output) => {
+            let output_length = output.len();
+            unsafe {
+                write_u32_if_present(status_pointer, 0);
+                write_usize_if_present(output_length_pointer, output_length);
+            }
+            if output.is_empty() {
+                ptr::null_mut()
+            } else {
+                leak_bytes(output)
+            }
+        }
+        Err(status) => {
+            unsafe {
+                write_u32_if_present(status_pointer, status);
+                write_usize_if_present(output_length_pointer, 0);
+            }
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Runs one bounded command against the opaque local-storage-root registry.
 ///
 /// Root handles and their capabilities are meaningful only inside this WASM
@@ -1441,51 +1486,6 @@ pub unsafe extern "C" fn sealed_lattice_action_randomness_command(
 ) -> *mut u8 {
     let input = unsafe { canonical_stream_input(input_pointer, input_length) };
     match run_action_randomness_command(command, input) {
-        Ok(output) => {
-            let output_length = output.len();
-            unsafe {
-                write_u32_if_present(status_pointer, 0);
-                write_usize_if_present(output_length_pointer, output_length);
-            }
-            if output.is_empty() {
-                ptr::null_mut()
-            } else {
-                leak_bytes(output)
-            }
-        }
-        Err(status) => {
-            unsafe {
-                write_u32_if_present(status_pointer, status);
-                write_usize_if_present(output_length_pointer, 0);
-            }
-            ptr::null_mut()
-        }
-    }
-}
-
-/// Runs one bounded operation against the namespace-freshness verifier.
-///
-/// Verified checkpoint and certificate handles remain owned by this WASM
-/// instance. Returned bytes contain only canonical public checkpoint bytes,
-/// verifier-derived descriptions, or opaque numeric handles. The returned
-/// allocation must be released with `sealed_lattice_deallocate` and the
-/// reported length.
-///
-/// # Safety
-///
-/// `input_pointer` must name its declared readable byte range. Every non-null
-/// output pointer must point to the corresponding writable value in WASM
-/// memory.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_namespace_freshness_command(
-    command: u32,
-    input_pointer: *const u8,
-    input_length: usize,
-    status_pointer: *mut u32,
-    output_length_pointer: *mut usize,
-) -> *mut u8 {
-    let input = unsafe { canonical_stream_input(input_pointer, input_length) };
-    match run_namespace_freshness_command(command, input) {
         Ok(output) => {
             let output_length = output.len();
             unsafe {

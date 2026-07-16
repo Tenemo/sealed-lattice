@@ -1,5 +1,9 @@
 use serde_json::{Map, Value, json};
 
+use super::command_fields::{
+    decode_exact_lowercase_hex, invalid_value, required_array, required_canonical_u64_decimal,
+    required_exact_lowercase_hex, required_lowercase_hex_bytes, required_object, required_value,
+};
 use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::foundation::{
     CanonicalDecodeLimits, Hash512, MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH,
@@ -8,13 +12,15 @@ use crate::foundation::{
     MailboxPayloadType, ParticipantIdentity, SignedMailboxEnvelope, StreamDescriptor,
     derive_setup_mailbox_slot_hash,
 };
-use crate::transcript_core::{decode_hex, encode_hex};
+use crate::transcript_core::encode_hex;
 
 pub(super) fn encode_mailbox_key_schedule_input(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
     let input = mailbox_key_schedule_input_from_json(required_value(request, "value")?)?;
-    let kem_ciphertext =
-        required_hex_array::<MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH>(request, "kemCiphertextHex")?;
+    let kem_ciphertext = required_exact_lowercase_hex::<MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH>(
+        request,
+        "kemCiphertextHex",
+    )?;
     Ok(json!({
         "canonicalBytesHex": encode_hex(&input.encode().map_err(schema_error)?),
         "hkdfExtractSaltHex": encode_hex(
@@ -27,7 +33,7 @@ pub(super) fn encode_mailbox_key_schedule_input(request: &Value) -> CanonicalRes
 
 pub(super) fn decode_mailbox_key_schedule_input(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
-    let bytes = required_hex_bytes(request, "canonicalBytesHex")?;
+    let bytes = required_lowercase_hex_bytes(request, "canonicalBytesHex")?;
     let input = MailboxKeyScheduleInput::decode(&bytes, &CanonicalDecodeLimits::default())
         .map_err(schema_error)?;
     Ok(json!({
@@ -45,7 +51,7 @@ pub(super) fn encode_mailbox_associated_data(request: &Value) -> CanonicalResult
 
 pub(super) fn decode_mailbox_associated_data(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
-    let bytes = required_hex_bytes(request, "canonicalBytesHex")?;
+    let bytes = required_lowercase_hex_bytes(request, "canonicalBytesHex")?;
     let associated_data = MailboxAssociatedData::decode(&bytes, &CanonicalDecodeLimits::default())
         .map_err(schema_error)?;
     Ok(json!({
@@ -63,7 +69,7 @@ pub(super) fn encode_stream_descriptor(request: &Value) -> CanonicalResult<Value
 
 pub(super) fn decode_stream_descriptor(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
-    let bytes = required_hex_bytes(request, "canonicalBytesHex")?;
+    let bytes = required_lowercase_hex_bytes(request, "canonicalBytesHex")?;
     let descriptor = StreamDescriptor::decode(&bytes, &CanonicalDecodeLimits::default())
         .map_err(schema_error)?;
     Ok(json!({
@@ -82,7 +88,7 @@ pub(super) fn encode_signed_mailbox_envelope(request: &Value) -> CanonicalResult
 
 pub(super) fn decode_signed_mailbox_envelope(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
-    let bytes = required_hex_bytes(request, "canonicalBytesHex")?;
+    let bytes = required_lowercase_hex_bytes(request, "canonicalBytesHex")?;
     let envelope = SignedMailboxEnvelope::decode(&bytes, &CanonicalDecodeLimits::default())
         .map_err(schema_error)?;
     Ok(json!({
@@ -118,7 +124,7 @@ pub(super) fn derive_setup_mailbox_slot_hash_command(request: &Value) -> Canonic
             required_hash(object, "rosterHash")?,
             required_participant_identity(object, "sourceParticipantId")?,
             required_participant_identity(object, "recipientParticipantId")?,
-            required_u64_decimal(object, "producerSequence")?,
+            required_canonical_u64_decimal(object, "producerSequence")?,
             payload_type,
             required_hash(object, "statementHash")?,
             &ordered_material_roots,
@@ -147,8 +153,8 @@ fn mailbox_key_schedule_input_from_json(value: &Value) -> CanonicalResult<Mailbo
         roster_hash: required_hash(object, "rosterHash")?,
         source_participant_id: required_participant_identity(object, "sourceParticipantId")?,
         recipient_participant_id: required_participant_identity(object, "recipientParticipantId")?,
-        producer_sequence: required_u64_decimal(object, "producerSequence")?,
-        envelope_attempt_identifier: required_hex_array::<
+        producer_sequence: required_canonical_u64_decimal(object, "producerSequence")?,
+        envelope_attempt_identifier: required_exact_lowercase_hex::<
             MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH,
         >(object, "envelopeAttemptIdentifierHex")?,
         payload_type,
@@ -194,15 +200,21 @@ fn signed_mailbox_envelope_from_json(
 ) -> CanonicalResult<SignedMailboxEnvelope> {
     let object = required_object(value, "signed mailbox envelope")?;
     let source_signature = if require_source_signature {
-        required_hex_array::<MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH>(object, "sourceSignatureHex")?
+        required_exact_lowercase_hex::<MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH>(
+            object,
+            "sourceSignatureHex",
+        )?
     } else {
         [0_u8; MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH]
     };
     SignedMailboxEnvelope::new(
         mailbox_associated_data_from_json(required_value(object, "associatedData")?)?,
-        required_hex_array::<MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH>(object, "kemCiphertextHex")?,
+        required_exact_lowercase_hex::<MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH>(
+            object,
+            "kemCiphertextHex",
+        )?,
         stream_descriptor_from_json(required_value(object, "ciphertextDescriptor")?)?,
-        required_hex_array::<MAILBOX_GCM_TAG_BYTE_LENGTH>(object, "gcmTagHex")?,
+        required_exact_lowercase_hex::<MAILBOX_GCM_TAG_BYTE_LENGTH>(object, "gcmTagHex")?,
         source_signature,
     )
     .map_err(schema_error)
@@ -226,7 +238,7 @@ fn stream_descriptor_from_json(value: &Value) -> CanonicalResult<StreamDescripto
         .map(|(index, digest)| hash_from_value(digest, &format!("orderedChunkDigests[{index}]")))
         .collect::<CanonicalResult<Vec<_>>>()?;
     StreamDescriptor::new(
-        required_u64_decimal(object, "totalByteLength")?,
+        required_canonical_u64_decimal(object, "totalByteLength")?,
         ordered_chunk_digests,
         hash_from_value(
             required_value(object, "fullObjectDigest")?,
@@ -248,63 +260,11 @@ fn stream_descriptor_to_json(descriptor: &StreamDescriptor) -> Value {
     })
 }
 
-fn required_object<'a>(
-    value: &'a Value,
-    field_name: &str,
-) -> CanonicalResult<&'a Map<String, Value>> {
-    value
-        .as_object()
-        .ok_or_else(|| invalid_value(format!("{field_name} must be an object")))
-}
-
-fn required_value<'a>(
-    object: &'a Map<String, Value>,
-    field_name: &str,
-) -> CanonicalResult<&'a Value> {
-    object
-        .get(field_name)
-        .ok_or_else(|| invalid_value(format!("{field_name} is required")))
-}
-
-fn required_string<'a>(
-    object: &'a Map<String, Value>,
-    field_name: &str,
-) -> CanonicalResult<&'a str> {
-    required_value(object, field_name)?
-        .as_str()
-        .ok_or_else(|| invalid_value(format!("{field_name} must be a string")))
-}
-
-fn required_array<'a>(
-    object: &'a Map<String, Value>,
-    field_name: &str,
-) -> CanonicalResult<&'a [Value]> {
-    required_value(object, field_name)?
-        .as_array()
-        .map(Vec::as_slice)
-        .ok_or_else(|| invalid_value(format!("{field_name} must be an array")))
-}
-
 fn required_u16(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<u16> {
     let value = required_value(object, field_name)?
         .as_u64()
         .ok_or_else(|| invalid_value(format!("{field_name} must be an unsigned integer")))?;
     u16::try_from(value).map_err(|_| invalid_value(format!("{field_name} does not fit u16")))
-}
-
-fn required_u64_decimal(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<u64> {
-    let value = required_string(object, field_name)?;
-    if value.is_empty()
-        || (value.len() > 1 && value.starts_with('0'))
-        || value.bytes().any(|byte| !byte.is_ascii_digit())
-    {
-        return Err(invalid_value(format!(
-            "{field_name} must be a canonical unsigned decimal string"
-        )));
-    }
-    value
-        .parse()
-        .map_err(|_| invalid_value(format!("{field_name} does not fit u64")))
 }
 
 fn required_hash(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<Hash512> {
@@ -315,7 +275,7 @@ fn hash_from_value(value: &Value, field_name: &str) -> CanonicalResult<Hash512> 
     let value = value
         .as_str()
         .ok_or_else(|| invalid_value(format!("{field_name} must be a lowercase hex string")))?;
-    Ok(Hash512::from_bytes(decode_exact_hex::<64>(
+    Ok(Hash512::from_bytes(decode_exact_lowercase_hex::<64>(
         value, field_name,
     )?))
 }
@@ -324,32 +284,9 @@ fn required_participant_identity(
     object: &Map<String, Value>,
     field_name: &str,
 ) -> CanonicalResult<ParticipantIdentity> {
-    Ok(ParticipantIdentity::from_bytes(required_hex_array::<64>(
-        object, field_name,
-    )?))
-}
-
-fn required_hex_bytes(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<Vec<u8>> {
-    decode_hex(required_string(object, field_name)?)
-}
-
-fn required_hex_array<const BYTE_LENGTH: usize>(
-    object: &Map<String, Value>,
-    field_name: &str,
-) -> CanonicalResult<[u8; BYTE_LENGTH]> {
-    decode_exact_hex(required_string(object, field_name)?, field_name)
-}
-
-fn decode_exact_hex<const BYTE_LENGTH: usize>(
-    value: &str,
-    field_name: &str,
-) -> CanonicalResult<[u8; BYTE_LENGTH]> {
-    let bytes = decode_hex(value)?;
-    bytes.try_into().map_err(|_| {
-        invalid_value(format!(
-            "{field_name} must contain exactly {BYTE_LENGTH} bytes"
-        ))
-    })
+    Ok(ParticipantIdentity::from_bytes(
+        required_exact_lowercase_hex::<64>(object, field_name)?,
+    ))
 }
 
 fn schema_error(error: crate::foundation::FoundationSchemaError) -> CanonicalError {
@@ -357,10 +294,6 @@ fn schema_error(error: crate::foundation::FoundationSchemaError) -> CanonicalErr
         CanonicalErrorCode::InvalidProtocolObject,
         format!("mailbox value refused: {}", error.refusal_reason),
     )
-}
-
-fn invalid_value(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
 #[cfg(test)]
@@ -539,7 +472,7 @@ mod tests {
             .as_bytes(),
         )
         .expect_err("leading-zero decimal refuses");
-        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
 
         let error = run_transcript_core_command_inner(
             json!({
@@ -564,6 +497,6 @@ mod tests {
             .as_bytes(),
         )
         .expect_err("unassigned mailbox payload type refuses");
-        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
     }
 }

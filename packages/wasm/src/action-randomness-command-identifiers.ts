@@ -3,7 +3,6 @@ export const actionRandomnessCommandIdentifiers = Object.freeze({
     open: 1,
     close: 2,
     setupMailboxEncapsulate: 3,
-    persistentProofAttempt: 4,
     ordinaryProofAttempt: 5,
     targetReleaseAttempt: 6,
     freshBallotAttempt: 7,

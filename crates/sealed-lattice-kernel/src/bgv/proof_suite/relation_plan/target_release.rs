@@ -12,7 +12,8 @@ use crate::bgv::proof_suite::{
     ProofPolynomialError, VerifiedCommonProof, VerifiedRelationColumnEvaluator,
 };
 
-const TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1621;
+const TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER: u16 =
+    crate::foundation::ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER;
 const MATERIAL_ROOTS_FIELD_ORDINAL: u64 = 10;
 const TARGET_ROLE_COUNT: u16 = 2;
 const RADIX_TRITS_PER_LIMB: usize = 11;
@@ -982,13 +983,13 @@ fn insert_bounded_unsigned_vector(
     let digit_layers = unsigned_radix_layers(values, MATERIAL_DIGIT_RADIX, 2)?;
     let maximum_digits = fixed_radix_digits(u128::from(maximum), 2, MATERIAL_DIGIT_RADIX)?;
     for half_ordinal in 0..2 {
-        for digit_ordinal in 0..2 {
+        for (digit_ordinal, digit_layer) in digit_layers.iter().enumerate() {
             let half_start = half_ordinal * trace_domain.size();
             insert_unsigned_half_column(
                 columns,
                 trace_domain,
                 layout.digit_columns_by_half[half_ordinal][digit_ordinal],
-                &digit_layers[digit_ordinal][half_start..half_start + trace_domain.size()],
+                &digit_layer[half_start..half_start + trace_domain.size()],
             )?;
         }
         let half_start = half_ordinal * trace_domain.size();
@@ -1403,6 +1404,8 @@ fn insert_role_equation_columns(
     Ok(())
 }
 
+type RoleVerifierRadixLayers = (Vec<Vec<u64>>, Vec<Vec<u64>>);
+
 fn insert_role_verifier_columns(
     columns: &mut BTreeMap<u32, CommonProofSourcePolynomial>,
     trace_domain: ProofEvaluationDomain,
@@ -1410,7 +1413,7 @@ fn insert_role_verifier_columns(
     role: TargetReleaseRoleWitness<'_>,
     modulus: u64,
     decryption_scale: u64,
-) -> Result<(Vec<Vec<u64>>, Vec<Vec<u64>>), TargetReleaseWitnessError> {
+) -> Result<RoleVerifierRadixLayers, TargetReleaseWitnessError> {
     let ring_degree = trace_domain
         .size()
         .checked_mul(2)
@@ -1549,15 +1552,21 @@ impl CompiledTargetReleaseRelation {
             if modulus_layout.role_equations.len() != 2 {
                 return Err(TargetReleaseWitnessError::InvalidWitness);
             }
-            for role_ordinal in 0..2 {
+            for (((role_layout, role), flooding_error), flooding_shift_layers) in modulus_layout
+                .role_equations
+                .iter()
+                .zip(modulus_witness.roles.iter().copied())
+                .zip(witness.flooding_errors_by_role.iter().copied())
+                .zip(&flooding_shift_layers_by_role)
+            {
                 insert_role_equation_columns(
                     &mut columns,
                     trace_domain,
-                    &modulus_layout.role_equations[role_ordinal],
-                    modulus_witness.roles[role_ordinal],
+                    role_layout,
+                    role,
                     &share_transform,
-                    witness.flooding_errors_by_role[role_ordinal],
-                    &flooding_shift_layers_by_role[role_ordinal],
+                    flooding_error,
+                    flooding_shift_layers,
                     modulus_layout.modulus,
                     self.decryption_scale,
                     self.simulation_scale,

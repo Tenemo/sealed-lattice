@@ -136,7 +136,7 @@ pub(super) fn read_target_accepted_binding(
 ) -> CanonicalResult<TargetAcceptedBinding> {
     if string_at_path(record, &["objectType"])? != "TargetAcceptedRecord" {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "targetAcceptedRecord must be a canonical TargetAcceptedRecord",
         ));
     }

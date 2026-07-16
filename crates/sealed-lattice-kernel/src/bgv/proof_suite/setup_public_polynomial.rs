@@ -17,11 +17,11 @@ use crate::{
 };
 
 use super::{
-    BoundedCommonProofByteSinkError, CommonProofBoundOpeningProvider, CommonProofByteSink,
-    CommonProofEncodingError, CommonProofOpeningArtifact, CommonProofOpeningGeometry,
-    CommonProofQuerySectionWriter, CompleteProofTreeCatalog, PROOF_EVALUATION_COSET_OFFSET,
-    ProofBaseFieldElement, ProofEvaluationDomain, ProofFieldError, ProofPolynomialError,
-    ProofTreeCatalogEntry, ProofTreeCatalogSource, encode_common_proof_query_tree_fragment,
+    BoundedCommonProofByteSinkError, CommonProofBoundOpeningProvider, CommonProofEncodingError,
+    CommonProofOpeningArtifact, CommonProofOpeningGeometry, CompleteProofTreeCatalog,
+    PROOF_EVALUATION_COSET_OFFSET, ProofBaseFieldElement, ProofEvaluationDomain, ProofFieldError,
+    ProofPolynomialError, ProofTreeCatalogEntry, ProofTreeCatalogSource,
+    encode_common_proof_query_tree_fragment,
 };
 
 const SETUP_PUBLIC_POLYNOMIAL_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x121b;
@@ -172,6 +172,20 @@ impl SetupPublicPolynomialContext {
         )
     }
 
+    pub(crate) fn galois_common(
+        setup_proof_context_hash: [u8; 64],
+        schedule_position: u32,
+    ) -> Result<Self, SetupPublicPolynomialError> {
+        Self::new(
+            setup_proof_context_hash,
+            SetupPublicPolynomialRootRole::GaloisCommon,
+            None,
+            None,
+            Some(schedule_position),
+            None,
+        )
+    }
+
     fn validate(&self) -> Result<(), SetupPublicPolynomialError> {
         let owns_root =
             self.owner_participant_identity.is_some() && self.owner_roster_position.is_some();
@@ -189,6 +203,14 @@ impl SetupPublicPolynomialContext {
             return Err(SetupPublicPolynomialError::InvalidContext);
         }
         Ok(())
+    }
+
+    pub(crate) const fn root_role(&self) -> SetupPublicPolynomialRootRole {
+        self.root_role
+    }
+
+    pub(crate) const fn schedule_position(&self) -> Option<u32> {
+        self.schedule_position
     }
 
     pub(crate) fn canonical_bytes(&self) -> Result<Vec<u8>, SetupPublicPolynomialError> {
@@ -250,6 +272,8 @@ pub(crate) struct SetupPublicPolynomialTreeInput<'input> {
 
 pub(crate) struct SetupPublicPolynomialTree {
     public_polynomial_context_hash: [u8; 64],
+    root_role: SetupPublicPolynomialRootRole,
+    schedule_position: Option<u32>,
     source_polynomial_degree_bound_exclusive: usize,
     ordered_coefficient_columns: Vec<Vec<ProofBaseFieldElement>>,
     extension_columns: Vec<Vec<ProofBaseFieldElement>>,
@@ -343,6 +367,8 @@ impl SetupPublicPolynomialTree {
         let merkle_levels = build_merkle_levels(public_polynomial_context_hash, leaf_digests)?;
         Ok(Self {
             public_polynomial_context_hash,
+            root_role: input.context.root_role(),
+            schedule_position: input.context.schedule_position(),
             source_polynomial_degree_bound_exclusive: input
                 .source_polynomial_degree_bound_exclusive,
             ordered_coefficient_columns,
@@ -353,6 +379,14 @@ impl SetupPublicPolynomialTree {
 
     pub(crate) const fn public_polynomial_context_hash(&self) -> [u8; 64] {
         self.public_polynomial_context_hash
+    }
+
+    pub(crate) const fn root_role(&self) -> SetupPublicPolynomialRootRole {
+        self.root_role
+    }
+
+    pub(crate) const fn schedule_position(&self) -> Option<u32> {
+        self.schedule_position
     }
 
     pub(crate) const fn source_polynomial_degree_bound_exclusive(&self) -> usize {
@@ -396,10 +430,24 @@ impl SetupPublicPolynomialTree {
     }
 }
 
+enum SetupPublicPolynomialTreeSource<'tree> {
+    Borrowed(&'tree SetupPublicPolynomialTree),
+    Owned(Box<SetupPublicPolynomialTree>),
+}
+
+impl SetupPublicPolynomialTreeSource<'_> {
+    fn tree(&self) -> &SetupPublicPolynomialTree {
+        match self {
+            Self::Borrowed(tree) => tree,
+            Self::Owned(tree) => tree.as_ref(),
+        }
+    }
+}
+
 struct SetupPublicPolynomialOpeningArtifact<'tree> {
     tree_catalog_index: u16,
     canonical_leaf_byte_length: usize,
-    tree: &'tree SetupPublicPolynomialTree,
+    tree: SetupPublicPolynomialTreeSource<'tree>,
 }
 
 impl CommonProofOpeningArtifact for SetupPublicPolynomialOpeningArtifact<'_> {
@@ -410,7 +458,7 @@ impl CommonProofOpeningArtifact for SetupPublicPolynomialOpeningArtifact<'_> {
     }
 
     fn leaf_count(&self) -> usize {
-        self.tree.leaf_count()
+        self.tree.tree().leaf_count()
     }
 
     fn canonical_leaf_byte_length(&self) -> usize {
@@ -422,7 +470,7 @@ impl CommonProofOpeningArtifact for SetupPublicPolynomialOpeningArtifact<'_> {
         leaf_index: u64,
         destination: &mut [u8],
     ) -> Result<(), Self::Error> {
-        let canonical_bytes = self.tree.canonical_leaf_bytes(
+        let canonical_bytes = self.tree.tree().canonical_leaf_bytes(
             usize::try_from(leaf_index).map_err(|_| SetupPublicPolynomialError::CountOverflow)?,
         )?;
         if canonical_bytes.len() != self.canonical_leaf_byte_length
@@ -436,6 +484,7 @@ impl CommonProofOpeningArtifact for SetupPublicPolynomialOpeningArtifact<'_> {
 
     fn read_digest(&mut self, level: u32, node_index: u64) -> Result<[u8; 64], Self::Error> {
         self.tree
+            .tree()
             .merkle_levels
             .get(usize::try_from(level).map_err(|_| SetupPublicPolynomialError::CountOverflow)?)
             .and_then(|nodes| {
@@ -464,7 +513,30 @@ impl<'tree> SetupPublicPolynomialBoundOpeningProvider<'tree> {
             let artifact = SetupPublicPolynomialOpeningArtifact {
                 tree_catalog_index,
                 canonical_leaf_byte_length,
-                tree,
+                tree: SetupPublicPolynomialTreeSource::Borrowed(tree),
+            };
+            if artifacts.insert(tree_catalog_index, artifact).is_some() {
+                return Err(SetupPublicPolynomialError::InvalidInput);
+            }
+        }
+        if artifacts.is_empty() {
+            return Err(SetupPublicPolynomialError::InvalidInput);
+        }
+        Ok(Self { artifacts })
+    }
+}
+
+impl SetupPublicPolynomialBoundOpeningProvider<'static> {
+    pub(crate) fn from_owned(
+        trees: impl IntoIterator<Item = (u16, SetupPublicPolynomialTree)>,
+    ) -> Result<Self, SetupPublicPolynomialError> {
+        let mut artifacts = BTreeMap::new();
+        for (tree_catalog_index, tree) in trees {
+            let canonical_leaf_byte_length = tree.canonical_leaf_bytes(0)?.len();
+            let artifact = SetupPublicPolynomialOpeningArtifact {
+                tree_catalog_index,
+                canonical_leaf_byte_length,
+                tree: SetupPublicPolynomialTreeSource::Owned(Box::new(tree)),
             };
             if artifacts.insert(tree_catalog_index, artifact).is_some() {
                 return Err(SetupPublicPolynomialError::InvalidInput);
@@ -496,23 +568,6 @@ impl CommonProofBoundOpeningProvider for SetupPublicPolynomialBoundOpeningProvid
             leaf_count: artifact.leaf_count(),
             canonical_leaf_byte_length: artifact.canonical_leaf_byte_length(),
         })
-    }
-
-    fn write_next_bound_opening<Sink>(
-        &mut self,
-        catalog_entry: &ProofTreeCatalogEntry,
-        writer: &mut CommonProofQuerySectionWriter<'_, Sink>,
-    ) -> Result<(), CommonProofEncodingError<Sink::Error, Self::Error>>
-    where
-        Sink: CommonProofByteSink,
-    {
-        let artifact = self
-            .artifacts
-            .get_mut(&catalog_entry.tree_catalog_index())
-            .ok_or(CommonProofEncodingError::Artifact(
-                SetupPublicPolynomialError::InvalidInput,
-            ))?;
-        writer.write_next_opening(artifact)
     }
 
     fn encode_bound_opening_fragment(

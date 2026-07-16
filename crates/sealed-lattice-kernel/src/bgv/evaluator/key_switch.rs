@@ -7,9 +7,10 @@ use crate::{
             engine::{Ciphertext, DevelopmentBgvKey, negacyclic_mul, signed_residue},
             prg::DeterministicSampler,
         },
+        key_switch_topology::{KEY_SWITCH_DATA_PRIMES_PER_BLOCK, KEY_SWITCH_SPECIAL_PRIMES},
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
-        parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME},
+        parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -25,8 +26,6 @@ pub(crate) use rotation::{generate_galois_key, rotate};
 pub(crate) const PLAINTEXT_MODULUS_I64: i64 = 65_537;
 pub(crate) const KEY_SWITCH_ERROR_DOMAIN: &str = "sealed-lattice-bgv-evaluator/key-switch-error";
 pub(crate) const KEY_SWITCH_SAMPLE_DOMAIN: &str = "sealed-lattice-bgv-evaluator/key-switch-sample";
-pub(crate) const KEY_SWITCH_DATA_PRIMES_PER_BLOCK: usize = 1;
-
 // A polynomial component held as residue vectors, one per active prime.
 type LimbMatrix = Vec<Vec<u64>>;
 
@@ -97,12 +96,12 @@ fn ntt_limbs(limbs: &[Vec<u64>], primes: &[u64]) -> CanonicalResult<Vec<Vec<u64>
 fn extended_moduli_for_level(level: usize) -> CanonicalResult<Vec<u64>> {
     if level >= DATA_PRIMES.len() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "hybrid key-switch level is outside the selected data basis",
         ));
     }
     let mut moduli = DATA_PRIMES[..=level].to_vec();
-    moduli.push(SPECIAL_PRIME);
+    moduli.extend(KEY_SWITCH_SPECIAL_PRIMES);
     Ok(moduli)
 }
 
@@ -145,10 +144,10 @@ fn generate_key_switch_key_with_block_size(
     seed_hex: &str,
     data_primes_per_block: usize,
 ) -> CanonicalResult<KeySwitchKey> {
-    if data_primes_per_block == 0 || data_primes_per_block > level + 1 {
+    if data_primes_per_block == 0 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "hybrid key-switch block size must be between one and the active data-prime count",
+            CanonicalErrorCode::InvalidProtocolObject,
+            "hybrid key-switch block size must be positive",
         ));
     }
     if source_limbs.len() != level + 1 {
@@ -260,7 +259,7 @@ fn generate_key_switch_component_limb_for_block(
             if let Some(source_limb) = input.source_limb {
                 let gadget_source = mul_mod(
                     source_limb[coefficient_index],
-                    SPECIAL_PRIME % input.modulus,
+                    special_basis_modulus_residue(input.modulus),
                     input.modulus,
                 )?;
                 value = add_mod(value, gadget_source, input.modulus)?;
@@ -270,6 +269,14 @@ fn generate_key_switch_component_limb_for_block(
         .collect::<CanonicalResult<Vec<_>>>()?;
 
     Ok((component_b_limb, public_sample))
+}
+
+fn special_basis_modulus_residue(modulus: u64) -> u64 {
+    KEY_SWITCH_SPECIAL_PRIMES
+        .iter()
+        .fold(1_u64, |product, special_modulus| {
+            mul_mod_fast(product, special_modulus % modulus, modulus)
+        })
 }
 
 fn public_component_a_limb(
@@ -304,13 +311,13 @@ fn key_switch_component(
 ) -> CanonicalResult<(LimbMatrix, LimbMatrix)> {
     let term_level = term.len().checked_sub(1).ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "key-switch term must carry at least one limb",
         )
     })?;
     if key_switch_key.level < term_level {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "key-switching key level is below the term level",
         ));
     }
@@ -323,7 +330,7 @@ fn key_switch_component(
     for (limb, modulus) in term.iter().zip(DATA_PRIMES[..=term_level].iter()) {
         if limb.iter().any(|value| *value >= *modulus) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "hybrid key-switch term contains a non-canonical residue",
             ));
         }
@@ -336,7 +343,7 @@ fn key_switch_component(
         ));
     }
     let extended_moduli = extended_moduli_for_level(term_level)?;
-    let stored_special_limb_index = key_switch_key.level + 1;
+    let stored_special_limb_start = key_switch_key.level + 1;
     let mut extended_zero_ntt = vec![vec![0_u64; POLYNOMIAL_DEGREE]; extended_moduli.len()];
     let mut extended_one_ntt = vec![vec![0_u64; POLYNOMIAL_DEGREE]; extended_moduli.len()];
 
@@ -354,20 +361,20 @@ fn key_switch_component(
             let stored_limb_index = if extended_limb_index <= term_level {
                 extended_limb_index
             } else {
-                stored_special_limb_index
+                stored_special_limb_start + extended_limb_index - (term_level + 1)
             };
             if component.moduli.get(stored_limb_index) != Some(&modulus) {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "hybrid key-switch component basis does not match its key level",
                 ));
             }
             let digit_ntt = forward_negacyclic_ntt(&digit.residues(modulus)?, modulus)?;
-            for coefficient_index in 0..POLYNOMIAL_DEGREE {
+            for (coefficient_index, digit_coefficient) in digit_ntt.iter().copied().enumerate() {
                 extended_zero_ntt[extended_limb_index][coefficient_index] = add_mod_fast(
                     extended_zero_ntt[extended_limb_index][coefficient_index],
                     mul_mod_fast(
-                        digit_ntt[coefficient_index],
+                        digit_coefficient,
                         component.component_b_ntt[stored_limb_index][coefficient_index],
                         modulus,
                     ),
@@ -376,7 +383,7 @@ fn key_switch_component(
                 extended_one_ntt[extended_limb_index][coefficient_index] = add_mod_fast(
                     extended_one_ntt[extended_limb_index][coefficient_index],
                     mul_mod_fast(
-                        digit_ntt[coefficient_index],
+                        digit_coefficient,
                         component.component_a_ntt[stored_limb_index][coefficient_index],
                         modulus,
                     ),
@@ -437,7 +444,7 @@ fn centered_block_reconstruction(
     for (limb, modulus) in residue_limbs.iter().zip(moduli.iter()) {
         if limb.len() != POLYNOMIAL_DEGREE || limb.iter().any(|value| *value >= *modulus) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "centered block reconstruction received a malformed residue limb",
             ));
         }
@@ -445,7 +452,7 @@ fn centered_block_reconstruction(
     if moduli.len() == 1 {
         let modulus = i64::try_from(moduli[0]).map_err(|_| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "single-limb centered reconstruction modulus does not fit i64",
             )
         })?;
@@ -509,7 +516,7 @@ fn bigint_residue(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
     }
     residue.to_u64().ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "centered block residue does not fit u64",
         )
     })
@@ -517,7 +524,7 @@ fn bigint_residue(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
 
 fn hybrid_modulus_down(extended: &[Vec<u64>], level: usize) -> CanonicalResult<LimbMatrix> {
     let data_limb_count = level + 1;
-    if extended.len() != data_limb_count + 1
+    if extended.len() != data_limb_count + KEY_SWITCH_SPECIAL_PRIMES.len()
         || extended.iter().any(|limb| limb.len() != POLYNOMIAL_DEGREE)
     {
         return Err(CanonicalError::new(
@@ -525,14 +532,33 @@ fn hybrid_modulus_down(extended: &[Vec<u64>], level: usize) -> CanonicalResult<L
             "hybrid modulus-down input has the wrong extended-basis shape",
         ));
     }
-    let special_limb = &extended[data_limb_count];
-    if special_limb.iter().any(|value| *value >= SPECIAL_PRIME) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "hybrid modulus-down input contains a non-canonical special-basis residue",
-        ));
-    }
-    let inverse_plaintext_modulus = inverse_mod(PLAINTEXT_MODULUS_I64 as u64, SPECIAL_PRIME)?;
+    let special_limbs = &extended[data_limb_count..];
+    let scaled_special_limbs = special_limbs
+        .iter()
+        .zip(KEY_SWITCH_SPECIAL_PRIMES.iter())
+        .map(|(special_limb, special_modulus)| {
+            if special_limb.iter().any(|value| *value >= *special_modulus) {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidProtocolObject,
+                    "hybrid modulus-down input contains a non-canonical special-basis residue",
+                ));
+            }
+            let inverse_plaintext_modulus =
+                inverse_mod(PLAINTEXT_MODULUS_I64 as u64, *special_modulus)?;
+            special_limb
+                .iter()
+                .map(|special_residue| {
+                    mul_mod(
+                        inverse_plaintext_modulus,
+                        *special_residue,
+                        *special_modulus,
+                    )
+                })
+                .collect::<CanonicalResult<Vec<_>>>()
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let centered_scaled_special =
+        centered_block_reconstruction(&scaled_special_limbs, &KEY_SWITCH_SPECIAL_PRIMES)?;
     let mut output = Vec::with_capacity(data_limb_count);
     for (data_limb_index, modulus) in DATA_PRIMES[..=level].iter().copied().enumerate() {
         if extended[data_limb_index]
@@ -540,27 +566,22 @@ fn hybrid_modulus_down(extended: &[Vec<u64>], level: usize) -> CanonicalResult<L
             .any(|value| *value >= modulus)
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "hybrid modulus-down input contains a non-canonical data-basis residue",
             ));
         }
-        let inverse_special_modulus = inverse_mod(SPECIAL_PRIME % modulus, modulus)?;
+        let inverse_special_modulus = inverse_mod(special_basis_modulus_residue(modulus), modulus)?;
+        let centered_scaled_special_residues = centered_scaled_special.residues(modulus)?;
         let limb = extended[data_limb_index]
             .iter()
-            .zip(special_limb.iter())
-            .map(|(data_residue, special_residue)| {
-                let scaled_special_residue =
-                    mul_mod(inverse_plaintext_modulus, *special_residue, SPECIAL_PRIME)?;
-                let negative_scaled_residue = if scaled_special_residue == 0 {
-                    0
-                } else {
-                    SPECIAL_PRIME - scaled_special_residue
-                };
-                let centered_correction_quotient =
-                    centered_residue_i128(negative_scaled_residue, SPECIAL_PRIME);
-                let correction = i128::from(PLAINTEXT_MODULUS_I64) * centered_correction_quotient;
-                let correction_residue = signed_i128_residue(correction, modulus);
-                let corrected = add_mod(*data_residue, correction_residue, modulus)?;
+            .zip(centered_scaled_special_residues.iter())
+            .map(|(data_residue, scaled_special_residue)| {
+                let correction_residue = mul_mod(
+                    PLAINTEXT_MODULUS_I64 as u64,
+                    *scaled_special_residue,
+                    modulus,
+                )?;
+                let corrected = sub_mod(*data_residue, correction_residue, modulus)?;
                 mul_mod(corrected, inverse_special_modulus, modulus)
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
@@ -568,19 +589,6 @@ fn hybrid_modulus_down(extended: &[Vec<u64>], level: usize) -> CanonicalResult<L
     }
 
     Ok(output)
-}
-
-fn centered_residue_i128(value: u64, modulus: u64) -> i128 {
-    if value > modulus / 2 {
-        i128::from(value) - i128::from(modulus)
-    } else {
-        i128::from(value)
-    }
-}
-
-fn signed_i128_residue(value: i128, modulus: u64) -> u64 {
-    let modulus = i128::from(modulus);
-    u64::try_from(((value % modulus) + modulus) % modulus).expect("modular i128 residue fits u64")
 }
 
 fn add_component_in_place(target: &mut [Vec<u64>], addend: &[Vec<u64>], level: usize) {
@@ -616,13 +624,13 @@ pub(crate) fn relinearize(
 ) -> CanonicalResult<Ciphertext> {
     if ciphertext.component_count() != 3 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "relinearization requires a three-component ciphertext",
         ));
     }
     if relinearization_key.level < ciphertext.level {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "relinearization key level is below the ciphertext level",
         ));
     }
@@ -646,9 +654,9 @@ mod tests {
 
     use super::{
         CenteredBlockCoefficients, KEY_SWITCH_ERROR_DOMAIN, PLAINTEXT_MODULUS_I64,
-        automorphism_residues, bigint_residue, centered_block_reconstruction,
-        centered_residue_i128, generate_galois_key, generate_relinearization_key,
-        hybrid_modulus_down, inverse_negacyclic_ntt, relinearize, rotate, signed_i128_residue,
+        automorphism_residues, bigint_residue, centered_block_reconstruction, generate_galois_key,
+        generate_relinearization_key, hybrid_modulus_down, inverse_negacyclic_ntt, relinearize,
+        rotate,
     };
     use crate::bgv::{
         encoding::decode_plaintext_coefficients_to_logical_slots,
@@ -656,10 +664,11 @@ mod tests {
             Ciphertext, DevelopmentBgvKey, ciphertext_tensor, encode_slots_to_coefficients,
             modulus_switch,
         },
-        modular_arithmetic::{add_mod, inverse_mod, mul_mod},
-        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME},
+        modular_arithmetic::add_mod,
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
     };
-    use num_bigint::BigInt;
+    use num_bigint::{BigInt, Sign};
+    use num_traits::{One, Zero};
 
     const DEVELOPMENT_SEED: &str = "0011223344556677";
     const TEST_LEVEL: usize = 3;
@@ -677,6 +686,32 @@ mod tests {
             current = modulus_switch(&current).expect("modulus switch");
         }
         current
+    }
+
+    fn canonical_bigint_residue(value: &BigInt, modulus: &BigInt) -> BigInt {
+        let mut residue = value % modulus;
+        if residue.sign() == Sign::Minus {
+            residue += modulus;
+        }
+        residue
+    }
+
+    fn bigint_inverse(value: &BigInt, modulus: &BigInt) -> BigInt {
+        let mut old_remainder = value.clone();
+        let mut remainder = modulus.clone();
+        let mut old_coefficient = BigInt::one();
+        let mut coefficient = BigInt::zero();
+        while !remainder.is_zero() {
+            let quotient = &old_remainder / &remainder;
+            (old_remainder, remainder) =
+                (remainder.clone(), old_remainder - &quotient * &remainder);
+            (old_coefficient, coefficient) = (
+                coefficient.clone(),
+                old_coefficient - quotient * coefficient,
+            );
+        }
+        assert_eq!(old_remainder, BigInt::one());
+        canonical_bigint_residue(&old_coefficient, modulus)
     }
 
     #[test]
@@ -718,49 +753,63 @@ mod tests {
 
     #[test]
     fn hybrid_modulus_down_matches_the_exact_integer_correction_at_boundaries() {
-        let special = i128::from(SPECIAL_PRIME);
-        let data = i128::from(DATA_PRIMES[0]);
-        let values = [
-            -(data * special),
-            -special,
-            -(special / 2),
-            -1,
-            0,
-            1,
-            special / 2,
-            special,
-            data * special,
+        let special_basis_modulus = SPECIAL_PRIMES
+            .iter()
+            .map(|modulus| BigInt::from(*modulus))
+            .product::<BigInt>();
+        let half_special_basis_modulus = &special_basis_modulus / BigInt::from(2_u8);
+        let data_boundary = BigInt::from(DATA_PRIMES[0]) * &special_basis_modulus;
+        let values = vec![
+            -(&data_boundary * BigInt::from(2_u8)) - BigInt::one(),
+            -data_boundary.clone(),
+            -&special_basis_modulus - BigInt::one(),
+            -special_basis_modulus.clone(),
+            -&half_special_basis_modulus - BigInt::one(),
+            -half_special_basis_modulus.clone(),
+            BigInt::from(-1_i8),
+            BigInt::zero(),
+            BigInt::one(),
+            half_special_basis_modulus.clone(),
+            &half_special_basis_modulus + BigInt::one(),
+            &special_basis_modulus - BigInt::one(),
+            special_basis_modulus.clone(),
+            &special_basis_modulus + BigInt::one(),
+            &data_boundary - BigInt::one(),
+            data_boundary.clone(),
+            &data_boundary + BigInt::one(),
+            &data_boundary * BigInt::from(2_u8) + BigInt::one(),
         ];
-        let mut extended = vec![vec![0_u64; POLYNOMIAL_DEGREE]; 3];
-        for (coefficient_index, value) in values.iter().copied().enumerate() {
-            extended[0][coefficient_index] = signed_i128_residue(value, DATA_PRIMES[0]);
-            extended[1][coefficient_index] = signed_i128_residue(value, DATA_PRIMES[1]);
-            extended[2][coefficient_index] = signed_i128_residue(value, SPECIAL_PRIME);
+        let mut extended = vec![vec![0_u64; POLYNOMIAL_DEGREE]; 2 + SPECIAL_PRIMES.len()];
+        for (coefficient_index, value) in values.iter().enumerate() {
+            for (data_limb_index, data_modulus) in DATA_PRIMES[..2].iter().enumerate() {
+                extended[data_limb_index][coefficient_index] =
+                    bigint_residue(value, *data_modulus).expect("data residue derives");
+            }
+            for (special_limb_index, special_modulus) in SPECIAL_PRIMES.iter().enumerate() {
+                extended[2 + special_limb_index][coefficient_index] =
+                    bigint_residue(value, *special_modulus).expect("special residue derives");
+            }
         }
         let actual = hybrid_modulus_down(&extended, 1).expect("hybrid modulus-down derives");
-        let inverse_plaintext =
-            inverse_mod(PLAINTEXT_MODULUS, SPECIAL_PRIME).expect("plaintext inverse");
-        for (coefficient_index, value) in values.iter().copied().enumerate() {
-            let special_residue = signed_i128_residue(value, SPECIAL_PRIME);
-            let scaled =
-                mul_mod(inverse_plaintext, special_residue, SPECIAL_PRIME).expect("scaled");
-            let negative_scaled = if scaled == 0 {
-                0
+        let plaintext_modulus = BigInt::from(PLAINTEXT_MODULUS);
+        let inverse_plaintext = bigint_inverse(&plaintext_modulus, &special_basis_modulus);
+        for (coefficient_index, value) in values.iter().enumerate() {
+            let canonical_scaled =
+                canonical_bigint_residue(&(value * &inverse_plaintext), &special_basis_modulus);
+            let centered_scaled = if canonical_scaled > half_special_basis_modulus {
+                canonical_scaled - &special_basis_modulus
             } else {
-                SPECIAL_PRIME - scaled
+                canonical_scaled
             };
-            let correction = i128::from(PLAINTEXT_MODULUS)
-                * centered_residue_i128(negative_scaled, SPECIAL_PRIME);
-            assert_eq!((value + correction) % special, 0);
-            let quotient = (value + correction) / special;
-            assert_eq!(
-                actual[0][coefficient_index],
-                signed_i128_residue(quotient, DATA_PRIMES[0])
-            );
-            assert_eq!(
-                actual[1][coefficient_index],
-                signed_i128_residue(quotient, DATA_PRIMES[1])
-            );
+            let corrected = value - &plaintext_modulus * centered_scaled;
+            assert_eq!(&corrected % &special_basis_modulus, BigInt::zero());
+            let quotient = corrected / &special_basis_modulus;
+            for (data_limb_index, data_modulus) in DATA_PRIMES[..2].iter().enumerate() {
+                assert_eq!(
+                    actual[data_limb_index][coefficient_index],
+                    bigint_residue(&quotient, *data_modulus).expect("quotient residue derives")
+                );
+            }
         }
     }
 
@@ -771,50 +820,58 @@ mod tests {
         let seed = "hybrid-special-basis";
         let generated =
             generate_relinearization_key(key, level, seed).expect("hybrid key generates");
-        assert_eq!(generated.components.len(), level + 1);
+        assert_eq!(generated.components.len(), 1);
         let component = &generated.components[0];
         assert_eq!(
             component.moduli,
-            vec![DATA_PRIMES[0], DATA_PRIMES[1], SPECIAL_PRIME]
+            DATA_PRIMES[..=level]
+                .iter()
+                .chain(SPECIAL_PRIMES.iter())
+                .copied()
+                .collect::<Vec<_>>()
         );
-        let special_limb_index = level + 1;
-        let component_b = inverse_negacyclic_ntt(
-            &component.component_b_ntt[special_limb_index],
-            SPECIAL_PRIME,
-        )
-        .expect("component b inverse NTT");
-        let component_a = inverse_negacyclic_ntt(
-            &component.component_a_ntt[special_limb_index],
-            SPECIAL_PRIME,
-        )
-        .expect("component a inverse NTT");
-        let secret = key
-            .secret()
-            .iter()
-            .map(|coefficient| super::signed_residue(*coefficient, SPECIAL_PRIME))
-            .collect::<Vec<_>>();
-        let public_sample_secret = super::negacyclic_mul(&component_a, &secret, SPECIAL_PRIME)
-            .expect("special-basis public sample product");
         let block_bytes = 0_u64.to_le_bytes();
         let error = super::DeterministicSampler::new(
             KEY_SWITCH_ERROR_DOMAIN,
             &[b"relinearization", seed.as_bytes(), &block_bytes],
         )
         .centered_binomial_eta2(POLYNOMIAL_DEGREE);
-        for coefficient_index in 0..POLYNOMIAL_DEGREE {
-            let observed = add_mod(
-                component_b[coefficient_index],
-                public_sample_secret[coefficient_index],
-                SPECIAL_PRIME,
+        for special_basis_index in [0, SPECIAL_PRIMES.len() / 2, SPECIAL_PRIMES.len() - 1] {
+            let special_modulus = SPECIAL_PRIMES[special_basis_index];
+            let special_limb_index = level + 1 + special_basis_index;
+            let component_b = inverse_negacyclic_ntt(
+                &component.component_b_ntt[special_limb_index],
+                special_modulus,
             )
-            .expect("special relation sum");
-            assert_eq!(
-                observed,
-                super::signed_residue(
-                    error[coefficient_index] * PLAINTEXT_MODULUS_I64,
-                    SPECIAL_PRIME,
+            .expect("component b inverse NTT");
+            let component_a = inverse_negacyclic_ntt(
+                &component.component_a_ntt[special_limb_index],
+                special_modulus,
+            )
+            .expect("component a inverse NTT");
+            let secret = key
+                .secret()
+                .iter()
+                .map(|coefficient| super::signed_residue(*coefficient, special_modulus))
+                .collect::<Vec<_>>();
+            let public_sample_secret =
+                super::negacyclic_mul(&component_a, &secret, special_modulus)
+                    .expect("special-basis public sample product");
+            for coefficient_index in 0..POLYNOMIAL_DEGREE {
+                let observed = add_mod(
+                    component_b[coefficient_index],
+                    public_sample_secret[coefficient_index],
+                    special_modulus,
                 )
-            );
+                .expect("special relation sum");
+                assert_eq!(
+                    observed,
+                    super::signed_residue(
+                        error[coefficient_index] * PLAINTEXT_MODULUS_I64,
+                        special_modulus,
+                    )
+                );
+            }
         }
     }
 

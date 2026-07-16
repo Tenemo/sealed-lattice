@@ -39,6 +39,7 @@ const fn field_residue_bit_width() -> usize {
 }
 pub(in crate::bgv::setup) const FIELD_RESIDUE_BIT_WIDTH: usize = field_residue_bit_width();
 
+#[cfg(test)]
 pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyProof) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(PROOF_MAGIC);
@@ -190,6 +191,7 @@ pub(crate) fn decode_trustee_evaluation_key_proof_from_source(
     Ok(SuccinctEvaluationKeyProof { limb_proofs })
 }
 
+#[cfg(test)]
 fn encode_low_degree_proof(bytes: &mut Vec<u8>, low_degree: &LowDegreeProof) {
     bytes.extend_from_slice(&(low_degree.folded_layer_roots.len() as u64).to_le_bytes());
     write_hash_slice(bytes, &low_degree.folded_layer_roots);
@@ -202,6 +204,7 @@ fn encode_low_degree_proof(bytes: &mut Vec<u8>, low_degree: &LowDegreeProof) {
     }
 }
 
+#[cfg(test)]
 fn write_low_degree_sibling_table(
     bytes: &mut Vec<u8>,
     low_degree: &LowDegreeProof,
@@ -263,6 +266,7 @@ fn low_degree_sibling_reference_byte_count(table_count: usize) -> usize {
         .div_ceil(8)
 }
 
+#[cfg(test)]
 fn write_low_degree_sibling_references(bytes: &mut Vec<u8>, references: &[u8], table_count: usize) {
     let bit_width = low_degree_sibling_reference_bit_width(table_count);
     let byte_count = low_degree_sibling_reference_byte_count(table_count);
@@ -480,6 +484,7 @@ fn field_residue_slice_byte_count(count: usize) -> Option<usize> {
 // The bit width is compile-time derived from the data primes; decode-side
 // residue and padding checks make the packed encoding canonical for transcript
 // binding.
+#[cfg(test)]
 fn write_field_residue_slice(bytes: &mut Vec<u8>, values: &[u64]) {
     let byte_count = field_residue_slice_byte_count(values.len())
         .expect("field residue slice bit count must fit usize");
@@ -496,6 +501,7 @@ fn write_field_residue_slice(bytes: &mut Vec<u8>, values: &[u64]) {
     }
 }
 
+#[cfg(test)]
 fn write_fixed_width_bits(bytes: &mut [u8], bit_cursor: &mut usize, value: u64, bit_width: usize) {
     let mut written_bits = 0_usize;
     while written_bits < bit_width {
@@ -511,6 +517,7 @@ fn write_fixed_width_bits(bytes: &mut [u8], bit_cursor: &mut usize, value: u64, 
     }
 }
 
+#[cfg(test)]
 fn write_extension_slice(bytes: &mut Vec<u8>, values: &[ChallengeExtensionElement]) {
     let residue_count = values
         .len()
@@ -533,12 +540,14 @@ fn write_extension_slice(bytes: &mut Vec<u8>, values: &[ChallengeExtensionElemen
     }
 }
 
+#[cfg(test)]
 fn write_hash_slice(bytes: &mut Vec<u8>, hashes: &[MerkleDigest]) {
     for hash in hashes {
         bytes.extend_from_slice(hash);
     }
 }
 
+#[cfg(test)]
 fn write_batched_opening(bytes: &mut Vec<u8>, opening: &BatchedMerkleOpening) {
     bytes.extend_from_slice(&(opening.authentication_nodes.len() as u64).to_le_bytes());
     write_hash_slice(bytes, &opening.authentication_nodes);

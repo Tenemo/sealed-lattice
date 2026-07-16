@@ -163,7 +163,7 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         let validated_proof_reference = validate_same_secret_bridge_proof_reference(
             proof_bytes_hash.as_str().ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "same-secret bridge proof hash must be a string",
                 )
             })?,
@@ -209,8 +209,6 @@ mod reconstructed;
 mod statement_record;
 
 use bridge_transport::*;
-#[cfg(test)]
-pub(in crate::bgv::setup) use reconstructed::verify_and_retain_same_secret_bridge_proof_binding;
 use reconstructed::{
     StatementRecordVerificationInput, StatementSetBinding,
     verify_reconstructed_same_secret_bridge_proof,

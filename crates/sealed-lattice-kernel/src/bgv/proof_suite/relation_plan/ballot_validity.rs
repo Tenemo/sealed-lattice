@@ -5,7 +5,8 @@ use num_traits::Zero;
 
 use super::*;
 
-const BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1302;
+const BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER: u16 =
+    crate::foundation::ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER;
 const VERIFIED_SETUP_SOURCE_HASH_FIELD_ORDINAL: u64 = 7;
 const BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL: u64 = 8;
 const OPTION_COUNT: usize = 20;
@@ -1001,11 +1002,10 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         let mut public_limb_columns = Vec::with_capacity(self.geometry.data_moduli.len());
         let mut quotient_limb_columns = Vec::with_capacity(self.geometry.data_moduli.len());
         let data_moduli = self.geometry.data_moduli.clone();
-        for limb_ordinal in 0..data_moduli.len() {
+        for (limb_ordinal, data_modulus) in data_moduli.iter().copied().enumerate() {
             let data_modulus_index = self.input.active_data_modulus_indices[limb_ordinal];
             public_limb_columns.push(self.add_public_data_limb_columns(data_modulus_index)?);
-            quotient_limb_columns
-                .push(self.add_encryption_quotient_columns(data_moduli[limb_ordinal])?);
+            quotient_limb_columns.push(self.add_encryption_quotient_columns(data_modulus)?);
         }
 
         let (score_offsets, encoder_weights) = self.add_score_and_encoder_columns()?;

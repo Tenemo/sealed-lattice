@@ -153,6 +153,37 @@ pub struct ProofApplicationSlotCeilings {
 }
 
 impl ProofApplicationSlotCeilings {
+    pub(crate) const SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1211;
+    pub(crate) const PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1212;
+    pub(crate) const COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1213;
+    pub(crate) const RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1214;
+    pub(crate) const RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1215;
+    pub(crate) const RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1216;
+    pub(crate) const GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1217;
+    pub(crate) const EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1218;
+    pub(crate) const BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1302;
+    pub(crate) const TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1621;
+    pub(crate) const VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x2110;
+    pub(crate) const AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x2111;
+
+    pub(crate) const PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS: [u16; 3] = [
+        Self::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        Self::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        Self::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ];
+
+    pub(crate) const SECRET_BEARING_FAMILY_SCHEMA_IDENTIFIERS: [u16; 9] = [
+        Self::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        Self::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        Self::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+        Self::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+        Self::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        Self::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+        Self::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+        Self::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        Self::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    ];
+
     pub fn derive(
         roster_size: u16,
         selected_relinearization_position_count: u32,
@@ -177,19 +208,55 @@ impl ProofApplicationSlotCeilings {
         let galois_trustee_slot_count = roster_size
             .checked_mul(selected_galois_position_count)
             .ok_or_else(slot_count_overflow)?;
+        let evaluator_aggregate_slot_count = selected_relinearization_position_count
+            .checked_add(selected_galois_position_count)
+            .ok_or_else(slot_count_overflow)?;
         let ordered_family_ceilings = [
-            family_ceiling(0x2110, roster_size),
-            family_ceiling(0x2111, roster_size),
-            family_ceiling(0x1211, roster_size),
-            family_ceiling(0x1212, roster_size),
-            family_ceiling(0x1213, 1),
-            family_ceiling(0x1214, relinearization_trustee_slot_count),
-            family_ceiling(0x1215, selected_relinearization_position_count),
-            family_ceiling(0x1216, relinearization_trustee_slot_count),
-            family_ceiling(0x1217, galois_trustee_slot_count),
-            family_ceiling(0x1218, 1),
-            family_ceiling(0x1302, maximum_candidate_packages_per_action),
-            family_ceiling(0x1621, roster_size),
+            family_ceiling(
+                Self::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+                roster_size,
+            ),
+            family_ceiling(
+                Self::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                roster_size,
+            ),
+            family_ceiling(Self::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER, roster_size),
+            family_ceiling(
+                Self::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                roster_size,
+            ),
+            family_ceiling(
+                Self::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                1,
+            ),
+            family_ceiling(
+                Self::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+                relinearization_trustee_slot_count,
+            ),
+            family_ceiling(
+                Self::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                selected_relinearization_position_count,
+            ),
+            family_ceiling(
+                Self::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+                relinearization_trustee_slot_count,
+            ),
+            family_ceiling(
+                Self::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                galois_trustee_slot_count,
+            ),
+            family_ceiling(
+                Self::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                evaluator_aggregate_slot_count,
+            ),
+            family_ceiling(
+                Self::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+                maximum_candidate_packages_per_action,
+            ),
+            family_ceiling(
+                Self::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+                roster_size,
+            ),
         ];
         let total_application_slot_ceiling =
             ordered_family_ceilings
@@ -379,14 +446,14 @@ mod tests {
             (0x1215, 3),
             (0x1216, 15),
             (0x1217, 20),
-            (0x1218, 1),
+            (0x1218, 7),
             (0x1302, 17),
             (0x1621, 5),
         ];
         for (family, ceiling) in expected {
             assert_eq!(ceilings.family_ceiling(family), Some(ceiling));
         }
-        assert_eq!(ceilings.total_application_slot_ceiling(), 97);
+        assert_eq!(ceilings.total_application_slot_ceiling(), 103);
         assert_eq!(ceilings.family_ceiling(0xffff), None);
     }
 

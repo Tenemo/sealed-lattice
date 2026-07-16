@@ -29,7 +29,7 @@ impl AggregateOpeningMaterialEvictionGuard {
 
 impl Drop for AggregateOpeningMaterialEvictionGuard {
     fn drop(&mut self) {
-        crate::bgv::setup::evict_verified_canonical_proof_materials(&self.material_roots);
+        crate::bgv::setup::evict_authenticated_canonical_proof_materials(&self.material_roots);
     }
 }
 
@@ -244,17 +244,17 @@ pub(crate) fn finish_bgv_target_decryption_result_release_for_test(
     })
 }
 
-fn read_target_decryption_participant<'a>(
-    setup_binding: &'a SetupBinding,
+fn read_target_decryption_participant(
+    setup_binding: &SetupBinding,
     trustee_roster_position: usize,
-) -> CanonicalResult<&'a ParticipantBinding> {
+) -> CanonicalResult<&ParticipantBinding> {
     setup_binding
         .participants
         .get(trustee_roster_position)
         .filter(|candidate| candidate.roster_position == trustee_roster_position)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "target decryption trustee roster position is not part of the setup roster",
             )
         })

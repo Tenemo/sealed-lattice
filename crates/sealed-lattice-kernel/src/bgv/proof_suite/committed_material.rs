@@ -20,14 +20,13 @@ use crate::foundation::{
 };
 
 use super::{
-    BoundedCommonProofByteSinkError, CommonProofBoundOpeningProvider, CommonProofByteSink,
-    CommonProofEncodingError, CommonProofOpeningArtifact, CommonProofOpeningGeometry,
-    CommonProofProverError, CommonProofQuerySectionWriter, CommonProofSourcePolynomial,
-    CompleteProofTreeCatalog, PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_BLOWUP_FACTOR,
-    PROOF_EVALUATION_COSET_OFFSET, PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-    ProofBaseFieldElement, ProofEvaluationDomain, ProofFieldError, ProofPolynomialError,
-    ProofTreeCatalogEntry, ProofTreeCatalogSource, apply_trace_mask,
-    encode_common_proof_query_tree_fragment,
+    BoundedCommonProofByteSinkError, CommonProofBoundOpeningProvider, CommonProofEncodingError,
+    CommonProofOpeningArtifact, CommonProofOpeningGeometry, CommonProofProverError,
+    CommonProofSourcePolynomial, CompleteProofTreeCatalog, PROOF_BASE_FIELD_MODULUS,
+    PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
+    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, ProofBaseFieldElement,
+    ProofEvaluationDomain, ProofFieldError, ProofPolynomialError, ProofTreeCatalogEntry,
+    ProofTreeCatalogSource, apply_trace_mask, encode_common_proof_query_tree_fragment,
 };
 
 const MATERIAL_DERIVATION_INPUT_SCHEMA_IDENTIFIER: u16 = 0x2105;
@@ -224,7 +223,9 @@ impl CommittedMaterialProfile {
                     .ok_or(CommittedMaterialError::CountOverflow)?
             || self.material_column_degree_bound_exclusive
                 >= self.committed_polynomial_degree_bound_exclusive
-            || self.evaluation_domain_size % self.trace_domain_size != 0
+            || !self
+                .evaluation_domain_size
+                .is_multiple_of(self.trace_domain_size)
             || u64::try_from(self.evaluation_domain_size)
                 .ok()
                 .is_none_or(|size| !(PROOF_BASE_FIELD_MODULUS - 1).is_multiple_of(size))
@@ -584,23 +585,6 @@ impl CommonProofBoundOpeningProvider for CommittedMaterialBoundOpeningProvider<'
             leaf_count: artifact.leaf_count(),
             canonical_leaf_byte_length: artifact.canonical_leaf_byte_length(),
         })
-    }
-
-    fn write_next_bound_opening<Sink>(
-        &mut self,
-        catalog_entry: &ProofTreeCatalogEntry,
-        writer: &mut CommonProofQuerySectionWriter<'_, Sink>,
-    ) -> Result<(), CommonProofEncodingError<Sink::Error, Self::Error>>
-    where
-        Sink: CommonProofByteSink,
-    {
-        let artifact = self
-            .artifacts
-            .get_mut(&catalog_entry.tree_catalog_index())
-            .ok_or(CommonProofEncodingError::Artifact(
-                CommittedMaterialError::InvalidInput,
-            ))?;
-        writer.write_next_opening(artifact)
     }
 
     fn encode_bound_opening_fragment(

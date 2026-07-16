@@ -9,7 +9,7 @@ pub(super) fn read_partial_decryption_share(
 ) -> CanonicalResult<()> {
     if string_at_path(share, &["objectType"])? != "BgvTargetDecryptionShare" {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "target decryption accepts only BgvTargetDecryptionShare records",
         ));
     }
@@ -20,7 +20,7 @@ pub(super) fn read_partial_decryption_share(
         .filter(|candidate| candidate.roster_position == trustee_roster_position)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "target decryption share roster position is not in the setup roster",
             )
         })?;
@@ -94,7 +94,7 @@ pub(super) fn read_partial_limb_set(
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     if string_at_path(payload, &["objectType"])? != "BgvTargetDecryptionSharePayload" {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "target share payload object type is not canonical",
         ));
     }
@@ -117,7 +117,7 @@ pub(super) fn read_partial_limb_set(
             let modulus = DATA_PRIMES[limb_index];
             if coefficients.iter().any(|coefficient| *coefficient >= modulus) {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "target partial-decryption limb contains a non-canonical residue",
                 ));
             }

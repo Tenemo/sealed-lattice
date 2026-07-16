@@ -3,18 +3,24 @@ use std::sync::OnceLock;
 
 use super::{
     DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, ROOT_PARAMETERS,
-    RootParameters, SPECIAL_PRIME,
+    RootParameters, SPECIAL_PRIMES,
 };
 
+#[cfg(test)]
 const DATA_PRIME_BIT_LENGTH: u32 = 47;
 const DATA_PRIME_COUNT: usize = 17;
+const SPECIAL_PRIME_COUNT: usize = SPECIAL_PRIMES.len();
 const TWICE_POLYNOMIAL_DEGREE: u64 = 2 * POLYNOMIAL_DEGREE as u64;
+#[cfg(test)]
 const COMPATIBILITY_CONGRUENCE_MODULUS: u64 = PLAINTEXT_MODULUS * TWICE_POLYNOMIAL_DEGREE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ParameterGenerationError {
+    #[cfg(test)]
     ArithmeticOverflow,
+    #[cfg(test)]
     CandidateSearchExhausted,
+    #[cfg(test)]
     PrimitiveGeneratorNotFound,
     InvalidCertificate,
 }
@@ -22,8 +28,11 @@ pub(crate) enum ParameterGenerationError {
 impl fmt::Display for ParameterGenerationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            #[cfg(test)]
             Self::ArithmeticOverflow => "parameter generation arithmetic overflowed",
+            #[cfg(test)]
             Self::CandidateSearchExhausted => "compatible data-prime search was exhausted",
+            #[cfg(test)]
             Self::PrimitiveGeneratorNotFound => {
                 "a full-order multiplicative generator was not found"
             }
@@ -36,6 +45,7 @@ impl std::error::Error for ParameterGenerationError {}
 
 /// Deterministically regenerates the complete supported data basis and the
 /// root certificate consumed by every NTT implementation.
+#[cfg(test)]
 pub(crate) fn regenerate_supported_data_root_parameters()
 -> Result<[RootParameters; DATA_PRIME_COUNT], ParameterGenerationError> {
     let maximum_candidate = (1_u64 << DATA_PRIME_BIT_LENGTH) - 1;
@@ -51,7 +61,45 @@ pub(crate) fn regenerate_supported_data_root_parameters()
             .and_then(|value| value.checked_add(1))
             .ok_or(ParameterGenerationError::ArithmeticOverflow)?;
         if is_prime(candidate_modulus) {
-            generated.push(derive_root_parameters(candidate_modulus)?);
+            generated.push(derive_root_parameters(
+                candidate_modulus,
+                verify_data_root_parameters,
+            )?);
+        }
+        multiplier = multiplier
+            .checked_sub(1)
+            .ok_or(ParameterGenerationError::CandidateSearchExhausted)?;
+    }
+
+    generated
+        .try_into()
+        .map_err(|_| ParameterGenerationError::CandidateSearchExhausted)
+}
+
+/// Deterministically regenerates the complete special basis used by hybrid
+/// key switching. Unlike the data basis, these primes only need the 2N root
+/// congruence; requiring the plaintext congruence would needlessly reduce the
+/// available basis.
+#[cfg(test)]
+pub(crate) fn regenerate_supported_special_root_parameters()
+-> Result<[RootParameters; SPECIAL_PRIME_COUNT], ParameterGenerationError> {
+    let maximum_candidate = (1_u64 << DATA_PRIME_BIT_LENGTH) - 1;
+    let mut multiplier = maximum_candidate
+        .checked_sub(1)
+        .ok_or(ParameterGenerationError::ArithmeticOverflow)?
+        / TWICE_POLYNOMIAL_DEGREE;
+    let mut generated = Vec::with_capacity(SPECIAL_PRIME_COUNT);
+
+    while generated.len() < SPECIAL_PRIME_COUNT {
+        let candidate_modulus = multiplier
+            .checked_mul(TWICE_POLYNOMIAL_DEGREE)
+            .and_then(|value| value.checked_add(1))
+            .ok_or(ParameterGenerationError::ArithmeticOverflow)?;
+        if is_prime(candidate_modulus) {
+            generated.push(derive_root_parameters(
+                candidate_modulus,
+                verify_ntt_root_parameters,
+            )?);
         }
         multiplier = multiplier
             .checked_sub(1)
@@ -165,17 +213,20 @@ fn validate_supported_algebraic_parameters_uncached() -> Result<(), ParameterGen
         }
     }
 
-    let special_parameters = ROOT_PARAMETERS[DATA_PRIME_COUNT + 1];
-    if special_parameters.modulus != SPECIAL_PRIME
-        || !verify_ntt_root_parameters(special_parameters)
-    {
-        return Err(ParameterGenerationError::InvalidCertificate);
+    for (expected_modulus, parameters) in SPECIAL_PRIMES.iter().copied().zip(
+        ROOT_PARAMETERS[DATA_PRIME_COUNT + 1..DATA_PRIME_COUNT + 1 + SPECIAL_PRIME_COUNT]
+            .iter()
+            .copied(),
+    ) {
+        if parameters.modulus != expected_modulus || !verify_ntt_root_parameters(parameters) {
+            return Err(ParameterGenerationError::InvalidCertificate);
+        }
     }
 
-    let mut ordered_moduli = Vec::with_capacity(DATA_PRIME_COUNT + 2);
+    let mut ordered_moduli = Vec::with_capacity(DATA_PRIME_COUNT + SPECIAL_PRIME_COUNT + 1);
     ordered_moduli.push(PLAINTEXT_MODULUS);
     ordered_moduli.extend(DATA_PRIMES);
-    ordered_moduli.push(SPECIAL_PRIME);
+    ordered_moduli.extend(SPECIAL_PRIMES);
     ordered_moduli.sort_unstable();
     if ordered_moduli.windows(2).any(|pair| pair[0] == pair[1]) {
         return Err(ParameterGenerationError::InvalidCertificate);
@@ -226,7 +277,11 @@ fn verify_logical_slot_layout() -> bool {
     exponent == 1 && seen_odd_exponents.into_iter().all(|was_seen| was_seen)
 }
 
-fn derive_root_parameters(modulus: u64) -> Result<RootParameters, ParameterGenerationError> {
+#[cfg(test)]
+fn derive_root_parameters(
+    modulus: u64,
+    verifier: fn(RootParameters) -> bool,
+) -> Result<RootParameters, ParameterGenerationError> {
     let multiplicative_group_order = modulus - 1;
     let prime_factors = distinct_prime_factors(multiplicative_group_order);
     let primitive_generator = (2..modulus)
@@ -255,7 +310,7 @@ fn derive_root_parameters(modulus: u64) -> Result<RootParameters, ParameterGener
         inverse_cyclic_root: modular_power(cyclic_root, modulus - 2, modulus),
         inverse_polynomial_degree: modular_power(POLYNOMIAL_DEGREE as u64, modulus - 2, modulus),
     };
-    if !verify_data_root_parameters(parameters) {
+    if !verifier(parameters) {
         return Err(ParameterGenerationError::InvalidCertificate);
     }
     Ok(parameters)
@@ -338,7 +393,7 @@ fn multiply_modular(left: u64, right: u64, modulus: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bgv::parameters::{DATA_PRIMES, ROOT_PARAMETERS};
+    use crate::bgv::parameters::{DATA_PRIMES, ROOT_PARAMETERS, SPECIAL_PRIMES};
 
     #[test]
     fn deterministic_generation_reproduces_the_complete_data_basis() {
@@ -350,6 +405,25 @@ mod tests {
             generated
                 .iter()
                 .all(|parameters| verify_data_root_parameters(*parameters))
+        );
+    }
+
+    #[test]
+    fn deterministic_generation_reproduces_the_complete_special_basis() {
+        let generated = regenerate_supported_special_root_parameters()
+            .expect("the supported special basis regenerates");
+        assert_eq!(
+            generated.map(|parameters| parameters.modulus),
+            SPECIAL_PRIMES
+        );
+        assert_eq!(
+            generated.as_slice(),
+            &ROOT_PARAMETERS[DATA_PRIME_COUNT + 1..DATA_PRIME_COUNT + 1 + SPECIAL_PRIME_COUNT]
+        );
+        assert!(
+            generated
+                .iter()
+                .all(|parameters| verify_ntt_root_parameters(*parameters))
         );
     }
 

@@ -465,6 +465,61 @@ pub(super) struct AnchorQuotientWitness {
     rows: Vec<[u32; 2]>,
 }
 
+pub(super) struct AnchorEquationInputs<'input> {
+    commitments: &'input [SplitIntegerVector],
+    first_matrix: &'input [Vec<SplitIntegerVector>],
+    second_matrix: &'input [SplitIntegerVector],
+    opening: &'input AnchorOpeningWitness,
+    secret: &'input ShiftedSmallVector,
+    quotients: &'input AnchorQuotientWitness,
+}
+
+impl<'input> AnchorEquationInputs<'input> {
+    pub(super) fn new(
+        commitments: &'input [SplitIntegerVector],
+        first_matrix: &'input [Vec<SplitIntegerVector>],
+        second_matrix: &'input [SplitIntegerVector],
+        opening: &'input AnchorOpeningWitness,
+        secret: &'input ShiftedSmallVector,
+        quotients: &'input AnchorQuotientWitness,
+    ) -> Self {
+        Self {
+            commitments,
+            first_matrix,
+            second_matrix,
+            opening,
+            secret,
+            quotients,
+        }
+    }
+}
+
+pub(super) struct PublicKeyEquationInputs<'input> {
+    public_key_share: &'input SplitIntegerVector,
+    common_reference: &'input SplitIntegerVector,
+    secret: &'input ReversibleShiftedSmallVector,
+    error: &'input ShiftedSmallVector,
+    quotient_columns: [u32; 2],
+}
+
+impl<'input> PublicKeyEquationInputs<'input> {
+    pub(super) fn new(
+        public_key_share: &'input SplitIntegerVector,
+        common_reference: &'input SplitIntegerVector,
+        secret: &'input ReversibleShiftedSmallVector,
+        error: &'input ShiftedSmallVector,
+        quotient_columns: [u32; 2],
+    ) -> Self {
+        Self {
+            public_key_share,
+            common_reference,
+            secret,
+            error,
+            quotient_columns,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct TrusteeAnchorOpeningWitness {
     hiding_secrets: Vec<SplitIntegerVector>,
@@ -1090,7 +1145,7 @@ impl KeyRelationPlanBuilder<'_> {
                 next_mask_purpose = next_mask_purpose
                     .checked_add(1)
                     .filter(|purpose| *purpose < 0xff00)
-                    .ok_or(RelationPlanError::CountOverflow)?;
+                    .ok_or(RelationPlanError::MaskPurposeExhausted)?;
             }
         }
         let quotient_component_count = self.context.quotient_component_count;
@@ -1129,7 +1184,7 @@ impl KeyRelationPlanBuilder<'_> {
             next_mask_purpose = next_mask_purpose
                 .checked_add(1)
                 .filter(|purpose| *purpose < 0xff00)
-                .ok_or(RelationPlanError::CountOverflow)?;
+                .ok_or(RelationPlanError::MaskPurposeExhausted)?;
         }
         ordered_masks.push(RelationMaskDescriptor {
             mask_purpose: next_mask_purpose,
@@ -2009,13 +2064,15 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         for half_ordinal in 0..2 {
             let selected_half = integer_lift_half(half_ordinal)?;
             let mut products = Vec::with_capacity(rank);
-            for column_ordinal in 0..rank {
+            for (hiding_secret, second_matrix_column) in
+                opening.hiding_secrets.iter().copied().zip(second_matrix)
+            {
                 products.push(self.full_ring_product(
                     batch_key,
                     selected_half,
                     true,
-                    opening.hiding_secrets[column_ordinal],
-                    &second_matrix[column_ordinal],
+                    hiding_secret,
+                    second_matrix_column,
                 )?);
             }
             self.add_integer_lift_component(
@@ -2044,13 +2101,16 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         &mut self,
         modulus_reference: SuiteModulusReference,
         challenge_ordinal: u16,
-        commitments: &[SplitIntegerVector],
-        first_matrix: &[Vec<SplitIntegerVector>],
-        second_matrix: &[SplitIntegerVector],
-        opening: &AnchorOpeningWitness,
-        secret: &ShiftedSmallVector,
-        quotients: &AnchorQuotientWitness,
+        inputs: AnchorEquationInputs<'_>,
     ) -> Result<(), RelationPlanError> {
+        let AnchorEquationInputs {
+            commitments,
+            first_matrix,
+            second_matrix,
+            opening,
+            secret,
+            quotients,
+        } = inputs;
         let rank = usize::from(self.geometry.commitment_module_rank);
         if commitments.len() != rank + 1
             || first_matrix.len() != rank
@@ -2105,13 +2165,15 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         for half_ordinal in 0..2 {
             let selected_half = integer_lift_half(half_ordinal)?;
             let mut products = Vec::with_capacity(rank);
-            for column_ordinal in 0..rank {
+            for (second_matrix_column, hiding_secret) in
+                second_matrix.iter().copied().zip(&opening.hiding_secrets)
+            {
                 products.push(self.full_ring_product(
                     batch_key,
                     selected_half,
                     true,
-                    second_matrix[column_ordinal],
-                    &opening.hiding_secrets[column_ordinal],
+                    second_matrix_column,
+                    hiding_secret,
                 )?);
             }
             self.add_integer_lift_component(
@@ -2140,17 +2202,20 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         &mut self,
         modulus_reference: SuiteModulusReference,
         challenge_ordinal: u16,
-        public_key_share: &SplitIntegerVector,
-        common_reference: &SplitIntegerVector,
-        secret: &ReversibleShiftedSmallVector,
-        error: &ShiftedSmallVector,
-        quotient_columns: [u32; 2],
+        inputs: PublicKeyEquationInputs<'_>,
     ) -> Result<(), RelationPlanError> {
+        let PublicKeyEquationInputs {
+            public_key_share,
+            common_reference,
+            secret,
+            error,
+            quotient_columns,
+        } = inputs;
         if secret.source.offset != 1 || error.offset != 2 {
             return Err(RelationPlanError::InvalidConstraint);
         }
         let batch_key = (modulus_reference, challenge_ordinal);
-        for half_ordinal in 0..2 {
+        for (half_ordinal, quotient_column) in quotient_columns.into_iter().enumerate() {
             let product = self.full_ring_product(
                 batch_key,
                 integer_lift_half(half_ordinal)?,
@@ -2160,7 +2225,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             )?;
             self.add_integer_lift_component(
                 batch_key,
-                quotient_columns[half_ordinal],
+                quotient_column,
                 vec![
                     constant_linear_term(public_key_share.halves[half_ordinal], 0, false),
                     RelationIntegerLiftLinearTermDescriptor {

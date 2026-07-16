@@ -278,6 +278,66 @@ export const copyLocalRecordIdentifierInput = (
                 ),
                 recordType: value.recordType,
             });
+        case 'commonProofExternalMemory': {
+            if (
+                value.externalMemoryRecordKind !== 'object-header' &&
+                value.externalMemoryRecordKind !== 'data-chunk' &&
+                value.externalMemoryRecordKind !== 'seal-marker'
+            ) {
+                throw malformed(
+                    errorCode,
+                    'Common-proof external-memory record kind is unsupported.',
+                );
+            }
+            return Object.freeze({
+                commonProofEnvironmentIdentifier: copyLocalRecordBytes(
+                    value.commonProofEnvironmentIdentifier,
+                    {
+                        allowEmpty: false,
+                        errorCode,
+                        exactByteLength: identifierByteLength,
+                        label: 'Common-proof environment identifier',
+                    },
+                ),
+                commonProofRuntimeBindingHash: copyLocalRecordBytes(
+                    value.commonProofRuntimeBindingHash,
+                    {
+                        allowEmpty: false,
+                        errorCode,
+                        exactByteLength: foundationHashByteLength,
+                        label: 'Common-proof runtime-binding hash',
+                    },
+                ),
+                externalMemoryByteOffset: copyUnsigned64(
+                    value.externalMemoryByteOffset,
+                    'Common-proof external-memory byte offset',
+                    errorCode,
+                ),
+                externalMemoryChunkOrdinal: copyUnsignedNumber(
+                    value.externalMemoryChunkOrdinal,
+                    maximumUnsigned32,
+                    'Common-proof external-memory chunk ordinal',
+                    errorCode,
+                ),
+                externalMemoryObjectOrdinal: copyUnsignedNumber(
+                    value.externalMemoryObjectOrdinal,
+                    maximumUnsigned32,
+                    'Common-proof external-memory object ordinal',
+                    errorCode,
+                ),
+                externalMemoryRecordKind: value.externalMemoryRecordKind,
+                proofAttemptLineageIdentifier: copyLocalRecordBytes(
+                    value.proofAttemptLineageIdentifier,
+                    {
+                        allowEmpty: false,
+                        errorCode,
+                        exactByteLength: identifierByteLength,
+                        label: 'Proof-attempt lineage identifier',
+                    },
+                ),
+                recordType: value.recordType,
+            });
+        }
         default:
             throw malformed(errorCode, 'Local-record type is unsupported.');
     }

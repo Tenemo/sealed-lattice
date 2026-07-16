@@ -295,7 +295,7 @@ pub(crate) fn create_protocol_signature_fixture(
     signed_root: Value,
 ) -> CanonicalResult<ProtocolSignatureFixture> {
     let parsed_signed_root = parse_signed_root(Some(&signed_root)).map_err(|failure| {
-        CanonicalError::new(CanonicalErrorCode::InvalidFixture, failure.message)
+        CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, failure.message)
     })?;
     let canonical_signed_root = parsed_signed_root.wire_value();
     let seed = key_fixture_seed(seed_label)?;
@@ -316,7 +316,7 @@ pub(crate) fn create_protocol_signature_fixture(
         )
         .map_err(|error| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("ML-DSA fixture signing failed: {error}"),
             )
         })?;
@@ -379,6 +379,31 @@ mod tests {
     };
     use crate::hashing::derive_canonical_object_hash;
     use serde_json::json;
+
+    #[test]
+    fn canonical_message_matches_shared_rust_and_typescript_vector() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-vectors/protocol-signature-message.json"
+        )))
+        .expect("protocol-signature message vector must parse");
+        let signed_root = super::parse_signed_root(vector.get("signedRoot"))
+            .expect("protocol-signature vector signed root");
+        let message = super::canonical_protocol_signature_message(
+            vector["publicKeyHash"]
+                .as_str()
+                .expect("protocol-signature vector public key hash"),
+            &signed_root,
+        )
+        .expect("canonical protocol-signature message");
+
+        assert_eq!(
+            message,
+            vector["canonicalMessageUtf8"]
+                .as_str()
+                .expect("protocol-signature vector canonical message")
+        );
+    }
 
     #[test]
     fn verifies_ml_dsa_signature_envelope_against_bound_root() {

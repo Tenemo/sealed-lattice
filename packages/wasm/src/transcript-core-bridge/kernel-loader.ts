@@ -6,14 +6,9 @@ import { registerStateVerifierKernelContext } from '../state-verifier-runtime.js
 
 import type {
     BgvCollectiveSetupParametersDescription,
-    BgvLatticeAnchorCommitmentComputation,
-    BgvTrusteeEvaluationKeyProofGeneration,
     BgvRnsParametersDescription,
-    BgvVssCommittedMaterialCommitmentComputation,
-    BgvSetupCommitmentOpeningComputation,
     DecodedMailboxAssociatedData,
     DecodedMailboxKeyScheduleInput,
-    DecodedProofApplicationBinding,
     DecodedPrivateRandomCursor,
     DecodedSignedMailboxEnvelope,
     DecodedStreamDescriptor,
@@ -141,6 +136,10 @@ export const createTranscriptCoreKernelLoader = (
             exports,
             'sealed_lattice_state_verifier_prepare_reservation',
         );
+        const stateProducerCommand = resolveOptionalNumberExport(
+            exports,
+            'sealed_lattice_state_producer_command',
+        );
         const stateVerifierVerifyReservation = resolveOptionalNumberExport(
             exports,
             'sealed_lattice_state_verifier_verify_reservation',
@@ -154,11 +153,6 @@ export const createTranscriptCoreKernelLoader = (
                     command: 'DeriveCanonicalObjectHash',
                     value: input.value,
                 }).canonicalObjectHash,
-            decodeProofApplicationBinding: (input) =>
-                executeCommand<DecodedProofApplicationBinding>({
-                    command: 'DecodeProofApplicationBinding',
-                    canonicalBytesHex: input.canonicalBytesHex,
-                }),
             encodeMailboxKeyScheduleInput: (input) =>
                 executeCommand<EncodedMailboxKeyScheduleInput>({
                     command: 'EncodeMailboxKeyScheduleInput',
@@ -237,73 +231,6 @@ export const createTranscriptCoreKernelLoader = (
                         ? {}
                         : { participantCount: input.participantCount }),
                 }),
-            generateTrusteeEvaluationKeyProof: (
-                input,
-            ): BgvTrusteeEvaluationKeyProofGeneration => {
-                if (input.statementFamily === 'public-key-share') {
-                    return executeCommand<BgvTrusteeEvaluationKeyProofGeneration>(
-                        {
-                            command: 'GenerateTrusteeEvaluationKeyProof',
-                            context: input.context,
-                            keys: input.keys,
-                            sameSecretBridge: input.sameSecretBridge,
-                            secretCoefficients: input.secretCoefficients,
-                            errorCoefficientsByKey:
-                                input.errorCoefficientsByKey,
-                            vssCommittedMaterialSeedsByBoundMessage:
-                                input.vssCommittedMaterialSeedsByBoundMessage,
-                            proofRandomnessSeedHex:
-                                input.proofRandomnessSeedHex,
-                        },
-                    );
-                }
-                return executeCommand<BgvTrusteeEvaluationKeyProofGeneration>({
-                    command: 'GenerateTrusteeEvaluationKeyProof',
-                    context: input.context,
-                    keys: input.keys,
-                    sameSecretLinkage: input.sameSecretLinkage,
-                    secretCoefficients: input.secretCoefficients,
-                    errorCoefficientsByKey: input.errorCoefficientsByKey,
-                    openingRandomnessBySourceLimbAndCommitmentLimb:
-                        input.openingRandomnessBySourceLimbAndCommitmentLimb,
-                    proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                });
-            },
-            computeLatticeAnchorCommitmentFromOpening: (
-                input,
-            ): BgvLatticeAnchorCommitmentComputation =>
-                executeCommand<BgvLatticeAnchorCommitmentComputation>({
-                    command: 'ComputeLatticeAnchorCommitmentFromOpening',
-                    publicMatrixSeedHash: input.publicMatrixSeedHash,
-                    commitmentDataPrimeIndex: input.commitmentDataPrimeIndex,
-                    secretContributionCoefficients:
-                        input.secretContributionCoefficients,
-                    openingPolynomials: input.openingPolynomials,
-                }),
-            computeSetupCommitmentFromOpening: (
-                input,
-            ): BgvSetupCommitmentOpeningComputation =>
-                executeCommand<BgvSetupCommitmentOpeningComputation>({
-                    command: 'ComputeSetupCommitmentFromOpening',
-                    publicMatrixSeedHash: input.publicMatrixSeedHash,
-                    sourceRnsLimbIndex: input.sourceRnsLimbIndex,
-                    shamirCoefficientIndex: input.shamirCoefficientIndex,
-                    messageCoefficients: input.messageCoefficients,
-                    randomnessByCommitmentLimb:
-                        input.randomnessByCommitmentLimb,
-                    ringDegree: input.ringDegree,
-                }),
-            computeVssCommittedMaterialCommitment: (
-                input,
-            ): BgvVssCommittedMaterialCommitmentComputation =>
-                executeCommand<BgvVssCommittedMaterialCommitmentComputation>({
-                    command: 'ComputeVssCommittedMaterialCommitment',
-                    commitmentRole: input.commitmentRole,
-                    commitmentContext: input.commitmentContext,
-                    rnsLimbIndex: input.rnsLimbIndex,
-                    messageCoefficients: input.messageCoefficients,
-                    materialSeedHex: input.materialSeedHex,
-                }),
         };
         registerPrivateKernelContexts(kernel, runtime);
         if (localStorageRootCommand !== undefined) {
@@ -367,6 +294,7 @@ export const createTranscriptCoreKernelLoader = (
             stateVerifierFinishOutput !== undefined &&
             stateVerifierPrepareOutput !== undefined &&
             stateVerifierPrepareReservation !== undefined &&
+            stateProducerCommand !== undefined &&
             stateVerifierVerifyReservation !== undefined
         ) {
             registerStateVerifierKernelContext(kernel, {
@@ -383,6 +311,7 @@ export const createTranscriptCoreKernelLoader = (
                 finishOutput: stateVerifierFinishOutput,
                 prepareOutput: stateVerifierPrepareOutput,
                 prepareReservation: stateVerifierPrepareReservation,
+                producerCommand: stateProducerCommand,
                 verifyReservation: stateVerifierVerifyReservation,
             });
         }

@@ -7,7 +7,6 @@ import {
     type BrowserActionStateReservationVerificationInput,
     type BrowserActionStateVerifierSessionInput,
     type BrowserOpenedActionRandomnessSession,
-    type BrowserPersistentProofAttemptInput,
     type BrowserSealedActionRandomnessSession,
     type BrowserTargetReleaseAttemptInput,
     type BrowserActionStorageCustodyErrorCode,
@@ -17,6 +16,8 @@ import {
     type BrowserLocalRecordOpenInput,
     type BrowserLocalRecordSealInput,
     type UntrustedExpectedStorageRootCommitment,
+    type WorkerPreparedBrowserFoundationInitialization,
+    type WorkerBrowserFoundationInitializationPreparationInput,
     type WorkerPreparedDeviceWrappingState,
     type VerificationResult,
 } from '@sealed-lattice/types';
@@ -30,7 +31,6 @@ import {
     copyOpenedActionRandomnessSession,
     copyOpaqueWorkerIdentifier,
     copyOpenSealedActionRandomnessInput,
-    copyPersistentProofAttemptInput,
     copySealedActionRandomnessSession,
     copyTargetReleaseAttemptInput,
     copyWorkerIdentifierVerificationResult,
@@ -38,7 +38,13 @@ import {
 import type {
     BrowserActionStorageCustody,
     BrowserDeviceWrappingSnapshot,
+    PreparedBrowserFoundationInitialization,
 } from './browser-action-storage-custody.js';
+import {
+    copyWorkerBrowserFoundationInitializationPreparationInput,
+    createPreparedBrowserFoundationInitialization,
+    destroyWorkerPreparedBrowserFoundationInitialization,
+} from './browser-foundation-initialization.js';
 import {
     copyLocalRecordBytes,
     copyLocalRecordIdentifierInput,
@@ -51,6 +57,14 @@ export type {
     WorkerPreparedDeviceWrappingState,
 } from '@sealed-lattice/types';
 
+export type BrowserActionStorageCustodyForOwnedWorker =
+    BrowserActionStorageCustody &
+        Readonly<{
+            prepareBrowserFoundationInitialization(
+                input: WorkerBrowserFoundationInitializationPreparationInput,
+            ): Promise<PreparedBrowserFoundationInitialization>;
+        }>;
+
 const deviceWrappingMutationIdentifierByteLength = 32;
 const foundationHashByteLength = 64;
 const maximumWrappedStorageRootByteLength = 492;
@@ -62,13 +76,22 @@ export type BrowserDeviceWrappingState = Readonly<{
     wrappedStorageRoot: Uint8Array;
 }>;
 
+export type BrowserDeviceWrappingRetirementTombstone = Readonly<{
+    mutationIdentifier: Uint8Array;
+    recordKind: 'retirementTombstone';
+}>;
+
+export type BrowserDeviceWrappingRecord =
+    | BrowserDeviceWrappingState
+    | BrowserDeviceWrappingRetirementTombstone;
+
 export type BrowserDeviceWrappingStateMutation = Readonly<{
     expectedMutationIdentifier: Uint8Array | undefined;
-    replacement: BrowserDeviceWrappingState | undefined;
+    replacement: BrowserDeviceWrappingRecord | undefined;
 }>;
 
 export type BrowserDeviceWrappingStateStorage = Readonly<{
-    readState(): Promise<BrowserDeviceWrappingState | undefined>;
+    readState(): Promise<BrowserDeviceWrappingRecord | undefined>;
     compareAndSwapState(
         mutation: BrowserDeviceWrappingStateMutation,
     ): Promise<boolean>;
@@ -242,6 +265,44 @@ export const copyBrowserDeviceWrappingState = (
     });
 };
 
+export const isBrowserDeviceWrappingRetirementTombstone = (
+    record: BrowserDeviceWrappingRecord,
+): record is BrowserDeviceWrappingRetirementTombstone =>
+    'recordKind' in record && record.recordKind === 'retirementTombstone';
+
+export const copyBrowserDeviceWrappingRetirementTombstone = (
+    tombstone: BrowserDeviceWrappingRetirementTombstone,
+    errorCode: 'InvalidInput' | 'InvalidState' = 'InvalidState',
+): BrowserDeviceWrappingRetirementTombstone => {
+    if (
+        typeof tombstone !== 'object' ||
+        tombstone === null ||
+        tombstone.recordKind !== 'retirementTombstone'
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            errorCode,
+            'Device-wrapping retirement tombstone is malformed.',
+        );
+    }
+    return Object.freeze({
+        mutationIdentifier: copyBytes(
+            tombstone.mutationIdentifier,
+            deviceWrappingMutationIdentifierByteLength,
+            errorCode,
+            'Device-wrapping retirement mutation identifier',
+        ),
+        recordKind: 'retirementTombstone' as const,
+    });
+};
+
+export const copyBrowserDeviceWrappingRecord = (
+    record: BrowserDeviceWrappingRecord,
+    errorCode: 'InvalidInput' | 'InvalidState' = 'InvalidState',
+): BrowserDeviceWrappingRecord =>
+    isBrowserDeviceWrappingRetirementTombstone(record)
+        ? copyBrowserDeviceWrappingRetirementTombstone(record, errorCode)
+        : copyBrowserDeviceWrappingState(record, errorCode);
+
 const copyPreparedState = (
     preparedState: WorkerPreparedDeviceWrappingState,
 ): WorkerPreparedDeviceWrappingState => {
@@ -395,6 +456,17 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
                     'Fresh initialization is forbidden after an expected storage-root commitment is known.',
                 );
             }
+            const existingRecord = await this.#readRecord();
+            if (existingRecord !== undefined) {
+                throw new BrowserActionStorageCustodyError(
+                    isBrowserDeviceWrappingRetirementTombstone(existingRecord)
+                        ? 'Unavailable'
+                        : 'Conflict',
+                    isBrowserDeviceWrappingRetirementTombstone(existingRecord)
+                        ? 'This participant is permanently retired for the action on this browser.'
+                        : 'Browser action-storage custody is already initialized.',
+                );
+            }
             const preparedState = await this.#workerCall(
                 () =>
                     this.#workerKernel.createAndStageDeviceWrappingState({
@@ -427,7 +499,17 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         BrowserDeviceWrappingSnapshot | undefined
     > {
         return this.#runOperation(async () => {
-            const state = await this.#readState();
+            const state = await this.#readRecord();
+
+            if (
+                state !== undefined &&
+                isBrowserDeviceWrappingRetirementTombstone(state)
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'Unavailable',
+                    'This participant is permanently retired for the action on this browser.',
+                );
+            }
 
             return state === undefined ? undefined : snapshotFromState(state);
         });
@@ -471,6 +553,30 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
                 expectedMutationIdentifier: state.mutationIdentifier,
                 replacement: undefined,
             });
+        });
+    }
+
+    public retire(): Promise<void> {
+        return this.#runOperation(async () => {
+            const existingRecord = await this.#readRecord();
+            if (
+                existingRecord === undefined ||
+                !isBrowserDeviceWrappingRetirementTombstone(existingRecord)
+            ) {
+                await this.#compareAndSwapOrConflict({
+                    expectedMutationIdentifier:
+                        existingRecord?.mutationIdentifier,
+                    replacement: {
+                        mutationIdentifier: this.#randomBytes(
+                            deviceWrappingMutationIdentifierByteLength,
+                        ),
+                        recordKind: 'retirementTombstone',
+                    },
+                });
+            }
+            await this.#destroyActiveAndStagedRoots();
+            this.#expectedStorageRootCommitment?.fill(0);
+            this.#expectedStorageRootCommitment = undefined;
         });
     }
 
@@ -577,6 +683,47 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
                 exactByteLength: foundationHashByteLength,
                 label: 'Worker-derived local-record envelope hash',
             });
+        });
+    }
+
+    public prepareBrowserFoundationInitialization(
+        input: WorkerBrowserFoundationInitializationPreparationInput,
+    ): Promise<PreparedBrowserFoundationInitialization> {
+        let copiedInput: WorkerBrowserFoundationInitializationPreparationInput;
+        try {
+            copiedInput =
+                copyWorkerBrowserFoundationInitializationPreparationInput(
+                    input,
+                );
+        } catch (error) {
+            return Promise.reject(normalizeInputError(error));
+        }
+
+        return this.#runOperation(async () => {
+            let workerPreparation:
+                | WorkerPreparedBrowserFoundationInitialization
+                | undefined;
+            try {
+                workerPreparation = await this.#workerCall(
+                    () =>
+                        this.#workerKernel.prepareBrowserFoundationInitialization(
+                            copiedInput,
+                        ),
+                    'Preparing browser foundation initialization failed inside the owned worker.',
+                );
+
+                return createPreparedBrowserFoundationInitialization({
+                    custodyBinding: this.#binding,
+                    preparationInput: copiedInput,
+                    workerPreparation,
+                });
+            } finally {
+                if (workerPreparation !== undefined) {
+                    destroyWorkerPreparedBrowserFoundationInitialization(
+                        workerPreparation,
+                    );
+                }
+            }
         });
     }
 
@@ -768,29 +915,6 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         );
     }
 
-    public derivePersistentProofAttempt(
-        input: BrowserPersistentProofAttemptInput,
-    ): Promise<BrowserActionProofAttemptBinding> {
-        let copiedInput: BrowserPersistentProofAttemptInput;
-        try {
-            copiedInput = copyPersistentProofAttemptInput(input);
-        } catch (error) {
-            return Promise.reject(normalizeInputError(error));
-        }
-
-        return this.#runOperation(async () =>
-            copyActionProofAttemptBinding(
-                await this.#workerCall(
-                    () =>
-                        this.#workerKernel.derivePersistentProofAttempt(
-                            copiedInput,
-                        ),
-                    'Deriving persistent proof randomness failed inside the owned worker.',
-                ),
-            ),
-        );
-    }
-
     public deriveTargetReleaseAttempt(
         input: BrowserTargetReleaseAttemptInput,
     ): Promise<BrowserActionProofAttemptBinding> {
@@ -868,13 +992,13 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
         return result;
     }
 
-    async #readState(): Promise<BrowserDeviceWrappingState | undefined> {
+    async #readRecord(): Promise<BrowserDeviceWrappingRecord | undefined> {
         try {
-            const state = await this.#storage.readState();
+            const record = await this.#storage.readState();
 
-            return state === undefined
+            return record === undefined
                 ? undefined
-                : copyBrowserDeviceWrappingState(state);
+                : copyBrowserDeviceWrappingRecord(record);
         } catch (error) {
             throw normalizeFailure(
                 error,
@@ -887,21 +1011,26 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
     async #readExpectedState(
         expectedSnapshot: BrowserDeviceWrappingSnapshot,
     ): Promise<BrowserDeviceWrappingState> {
-        const state = await this.#readState();
-        if (state === undefined) {
+        const record = await this.#readRecord();
+        if (
+            record === undefined ||
+            isBrowserDeviceWrappingRetirementTombstone(record)
+        ) {
             throw new BrowserActionStorageCustodyError(
                 'Unavailable',
-                'The committed browser action-storage root is not present on this device.',
+                record === undefined
+                    ? 'The committed browser action-storage root is not present on this device.'
+                    : 'This participant is permanently retired for the action on this browser.',
             );
         }
-        if (!stateMatchesSnapshot(state, expectedSnapshot)) {
+        if (!stateMatchesSnapshot(record, expectedSnapshot)) {
             throw new BrowserActionStorageCustodyError(
                 'Conflict',
                 'Browser action-storage custody changed before the requested operation.',
             );
         }
 
-        return state;
+        return record;
     }
 
     #makeState(input: {
@@ -1005,9 +1134,10 @@ class OwnedWorkerBrowserActionStorageCustody implements BrowserActionStorageCust
     async #commitStagedRootForPublishedState(
         expectedState: BrowserDeviceWrappingState,
     ): Promise<void> {
-        const publishedState = await this.#readState();
+        const publishedState = await this.#readRecord();
         if (
             publishedState === undefined ||
+            isBrowserDeviceWrappingRetirementTombstone(publishedState) ||
             !bytesEqual(
                 publishedState.mutationIdentifier,
                 expectedState.mutationIdentifier,
@@ -1104,7 +1234,7 @@ export const createBrowserActionStorageCustodyForOwnedWorker = (input: {
     knownStorageRootCommitment?: Uint8Array;
     storage: BrowserDeviceWrappingStateStorage;
     workerKernel: BrowserActionStorageWorkerKernel;
-}): BrowserActionStorageCustody => {
+}): BrowserActionStorageCustodyForOwnedWorker => {
     const cryptoProvider = input.cryptoProvider ?? globalThis.crypto;
     if (
         cryptoProvider === undefined ||

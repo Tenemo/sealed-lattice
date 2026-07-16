@@ -4,6 +4,7 @@ import {
 } from '../canonical-stream-runtime.js';
 
 import { registerActionRandomnessKernelContext } from './action-randomness-kernel-context.js';
+import { registerCommonProofKernelContext } from './common-proof-kernel-context.js';
 import type { TranscriptCoreKernelContextOwner } from './kernel-contracts.js';
 import type { TranscriptCoreKernelCommandRuntime } from './kernel-runtime.js';
 import { resolveOptionalNumberExport } from './kernel-runtime.js';
@@ -14,6 +15,7 @@ export const registerPrivateKernelContexts = (
     runtime: TranscriptCoreKernelCommandRuntime,
 ): void => {
     registerKernelContexts(kernel, runtime);
+    registerCommonProofKernelContext(kernel, runtime);
 
     const actionRandomnessCommand = resolveOptionalNumberExport(
         runtime.wasmExports,

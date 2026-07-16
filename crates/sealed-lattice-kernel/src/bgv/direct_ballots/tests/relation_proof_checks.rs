@@ -33,7 +33,7 @@ fn direct_ballot_shared_rns_relation_proof_rejects_last_limb_ciphertext_mutation
     )
     .expect_err("mutated last limb must reject");
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
     assert!(
         error.message.contains("not bound to this statement")
             || error.message.contains("limb 16 c0 response")
@@ -90,7 +90,7 @@ fn direct_ballot_shared_rns_relation_proof_rejects_single_bit_proof_mutations() 
 
         assert_eq!(
             error.code,
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "{case_label}: unexpected rejection code"
         );
         assert!(
@@ -128,7 +128,7 @@ fn direct_ballot_relation_proof_rejects_linear_consistent_non_boolean_one_hot_wi
     )
     .expect_err("non-Boolean one-hot witness must reject");
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
     assert!(
         error
             .message
@@ -151,7 +151,7 @@ fn direct_ballot_shared_rns_relation_proof_rejects_wrong_public_key() {
     )
     .expect_err("wrong public key must reject");
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
     assert!(error.message.contains("not bound to this statement"));
 }
 
@@ -171,7 +171,7 @@ fn direct_ballot_all_limb_relation_rejects_last_limb_mutation() {
     let error = validate_all_limb_encryption_relation(&evaluator_key, &encrypted_ballot)
         .expect_err("last limb mutation must reject");
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
     assert!(error.message.contains("RNS limb 16 c0 relation failed"));
 }
 
@@ -185,7 +185,7 @@ fn direct_ballot_all_limb_relation_rejects_different_plaintext_witness() {
     let error = validate_all_limb_encryption_relation(&evaluator_key, &encrypted_ballot)
         .expect_err("different plaintext witness must reject");
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
     assert!(error.message.contains("RNS limb 0 c0 relation failed"));
 }
 
@@ -199,7 +199,7 @@ fn direct_ballot_support_rejects_out_of_range_randomizer() {
     let error = validate_encryption_witness_support(&encrypted_ballot.encryption_witness)
         .expect_err("out-of-range randomizer must reject");
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
     assert!(error.message.contains(
         "direct encrypted ballot randomizer has a coefficient outside the expected support"
     ));
@@ -218,7 +218,7 @@ fn direct_ballot_support_rejects_out_of_range_error_polynomials() {
     let first_error = validate_encryption_witness_support(&first_error_ballot.encryption_witness)
         .expect_err("out-of-range first error coefficient must reject");
 
-    assert_eq!(first_error.code, CanonicalErrorCode::InvalidFixture);
+    assert_eq!(first_error.code, CanonicalErrorCode::InvalidProtocolObject);
     assert!(first_error.message.contains(
         "direct encrypted ballot first error polynomial has a coefficient outside the expected support"
     ));
@@ -230,7 +230,7 @@ fn direct_ballot_support_rejects_out_of_range_error_polynomials() {
     let second_error = validate_encryption_witness_support(&second_error_ballot.encryption_witness)
         .expect_err("out-of-range second error coefficient must reject");
 
-    assert_eq!(second_error.code, CanonicalErrorCode::InvalidFixture);
+    assert_eq!(second_error.code, CanonicalErrorCode::InvalidProtocolObject);
     assert!(second_error.message.contains(
         "direct encrypted ballot second error polynomial has a coefficient outside the expected support"
     ));

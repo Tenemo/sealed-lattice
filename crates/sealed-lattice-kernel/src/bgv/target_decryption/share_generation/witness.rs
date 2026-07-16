@@ -11,7 +11,7 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
         != "LocalTrusteeTargetDecryptionProofWitnessMaterial"
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "local target-decryption share witness must be LocalTrusteeTargetDecryptionProofWitnessMaterial",
         ));
     }
@@ -25,7 +25,7 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
     let opening = value_at_path(witness, &["aggregateOpening"])?;
     if string_at_path(opening, &["objectType"])? != "LocalTrusteeVssPublicAggregateOpeningWitness" {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "local target-decryption share witness must include aggregate opening material",
         ));
     }

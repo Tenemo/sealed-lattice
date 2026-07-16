@@ -662,7 +662,7 @@ mod component_material_stream {
             )
             .expect_err("a summary from another canonical stream domain must reject");
 
-            assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+            assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
             assert!(
                 error
                     .message

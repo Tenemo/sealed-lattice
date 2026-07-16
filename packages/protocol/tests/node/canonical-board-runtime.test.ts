@@ -95,15 +95,17 @@ const objectDescription = (
 });
 
 const runtimeInput = (): CanonicalBoardRuntimeInput => ({
-    configuration: {
-        actionContextHash: new Uint8Array(64).fill(0x33),
+    contextInput: {
+        actionIdentifier: 'action',
+        canonicalActionDefinitionBytes: Uint8Array.of(0xa1),
+        canonicalBoardPolicyBytes: Uint8Array.of(0xb1),
+        canonicalManifestBytes: Uint8Array.of(0xc1),
         canonicalRosterBytes: Uint8Array.of(1),
-        ceremonyContextHash: new Uint8Array(64).fill(0x22),
-        maximumBallotAttemptsPerParticipant: 8,
-        maximumRetainedCanonicalCarrierByteLength: 1_048_576,
-        maximumRetainedTranscriptObjects: 128,
-        maximumUnorderedCarriersPerBatch: 32,
-        suiteIdentifier: new Uint8Array(64).fill(0x11),
+        canonicalSuiteRecordBytes: Uint8Array.of(0xd1),
+        ceremonyIdentifier: 'ceremony',
+        expectedActionContextHash: new Uint8Array(64).fill(0x33),
+        expectedCeremonyContextHash: new Uint8Array(64).fill(0x22),
+        expectedSuiteIdentifier: new Uint8Array(64).fill(0x11),
     },
     kernel: Object.freeze(Object.create(null)) as TranscriptCoreKernel,
 });
@@ -179,6 +181,12 @@ describe('canonical board runtime', () => {
                 ),
             ),
         ).toEqual(Uint8Array.of(1, 2, 3));
+        expect(requireValid(runtime.copyCanonicalCarrierSet(snapshot))).toEqual(
+            [
+                { canonicalCarrier: Uint8Array.of(1, 2, 3) },
+                { canonicalCarrier: Uint8Array.of(4, 5, 6) },
+            ],
+        );
     });
 
     it('keeps an earlier snapshot usable after an atomic batch refusal', () => {
@@ -334,6 +342,34 @@ describe('canonical board runtime', () => {
             isValid: false,
             refusalReason: 'consumedState',
         });
+    });
+
+    it('transfers one exclusive owner and makes the retained wrapper stale', () => {
+        const fake = createFakeSession([]);
+        openCanonicalBoardVerifierSessionMock.mockReturnValue({
+            isValid: true,
+            value: fake.session,
+        });
+        const retainedRuntime = requireValid(
+            openCanonicalBoardRuntime(runtimeInput()),
+        );
+
+        const ownedRuntime = retainedRuntime.claimExclusiveOwner();
+        expect(() => retainedRuntime.copyContextInput()).toThrowError(/stale/u);
+        expect(() => retainedRuntime.claimExclusiveOwner()).toThrowError(
+            /stale/u,
+        );
+        expect(ownedRuntime.copyContextInput().expectedSuiteIdentifier).toEqual(
+            runtimeInput().contextInput.expectedSuiteIdentifier,
+        );
+
+        ownedRuntime.close();
+        ownedRuntime.close();
+        expect(fake.close).toHaveBeenCalledTimes(1);
+        expect(ownedRuntime.state()).toBe('closed');
+        expect(ownedRuntime.copyContextInput().expectedSuiteIdentifier).toEqual(
+            runtimeInput().contextInput.expectedSuiteIdentifier,
+        );
     });
 
     it('forwards a verifier-session refusal without minting a runtime', () => {

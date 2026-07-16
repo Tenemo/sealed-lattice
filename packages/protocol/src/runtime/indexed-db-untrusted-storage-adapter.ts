@@ -1,5 +1,8 @@
 import {
+    copyBrowserDeviceWrappingRecord,
     copyBrowserDeviceWrappingState,
+    isBrowserDeviceWrappingRetirementTombstone,
+    type BrowserDeviceWrappingRecord,
     type BrowserDeviceWrappingState,
     type BrowserDeviceWrappingStateMutation,
     type BrowserDeviceWrappingStateStorage,
@@ -14,10 +17,14 @@ const databaseVersion = 1;
 const objectStoreName = 'records';
 const deviceWrappingRecordKind = 'sealed-lattice-device-wrapping-state';
 const deviceWrappingRecordFormatVersion = 2;
+const deviceWrappingRetirementRecordKind =
+    'sealed-lattice-device-wrapping-retirement';
+const deviceWrappingRetirementRecordFormatVersion = 1;
 const deviceWrappingMutationIdentifierByteLength = 32;
 const storageRootCommitmentByteLength = 64;
 const storageNamespacePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const deviceWrappingStorageKeyPrefix = 'sealed-lattice-device-wrapping/';
+const textEncoder = new TextEncoder();
 
 type IndexedDbUntrustedStorageAdapterErrorCode =
     | 'Closed'
@@ -76,6 +83,16 @@ type StoredDeviceWrappingState = Readonly<{
     storageRootCommitment: Uint8Array;
     wrappedStorageRoot: Uint8Array;
 }>;
+
+type StoredDeviceWrappingRetirementTombstone = Readonly<{
+    formatVersion: number;
+    mutationIdentifier: Uint8Array;
+    recordKind: string;
+}>;
+
+type StoredDeviceWrappingRecord =
+    | StoredDeviceWrappingState
+    | StoredDeviceWrappingRetirementTombstone;
 
 const bytesEqual = (
     left: Uint8Array | undefined,
@@ -227,6 +244,26 @@ const copyDeviceWrappingStateForWrite = (
     }
 };
 
+const copyDeviceWrappingRecordForWrite = (
+    value: BrowserDeviceWrappingRecord,
+): StoredDeviceWrappingRecord => {
+    if (isBrowserDeviceWrappingRetirementTombstone(value)) {
+        const copy = copyBrowserDeviceWrappingRecord(value, 'InvalidState');
+        if (!isBrowserDeviceWrappingRetirementTombstone(copy)) {
+            throw new IndexedDbUntrustedStorageAdapterError(
+                'InvalidMutation',
+                'The proposed retirement tombstone changed kind while being copied.',
+            );
+        }
+        return {
+            formatVersion: deviceWrappingRetirementRecordFormatVersion,
+            mutationIdentifier: copy.mutationIdentifier,
+            recordKind: deviceWrappingRetirementRecordKind,
+        };
+    }
+    return copyDeviceWrappingStateForWrite(value);
+};
+
 const copyStoredDeviceWrappingState = (
     value: unknown,
 ): BrowserDeviceWrappingState => {
@@ -252,6 +289,49 @@ const copyStoredDeviceWrappingState = (
             error,
         );
     }
+};
+
+const copyStoredDeviceWrappingRecord = (
+    value: unknown,
+): BrowserDeviceWrappingRecord => {
+    if (
+        typeof value === 'object' &&
+        value !== null &&
+        (value as Partial<StoredDeviceWrappingRetirementTombstone>)
+            .recordKind === deviceWrappingRetirementRecordKind
+    ) {
+        const storedValue = value as StoredDeviceWrappingRetirementTombstone;
+        try {
+            if (
+                storedValue.formatVersion !==
+                deviceWrappingRetirementRecordFormatVersion
+            ) {
+                throw new Error(
+                    'stored retirement tombstone has the wrong version or state',
+                );
+            }
+            const copiedRecord = copyBrowserDeviceWrappingRecord(
+                {
+                    mutationIdentifier: storedValue.mutationIdentifier,
+                    recordKind: 'retirementTombstone',
+                },
+                'InvalidState',
+            );
+            if (!isBrowserDeviceWrappingRetirementTombstone(copiedRecord)) {
+                throw new Error(
+                    'stored retirement tombstone changed kind while being copied',
+                );
+            }
+            return copiedRecord;
+        } catch (error) {
+            throw new IndexedDbUntrustedStorageAdapterError(
+                'TransactionFailed',
+                'IndexedDB contained a malformed device-wrapping retirement tombstone.',
+                error,
+            );
+        }
+    }
+    return copyStoredDeviceWrappingState(value);
 };
 
 const copyAndValidateMutation = (
@@ -313,6 +393,33 @@ const copyAndValidateMutation = (
     });
 
     return { expectedValues, writes, deletes };
+};
+
+const copyAndValidateUnreferencedObjectDeletion = (input: {
+    indexPrefix: string;
+    objectKeys: readonly string[];
+}): Readonly<{ indexPrefix: string; objectKeys: readonly string[] }> => {
+    assertStorageKey(input.indexPrefix);
+    if (input.indexPrefix.length === 0) {
+        throw new IndexedDbUntrustedStorageAdapterError(
+            'InvalidMutation',
+            'The unreferenced-object index prefix must be nonempty.',
+        );
+    }
+    const uniqueObjectKeys = new Set<string>();
+    const objectKeys = input.objectKeys.map((objectKey) => {
+        assertStorageKey(objectKey);
+        if (objectKey.length === 0 || uniqueObjectKeys.has(objectKey)) {
+            throw new IndexedDbUntrustedStorageAdapterError(
+                'InvalidMutation',
+                'Unreferenced-object deletion keys must be nonempty and unique.',
+            );
+        }
+        uniqueObjectKeys.add(objectKey);
+        return objectKey;
+    });
+
+    return { indexPrefix: input.indexPrefix, objectKeys };
 };
 
 const openDatabase = async (
@@ -484,7 +591,18 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
                 'IndexedDB read',
                 () => operationFailure,
             );
-            const request = objectStore.openCursor(key);
+            let request: IDBRequest<IDBCursorWithValue | null>;
+            try {
+                request = objectStore.openCursor(key);
+            } catch (error) {
+                operationFailure = error;
+                return this.#rejectAfterSynchronousRequestFailure({
+                    completion,
+                    operation: 'IndexedDB read',
+                    operationFailure: error,
+                    transaction,
+                });
+            }
             request.addEventListener('success', () => {
                 try {
                     const cursor = request.result;
@@ -530,9 +648,20 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
                 'IndexedDB write',
                 () => operationFailure,
             );
-            const request = transaction
-                .objectStore(objectStoreName)
-                .put(copiedValue, key);
+            let request: IDBRequest<IDBValidKey>;
+            try {
+                request = transaction
+                    .objectStore(objectStoreName)
+                    .put(copiedValue, key);
+            } catch (error) {
+                operationFailure = error;
+                return this.#rejectAfterSynchronousRequestFailure({
+                    completion,
+                    operation: 'IndexedDB write',
+                    operationFailure: error,
+                    transaction,
+                });
+            }
             request.addEventListener('error', () => {
                 operationFailure ??= request.error;
             });
@@ -550,9 +679,18 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
                 'IndexedDB delete',
                 () => operationFailure,
             );
-            const request = transaction
-                .objectStore(objectStoreName)
-                .delete(key);
+            let request: IDBRequest<undefined>;
+            try {
+                request = transaction.objectStore(objectStoreName).delete(key);
+            } catch (error) {
+                operationFailure = error;
+                return this.#rejectAfterSynchronousRequestFailure({
+                    completion,
+                    operation: 'IndexedDB delete',
+                    operationFailure: error,
+                    transaction,
+                });
+            }
             request.addEventListener('error', () => {
                 operationFailure ??= request.error;
             });
@@ -574,9 +712,20 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
                 'IndexedDB prefix listing',
                 () => operationFailure,
             );
-            const request = objectStore.openKeyCursor(
-                this.#keyRangeFactory.lowerBound(prefix),
-            );
+            let request: IDBRequest<IDBCursor | null>;
+            try {
+                request = objectStore.openKeyCursor(
+                    this.#keyRangeFactory.lowerBound(prefix),
+                );
+            } catch (error) {
+                operationFailure = error;
+                return this.#rejectAfterSynchronousRequestFailure({
+                    completion,
+                    operation: 'IndexedDB prefix listing',
+                    operationFailure: error,
+                    transaction,
+                });
+            }
             request.addEventListener('success', () => {
                 try {
                     const cursor = request.result;
@@ -611,6 +760,142 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
             }
 
             return keys;
+        });
+    }
+
+    public async deleteUnreferencedObjects(input: {
+        indexPrefix: string;
+        objectKeys: readonly string[];
+    }): Promise<boolean> {
+        const copiedInput = copyAndValidateUnreferencedObjectDeletion(input);
+        if (copiedInput.objectKeys.length === 0) {
+            return true;
+        }
+        const encodedObjectKeys = copiedInput.objectKeys.map((objectKey) =>
+            textEncoder.encode(objectKey),
+        );
+        return this.#withOpenConnection(async (database) => {
+            const transaction = this.#strictReadwriteTransaction(database);
+            const objectStore = transaction.objectStore(objectStoreName);
+
+            return new Promise<boolean>((resolve, reject) => {
+                let conflictDetected = false;
+                let operationFailure: unknown;
+                const rejectTransaction = (error: unknown): void => {
+                    reject(
+                        this.#transactionFailure(
+                            'IndexedDB unreferenced-object deletion',
+                            error,
+                        ),
+                    );
+                };
+                transaction.addEventListener(
+                    'complete',
+                    () => {
+                        if (
+                            conflictDetected ||
+                            operationFailure !== undefined
+                        ) {
+                            rejectTransaction(
+                                operationFailure ??
+                                    new IndexedDbUntrustedStorageAdapterError(
+                                        'TransactionFailed',
+                                        'IndexedDB committed referenced-object deletion after an abort was requested.',
+                                    ),
+                            );
+                            return;
+                        }
+                        resolve(true);
+                    },
+                    { once: true },
+                );
+                transaction.addEventListener(
+                    'abort',
+                    () => {
+                        if (
+                            conflictDetected &&
+                            operationFailure === undefined
+                        ) {
+                            resolve(false);
+                            return;
+                        }
+                        rejectTransaction(
+                            operationFailure ?? transaction.error,
+                        );
+                    },
+                    { once: true },
+                );
+                const failOperation = (error: unknown): void => {
+                    operationFailure ??= error;
+                    try {
+                        transaction.abort();
+                    } catch (abortError) {
+                        operationFailure =
+                            new IndexedDbUntrustedStorageAdapterError(
+                                'TransactionFailed',
+                                'IndexedDB unreferenced-object deletion and transaction abort both failed.',
+                                [operationFailure, abortError],
+                            );
+                    }
+                };
+                const queueDeletes = (): void => {
+                    try {
+                        for (const objectKey of copiedInput.objectKeys) {
+                            const deleteRequest = objectStore.delete(objectKey);
+                            deleteRequest.addEventListener('error', () => {
+                                operationFailure ??= deleteRequest.error;
+                            });
+                        }
+                    } catch (error) {
+                        failOperation(error);
+                    }
+                };
+                let listingRequest: IDBRequest<IDBCursorWithValue | null>;
+                try {
+                    listingRequest = objectStore.openCursor(
+                        this.#keyRangeFactory.lowerBound(
+                            copiedInput.indexPrefix,
+                        ),
+                    );
+                } catch (error) {
+                    failOperation(error);
+                    return;
+                }
+                listingRequest.addEventListener('success', () => {
+                    try {
+                        const cursor = listingRequest.result;
+                        if (
+                            cursor === null ||
+                            typeof cursor.key !== 'string' ||
+                            !cursor.key.startsWith(copiedInput.indexPrefix)
+                        ) {
+                            queueDeletes();
+                            return;
+                        }
+                        const indexValue = copyStoredBytes(cursor.value);
+                        if (
+                            encodedObjectKeys.some((objectKey) =>
+                                bytesEqual(indexValue, objectKey),
+                            )
+                        ) {
+                            conflictDetected = true;
+                            try {
+                                transaction.abort();
+                            } catch (error) {
+                                conflictDetected = false;
+                                operationFailure = error;
+                            }
+                            return;
+                        }
+                        cursor.continue();
+                    } catch (error) {
+                        failOperation(error);
+                    }
+                });
+                listingRequest.addEventListener('error', () => {
+                    operationFailure ??= listingRequest.error;
+                });
+            });
         });
     }
 
@@ -733,7 +1018,14 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
                     return;
                 }
                 for (const expectedValue of copiedMutation.expectedValues) {
-                    const request = objectStore.openCursor(expectedValue.key);
+                    let request: IDBRequest<IDBCursorWithValue | null>;
+                    try {
+                        request = objectStore.openCursor(expectedValue.key);
+                    } catch (error) {
+                        operationFailure = error;
+                        this.#abortAfterOperationFailure(transaction, error);
+                        return;
+                    }
                     request.addEventListener('success', () => {
                         try {
                             const cursor = request.result;
@@ -794,20 +1086,31 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
 
     async #readDeviceWrappingState(
         storageKey: string,
-    ): Promise<BrowserDeviceWrappingState | undefined> {
+    ): Promise<BrowserDeviceWrappingRecord | undefined> {
         return this.#withOpenConnection(async (database) => {
             const transaction = this.#trackTransaction(
                 database.transaction(objectStoreName, 'readonly'),
             );
             const objectStore = transaction.objectStore(objectStoreName);
             let operationFailure: unknown;
-            let result: BrowserDeviceWrappingState | undefined;
+            let result: BrowserDeviceWrappingRecord | undefined;
             const completion = this.#waitForTransaction(
                 transaction,
                 'IndexedDB device-wrapping read',
                 () => operationFailure,
             );
-            const request = objectStore.openCursor(storageKey);
+            let request: IDBRequest<IDBCursorWithValue | null>;
+            try {
+                request = objectStore.openCursor(storageKey);
+            } catch (error) {
+                operationFailure = error;
+                return this.#rejectAfterSynchronousRequestFailure({
+                    completion,
+                    operation: 'IndexedDB device-wrapping read',
+                    operationFailure: error,
+                    transaction,
+                });
+            }
             request.addEventListener('success', () => {
                 try {
                     const cursor = request.result;
@@ -821,7 +1124,7 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
                             'IndexedDB device-wrapping read returned a different key.',
                         );
                     }
-                    result = copyStoredDeviceWrappingState(cursor.value);
+                    result = copyStoredDeviceWrappingRecord(cursor.value);
                 } catch (error) {
                     operationFailure = error;
                     this.#abortAfterOperationFailure(transaction, error);
@@ -852,7 +1155,7 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
         const replacement =
             mutation.replacement === undefined
                 ? undefined
-                : copyDeviceWrappingStateForWrite(mutation.replacement);
+                : copyDeviceWrappingRecordForWrite(mutation.replacement);
         if (
             expectedMutationIdentifier !== undefined &&
             replacement !== undefined &&
@@ -937,7 +1240,14 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
                         this.#abortAfterOperationFailure(transaction, error);
                     }
                 };
-                const request = objectStore.openCursor(storageKey);
+                let request: IDBRequest<IDBCursorWithValue | null>;
+                try {
+                    request = objectStore.openCursor(storageKey);
+                } catch (error) {
+                    operationFailure = error;
+                    this.#abortAfterOperationFailure(transaction, error);
+                    return;
+                }
                 request.addEventListener('success', () => {
                     try {
                         const cursor = request.result;
@@ -952,7 +1262,7 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
                                 ? cursor === null
                                 : cursor !== null &&
                                   bytesEqual(
-                                      copyStoredDeviceWrappingState(
+                                      copyStoredDeviceWrappingRecord(
                                           cursor.value,
                                       ).mutationIdentifier,
                                       expectedMutationIdentifier,
@@ -1112,6 +1422,42 @@ export class IndexedDbUntrustedStorageAdapter implements UntrustedStorageAdapter
                 [operationFailure, abortError],
             );
         }
+    }
+
+    async #rejectAfterSynchronousRequestFailure(input: {
+        completion: Promise<void>;
+        operation: string;
+        operationFailure: unknown;
+        transaction: IDBTransaction;
+    }): Promise<never> {
+        let abortFailure: unknown;
+        try {
+            input.transaction.abort();
+        } catch (error) {
+            abortFailure = error;
+        }
+        try {
+            await input.completion;
+        } catch (transactionFailure) {
+            if (abortFailure === undefined) {
+                throw transactionFailure;
+            }
+            throw new IndexedDbUntrustedStorageAdapterError(
+                'TransactionFailed',
+                `${input.operation} request creation, transaction abort, and transaction completion failed.`,
+                [input.operationFailure, abortFailure, transactionFailure],
+            );
+        }
+        throw this.#transactionFailure(
+            input.operation,
+            abortFailure === undefined
+                ? input.operationFailure
+                : new IndexedDbUntrustedStorageAdapterError(
+                      'TransactionFailed',
+                      `${input.operation} request creation and transaction abort both failed.`,
+                      [input.operationFailure, abortFailure],
+                  ),
+        );
     }
 
     #transactionFailure(operation: string, cause: unknown): Error {

@@ -120,7 +120,9 @@ fn g_degree_adjustment_rejects_helper_above_the_sumcheck_bound() {
             &mut private_randomness,
         )
         .expect("fri commit");
-        let query_positions = prover_transcript.challenge_positions("key-query", coset_size, 40);
+        let query_positions = prover_transcript
+            .challenge_positions("key-query", coset_size, 40)
+            .expect("prover query positions");
         let fri = fri_answer(&commitment, &query_positions);
 
         let mut verifier_transcript = Transcript::new(PROTOCOL_LABEL);
@@ -135,8 +137,9 @@ fn g_degree_adjustment_rejects_helper_above_the_sumcheck_bound() {
         .expect("fri structure") else {
             return false;
         };
-        let verifier_positions =
-            verifier_transcript.challenge_positions("key-query", coset_size, 40);
+        let verifier_positions = verifier_transcript
+            .challenge_positions("key-query", coset_size, 40)
+            .expect("verifier query positions");
         fri_verify_queries(&parameters, &verification, &fri, &verifier_positions)
     };
 

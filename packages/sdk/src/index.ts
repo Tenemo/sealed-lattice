@@ -32,6 +32,17 @@ import {
     snapshotSetupPackageVerificationInput,
 } from './setup-verification-input.js';
 
+class SetupPackageVerificationCleanupError extends Error {
+    public override readonly name = 'SetupPackageVerificationCleanupError';
+
+    public constructor(
+        public readonly operationFailure: unknown,
+        public readonly cleanupFailure: unknown,
+    ) {
+        super('Setup-package verification and session cleanup both failed.');
+    }
+}
+
 function assertProtocolHash(
     value: unknown,
     fieldName: string,
@@ -249,7 +260,14 @@ export const verifySetupPackage = async (
             value: undefined,
         };
     } catch (error) {
-        acceptedSetupSession.cancel();
+        try {
+            acceptedSetupSession.cancel();
+        } catch (cleanupFailure) {
+            throw new SetupPackageVerificationCleanupError(
+                error,
+                cleanupFailure,
+            );
+        }
         throw error;
     }
 };

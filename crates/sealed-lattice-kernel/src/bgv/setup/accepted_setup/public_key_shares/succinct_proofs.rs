@@ -43,7 +43,7 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
     };
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupContext was required before public-key share succinct proof verification",
         )
     })?;
@@ -53,7 +53,7 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "commonRandomness.publicMatrixSeedHash was required before public-key share succinct proof verification",
             )
     })?;
@@ -141,7 +141,7 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
             &verification_context,
             proof_bytes_hash.as_str().ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "public-key share succinct proof hash must be a string",
                 )
             })?,
@@ -193,7 +193,7 @@ fn verify_public_key_share_succinct_proof_record(
         .get(&trustee_roster_position)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "public-key share succinct proof must reference an accepted share record",
             )
         })?;
@@ -202,7 +202,7 @@ fn verify_public_key_share_succinct_proof_record(
         .contains_key(&trustee_roster_position)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "public-key share succinct proof must reference accepted public-key share material",
         ));
     }
@@ -212,7 +212,7 @@ fn verify_public_key_share_succinct_proof_record(
         .verified_same_secret_bridge
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "same-secret bridge material was required for public-key share succinct proof verification",
             )
         })?;

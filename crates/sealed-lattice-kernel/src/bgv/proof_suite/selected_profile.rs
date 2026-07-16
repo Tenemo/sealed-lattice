@@ -1,13 +1,15 @@
 //! Deterministic construction of the fixed proof-profile artifact.
 
+use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, SPECIAL_PRIMES};
+
+#[cfg(test)]
 use crate::{
     bgv::{
-        evaluator::suite_closure::EvaluatorCandidateInput,
-        key_switch_topology::KeySwitchDecompositionTopology,
-        parameters::{
-            DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
-            SPECIAL_PRIME, root_parameters_for_modulus,
+        evaluator::{
+            candidate_evidence::EvaluatorCandidateInput, program::selected_evaluator_program_set,
         },
+        key_switch_topology::KeySwitchDecompositionTopology,
+        parameters::{LOGICAL_SLOT_GENERATOR, POLYNOMIAL_DEGREE, root_parameters_for_modulus},
         setup::{
             SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
             TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND,
@@ -18,23 +20,27 @@ use crate::{
 };
 
 use super::{
-    BallotValidityRelationPlanInput, CollectivePublicKeyAggregatePlanInput,
-    CommittedMaterialProfile, CommittedMaterialRelationPlanInput,
-    EvaluatorKeyAggregateEntryPlanInput, EvaluatorKeyAggregatePlanInput,
-    EvaluatorKeyAggregateVariantInput, FirstProfileRootTopology, GaloisKeyShareRelationPlanInput,
     PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
     PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT, PROOF_EVALUATION_BLOWUP_FACTOR,
     PROOF_EVALUATION_COSET_OFFSET, PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-    PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT, PROOF_UNIQUE_QUERY_COUNT, ProofProfileError,
-    ProofProfileSet, PublicAggregateRelationGeometry, PublicKeyShareRelationPlanInput,
-    RelationPlanCheckContext, RelinearizationRoundOneRelationPlanInput,
-    RelinearizationRoundTwoRelationPlanInput, ResolvedSuiteModulus, RkgRoundOneAggregatePlanInput,
-    RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput, SuiteModulusReference,
-    TargetReleaseRelationPlanInput, TrusteeEvaluationKeyDecompositionBlock,
-    TrusteeEvaluationKeyRelationGeometry, ValidatedRelationPlanArtifact,
-    compile_aggregate_threshold_share_relation_plan, compile_ballot_validity_relation_plan,
-    compile_collective_public_key_aggregate_relation_plan,
+    PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT, PROOF_UNIQUE_QUERY_COUNT, RelationPlanCheckContext,
+    ResolvedSuiteModulus, SuiteModulusReference,
+};
+
+#[cfg(test)]
+use super::{
+    BallotValidityRelationPlanInput, CollectivePublicKeyAggregatePlanInput,
+    CommittedMaterialProfile, CommittedMaterialRelationPlanInput,
+    EvaluatorKeyAggregateEntryPlanInput, EvaluatorKeyAggregatePlanInput,
+    EvaluatorKeyAggregateVariantInput, FirstProfileRootTopology, GaloisKeyShareRelationPlanInput,
+    ProofProfileError, ProofProfileSet, PublicAggregateRelationGeometry,
+    PublicKeyShareRelationPlanInput, RelinearizationRoundOneRelationPlanInput,
+    RelinearizationRoundTwoRelationPlanInput, RkgRoundOneAggregatePlanInput,
+    RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput, TargetReleaseRelationPlanInput,
+    TrusteeEvaluationKeyDecompositionBlock, TrusteeEvaluationKeyRelationGeometry,
+    ValidatedRelationPlanArtifact, compile_aggregate_threshold_share_relation_plan,
+    compile_ballot_validity_relation_plan, compile_collective_public_key_aggregate_relation_plan,
     compile_evaluator_key_aggregate_relation_plan, compile_galois_key_share_relation_plan,
     compile_public_key_share_relation_plan, compile_relinearization_round_one_relation_plan,
     compile_relinearization_round_two_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
@@ -43,13 +49,16 @@ use super::{
 };
 
 const SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 262_144;
-const SELECTED_EVALUATION_DOMAIN_SIZE: u64 =
+pub(super) const SELECTED_EVALUATION_DOMAIN_SIZE: u64 =
     SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE * PROOF_EVALUATION_BLOWUP_FACTOR as u64;
+#[cfg(test)]
 const SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE: u64 = 16_384;
 const SELECTED_QUOTIENT_COMPONENT_COUNT: u32 = 8;
-const SELECTED_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 32_768;
+const SELECTED_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 33_884;
 const SELECTED_FRI_FOLD_COUNT: u16 = 10;
+#[cfg(test)]
 const FIRST_MASK_PURPOSE: u16 = 100;
+#[cfg(test)]
 const RESERVED_BALLOT_SLOT_RULE: u16 = 1;
 
 pub(crate) fn selected_relation_plan_check_context() -> RelationPlanCheckContext {
@@ -66,9 +75,15 @@ pub(crate) fn selected_relation_plan_check_context() -> RelationPlanCheckContext
             )
         })
         .collect::<Vec<_>>();
-    resolved_moduli.push(ResolvedSuiteModulus::new(
-        SuiteModulusReference::special(0),
-        SPECIAL_PRIME,
+    resolved_moduli.extend(SPECIAL_PRIMES.iter().copied().enumerate().map(
+        |(modulus_index, modulus)| {
+            ResolvedSuiteModulus::new(
+                SuiteModulusReference::special(
+                    u16::try_from(modulus_index).expect("the selected special basis fits u16"),
+                ),
+                modulus,
+            )
+        },
     ));
     resolved_moduli.push(ResolvedSuiteModulus::new(
         SuiteModulusReference::plaintext(),
@@ -110,6 +125,7 @@ pub(crate) fn selected_relation_plan_check_context() -> RelationPlanCheckContext
     }
 }
 
+#[cfg(test)]
 pub(crate) fn selected_proof_profile_set(
     maximum_ballot_attempts_per_participant: u16,
 ) -> Result<ProofProfileSet, ProofProfileError> {
@@ -121,17 +137,30 @@ pub(crate) fn selected_proof_profile_set(
     )
 }
 
+#[cfg(test)]
+pub(crate) fn selected_committed_material_profile()
+-> Result<CommittedMaterialProfile, ProofProfileError> {
+    CommittedMaterialProfile::for_common_proof_evaluation_domain(
+        POLYNOMIAL_DEGREE,
+        usize::try_from(SELECTED_EVALUATION_DOMAIN_SIZE)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
+    )
+    .map_err(|_| ProofProfileError::InvalidRelationPlan)
+}
+
+#[cfg(test)]
+pub(crate) fn selected_target_decryption_flooding_bound() -> Result<u64, ProofProfileError> {
+    u64::try_from(TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND)
+        .map_err(|_| ProofProfileError::InvalidRelationPlan)
+}
+
+#[cfg(test)]
 fn selected_relation_plans(
     context: &RelationPlanCheckContext,
 ) -> Result<Vec<ValidatedRelationPlanArtifact>, ProofProfileError> {
     let evaluator_candidate = EvaluatorCandidateInput::implemented()
         .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
-    let committed_material_profile = CommittedMaterialProfile::for_common_proof_evaluation_domain(
-        POLYNOMIAL_DEGREE,
-        usize::try_from(SELECTED_EVALUATION_DOMAIN_SIZE)
-            .map_err(|_| ProofProfileError::CountOverflow)?,
-    )
-    .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
+    let committed_material_profile = selected_committed_material_profile()?;
     let material_column_degree_bound_exclusive =
         u64::try_from(committed_material_profile.material_column_degree_bound_exclusive())
             .map_err(|_| ProofProfileError::CountOverflow)?;
@@ -238,10 +267,10 @@ fn selected_relation_plans(
         .copied()
         .enumerate()
         .map(|(schedule_position, (galois_element, level))| {
-            if level != evaluator_candidate.multi_ballot_working_level {
+            if level != evaluator_candidate.evaluator_working_level {
                 return Err(ProofProfileError::InvalidRelationPlan);
             }
-            Ok(compile_galois_key_share_relation_plan(
+            compile_galois_key_share_relation_plan(
                 &GaloisKeyShareRelationPlanInput {
                     schedule_position: u32::try_from(schedule_position)
                         .map_err(|_| ProofProfileError::CountOverflow)?,
@@ -250,23 +279,20 @@ fn selected_relation_plans(
                     geometry: trustee_geometry.clone(),
                 },
                 context,
-            )?)
+            )
+            .map_err(ProofProfileError::from)
         })
         .collect::<Result<Vec<_>, ProofProfileError>>()?;
     let galois_key_shares = merge_checked_relation_plan_variants(0x1217, galois_plans, context)?;
 
-    let evaluator_entries =
-        selected_evaluator_aggregate_entries(&evaluator_candidate, &trustee_root_component_moduli)?;
+    let evaluator_variants = selected_evaluator_aggregate_variants(
+        &evaluator_candidate,
+        &trustee_root_component_moduli,
+    )?;
     let evaluator_key_aggregate = compile_evaluator_key_aggregate_relation_plan(
         &EvaluatorKeyAggregatePlanInput {
             geometry: aggregate_geometry,
-            ordered_variants: (1..=FOUNDATION_PROFILE.option_count)
-                .map(|top_count| EvaluatorKeyAggregateVariantInput {
-                    top_count,
-                    relinearization_entry_count: 1,
-                    ordered_entries: evaluator_entries[..usize::from(top_count)].to_vec(),
-                })
-                .collect(),
+            ordered_variants: evaluator_variants,
         },
         context,
     )?;
@@ -305,8 +331,7 @@ fn selected_relation_plans(
             simulation_scale: PLAINTEXT_MODULUS
                 .checked_mul(denominator_clearing_factor)
                 .ok_or(ProofProfileError::CountOverflow)?,
-            flooding_bound: u64::try_from(TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND)
-                .map_err(|_| ProofProfileError::InvalidRelationPlan)?,
+            flooding_bound: selected_target_decryption_flooding_bound()?,
             first_mask_purpose: FIRST_MASK_PURPOSE,
         },
         context,
@@ -346,11 +371,12 @@ fn selected_relation_plans(
         aggregate_threshold_share,
     ];
     compiled_plans
-        .iter()
-        .map(|plan| ValidatedRelationPlanArtifact::from_compiled_plan(plan, context))
+        .into_iter()
+        .map(|plan| ValidatedRelationPlanArtifact::from_owned_compiled_plan(plan, context))
         .collect()
 }
 
+#[cfg(test)]
 fn selected_trustee_evaluation_key_geometry(
     evaluator_candidate: &EvaluatorCandidateInput,
     commitment_data_modulus_indices: Vec<u16>,
@@ -401,42 +427,82 @@ fn selected_trustee_evaluation_key_geometry(
     })
 }
 
-fn selected_evaluator_aggregate_entries(
+#[cfg(test)]
+fn selected_evaluator_aggregate_variants(
     evaluator_candidate: &EvaluatorCandidateInput,
     ordered_runtime_component_moduli: &[SuiteModulusReference],
-) -> Result<Vec<EvaluatorKeyAggregateEntryPlanInput>, ProofProfileError> {
-    let mut entries = evaluator_candidate
-        .relinearization_levels
-        .iter()
-        .enumerate()
-        .map(|(schedule_position, _)| {
-            Ok(EvaluatorKeyAggregateEntryPlanInput {
-                schedule_position: u32::try_from(schedule_position)
-                    .map_err(|_| ProofProfileError::CountOverflow)?,
-                ordered_runtime_component_moduli: ordered_runtime_component_moduli.to_vec(),
-            })
-        })
-        .collect::<Result<Vec<_>, ProofProfileError>>()?;
-    entries.extend(
-        evaluator_candidate
-            .galois_key_schedule
+) -> Result<Vec<EvaluatorKeyAggregateVariantInput>, ProofProfileError> {
+    let key_positions = selected_evaluator_program_set()
+        .and_then(|program| program.key_positions())
+        .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
+    if key_positions.relinearization_catalog_levels() != evaluator_candidate.relinearization_levels
+        || key_positions.galois_catalog_positions().len()
+            != evaluator_candidate.galois_key_schedule.len()
+        || key_positions
+            .galois_catalog_positions()
             .iter()
-            .enumerate()
-            .map(|(schedule_position, _)| {
-                Ok(EvaluatorKeyAggregateEntryPlanInput {
-                    schedule_position: u32::try_from(schedule_position)
-                        .map_err(|_| ProofProfileError::CountOverflow)?,
-                    ordered_runtime_component_moduli: ordered_runtime_component_moduli.to_vec(),
-                })
+            .zip(&evaluator_candidate.galois_key_schedule)
+            .any(|(position, expected)| {
+                (position.galois_element(), position.catalog_level()) != *expected
             })
-            .collect::<Result<Vec<_>, ProofProfileError>>()?,
-    );
-    if entries.len() != usize::from(FOUNDATION_PROFILE.option_count) {
+    {
         return Err(ProofProfileError::InvalidRelationPlan);
     }
-    Ok(entries)
+    key_positions
+        .streams()
+        .iter()
+        .map(|stream| {
+            let mut ordered_entries = stream
+                .relinearization_catalog_levels()
+                .iter()
+                .map(|level| {
+                    let schedule_position = key_positions
+                        .relinearization_catalog_levels()
+                        .binary_search(level)
+                        .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
+                    Ok(EvaluatorKeyAggregateEntryPlanInput {
+                        schedule_position: u32::try_from(schedule_position)
+                            .map_err(|_| ProofProfileError::CountOverflow)?,
+                        ordered_runtime_component_moduli: ordered_runtime_component_moduli.to_vec(),
+                    })
+                })
+                .collect::<Result<Vec<_>, ProofProfileError>>()?;
+            ordered_entries.extend(
+                stream
+                    .galois_catalog_positions()
+                    .iter()
+                    .map(|position| {
+                        let schedule_position = key_positions
+                            .galois_catalog_positions()
+                            .binary_search(position)
+                            .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
+                        Ok(EvaluatorKeyAggregateEntryPlanInput {
+                            schedule_position: u32::try_from(schedule_position)
+                                .map_err(|_| ProofProfileError::CountOverflow)?,
+                            ordered_runtime_component_moduli: ordered_runtime_component_moduli
+                                .to_vec(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ProofProfileError>>()?,
+            );
+            ordered_entries
+                .into_iter()
+                .enumerate()
+                .map(|(entry_ordinal, entry)| {
+                    Ok(EvaluatorKeyAggregateVariantInput {
+                        top_count: stream.top_count(),
+                        entry_ordinal: u32::try_from(entry_ordinal)
+                            .map_err(|_| ProofProfileError::CountOverflow)?,
+                        entry,
+                    })
+                })
+                .collect::<Result<Vec<_>, ProofProfileError>>()
+        })
+        .collect::<Result<Vec<_>, ProofProfileError>>()
+        .map(|variants| variants.into_iter().flatten().collect())
 }
 
+#[cfg(test)]
 fn ordered_trustee_root_row_modulus_references(
     geometry: &TrusteeEvaluationKeyRelationGeometry,
 ) -> Result<Vec<SuiteModulusReference>, ProofProfileError> {
@@ -457,6 +523,7 @@ fn ordered_trustee_root_row_modulus_references(
         .collect())
 }
 
+#[cfg(test)]
 fn split_polynomial_modulus_references(
     ordered_moduli: &[SuiteModulusReference],
 ) -> Vec<SuiteModulusReference> {
@@ -467,6 +534,7 @@ fn split_polynomial_modulus_references(
         .collect()
 }
 
+#[cfg(test)]
 fn selected_data_modulus_indices() -> Vec<u16> {
     (0..DATA_PRIMES.len())
         .map(|modulus_index| {
@@ -475,6 +543,7 @@ fn selected_data_modulus_indices() -> Vec<u16> {
         .collect()
 }
 
+#[cfg(test)]
 fn selected_ring_degree() -> u64 {
     u64::try_from(POLYNOMIAL_DEGREE).expect("the selected ring degree fits u64")
 }
@@ -506,7 +575,10 @@ mod tests {
             17_654_865_857_378_133_588
         );
         assert_eq!(context.fri_fold_count, 10);
-        assert_eq!(context.resolved_moduli.len(), DATA_PRIMES.len() + 4);
+        assert_eq!(
+            context.resolved_moduli.len(),
+            DATA_PRIMES.len() + SPECIAL_PRIMES.len() + 3
+        );
 
         let persistent_material_profile =
             CommittedMaterialProfile::for_common_proof_evaluation_domain(
@@ -531,17 +603,59 @@ mod tests {
     }
 
     #[test]
-    fn selected_profile_catalog_and_topology_are_complete() {
-        let profile = selected_proof_profile_set(3).expect("selected proof profile");
-        assert_eq!(profile.relation_plans().len(), 12);
+    fn selected_profile_has_the_complete_relation_and_root_inventory() {
+        let mut profile = selected_proof_profile_set(3).expect("selected proof profile");
         assert_eq!(
-            profile.relation_plans()[6].compiled_plan().variants().len(),
-            19
+            profile.relation_plans().len(),
+            super::super::FIRST_PROFILE_APPLICATION_FAMILIES.len()
         );
+
+        let relation_plan = |schema_identifier| {
+            profile
+                .relation_plans()
+                .iter()
+                .find(|artifact| {
+                    artifact.application_statement_schema_identifier() == schema_identifier
+                })
+                .expect("selected relation family")
+                .compiled_plan()
+        };
+        let evaluator_variant_count = relation_plan(0x1218).variants().len();
+        let key_positions = selected_evaluator_program_set()
+            .and_then(|program| program.key_positions())
+            .expect("selected evaluator key positions");
+        let expected_evaluator_variant_count = key_positions
+            .streams()
+            .iter()
+            .map(|stream| {
+                stream.relinearization_catalog_levels().len()
+                    + stream.galois_catalog_positions().len()
+            })
+            .sum::<usize>();
+        assert_eq!(evaluator_variant_count, expected_evaluator_variant_count);
+
+        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+        let sharing_limb_count = DATA_PRIMES.len();
+        let commitment_anchor_count = SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
+        let round_one_variant_count = relation_plan(0x1214).variants().len();
+        let round_one_aggregate_variant_count = relation_plan(0x1215).variants().len();
+        let round_two_variant_count = relation_plan(0x1216).variants().len();
+        let galois_variant_count = relation_plan(0x1217).variants().len();
+        let expected_root_edge_count = participant_count * sharing_limb_count
+            + participant_count * participant_count * sharing_limb_count
+            + participant_count * 2
+            + participant_count * commitment_anchor_count
+            + participant_count
+                * commitment_anchor_count
+                * (round_one_variant_count + round_two_variant_count + galois_variant_count)
+            + participant_count
+            + round_one_aggregate_variant_count * participant_count * 2
+            + round_two_variant_count * participant_count * 4
+            + evaluator_variant_count * participant_count;
         assert_eq!(
-            profile.relation_plans()[7].compiled_plan().variants().len(),
-            20
+            profile.root_compatibility_edges().len(),
+            expected_root_edge_count
         );
-        assert!(!profile.root_compatibility_edges().is_empty());
+        profile.assert_catalog_mutation_boundaries();
     }
 }

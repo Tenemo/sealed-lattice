@@ -1,5 +1,45 @@
-import { browserActionStorageCustodyErrorCodes } from '@sealed-lattice/types';
+import {
+    browserActionStorageCustodyErrorCodes,
+    foundationProfile,
+    refusalReasonCodes,
+} from '@sealed-lattice/types';
+import type {
+    BrowserStateObjectSignatureOperation,
+    BrowserFoundationInitializationPreparationInput,
+    RefusalReason,
+} from '@sealed-lattice/types';
+import {
+    certifyClosedWorkerActionRandomnessReservation,
+    copyVerifiedStateDurableBinding,
+    describeClosedWorkerPreparedCommonProofGeneration,
+    describeClosedWorkerPreparedCommonProofVerification,
+    openClosedWorkerVerifiedStateDurableBinding,
+    prepareClosedWorkerVerifiedCommonProofApplication,
+    produceClosedWorkerActionRandomnessReservationIntent,
+    produceClosedWorkerActionRandomnessReservationWitnessVote,
+    releaseClosedWorkerPreparedCommonProofGeneration,
+    releaseClosedWorkerPreparedCommonProofVerification,
+    runClosedWorkerPreparedCommonProofGeneration,
+    runClosedWorkerPreparedCommonProofVerification,
+    type ClosedWorkerPreparedCommonProofGeneration,
+    type ClosedWorkerPreparedCommonProofVerification,
+    type CommonProofGenerationWorkerOptions,
+    type CommonProofVerificationWorkerOptions,
+    type VerifiedCommonProofCapability,
+    type VerifiedStateDurableBinding,
+    verifyClosedWorkerActionRandomnessReservationIntentForWitness,
+} from '@sealed-lattice/wasm';
 
+import type {
+    AuthenticatedCheckpointStore,
+    AuthenticatedCheckpointStoreLimits,
+    CheckpointBoundary,
+    CheckpointBoundaryPolicy,
+    CheckpointOperationIdentity,
+    CheckpointRandomCursorKernel,
+    ExpectedCheckpointBoundary,
+    ResumedCheckpoint,
+} from './authenticated-checkpoint-store.js';
 import {
     copyActionProofAttemptBinding,
     copyActionRandomnessReservationVerificationInput,
@@ -9,7 +49,6 @@ import {
     copyOpenedActionRandomnessSession,
     copyOpaqueWorkerIdentifier,
     copyOpenSealedActionRandomnessInput,
-    copyPersistentProofAttemptInput,
     copySealedActionRandomnessSession,
     copyTargetReleaseAttemptInput,
     copyWorkerIdentifierVerificationResult,
@@ -23,66 +62,149 @@ import {
     type BrowserActionStateReservationVerificationInput,
     type BrowserActionStateVerifierSessionInput,
     type BrowserOpenedActionRandomnessSession,
-    type BrowserPersistentProofAttemptInput,
     type BrowserSealedActionRandomnessSession,
     type BrowserTargetReleaseAttemptInput,
     type BrowserActionStorageCustody,
     type BrowserActionStorageCustodyErrorCode,
     type BrowserActionStorageRootBinding,
     type BrowserDeviceWrappingSnapshot,
+    type BrowserFoundationFreshnessCoordinate,
+    type BrowserFoundationCheckpointDescription,
+    type BrowserFoundationCheckpointHandle,
+    type BrowserFoundationStorageAuthority,
+    type BrowserFreshFoundationInitializationCommit,
     type BrowserLocalRecordIdentifierInput,
     type BrowserLocalRecordOpenInput,
     type BrowserLocalRecordSealInput,
     type UntrustedExpectedStorageRootCommitment,
     type VerificationResult,
+    type TransferableBrowserFoundationStorageAuthority,
 } from './browser-action-storage-custody.js';
+import { copyBrowserFoundationInitializationPreparationInput } from './browser-foundation-initialization.js';
+import type {
+    BrowserFoundationActionRandomnessHandle,
+    BrowserFoundationDurableStateBindingHandle,
+    BrowserFoundationInitializationInput,
+    BrowserFoundationNormalWitnessRoleHandle,
+    BrowserFoundationOperationOwner,
+    BrowserFoundationProducedStateReservation,
+    BrowserFoundationProducedStateReservationIntent,
+    BrowserRecoveredFoundationInitialization,
+    BrowserRecoveredFoundationInitializationBatch,
+    BrowserFoundationStateReservationIntentHandle,
+    TransferableBrowserFoundationOperationOwner,
+} from './browser-foundation-operation-owner.js';
 import {
     copyLocalRecordBytes,
     copyLocalRecordIdentifierInput,
     copyLocalRecordOpenInput,
     copyLocalRecordSealInput,
 } from './browser-local-record-validation.js';
+import type {
+    CommonProofBrowserCustody,
+    CommonProofCheckpointResumeDescriptor,
+} from './common-proof-browser-custody.js';
+import type {
+    DurableStateWitnessServiceLimits,
+    DurableStateWitnessService,
+} from './durable-state-witness-service.js';
+import { persistCommonProofApplicationAuthorization } from './durable-state-witness-service.js';
+import {
+    ExclusiveResourceLifecycle,
+    type ExclusiveResourceOwnerToken,
+} from './exclusive-resource-lifecycle.js';
 import type { UntrustedStorageTransactionLimits } from './untrusted-storage-transaction-store.js';
 import {
     openWebLockOwnedBrowserActionStorageCustody,
     type WebLockOwnedBrowserActionStorageCustody,
+    type WebLockCommittedBrowserFoundationInitialization,
+    type WebLockFoundationWitnessRecord,
+    type WebLockRecoveredBrowserFoundationInitialization,
 } from './web-lock-owned-untrusted-storage-transaction-store.js';
 
 const mutationIdentifierByteLength = 32;
 const storageRootCommitmentByteLength = 64;
 const maximumDatabaseNameLength = 256;
 const maximumNamespaceLength = 64;
+const maximumCheckpointCollectionLength = 4096;
+const maximumCheckpointDescriptorByteLength = 1_048_576;
 const namespacePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
-type BrowserActionStorageCustodyWorkerConfiguration = Readonly<{
+export type BrowserActionStorageCustodyWorkerConfiguration = Readonly<{
     acquisitionDeadlineEpochMilliseconds?: number;
     binding: BrowserActionStorageRootBinding;
     databaseName: string;
     knownStorageRootCommitment?: Uint8Array;
     limits: UntrustedStorageTransactionLimits;
     namespace: string;
+    runtimeBuildManifestHash: Uint8Array;
+}>;
+
+export type BrowserFoundationOperationOwnerWorkerRootOpening =
+    | Readonly<{ mode: 'fresh' }>
+    | Readonly<{
+          expectedSnapshot: BrowserDeviceWrappingSnapshot;
+          mode: 'recovered';
+          untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
+      }>;
+
+export type OpenedBrowserFoundationOperationOwnerWorker = Readonly<{
+    deviceWrappingSnapshot: BrowserDeviceWrappingSnapshot;
+    operationOwner: TransferableBrowserFoundationOperationOwner;
 }>;
 
 type CustodyWorkerCommand =
+    | 'activate-fresh-foundation-initialization'
+    | 'activate-recovered-foundation-initialization'
+    | 'abort-checkpoint-publication'
+    | 'abort-checkpoint-restore'
+    | 'begin-checkpoint'
+    | 'begin-checkpoint-publication'
+    | 'begin-checkpoint-restore'
+    | 'cache-foundation-witness-exact-output'
+    | 'cache-foundation-witness-signed-vote-carrier'
+    | 'certify-foundation-action-randomness-reservation'
+    | 'commit-checkpoint-publication'
+    | 'copy-checkpoint-description'
     | 'close-action-randomness'
+    | 'close-foundation-action-randomness'
+    | 'close-foundation-witness-durable-binding'
     | 'close-state-verifier-session'
     | 'close'
+    | 'commit-fresh-foundation-initialization'
+    | 'commit-foundation-operation-initialization'
+    | 'compare-and-lock-foundation-witness-intent'
+    | 'copy-foundation-witness-subject'
     | 'current-snapshot'
     | 'delete'
     | 'derive-record-identifier'
-    | 'derive-persistent-proof-attempt'
     | 'derive-target-release-attempt'
+    | 'derive-foundation-target-release-attempt'
+    | 'evict-checkpoint'
     | 'hash-record-envelope'
+    | 'authenticate-foundation-head'
     | 'initialize'
     | 'create-and-seal-action-randomness'
     | 'open-sealed-action-randomness'
+    | 'open-recovered-foundation-initialization'
+    | 'open-foundation-witness-durable-binding'
     | 'open-state-verifier-session'
     | 'open-record'
     | 'open-custody'
     | 'open-root'
     | 'release-state-object'
+    | 'release-foundation-state-reservation-intent'
+    | 'read-checkpoint-restore-chunk'
+    | 'read-foundation-witness-exact-output'
+    | 'read-foundation-witness-signed-vote-carrier'
+    | 'retire'
+    | 'resume-checkpoint'
     | 'seal-record'
+    | 'write-checkpoint-publication-chunk'
     | 'verify-state-reservation'
+    | 'verify-foundation-action-randomness-reservation'
+    | 'produce-foundation-action-randomness-reservation-intent'
+    | 'vote-for-foundation-action-randomness-reservation-intent'
     | 'verify-action-randomness-reservation';
 
 type CustodyWorkerRequest = Readonly<{
@@ -100,6 +222,7 @@ type CustodyWorkerResponse =
       }>
     | Readonly<{
           errorCode: BrowserActionStorageCustodyErrorCode;
+          errorMessage?: string;
           messageKind: 'browser-action-storage-custody-failed';
           requestIdentifier: number;
       }>
@@ -112,6 +235,638 @@ type CustodyWorkerLike = Pick<
     Worker,
     'addEventListener' | 'postMessage' | 'removeEventListener' | 'terminate'
 >;
+
+type InstalledCustodyWorkerHost = () => Promise<void>;
+
+type ClosedWorkerCommonProofApplicationInput = Readonly<{
+    capability: VerifiedCommonProofCapability;
+    durableBindingIdentifier: string;
+    witnessRoleIdentifier: string;
+}>;
+
+const installedCommonProofExecutionEnvironmentBrand = Symbol(
+    'installed-common-proof-execution-environment',
+);
+const installedCommonProofPreparedOperationBrand = Symbol(
+    'installed-common-proof-prepared-operation',
+);
+
+export type InstalledCommonProofExecutionEnvironment = Readonly<{
+    readonly [installedCommonProofExecutionEnvironmentBrand]: true;
+}>;
+
+export type InstalledCommonProofPreparedOperation = Readonly<{
+    readonly [installedCommonProofPreparedOperationBrand]: true;
+}>;
+
+export type OpenInstalledCommonProofExecutionEnvironmentInput = Readonly<{
+    preparedOperation: InstalledCommonProofPreparedOperation;
+    resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
+}>;
+
+type ResolvedInstalledCommonProofExecutionEnvironmentInput = Readonly<{
+    commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
+    foundationActionRandomnessHandleIdentifier: string;
+    preparedGeneration: ClosedWorkerPreparedCommonProofGeneration;
+    proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
+    resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
+}>;
+
+const destroyCommonProofCheckpointResumeDescriptor = (
+    descriptor: CommonProofCheckpointResumeDescriptor | undefined,
+): void => {
+    if (descriptor === undefined) {
+        return;
+    }
+    descriptor.checkpointLineageIdentifier.fill(0);
+    descriptor.commonProofEnvironmentIdentifier.fill(0);
+    for (const cursorBytes of descriptor.orderedPrivateRandomCursorBytes) {
+        cursorBytes.fill(0);
+    }
+    descriptor.stableAttemptBindingHash.fill(0);
+};
+
+const copyCommonProofCheckpointResumeDescriptorForWorker = (
+    descriptor: CommonProofCheckpointResumeDescriptor,
+): CommonProofCheckpointResumeDescriptor => {
+    let checkpointLineageIdentifier = new Uint8Array(0);
+    let commonProofEnvironmentIdentifier = new Uint8Array(0);
+    const orderedPrivateRandomCursorBytes: Uint8Array<ArrayBuffer>[] = [];
+    let stableAttemptBindingHash = new Uint8Array(0);
+    try {
+        checkpointLineageIdentifier = Uint8Array.from(
+            copyBytes(
+                descriptor.checkpointLineageIdentifier,
+                mutationIdentifierByteLength,
+                'Common-proof checkpoint-lineage identifier',
+            ),
+        );
+        commonProofEnvironmentIdentifier = Uint8Array.from(
+            copyBytes(
+                descriptor.commonProofEnvironmentIdentifier,
+                mutationIdentifierByteLength,
+                'Checkpoint common-proof environment identifier',
+            ),
+        );
+        for (
+            let cursorIndex = 0;
+            cursorIndex < descriptor.orderedPrivateRandomCursorBytes.length;
+            cursorIndex += 1
+        ) {
+            orderedPrivateRandomCursorBytes.push(
+                Uint8Array.from(
+                    copyBoundedBytes(
+                        descriptor.orderedPrivateRandomCursorBytes[cursorIndex],
+                        maximumCheckpointDescriptorByteLength,
+                        `Common-proof checkpoint cursor ${String(cursorIndex)}`,
+                    ),
+                ),
+            );
+        }
+        stableAttemptBindingHash = Uint8Array.from(
+            copyBytes(
+                descriptor.stableAttemptBindingHash,
+                storageRootCommitmentByteLength,
+                'Stable attempt-binding hash',
+            ),
+        );
+        return Object.freeze({
+            checkpointLineageIdentifier,
+            commonProofEnvironmentIdentifier,
+            orderedPrivateRandomCursorBytes: Object.freeze(
+                orderedPrivateRandomCursorBytes,
+            ),
+            safeBoundaryOrdinal: descriptor.safeBoundaryOrdinal,
+            stableAttemptBindingHash,
+        });
+    } catch (error) {
+        checkpointLineageIdentifier.fill(0);
+        commonProofEnvironmentIdentifier.fill(0);
+        for (const cursorBytes of orderedPrivateRandomCursorBytes) {
+            cursorBytes.fill(0);
+        }
+        stableAttemptBindingHash.fill(0);
+        throw error;
+    }
+};
+
+type InstalledCommonProofPreparedOperationRecord = {
+    commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
+    consumed: boolean;
+    foundationActionRandomnessHandleIdentifier: string;
+    installedHost: InstalledCustodyWorkerHost;
+    preparedGeneration: ClosedWorkerPreparedCommonProofGeneration | undefined;
+    proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
+};
+
+const installedCommonProofPreparedOperationRecords = new WeakMap<
+    InstalledCommonProofPreparedOperation,
+    InstalledCommonProofPreparedOperationRecord
+>();
+
+const installedCustodyWorkerHostCommonProofGenerationPreparers = new WeakMap<
+    InstalledCustodyWorkerHost,
+    (input: {
+        foundationActionRandomnessHandleIdentifier: string;
+        preparedGeneration: ClosedWorkerPreparedCommonProofGeneration;
+    }) => InstalledCommonProofPreparedOperation
+>();
+
+/** Internal exact-family adapter entry; intentionally absent from the protocol root. */
+export const prepareCommonProofGenerationInInstalledCustodyWorker = (
+    installedHost: InstalledCustodyWorkerHost,
+    input: {
+        foundationActionRandomnessHandleIdentifier: string;
+        preparedGeneration: ClosedWorkerPreparedCommonProofGeneration;
+    },
+): InstalledCommonProofPreparedOperation => {
+    const prepareOperation =
+        installedCustodyWorkerHostCommonProofGenerationPreparers.get(
+            installedHost,
+        );
+    if (prepareOperation === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The installed custody worker host cannot prepare common-proof generation.',
+        );
+    }
+    return prepareOperation(input);
+};
+
+type InstalledCommonProofExecutionEnvironmentRecord = {
+    applyVerifiedCommonProof(
+        input: ClosedWorkerCommonProofApplicationInput,
+    ): Promise<void>;
+    closed: boolean;
+    commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
+    custody: CommonProofBrowserCustody;
+    foundationActionRandomnessHandleIdentifier: string;
+    generationCompleted: boolean;
+    installedHost: InstalledCustodyWorkerHost;
+    operationActive: boolean;
+    preparedGeneration: ClosedWorkerPreparedCommonProofGeneration | undefined;
+    proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
+    resumedFromCheckpoint: boolean;
+    releaseOwnerReference(): void;
+    runInHostQueue<Result>(operation: () => Promise<Result>): Promise<Result>;
+};
+
+const installedCommonProofExecutionEnvironmentRecords = new WeakMap<
+    InstalledCommonProofExecutionEnvironment,
+    InstalledCommonProofExecutionEnvironmentRecord
+>();
+
+const installedCustodyWorkerHostCommonProofEnvironmentOpeners = new WeakMap<
+    InstalledCustodyWorkerHost,
+    (
+        input: OpenInstalledCommonProofExecutionEnvironmentInput,
+    ) => Promise<InstalledCommonProofExecutionEnvironment>
+>();
+
+export const openCommonProofExecutionEnvironmentInInstalledCustodyWorker = (
+    installedHost: InstalledCustodyWorkerHost,
+    input: OpenInstalledCommonProofExecutionEnvironmentInput,
+): Promise<InstalledCommonProofExecutionEnvironment> => {
+    const openEnvironment =
+        installedCustodyWorkerHostCommonProofEnvironmentOpeners.get(
+            installedHost,
+        );
+    if (openEnvironment === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The installed custody worker host cannot open common-proof execution custody.',
+        );
+    }
+    return openEnvironment(input);
+};
+
+export const copyInstalledCommonProofCheckpointResumeDescriptor = (
+    environment: InstalledCommonProofExecutionEnvironment,
+): CommonProofCheckpointResumeDescriptor | undefined => {
+    const record =
+        installedCommonProofExecutionEnvironmentRecords.get(environment);
+    if (record === undefined || record.closed) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The common-proof execution environment is unavailable.',
+        );
+    }
+    return record.custody.copyCheckpointResumeDescriptor();
+};
+
+/** Direct-module crash/resume simulation seam; absent from the package root. */
+export const suspendCommonProofExecutionEnvironmentForResumeInInstalledCustodyWorkerForTest =
+    async (
+        environment: InstalledCommonProofExecutionEnvironment,
+    ): Promise<CommonProofCheckpointResumeDescriptor> => {
+        const record =
+            installedCommonProofExecutionEnvironmentRecords.get(environment);
+        if (record === undefined || record.closed || record.operationActive) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The common-proof execution environment cannot suspend in its current state.',
+            );
+        }
+        const resumeDescriptor =
+            record.custody.copyCheckpointResumeDescriptor();
+        if (resumeDescriptor === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The common-proof execution environment has no authenticated resume point.',
+            );
+        }
+        try {
+            await record.custody.suspendForAuthenticatedResume();
+        } catch (error) {
+            destroyCommonProofCheckpointResumeDescriptor(resumeDescriptor);
+            throw error;
+        }
+        record.closed = true;
+        installedCommonProofExecutionEnvironmentRecords.delete(environment);
+        record.releaseOwnerReference();
+        record.commonProofRuntimeBindingHash.fill(0);
+        record.proofAttemptLineageIdentifier.fill(0);
+        if (record.preparedGeneration !== undefined) {
+            releaseClosedWorkerPreparedCommonProofGeneration(
+                record.preparedGeneration,
+            );
+            record.preparedGeneration = undefined;
+        }
+        return resumeDescriptor;
+    };
+
+export const closeCommonProofExecutionEnvironmentInInstalledCustodyWorker =
+    async (
+        environment: InstalledCommonProofExecutionEnvironment,
+    ): Promise<void> => {
+        const record =
+            installedCommonProofExecutionEnvironmentRecords.get(environment);
+        if (record === undefined || record.closed) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The common-proof execution environment is unavailable.',
+            );
+        }
+        await retireInstalledCommonProofExecutionEnvironment(
+            environment,
+            record,
+        );
+    };
+
+type InstalledCommonProofGenerationOptions = Pick<
+    CommonProofGenerationWorkerOptions,
+    'signal' | 'yieldControl'
+>;
+
+const retireInstalledCommonProofExecutionEnvironment = async (
+    environment: InstalledCommonProofExecutionEnvironment,
+    record: InstalledCommonProofExecutionEnvironmentRecord,
+): Promise<void> => {
+    if (record.closed) {
+        return;
+    }
+    record.closed = true;
+    installedCommonProofExecutionEnvironmentRecords.delete(environment);
+    record.releaseOwnerReference();
+    record.commonProofRuntimeBindingHash.fill(0);
+    record.proofAttemptLineageIdentifier.fill(0);
+    const failures: unknown[] = [];
+    if (record.preparedGeneration !== undefined) {
+        try {
+            releaseClosedWorkerPreparedCommonProofGeneration(
+                record.preparedGeneration,
+            );
+        } catch (error) {
+            failures.push(error);
+        }
+        record.preparedGeneration = undefined;
+    }
+    try {
+        await record.custody.retire();
+    } catch (error) {
+        failures.push(error);
+    }
+    if (failures.length !== 0) {
+        throw new BrowserActionStorageCustodyError(
+            'StorageFailure',
+            'The installed common-proof environment could not retire all worker-owned authority and durable records.',
+            failures,
+        );
+    }
+};
+
+const completeInstalledCommonProofExecutionEnvironment = async (
+    environment: InstalledCommonProofExecutionEnvironment,
+    record: InstalledCommonProofExecutionEnvironmentRecord,
+): Promise<void> => {
+    if (record.closed) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidState',
+            'The installed common-proof environment cannot complete twice.',
+        );
+    }
+    record.closed = true;
+    installedCommonProofExecutionEnvironmentRecords.delete(environment);
+    record.releaseOwnerReference();
+    record.commonProofRuntimeBindingHash.fill(0);
+    record.proofAttemptLineageIdentifier.fill(0);
+    if (record.preparedGeneration !== undefined) {
+        try {
+            releaseClosedWorkerPreparedCommonProofGeneration(
+                record.preparedGeneration,
+            );
+        } finally {
+            record.preparedGeneration = undefined;
+        }
+    }
+    await record.custody.completeVerifiedOutput();
+};
+
+/** Runs one family-prepared prover without exposing custody or Rust handles. */
+export const runCommonProofGenerationInInstalledCustodyWorker = async (
+    environment: InstalledCommonProofExecutionEnvironment,
+    options: InstalledCommonProofGenerationOptions = {},
+): Promise<void> => {
+    const record =
+        installedCommonProofExecutionEnvironmentRecords.get(environment);
+    if (record === undefined || record.closed) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The common-proof execution environment is unavailable.',
+        );
+    }
+    return record.runInHostQueue(async () => {
+        if (
+            record.closed ||
+            installedCommonProofExecutionEnvironmentRecords.get(environment) !==
+                record
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The common-proof execution environment became unavailable before generation.',
+            );
+        }
+        if (record.operationActive) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The common-proof execution environment already owns an active operation.',
+            );
+        }
+        if (
+            record.generationCompleted ||
+            record.preparedGeneration === undefined
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The common-proof execution environment has no prepared generation operation.',
+            );
+        }
+        const checkpointCustody = record.custody.checkpointCustody;
+        if (checkpointCustody === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'Unavailable',
+                'Installed common-proof generation requires authenticated checkpoint custody.',
+            );
+        }
+        record.operationActive = true;
+        const preparedGeneration = record.preparedGeneration;
+        record.preparedGeneration = undefined;
+        try {
+            await runClosedWorkerPreparedCommonProofGeneration(
+                preparedGeneration,
+                record.custody.externalMemory,
+                record.custody.outputStore,
+                {
+                    ...(record.resumedFromCheckpoint
+                        ? {
+                              resume: {
+                                  checkpointCustody,
+                                  prefixReplayExternalMemory:
+                                      record.custody.prefixReplayExternalMemory,
+                              },
+                          }
+                        : { checkpointCustody }),
+                    ...(options.signal === undefined
+                        ? {}
+                        : { signal: options.signal }),
+                    ...(options.yieldControl === undefined
+                        ? {}
+                        : { yieldControl: options.yieldControl }),
+                },
+            );
+        } catch (error) {
+            if (
+                typeof error === 'object' &&
+                error !== null &&
+                'permanentRetirementRequired' in error &&
+                error.permanentRetirementRequired === true
+            ) {
+                try {
+                    await retireInstalledCommonProofExecutionEnvironment(
+                        environment,
+                        record,
+                    );
+                } catch (retirementError) {
+                    record.operationActive = false;
+                    throw new BrowserActionStorageCustodyError(
+                        'StorageFailure',
+                        'The installed common-proof generation failed and durable retirement was incomplete.',
+                        [error, retirementError],
+                    );
+                }
+            }
+            if (!record.closed) {
+                record.operationActive = false;
+            }
+            throw error;
+        }
+        try {
+            record.custody.sealCanonicalOutput();
+            await record.custody.releaseExternalMemory();
+            record.generationCompleted = true;
+        } catch (error) {
+            const cleanupFailures: unknown[] = [error];
+            try {
+                await retireInstalledCommonProofExecutionEnvironment(
+                    environment,
+                    record,
+                );
+            } catch (retirementError) {
+                cleanupFailures.push(retirementError);
+            }
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'The installed common-proof generation completed but final custody closure failed.',
+                cleanupFailures,
+            );
+        } finally {
+            if (!record.closed) {
+                record.operationActive = false;
+            }
+        }
+    });
+};
+
+const installedCustodyWorkerHostCommonProofOperations = new WeakMap<
+    InstalledCustodyWorkerHost,
+    (input: ClosedWorkerCommonProofApplicationInput) => Promise<void>
+>();
+
+/**
+ * Same-realm entry used by an exact proof-family adapter after real verifier
+ * completion. It is intentionally absent from the package entry point and
+ * never accepts a proof handle, frame, root lease, or root capability.
+ */
+export const applyVerifiedCommonProofInInstalledCustodyWorker = (
+    installedHost: InstalledCustodyWorkerHost,
+    input: ClosedWorkerCommonProofApplicationInput,
+): Promise<void> => {
+    const operation =
+        installedCustodyWorkerHostCommonProofOperations.get(installedHost);
+    if (operation === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The installed custody worker host does not own common-proof application authority.',
+        );
+    }
+    return operation(input);
+};
+
+type VerifyAndApplyInstalledCommonProofInput = Readonly<{
+    durableBindingIdentifier: string;
+    preparedVerification: ClosedWorkerPreparedCommonProofVerification;
+    signal?: CommonProofVerificationWorkerOptions['signal'];
+    witnessRoleIdentifier: string;
+    yieldControl?: CommonProofVerificationWorkerOptions['yieldControl'];
+}>;
+
+/**
+ * Authenticates the committed generated stream, completes the Rust verifier,
+ * and applies only its opaque capability to one durable foundation successor.
+ */
+export const verifyAndApplyCommonProofInInstalledCustodyWorker = async (
+    environment: InstalledCommonProofExecutionEnvironment,
+    input: VerifyAndApplyInstalledCommonProofInput,
+): Promise<void> => {
+    const record =
+        installedCommonProofExecutionEnvironmentRecords.get(environment);
+    if (record === undefined || record.closed) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The common-proof execution environment is unavailable.',
+        );
+    }
+    return record.runInHostQueue(async () => {
+        if (
+            record.closed ||
+            installedCommonProofExecutionEnvironmentRecords.get(environment) !==
+                record
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The common-proof execution environment became unavailable before verification.',
+            );
+        }
+        if (record.operationActive || !record.generationCompleted) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The common-proof execution environment has no sealed generated proof ready for verification.',
+            );
+        }
+        const verificationDescription =
+            describeClosedWorkerPreparedCommonProofVerification(
+                input.preparedVerification,
+            );
+        try {
+            if (
+                !bytesEqual(
+                    verificationDescription.commonProofRuntimeBindingHash,
+                    record.commonProofRuntimeBindingHash,
+                ) ||
+                !bytesEqual(
+                    verificationDescription.proofAttemptLineageIdentifier,
+                    record.proofAttemptLineageIdentifier,
+                )
+            ) {
+                try {
+                    releaseClosedWorkerPreparedCommonProofVerification(
+                        input.preparedVerification,
+                    );
+                } catch (releaseError) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'The mismatched common-proof verifier preparation could not be retired.',
+                        releaseError,
+                    );
+                }
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The prepared common-proof verifier belongs to another proof attempt.',
+                );
+            }
+        } finally {
+            verificationDescription.commonProofRuntimeBindingHash.fill(0);
+            verificationDescription.proofAttemptLineageIdentifier.fill(0);
+        }
+
+        record.operationActive = true;
+        let capability: VerifiedCommonProofCapability | undefined;
+        try {
+            capability = await runClosedWorkerPreparedCommonProofVerification(
+                input.preparedVerification,
+                record.custody.authenticatedOutput(),
+                {
+                    ...(input.signal === undefined
+                        ? {}
+                        : { signal: input.signal }),
+                    ...(input.yieldControl === undefined
+                        ? {}
+                        : { yieldControl: input.yieldControl }),
+                },
+            );
+            await completeInstalledCommonProofExecutionEnvironment(
+                environment,
+                record,
+            );
+            const result = await record.applyVerifiedCommonProof({
+                capability,
+                durableBindingIdentifier: input.durableBindingIdentifier,
+                witnessRoleIdentifier: input.witnessRoleIdentifier,
+            });
+            capability = undefined;
+            return result;
+        } catch (error) {
+            if (capability !== undefined) {
+                try {
+                    capability.release();
+                } catch (releaseError) {
+                    try {
+                        await retireInstalledCommonProofExecutionEnvironment(
+                            environment,
+                            record,
+                        );
+                    } catch (retirementError) {
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'Common-proof application failed with verifier authority pending and durable retirement also failed.',
+                            [error, releaseError, retirementError],
+                        );
+                    }
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'Common-proof application failed and its verifier authority could not be retired.',
+                        [error, releaseError],
+                    );
+                }
+            }
+            throw error;
+        } finally {
+            if (!record.closed) {
+                record.operationActive = false;
+            }
+        }
+    });
+};
 
 type CustodyWorkerScope = Readonly<{
     addEventListener(
@@ -132,6 +887,64 @@ type ActiveClientRequest = Readonly<{
     resolve(value: unknown): void;
     validateResult(value: unknown): unknown;
 }>;
+
+type WorkerCommittedFoundationInitializationResult = Readonly<{
+    batchIdentifier: string;
+    freshnessCoordinate: BrowserFoundationFreshnessCoordinate;
+}>;
+
+type WorkerActivatedFoundationInitializationResult = Readonly<{
+    actionRandomnessHandleIdentifier: string;
+    orderedWitnessRoleHandleIdentifiers: readonly string[];
+}>;
+
+const committedFoundationBatchIdentifiers = new WeakMap<object, string>();
+const recoveredFoundationBatchIdentifiers = new WeakMap<object, string>();
+const normalWitnessRoleSessionIdentifiers = new WeakMap<object, string>();
+const foundationActionRandomnessHandleIdentifiers = new WeakMap<
+    object,
+    string
+>();
+const foundationStateReservationIntentHandleIdentifiers = new WeakMap<
+    object,
+    string
+>();
+const durableStateBindingHandleIdentifiers = new WeakMap<object, string>();
+const checkpointIdentifiers = new WeakMap<object, string>();
+
+const requireCheckpointIdentifier = (
+    checkpoint: BrowserFoundationCheckpointHandle,
+): string => {
+    const identifier =
+        typeof checkpoint === 'object' && checkpoint !== null
+            ? checkpointIdentifiers.get(checkpoint)
+            : undefined;
+    if (identifier === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The checkpoint handle was not issued by this browser foundation storage authority.',
+        );
+    }
+    return identifier;
+};
+
+const requireIssuedHandleIdentifier = (
+    handle: unknown,
+    identifiers: WeakMap<object, string>,
+    label: string,
+): string => {
+    const identifier =
+        typeof handle === 'object' && handle !== null
+            ? identifiers.get(handle)
+            : undefined;
+    if (identifier === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            `${label} was not issued by this browser foundation operation owner.`,
+        );
+    }
+    return identifier;
+};
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -176,6 +989,577 @@ const copyBytes = (
     return value.slice();
 };
 
+const copyBoundedBytes = (
+    value: unknown,
+    maximumByteLength: number,
+    label: string,
+): Uint8Array => {
+    if (
+        !(value instanceof Uint8Array) ||
+        value.byteLength > maximumByteLength
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            `${label} must be a byte array within the worker-channel copy bound.`,
+        );
+    }
+    return value.slice();
+};
+
+const copyCheckpointBoundary = <
+    Boundary extends CheckpointBoundary | ExpectedCheckpointBoundary,
+>(
+    value: Boundary,
+    includeDescriptor: Boundary extends CheckpointBoundary ? true : false,
+): Boundary => {
+    const stateStreamDescriptorBytes = (value as Partial<CheckpointBoundary>)
+        .stateStreamDescriptorBytes;
+    if (
+        !isPlainRecord(value) ||
+        !Number.isSafeInteger(value.operationKind) ||
+        !Number.isSafeInteger(value.safeBoundaryOrdinal) ||
+        typeof value.stateStreamDomain !== 'string' ||
+        !Array.isArray(value.orderedRandomCursors) ||
+        !Array.isArray(value.orderedSourceDigests) ||
+        value.orderedRandomCursors.length > maximumCheckpointCollectionLength ||
+        value.orderedSourceDigests.length > maximumCheckpointCollectionLength ||
+        (includeDescriptor &&
+            !(stateStreamDescriptorBytes instanceof Uint8Array))
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The checkpoint boundary is malformed or outside the worker-channel copy bound.',
+        );
+    }
+    const orderedRandomCursors = value.orderedRandomCursors.map(
+        (cursor, cursorIndex) => {
+            if (
+                !isPlainRecord(cursor) ||
+                !Number.isSafeInteger(cursor.family) ||
+                !Number.isSafeInteger(cursor.purpose) ||
+                typeof cursor.nextCounter !== 'bigint' ||
+                (cursor.nextUnreadBitOffsetInBufferedBlock !== undefined &&
+                    !Number.isSafeInteger(
+                        cursor.nextUnreadBitOffsetInBufferedBlock,
+                    ))
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    `Checkpoint random cursor ${String(cursorIndex)} is malformed.`,
+                );
+            }
+            return Object.freeze({
+                derivationContextHash: copyBytes(
+                    cursor.derivationContextHash,
+                    storageRootCommitmentByteLength,
+                    `Checkpoint random cursor ${String(cursorIndex)} derivation-context hash`,
+                ),
+                family: cursor.family,
+                nextCounter: cursor.nextCounter,
+                ...(cursor.nextUnreadBitOffsetInBufferedBlock === undefined
+                    ? {}
+                    : {
+                          nextUnreadBitOffsetInBufferedBlock:
+                              cursor.nextUnreadBitOffsetInBufferedBlock,
+                      }),
+                purpose: cursor.purpose,
+                streamAttemptIdentifier: copyBytes(
+                    cursor.streamAttemptIdentifier,
+                    32,
+                    `Checkpoint random cursor ${String(cursorIndex)} stream-attempt identifier`,
+                ),
+            });
+        },
+    );
+    return Object.freeze({
+        operationKind: value.operationKind,
+        orderedRandomCursors: Object.freeze(orderedRandomCursors),
+        orderedSourceDigests: Object.freeze(
+            value.orderedSourceDigests.map((digest, digestIndex) =>
+                copyBytes(
+                    digest,
+                    storageRootCommitmentByteLength,
+                    `Checkpoint source digest ${String(digestIndex)}`,
+                ),
+            ),
+        ),
+        safeBoundaryOrdinal: value.safeBoundaryOrdinal,
+        ...(includeDescriptor
+            ? {
+                  stateStreamDescriptorBytes: copyBoundedBytes(
+                      stateStreamDescriptorBytes,
+                      maximumCheckpointDescriptorByteLength,
+                      'Checkpoint state-stream descriptor',
+                  ),
+              }
+            : {}),
+        stateStreamDomain: value.stateStreamDomain,
+    }) as Boundary;
+};
+
+const copyCheckpointDescription = (
+    value: unknown,
+): BrowserFoundationCheckpointDescription => {
+    if (
+        !isPlainRecord(value) ||
+        !(value.checkpointLineageIdentifier instanceof Uint8Array)
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned a malformed checkpoint description.',
+        );
+    }
+    return Object.freeze({
+        checkpointLineageIdentifier: copyBytes(
+            value.checkpointLineageIdentifier,
+            32,
+            'Checkpoint lineage identifier',
+        ),
+        ...(value.canonicalManifestBytes === undefined
+            ? {}
+            : {
+                  canonicalManifestBytes: copyBoundedBytes(
+                      value.canonicalManifestBytes,
+                      maximumCheckpointDescriptorByteLength,
+                      'Checkpoint canonical manifest',
+                  ),
+              }),
+        ...(value.stateStreamDescriptorBytes === undefined
+            ? {}
+            : {
+                  stateStreamDescriptorBytes: copyBoundedBytes(
+                      value.stateStreamDescriptorBytes,
+                      maximumCheckpointDescriptorByteLength,
+                      'Checkpoint state-stream descriptor',
+                  ),
+              }),
+    });
+};
+
+const createCheckpointHandle = (
+    value: unknown,
+): BrowserFoundationCheckpointHandle => {
+    if (
+        !isPlainRecord(value) ||
+        typeof value.checkpointIdentifier !== 'string' ||
+        !/^[0-9a-f]{64}$/u.test(value.checkpointIdentifier)
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned a malformed checkpoint handle.',
+        );
+    }
+    const checkpoint = Object.freeze({}) as BrowserFoundationCheckpointHandle;
+    checkpointIdentifiers.set(checkpoint, value.checkpointIdentifier);
+    return checkpoint;
+};
+
+const copyFoundationFreshnessCoordinate = (
+    value: unknown,
+): BrowserFoundationFreshnessCoordinate => {
+    if (
+        !isPlainRecord(value) ||
+        !hasRequiredKeys(value, [
+            'authenticatedHeadDigest',
+            'freshnessSequence',
+            'storageInstanceIdentity',
+        ]) ||
+        typeof value.freshnessSequence !== 'bigint' ||
+        value.freshnessSequence < 0n
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned a malformed foundation freshness coordinate.',
+        );
+    }
+    return Object.freeze({
+        authenticatedHeadDigest: copyBytes(
+            value.authenticatedHeadDigest,
+            storageRootCommitmentByteLength,
+            'Foundation authenticated-head digest',
+        ),
+        freshnessSequence: value.freshnessSequence,
+        storageInstanceIdentity: copyBytes(
+            value.storageInstanceIdentity,
+            storageRootCommitmentByteLength,
+            'Foundation storage-instance identity',
+        ),
+    });
+};
+
+const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
+    if (left.byteLength !== right.byteLength) {
+        return false;
+    }
+    let difference = 0;
+    for (let byteIndex = 0; byteIndex < left.byteLength; byteIndex += 1) {
+        difference |= (left[byteIndex] ?? 0) ^ (right[byteIndex] ?? 0);
+    }
+    return difference === 0;
+};
+
+const foundationCoordinatesEqual = (
+    left: BrowserFoundationFreshnessCoordinate,
+    right: BrowserFoundationFreshnessCoordinate,
+): boolean =>
+    left.freshnessSequence === right.freshnessSequence &&
+    bytesEqual(left.authenticatedHeadDigest, right.authenticatedHeadDigest) &&
+    bytesEqual(left.storageInstanceIdentity, right.storageInstanceIdentity);
+
+const destroyFoundationCoordinate = (
+    coordinate: BrowserFoundationFreshnessCoordinate,
+): void => {
+    coordinate.authenticatedHeadDigest.fill(0);
+    coordinate.storageInstanceIdentity.fill(0);
+};
+
+const copyWorkerCommittedFoundationInitializationResult = (
+    value: unknown,
+): WorkerCommittedFoundationInitializationResult => {
+    if (
+        !isPlainRecord(value) ||
+        !hasRequiredKeys(value, ['batchIdentifier', 'freshnessCoordinate']) ||
+        typeof value.batchIdentifier !== 'string' ||
+        !/^[0-9a-f]{64}$/u.test(value.batchIdentifier)
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned malformed committed foundation initialization authority.',
+        );
+    }
+    const freshnessCoordinate = copyFoundationFreshnessCoordinate(
+        value.freshnessCoordinate,
+    );
+    if (freshnessCoordinate.freshnessSequence !== 0n) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'Fresh foundation initialization must begin at freshness sequence zero.',
+        );
+    }
+    return Object.freeze({
+        batchIdentifier: value.batchIdentifier,
+        freshnessCoordinate,
+    });
+};
+
+const createBrowserFreshFoundationInitializationCommit = (
+    value: unknown,
+): BrowserFreshFoundationInitializationCommit => {
+    const copied = copyWorkerCommittedFoundationInitializationResult(value);
+    const committedBatch = Object.freeze(
+        {},
+    ) as BrowserFreshFoundationInitializationCommit['committedBatch'];
+    committedFoundationBatchIdentifiers.set(
+        committedBatch,
+        copied.batchIdentifier,
+    );
+    return Object.freeze({
+        committedBatch,
+        freshnessCoordinate: copied.freshnessCoordinate,
+    });
+};
+
+const createBrowserRecoveredFoundationInitialization = (
+    value: unknown,
+): BrowserRecoveredFoundationInitialization => {
+    if (
+        !isPlainRecord(value) ||
+        typeof value.batchIdentifier !== 'string' ||
+        !/^[0-9a-f]{64}$/u.test(value.batchIdentifier)
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned malformed recovered foundation initialization authority.',
+        );
+    }
+    const freshnessCoordinate = copyFoundationFreshnessCoordinate(
+        value.freshnessCoordinate,
+    );
+    const recoveredBatch = Object.freeze(
+        {},
+    ) as BrowserRecoveredFoundationInitializationBatch;
+    recoveredFoundationBatchIdentifiers.set(
+        recoveredBatch,
+        value.batchIdentifier,
+    );
+    destroyFoundationCoordinate(freshnessCoordinate);
+    return Object.freeze({ recoveredBatch });
+};
+
+const copyWorkerActivatedFoundationInitializationResult = (
+    value: unknown,
+): WorkerActivatedFoundationInitializationResult => {
+    if (
+        !isPlainRecord(value) ||
+        typeof value.actionRandomnessHandleIdentifier !== 'string' ||
+        !/^[0-9a-f]{64}$/u.test(value.actionRandomnessHandleIdentifier) ||
+        !Array.isArray(value.orderedWitnessRoleHandleIdentifiers) ||
+        value.orderedWitnessRoleHandleIdentifiers.length !==
+            foundationProfile.participantCount - 1 ||
+        value.orderedWitnessRoleHandleIdentifiers.some(
+            (identifier) =>
+                typeof identifier !== 'string' ||
+                !/^[0-9a-f]{64}$/u.test(identifier),
+        ) ||
+        new Set(value.orderedWitnessRoleHandleIdentifiers).size !==
+            foundationProfile.participantCount - 1
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned malformed activated foundation authority.',
+        );
+    }
+    return Object.freeze({
+        actionRandomnessHandleIdentifier:
+            value.actionRandomnessHandleIdentifier,
+        orderedWitnessRoleHandleIdentifiers: Object.freeze(
+            value.orderedWitnessRoleHandleIdentifiers.map(
+                (identifier) => identifier as string,
+            ),
+        ),
+    });
+};
+
+const createBrowserActivatedFoundationInitialization = (
+    value: unknown,
+): Awaited<
+    ReturnType<
+        BrowserFoundationOperationOwner['activateFreshFoundationInitialization']
+    >
+> => {
+    const copied = copyWorkerActivatedFoundationInitializationResult(value);
+    const actionRandomnessHandle = Object.freeze(
+        {},
+    ) as BrowserFoundationActionRandomnessHandle;
+    foundationActionRandomnessHandleIdentifiers.set(
+        actionRandomnessHandle,
+        copied.actionRandomnessHandleIdentifier,
+    );
+    const orderedWitnessRoleHandles =
+        copied.orderedWitnessRoleHandleIdentifiers.map((identifier) => {
+            const handle = Object.freeze(
+                {},
+            ) as BrowserFoundationNormalWitnessRoleHandle;
+            normalWitnessRoleSessionIdentifiers.set(handle, identifier);
+            return handle;
+        });
+    return Object.freeze({
+        actionRandomnessHandle,
+        orderedWitnessRoleHandles: Object.freeze(orderedWitnessRoleHandles),
+    });
+};
+
+const createDurableStateBindingHandle = (
+    value: unknown,
+): BrowserFoundationDurableStateBindingHandle => {
+    const identifier = copyOpaqueWorkerIdentifier(
+        value,
+        'Durable state binding handle identifier',
+    );
+    const handle = Object.freeze(
+        {},
+    ) as BrowserFoundationDurableStateBindingHandle;
+    durableStateBindingHandleIdentifiers.set(handle, identifier);
+    return handle;
+};
+
+const copyBytesVerificationResult = (
+    value: unknown,
+): VerificationResult<Uint8Array> => {
+    if (!isPlainRecord(value) || typeof value.isValid !== 'boolean') {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned a malformed verification result.',
+        );
+    }
+    if (value.isValid) {
+        return Object.freeze({
+            isValid: true,
+            value: copyBoundedBytes(
+                value.value,
+                foundationProfile.maximumCopiedBufferByteLength,
+                'Verified canonical bytes',
+            ),
+        });
+    }
+    if (
+        typeof value.refusalReason !== 'string' ||
+        !Object.prototype.hasOwnProperty.call(
+            refusalReasonCodes,
+            value.refusalReason,
+        )
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned an unassigned refusal reason.',
+        );
+    }
+    return Object.freeze({
+        isValid: false,
+        refusalReason: value.refusalReason as RefusalReason,
+    });
+};
+
+const copyWorkerProducedStateReservationIntentVerificationResult = (
+    value: unknown,
+): VerificationResult<
+    Readonly<{
+        canonicalReservationIntentCarrier: Uint8Array;
+        stateIntentIdentifier: string;
+    }>
+> => {
+    if (!isPlainRecord(value) || typeof value.isValid !== 'boolean') {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The worker state producer returned a malformed reservation-intent result.',
+        );
+    }
+    if (value.isValid) {
+        if (!isPlainRecord(value.value)) {
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'The worker state producer returned malformed reservation-intent material.',
+            );
+        }
+        return Object.freeze({
+            isValid: true,
+            value: Object.freeze({
+                canonicalReservationIntentCarrier: copyBoundedBytes(
+                    value.value.canonicalReservationIntentCarrier,
+                    foundationProfile.maximumCopiedBufferByteLength,
+                    'Produced canonical state reservation-intent carrier',
+                ),
+                stateIntentIdentifier: copyOpaqueWorkerIdentifier(
+                    value.value.stateIntentIdentifier,
+                    'Produced state reservation-intent identifier',
+                ),
+            }),
+        });
+    }
+    if (
+        typeof value.refusalReason !== 'string' ||
+        !Object.prototype.hasOwnProperty.call(
+            refusalReasonCodes,
+            value.refusalReason,
+        )
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The worker state producer returned an unassigned reservation-intent refusal reason.',
+        );
+    }
+    return Object.freeze({
+        isValid: false,
+        refusalReason: value.refusalReason as RefusalReason,
+    });
+};
+
+const copyProducedStateReservationIntentVerificationResult = (
+    value: unknown,
+): VerificationResult<BrowserFoundationProducedStateReservationIntent> => {
+    if (!isPlainRecord(value) || typeof value.isValid !== 'boolean') {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned a malformed produced-intent result.',
+        );
+    }
+    if (value.isValid) {
+        if (!isPlainRecord(value.value)) {
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'The owned worker returned malformed produced-intent material.',
+            );
+        }
+        const identifier = copyOpaqueWorkerIdentifier(
+            value.value.stateIntentIdentifier,
+            'Produced state reservation-intent identifier',
+        );
+        const intentHandle = Object.freeze(
+            {},
+        ) as BrowserFoundationStateReservationIntentHandle;
+        foundationStateReservationIntentHandleIdentifiers.set(
+            intentHandle,
+            identifier,
+        );
+        return Object.freeze({
+            isValid: true,
+            value: Object.freeze({
+                canonicalReservationIntentCarrier: copyBoundedBytes(
+                    value.value.canonicalReservationIntentCarrier,
+                    foundationProfile.maximumCopiedBufferByteLength,
+                    'Produced canonical state reservation-intent carrier',
+                ),
+                intentHandle,
+            }),
+        });
+    }
+    if (
+        typeof value.refusalReason !== 'string' ||
+        !Object.prototype.hasOwnProperty.call(
+            refusalReasonCodes,
+            value.refusalReason,
+        )
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned an unassigned produced-intent refusal reason.',
+        );
+    }
+    return Object.freeze({
+        isValid: false,
+        refusalReason: value.refusalReason as RefusalReason,
+    });
+};
+
+const copyProducedStateReservationVerificationResult = (
+    value: unknown,
+): VerificationResult<BrowserFoundationProducedStateReservation> => {
+    if (!isPlainRecord(value) || typeof value.isValid !== 'boolean') {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned a malformed produced-reservation result.',
+        );
+    }
+    if (value.isValid) {
+        if (!isPlainRecord(value.value)) {
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'The owned worker returned malformed produced-reservation material.',
+            );
+        }
+        return Object.freeze({
+            isValid: true,
+            value: Object.freeze({
+                canonicalStateCertificate: copyBoundedBytes(
+                    value.value.canonicalStateCertificate,
+                    foundationProfile.maximumCopiedBufferByteLength,
+                    'Produced canonical state certificate',
+                ),
+                stateReservationIdentifier: copyOpaqueWorkerIdentifier(
+                    value.value.stateReservationIdentifier,
+                    'Produced state reservation identifier',
+                ),
+            }),
+        });
+    }
+    if (
+        typeof value.refusalReason !== 'string' ||
+        !Object.prototype.hasOwnProperty.call(
+            refusalReasonCodes,
+            value.refusalReason,
+        )
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned an unassigned produced-reservation refusal reason.',
+        );
+    }
+    return Object.freeze({
+        isValid: false,
+        refusalReason: value.refusalReason as RefusalReason,
+    });
+};
+
 const copyRootBinding = (value: unknown): BrowserActionStorageRootBinding => {
     if (
         !isPlainRecord(value) ||
@@ -212,6 +1596,28 @@ const copyRootBinding = (value: unknown): BrowserActionStorageRootBinding => {
             value.suiteId,
             storageRootCommitmentByteLength,
             'Suite identifier',
+        ),
+    });
+};
+
+const copyFoundationOperationInitializationInput = (
+    value: unknown,
+): BrowserFoundationInitializationInput => {
+    if (!isPlainRecord(value)) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'Browser foundation initialization input is malformed.',
+        );
+    }
+    const preparation = copyBrowserFoundationInitializationPreparationInput(
+        value as BrowserFoundationInitializationPreparationInput,
+    );
+    return Object.freeze({
+        ...preparation,
+        canonicalRosterBytes: copyBoundedBytes(
+            value.canonicalRosterBytes,
+            foundationProfile.maximumCopiedBufferByteLength,
+            'Canonical roster bytes',
         ),
     });
 };
@@ -355,6 +1761,7 @@ const copyWorkerConfiguration = (
             'knownStorageRootCommitment',
             'limits',
             'namespace',
+            'runtimeBuildManifestHash',
         ]) ||
         typeof value.databaseName !== 'string' ||
         value.databaseName.length === 0 ||
@@ -389,6 +1796,11 @@ const copyWorkerConfiguration = (
                   ),
         limits: copyLimits(value.limits),
         namespace: value.namespace,
+        runtimeBuildManifestHash: copyBytes(
+            value.runtimeBuildManifestHash,
+            storageRootCommitmentByteLength,
+            'Runtime build-manifest hash',
+        ),
     });
 };
 
@@ -427,26 +1839,58 @@ const isCustodyWorkerResponse = (
 };
 
 const custodyWorkerCommands: readonly CustodyWorkerCommand[] = [
+    'activate-fresh-foundation-initialization',
+    'activate-recovered-foundation-initialization',
+    'abort-checkpoint-publication',
+    'abort-checkpoint-restore',
+    'authenticate-foundation-head',
+    'begin-checkpoint',
+    'begin-checkpoint-publication',
+    'begin-checkpoint-restore',
+    'cache-foundation-witness-exact-output',
+    'cache-foundation-witness-signed-vote-carrier',
+    'certify-foundation-action-randomness-reservation',
     'close-action-randomness',
+    'close-foundation-action-randomness',
+    'close-foundation-witness-durable-binding',
     'close-state-verifier-session',
     'close',
+    'commit-fresh-foundation-initialization',
+    'commit-foundation-operation-initialization',
+    'compare-and-lock-foundation-witness-intent',
+    'commit-checkpoint-publication',
+    'copy-checkpoint-description',
+    'copy-foundation-witness-subject',
     'current-snapshot',
     'delete',
     'derive-record-identifier',
-    'derive-persistent-proof-attempt',
     'derive-target-release-attempt',
+    'derive-foundation-target-release-attempt',
+    'evict-checkpoint',
     'hash-record-envelope',
     'initialize',
     'create-and-seal-action-randomness',
     'open-sealed-action-randomness',
+    'open-recovered-foundation-initialization',
+    'open-foundation-witness-durable-binding',
     'open-state-verifier-session',
     'open-record',
     'open-custody',
     'open-root',
+    'produce-foundation-action-randomness-reservation-intent',
+    'release-foundation-state-reservation-intent',
     'release-state-object',
+    'read-checkpoint-restore-chunk',
+    'read-foundation-witness-exact-output',
+    'read-foundation-witness-signed-vote-carrier',
+    'retire',
+    'resume-checkpoint',
     'seal-record',
     'verify-action-randomness-reservation',
+    'verify-foundation-action-randomness-reservation',
     'verify-state-reservation',
+    'vote-for-foundation-action-randomness-reservation-intent',
+    'write-checkpoint-publication-chunk',
 ];
 
 const isCustodyWorkerRequest = (
@@ -464,7 +1908,7 @@ const isCustodyWorkerRequest = (
     typeof value.command === 'string' &&
     custodyWorkerCommands.includes(value.command as CustodyWorkerCommand);
 
-class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCustody {
+class BrowserActionStorageCustodyWorkerClient implements BrowserFoundationStorageAuthority {
     #activeRequest: ActiveClientRequest | undefined;
     #binding: BrowserActionStorageRootBinding | undefined;
     #closed = false;
@@ -518,6 +1962,8 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
                     configuration.knownStorageRootCommitment,
                 limits: configuration.limits,
                 namespace: configuration.namespace,
+                runtimeBuildManifestHash:
+                    configuration.runtimeBuildManifestHash,
             });
         } catch (error) {
             return Promise.reject(
@@ -577,6 +2023,466 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
             () => copyBoundSnapshotInput(input),
             (copiedInput) =>
                 this.#sendRequest('open-root', copiedInput, validateVoidResult),
+        );
+    }
+
+    public authenticateFoundationHead(): Promise<BrowserFoundationFreshnessCoordinate> {
+        return this.#queueOperation(() =>
+            this.#sendRequest(
+                'authenticate-foundation-head',
+                undefined,
+                copyFoundationFreshnessCoordinate,
+            ),
+        );
+    }
+
+    public beginCheckpoint(
+        streamAttemptIdentifiers: readonly Uint8Array[],
+    ): Promise<BrowserFoundationCheckpointHandle> {
+        return this.#queueValidatedOperation(
+            () => {
+                if (
+                    !Array.isArray(streamAttemptIdentifiers) ||
+                    streamAttemptIdentifiers.length >
+                        maximumCheckpointCollectionLength
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'Checkpoint stream-attempt identifiers are outside the worker-channel copy bound.',
+                    );
+                }
+                return Object.freeze(
+                    streamAttemptIdentifiers.map((identifier, index) =>
+                        copyBytes(
+                            identifier,
+                            32,
+                            `Checkpoint stream-attempt identifier ${String(index)}`,
+                        ),
+                    ),
+                );
+            },
+            (copiedIdentifiers) =>
+                this.#sendRequest(
+                    'begin-checkpoint',
+                    copiedIdentifiers,
+                    createCheckpointHandle,
+                ),
+        );
+    }
+
+    public copyCheckpointDescription(
+        checkpoint: BrowserFoundationCheckpointHandle,
+    ): Promise<BrowserFoundationCheckpointDescription> {
+        return this.#queueValidatedOperation(
+            () => requireCheckpointIdentifier(checkpoint),
+            (checkpointIdentifier) =>
+                this.#sendRequest(
+                    'copy-checkpoint-description',
+                    checkpointIdentifier,
+                    copyCheckpointDescription,
+                ),
+        );
+    }
+
+    public evictCheckpoint(
+        checkpoint: BrowserFoundationCheckpointHandle,
+    ): Promise<void> {
+        return this.#queueValidatedOperation(
+            () => requireCheckpointIdentifier(checkpoint),
+            async (checkpointIdentifier) => {
+                await this.#sendRequest(
+                    'evict-checkpoint',
+                    checkpointIdentifier,
+                    validateVoidResult,
+                );
+                checkpointIdentifiers.delete(checkpoint);
+            },
+        );
+    }
+
+    public publishCheckpoint(
+        checkpoint: BrowserFoundationCheckpointHandle,
+        input: {
+            boundary: CheckpointBoundary;
+            stateChunks: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
+        },
+    ): Promise<Uint8Array> {
+        return this.#queueOperation(async () => {
+            const checkpointIdentifier =
+                requireCheckpointIdentifier(checkpoint);
+            const boundary = copyCheckpointBoundary(input.boundary, true);
+            const source = input.stateChunks;
+            if (typeof source !== 'object' || source === null) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Checkpoint state chunks must be iterable.',
+                );
+            }
+            const asyncIteratorFactory = (
+                source as Partial<AsyncIterable<Uint8Array>>
+            )[Symbol.asyncIterator];
+            const iteratorFactory = (source as Partial<Iterable<Uint8Array>>)[
+                Symbol.iterator
+            ];
+            const iterator =
+                typeof asyncIteratorFactory === 'function'
+                    ? asyncIteratorFactory.call(source)
+                    : typeof iteratorFactory === 'function'
+                      ? iteratorFactory.call(source)
+                      : undefined;
+            if (iterator === undefined || typeof iterator.next !== 'function') {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Checkpoint state chunks returned an invalid iterator.',
+                );
+            }
+            const publicationIdentifier = await this.#sendRequest(
+                'begin-checkpoint-publication',
+                { boundary, checkpointIdentifier },
+                (value) =>
+                    copyOpaqueWorkerIdentifier(
+                        value,
+                        'Checkpoint publication identifier',
+                    ),
+            );
+            try {
+                let chunkIndex = 0;
+                for (;;) {
+                    const next = await iterator.next();
+                    if (typeof next !== 'object' || next === null) {
+                        throw new BrowserActionStorageCustodyError(
+                            'InvalidInput',
+                            'Checkpoint state iterator returned a malformed result.',
+                        );
+                    }
+                    if (next.done === true) {
+                        break;
+                    }
+                    const chunk = copyBoundedBytes(
+                        next.value,
+                        maximumCheckpointDescriptorByteLength,
+                        `Checkpoint state chunk ${String(chunkIndex)}`,
+                    );
+                    await this.#sendRequest(
+                        'write-checkpoint-publication-chunk',
+                        { chunk, publicationIdentifier },
+                        validateVoidResult,
+                    );
+                    chunkIndex += 1;
+                    if (chunkIndex > maximumCheckpointCollectionLength) {
+                        throw new BrowserActionStorageCustodyError(
+                            'InvalidInput',
+                            'Checkpoint state chunk count exceeds the worker-channel copy bound.',
+                        );
+                    }
+                }
+                return await this.#sendRequest(
+                    'commit-checkpoint-publication',
+                    publicationIdentifier,
+                    (value) =>
+                        copyBoundedBytes(
+                            value,
+                            maximumCheckpointDescriptorByteLength,
+                            'Checkpoint canonical manifest',
+                        ),
+                );
+            } catch (error) {
+                try {
+                    await this.#sendRequest(
+                        'abort-checkpoint-publication',
+                        publicationIdentifier,
+                        validateVoidResult,
+                    );
+                } catch (abortError) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'Checkpoint publication failed and worker-owned rollback also failed.',
+                        [error, abortError],
+                    );
+                }
+                throw error;
+            }
+        });
+    }
+
+    public restoreCheckpointState(
+        checkpoint: BrowserFoundationCheckpointHandle,
+        consumeChunk: (
+            chunkIndex: number,
+            chunkBytes: Uint8Array,
+        ) => Promise<void> | void,
+    ): Promise<void> {
+        return this.#queueOperation(async () => {
+            if (typeof consumeChunk !== 'function') {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Checkpoint restore requires a chunk consumer.',
+                );
+            }
+            const checkpointIdentifier =
+                requireCheckpointIdentifier(checkpoint);
+            const restoreIdentifier = await this.#sendRequest(
+                'begin-checkpoint-restore',
+                checkpointIdentifier,
+                (value) =>
+                    copyOpaqueWorkerIdentifier(
+                        value,
+                        'Checkpoint restore identifier',
+                    ),
+            );
+            try {
+                let expectedChunkIndex = 0;
+                for (;;) {
+                    const restored = await this.#sendRequest(
+                        'read-checkpoint-restore-chunk',
+                        restoreIdentifier,
+                        (value) => {
+                            if (
+                                !isPlainRecord(value) ||
+                                typeof value.done !== 'boolean'
+                            ) {
+                                throw new BrowserActionStorageCustodyError(
+                                    'OwnedWorkerFailure',
+                                    'The owned worker returned malformed checkpoint restore output.',
+                                );
+                            }
+                            if (value.done) {
+                                return Object.freeze({ done: true as const });
+                            }
+                            if (!Number.isSafeInteger(value.chunkIndex)) {
+                                throw new BrowserActionStorageCustodyError(
+                                    'OwnedWorkerFailure',
+                                    'The owned worker returned a malformed checkpoint chunk index.',
+                                );
+                            }
+                            return Object.freeze({
+                                chunkBytes: copyBoundedBytes(
+                                    value.chunkBytes,
+                                    maximumCheckpointDescriptorByteLength,
+                                    'Restored checkpoint chunk',
+                                ),
+                                chunkIndex: value.chunkIndex as number,
+                                done: false as const,
+                            });
+                        },
+                    );
+                    if (restored.done) {
+                        return;
+                    }
+                    if (restored.chunkIndex !== expectedChunkIndex) {
+                        restored.chunkBytes.fill(0);
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'The owned worker returned checkpoint chunks out of order.',
+                        );
+                    }
+                    await consumeChunk(
+                        restored.chunkIndex,
+                        restored.chunkBytes,
+                    );
+                    expectedChunkIndex += 1;
+                }
+            } catch (error) {
+                try {
+                    await this.#sendRequest(
+                        'abort-checkpoint-restore',
+                        restoreIdentifier,
+                        validateVoidResult,
+                    );
+                } catch (abortError) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'Checkpoint restore failed and worker-owned abort also failed.',
+                        [error, abortError],
+                    );
+                }
+                throw error;
+            }
+        });
+    }
+
+    public resumeCheckpoint(input: {
+        checkpointLineageIdentifier: Uint8Array;
+        expectedBoundary: ExpectedCheckpointBoundary;
+    }): Promise<BrowserFoundationCheckpointHandle> {
+        return this.#queueValidatedOperation(
+            () => ({
+                checkpointLineageIdentifier: copyBytes(
+                    input.checkpointLineageIdentifier,
+                    32,
+                    'Checkpoint lineage identifier',
+                ),
+                expectedBoundary: copyCheckpointBoundary(
+                    input.expectedBoundary,
+                    false,
+                ),
+            }),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'resume-checkpoint',
+                    copiedInput,
+                    createCheckpointHandle,
+                ),
+        );
+    }
+
+    public commitFreshFoundationInitialization(
+        input: BrowserFoundationInitializationPreparationInput,
+    ): Promise<BrowserFreshFoundationInitializationCommit> {
+        return this.#queueValidatedOperation(
+            () => copyBrowserFoundationInitializationPreparationInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'commit-fresh-foundation-initialization',
+                    copiedInput,
+                    createBrowserFreshFoundationInitializationCommit,
+                ),
+        );
+    }
+
+    public commitFoundationOperationInitialization(
+        input: BrowserFoundationInitializationInput,
+    ): Promise<BrowserFreshFoundationInitializationCommit> {
+        return this.#queueValidatedOperation(
+            () => copyFoundationOperationInitializationInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'commit-foundation-operation-initialization',
+                    copiedInput,
+                    createBrowserFreshFoundationInitializationCommit,
+                ),
+        );
+    }
+
+    public openRecoveredFoundationInitialization(
+        input: BrowserFoundationInitializationInput,
+    ): Promise<BrowserRecoveredFoundationInitialization> {
+        return this.#queueValidatedOperation(
+            () => copyFoundationOperationInitializationInput(input),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'open-recovered-foundation-initialization',
+                    copiedInput,
+                    createBrowserRecoveredFoundationInitialization,
+                ),
+        );
+    }
+
+    public activateFreshFoundationInitialization(
+        committedBatch: BrowserFreshFoundationInitializationCommit['committedBatch'],
+    ): ReturnType<
+        BrowserFoundationOperationOwner['activateFreshFoundationInitialization']
+    > {
+        return this.#queueValidatedOperation(
+            () =>
+                requireIssuedHandleIdentifier(
+                    committedBatch,
+                    committedFoundationBatchIdentifiers,
+                    'Committed foundation initialization batch',
+                ),
+            async (batchIdentifier) => {
+                const activated = await this.#sendRequest(
+                    'activate-fresh-foundation-initialization',
+                    batchIdentifier,
+                    createBrowserActivatedFoundationInitialization,
+                );
+                committedFoundationBatchIdentifiers.delete(committedBatch);
+                return activated;
+            },
+        );
+    }
+
+    public activateRecoveredFoundationInitialization(
+        recoveredBatch: BrowserRecoveredFoundationInitializationBatch,
+    ): ReturnType<
+        BrowserFoundationOperationOwner['activateRecoveredFoundationInitialization']
+    > {
+        return this.#queueValidatedOperation(
+            () =>
+                requireIssuedHandleIdentifier(
+                    recoveredBatch,
+                    recoveredFoundationBatchIdentifiers,
+                    'Recovered foundation initialization batch',
+                ),
+            async (batchIdentifier) => {
+                const activated = await this.#sendRequest(
+                    'activate-recovered-foundation-initialization',
+                    batchIdentifier,
+                    createBrowserActivatedFoundationInitialization,
+                );
+                recoveredFoundationBatchIdentifiers.delete(recoveredBatch);
+                return activated;
+            },
+        );
+    }
+
+    public copyWitnessSubjectParticipantIdentity(
+        witnessRole: BrowserFoundationNormalWitnessRoleHandle,
+    ): Promise<Uint8Array> {
+        return this.#queueValidatedOperation(
+            () =>
+                requireIssuedHandleIdentifier(
+                    witnessRole,
+                    normalWitnessRoleSessionIdentifiers,
+                    'Foundation witness role',
+                ),
+            (witnessRoleIdentifier) =>
+                this.#sendRequest(
+                    'copy-foundation-witness-subject',
+                    witnessRoleIdentifier,
+                    (value) =>
+                        copyBytes(
+                            value,
+                            storageRootCommitmentByteLength,
+                            'Witness subject participant identity',
+                        ),
+                ),
+        );
+    }
+
+    public openWitnessDurableStateBinding(
+        witnessRole: BrowserFoundationNormalWitnessRoleHandle,
+        stateObjectIdentifier: string,
+    ): Promise<BrowserFoundationDurableStateBindingHandle> {
+        return this.#queueValidatedOperation(
+            () => ({
+                stateObjectIdentifier: copyOpaqueWorkerIdentifier(
+                    stateObjectIdentifier,
+                    'State object identifier',
+                ),
+                witnessRoleIdentifier: requireIssuedHandleIdentifier(
+                    witnessRole,
+                    normalWitnessRoleSessionIdentifiers,
+                    'Foundation witness role',
+                ),
+            }),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'open-foundation-witness-durable-binding',
+                    copiedInput,
+                    createDurableStateBindingHandle,
+                ),
+        );
+    }
+
+    public closeWitnessDurableStateBinding(
+        durableBinding: BrowserFoundationDurableStateBindingHandle,
+    ): Promise<void> {
+        return this.#queueValidatedOperation(
+            () =>
+                requireIssuedHandleIdentifier(
+                    durableBinding,
+                    durableStateBindingHandleIdentifiers,
+                    'Durable state binding',
+                ),
+            async (durableBindingIdentifier) => {
+                await this.#sendRequest(
+                    'close-foundation-witness-durable-binding',
+                    durableBindingIdentifier,
+                    validateVoidResult,
+                );
+                durableStateBindingHandleIdentifiers.delete(durableBinding);
+            },
         );
     }
 
@@ -697,6 +2603,144 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
         );
     }
 
+    public produceFoundationActionRandomnessReservationIntent(
+        actionRandomness: BrowserFoundationActionRandomnessHandle,
+        input: { stateVerifierSessionIdentifier: string },
+    ): Promise<
+        VerificationResult<BrowserFoundationProducedStateReservationIntent>
+    > {
+        return this.#queueValidatedOperation(
+            () => ({
+                actionRandomnessHandleIdentifier: requireIssuedHandleIdentifier(
+                    actionRandomness,
+                    foundationActionRandomnessHandleIdentifiers,
+                    'Foundation action-randomness handle',
+                ),
+                stateVerifierSessionIdentifier: copyOpaqueWorkerIdentifier(
+                    input.stateVerifierSessionIdentifier,
+                    'State-verifier session identifier',
+                ),
+            }),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'produce-foundation-action-randomness-reservation-intent',
+                    copiedInput,
+                    copyProducedStateReservationIntentVerificationResult,
+                ),
+        );
+    }
+
+    public certifyFoundationActionRandomnessReservation(
+        intent: BrowserFoundationStateReservationIntentHandle,
+        untrustedVoteCarriers: readonly Uint8Array[],
+    ): Promise<VerificationResult<BrowserFoundationProducedStateReservation>> {
+        return this.#queueValidatedOperation(
+            () => {
+                if (
+                    !Array.isArray(untrustedVoteCarriers) ||
+                    untrustedVoteCarriers.length === 0 ||
+                    untrustedVoteCarriers.length >
+                        foundationProfile.participantCount * 2
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'State reservation certification requires a bounded non-empty vote-carrier array.',
+                    );
+                }
+                return {
+                    stateIntentIdentifier: requireIssuedHandleIdentifier(
+                        intent,
+                        foundationStateReservationIntentHandleIdentifiers,
+                        'State reservation-intent handle',
+                    ),
+                    untrustedVoteCarriers: untrustedVoteCarriers.map(
+                        (carrier) =>
+                            copyBoundedBytes(
+                                carrier,
+                                foundationProfile.maximumCopiedBufferByteLength,
+                                'Canonical state witness-vote carrier',
+                            ),
+                    ),
+                };
+            },
+            async (copiedInput) => {
+                const result = await this.#sendRequest(
+                    'certify-foundation-action-randomness-reservation',
+                    copiedInput,
+                    copyProducedStateReservationVerificationResult,
+                );
+                if (result.isValid) {
+                    foundationStateReservationIntentHandleIdentifiers.delete(
+                        intent,
+                    );
+                }
+                return result;
+            },
+        );
+    }
+
+    public releaseFoundationStateReservationIntent(
+        intent: BrowserFoundationStateReservationIntentHandle,
+    ): Promise<void> {
+        return this.#queueValidatedOperation(
+            () =>
+                requireIssuedHandleIdentifier(
+                    intent,
+                    foundationStateReservationIntentHandleIdentifiers,
+                    'State reservation-intent handle',
+                ),
+            async (stateIntentIdentifier) => {
+                await this.#sendRequest(
+                    'release-foundation-state-reservation-intent',
+                    stateIntentIdentifier,
+                    validateVoidResult,
+                );
+                foundationStateReservationIntentHandleIdentifiers.delete(
+                    intent,
+                );
+            },
+        );
+    }
+
+    public voteForFoundationActionRandomnessReservationIntent(
+        witnessRole: BrowserFoundationNormalWitnessRoleHandle,
+        input: {
+            canonicalReservationIntentCarrier: Uint8Array;
+            stateVerifierSessionIdentifier: string;
+            subjectParticipantIdentity: Uint8Array;
+        },
+    ): Promise<VerificationResult<Uint8Array>> {
+        return this.#queueValidatedOperation(
+            () => ({
+                canonicalReservationIntentCarrier: copyBoundedBytes(
+                    input.canonicalReservationIntentCarrier,
+                    foundationProfile.maximumCopiedBufferByteLength,
+                    'Canonical action-randomness reservation-intent carrier',
+                ),
+                stateVerifierSessionIdentifier: copyOpaqueWorkerIdentifier(
+                    input.stateVerifierSessionIdentifier,
+                    'State-verifier session identifier',
+                ),
+                subjectParticipantIdentity: copyBytes(
+                    input.subjectParticipantIdentity,
+                    storageRootCommitmentByteLength,
+                    'State reservation subject participant identity',
+                ),
+                witnessRoleIdentifier: requireIssuedHandleIdentifier(
+                    witnessRole,
+                    normalWitnessRoleSessionIdentifiers,
+                    'Foundation witness role',
+                ),
+            }),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'vote-for-foundation-action-randomness-reservation-intent',
+                    copiedInput,
+                    copyBytesVerificationResult,
+                ),
+        );
+    }
+
     public releaseActionStateObject(identifier: string): Promise<void> {
         return this.#queueValidatedOperation(
             () =>
@@ -777,20 +2821,6 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
         );
     }
 
-    public derivePersistentProofAttempt(
-        input: BrowserPersistentProofAttemptInput,
-    ): Promise<BrowserActionProofAttemptBinding> {
-        return this.#queueValidatedOperation(
-            () => copyPersistentProofAttemptInput(input),
-            (copiedInput) =>
-                this.#sendRequest(
-                    'derive-persistent-proof-attempt',
-                    copiedInput,
-                    copyActionProofAttemptBinding,
-                ),
-        );
-    }
-
     public deriveTargetReleaseAttempt(
         input: BrowserTargetReleaseAttemptInput,
     ): Promise<BrowserActionProofAttemptBinding> {
@@ -805,6 +2835,177 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
         );
     }
 
+    public compareAndLockWitnessIntent(
+        witnessRole: BrowserFoundationNormalWitnessRoleHandle,
+        input: { durableBinding: BrowserFoundationDurableStateBindingHandle },
+    ): Promise<void> {
+        return this.#foundationWitnessDurableOperation(
+            'compare-and-lock-foundation-witness-intent',
+            witnessRole,
+            input.durableBinding,
+            undefined,
+            undefined,
+            validateVoidResult,
+        );
+    }
+
+    public cacheWitnessSignedVoteCarrier(
+        witnessRole: BrowserFoundationNormalWitnessRoleHandle,
+        input: {
+            canonicalSignedVoteCarrier: Uint8Array;
+            durableBinding: BrowserFoundationDurableStateBindingHandle;
+        },
+    ): Promise<Uint8Array> {
+        return this.#foundationWitnessDurableOperation(
+            'cache-foundation-witness-signed-vote-carrier',
+            witnessRole,
+            input.durableBinding,
+            input.canonicalSignedVoteCarrier,
+            'Canonical signed vote carrier',
+            (candidate) =>
+                copyBoundedBytes(
+                    candidate,
+                    foundationProfile.maximumCopiedBufferByteLength,
+                    'Canonical cached signed vote carrier',
+                ),
+        );
+    }
+
+    public readWitnessSignedVoteCarrier(
+        witnessRole: BrowserFoundationNormalWitnessRoleHandle,
+        input: { durableBinding: BrowserFoundationDurableStateBindingHandle },
+    ): Promise<Uint8Array> {
+        return this.#foundationWitnessDurableOperation(
+            'read-foundation-witness-signed-vote-carrier',
+            witnessRole,
+            input.durableBinding,
+            undefined,
+            undefined,
+            (value) =>
+                copyBoundedBytes(
+                    value,
+                    foundationProfile.maximumCopiedBufferByteLength,
+                    'Canonical cached signed vote carrier',
+                ),
+        );
+    }
+
+    public cacheWitnessExactOutput(
+        witnessRole: BrowserFoundationNormalWitnessRoleHandle,
+        input: {
+            durableBinding: BrowserFoundationDurableStateBindingHandle;
+            exactOutputBytes: Uint8Array;
+        },
+    ): Promise<void> {
+        return this.#foundationWitnessDurableOperation(
+            'cache-foundation-witness-exact-output',
+            witnessRole,
+            input.durableBinding,
+            input.exactOutputBytes,
+            'Exact output bytes',
+            validateVoidResult,
+        );
+    }
+
+    public readWitnessExactOutput(
+        witnessRole: BrowserFoundationNormalWitnessRoleHandle,
+        input: { durableBinding: BrowserFoundationDurableStateBindingHandle },
+    ): Promise<Uint8Array> {
+        return this.#foundationWitnessDurableOperation(
+            'read-foundation-witness-exact-output',
+            witnessRole,
+            input.durableBinding,
+            undefined,
+            undefined,
+            (value) =>
+                copyBoundedBytes(
+                    value,
+                    foundationProfile.maximumCopiedBufferByteLength,
+                    'Exact cached output bytes',
+                ),
+        );
+    }
+
+    public verifyFoundationActionRandomnessReservation(
+        actionRandomness: BrowserFoundationActionRandomnessHandle,
+        input: Omit<
+            BrowserActionRandomnessReservationVerificationInput,
+            'actionRandomnessSessionIdentifier'
+        >,
+    ): Promise<VerificationResult<string>> {
+        return this.#queueValidatedOperation(
+            () => ({
+                actionRandomnessHandleIdentifier: requireIssuedHandleIdentifier(
+                    actionRandomness,
+                    foundationActionRandomnessHandleIdentifiers,
+                    'Foundation action-randomness handle',
+                ),
+                verificationInput:
+                    copyActionRandomnessReservationVerificationInput({
+                        ...input,
+                        actionRandomnessSessionIdentifier: '0'.repeat(64),
+                    }),
+            }),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'verify-foundation-action-randomness-reservation',
+                    copiedInput,
+                    copyWorkerIdentifierVerificationResult,
+                ),
+        );
+    }
+
+    public deriveFoundationTargetReleaseAttempt(
+        actionRandomness: BrowserFoundationActionRandomnessHandle,
+        input: Omit<
+            BrowserTargetReleaseAttemptInput,
+            'actionRandomnessSessionIdentifier'
+        >,
+    ): Promise<BrowserActionProofAttemptBinding> {
+        return this.#queueValidatedOperation(
+            () => ({
+                actionRandomnessHandleIdentifier: requireIssuedHandleIdentifier(
+                    actionRandomness,
+                    foundationActionRandomnessHandleIdentifiers,
+                    'Foundation action-randomness handle',
+                ),
+                attemptInput: copyTargetReleaseAttemptInput({
+                    ...input,
+                    actionRandomnessSessionIdentifier: '0'.repeat(64),
+                }),
+            }),
+            (copiedInput) =>
+                this.#sendRequest(
+                    'derive-foundation-target-release-attempt',
+                    copiedInput,
+                    copyActionProofAttemptBinding,
+                ),
+        );
+    }
+
+    public closeFoundationActionRandomness(
+        actionRandomness: BrowserFoundationActionRandomnessHandle,
+    ): Promise<void> {
+        return this.#queueValidatedOperation(
+            () =>
+                requireIssuedHandleIdentifier(
+                    actionRandomness,
+                    foundationActionRandomnessHandleIdentifiers,
+                    'Foundation action-randomness handle',
+                ),
+            async (actionRandomnessHandleIdentifier) => {
+                await this.#sendRequest(
+                    'close-foundation-action-randomness',
+                    actionRandomnessHandleIdentifier,
+                    validateVoidResult,
+                );
+                foundationActionRandomnessHandleIdentifiers.delete(
+                    actionRandomness,
+                );
+            },
+        );
+    }
+
     public delete(
         expectedSnapshot: BrowserDeviceWrappingSnapshot,
     ): Promise<void> {
@@ -812,6 +3013,12 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
             () => copySnapshot(expectedSnapshot),
             (snapshot) =>
                 this.#sendRequest('delete', snapshot, validateVoidResult),
+        );
+    }
+
+    public retire(): Promise<void> {
+        return this.#queueOperation(() =>
+            this.#sendRequest('retire', undefined, validateVoidResult),
         );
     }
 
@@ -862,6 +3069,45 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
         }
 
         return this.#queueOperation(() => operation(copiedInput));
+    }
+
+    #foundationWitnessDurableOperation<Result>(
+        command:
+            | 'cache-foundation-witness-exact-output'
+            | 'cache-foundation-witness-signed-vote-carrier'
+            | 'compare-and-lock-foundation-witness-intent'
+            | 'read-foundation-witness-exact-output'
+            | 'read-foundation-witness-signed-vote-carrier',
+        witnessRole: BrowserFoundationNormalWitnessRoleHandle,
+        durableBinding: BrowserFoundationDurableStateBindingHandle,
+        value: unknown,
+        valueLabel: string | undefined,
+        validateResult: (candidate: unknown) => Result,
+    ): Promise<Result> {
+        return this.#queueValidatedOperation(
+            () => ({
+                durableBindingIdentifier: requireIssuedHandleIdentifier(
+                    durableBinding,
+                    durableStateBindingHandleIdentifiers,
+                    'Durable state binding',
+                ),
+                value:
+                    value === undefined
+                        ? undefined
+                        : copyBoundedBytes(
+                              value,
+                              foundationProfile.maximumCopiedBufferByteLength,
+                              valueLabel ?? 'Durable witness value',
+                          ),
+                witnessRoleIdentifier: requireIssuedHandleIdentifier(
+                    witnessRole,
+                    normalWitnessRoleSessionIdentifiers,
+                    'Foundation witness role',
+                ),
+            }),
+            (copiedInput) =>
+                this.#sendRequest(command, copiedInput, validateResult),
+        );
     }
 
     #queueOperation<Result>(operation: () => Promise<Result>): Promise<Result> {
@@ -975,7 +3221,7 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
             activeRequest.reject(
                 new BrowserActionStorageCustodyError(
                     message.errorCode,
-                    `The browser action-storage worker refused ${activeRequest.command}.`,
+                    `The browser action-storage worker refused ${activeRequest.command}${message.errorMessage === undefined ? '.' : `: ${message.errorMessage}`}`,
                 ),
             );
             return;
@@ -986,7 +3232,7 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
             this.#failChannel(
                 new BrowserActionStorageCustodyError(
                     'OwnedWorkerFailure',
-                    'The browser action-storage worker result failed validation.',
+                    `The browser action-storage worker result failed validation${error instanceof Error ? `: ${error.message}` : '.'}`,
                     error,
                 ),
                 activeRequest,
@@ -1018,52 +3264,430 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserActionStorageCus
     }
 }
 
+const makeTransferableCustody = (
+    custody: BrowserFoundationStorageAuthority,
+): TransferableBrowserFoundationStorageAuthority => {
+    const lifecycle = new ExclusiveResourceLifecycle({
+        cleanup: () => custody.close(),
+        createInvalidStateError: (message) =>
+            new BrowserActionStorageCustodyError('InvalidState', message),
+    });
+    const initialOwner = lifecycle.initialOwner();
+    const createOwnedCustody = (
+        owner: ExclusiveResourceOwnerToken,
+    ): BrowserFoundationStorageAuthority =>
+        Object.freeze({
+            authenticateFoundationHead: () =>
+                lifecycle.run(owner, () =>
+                    custody.authenticateFoundationHead(),
+                ),
+            beginCheckpoint: (streamAttemptIdentifiers) =>
+                lifecycle.run(owner, () =>
+                    custody.beginCheckpoint(streamAttemptIdentifiers),
+                ),
+            close: () => lifecycle.close(owner),
+            closeActionRandomness: (identifier) =>
+                lifecycle.run(owner, () =>
+                    custody.closeActionRandomness(identifier),
+                ),
+            closeActionStateVerifierSession: (identifier) =>
+                lifecycle.run(owner, () =>
+                    custody.closeActionStateVerifierSession(identifier),
+                ),
+            copyBinding: () => {
+                lifecycle.assertOpen(owner);
+                return custody.copyBinding();
+            },
+            copyCheckpointDescription: (checkpoint) =>
+                lifecycle.run(owner, () =>
+                    custody.copyCheckpointDescription(checkpoint),
+                ),
+            commitFreshFoundationInitialization: (preparationInput) =>
+                lifecycle.run(owner, () =>
+                    custody.commitFreshFoundationInitialization(
+                        preparationInput,
+                    ),
+                ),
+            createAndSealActionRandomness: (operationInput) =>
+                lifecycle.run(owner, () =>
+                    custody.createAndSealActionRandomness(operationInput),
+                ),
+            evictCheckpoint: (checkpoint) =>
+                lifecycle.run(owner, () => custody.evictCheckpoint(checkpoint)),
+            currentSnapshot: () =>
+                lifecycle.run(owner, () => custody.currentSnapshot()),
+            delete: (expectedSnapshot) =>
+                lifecycle.run(owner, () => custody.delete(expectedSnapshot)),
+            retire: () => lifecycle.run(owner, () => custody.retire()),
+            deriveLocalRecordIdentifier: (identifierInput) =>
+                lifecycle.run(owner, () =>
+                    custody.deriveLocalRecordIdentifier(identifierInput),
+                ),
+            deriveTargetReleaseAttempt: (attemptInput) =>
+                lifecycle.run(owner, () =>
+                    custody.deriveTargetReleaseAttempt(attemptInput),
+                ),
+            hashLocalRecordEnvelope: (envelope) =>
+                lifecycle.run(owner, () =>
+                    custody.hashLocalRecordEnvelope(envelope),
+                ),
+            initialize: () => lifecycle.run(owner, () => custody.initialize()),
+            openActionStateVerifierSession: (sessionInput) =>
+                lifecycle.run(owner, () =>
+                    custody.openActionStateVerifierSession(sessionInput),
+                ),
+            openIntoOwnedWorker: (openInput) =>
+                lifecycle.run(owner, () =>
+                    custody.openIntoOwnedWorker(openInput),
+                ),
+            openLocalRecord: (recordInput) =>
+                lifecycle.run(owner, () =>
+                    custody.openLocalRecord(recordInput),
+                ),
+            openSealedActionRandomness: (operationInput) =>
+                lifecycle.run(owner, () =>
+                    custody.openSealedActionRandomness(operationInput),
+                ),
+            publishCheckpoint: (checkpoint, publicationInput) =>
+                lifecycle.run(owner, () =>
+                    custody.publishCheckpoint(checkpoint, publicationInput),
+                ),
+            releaseActionStateObject: (identifier) =>
+                lifecycle.run(owner, () =>
+                    custody.releaseActionStateObject(identifier),
+                ),
+            restoreCheckpointState: (checkpoint, consumeChunk) =>
+                lifecycle.run(owner, () =>
+                    custody.restoreCheckpointState(checkpoint, consumeChunk),
+                ),
+            resumeCheckpoint: (resumeInput) =>
+                lifecycle.run(owner, () =>
+                    custody.resumeCheckpoint(resumeInput),
+                ),
+            sealLocalRecord: (recordInput) =>
+                lifecycle.run(owner, () =>
+                    custody.sealLocalRecord(recordInput),
+                ),
+            verifyActionRandomnessReservation: (verificationInput) =>
+                lifecycle.run(owner, () =>
+                    custody.verifyActionRandomnessReservation(
+                        verificationInput,
+                    ),
+                ),
+            verifyActionStateReservation: (verificationInput) =>
+                lifecycle.run(owner, () =>
+                    custody.verifyActionStateReservation(verificationInput),
+                ),
+        });
+    const initialCustody = createOwnedCustody(initialOwner);
+    return Object.freeze({
+        ...initialCustody,
+        claimExclusiveOwner: () =>
+            createOwnedCustody(lifecycle.claim(initialOwner)),
+    });
+};
+
+const makeTransferableFoundationOperationOwner = (
+    client: BrowserActionStorageCustodyWorkerClient,
+): TransferableBrowserFoundationOperationOwner => {
+    const lifecycle = new ExclusiveResourceLifecycle({
+        cleanup: () => client.close(),
+        createInvalidStateError: (message) =>
+            new BrowserActionStorageCustodyError('InvalidState', message),
+    });
+    const initialOwner = lifecycle.initialOwner();
+    const createOwnedOperationOwner = (
+        owner: ExclusiveResourceOwnerToken,
+    ): BrowserFoundationOperationOwner =>
+        Object.freeze({
+            activateFreshFoundationInitialization: (committedBatch) =>
+                lifecycle.run(owner, () =>
+                    client.activateFreshFoundationInitialization(
+                        committedBatch,
+                    ),
+                ),
+            activateRecoveredFoundationInitialization: (recoveredBatch) =>
+                lifecycle.run(owner, () =>
+                    client.activateRecoveredFoundationInitialization(
+                        recoveredBatch,
+                    ),
+                ),
+            beginCheckpoint: (streamAttemptIdentifiers) =>
+                lifecycle.run(owner, () =>
+                    client.beginCheckpoint(streamAttemptIdentifiers),
+                ),
+            cacheWitnessExactOutput: (witnessRole, cacheInput) =>
+                lifecycle.run(owner, () =>
+                    client.cacheWitnessExactOutput(witnessRole, cacheInput),
+                ),
+            cacheWitnessSignedVoteCarrier: (witnessRole, cacheInput) =>
+                lifecycle.run(owner, () =>
+                    client.cacheWitnessSignedVoteCarrier(
+                        witnessRole,
+                        cacheInput,
+                    ),
+                ),
+            close: () => lifecycle.close(owner),
+            closeFoundationActionRandomness: (actionRandomness) =>
+                lifecycle.run(owner, () =>
+                    client.closeFoundationActionRandomness(actionRandomness),
+                ),
+            closeWitnessDurableStateBinding: (durableBinding) =>
+                lifecycle.run(owner, () =>
+                    client.closeWitnessDurableStateBinding(durableBinding),
+                ),
+            commitFreshFoundationInitialization: (initializationInput) =>
+                lifecycle.run(owner, () =>
+                    client.commitFoundationOperationInitialization(
+                        initializationInput,
+                    ),
+                ),
+            compareAndLockWitnessIntent: (witnessRole, compareInput) =>
+                lifecycle.run(owner, () =>
+                    client.compareAndLockWitnessIntent(
+                        witnessRole,
+                        compareInput,
+                    ),
+                ),
+            certifyFoundationActionRandomnessReservation: (
+                intent,
+                untrustedVoteCarriers,
+            ) =>
+                lifecycle.run(owner, () =>
+                    client.certifyFoundationActionRandomnessReservation(
+                        intent,
+                        untrustedVoteCarriers,
+                    ),
+                ),
+            copyBinding: () => {
+                lifecycle.assertOpen(owner);
+                return client.copyBinding();
+            },
+            copyCheckpointDescription: (checkpoint) =>
+                lifecycle.run(owner, () =>
+                    client.copyCheckpointDescription(checkpoint),
+                ),
+            copyWitnessSubjectParticipantIdentity: (witnessRole) =>
+                lifecycle.run(owner, () =>
+                    client.copyWitnessSubjectParticipantIdentity(witnessRole),
+                ),
+            deriveFoundationTargetReleaseAttempt: (
+                actionRandomness,
+                attemptInput,
+            ) =>
+                lifecycle.run(owner, () =>
+                    client.deriveFoundationTargetReleaseAttempt(
+                        actionRandomness,
+                        attemptInput,
+                    ),
+                ),
+            openActionStateVerifierSession: (sessionInput) =>
+                lifecycle.run(owner, () =>
+                    client.openActionStateVerifierSession(sessionInput),
+                ),
+            openRecoveredFoundationInitialization: (initializationInput) =>
+                lifecycle.run(owner, () =>
+                    client.openRecoveredFoundationInitialization(
+                        initializationInput,
+                    ),
+                ),
+            openWitnessDurableStateBinding: (
+                witnessRole,
+                stateObjectIdentifier,
+            ) =>
+                lifecycle.run(owner, () =>
+                    client.openWitnessDurableStateBinding(
+                        witnessRole,
+                        stateObjectIdentifier,
+                    ),
+                ),
+            produceFoundationActionRandomnessReservationIntent: (
+                actionRandomness,
+                productionInput,
+            ) =>
+                lifecycle.run(owner, () =>
+                    client.produceFoundationActionRandomnessReservationIntent(
+                        actionRandomness,
+                        productionInput,
+                    ),
+                ),
+            publishCheckpoint: (checkpoint, publicationInput) =>
+                lifecycle.run(owner, () =>
+                    client.publishCheckpoint(checkpoint, publicationInput),
+                ),
+            readWitnessExactOutput: (witnessRole, readInput) =>
+                lifecycle.run(owner, () =>
+                    client.readWitnessExactOutput(witnessRole, readInput),
+                ),
+            readWitnessSignedVoteCarrier: (witnessRole, readInput) =>
+                lifecycle.run(owner, () =>
+                    client.readWitnessSignedVoteCarrier(witnessRole, readInput),
+                ),
+            releaseActionStateObject: (identifier) =>
+                lifecycle.run(owner, () =>
+                    client.releaseActionStateObject(identifier),
+                ),
+            releaseFoundationStateReservationIntent: (intent) =>
+                lifecycle.run(owner, () =>
+                    client.releaseFoundationStateReservationIntent(intent),
+                ),
+            restoreCheckpointState: (checkpoint, consumeChunk) =>
+                lifecycle.run(owner, () =>
+                    client.restoreCheckpointState(checkpoint, consumeChunk),
+                ),
+            resumeCheckpoint: (resumeInput) =>
+                lifecycle.run(owner, () =>
+                    client.resumeCheckpoint(resumeInput),
+                ),
+            verifyActionStateReservation: (verificationInput) =>
+                lifecycle.run(owner, () =>
+                    client.verifyActionStateReservation(verificationInput),
+                ),
+            verifyFoundationActionRandomnessReservation: (
+                actionRandomness,
+                verificationInput,
+            ) =>
+                lifecycle.run(owner, () =>
+                    client.verifyFoundationActionRandomnessReservation(
+                        actionRandomness,
+                        verificationInput,
+                    ),
+                ),
+            voteForFoundationActionRandomnessReservationIntent: (
+                witnessRole,
+                voteInput,
+            ) =>
+                lifecycle.run(owner, () =>
+                    client.voteForFoundationActionRandomnessReservationIntent(
+                        witnessRole,
+                        voteInput,
+                    ),
+                ),
+        });
+    const initialOperationOwner = createOwnedOperationOwner(initialOwner);
+    return Object.freeze({
+        ...initialOperationOwner,
+        claimExclusiveOwner: () =>
+            createOwnedOperationOwner(lifecycle.claim(initialOwner)),
+    });
+};
+
 export const openBrowserActionStorageCustodyWorker = async (input: {
     configuration: BrowserActionStorageCustodyWorkerConfiguration;
     worker: CustodyWorkerLike;
-}): Promise<BrowserActionStorageCustody> => {
+}): Promise<TransferableBrowserFoundationStorageAuthority> => {
     const client = new BrowserActionStorageCustodyWorkerClient(input.worker);
     try {
         await client.open(input.configuration);
 
-        return Object.freeze({
-            closeActionRandomness: (identifier) =>
-                client.closeActionRandomness(identifier),
-            closeActionStateVerifierSession: (identifier) =>
-                client.closeActionStateVerifierSession(identifier),
-            close: () => client.close(),
-            copyBinding: () => client.copyBinding(),
-            currentSnapshot: () => client.currentSnapshot(),
-            createAndSealActionRandomness: (operationInput) =>
-                client.createAndSealActionRandomness(operationInput),
-            delete: (expectedSnapshot) => client.delete(expectedSnapshot),
-            deriveLocalRecordIdentifier: (identifierInput) =>
-                client.deriveLocalRecordIdentifier(identifierInput),
-            derivePersistentProofAttempt: (attemptInput) =>
-                client.derivePersistentProofAttempt(attemptInput),
-            deriveTargetReleaseAttempt: (attemptInput) =>
-                client.deriveTargetReleaseAttempt(attemptInput),
-            hashLocalRecordEnvelope: (envelope) =>
-                client.hashLocalRecordEnvelope(envelope),
-            initialize: () => client.initialize(),
-            openLocalRecord: (recordInput) =>
-                client.openLocalRecord(recordInput),
-            openActionStateVerifierSession: (sessionInput) =>
-                client.openActionStateVerifierSession(sessionInput),
-            openIntoOwnedWorker: (openInput) =>
-                client.openIntoOwnedWorker(openInput),
-            openSealedActionRandomness: (operationInput) =>
-                client.openSealedActionRandomness(operationInput),
-            releaseActionStateObject: (identifier) =>
-                client.releaseActionStateObject(identifier),
-            sealLocalRecord: (recordInput) =>
-                client.sealLocalRecord(recordInput),
-            verifyActionStateReservation: (verificationInput) =>
-                client.verifyActionStateReservation(verificationInput),
-            verifyActionRandomnessReservation: (verificationInput) =>
-                client.verifyActionRandomnessReservation(verificationInput),
-        } satisfies BrowserActionStorageCustody);
+        return makeTransferableCustody(
+            Object.freeze({
+                authenticateFoundationHead: () =>
+                    client.authenticateFoundationHead(),
+                beginCheckpoint: (streamAttemptIdentifiers) =>
+                    client.beginCheckpoint(streamAttemptIdentifiers),
+                closeActionRandomness: (identifier) =>
+                    client.closeActionRandomness(identifier),
+                closeActionStateVerifierSession: (identifier) =>
+                    client.closeActionStateVerifierSession(identifier),
+                close: () => client.close(),
+                copyBinding: () => client.copyBinding(),
+                copyCheckpointDescription: (checkpoint) =>
+                    client.copyCheckpointDescription(checkpoint),
+                commitFreshFoundationInitialization: (preparationInput) =>
+                    client.commitFreshFoundationInitialization(
+                        preparationInput,
+                    ),
+                currentSnapshot: () => client.currentSnapshot(),
+                createAndSealActionRandomness: (operationInput) =>
+                    client.createAndSealActionRandomness(operationInput),
+                delete: (expectedSnapshot) => client.delete(expectedSnapshot),
+                retire: () => client.retire(),
+                deriveLocalRecordIdentifier: (identifierInput) =>
+                    client.deriveLocalRecordIdentifier(identifierInput),
+                deriveTargetReleaseAttempt: (attemptInput) =>
+                    client.deriveTargetReleaseAttempt(attemptInput),
+                evictCheckpoint: (checkpoint) =>
+                    client.evictCheckpoint(checkpoint),
+                hashLocalRecordEnvelope: (envelope) =>
+                    client.hashLocalRecordEnvelope(envelope),
+                initialize: () => client.initialize(),
+                openLocalRecord: (recordInput) =>
+                    client.openLocalRecord(recordInput),
+                openActionStateVerifierSession: (sessionInput) =>
+                    client.openActionStateVerifierSession(sessionInput),
+                openIntoOwnedWorker: (openInput) =>
+                    client.openIntoOwnedWorker(openInput),
+                openSealedActionRandomness: (operationInput) =>
+                    client.openSealedActionRandomness(operationInput),
+                publishCheckpoint: (checkpoint, publicationInput) =>
+                    client.publishCheckpoint(checkpoint, publicationInput),
+                releaseActionStateObject: (identifier) =>
+                    client.releaseActionStateObject(identifier),
+                restoreCheckpointState: (checkpoint, consumeChunk) =>
+                    client.restoreCheckpointState(checkpoint, consumeChunk),
+                resumeCheckpoint: (resumeInput) =>
+                    client.resumeCheckpoint(resumeInput),
+                sealLocalRecord: (recordInput) =>
+                    client.sealLocalRecord(recordInput),
+                verifyActionStateReservation: (verificationInput) =>
+                    client.verifyActionStateReservation(verificationInput),
+                verifyActionRandomnessReservation: (verificationInput) =>
+                    client.verifyActionRandomnessReservation(verificationInput),
+            } satisfies BrowserFoundationStorageAuthority),
+        );
     } catch (error) {
+        client.abortAfterOpenFailure();
+        throw error;
+    }
+};
+
+export const openBrowserFoundationOperationOwnerWorker = async (input: {
+    configuration: BrowserActionStorageCustodyWorkerConfiguration;
+    rootOpening: BrowserFoundationOperationOwnerWorkerRootOpening;
+    worker: CustodyWorkerLike;
+}): Promise<OpenedBrowserFoundationOperationOwnerWorker> => {
+    const client = new BrowserActionStorageCustodyWorkerClient(input.worker);
+    let freshSnapshot: BrowserDeviceWrappingSnapshot | undefined;
+    try {
+        await client.open(input.configuration);
+        const deviceWrappingSnapshot =
+            input.rootOpening.mode === 'fresh'
+                ? await client.initialize()
+                : copySnapshot(input.rootOpening.expectedSnapshot);
+        if (input.rootOpening.mode === 'fresh') {
+            freshSnapshot = deviceWrappingSnapshot;
+            await client.openIntoOwnedWorker({
+                expectedSnapshot: deviceWrappingSnapshot,
+                untrustedExpectedCommitment: Object.freeze({
+                    storageRootCommitment:
+                        deviceWrappingSnapshot.storageRootCommitment.slice(),
+                }),
+            });
+        } else {
+            await client.openIntoOwnedWorker({
+                expectedSnapshot: deviceWrappingSnapshot,
+                untrustedExpectedCommitment:
+                    input.rootOpening.untrustedExpectedCommitment,
+            });
+        }
+        return Object.freeze({
+            deviceWrappingSnapshot: copySnapshot(deviceWrappingSnapshot),
+            operationOwner: makeTransferableFoundationOperationOwner(client),
+        });
+    } catch (error) {
+        if (freshSnapshot !== undefined) {
+            try {
+                await client.delete(freshSnapshot);
+            } catch (cleanupFailure) {
+                client.abortAfterOpenFailure();
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'Fresh foundation root opening failed and its worker-owned rollback also failed.',
+                    [error, cleanupFailure],
+                );
+            }
+        }
         client.abortAfterOpenFailure();
         throw error;
     }
@@ -1078,10 +3702,281 @@ const copyHostCommandInput = (
             return copyWorkerConfiguration(input);
         case 'initialize':
         case 'current-snapshot':
+        case 'authenticate-foundation-head':
+        case 'retire':
         case 'close':
             return validateVoidResult(input);
+        case 'activate-fresh-foundation-initialization':
+        case 'activate-recovered-foundation-initialization':
+            return copyOpaqueWorkerIdentifier(
+                input,
+                'Foundation initialization batch identifier',
+            );
+        case 'copy-foundation-witness-subject':
+            return copyOpaqueWorkerIdentifier(
+                input,
+                'Foundation witness role identifier',
+            );
+        case 'close-foundation-action-randomness':
+            return copyOpaqueWorkerIdentifier(
+                input,
+                'Foundation action-randomness handle identifier',
+            );
+        case 'close-foundation-witness-durable-binding':
+            return copyOpaqueWorkerIdentifier(
+                input,
+                'Durable state binding handle identifier',
+            );
+        case 'release-foundation-state-reservation-intent':
+            return copyOpaqueWorkerIdentifier(
+                input,
+                'State reservation-intent identifier',
+            );
         case 'open-root':
             return copyBoundSnapshotInput(input);
+        case 'begin-checkpoint':
+            if (
+                !Array.isArray(input) ||
+                input.length > maximumCheckpointCollectionLength
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Checkpoint stream-attempt identifiers are malformed.',
+                );
+            }
+            return Object.freeze(
+                input.map((identifier, index) =>
+                    copyBytes(
+                        identifier,
+                        32,
+                        `Checkpoint stream-attempt identifier ${String(index)}`,
+                    ),
+                ),
+            );
+        case 'copy-checkpoint-description':
+        case 'evict-checkpoint':
+        case 'begin-checkpoint-restore':
+            return copyOpaqueWorkerIdentifier(input, 'Checkpoint identifier');
+        case 'commit-checkpoint-publication':
+        case 'abort-checkpoint-publication':
+            return copyOpaqueWorkerIdentifier(
+                input,
+                'Checkpoint publication identifier',
+            );
+        case 'abort-checkpoint-restore':
+        case 'read-checkpoint-restore-chunk':
+            return copyOpaqueWorkerIdentifier(
+                input,
+                'Checkpoint restore identifier',
+            );
+        case 'resume-checkpoint':
+            if (!isPlainRecord(input)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Checkpoint resume input is malformed.',
+                );
+            }
+            return Object.freeze({
+                checkpointLineageIdentifier: copyBytes(
+                    input.checkpointLineageIdentifier,
+                    32,
+                    'Checkpoint lineage identifier',
+                ),
+                expectedBoundary: copyCheckpointBoundary(
+                    input.expectedBoundary as ExpectedCheckpointBoundary,
+                    false,
+                ),
+            });
+        case 'begin-checkpoint-publication':
+            if (!isPlainRecord(input)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Checkpoint publication input is malformed.',
+                );
+            }
+            return Object.freeze({
+                boundary: copyCheckpointBoundary(
+                    input.boundary as CheckpointBoundary,
+                    true,
+                ),
+                checkpointIdentifier: copyOpaqueWorkerIdentifier(
+                    input.checkpointIdentifier,
+                    'Checkpoint identifier',
+                ),
+            });
+        case 'write-checkpoint-publication-chunk':
+            if (!isPlainRecord(input)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Checkpoint publication chunk input is malformed.',
+                );
+            }
+            return Object.freeze({
+                chunk: copyBoundedBytes(
+                    input.chunk,
+                    maximumCheckpointDescriptorByteLength,
+                    'Checkpoint state chunk',
+                ),
+                publicationIdentifier: copyOpaqueWorkerIdentifier(
+                    input.publicationIdentifier,
+                    'Checkpoint publication identifier',
+                ),
+            });
+        case 'open-foundation-witness-durable-binding':
+            if (!isPlainRecord(input)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Foundation durable state binding input is malformed.',
+                );
+            }
+            return Object.freeze({
+                stateObjectIdentifier: copyOpaqueWorkerIdentifier(
+                    input.stateObjectIdentifier,
+                    'State object identifier',
+                ),
+                witnessRoleIdentifier: copyOpaqueWorkerIdentifier(
+                    input.witnessRoleIdentifier,
+                    'Foundation witness role identifier',
+                ),
+            });
+        case 'produce-foundation-action-randomness-reservation-intent':
+            if (!isPlainRecord(input)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Foundation state reservation-intent production input is malformed.',
+                );
+            }
+            return Object.freeze({
+                actionRandomnessHandleIdentifier: copyOpaqueWorkerIdentifier(
+                    input.actionRandomnessHandleIdentifier,
+                    'Foundation action-randomness handle identifier',
+                ),
+                stateVerifierSessionIdentifier: copyOpaqueWorkerIdentifier(
+                    input.stateVerifierSessionIdentifier,
+                    'State-verifier session identifier',
+                ),
+            });
+        case 'certify-foundation-action-randomness-reservation':
+            if (
+                !isPlainRecord(input) ||
+                !Array.isArray(input.untrustedVoteCarriers) ||
+                input.untrustedVoteCarriers.length === 0 ||
+                input.untrustedVoteCarriers.length >
+                    foundationProfile.participantCount * 2
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Foundation state reservation certification input is malformed.',
+                );
+            }
+            return Object.freeze({
+                stateIntentIdentifier: copyOpaqueWorkerIdentifier(
+                    input.stateIntentIdentifier,
+                    'State reservation-intent identifier',
+                ),
+                untrustedVoteCarriers: Object.freeze(
+                    input.untrustedVoteCarriers.map((carrier, carrierIndex) =>
+                        copyBoundedBytes(
+                            carrier,
+                            foundationProfile.maximumCopiedBufferByteLength,
+                            `Canonical state witness-vote carrier ${String(carrierIndex)}`,
+                        ),
+                    ),
+                ),
+            });
+        case 'vote-for-foundation-action-randomness-reservation-intent':
+            if (!isPlainRecord(input)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Foundation state reservation witness-vote input is malformed.',
+                );
+            }
+            return Object.freeze({
+                canonicalReservationIntentCarrier: copyBoundedBytes(
+                    input.canonicalReservationIntentCarrier,
+                    foundationProfile.maximumCopiedBufferByteLength,
+                    'Canonical action-randomness reservation-intent carrier',
+                ),
+                stateVerifierSessionIdentifier: copyOpaqueWorkerIdentifier(
+                    input.stateVerifierSessionIdentifier,
+                    'State-verifier session identifier',
+                ),
+                subjectParticipantIdentity: copyBytes(
+                    input.subjectParticipantIdentity,
+                    storageRootCommitmentByteLength,
+                    'State reservation subject participant identity',
+                ),
+                witnessRoleIdentifier: copyOpaqueWorkerIdentifier(
+                    input.witnessRoleIdentifier,
+                    'Foundation witness role identifier',
+                ),
+            });
+        case 'compare-and-lock-foundation-witness-intent':
+        case 'read-foundation-witness-exact-output':
+        case 'read-foundation-witness-signed-vote-carrier':
+        case 'cache-foundation-witness-exact-output':
+        case 'cache-foundation-witness-signed-vote-carrier': {
+            if (!isPlainRecord(input)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Foundation durable witness operation input is malformed.',
+                );
+            }
+            const operationCarriesValue =
+                command === 'cache-foundation-witness-exact-output' ||
+                command === 'cache-foundation-witness-signed-vote-carrier';
+            if (!operationCarriesValue) {
+                validateVoidResult(input.value);
+            }
+            return Object.freeze({
+                durableBindingIdentifier: copyOpaqueWorkerIdentifier(
+                    input.durableBindingIdentifier,
+                    'Durable state binding handle identifier',
+                ),
+                value: operationCarriesValue
+                    ? copyBoundedBytes(
+                          input.value,
+                          foundationProfile.maximumCopiedBufferByteLength,
+                          'Foundation durable witness operation bytes',
+                      )
+                    : undefined,
+                witnessRoleIdentifier: copyOpaqueWorkerIdentifier(
+                    input.witnessRoleIdentifier,
+                    'Foundation witness role identifier',
+                ),
+            });
+        }
+        case 'verify-foundation-action-randomness-reservation':
+            if (!isPlainRecord(input)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Foundation action-randomness verification input is malformed.',
+                );
+            }
+            return Object.freeze({
+                actionRandomnessHandleIdentifier: copyOpaqueWorkerIdentifier(
+                    input.actionRandomnessHandleIdentifier,
+                    'Foundation action-randomness handle identifier',
+                ),
+                verificationInput:
+                    copyActionRandomnessReservationVerificationInput(
+                        input.verificationInput,
+                    ),
+            });
+        case 'derive-foundation-target-release-attempt':
+            if (!isPlainRecord(input)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Foundation target-release attempt input is malformed.',
+                );
+            }
+            return Object.freeze({
+                actionRandomnessHandleIdentifier: copyOpaqueWorkerIdentifier(
+                    input.actionRandomnessHandleIdentifier,
+                    'Foundation action-randomness handle identifier',
+                ),
+                attemptInput: copyTargetReleaseAttemptInput(input.attemptInput),
+            });
         case 'derive-record-identifier':
             return copyLocalRecordIdentifierInput(input);
         case 'open-state-verifier-session':
@@ -1106,8 +4001,6 @@ const copyHostCommandInput = (
                 input,
                 'Action-randomness session identifier',
             );
-        case 'derive-persistent-proof-attempt':
-            return copyPersistentProofAttemptInput(input);
         case 'derive-target-release-attempt':
             return copyTargetReleaseAttemptInput(input);
         case 'seal-record':
@@ -1120,6 +4013,13 @@ const copyHostCommandInput = (
                 errorCode: 'InvalidInput',
                 label: 'Local-record envelope',
             });
+        case 'commit-fresh-foundation-initialization':
+            return copyBrowserFoundationInitializationPreparationInput(
+                input as BrowserFoundationInitializationPreparationInput,
+            );
+        case 'commit-foundation-operation-initialization':
+        case 'open-recovered-foundation-initialization':
+            return copyFoundationOperationInitializationInput(input);
         case 'delete':
             return copySnapshot(input);
     }
@@ -1132,12 +4032,125 @@ const copyHostCommandResult = (
     switch (command) {
         case 'open-custody':
         case 'open-root':
+        case 'abort-checkpoint-publication':
+        case 'abort-checkpoint-restore':
+        case 'evict-checkpoint':
+        case 'write-checkpoint-publication-chunk':
         case 'close-action-randomness':
         case 'close-state-verifier-session':
+        case 'release-foundation-state-reservation-intent':
         case 'release-state-object':
         case 'delete':
+        case 'retire':
         case 'close':
             return validateVoidResult(result);
+        case 'activate-fresh-foundation-initialization':
+        case 'activate-recovered-foundation-initialization':
+            return copyWorkerActivatedFoundationInitializationResult(result);
+        case 'begin-checkpoint':
+        case 'resume-checkpoint': {
+            if (
+                !isPlainRecord(result) ||
+                typeof result.checkpointIdentifier !== 'string'
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The owned worker returned a malformed checkpoint handle.',
+                );
+            }
+            return Object.freeze({
+                checkpointIdentifier: copyOpaqueWorkerIdentifier(
+                    result.checkpointIdentifier,
+                    'Checkpoint identifier',
+                ),
+            });
+        }
+        case 'copy-checkpoint-description':
+            return copyCheckpointDescription(result);
+        case 'begin-checkpoint-publication':
+        case 'begin-checkpoint-restore':
+            return copyOpaqueWorkerIdentifier(
+                result,
+                'Checkpoint stream identifier',
+            );
+        case 'commit-checkpoint-publication':
+            return copyBoundedBytes(
+                result,
+                maximumCheckpointDescriptorByteLength,
+                'Checkpoint canonical manifest',
+            );
+        case 'read-checkpoint-restore-chunk':
+            if (!isPlainRecord(result) || typeof result.done !== 'boolean') {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The owned worker returned malformed checkpoint restore output.',
+                );
+            }
+            return result.done
+                ? Object.freeze({ done: true })
+                : Object.freeze({
+                      chunkBytes: copyBoundedBytes(
+                          result.chunkBytes,
+                          maximumCheckpointDescriptorByteLength,
+                          'Restored checkpoint chunk',
+                      ),
+                      chunkIndex: result.chunkIndex,
+                      done: false,
+                  });
+        case 'authenticate-foundation-head':
+            return copyFoundationFreshnessCoordinate(result);
+        case 'commit-fresh-foundation-initialization':
+        case 'commit-foundation-operation-initialization':
+            return copyWorkerCommittedFoundationInitializationResult(result);
+        case 'open-recovered-foundation-initialization': {
+            if (
+                !isPlainRecord(result) ||
+                typeof result.batchIdentifier !== 'string'
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The owned worker returned malformed recovered foundation initialization authority.',
+                );
+            }
+            return Object.freeze({
+                batchIdentifier: copyOpaqueWorkerIdentifier(
+                    result.batchIdentifier,
+                    'Recovered foundation initialization batch identifier',
+                ),
+                freshnessCoordinate: copyFoundationFreshnessCoordinate(
+                    result.freshnessCoordinate,
+                ),
+            });
+        }
+        case 'copy-foundation-witness-subject':
+            return copyBytes(
+                result,
+                storageRootCommitmentByteLength,
+                'Foundation witness subject participant identity',
+            );
+        case 'vote-for-foundation-action-randomness-reservation-intent':
+            return copyBytesVerificationResult(result);
+        case 'open-foundation-witness-durable-binding':
+            return copyOpaqueWorkerIdentifier(
+                result,
+                'Durable state binding handle identifier',
+            );
+        case 'compare-and-lock-foundation-witness-intent':
+        case 'cache-foundation-witness-exact-output':
+            return validateVoidResult(result);
+        case 'cache-foundation-witness-signed-vote-carrier':
+            return copyBoundedBytes(
+                result,
+                foundationProfile.maximumCopiedBufferByteLength,
+                'Canonical cached signed vote carrier',
+            );
+        case 'read-foundation-witness-exact-output':
+        case 'read-foundation-witness-signed-vote-carrier':
+            return copyBoundedBytes(
+                result,
+                foundationProfile.maximumCopiedBufferByteLength,
+                'Foundation durable witness bytes',
+            );
         case 'derive-record-identifier':
         case 'hash-record-envelope':
             return copyLocalRecordBytes(result, {
@@ -1148,14 +4161,21 @@ const copyHostCommandResult = (
             });
         case 'open-state-verifier-session':
         case 'verify-action-randomness-reservation':
+        case 'verify-foundation-action-randomness-reservation':
         case 'verify-state-reservation':
             return copyWorkerIdentifierVerificationResult(result);
+        case 'produce-foundation-action-randomness-reservation-intent':
+            return copyWorkerProducedStateReservationIntentVerificationResult(
+                result,
+            );
+        case 'certify-foundation-action-randomness-reservation':
+            return copyProducedStateReservationVerificationResult(result);
         case 'create-and-seal-action-randomness':
             return copySealedActionRandomnessSession(result);
         case 'open-sealed-action-randomness':
             return copyOpenedActionRandomnessSession(result);
-        case 'derive-persistent-proof-attempt':
         case 'derive-target-release-attempt':
+        case 'derive-foundation-target-release-attempt':
             return copyActionProofAttemptBinding(result);
         case 'seal-record':
             return copyLocalRecordBytes(result, {
@@ -1179,6 +4199,20 @@ const copyHostCommandResult = (
 const normalizeHostErrorCode = (
     error: unknown,
 ): BrowserActionStorageCustodyErrorCode => {
+    if (typeof error === 'object' && error !== null && 'code' in error) {
+        if (error.code === 'Conflict') {
+            return 'Conflict';
+        }
+        if (error.code === 'AuthenticationFailed') {
+            return 'RecordAuthenticationFailed';
+        }
+        if (error.code === 'MissingRecord') {
+            return 'Unavailable';
+        }
+        if (error.code === 'InvalidConfiguration') {
+            return 'InvalidInput';
+        }
+    }
     if (
         error instanceof BrowserActionStorageCustodyError &&
         isCustodyErrorCode(error.code)
@@ -1205,16 +4239,183 @@ const normalizeHostErrorCode = (
     return 'OwnedWorkerFailure';
 };
 
+const describeHostError = (error: unknown, depth = 0): string => {
+    if (depth >= 12) {
+        return 'nested failure';
+    }
+    if (Array.isArray(error)) {
+        return error
+            .map((item) => describeHostError(item, depth + 1))
+            .join(' | ');
+    }
+    if (error instanceof Error) {
+        const failureCause =
+            'failureCause' in error
+                ? (error as Error & { failureCause?: unknown }).failureCause
+                : undefined;
+        return `${error.name}: ${error.message}${failureCause === undefined ? '' : ` -> ${describeHostError(failureCause, depth + 1)}`}`;
+    }
+    return String(error);
+};
+
+class BoundedWorkerAsyncChannel<Value> implements AsyncIterable<Value> {
+    #failure: Error | undefined;
+    #finished = false;
+    #pending:
+        | Readonly<{
+              reject(error: unknown): void;
+              resolve(): void;
+              value: Value;
+          }>
+        | undefined;
+    #waiting:
+        | Readonly<{
+              reject(error: unknown): void;
+              resolve(result: IteratorResult<Value>): void;
+          }>
+        | undefined;
+
+    public [Symbol.asyncIterator](): AsyncIterator<Value> {
+        return { next: () => this.read() };
+    }
+
+    public write(value: Value): Promise<void> {
+        if (this.#failure !== undefined) {
+            return Promise.reject(this.#failure);
+        }
+        if (this.#finished || this.#pending !== undefined) {
+            return Promise.reject(
+                new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'The bounded worker stream cannot accept another chunk.',
+                ),
+            );
+        }
+        const waiting = this.#waiting;
+        if (waiting !== undefined) {
+            this.#waiting = undefined;
+            waiting.resolve({ done: false, value });
+            return Promise.resolve();
+        }
+        return new Promise<void>((resolve, reject) => {
+            this.#pending = { reject, resolve, value };
+        });
+    }
+
+    public finish(): void {
+        if (this.#finished) {
+            return;
+        }
+        this.#finished = true;
+        this.#waiting?.resolve({ done: true, value: undefined });
+        this.#waiting = undefined;
+    }
+
+    public fail(error: unknown): void {
+        if (this.#failure !== undefined) {
+            return;
+        }
+        const failure =
+            error instanceof Error
+                ? error
+                : new BrowserActionStorageCustodyError(
+                      'OwnedWorkerFailure',
+                      'The bounded worker stream failed with a non-error value.',
+                      error,
+                  );
+        this.#failure = failure;
+        this.#pending?.reject(failure);
+        this.#pending = undefined;
+        this.#waiting?.reject(failure);
+        this.#waiting = undefined;
+    }
+
+    public read(): Promise<IteratorResult<Value>> {
+        if (this.#failure !== undefined) {
+            return Promise.reject(this.#failure);
+        }
+        const pending = this.#pending;
+        if (pending !== undefined) {
+            this.#pending = undefined;
+            pending.resolve();
+            return Promise.resolve({ done: false, value: pending.value });
+        }
+        if (this.#finished) {
+            return Promise.resolve({ done: true, value: undefined });
+        }
+        if (this.#waiting !== undefined) {
+            return Promise.reject(
+                new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'The bounded worker stream already has a waiting reader.',
+                ),
+            );
+        }
+        return new Promise<IteratorResult<Value>>((resolve, reject) => {
+            this.#waiting = { reject, resolve };
+        });
+    }
+}
+
 /**
  * Installs the worker half of the bounded custody channel. The cryptographic
  * kernel, Web Lock handle, IndexedDB adapter, device key, wrapped envelope, and
  * plaintext root all remain in this worker realm.
  */
-type BrowserActionStorageCustodyWorkerHostConfiguration = Readonly<{
+type BrowserFoundationWitnessCryptography = Readonly<{
+    stateObjectSignatureOperation: BrowserStateObjectSignatureOperation;
+}>;
+
+type BrowserFoundationWitnessRuntimeConfiguration = Readonly<{
+    durableStateLimits: DurableStateWitnessServiceLimits;
+    openVerifiedStateDurableBinding?(
+        stateObjectIdentifier: string,
+    ): Promise<VerificationResult<VerifiedStateDurableBinding>>;
+    openWitnessCryptography(input: {
+        canonicalRosterBytes: Uint8Array;
+    }):
+        | Promise<BrowserFoundationWitnessCryptography>
+        | BrowserFoundationWitnessCryptography;
+}>;
+
+type WorkerFoundationOperationInitializationBatch = Readonly<{
+    canonicalRosterBytes: Uint8Array;
+    initialization:
+        | WebLockCommittedBrowserFoundationInitialization
+        | WebLockRecoveredBrowserFoundationInitialization;
+    openingMode: 'fresh-provisioned' | 'recovered';
+}>;
+
+type WorkerFoundationNormalWitnessRole = Readonly<{
+    durableStateService: DurableStateWitnessService;
+    freshnessCoordinate: BrowserFoundationFreshnessCoordinate;
+    record: WebLockFoundationWitnessRecord;
+    stateObjectSignatureOperation: BrowserStateObjectSignatureOperation;
+}>;
+
+type WorkerFoundationActionRandomnessHandle = Readonly<{
+    actionRandomnessCommitment: Uint8Array;
+    actionRandomnessSessionIdentifier: string;
+}>;
+
+type WorkerFoundationDurableStateBinding = {
+    binding: VerifiedStateDurableBinding;
+    expectedFreshnessCoordinate: BrowserFoundationFreshnessCoordinate;
+    stateObjectIdentifier: string;
+    witnessRoleIdentifier: string;
+};
+
+export type BrowserActionStorageCustodyWorkerHostConfiguration = Readonly<{
+    checkpointStore?: Readonly<{
+        boundaryPolicy: CheckpointBoundaryPolicy;
+        cursorKernel: CheckpointRandomCursorKernel;
+        limits: AuthenticatedCheckpointStoreLimits;
+    }>;
     cryptoProvider?: Crypto;
     indexedDbFactory?: IDBFactory;
     keyRangeFactory?: typeof IDBKeyRange;
     lockManager?: LockManager | null;
+    foundationWitnessRuntime?: BrowserFoundationWitnessRuntimeConfiguration;
     workerScope: CustodyWorkerScope;
 }> &
     (
@@ -1227,7 +4428,7 @@ type BrowserActionStorageCustodyWorkerHostConfiguration = Readonly<{
                   configuration: BrowserActionStorageCustodyWorkerConfiguration,
                   acquisitionSignal: AbortSignal,
               ): Promise<WebLockOwnedBrowserActionStorageCustody>;
-              workerKernel?: never;
+              workerKernel?: BrowserActionStorageWorkerKernel;
           }>
     );
 
@@ -1242,6 +4443,10 @@ export const installBrowserActionStorageCustodyWorkerHost = (
     }
     let lastRequestIdentifier = 0;
     let ownedCustody: WebLockOwnedBrowserActionStorageCustody | undefined;
+    let checkpointStore: AuthenticatedCheckpointStore | undefined;
+    let openingCheckpointStore:
+        | Promise<AuthenticatedCheckpointStore>
+        | undefined;
     let openingCustody:
         | Promise<WebLockOwnedBrowserActionStorageCustody>
         | undefined;
@@ -1250,15 +4455,363 @@ export const installBrowserActionStorageCustodyWorkerHost = (
     let terminalCleanup: Promise<void> | undefined;
     let terminalFailure: BrowserActionStorageCustodyError | undefined;
     let uninstalled = false;
+    const committedFoundationInitializationBatches = new Map<
+        string,
+        WebLockCommittedBrowserFoundationInitialization
+    >();
+    const foundationOperationInitializationBatches = new Map<
+        string,
+        WorkerFoundationOperationInitializationBatch
+    >();
+    const foundationNormalWitnessRoles = new Map<
+        string,
+        WorkerFoundationNormalWitnessRole
+    >();
+    const foundationActionRandomnessHandles = new Map<
+        string,
+        WorkerFoundationActionRandomnessHandle
+    >();
+    const foundationDurableStateBindings = new Map<
+        string,
+        WorkerFoundationDurableStateBinding
+    >();
+    const foundationStateObjectIdentifiers = new Set<string>();
+    const checkpoints = new Map<
+        string,
+        Readonly<{
+            identity: CheckpointOperationIdentity;
+            resumed?: ResumedCheckpoint;
+        }>
+    >();
+    const checkpointPublications = new Map<
+        string,
+        Readonly<{
+            channel: BoundedWorkerAsyncChannel<Uint8Array>;
+            publication: Promise<Uint8Array>;
+        }>
+    >();
+    const checkpointRestores = new Map<
+        string,
+        Readonly<{
+            channel: BoundedWorkerAsyncChannel<
+                Readonly<{ chunkBytes: Uint8Array; chunkIndex: number }>
+            >;
+            restoration: Promise<void>;
+        }>
+    >();
+    const commonProofExecutionEnvironments =
+        new Set<InstalledCommonProofExecutionEnvironment>();
+    const commonProofPreparedOperations =
+        new Set<InstalledCommonProofPreparedOperation>();
+    const retirePreparedCommonProofOperation = (
+        preparedOperation: InstalledCommonProofPreparedOperation,
+    ): void => {
+        const record =
+            installedCommonProofPreparedOperationRecords.get(preparedOperation);
+        if (record !== undefined) {
+            record.consumed = true;
+            const preparedGeneration = record.preparedGeneration;
+            record.preparedGeneration = undefined;
+            record.commonProofRuntimeBindingHash.fill(0);
+            record.proofAttemptLineageIdentifier.fill(0);
+            installedCommonProofPreparedOperationRecords.delete(
+                preparedOperation,
+            );
+            if (preparedGeneration !== undefined) {
+                releaseClosedWorkerPreparedCommonProofGeneration(
+                    preparedGeneration,
+                );
+            }
+        }
+        commonProofPreparedOperations.delete(preparedOperation);
+    };
     const listenerHolder: {
         value?: (event: MessageEvent<unknown>) => void;
     } = {};
+    const issueFoundationInitializationBatchIdentifier = (
+        additionallyReservedIdentifiers?: ReadonlySet<string>,
+    ): string => {
+        const cryptoProvider = input.cryptoProvider ?? globalThis.crypto;
+        if (cryptoProvider?.getRandomValues === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'Unavailable',
+                'Secure randomness is unavailable for a foundation initialization batch identifier.',
+            );
+        }
+        for (let attempt = 0; attempt < 16; attempt += 1) {
+            const identifierBytes = new Uint8Array(32);
+            cryptoProvider.getRandomValues(identifierBytes);
+            const identifier = Array.from(identifierBytes, (byte) =>
+                byte.toString(16).padStart(2, '0'),
+            ).join('');
+            identifierBytes.fill(0);
+            if (
+                !committedFoundationInitializationBatches.has(identifier) &&
+                !foundationOperationInitializationBatches.has(identifier) &&
+                !foundationNormalWitnessRoles.has(identifier) &&
+                !foundationActionRandomnessHandles.has(identifier) &&
+                !foundationDurableStateBindings.has(identifier) &&
+                !checkpoints.has(identifier) &&
+                !checkpointPublications.has(identifier) &&
+                !checkpointRestores.has(identifier) &&
+                !additionallyReservedIdentifiers?.has(identifier)
+            ) {
+                return identifier;
+            }
+        }
+        throw new BrowserActionStorageCustodyError(
+            'Unavailable',
+            'Secure randomness repeatedly produced an existing foundation initialization batch identifier.',
+        );
+    };
+    const requireCheckpointStore =
+        async (): Promise<AuthenticatedCheckpointStore> => {
+            if (checkpointStore !== undefined) {
+                return checkpointStore;
+            }
+            if (
+                input.checkpointStore === undefined ||
+                ownedCustody === undefined
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'Worker-owned checkpoint storage is not configured or root-active.',
+                );
+            }
+            openingCheckpointStore ??= ownedCustody
+                .openCheckpointStore(input.checkpointStore)
+                .then((opened) => opened.claimExclusiveOwner());
+            checkpointStore = await openingCheckpointStore;
+            return checkpointStore;
+        };
+    const requireFoundationWitnessRuntime =
+        (): BrowserFoundationWitnessRuntimeConfiguration => {
+            if (input.foundationWitnessRuntime === undefined) {
+                throw new BrowserActionStorageCustodyError(
+                    'Unavailable',
+                    'Worker-owned foundation witness cryptography is not configured.',
+                );
+            }
+            return input.foundationWitnessRuntime;
+        };
+    const requireFoundationWorkerKernel =
+        (): BrowserActionStorageWorkerKernel => {
+            if (input.workerKernel === undefined) {
+                throw new BrowserActionStorageCustodyError(
+                    'Unavailable',
+                    'The worker-owned foundation kernel is unavailable.',
+                );
+            }
+            return input.workerKernel;
+        };
+    const destroyFoundationWitnessRecord = (
+        record: WebLockFoundationWitnessRecord,
+    ): void => {
+        record.actionRandomnessCommitment.fill(0);
+        record.authorizedEmptyPlaintext.fill(0);
+        record.localRecordIdentifier.fill(0);
+        record.stateKey.fill(0);
+        record.subjectParticipantIdentity.fill(0);
+        record.witnessParticipantIdentity.fill(0);
+    };
+    const destroyCommittedFoundationInitialization = (
+        initialization:
+            | WebLockCommittedBrowserFoundationInitialization
+            | WebLockRecoveredBrowserFoundationInitialization,
+    ): void => {
+        initialization.actionRandomnessCommitment.fill(0);
+        destroyFoundationCoordinate(initialization.freshnessCoordinate);
+        for (const record of initialization.orderedWitnessRecords) {
+            destroyFoundationWitnessRecord(record);
+        }
+    };
+    const closeFoundationNormalWitnessRole = async (
+        role: WorkerFoundationNormalWitnessRole,
+    ): Promise<void> => {
+        const outcomes = await Promise.allSettled([
+            role.durableStateService.close(),
+        ]);
+        destroyFoundationCoordinate(role.freshnessCoordinate);
+        destroyFoundationWitnessRecord(role.record);
+        const failures = outcomes
+            .filter(
+                (outcome): outcome is PromiseRejectedResult =>
+                    outcome.status === 'rejected',
+            )
+            .map((outcome) => outcome.reason as unknown);
+        if (failures.length !== 0) {
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'Worker-owned foundation witness cleanup failed.',
+                failures,
+            );
+        }
+    };
+    const closeFoundationOperationResources = async (): Promise<void> => {
+        const failures: unknown[] = [];
+        for (const preparedOperation of commonProofPreparedOperations) {
+            retirePreparedCommonProofOperation(preparedOperation);
+        }
+        for (const role of foundationNormalWitnessRoles.values()) {
+            try {
+                await closeFoundationNormalWitnessRole(role);
+            } catch (error) {
+                failures.push(error);
+            }
+        }
+        foundationNormalWitnessRoles.clear();
+        for (const binding of foundationDurableStateBindings.values()) {
+            destroyFoundationCoordinate(binding.expectedFreshnessCoordinate);
+        }
+        foundationDurableStateBindings.clear();
+        const workerKernel = input.workerKernel;
+        for (const stateObjectIdentifier of foundationStateObjectIdentifiers) {
+            try {
+                await workerKernel?.releaseActionStateObject(
+                    stateObjectIdentifier,
+                );
+            } catch (error) {
+                failures.push(error);
+            }
+        }
+        foundationStateObjectIdentifiers.clear();
+        for (const handle of foundationActionRandomnessHandles.values()) {
+            try {
+                await custody().closeActionRandomness(
+                    handle.actionRandomnessSessionIdentifier,
+                );
+            } catch (error) {
+                failures.push(error);
+            }
+            handle.actionRandomnessCommitment.fill(0);
+        }
+        foundationActionRandomnessHandles.clear();
+        for (const batch of foundationOperationInitializationBatches.values()) {
+            try {
+                await custody().closeActionRandomness(
+                    batch.initialization.actionRandomnessSessionIdentifier,
+                );
+            } catch (error) {
+                failures.push(error);
+            }
+            batch.canonicalRosterBytes.fill(0);
+            destroyCommittedFoundationInitialization(batch.initialization);
+        }
+        foundationOperationInitializationBatches.clear();
+        for (const batch of committedFoundationInitializationBatches.values()) {
+            try {
+                await custody().closeActionRandomness(
+                    batch.actionRandomnessSessionIdentifier,
+                );
+            } catch (error) {
+                failures.push(error);
+            }
+            destroyCommittedFoundationInitialization(batch);
+        }
+        committedFoundationInitializationBatches.clear();
+        if (failures.length !== 0) {
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'Worker-owned foundation operation cleanup failed.',
+                failures,
+            );
+        }
+    };
+    const closeCheckpointResources = async (): Promise<void> => {
+        const closingError = new BrowserActionStorageCustodyError(
+            'Closed',
+            'Worker-owned checkpoint storage is closing.',
+        );
+        for (const publication of checkpointPublications.values()) {
+            publication.channel.fail(closingError);
+        }
+        for (const restore of checkpointRestores.values()) {
+            restore.channel.fail(closingError);
+        }
+        const commonProofCleanupOutcomes = await Promise.allSettled(
+            [...commonProofExecutionEnvironments].map(async (environment) => {
+                const record =
+                    installedCommonProofExecutionEnvironmentRecords.get(
+                        environment,
+                    );
+                if (record === undefined || record.closed) {
+                    return;
+                }
+                record.closed = true;
+                installedCommonProofExecutionEnvironmentRecords.delete(
+                    environment,
+                );
+                await record.custody.retire();
+            }),
+        );
+        commonProofExecutionEnvironments.clear();
+        const operationOutcomes = await Promise.allSettled([
+            ...[...checkpointPublications.values()].map(
+                (record) => record.publication,
+            ),
+            ...[...checkpointRestores.values()].map(
+                (record) => record.restoration,
+            ),
+        ]);
+        checkpointPublications.clear();
+        checkpointRestores.clear();
+        checkpoints.clear();
+        const failures = operationOutcomes
+            .filter(
+                (outcome): outcome is PromiseRejectedResult =>
+                    outcome.status === 'rejected',
+            )
+            .map((outcome) => outcome.reason as unknown);
+        failures.push(
+            ...commonProofCleanupOutcomes
+                .filter(
+                    (outcome): outcome is PromiseRejectedResult =>
+                        outcome.status === 'rejected',
+                )
+                .map((outcome) => outcome.reason as unknown),
+        );
+        let store = checkpointStore;
+        if (store === undefined && openingCheckpointStore !== undefined) {
+            try {
+                store = await openingCheckpointStore;
+            } catch (error) {
+                failures.push(error);
+                store = undefined;
+            }
+        }
+        checkpointStore = undefined;
+        openingCheckpointStore = undefined;
+        try {
+            await store?.close();
+        } catch (error) {
+            failures.push(error);
+        }
+        if (failures.length !== 0) {
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'Worker-owned checkpoint cleanup failed.',
+                failures,
+            );
+        }
+    };
 
     const closeForTerminalFailure = async (
         originalFailure: BrowserActionStorageCustodyError,
     ): Promise<void> => {
         const cleanupFailures: unknown[] = [];
         const handles = new Set<WebLockOwnedBrowserActionStorageCustody>();
+        try {
+            await closeCheckpointResources();
+        } catch (error) {
+            cleanupFailures.push(error);
+        }
+        try {
+            if (ownedCustody !== undefined) {
+                await closeFoundationOperationResources();
+            }
+        } catch (error) {
+            cleanupFailures.push(error);
+        }
         const opening = openingCustody;
         if (opening !== undefined) {
             try {
@@ -1271,6 +4824,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
             handles.add(ownedCustody);
         }
         ownedCustody = undefined;
+        committedFoundationInitializationBatches.clear();
         const closeOutcomes = await Promise.allSettled(
             [...handles].map((handle) => handle.close()),
         );
@@ -1339,6 +4893,667 @@ export const installBrowserActionStorageCustodyWorkerHost = (
         return ownedCustody.custody;
     };
 
+    const requireOwnedCustody = (): WebLockOwnedBrowserActionStorageCustody => {
+        if (ownedCustody === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'Closed',
+                'Browser foundation storage ownership is not open in this worker.',
+            );
+        }
+        return ownedCustody;
+    };
+
+    const requireFoundationNormalWitnessRole = (
+        identifier: string,
+    ): WorkerFoundationNormalWitnessRole => {
+        const role = foundationNormalWitnessRoles.get(identifier);
+        if (role === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The foundation witness role is unavailable in this worker.',
+            );
+        }
+        return role;
+    };
+
+    const requireFoundationDurableStateBinding = (
+        identifier: string,
+        witnessRoleIdentifier: string,
+    ): WorkerFoundationDurableStateBinding => {
+        const binding = foundationDurableStateBindings.get(identifier);
+        if (
+            binding === undefined ||
+            binding.witnessRoleIdentifier !== witnessRoleIdentifier
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The durable state binding is unavailable or belongs to another witness context.',
+            );
+        }
+        return binding;
+    };
+
+    const requireCurrentDurableBindingHead = async (
+        binding: WorkerFoundationDurableStateBinding,
+    ): Promise<BrowserFoundationFreshnessCoordinate> => {
+        const current = copyFoundationFreshnessCoordinate(
+            await requireOwnedCustody().authenticateFoundationHead(),
+        );
+        if (
+            !foundationCoordinatesEqual(
+                current,
+                binding.expectedFreshnessCoordinate,
+            )
+        ) {
+            destroyFoundationCoordinate(current);
+            throw new BrowserActionStorageCustodyError(
+                'Conflict',
+                'The durable state binding is stale for the authenticated storage head.',
+            );
+        }
+        return current;
+    };
+
+    const classifyFoundationHeadTransition = (
+        before: BrowserFoundationFreshnessCoordinate,
+        after: BrowserFoundationFreshnessCoordinate,
+    ): boolean => {
+        if (foundationCoordinatesEqual(before, after)) {
+            return false;
+        }
+        if (
+            after.freshnessSequence !== before.freshnessSequence + 1n ||
+            !bytesEqual(
+                before.storageInstanceIdentity,
+                after.storageInstanceIdentity,
+            ) ||
+            bytesEqual(
+                before.authenticatedHeadDigest,
+                after.authenticatedHeadDigest,
+            )
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'Conflict',
+                'The worker-owned operation produced an invalid authenticated storage transition.',
+            );
+        }
+        return true;
+    };
+
+    const runFoundationWitnessMutation = async <Value>(operationInput: {
+        durableBindingIdentifier: string;
+        operation(
+            role: WorkerFoundationNormalWitnessRole,
+            binding: VerifiedStateDurableBinding,
+            predecessor: BrowserFoundationFreshnessCoordinate,
+        ): Promise<Value>;
+        witnessRoleIdentifier: string;
+    }): Promise<Value> => {
+        const role = requireFoundationNormalWitnessRole(
+            operationInput.witnessRoleIdentifier,
+        );
+        const binding = requireFoundationDurableStateBinding(
+            operationInput.durableBindingIdentifier,
+            operationInput.witnessRoleIdentifier,
+        );
+        const before = await requireCurrentDurableBindingHead(binding);
+        let after: BrowserFoundationFreshnessCoordinate | undefined;
+        try {
+            const value = await operationInput.operation(
+                role,
+                binding.binding,
+                before,
+            );
+            after = copyFoundationFreshnessCoordinate(
+                await requireOwnedCustody().authenticateFoundationHead(),
+            );
+            classifyFoundationHeadTransition(before, after);
+            destroyFoundationCoordinate(binding.expectedFreshnessCoordinate);
+            binding.expectedFreshnessCoordinate =
+                copyFoundationFreshnessCoordinate(after);
+            return value;
+        } finally {
+            destroyFoundationCoordinate(before);
+            if (after !== undefined) {
+                destroyFoundationCoordinate(after);
+            }
+        }
+    };
+
+    const runVerifiedCommonProofApplication = async (
+        operationInput: ClosedWorkerCommonProofApplicationInput,
+    ): Promise<void> => {
+        let commitAttempted = false;
+        let abortFailed = false;
+        try {
+            return await runFoundationWitnessMutation({
+                durableBindingIdentifier:
+                    operationInput.durableBindingIdentifier,
+                operation: async (role, _binding, predecessor) => {
+                    const prepared =
+                        await prepareClosedWorkerVerifiedCommonProofApplication(
+                            requireFoundationWorkerKernel(),
+                            operationInput.capability,
+                            predecessor,
+                        );
+                    let authenticatedAuthorizationFrame: Uint8Array | undefined;
+                    let successor:
+                        | BrowserFoundationFreshnessCoordinate
+                        | undefined;
+                    try {
+                        authenticatedAuthorizationFrame =
+                            await persistCommonProofApplicationAuthorization(
+                                role.durableStateService,
+                                {
+                                    authorizationFrame:
+                                        prepared.authorizationFrame,
+                                    onCommitAttempt: () => {
+                                        if (commitAttempted) {
+                                            throw new BrowserActionStorageCustodyError(
+                                                'InvalidState',
+                                                'The common-proof application attempted more than one durable commit.',
+                                            );
+                                        }
+                                        commitAttempted = true;
+                                    },
+                                    proofApplicationSlotHash:
+                                        prepared.proofApplicationSlotHash,
+                                },
+                            );
+                        if (!commitAttempted) {
+                            throw new BrowserActionStorageCustodyError(
+                                'OwnedWorkerFailure',
+                                'Common-proof persistence returned without an authenticated commit attempt.',
+                            );
+                        }
+                        successor = copyFoundationFreshnessCoordinate(
+                            await requireOwnedCustody().authenticateFoundationHead(),
+                        );
+                        if (
+                            !classifyFoundationHeadTransition(
+                                predecessor,
+                                successor,
+                            )
+                        ) {
+                            throw new BrowserActionStorageCustodyError(
+                                'OwnedWorkerFailure',
+                                'The common-proof application did not advance the authenticated storage head.',
+                            );
+                        }
+                        await prepared.confirm({
+                            authenticatedAuthorizationFrame,
+                            successor,
+                        });
+                        return undefined;
+                    } catch (error) {
+                        if (!commitAttempted) {
+                            try {
+                                await prepared.abort();
+                            } catch (abortError) {
+                                abortFailed = true;
+                                throw new BrowserActionStorageCustodyError(
+                                    'OwnedWorkerFailure',
+                                    'The common-proof application failed before commit and its verifier capability could not be restored.',
+                                    [error, abortError],
+                                );
+                            }
+                        }
+                        throw error;
+                    } finally {
+                        authenticatedAuthorizationFrame?.fill(0);
+                        if (successor !== undefined) {
+                            destroyFoundationCoordinate(successor);
+                        }
+                    }
+                },
+                witnessRoleIdentifier: operationInput.witnessRoleIdentifier,
+            });
+        } catch (error) {
+            const errorCode =
+                error instanceof Error && 'code' in error
+                    ? String((error as { code?: unknown }).code)
+                    : undefined;
+            const permanentStateFailure =
+                abortFailed ||
+                commitAttempted ||
+                errorCode === 'AuthenticationFailed' ||
+                errorCode === 'CleanupFailed' ||
+                errorCode === 'Conflict' ||
+                errorCode === 'MissingRecord';
+            if (!permanentStateFailure) {
+                throw error;
+            }
+            const terminalError =
+                error instanceof BrowserActionStorageCustodyError &&
+                error.code === 'OwnedWorkerFailure'
+                    ? error
+                    : new BrowserActionStorageCustodyError(
+                          'OwnedWorkerFailure',
+                          'The common-proof application could not establish one exact authenticated durable successor.',
+                          error,
+                      );
+            failHost(terminalError);
+            throw terminalError;
+        }
+    };
+
+    const runFoundationWitnessRead = async <Value>(operationInput: {
+        durableBindingIdentifier: string;
+        operation(
+            role: WorkerFoundationNormalWitnessRole,
+            binding: VerifiedStateDurableBinding,
+        ): Promise<Value>;
+        witnessRoleIdentifier: string;
+    }): Promise<Value> => {
+        const role = requireFoundationNormalWitnessRole(
+            operationInput.witnessRoleIdentifier,
+        );
+        const binding = requireFoundationDurableStateBinding(
+            operationInput.durableBindingIdentifier,
+            operationInput.witnessRoleIdentifier,
+        );
+        const before = await requireCurrentDurableBindingHead(binding);
+        let after: BrowserFoundationFreshnessCoordinate | undefined;
+        try {
+            const value = await operationInput.operation(role, binding.binding);
+            after = copyFoundationFreshnessCoordinate(
+                await requireOwnedCustody().authenticateFoundationHead(),
+            );
+            if (!foundationCoordinatesEqual(before, after)) {
+                throw new BrowserActionStorageCustodyError(
+                    'Conflict',
+                    'A worker-owned durable read changed the authenticated storage head.',
+                );
+            }
+            return value;
+        } finally {
+            destroyFoundationCoordinate(before);
+            if (after !== undefined) {
+                destroyFoundationCoordinate(after);
+            }
+        }
+    };
+
+    const requireFoundationStateObjectSignatureOperation =
+        (): BrowserStateObjectSignatureOperation => {
+            const rootBinding = custody().copyBinding();
+            try {
+                for (const role of foundationNormalWitnessRoles.values()) {
+                    if (
+                        bytesEqual(
+                            role.record.witnessParticipantIdentity,
+                            rootBinding.participantId,
+                        )
+                    ) {
+                        return role.stateObjectSignatureOperation;
+                    }
+                }
+            } finally {
+                rootBinding.actionContextHash.fill(0);
+                rootBinding.ceremonyContextHash.fill(0);
+                rootBinding.participantId.fill(0);
+                rootBinding.suiteId.fill(0);
+            }
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The active participant has no worker-owned foundation state signer.',
+            );
+        };
+
+    const openFoundationWitnessDurableBinding = async (
+        witnessRoleIdentifier: string,
+        stateObjectIdentifier: string,
+    ): Promise<string> => {
+        const role = requireFoundationNormalWitnessRole(witnessRoleIdentifier);
+        const runtime = requireFoundationWitnessRuntime();
+        const opened =
+            runtime.openVerifiedStateDurableBinding === undefined
+                ? await openClosedWorkerVerifiedStateDurableBinding(
+                      requireFoundationWorkerKernel(),
+                      stateObjectIdentifier,
+                  )
+                : await runtime.openVerifiedStateDurableBinding(
+                      stateObjectIdentifier,
+                  );
+        if (!opened.isValid) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                `The verified state object cannot issue a durable binding: ${opened.refusalReason}.`,
+            );
+        }
+        const description = copyVerifiedStateDurableBinding(opened.value);
+        const rootBinding = custody().copyBinding();
+        try {
+            if (
+                !bytesEqual(
+                    description.actionContextHash,
+                    rootBinding.actionContextHash,
+                ) ||
+                !bytesEqual(
+                    description.ceremonyContextHash,
+                    rootBinding.ceremonyContextHash,
+                ) ||
+                !bytesEqual(description.suiteIdentifier, rootBinding.suiteId) ||
+                !bytesEqual(
+                    description.subjectParticipantIdentity,
+                    role.record.subjectParticipantIdentity,
+                )
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The verified state object belongs to another action or witness subject.',
+                );
+            }
+        } finally {
+            description.actionContextHash.fill(0);
+            description.ceremonyContextHash.fill(0);
+            description.exactOutputHash?.fill(0);
+            description.intentObjectHash.fill(0);
+            description.outputIntentObjectHash?.fill(0);
+            description.reservationIntentObjectHash?.fill(0);
+            description.stateKey.fill(0);
+            description.subjectParticipantIdentity.fill(0);
+            description.suiteIdentifier.fill(0);
+            rootBinding.actionContextHash.fill(0);
+            rootBinding.ceremonyContextHash.fill(0);
+            rootBinding.participantId.fill(0);
+            rootBinding.suiteId.fill(0);
+        }
+        const identifier = issueFoundationInitializationBatchIdentifier();
+        foundationDurableStateBindings.set(identifier, {
+            binding: opened.value,
+            expectedFreshnessCoordinate: copyFoundationFreshnessCoordinate(
+                await requireOwnedCustody().authenticateFoundationHead(),
+            ),
+            stateObjectIdentifier,
+            witnessRoleIdentifier,
+        });
+        return identifier;
+    };
+
+    const voteForFoundationActionRandomnessReservationIntent =
+        async (voteInput: {
+            canonicalReservationIntentCarrier: Uint8Array;
+            stateVerifierSessionIdentifier: string;
+            subjectParticipantIdentity: Uint8Array;
+            witnessRoleIdentifier: string;
+        }): Promise<VerificationResult<Uint8Array>> => {
+            const role = requireFoundationNormalWitnessRole(
+                voteInput.witnessRoleIdentifier,
+            );
+            if (
+                !bytesEqual(
+                    role.record.subjectParticipantIdentity,
+                    voteInput.subjectParticipantIdentity,
+                )
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The foundation witness role belongs to another state subject.',
+                );
+            }
+            const verified =
+                await verifyClosedWorkerActionRandomnessReservationIntentForWitness(
+                    requireFoundationWorkerKernel(),
+                    {
+                        canonicalReservationIntentCarrier:
+                            voteInput.canonicalReservationIntentCarrier,
+                        stateVerifierSessionIdentifier:
+                            voteInput.stateVerifierSessionIdentifier,
+                        subjectParticipantIdentity:
+                            voteInput.subjectParticipantIdentity,
+                    },
+                );
+            if (!verified.isValid) {
+                return verified;
+            }
+
+            const stateIntentIdentifier = verified.value;
+            foundationStateObjectIdentifiers.add(stateIntentIdentifier);
+            let durableBindingIdentifier: string | undefined;
+            let canonicalVoteCarrier: Uint8Array | undefined;
+            let cachedVoteCarrier: Uint8Array | undefined;
+            let readVoteCarrier: Uint8Array | undefined;
+            try {
+                durableBindingIdentifier =
+                    await openFoundationWitnessDurableBinding(
+                        voteInput.witnessRoleIdentifier,
+                        stateIntentIdentifier,
+                    );
+                await runFoundationWitnessMutation({
+                    durableBindingIdentifier,
+                    operation: (witnessRole, binding) =>
+                        witnessRole.durableStateService.compareAndLockIntent({
+                            verifiedIntentBinding: binding,
+                        }),
+                    witnessRoleIdentifier: voteInput.witnessRoleIdentifier,
+                });
+                const produced =
+                    await produceClosedWorkerActionRandomnessReservationWitnessVote(
+                        requireFoundationWorkerKernel(),
+                        {
+                            signatureOperation:
+                                role.stateObjectSignatureOperation,
+                            stateIntentIdentifier,
+                            witnessParticipantIdentity:
+                                role.record.witnessParticipantIdentity,
+                        },
+                    );
+                if (!produced.isValid) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        `The verified foundation reservation intent could not produce a witness vote: ${produced.refusalReason}.`,
+                    );
+                }
+                canonicalVoteCarrier = produced.value;
+                const cached = await runFoundationWitnessMutation({
+                    durableBindingIdentifier,
+                    operation: (witnessRole, binding) =>
+                        witnessRole.durableStateService.cacheSignedVoteCarrier({
+                            canonicalSignedVoteCarrier: produced.value,
+                            verifiedIntentBinding: binding,
+                        }),
+                    witnessRoleIdentifier: voteInput.witnessRoleIdentifier,
+                });
+                cachedVoteCarrier = cached;
+                if (!bytesEqual(canonicalVoteCarrier, cachedVoteCarrier)) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'The durable state service did not retain the exact worker-produced witness vote carrier.',
+                    );
+                }
+                readVoteCarrier = await runFoundationWitnessRead({
+                    durableBindingIdentifier,
+                    operation: (witnessRole, binding) =>
+                        witnessRole.durableStateService.readSignedVoteCarrier({
+                            verifiedIntentBinding: binding,
+                        }),
+                    witnessRoleIdentifier: voteInput.witnessRoleIdentifier,
+                });
+                if (!bytesEqual(canonicalVoteCarrier, readVoteCarrier)) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'The durable state service did not read back the exact worker-produced witness vote carrier.',
+                    );
+                }
+                return Object.freeze({
+                    isValid: true,
+                    value: canonicalVoteCarrier.slice(),
+                });
+            } finally {
+                canonicalVoteCarrier?.fill(0);
+                cachedVoteCarrier?.fill(0);
+                readVoteCarrier?.fill(0);
+                if (durableBindingIdentifier !== undefined) {
+                    const binding = foundationDurableStateBindings.get(
+                        durableBindingIdentifier,
+                    );
+                    if (binding !== undefined) {
+                        destroyFoundationCoordinate(
+                            binding.expectedFreshnessCoordinate,
+                        );
+                        foundationDurableStateBindings.delete(
+                            durableBindingIdentifier,
+                        );
+                    }
+                }
+                await requireFoundationWorkerKernel().releaseActionStateObject(
+                    stateIntentIdentifier,
+                );
+                foundationStateObjectIdentifiers.delete(stateIntentIdentifier);
+            }
+        };
+
+    const activateFoundationInitialization = async (
+        batchIdentifier: string,
+        expectedOpeningMode: 'fresh-provisioned' | 'recovered',
+    ): Promise<WorkerActivatedFoundationInitializationResult> => {
+        const batch =
+            foundationOperationInitializationBatches.get(batchIdentifier);
+        if (batch === undefined || batch.openingMode !== expectedOpeningMode) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The requested foundation initialization batch is unavailable or has the wrong lifecycle.',
+            );
+        }
+        const runtime = requireFoundationWitnessRuntime();
+        const foundationCustody = requireOwnedCustody();
+        const before = copyFoundationFreshnessCoordinate(
+            await foundationCustody.authenticateFoundationHead(),
+        );
+        if (
+            !foundationCoordinatesEqual(
+                before,
+                batch.initialization.freshnessCoordinate,
+            )
+        ) {
+            destroyFoundationCoordinate(before);
+            throw new BrowserActionStorageCustodyError(
+                'Conflict',
+                'The foundation initialization batch is stale for the authenticated storage head.',
+            );
+        }
+        const openedRoles: Array<
+            Readonly<{
+                identifier: string;
+                role: WorkerFoundationNormalWitnessRole;
+            }>
+        > = [];
+        const openedRoleIdentifiers = new Set<string>();
+        let after: BrowserFoundationFreshnessCoordinate | undefined;
+        try {
+            for (const witnessRecord of batch.initialization
+                .orderedWitnessRecords) {
+                const cryptography = await runtime.openWitnessCryptography({
+                    canonicalRosterBytes: batch.canonicalRosterBytes.slice(),
+                });
+                const openedRole =
+                    await foundationCustody.openFoundationWitnessRole({
+                        durableStateLimits: runtime.durableStateLimits,
+                        openingMode: batch.openingMode,
+                        record: witnessRecord,
+                    });
+                let durableStateService: DurableStateWitnessService | undefined;
+                try {
+                    durableStateService =
+                        openedRole.durableStateService.claimExclusiveOwner();
+                } catch (error) {
+                    try {
+                        await openedRole.durableStateService.close();
+                    } catch (cleanupError) {
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'Foundation witness ownership transfer and cleanup both failed.',
+                            [error, cleanupError],
+                        );
+                    }
+                    throw error;
+                }
+                const role: WorkerFoundationNormalWitnessRole = Object.freeze({
+                    durableStateService,
+                    freshnessCoordinate:
+                        copyFoundationFreshnessCoordinate(before),
+                    record: witnessRecord,
+                    stateObjectSignatureOperation:
+                        cryptography.stateObjectSignatureOperation,
+                });
+                const identifier = issueFoundationInitializationBatchIdentifier(
+                    openedRoleIdentifiers,
+                );
+                openedRoleIdentifiers.add(identifier);
+                openedRoles.push({ identifier, role });
+            }
+            after = copyFoundationFreshnessCoordinate(
+                await foundationCustody.authenticateFoundationHead(),
+            );
+            if (!foundationCoordinatesEqual(before, after)) {
+                throw new BrowserActionStorageCustodyError(
+                    'Conflict',
+                    'Opening the foundation witness roles changed the authenticated storage head.',
+                );
+            }
+            const actionRandomnessHandleIdentifier =
+                issueFoundationInitializationBatchIdentifier(
+                    openedRoleIdentifiers,
+                );
+            for (const opened of openedRoles) {
+                foundationNormalWitnessRoles.set(
+                    opened.identifier,
+                    opened.role,
+                );
+            }
+            foundationActionRandomnessHandles.set(
+                actionRandomnessHandleIdentifier,
+                Object.freeze({
+                    actionRandomnessCommitment:
+                        batch.initialization.actionRandomnessCommitment.slice(),
+                    actionRandomnessSessionIdentifier:
+                        batch.initialization.actionRandomnessSessionIdentifier,
+                }),
+            );
+            foundationOperationInitializationBatches.delete(batchIdentifier);
+            batch.canonicalRosterBytes.fill(0);
+            batch.initialization.actionRandomnessCommitment.fill(0);
+            destroyFoundationCoordinate(
+                batch.initialization.freshnessCoordinate,
+            );
+            return Object.freeze({
+                actionRandomnessHandleIdentifier,
+                orderedWitnessRoleHandleIdentifiers: Object.freeze(
+                    openedRoles.map((opened) => opened.identifier),
+                ),
+            });
+        } catch (error) {
+            for (const opened of openedRoles) {
+                foundationNormalWitnessRoles.delete(opened.identifier);
+            }
+            const cleanupOutcomes = await Promise.allSettled(
+                openedRoles.map((opened) =>
+                    closeFoundationNormalWitnessRole(opened.role),
+                ),
+            );
+            const cleanupFailures = cleanupOutcomes
+                .filter(
+                    (outcome): outcome is PromiseRejectedResult =>
+                        outcome.status === 'rejected',
+                )
+                .map((outcome) => outcome.reason as unknown);
+            if (cleanupFailures.length !== 0) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'Foundation activation and worker-owned cleanup both failed.',
+                    [error, ...cleanupFailures],
+                );
+            }
+            throw error;
+        } finally {
+            destroyFoundationCoordinate(before);
+            if (after !== undefined) {
+                destroyFoundationCoordinate(after);
+            }
+        }
+    };
+
     const execute = async (
         request: CustodyWorkerRequest,
         copiedInput: unknown,
@@ -1372,6 +5587,8 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                               knownStorageRootCommitment:
                                   configuration.knownStorageRootCommitment,
                               namespace: configuration.namespace,
+                              runtimeBuildManifestHash:
+                                  configuration.runtimeBuildManifestHash,
                               workerKernel: input.workerKernel,
                           })
                         : input.openOwnedCustody(
@@ -1405,12 +5622,249 @@ export const installBrowserActionStorageCustodyWorkerHost = (
             case 'current-snapshot':
                 return custody().currentSnapshot();
             case 'open-root':
-                return custody().openIntoOwnedWorker(
+                if (ownedCustody === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'Closed',
+                        'Browser foundation storage ownership is not open in this worker.',
+                    );
+                }
+                await ownedCustody.openRootAndAuthenticatedStore(
                     copiedInput as {
                         expectedSnapshot: BrowserDeviceWrappingSnapshot;
                         untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
                     },
                 );
+                return undefined;
+            case 'begin-checkpoint': {
+                const store = await requireCheckpointStore();
+                const identity = await store.beginOperation(
+                    copiedInput as readonly Uint8Array[],
+                );
+                const checkpointIdentifier =
+                    issueFoundationInitializationBatchIdentifier();
+                checkpoints.set(checkpointIdentifier, { identity });
+                return { checkpointIdentifier };
+            }
+            case 'resume-checkpoint': {
+                const store = await requireCheckpointStore();
+                const resumed = await store.resume(
+                    copiedInput as {
+                        checkpointLineageIdentifier: Uint8Array;
+                        expectedBoundary: ExpectedCheckpointBoundary;
+                    },
+                );
+                const checkpointIdentifier =
+                    issueFoundationInitializationBatchIdentifier();
+                checkpoints.set(checkpointIdentifier, {
+                    identity: resumed.operationIdentity,
+                    resumed,
+                });
+                return { checkpointIdentifier };
+            }
+            case 'copy-checkpoint-description': {
+                const record = checkpoints.get(copiedInput as string);
+                if (record === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The checkpoint handle is unavailable in this worker.',
+                    );
+                }
+                return {
+                    checkpointLineageIdentifier:
+                        record.identity.checkpointLineageIdentifier,
+                    ...(record.resumed === undefined
+                        ? {}
+                        : {
+                              canonicalManifestBytes:
+                                  record.resumed.canonicalManifestBytes,
+                              stateStreamDescriptorBytes:
+                                  record.resumed.stateStreamDescriptorBytes,
+                          }),
+                };
+            }
+            case 'begin-checkpoint-publication': {
+                const publicationInput = copiedInput as {
+                    boundary: CheckpointBoundary;
+                    checkpointIdentifier: string;
+                };
+                const checkpoint = checkpoints.get(
+                    publicationInput.checkpointIdentifier,
+                );
+                if (checkpoint === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The checkpoint handle is unavailable in this worker.',
+                    );
+                }
+                const store = await requireCheckpointStore();
+                const channel = new BoundedWorkerAsyncChannel<Uint8Array>();
+                const publication = store.publish({
+                    boundary: publicationInput.boundary,
+                    identity: checkpoint.identity,
+                    stateChunks: channel,
+                });
+                void publication.catch((error: unknown) => {
+                    channel.fail(error);
+                });
+                const publicationIdentifier =
+                    issueFoundationInitializationBatchIdentifier();
+                checkpointPublications.set(publicationIdentifier, {
+                    channel,
+                    publication,
+                });
+                return publicationIdentifier;
+            }
+            case 'write-checkpoint-publication-chunk': {
+                const writeInput = copiedInput as {
+                    chunk: Uint8Array;
+                    publicationIdentifier: string;
+                };
+                const publication = checkpointPublications.get(
+                    writeInput.publicationIdentifier,
+                );
+                if (publication === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The checkpoint publication is unavailable in this worker.',
+                    );
+                }
+                await publication.channel.write(writeInput.chunk.slice());
+                return undefined;
+            }
+            case 'commit-checkpoint-publication': {
+                const identifier = copiedInput as string;
+                const publication = checkpointPublications.get(identifier);
+                if (publication === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The checkpoint publication is unavailable in this worker.',
+                    );
+                }
+                publication.channel.finish();
+                try {
+                    return await publication.publication;
+                } finally {
+                    checkpointPublications.delete(identifier);
+                }
+            }
+            case 'abort-checkpoint-publication': {
+                const identifier = copiedInput as string;
+                const publication = checkpointPublications.get(identifier);
+                if (publication === undefined) {
+                    return undefined;
+                }
+                const abortFailure = new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'Checkpoint publication was aborted by its owner.',
+                );
+                publication.channel.fail(abortFailure);
+                try {
+                    await publication.publication;
+                } catch (error) {
+                    if (error !== abortFailure) {
+                        throw error;
+                    }
+                } finally {
+                    checkpointPublications.delete(identifier);
+                }
+                return undefined;
+            }
+            case 'abort-checkpoint-restore': {
+                const identifier = copiedInput as string;
+                const restore = checkpointRestores.get(identifier);
+                if (restore === undefined) {
+                    return undefined;
+                }
+                const abortFailure = new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'Checkpoint restore was aborted by its owner.',
+                );
+                restore.channel.fail(abortFailure);
+                try {
+                    await restore.restoration;
+                } catch (error) {
+                    if (error !== abortFailure) {
+                        throw error;
+                    }
+                } finally {
+                    checkpointRestores.delete(identifier);
+                }
+                return undefined;
+            }
+            case 'evict-checkpoint': {
+                const identifier = copiedInput as string;
+                const checkpoint = checkpoints.get(identifier);
+                if (checkpoint === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The checkpoint handle is unavailable in this worker.',
+                    );
+                }
+                const store = await requireCheckpointStore();
+                await store.evict(
+                    checkpoint.identity.checkpointLineageIdentifier,
+                );
+                checkpoints.delete(identifier);
+                return undefined;
+            }
+            case 'begin-checkpoint-restore': {
+                const checkpoint = checkpoints.get(copiedInput as string);
+                if (checkpoint?.resumed === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'Checkpoint restore requires a resumed checkpoint handle.',
+                    );
+                }
+                const channel = new BoundedWorkerAsyncChannel<
+                    Readonly<{ chunkBytes: Uint8Array; chunkIndex: number }>
+                >();
+                const restoration = checkpoint.resumed
+                    .restoreState((chunkIndex, chunkBytes) =>
+                        channel.write({
+                            chunkBytes: chunkBytes.slice(),
+                            chunkIndex,
+                        }),
+                    )
+                    .then(
+                        () => channel.finish(),
+                        (error) => {
+                            channel.fail(error);
+                            throw error;
+                        },
+                    );
+                void restoration.catch(() => undefined);
+                const restoreIdentifier =
+                    issueFoundationInitializationBatchIdentifier();
+                checkpointRestores.set(restoreIdentifier, {
+                    channel,
+                    restoration,
+                });
+                return restoreIdentifier;
+            }
+            case 'read-checkpoint-restore-chunk': {
+                const identifier = copiedInput as string;
+                const restore = checkpointRestores.get(identifier);
+                if (restore === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The checkpoint restore is unavailable in this worker.',
+                    );
+                }
+                const next = await restore.channel.read();
+                if (next.done) {
+                    try {
+                        await restore.restoration;
+                    } finally {
+                        checkpointRestores.delete(identifier);
+                    }
+                    return { done: true };
+                }
+                return {
+                    chunkBytes: next.value.chunkBytes,
+                    chunkIndex: next.value.chunkIndex,
+                    done: false,
+                };
+            }
             case 'derive-record-identifier':
                 return custody().deriveLocalRecordIdentifier(
                     copiedInput as BrowserLocalRecordIdentifierInput,
@@ -1427,6 +5881,238 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 return custody().hashLocalRecordEnvelope(
                     copiedInput as Uint8Array,
                 );
+            case 'commit-fresh-foundation-initialization': {
+                if (ownedCustody === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'Closed',
+                        'Browser foundation storage ownership is not open in this worker.',
+                    );
+                }
+                const committed =
+                    await ownedCustody.commitFreshFoundationInitialization(
+                        copiedInput as BrowserFoundationInitializationPreparationInput,
+                    );
+                const batchIdentifier =
+                    issueFoundationInitializationBatchIdentifier();
+                committedFoundationInitializationBatches.set(
+                    batchIdentifier,
+                    committed,
+                );
+                return Object.freeze({
+                    batchIdentifier,
+                    freshnessCoordinate: committed.freshnessCoordinate,
+                });
+            }
+            case 'commit-foundation-operation-initialization': {
+                const foundationCustody = requireOwnedCustody();
+                const initializationInput =
+                    copiedInput as BrowserFoundationInitializationInput;
+                const committed =
+                    await foundationCustody.commitFreshFoundationInitialization(
+                        initializationInput,
+                    );
+                let batchIdentifier: string | undefined;
+                let canonicalRosterBytes: Uint8Array | undefined;
+                try {
+                    if (
+                        committed.orderedWitnessRecords.length !==
+                        foundationProfile.participantCount - 1
+                    ) {
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'The worker-owned foundation commit did not retain the exact fixed-roster witness set.',
+                        );
+                    }
+                    batchIdentifier =
+                        issueFoundationInitializationBatchIdentifier();
+                    canonicalRosterBytes =
+                        initializationInput.canonicalRosterBytes.slice();
+                    foundationOperationInitializationBatches.set(
+                        batchIdentifier,
+                        Object.freeze({
+                            canonicalRosterBytes,
+                            initialization: committed,
+                            openingMode: 'fresh-provisioned',
+                        }),
+                    );
+                    return Object.freeze({
+                        batchIdentifier,
+                        freshnessCoordinate: committed.freshnessCoordinate,
+                    });
+                } catch (error) {
+                    if (batchIdentifier !== undefined) {
+                        foundationOperationInitializationBatches.delete(
+                            batchIdentifier,
+                        );
+                    }
+                    canonicalRosterBytes?.fill(0);
+                    const cleanupOutcomes = await Promise.allSettled([
+                        custody().closeActionRandomness(
+                            committed.actionRandomnessSessionIdentifier,
+                        ),
+                    ]);
+                    destroyCommittedFoundationInitialization(committed);
+                    const cleanupFailures = cleanupOutcomes
+                        .filter(
+                            (outcome): outcome is PromiseRejectedResult =>
+                                outcome.status === 'rejected',
+                        )
+                        .map((outcome) => outcome.reason as unknown);
+                    if (cleanupFailures.length !== 0) {
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'Foundation commit retention and worker-owned cleanup both failed.',
+                            [error, ...cleanupFailures],
+                        );
+                    }
+                    throw error;
+                }
+            }
+            case 'open-recovered-foundation-initialization': {
+                const initializationInput =
+                    copiedInput as BrowserFoundationInitializationInput;
+                const recovered =
+                    await requireOwnedCustody().openRecoveredFoundationInitialization(
+                        initializationInput,
+                    );
+                if (
+                    recovered.orderedWitnessRecords.length !==
+                    foundationProfile.participantCount - 1
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'Recovered foundation initialization did not retain the exact fixed-roster witness set.',
+                    );
+                }
+                const batchIdentifier =
+                    issueFoundationInitializationBatchIdentifier();
+                foundationOperationInitializationBatches.set(
+                    batchIdentifier,
+                    Object.freeze({
+                        canonicalRosterBytes:
+                            initializationInput.canonicalRosterBytes.slice(),
+                        initialization: recovered,
+                        openingMode: 'recovered',
+                    }),
+                );
+                return Object.freeze({
+                    batchIdentifier,
+                    freshnessCoordinate: recovered.freshnessCoordinate,
+                });
+            }
+            case 'activate-fresh-foundation-initialization':
+                return activateFoundationInitialization(
+                    copiedInput as string,
+                    'fresh-provisioned',
+                );
+            case 'activate-recovered-foundation-initialization':
+                return activateFoundationInitialization(
+                    copiedInput as string,
+                    'recovered',
+                );
+            case 'copy-foundation-witness-subject':
+                return requireFoundationNormalWitnessRole(
+                    copiedInput as string,
+                ).record.subjectParticipantIdentity.slice();
+            case 'open-foundation-witness-durable-binding': {
+                const bindingInput = copiedInput as {
+                    stateObjectIdentifier: string;
+                    witnessRoleIdentifier: string;
+                };
+                return openFoundationWitnessDurableBinding(
+                    bindingInput.witnessRoleIdentifier,
+                    bindingInput.stateObjectIdentifier,
+                );
+            }
+            case 'close-foundation-witness-durable-binding': {
+                const identifier = copiedInput as string;
+                const binding = foundationDurableStateBindings.get(identifier);
+                if (binding !== undefined) {
+                    destroyFoundationCoordinate(
+                        binding.expectedFreshnessCoordinate,
+                    );
+                    foundationDurableStateBindings.delete(identifier);
+                }
+                return undefined;
+            }
+            case 'compare-and-lock-foundation-witness-intent': {
+                const operationInput = copiedInput as {
+                    durableBindingIdentifier: string;
+                    witnessRoleIdentifier: string;
+                };
+                return runFoundationWitnessMutation({
+                    ...operationInput,
+                    operation: (role, binding) =>
+                        role.durableStateService.compareAndLockIntent({
+                            verifiedIntentBinding: binding,
+                        }),
+                });
+            }
+            case 'cache-foundation-witness-signed-vote-carrier': {
+                const operationInput = copiedInput as {
+                    durableBindingIdentifier: string;
+                    value: Uint8Array;
+                    witnessRoleIdentifier: string;
+                };
+                return runFoundationWitnessMutation({
+                    ...operationInput,
+                    operation: (role, binding) =>
+                        role.durableStateService.cacheSignedVoteCarrier({
+                            canonicalSignedVoteCarrier: operationInput.value,
+                            verifiedIntentBinding: binding,
+                        }),
+                });
+            }
+            case 'read-foundation-witness-signed-vote-carrier': {
+                const operationInput = copiedInput as {
+                    durableBindingIdentifier: string;
+                    witnessRoleIdentifier: string;
+                };
+                return runFoundationWitnessRead({
+                    ...operationInput,
+                    operation: (role, binding) =>
+                        role.durableStateService.readSignedVoteCarrier({
+                            verifiedIntentBinding: binding,
+                        }),
+                });
+            }
+            case 'cache-foundation-witness-exact-output': {
+                const operationInput = copiedInput as {
+                    durableBindingIdentifier: string;
+                    value: Uint8Array;
+                    witnessRoleIdentifier: string;
+                };
+                return runFoundationWitnessMutation({
+                    ...operationInput,
+                    operation: (role, binding) =>
+                        role.durableStateService.cacheExactOutput({
+                            exactOutputBytes: operationInput.value,
+                            verifiedOutputBinding: binding,
+                        }),
+                });
+            }
+            case 'read-foundation-witness-exact-output': {
+                const operationInput = copiedInput as {
+                    durableBindingIdentifier: string;
+                    witnessRoleIdentifier: string;
+                };
+                return runFoundationWitnessRead({
+                    ...operationInput,
+                    operation: (role, binding) =>
+                        role.durableStateService.readExactOutput({
+                            verifiedOutputBinding: binding,
+                        }),
+                });
+            }
+            case 'authenticate-foundation-head': {
+                if (ownedCustody === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'Closed',
+                        'Browser foundation storage ownership is not open in this worker.',
+                    );
+                }
+                return ownedCustody.authenticateFoundationHead();
+            }
             case 'open-state-verifier-session':
                 return custody().openActionStateVerifierSession(
                     copiedInput as BrowserActionStateVerifierSessionInput,
@@ -1439,10 +6125,131 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 return custody().verifyActionRandomnessReservation(
                     copiedInput as BrowserActionRandomnessReservationVerificationInput,
                 );
-            case 'release-state-object':
-                return custody().releaseActionStateObject(
-                    copiedInput as string,
+            case 'produce-foundation-action-randomness-reservation-intent': {
+                const productionInput = copiedInput as {
+                    actionRandomnessHandleIdentifier: string;
+                    stateVerifierSessionIdentifier: string;
+                };
+                const handle = foundationActionRandomnessHandles.get(
+                    productionInput.actionRandomnessHandleIdentifier,
                 );
+                if (handle === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The foundation action-randomness handle is unavailable in this worker.',
+                    );
+                }
+                const produced =
+                    await produceClosedWorkerActionRandomnessReservationIntent(
+                        requireFoundationWorkerKernel(),
+                        {
+                            actionRandomnessSessionIdentifier:
+                                handle.actionRandomnessSessionIdentifier,
+                            signatureOperation:
+                                requireFoundationStateObjectSignatureOperation(),
+                            stateVerifierSessionIdentifier:
+                                productionInput.stateVerifierSessionIdentifier,
+                        },
+                    );
+                if (produced.isValid) {
+                    foundationStateObjectIdentifiers.add(
+                        produced.value.stateIntentIdentifier,
+                    );
+                }
+                return produced;
+            }
+            case 'vote-for-foundation-action-randomness-reservation-intent':
+                return voteForFoundationActionRandomnessReservationIntent(
+                    copiedInput as {
+                        canonicalReservationIntentCarrier: Uint8Array;
+                        stateVerifierSessionIdentifier: string;
+                        subjectParticipantIdentity: Uint8Array;
+                        witnessRoleIdentifier: string;
+                    },
+                );
+            case 'certify-foundation-action-randomness-reservation': {
+                const certificationInput = copiedInput as {
+                    stateIntentIdentifier: string;
+                    untrustedVoteCarriers: readonly Uint8Array[];
+                };
+                if (
+                    !foundationStateObjectIdentifiers.has(
+                        certificationInput.stateIntentIdentifier,
+                    )
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The foundation state reservation intent is unavailable in this worker.',
+                    );
+                }
+                const produced =
+                    await certifyClosedWorkerActionRandomnessReservation(
+                        requireFoundationWorkerKernel(),
+                        certificationInput,
+                    );
+                if (produced.isValid) {
+                    foundationStateObjectIdentifiers.delete(
+                        certificationInput.stateIntentIdentifier,
+                    );
+                    foundationStateObjectIdentifiers.add(
+                        produced.value.stateReservationIdentifier,
+                    );
+                }
+                return produced;
+            }
+            case 'verify-foundation-action-randomness-reservation': {
+                const verificationInput = copiedInput as {
+                    actionRandomnessHandleIdentifier: string;
+                    verificationInput: BrowserActionRandomnessReservationVerificationInput;
+                };
+                const handle = foundationActionRandomnessHandles.get(
+                    verificationInput.actionRandomnessHandleIdentifier,
+                );
+                if (handle === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The foundation action-randomness handle is unavailable in this worker.',
+                    );
+                }
+                return custody().verifyActionRandomnessReservation({
+                    ...verificationInput.verificationInput,
+                    actionRandomnessSessionIdentifier:
+                        handle.actionRandomnessSessionIdentifier,
+                });
+            }
+            case 'release-state-object': {
+                const stateObjectIdentifier = copiedInput as string;
+                for (const [
+                    identifier,
+                    binding,
+                ] of foundationDurableStateBindings) {
+                    if (
+                        binding.stateObjectIdentifier !== stateObjectIdentifier
+                    ) {
+                        continue;
+                    }
+                    destroyFoundationCoordinate(
+                        binding.expectedFreshnessCoordinate,
+                    );
+                    foundationDurableStateBindings.delete(identifier);
+                }
+                await custody().releaseActionStateObject(stateObjectIdentifier);
+                foundationStateObjectIdentifiers.delete(stateObjectIdentifier);
+                return undefined;
+            }
+            case 'release-foundation-state-reservation-intent': {
+                const stateObjectIdentifier = copiedInput as string;
+                if (
+                    !foundationStateObjectIdentifiers.has(stateObjectIdentifier)
+                ) {
+                    return undefined;
+                }
+                await requireFoundationWorkerKernel().releaseActionStateObject(
+                    stateObjectIdentifier,
+                );
+                foundationStateObjectIdentifiers.delete(stateObjectIdentifier);
+                return undefined;
+            }
             case 'close-state-verifier-session':
                 return custody().closeActionStateVerifierSession(
                     copiedInput as string,
@@ -1461,21 +6268,117 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 );
             case 'close-action-randomness':
                 return custody().closeActionRandomness(copiedInput as string);
-            case 'derive-persistent-proof-attempt':
-                return custody().derivePersistentProofAttempt(
-                    copiedInput as BrowserPersistentProofAttemptInput,
-                );
+            case 'close-foundation-action-randomness': {
+                const identifier = copiedInput as string;
+                const handle =
+                    foundationActionRandomnessHandles.get(identifier);
+                if (handle === undefined) {
+                    return undefined;
+                }
+                foundationActionRandomnessHandles.delete(identifier);
+                for (const preparedOperation of commonProofPreparedOperations) {
+                    const preparedRecord =
+                        installedCommonProofPreparedOperationRecords.get(
+                            preparedOperation,
+                        );
+                    if (
+                        preparedRecord?.foundationActionRandomnessHandleIdentifier ===
+                        identifier
+                    ) {
+                        retirePreparedCommonProofOperation(preparedOperation);
+                    }
+                }
+                const associatedEnvironments = [
+                    ...commonProofExecutionEnvironments,
+                ].filter((environment) => {
+                    const record =
+                        installedCommonProofExecutionEnvironmentRecords.get(
+                            environment,
+                        );
+                    return (
+                        record !== undefined &&
+                        !record.closed &&
+                        record.foundationActionRandomnessHandleIdentifier ===
+                            identifier
+                    );
+                });
+                const closureOutcomes = await Promise.allSettled([
+                    ...associatedEnvironments.map(async (environment) => {
+                        const record =
+                            installedCommonProofExecutionEnvironmentRecords.get(
+                                environment,
+                            );
+                        if (record === undefined || record.closed) {
+                            return;
+                        }
+                        record.closed = true;
+                        installedCommonProofExecutionEnvironmentRecords.delete(
+                            environment,
+                        );
+                        record.releaseOwnerReference();
+                        await record.custody.retire();
+                    }),
+                    custody().closeActionRandomness(
+                        handle.actionRandomnessSessionIdentifier,
+                    ),
+                ]);
+                handle.actionRandomnessCommitment.fill(0);
+                const closureFailures = closureOutcomes
+                    .filter(
+                        (outcome): outcome is PromiseRejectedResult =>
+                            outcome.status === 'rejected',
+                    )
+                    .map((outcome) => outcome.reason as unknown);
+                if (closureFailures.length !== 0) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'Closing foundation action randomness could not retire every common-proof environment.',
+                        closureFailures,
+                    );
+                }
+                return undefined;
+            }
             case 'derive-target-release-attempt':
                 return custody().deriveTargetReleaseAttempt(
                     copiedInput as BrowserTargetReleaseAttemptInput,
                 );
+            case 'derive-foundation-target-release-attempt': {
+                const attemptInput = copiedInput as {
+                    actionRandomnessHandleIdentifier: string;
+                    attemptInput: BrowserTargetReleaseAttemptInput;
+                };
+                const handle = foundationActionRandomnessHandles.get(
+                    attemptInput.actionRandomnessHandleIdentifier,
+                );
+                if (handle === undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The foundation action-randomness handle is unavailable in this worker.',
+                    );
+                }
+                return custody().deriveTargetReleaseAttempt({
+                    ...attemptInput.attemptInput,
+                    actionRandomnessSessionIdentifier:
+                        handle.actionRandomnessSessionIdentifier,
+                });
+            }
             case 'delete':
                 return custody().delete(
                     copiedInput as BrowserDeviceWrappingSnapshot,
                 );
+            case 'retire': {
+                await closeFoundationOperationResources();
+                committedFoundationInitializationBatches.clear();
+                await closeCheckpointResources();
+                await custody().retire();
+                return undefined;
+            }
             case 'close': {
                 const handle = ownedCustody;
+                await closeFoundationOperationResources();
                 ownedCustody = undefined;
+                committedFoundationInitializationBatches.clear();
+                await closeCheckpointResources();
                 await handle?.close();
                 return undefined;
             }
@@ -1505,6 +6408,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
             try {
                 input.workerScope.postMessage({
                     errorCode: normalizeHostErrorCode(error),
+                    errorMessage: describeHostError(error),
                     messageKind: 'browser-action-storage-custody-failed',
                     requestIdentifier: request.requestIdentifier,
                 });
@@ -1561,7 +6465,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
     listenerHolder.value = listener;
     input.workerScope.addEventListener('message', listener);
 
-    return async (): Promise<void> => {
+    const uninstall = async (): Promise<void> => {
         if (uninstalled) {
             await terminalCleanup;
             return;
@@ -1570,7 +6474,367 @@ export const installBrowserActionStorageCustodyWorkerHost = (
         input.workerScope.removeEventListener('message', listener);
         await operationTail;
         const handle = ownedCustody;
+        await closeCheckpointResources();
+        if (handle !== undefined) {
+            await closeFoundationOperationResources();
+        }
         ownedCustody = undefined;
         await handle?.close();
     };
+    installedCustodyWorkerHostCommonProofOperations.set(
+        uninstall,
+        (applicationInput) => {
+            if (uninstalled || terminalFailure !== undefined) {
+                return Promise.reject(
+                    terminalFailure ??
+                        new BrowserActionStorageCustodyError(
+                            'Closed',
+                            'The custody worker host is no longer available for common-proof application.',
+                        ),
+                );
+            }
+            let copiedInput: ClosedWorkerCommonProofApplicationInput;
+            try {
+                copiedInput = Object.freeze({
+                    capability: applicationInput.capability,
+                    durableBindingIdentifier: copyOpaqueWorkerIdentifier(
+                        applicationInput.durableBindingIdentifier,
+                        'Durable state binding handle identifier',
+                    ),
+                    witnessRoleIdentifier: copyOpaqueWorkerIdentifier(
+                        applicationInput.witnessRoleIdentifier,
+                        'Foundation witness role identifier',
+                    ),
+                });
+            } catch (error) {
+                return Promise.reject(
+                    error instanceof Error
+                        ? error
+                        : new BrowserActionStorageCustodyError(
+                              'InvalidInput',
+                              'The common-proof application input failed with a non-error value.',
+                              error,
+                          ),
+                );
+            }
+            const result = operationTail.then(
+                () => runVerifiedCommonProofApplication(copiedInput),
+                () => runVerifiedCommonProofApplication(copiedInput),
+            );
+            operationTail = result.then(
+                () => undefined,
+                () => undefined,
+            );
+            return result;
+        },
+    );
+    installedCustodyWorkerHostCommonProofGenerationPreparers.set(
+        uninstall,
+        (preparationInput) => {
+            if (uninstalled || terminalFailure !== undefined) {
+                throw (
+                    terminalFailure ??
+                    new BrowserActionStorageCustodyError(
+                        'Closed',
+                        'The custody worker host is no longer available for common-proof preparation.',
+                    )
+                );
+            }
+            const foundationActionRandomnessHandleIdentifier =
+                copyOpaqueWorkerIdentifier(
+                    preparationInput.foundationActionRandomnessHandleIdentifier,
+                    'Foundation action-randomness handle identifier',
+                );
+            if (
+                !foundationActionRandomnessHandles.has(
+                    foundationActionRandomnessHandleIdentifier,
+                )
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The foundation action-randomness handle is unavailable for common-proof preparation.',
+                );
+            }
+            const description =
+                describeClosedWorkerPreparedCommonProofGeneration(
+                    preparationInput.preparedGeneration,
+                );
+            try {
+                const preparedOperation = Object.freeze({
+                    [installedCommonProofPreparedOperationBrand]: true as const,
+                });
+                installedCommonProofPreparedOperationRecords.set(
+                    preparedOperation,
+                    {
+                        commonProofRuntimeBindingHash:
+                            description.commonProofRuntimeBindingHash,
+                        consumed: false,
+                        foundationActionRandomnessHandleIdentifier,
+                        installedHost: uninstall,
+                        preparedGeneration: preparationInput.preparedGeneration,
+                        proofAttemptLineageIdentifier:
+                            description.proofAttemptLineageIdentifier,
+                    },
+                );
+                commonProofPreparedOperations.add(preparedOperation);
+                return preparedOperation;
+            } catch (error) {
+                description.commonProofRuntimeBindingHash.fill(0);
+                description.proofAttemptLineageIdentifier.fill(0);
+                throw error;
+            }
+        },
+    );
+    installedCustodyWorkerHostCommonProofEnvironmentOpeners.set(
+        uninstall,
+        (environmentInput) => {
+            if (uninstalled || terminalFailure !== undefined) {
+                return Promise.reject(
+                    terminalFailure ??
+                        new BrowserActionStorageCustodyError(
+                            'Closed',
+                            'The custody worker host is no longer available for common-proof execution.',
+                        ),
+                );
+            }
+            let copiedRuntimeBindingHash = new Uint8Array(0);
+            let copiedProofAttemptLineageIdentifier = new Uint8Array(0);
+            let preparedGeneration:
+                | ClosedWorkerPreparedCommonProofGeneration
+                | undefined;
+            let copiedResumeDescriptor:
+                | CommonProofCheckpointResumeDescriptor
+                | undefined;
+            let copiedInput: ResolvedInstalledCommonProofExecutionEnvironmentInput;
+            const preparedRecord =
+                installedCommonProofPreparedOperationRecords.get(
+                    environmentInput.preparedOperation,
+                );
+            try {
+                if (
+                    preparedRecord === undefined ||
+                    preparedRecord.installedHost !== uninstall ||
+                    preparedRecord.consumed ||
+                    preparedRecord.preparedGeneration === undefined ||
+                    !foundationActionRandomnessHandles.has(
+                        preparedRecord.foundationActionRandomnessHandleIdentifier,
+                    )
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'The common-proof prepared operation is unavailable in this worker.',
+                    );
+                }
+                preparedRecord.consumed = true;
+                copiedRuntimeBindingHash = Uint8Array.from(
+                    copyBytes(
+                        preparedRecord.commonProofRuntimeBindingHash,
+                        storageRootCommitmentByteLength,
+                        'Common-proof runtime-binding hash',
+                    ),
+                );
+                copiedProofAttemptLineageIdentifier = Uint8Array.from(
+                    copyBytes(
+                        preparedRecord.proofAttemptLineageIdentifier,
+                        mutationIdentifierByteLength,
+                        'Proof-attempt lineage identifier',
+                    ),
+                );
+                copiedResumeDescriptor =
+                    environmentInput.resumeDescriptor === undefined
+                        ? undefined
+                        : copyCommonProofCheckpointResumeDescriptorForWorker(
+                              environmentInput.resumeDescriptor,
+                          );
+                preparedGeneration = preparedRecord.preparedGeneration;
+                preparedRecord.preparedGeneration = undefined;
+                copiedInput = Object.freeze({
+                    commonProofRuntimeBindingHash: copiedRuntimeBindingHash,
+                    foundationActionRandomnessHandleIdentifier:
+                        preparedRecord.foundationActionRandomnessHandleIdentifier,
+                    preparedGeneration,
+                    proofAttemptLineageIdentifier:
+                        copiedProofAttemptLineageIdentifier,
+                    ...(copiedResumeDescriptor === undefined
+                        ? {}
+                        : { resumeDescriptor: copiedResumeDescriptor }),
+                });
+            } catch (error) {
+                copiedRuntimeBindingHash.fill(0);
+                copiedProofAttemptLineageIdentifier.fill(0);
+                destroyCommonProofCheckpointResumeDescriptor(
+                    copiedResumeDescriptor,
+                );
+                if (preparedGeneration !== undefined) {
+                    try {
+                        releaseClosedWorkerPreparedCommonProofGeneration(
+                            preparedGeneration,
+                        );
+                    } catch {
+                        // The input failure below remains authoritative.
+                    }
+                }
+                if (
+                    preparedRecord !== undefined &&
+                    preparedRecord.installedHost === uninstall &&
+                    preparedRecord.consumed
+                ) {
+                    retirePreparedCommonProofOperation(
+                        environmentInput.preparedOperation,
+                    );
+                }
+                return Promise.reject(
+                    error instanceof Error
+                        ? error
+                        : new BrowserActionStorageCustodyError(
+                              'InvalidInput',
+                              'The common-proof environment input is malformed.',
+                              error,
+                          ),
+                );
+            }
+            retirePreparedCommonProofOperation(
+                environmentInput.preparedOperation,
+            );
+            const result = operationTail.then(
+                async () => {
+                    const actionRandomnessHandle =
+                        foundationActionRandomnessHandles.get(
+                            copiedInput.foundationActionRandomnessHandleIdentifier,
+                        );
+                    if (actionRandomnessHandle === undefined) {
+                        throw new BrowserActionStorageCustodyError(
+                            'InvalidInput',
+                            'The foundation action-randomness handle is unavailable for common-proof execution.',
+                        );
+                    }
+                    const cryptoProvider =
+                        input.cryptoProvider ?? globalThis.crypto;
+                    if (
+                        copiedInput.resumeDescriptor === undefined &&
+                        cryptoProvider?.getRandomValues === undefined
+                    ) {
+                        throw new BrowserActionStorageCustodyError(
+                            'Unavailable',
+                            'Secure randomness is unavailable for a common-proof environment identifier.',
+                        );
+                    }
+                    const commonProofEnvironmentIdentifier =
+                        copiedInput.resumeDescriptor === undefined
+                            ? new Uint8Array(mutationIdentifierByteLength)
+                            : copiedInput.resumeDescriptor.commonProofEnvironmentIdentifier.slice();
+                    let commonProofCustody: CommonProofBrowserCustody;
+                    try {
+                        if (copiedInput.resumeDescriptor === undefined) {
+                            cryptoProvider.getRandomValues(
+                                commonProofEnvironmentIdentifier,
+                            );
+                        }
+                        const owned = requireOwnedCustody();
+                        if (
+                            input.checkpointStore === undefined ||
+                            owned.openCommonProofCustody === undefined
+                        ) {
+                            throw new BrowserActionStorageCustodyError(
+                                'Unavailable',
+                                'The installed worker does not provide common-proof checkpoint and execution custody.',
+                            );
+                        }
+                        commonProofCustody = await owned.openCommonProofCustody(
+                            {
+                                actionRandomnessCommitment:
+                                    actionRandomnessHandle.actionRandomnessCommitment.slice(),
+                                checkpoint: {
+                                    cursorKernel:
+                                        input.checkpointStore.cursorKernel,
+                                    ...(copiedInput.resumeDescriptor ===
+                                    undefined
+                                        ? {}
+                                        : {
+                                              resumeDescriptor:
+                                                  copiedInput.resumeDescriptor,
+                                          }),
+                                    store: await requireCheckpointStore(),
+                                },
+                                commonProofEnvironmentIdentifier,
+                                commonProofRuntimeBindingHash:
+                                    copiedInput.commonProofRuntimeBindingHash,
+                                proofAttemptLineageIdentifier:
+                                    copiedInput.proofAttemptLineageIdentifier,
+                            },
+                        );
+                    } finally {
+                        commonProofEnvironmentIdentifier.fill(0);
+                    }
+                    const environment = Object.freeze({
+                        [installedCommonProofExecutionEnvironmentBrand]:
+                            true as const,
+                    });
+                    commonProofExecutionEnvironments.add(environment);
+                    installedCommonProofExecutionEnvironmentRecords.set(
+                        environment,
+                        {
+                            applyVerifiedCommonProof:
+                                runVerifiedCommonProofApplication,
+                            closed: false,
+                            commonProofRuntimeBindingHash:
+                                copiedInput.commonProofRuntimeBindingHash.slice(),
+                            custody: commonProofCustody,
+                            foundationActionRandomnessHandleIdentifier:
+                                copiedInput.foundationActionRandomnessHandleIdentifier,
+                            generationCompleted: false,
+                            installedHost: uninstall,
+                            operationActive: false,
+                            preparedGeneration: copiedInput.preparedGeneration,
+                            proofAttemptLineageIdentifier:
+                                copiedInput.proofAttemptLineageIdentifier.slice(),
+                            releaseOwnerReference: () => {
+                                commonProofExecutionEnvironments.delete(
+                                    environment,
+                                );
+                            },
+                            resumedFromCheckpoint:
+                                copiedInput.resumeDescriptor !== undefined,
+                            runInHostQueue: <Result>(
+                                operation: () => Promise<Result>,
+                            ): Promise<Result> => {
+                                const queuedResult = operationTail.then(
+                                    operation,
+                                    operation,
+                                );
+                                operationTail = queuedResult.then(
+                                    () => undefined,
+                                    () => undefined,
+                                );
+                                return queuedResult;
+                            },
+                        },
+                    );
+                    return environment;
+                },
+                () => {
+                    throw (
+                        terminalFailure ??
+                        new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'The installed custody worker operation queue failed before common-proof environment creation.',
+                        )
+                    );
+                },
+            );
+            const resultWithDestroyedInput = result.finally(() => {
+                copiedInput.commonProofRuntimeBindingHash.fill(0);
+                copiedInput.proofAttemptLineageIdentifier.fill(0);
+                destroyCommonProofCheckpointResumeDescriptor(
+                    copiedInput.resumeDescriptor,
+                );
+            });
+            operationTail = resultWithDestroyedInput.then(
+                () => undefined,
+                () => undefined,
+            );
+            return resultWithDestroyedInput;
+        },
+    );
+    return uninstall;
 };

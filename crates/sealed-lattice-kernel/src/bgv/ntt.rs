@@ -67,7 +67,7 @@ fn transform_negacyclic_in_place(
 
     let root_parameters = root_parameters_for_modulus(modulus).ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "modulus is not part of the selected BGV-RNS parameters",
         )
     })?;
@@ -123,7 +123,7 @@ fn full_degree_ntt_plan(modulus: u64) -> CanonicalResult<&'static NttPlan> {
         .find(|plan| plan.modulus == modulus)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "modulus is not part of the selected BGV-RNS parameters",
             )
         })
@@ -270,7 +270,7 @@ fn apply_bit_reverse_swaps(values: &mut [u64], swaps: &[(usize, usize)]) {
 fn validate_transform_length(length: usize) -> CanonicalResult<()> {
     if length == 0 || !length.is_power_of_two() || !POLYNOMIAL_DEGREE.is_multiple_of(length) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "NTT length must be a non-empty power of two dividing the selected polynomial degree",
         ));
     }
@@ -281,7 +281,7 @@ fn validate_transform_length(length: usize) -> CanonicalResult<()> {
 fn validate_residues(values: &[u64], modulus: u64) -> CanonicalResult<()> {
     if values.iter().any(|value| *value >= modulus) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "NTT input contains a non-canonical residue",
         ));
     }
@@ -303,7 +303,7 @@ pub(crate) fn negacyclic_convolution_for_tests(
 ) -> CanonicalResult<Vec<u64>> {
     if left.len() != right.len() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "convolution inputs must have the same length",
         ));
     }
@@ -326,7 +326,7 @@ mod tests {
     use crate::{
         bgv::{
             modular_arithmetic::sub_mod,
-            parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME},
+            parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
         },
         encoding::CanonicalResult,
     };
@@ -406,7 +406,7 @@ mod tests {
     }
 
     fn selected_ntt_moduli() -> Vec<u64> {
-        DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]).collect()
+        DATA_PRIMES.into_iter().chain(SPECIAL_PRIMES).collect()
     }
 
     fn full_degree_fixture_vector(modulus: u64) -> Vec<u64> {

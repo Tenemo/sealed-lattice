@@ -54,7 +54,7 @@ pub(super) fn encode_logical_slots_to_plaintext_coefficients(
     }
     if supplied_slots.iter().any(|slot| *slot >= PLAINTEXT_MODULUS) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "BGV batch encoder slot value is outside GF(65537)",
         ));
     }
@@ -159,7 +159,7 @@ pub(crate) fn decode_batch_plaintext_polynomial(
         for (coefficient_index, coefficient) in limb.iter().enumerate() {
             if coefficient % PLAINTEXT_MODULUS != coefficients_mod_plaintext[coefficient_index] {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     format!(
                         "BGV plaintext limb {limb_index} coefficient {coefficient_index} is not a consistent plaintext lift",
                     ),

@@ -13,13 +13,20 @@ import {
     bytesEqual,
     bytesToHex,
     copyBoundedBytes,
+    copyRuntimeRecordProtectionAuthorityContext,
     copyRuntimeStorageAuthorityContext,
     createRuntimeRecordProtection,
     mapStorageError,
     readRuntimeRecord,
+    releaseRuntimeRecordProtection,
     stageRuntimeRecordWrite,
+    type RuntimeRecordProtection,
     type RuntimeStorageAuthorityContext,
 } from './authenticated-runtime-record.js';
+import {
+    ExclusiveResourceLifecycle,
+    type ExclusiveResourceOwnerToken,
+} from './exclusive-resource-lifecycle.js';
 import type {
     UntrustedStorageTransaction,
     UntrustedStorageTransactionStore,
@@ -33,10 +40,14 @@ const signedVoteCarrierRecordOperationDomain =
     'sealed-lattice/runtime/state-signed-vote-carrier-record/v1';
 const exactOutputRecordOperationDomain =
     'sealed-lattice/runtime/state-exact-output-record/v1';
+const commonProofApplicationRecordOperationDomain =
+    'sealed-lattice/runtime/common-proof-application-record/v1';
 const stateExactOutputHashDomain = 'sealed-lattice/state/exact-output/v1';
 const intentLockRecordByteLength = 262;
 const signedVoteCarrierRecordHeaderByteLength = 214;
 const exactOutputRecordHeaderByteLength = 204;
+const proofApplicationSlotHashByteLength = 64;
+const maximumCommonProofAuthorizationFrameByteLength = 1_048_576;
 const textEncoder = new TextEncoder();
 const validStateCapabilityKinds = new Set<number>(
     Object.values(stateCapabilityKinds),
@@ -83,6 +94,7 @@ export type DurableStateWitnessServiceLimits = Readonly<{
  * This is not an external network service or a separate ceremony actor.
  */
 export type DurableStateWitnessService = Readonly<{
+    close(): Promise<void>;
     copyAuthorityContext(): RuntimeStorageAuthorityContext;
     cacheSignedVoteCarrier(input: {
         canonicalSignedVoteCarrier: Uint8Array;
@@ -102,6 +114,45 @@ export type DurableStateWitnessService = Readonly<{
         verifiedIntentBinding: VerifiedStateDurableBinding;
     }): Promise<Uint8Array>;
 }>;
+
+export type TransferableDurableStateWitnessService =
+    DurableStateWitnessService &
+        Readonly<{
+            claimExclusiveOwner(): DurableStateWitnessService;
+        }>;
+
+type PersistCommonProofApplicationInput = Readonly<{
+    authorizationFrame: Uint8Array;
+    onCommitAttempt(): void;
+    proofApplicationSlotHash: Uint8Array;
+}>;
+
+type PersistCommonProofApplicationOperation = (
+    input: PersistCommonProofApplicationInput,
+) => Promise<Uint8Array>;
+
+const commonProofApplicationPersistenceOperations = new WeakMap<
+    DurableStateWitnessService,
+    PersistCommonProofApplicationOperation
+>();
+
+/**
+ * Same-worker bridge for one verifier-prepared common-proof authorization.
+ * It is intentionally absent from the public durable-state service surface.
+ */
+export const persistCommonProofApplicationAuthorization = (
+    service: DurableStateWitnessService,
+    input: PersistCommonProofApplicationInput,
+): Promise<Uint8Array> => {
+    const operation = commonProofApplicationPersistenceOperations.get(service);
+    if (operation === undefined) {
+        throw new AuthenticatedRuntimeRecordError(
+            'InvalidInput',
+            'The durable state witness service does not own common-proof application storage in this worker.',
+        );
+    }
+    return operation(input);
+};
 
 const requireSafePositiveInteger = (value: number, label: string): void => {
     if (!Number.isSafeInteger(value) || value <= 0) {
@@ -136,6 +187,10 @@ const signedVoteCarrierRecordKey = (
     binding: StateDurableBindingDescription,
 ): string =>
     `state-signed-vote-carrier/${bytesToHex(binding.stateKey)}/${binding.witnessVoteSequence.toString(10)}`;
+
+const commonProofApplicationRecordKey = (
+    proofApplicationSlotHash: Uint8Array,
+): string => `common-proof-application/${bytesToHex(proofApplicationSlotHash)}`;
 
 const writeOptionalHash = (
     bytes: Uint8Array,
@@ -797,48 +852,49 @@ const requireExactOutputCacheMatches = async (input: {
     return record;
 };
 
-export const openDurableStateWitnessService = (input: {
-    authorityContext: RuntimeStorageAuthorityContext;
-    cryptoProvider?: Crypto;
-    encryptionKey: CryptoKey;
-    limits: DurableStateWitnessServiceLimits;
-    store: UntrustedStorageTransactionStore;
-}): DurableStateWitnessService => {
+const validateDurableStateWitnessServiceLimits = (
+    limits: DurableStateWitnessServiceLimits,
+): DurableStateWitnessServiceLimits => {
     requireSafePositiveInteger(
-        input.limits.maximumExactOutputByteLength,
+        limits.maximumExactOutputByteLength,
         'maximumExactOutputByteLength',
     );
     requireSafePositiveInteger(
-        input.limits.maximumRecordSealingCount,
+        limits.maximumRecordSealingCount,
         'maximumRecordSealingCount',
     );
-    if (input.limits.maximumRecordSealingCount > 0x1_0000_0000) {
+    if (limits.maximumRecordSealingCount > 0x1_0000_0000) {
         throw new AuthenticatedRuntimeRecordError(
             'InvalidConfiguration',
             'maximumRecordSealingCount exceeds the AES-GCM random-nonce invocation ceiling.',
         );
     }
     requireSafePositiveInteger(
-        input.limits.maximumSignedVoteCarrierByteLength,
+        limits.maximumSignedVoteCarrierByteLength,
         'maximumSignedVoteCarrierByteLength',
     );
     requireSafePositiveInteger(
-        input.limits.transactionLifetimeMilliseconds,
+        limits.transactionLifetimeMilliseconds,
         'transactionLifetimeMilliseconds',
     );
-    const limits = Object.freeze({ ...input.limits });
-    const protection = createRuntimeRecordProtection({
-        authorityContext: input.authorityContext,
-        cryptoProvider: input.cryptoProvider,
-        encryptionKey: input.encryptionKey,
-        maximumRecordSealingCount: limits.maximumRecordSealingCount,
-    });
+    return Object.freeze({ ...limits });
+};
+
+export const openDurableStateWitnessServiceWithProtection = (input: {
+    limits: DurableStateWitnessServiceLimits;
+    protection: RuntimeRecordProtection;
+    store: UntrustedStorageTransactionStore;
+}): TransferableDurableStateWitnessService => {
+    const limits = validateDurableStateWitnessServiceLimits(input.limits);
+    const protection = input.protection;
+    const authorityContext =
+        copyRuntimeRecordProtectionAuthorityContext(protection);
 
     const compareAndLockIntent: DurableStateWitnessService['compareAndLockIntent'] =
         async ({ verifiedIntentBinding }) => {
             const binding = copyVerifiedBinding(
                 verifiedIntentBinding,
-                protection.authorityContext,
+                authorityContext,
             );
             const openedCurrentRecord = await readIntentLockRecord({
                 binding,
@@ -932,7 +988,7 @@ export const openDurableStateWitnessService = (input: {
         async ({ canonicalSignedVoteCarrier, verifiedIntentBinding }) => {
             const binding = copyVerifiedBinding(
                 verifiedIntentBinding,
-                protection.authorityContext,
+                authorityContext,
             );
             const candidateCarrier = copyBoundedBytes(
                 canonicalSignedVoteCarrier,
@@ -1043,7 +1099,7 @@ export const openDurableStateWitnessService = (input: {
         async ({ exactOutputBytes, verifiedOutputBinding }) => {
             const binding = copyVerifiedBinding(
                 verifiedOutputBinding,
-                protection.authorityContext,
+                authorityContext,
             );
             if (
                 binding.voteKind !== stateWitnessVoteKinds.output ||
@@ -1158,7 +1214,7 @@ export const openDurableStateWitnessService = (input: {
         async ({ verifiedOutputBinding }) => {
             const binding = copyVerifiedBinding(
                 verifiedOutputBinding,
-                protection.authorityContext,
+                authorityContext,
             );
             const record = await requireExactOutputCacheMatches({
                 binding,
@@ -1175,7 +1231,7 @@ export const openDurableStateWitnessService = (input: {
         async ({ verifiedIntentBinding }) => {
             const binding = copyVerifiedBinding(
                 verifiedIntentBinding,
-                protection.authorityContext,
+                authorityContext,
             );
             const record = await readSignedVoteCarrierRecord({
                 binding,
@@ -1197,14 +1253,214 @@ export const openDurableStateWitnessService = (input: {
             }
         };
 
-    return Object.freeze({
-        cacheExactOutput,
-        cacheSignedVoteCarrier,
-        compareAndLockIntent,
-        copyAuthorityContext: () =>
-            copyRuntimeStorageAuthorityContext(protection.authorityContext),
-        readExactOutput,
-        readSignedVoteCarrier,
+    const persistCommonProofApplication: PersistCommonProofApplicationOperation =
+        async ({
+            authorizationFrame,
+            onCommitAttempt,
+            proofApplicationSlotHash,
+        }) => {
+            if (typeof onCommitAttempt !== 'function') {
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidInput',
+                    'Common-proof persistence requires a commit-attempt boundary callback.',
+                );
+            }
+            const copiedAuthorizationFrame = copyBoundedBytes(
+                authorizationFrame,
+                maximumCommonProofAuthorizationFrameByteLength,
+                'Common-proof authorization frame',
+            );
+            const copiedApplicationSlotHash = copyBoundedBytes(
+                proofApplicationSlotHash,
+                proofApplicationSlotHashByteLength,
+                'Common-proof application slot hash',
+            );
+            if (
+                copiedApplicationSlotHash.byteLength !==
+                proofApplicationSlotHashByteLength
+            ) {
+                copiedAuthorizationFrame.fill(0);
+                copiedApplicationSlotHash.fill(0);
+                throw new AuthenticatedRuntimeRecordError(
+                    'InvalidInput',
+                    'Common-proof application slot hash must be exactly 64 bytes.',
+                );
+            }
+
+            const logicalRecordKey = commonProofApplicationRecordKey(
+                copiedApplicationSlotHash,
+            );
+            let transaction: UntrustedStorageTransaction | undefined;
+            let stagedSealedBytes: Uint8Array | undefined;
+            try {
+                const existing = await readRuntimeRecord({
+                    logicalRecordKey,
+                    operationDomain:
+                        commonProofApplicationRecordOperationDomain,
+                    protection,
+                    store: input.store,
+                });
+                if (existing !== undefined) {
+                    existing.plaintext.fill(0);
+                    existing.sealedBytes.fill(0);
+                    throw new AuthenticatedRuntimeRecordError(
+                        'Conflict',
+                        'The common-proof application slot is already occupied.',
+                    );
+                }
+
+                transaction = await beginDurableStateTransaction({
+                    lifetimeMilliseconds:
+                        limits.transactionLifetimeMilliseconds,
+                    store: input.store,
+                });
+                try {
+                    stagedSealedBytes = await stageRuntimeRecordWrite({
+                        expectedCurrentSealedBytes: null,
+                        logicalRecordKey,
+                        operationDomain:
+                            commonProofApplicationRecordOperationDomain,
+                        plaintext: copiedAuthorizationFrame,
+                        protection,
+                        transaction,
+                    });
+                } catch (error) {
+                    throw await closeTransactionAfterFailure(
+                        transaction,
+                        error,
+                    );
+                }
+
+                try {
+                    onCommitAttempt();
+                } catch (error) {
+                    throw await closeTransactionAfterFailure(
+                        transaction,
+                        error,
+                    );
+                }
+                try {
+                    await transaction.commit();
+                } catch (error) {
+                    throw await closeTransactionAfterFailure(
+                        transaction,
+                        error,
+                    );
+                }
+
+                const committed = await readRuntimeRecord({
+                    logicalRecordKey,
+                    operationDomain:
+                        commonProofApplicationRecordOperationDomain,
+                    protection,
+                    store: input.store,
+                });
+                if (committed === undefined) {
+                    throw new AuthenticatedRuntimeRecordError(
+                        'MissingRecord',
+                        'The committed common-proof application frame is unavailable.',
+                    );
+                }
+                try {
+                    if (
+                        !bytesEqual(
+                            committed.plaintext,
+                            copiedAuthorizationFrame,
+                        )
+                    ) {
+                        throw new AuthenticatedRuntimeRecordError(
+                            'AuthenticationFailed',
+                            'The committed common-proof application frame differs from the verifier-prepared bytes.',
+                        );
+                    }
+                    return committed.plaintext.slice();
+                } finally {
+                    committed.plaintext.fill(0);
+                    committed.sealedBytes.fill(0);
+                }
+            } finally {
+                copiedAuthorizationFrame.fill(0);
+                copiedApplicationSlotHash.fill(0);
+                stagedSealedBytes?.fill(0);
+            }
+        };
+
+    const lifecycle = new ExclusiveResourceLifecycle({
+        cleanup: async () => {
+            authorityContext.actionContextHash.fill(0);
+            authorityContext.ceremonyContextHash.fill(0);
+            authorityContext.ownerParticipantIdentity.fill(0);
+            authorityContext.runtimeBuildManifestHash.fill(0);
+            authorityContext.suiteIdentifier.fill(0);
+            await releaseRuntimeRecordProtection(protection);
+        },
+        createInvalidStateError: (message) =>
+            new AuthenticatedRuntimeRecordError('InvalidState', message),
+    });
+    const initialOwner = lifecycle.initialOwner();
+    const createOwnedService = (
+        owner: ExclusiveResourceOwnerToken,
+    ): DurableStateWitnessService => {
+        const service: DurableStateWitnessService = Object.freeze({
+            cacheExactOutput: (cacheInput) =>
+                lifecycle.run(owner, () => cacheExactOutput(cacheInput)),
+            cacheSignedVoteCarrier: (cacheInput) =>
+                lifecycle.run(owner, () => cacheSignedVoteCarrier(cacheInput)),
+            close: () => lifecycle.close(owner),
+            compareAndLockIntent: (compareInput) =>
+                lifecycle.run(owner, () => compareAndLockIntent(compareInput)),
+            copyAuthorityContext: () => {
+                lifecycle.assertOpen(owner);
+                return copyRuntimeStorageAuthorityContext(authorityContext);
+            },
+            readExactOutput: (readInput) =>
+                lifecycle.run(owner, () => readExactOutput(readInput)),
+            readSignedVoteCarrier: (readInput) =>
+                lifecycle.run(owner, () => readSignedVoteCarrier(readInput)),
+        });
+        commonProofApplicationPersistenceOperations.set(
+            service,
+            (persistInput) =>
+                lifecycle.run(owner, () =>
+                    persistCommonProofApplication(persistInput),
+                ),
+        );
+        return service;
+    };
+    const initialService = createOwnedService(initialOwner);
+    const transferableService = Object.freeze({
+        ...initialService,
+        claimExclusiveOwner: () =>
+            createOwnedService(lifecycle.claim(initialOwner)),
+    });
+    commonProofApplicationPersistenceOperations.set(
+        transferableService,
+        (persistInput) =>
+            lifecycle.run(initialOwner, () =>
+                persistCommonProofApplication(persistInput),
+            ),
+    );
+    return transferableService;
+};
+
+/** Local-key constructor retained only for focused storage tests. */
+export const openDurableStateWitnessService = (input: {
+    authorityContext: RuntimeStorageAuthorityContext;
+    cryptoProvider?: Crypto;
+    encryptionKey: CryptoKey;
+    limits: DurableStateWitnessServiceLimits;
+    store: UntrustedStorageTransactionStore;
+}): TransferableDurableStateWitnessService => {
+    const limits = validateDurableStateWitnessServiceLimits(input.limits);
+    return openDurableStateWitnessServiceWithProtection({
+        limits,
+        protection: createRuntimeRecordProtection({
+            authorityContext: input.authorityContext,
+            cryptoProvider: input.cryptoProvider,
+            encryptionKey: input.encryptionKey,
+            maximumRecordSealingCount: limits.maximumRecordSealingCount,
+        }),
+        store: input.store,
     });
 };
 

@@ -1,5 +1,3 @@
-use serde_json::{Value, json};
-
 use super::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
     SETUP_COMMITMENT_ROW_COUNT, StructuralMatrixPolynomial, add_mod_fast, forward_negacyclic_ntt,
@@ -11,7 +9,6 @@ use crate::{
     bgv::setup_helpers::validate_hash_string,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple},
-    transcript_core::encode_hex,
 };
 
 const LATTICE_ANCHOR_COMMITMENT_SCHEMA_IDENTIFIER: u16 = 0x2124;
@@ -155,52 +152,6 @@ pub(crate) fn parse_lattice_anchor_commitment_canonical_bytes(
         ring_degree: POLYNOMIAL_DEGREE,
         rows,
     })
-}
-
-pub(crate) fn compute_lattice_anchor_commitment_from_opening_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let public_matrix_seed_hash = request
-        .get("publicMatrixSeedHash")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid_commitment_input("publicMatrixSeedHash must be a string"))?;
-    validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
-    let commitment_data_prime_index = read_usize(request, "commitmentDataPrimeIndex")?;
-    let secret_contribution_coefficients =
-        read_centered_ternary_vector(request, "secretContributionCoefficients")?;
-    let opening_polynomials = read_centered_ternary_matrix(request, "openingPolynomials")?;
-    let commitment = compute_lattice_anchor_commitment_for_degree(
-        public_matrix_seed_hash,
-        commitment_data_prime_index,
-        &secret_contribution_coefficients,
-        &opening_polynomials,
-        POLYNOMIAL_DEGREE,
-    )?;
-    Ok(json!({
-        "canonicalCommitmentBytesHex": encode_hex(
-            &lattice_anchor_commitment_canonical_bytes(&commitment)?
-        ),
-    }))
-}
-
-pub(crate) fn compute_lattice_anchor_commitment_from_typed_opening(
-    public_matrix_seed_hash: &str,
-    commitment_data_prime_index: usize,
-    secret_contribution_coefficients: &[i8],
-    opening_polynomials: &[Vec<i8>],
-) -> CanonicalResult<Value> {
-    let commitment = compute_lattice_anchor_commitment_for_degree(
-        public_matrix_seed_hash,
-        commitment_data_prime_index,
-        secret_contribution_coefficients,
-        opening_polynomials,
-        POLYNOMIAL_DEGREE,
-    )?;
-    Ok(json!({
-        "canonicalCommitmentBytesHex": encode_hex(
-            &lattice_anchor_commitment_canonical_bytes(&commitment)?
-        ),
-    }))
 }
 
 fn compute_lattice_anchor_commitment_for_degree(
@@ -372,63 +323,6 @@ fn centered_i8_to_residue(coefficient: i8, modulus: u64) -> u64 {
         1 => 1,
         _ => unreachable!("centered ternary support was validated"),
     }
-}
-
-fn read_usize(value: &Value, field_name: &str) -> CanonicalResult<usize> {
-    let integer = value
-        .get(field_name)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            invalid_commitment_input(format!("{field_name} must be a non-negative integer"))
-        })?;
-    usize::try_from(integer)
-        .map_err(|_| invalid_commitment_input(format!("{field_name} does not fit usize")))
-}
-
-fn read_centered_ternary_vector(value: &Value, field_name: &str) -> CanonicalResult<Vec<i8>> {
-    let values = value
-        .get(field_name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            invalid_commitment_input(format!("{field_name} must be an array of signed integers"))
-        })?;
-    values
-        .iter()
-        .enumerate()
-        .map(|(coefficient_index, coefficient)| {
-            let signed = coefficient.as_i64().ok_or_else(|| {
-                invalid_commitment_input(format!(
-                    "{field_name}[{coefficient_index}] must be a signed integer"
-                ))
-            })?;
-            i8::try_from(signed).map_err(|_| {
-                invalid_commitment_input(format!(
-                    "{field_name}[{coefficient_index}] does not fit a centered coefficient"
-                ))
-            })
-        })
-        .collect()
-}
-
-fn read_centered_ternary_matrix(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<i8>>> {
-    let rows = value
-        .get(field_name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            invalid_commitment_input(format!("{field_name} must be an array of polynomials"))
-        })?;
-    rows.iter()
-        .enumerate()
-        .map(|(polynomial_index, polynomial)| {
-            read_centered_ternary_vector(&json!({ "polynomial": polynomial }), "polynomial")
-                .map_err(|error| {
-                    CanonicalError::new(
-                        error.code,
-                        format!("{field_name}[{polynomial_index}]: {}", error.message),
-                    )
-                })
-        })
-        .collect()
 }
 
 fn lattice_anchor_decode_limits() -> CanonicalDecodeLimits {

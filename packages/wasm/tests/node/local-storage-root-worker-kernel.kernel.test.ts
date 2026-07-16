@@ -1,5 +1,6 @@
 import {
     BrowserActionStorageCustodyError,
+    foundationProfile,
     stateCapabilityKinds,
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
@@ -42,7 +43,66 @@ const expectCustodyErrorCode = async (
 };
 
 describe('Local storage-root real-WASM worker kernel', () => {
-    it('seals and reopens action randomness without exposing its root plaintext', async () => {
+    it('observes and types a deferred kernel-load failure before first use', async () => {
+        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
+            kernel: Promise.reject(new Error('synthetic kernel-load failure')),
+        });
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        await expectCustodyErrorCode(
+            workerKernel.destroyActiveActionStorageRoot(),
+            'Unavailable',
+        );
+    });
+
+    it('prepares one complete worker-owned foundation initialization batch', async () => {
+        const vector = createStateVerifierTestVector();
+        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
+            kernel: loadFreshTranscriptCoreKernel(),
+        });
+        await workerKernel.createAndStageDeviceWrappingState({
+            binding: {
+                actionContextHash: vector.actionContextHash,
+                ceremonyContextHash: vector.ceremonyContextHash,
+                participantId: vector.subjectParticipantIdentity,
+                suiteId: vector.suiteIdentifier,
+            },
+        });
+        await workerKernel.commitStagedActionStorageRoot();
+        const prepared =
+            await workerKernel.prepareBrowserFoundationInitialization({
+                actionRandomnessRecordContext: { recordVersion: 0n },
+                orderedWitnessBindings: Array.from(
+                    { length: foundationProfile.participantCount - 1 },
+                    (_unused, witnessIndex) => ({
+                        subjectParticipantIdentity: createBytes(
+                            64,
+                            101 + witnessIndex,
+                        ),
+                        witnessParticipantIdentity:
+                            vector.subjectParticipantIdentity,
+                    }),
+                ),
+                runtimeBuildManifestHash: createBytes(64, 71),
+            });
+
+        expect(prepared.witnessStateRecords).toHaveLength(9);
+        expect(
+            new Set(
+                prepared.witnessStateRecords.map((record) =>
+                    Buffer.from(record.localRecordIdentifier).toString('hex'),
+                ),
+            ).size,
+        ).toBe(9);
+        await workerKernel.closeActionRandomness(
+            prepared.actionRandomness.actionRandomnessSessionIdentifier,
+        );
+        await workerKernel.destroyActiveActionStorageRoot();
+    });
+
+    it('seals and recovers action randomness without exposing its root plaintext', async () => {
         const baseStateVector = createStateVerifierTestVector();
         const actionBinding = Object.freeze({
             actionContextHash: baseStateVector.actionContextHash,
@@ -53,9 +113,10 @@ describe('Local storage-root real-WASM worker kernel', () => {
         const workerKernel = createWasmBrowserActionStorageWorkerKernel({
             kernel: loadFreshTranscriptCoreKernel(),
         });
-        await workerKernel.createAndStageDeviceWrappingState({
-            binding: actionBinding,
-        });
+        const preparedDeviceWrappingState =
+            await workerKernel.createAndStageDeviceWrappingState({
+                binding: actionBinding,
+            });
         await workerKernel.commitStagedActionStorageRoot();
         const recordContext = {
             recordVersion: 0n,
@@ -127,41 +188,6 @@ describe('Local storage-root real-WASM worker kernel', () => {
         }
         expect(created.actionRandomnessCommitment).toHaveLength(64);
         expect(created.canonicalEnvelope.length).toBeGreaterThan(64);
-        await closeWorkerActionRandomness(
-            workerKernel,
-            created.actionRandomnessSessionIdentifier,
-        );
-        const reopened = await openSealedWorkerActionRandomness(workerKernel, {
-            ...recordContext,
-            actionRandomnessCommitment: created.actionRandomnessCommitment,
-            canonicalEnvelope: created.canonicalEnvelope,
-        });
-        expect(reopened.actionRandomnessCommitment).toEqual(
-            created.actionRandomnessCommitment,
-        );
-        const terminalPackageReservationVector =
-            stateVector.reservationOnly.find(
-                ({ capabilityKind }) =>
-                    capabilityKind ===
-                    stateCapabilityKinds.setupTerminalPackage,
-            );
-        if (terminalPackageReservationVector === undefined) {
-            throw new Error('Missing terminal-package reservation vector.');
-        }
-        const terminalPackageReservation =
-            await workerKernel.verifyActionStateReservation({
-                canonicalReservationIntentCarrier:
-                    terminalPackageReservationVector.certifiedIntent
-                        .canonicalIntentCarrier,
-                canonicalStateCertificate:
-                    terminalPackageReservationVector.certifiedIntent
-                        .canonicalStateCertificate,
-                capabilityKind: stateCapabilityKinds.setupTerminalPackage,
-                expectedAuthorizationHash: stateVector.authorizationHash,
-                stateVerifierSessionIdentifier: openedStateSession.value,
-                subjectParticipantIdentity:
-                    stateVector.subjectParticipantIdentity,
-            });
         const targetReservation =
             await workerKernel.verifyActionStateReservation({
                 canonicalReservationIntentCarrier:
@@ -174,29 +200,12 @@ describe('Local storage-root real-WASM worker kernel', () => {
                 subjectParticipantIdentity:
                     stateVector.subjectParticipantIdentity,
             });
-        if (!terminalPackageReservation.isValid || !targetReservation.isValid) {
+        if (!targetReservation.isValid) {
             throw new Error('Proof-attempt reservations did not verify.');
         }
-        const persistentAttemptInput = {
-            actionRandomnessSessionIdentifier:
-                reopened.actionRandomnessSessionIdentifier,
-            applicationStatementHash: createBytes(64, 177),
-            rosterPosition: 0,
-            stateReservationIdentifier: rootReservation.value,
-            statementSchemaIdentifier: 0x1211,
-        } as const;
-        expect(
-            await workerKernel.derivePersistentProofAttempt(
-                persistentAttemptInput,
-            ),
-        ).toEqual(
-            await workerKernel.derivePersistentProofAttempt(
-                persistentAttemptInput,
-            ),
-        );
         const targetAttemptInput = {
             actionRandomnessSessionIdentifier:
-                reopened.actionRandomnessSessionIdentifier,
+                created.actionRandomnessSessionIdentifier,
             rosterPosition: 0,
             stateReservationIdentifier: targetReservation.value,
         } as const;
@@ -212,15 +221,36 @@ describe('Local storage-root real-WASM worker kernel', () => {
             }),
             'InvalidState',
         );
+        await expectCustodyErrorCode(
+            createAndSealWorkerActionRandomness(workerKernel, recordContext),
+            'Conflict',
+        );
         await closeWorkerActionRandomness(
             workerKernel,
-            reopened.actionRandomnessSessionIdentifier,
+            created.actionRandomnessSessionIdentifier,
         );
+        await workerKernel.closeActionStateVerifierSession(
+            openedStateSession.value,
+        );
+        await workerKernel.destroyActiveActionStorageRoot();
 
         const tamperedEnvelope = created.canonicalEnvelope.slice();
         tamperedEnvelope[tamperedEnvelope.byteLength - 1] ^= 1;
+        const tamperedOpeningWorkerKernel =
+            createWasmBrowserActionStorageWorkerKernel({
+                kernel: loadFreshTranscriptCoreKernel(),
+            });
+        await tamperedOpeningWorkerKernel.stageDeviceWrappingStateOpen({
+            binding: actionBinding,
+            untrustedExpectedCommitment: {
+                storageRootCommitment:
+                    preparedDeviceWrappingState.storageRootCommitment,
+            },
+            state: preparedDeviceWrappingState,
+        });
+        await tamperedOpeningWorkerKernel.commitStagedActionStorageRoot();
         await expectCustodyErrorCode(
-            openSealedWorkerActionRandomness(workerKernel, {
+            openSealedWorkerActionRandomness(tamperedOpeningWorkerKernel, {
                 ...recordContext,
                 actionRandomnessCommitment: created.actionRandomnessCommitment,
                 canonicalEnvelope: tamperedEnvelope,
@@ -228,15 +258,94 @@ describe('Local storage-root real-WASM worker kernel', () => {
             'RecordAuthenticationFailed',
         );
         await expectCustodyErrorCode(
-            createAndSealWorkerActionRandomness(workerKernel, {
+            openSealedWorkerActionRandomness(tamperedOpeningWorkerKernel, {
                 ...recordContext,
+                actionRandomnessCommitment: created.actionRandomnessCommitment,
+                canonicalEnvelope: created.canonicalEnvelope,
             }),
-            'InvalidState',
+            'Conflict',
         );
-        await workerKernel.closeActionStateVerifierSession(
-            openedStateSession.value,
+        await tamperedOpeningWorkerKernel.destroyActiveActionStorageRoot();
+
+        const recoveredWorkerKernel =
+            createWasmBrowserActionStorageWorkerKernel({
+                kernel: loadFreshTranscriptCoreKernel(),
+            });
+        await recoveredWorkerKernel.stageDeviceWrappingStateOpen({
+            binding: actionBinding,
+            untrustedExpectedCommitment: {
+                storageRootCommitment:
+                    preparedDeviceWrappingState.storageRootCommitment,
+            },
+            state: preparedDeviceWrappingState,
+        });
+        await recoveredWorkerKernel.commitStagedActionStorageRoot();
+        const reopened = await openSealedWorkerActionRandomness(
+            recoveredWorkerKernel,
+            {
+                ...recordContext,
+                actionRandomnessCommitment: created.actionRandomnessCommitment,
+                canonicalEnvelope: created.canonicalEnvelope,
+            },
         );
-        await workerKernel.destroyActiveActionStorageRoot();
+        expect(reopened.actionRandomnessCommitment).toEqual(
+            created.actionRandomnessCommitment,
+        );
+        await expectCustodyErrorCode(
+            openSealedWorkerActionRandomness(recoveredWorkerKernel, {
+                ...recordContext,
+                actionRandomnessCommitment: created.actionRandomnessCommitment,
+                canonicalEnvelope: created.canonicalEnvelope,
+            }),
+            'Conflict',
+        );
+        const recoveredStateSession =
+            await recoveredWorkerKernel.openActionStateVerifierSession({
+                canonicalRosterBytes: stateVector.canonicalRosterBytes,
+            });
+        if (!recoveredStateSession.isValid) {
+            throw new Error('Recovered state-verifier session did not open.');
+        }
+        const recoveredTargetReservation =
+            await recoveredWorkerKernel.verifyActionStateReservation({
+                canonicalReservationIntentCarrier:
+                    stateVector.reservation.canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    stateVector.reservation.canonicalStateCertificate,
+                capabilityKind: stateCapabilityKinds.targetRelease,
+                expectedAuthorizationHash: stateVector.authorizationHash,
+                stateVerifierSessionIdentifier: recoveredStateSession.value,
+                subjectParticipantIdentity:
+                    stateVector.subjectParticipantIdentity,
+            });
+        if (!recoveredTargetReservation.isValid) {
+            throw new Error(
+                'Recovered proof-attempt reservation did not verify.',
+            );
+        }
+        const recoveredTargetAttemptInput = {
+            actionRandomnessSessionIdentifier:
+                reopened.actionRandomnessSessionIdentifier,
+            rosterPosition: 0,
+            stateReservationIdentifier: recoveredTargetReservation.value,
+        } as const;
+        expect(
+            await recoveredWorkerKernel.deriveTargetReleaseAttempt(
+                recoveredTargetAttemptInput,
+            ),
+        ).toEqual(
+            await recoveredWorkerKernel.deriveTargetReleaseAttempt(
+                recoveredTargetAttemptInput,
+            ),
+        );
+        await closeWorkerActionRandomness(
+            recoveredWorkerKernel,
+            reopened.actionRandomnessSessionIdentifier,
+        );
+        await recoveredWorkerKernel.closeActionStateVerifierSession(
+            recoveredStateSession.value,
+        );
+        await recoveredWorkerKernel.destroyActiveActionStorageRoot();
     });
 
     it('derives, seals, authenticates, versions, and hashes local records inside the owned kernel', async () => {

@@ -101,7 +101,7 @@ fn private_flooding_seed_must_be_full_lowercase_hex() {
             }))
         })
         .expect_err("malformed private flooding seed must reject");
-        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
         assert!(error.message.contains("64 lowercase-hexadecimal bytes"));
     }
 }

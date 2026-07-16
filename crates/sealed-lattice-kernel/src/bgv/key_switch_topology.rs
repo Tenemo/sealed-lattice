@@ -1,16 +1,47 @@
 use std::ops::Range;
 
+use num_bigint::BigUint;
+use num_traits::One;
+
 use crate::{
-    bgv::parameters::{DATA_PRIMES, SPECIAL_PRIME},
+    bgv::parameters::{DATA_PRIMES, SPECIAL_PRIMES},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-pub(crate) const KEY_SWITCH_DATA_PRIMES_PER_BLOCK: usize = 1;
-pub(crate) const KEY_SWITCH_SPECIAL_PRIMES: [u64; 1] = [SPECIAL_PRIME];
+pub(crate) const KEY_SWITCH_DATA_PRIMES_PER_BLOCK: usize = DATA_PRIMES.len();
+pub(crate) const KEY_SWITCH_SPECIAL_PRIMES: [u64; SPECIAL_PRIMES.len()] = SPECIAL_PRIMES;
+
+pub(crate) fn key_switch_special_basis_modulus_product() -> BigUint {
+    KEY_SWITCH_SPECIAL_PRIMES
+        .iter()
+        .map(|modulus| BigUint::from(*modulus))
+        .product()
+}
+
+/// Canonical little-endian residue width for one modulus-owned stream.
+///
+/// The modulus is suite-owned, so the payload does not repeat this width.
+pub(crate) fn canonical_residue_byte_length(modulus: u64) -> CanonicalResult<usize> {
+    if modulus < 2 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "hybrid key-switch modulus must exceed one",
+        ));
+    }
+    let significant_bit_count = u64::BITS - modulus.leading_zeros();
+    usize::try_from(significant_bit_count.div_ceil(8)).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "hybrid key-switch residue width does not fit usize",
+        )
+    })
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct KeySwitchDecompositionTopology {
+    #[cfg(test)]
     level: usize,
+    #[cfg(test)]
     data_primes_per_block: usize,
     data_block_ranges: Vec<Range<usize>>,
     extended_moduli: Vec<u64>,
@@ -27,48 +58,68 @@ impl KeySwitchDecompositionTopology {
     ) -> CanonicalResult<Self> {
         let data_prime_count = level.checked_add(1).ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "hybrid key-switch level overflowed",
             )
         })?;
         if data_prime_count > DATA_PRIMES.len() {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "hybrid key-switch level is outside the selected data basis",
             ));
         }
-        if data_primes_per_block == 0 || data_primes_per_block > data_prime_count {
+        if data_primes_per_block == 0 {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "hybrid key-switch block size must be between one and the active data-prime count",
+                CanonicalErrorCode::InvalidProtocolObject,
+                "hybrid key-switch block size must be positive",
             ));
         }
 
-        let data_block_ranges = (0..data_prime_count)
+        let data_block_ranges: Vec<Range<usize>> = (0..data_prime_count)
             .step_by(data_primes_per_block)
             .map(|block_start| {
                 block_start..data_prime_count.min(block_start + data_primes_per_block)
             })
             .collect();
+        let special_basis_modulus_product = key_switch_special_basis_modulus_product();
+        let has_undersized_special_basis = data_block_ranges.iter().any(|data_block_range| {
+            DATA_PRIMES[data_block_range.clone()]
+                .iter()
+                .fold(BigUint::one(), |product, modulus| {
+                    product * BigUint::from(*modulus)
+                })
+                >= special_basis_modulus_product
+        });
+        if has_undersized_special_basis {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "hybrid key-switch special-basis product must exceed every data-block product",
+            ));
+        }
         let mut extended_moduli = DATA_PRIMES[..data_prime_count].to_vec();
         extended_moduli.extend(KEY_SWITCH_SPECIAL_PRIMES);
 
         Ok(Self {
+            #[cfg(test)]
             level,
+            #[cfg(test)]
             data_primes_per_block,
             data_block_ranges,
             extended_moduli,
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn level(&self) -> usize {
         self.level
     }
 
+    #[cfg(test)]
     pub(crate) fn data_prime_count(&self) -> usize {
         self.level + 1
     }
 
+    #[cfg(test)]
     pub(crate) fn data_primes_per_block(&self) -> usize {
         self.data_primes_per_block
     }
@@ -77,22 +128,25 @@ impl KeySwitchDecompositionTopology {
         self.data_block_ranges.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn data_block_range(&self, block_index: usize) -> CanonicalResult<Range<usize>> {
         self.data_block_ranges
             .get(block_index)
             .cloned()
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "hybrid key-switch block index is outside the decomposition topology",
                 )
             })
     }
 
+    #[cfg(test)]
     pub(crate) fn active_data_moduli(&self) -> &[u64] {
         &self.extended_moduli[..self.data_prime_count()]
     }
 
+    #[cfg(test)]
     pub(crate) fn extended_moduli(&self) -> &[u64] {
         &self.extended_moduli
     }
@@ -101,17 +155,51 @@ impl KeySwitchDecompositionTopology {
         self.extended_moduli.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn special_limb_count(&self) -> usize {
         KEY_SWITCH_SPECIAL_PRIMES.len()
     }
 
+    pub(crate) fn canonical_component_wire_byte_length(
+        &self,
+        ring_degree: usize,
+    ) -> CanonicalResult<u64> {
+        let bytes_per_coefficient = self.extended_moduli.iter().try_fold(
+            0_u64,
+            |total, modulus| -> CanonicalResult<u64> {
+                let residue_byte_length = canonical_residue_byte_length(*modulus)?;
+                total
+                    .checked_add(u64::try_from(residue_byte_length).map_err(|_| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::InvalidProtocolObject,
+                            "hybrid key-switch residue width does not fit u64",
+                        )
+                    })?)
+                    .ok_or_else(component_byte_length_overflow)
+            },
+        )?;
+        checked_component_byte_length(self.data_block_count(), ring_degree, bytes_per_coefficient)
+    }
+
+    pub(crate) fn resident_component_byte_length(
+        &self,
+        ring_degree: usize,
+    ) -> CanonicalResult<u64> {
+        let bytes_per_coefficient = u64::try_from(self.extended_limb_count())
+            .ok()
+            .and_then(|limb_count| limb_count.checked_mul(u64::from(u64::BITS / 8)))
+            .ok_or_else(component_byte_length_overflow)?;
+        checked_component_byte_length(self.data_block_count(), ring_degree, bytes_per_coefficient)
+    }
+
+    #[cfg(test)]
     pub(crate) fn projection_indices_for_level(
         &self,
         projected_level: usize,
     ) -> CanonicalResult<Vec<usize>> {
         if projected_level > self.level {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "hybrid key-switch projection level exceeds the stored key level",
             ));
         }
@@ -121,6 +209,29 @@ impl KeySwitchDecompositionTopology {
             .extend(self.data_prime_count()..self.data_prime_count() + self.special_limb_count());
         Ok(indices)
     }
+}
+
+fn checked_component_byte_length(
+    data_block_count: usize,
+    ring_degree: usize,
+    bytes_per_coefficient: u64,
+) -> CanonicalResult<u64> {
+    u64::try_from(data_block_count)
+        .ok()
+        .and_then(|block_count| {
+            u64::try_from(ring_degree)
+                .ok()
+                .and_then(|degree| block_count.checked_mul(degree))
+        })
+        .and_then(|coefficient_count| coefficient_count.checked_mul(bytes_per_coefficient))
+        .ok_or_else(component_byte_length_overflow)
+}
+
+fn component_byte_length_overflow() -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::InvalidProtocolObject,
+        "hybrid key-switch component byte length overflowed",
+    )
 }
 
 #[cfg(test)]
@@ -157,7 +268,9 @@ mod tests {
             topology
                 .projection_indices_for_level(2)
                 .expect("level-two projection"),
-            vec![0, 1, 2, 6]
+            (0..3)
+                .chain(6..6 + KEY_SWITCH_SPECIAL_PRIMES.len())
+                .collect::<Vec<_>>()
         );
         assert!(topology.projection_indices_for_level(6).is_err());
     }
@@ -168,8 +281,48 @@ mod tests {
         assert!(
             KeySwitchDecompositionTopology::for_level_with_data_primes_per_block(1, 0).is_err()
         );
-        assert!(
-            KeySwitchDecompositionTopology::for_level_with_data_primes_per_block(1, 3).is_err()
+        assert!(KeySwitchDecompositionTopology::for_level_with_data_primes_per_block(1, 3).is_ok());
+    }
+
+    #[test]
+    fn component_lengths_distinguish_compact_wire_bytes_from_resident_words() {
+        let topology = KeySwitchDecompositionTopology::for_level_with_data_primes_per_block(
+            DATA_PRIMES.len() - 1,
+            KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
+        )
+        .expect("full selected topology");
+
+        assert_eq!(
+            topology
+                .canonical_component_wire_byte_length(32_768)
+                .expect("wire length"),
+            6_684_672
         );
+        assert_eq!(
+            topology
+                .resident_component_byte_length(32_768)
+                .expect("resident length"),
+            8_912_896
+        );
+        assert!(topology.resident_component_byte_length(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn complete_special_basis_product_exceeds_every_selected_data_block_product() {
+        let topology = KeySwitchDecompositionTopology::for_level(DATA_PRIMES.len() - 1)
+            .expect("full selected topology");
+        let special_basis_modulus_product = key_switch_special_basis_modulus_product();
+
+        assert_eq!(topology.data_block_count(), 1);
+        for data_block_index in 0..topology.data_block_count() {
+            let data_block_range = topology
+                .data_block_range(data_block_index)
+                .expect("selected data block");
+            let data_block_modulus_product = DATA_PRIMES[data_block_range]
+                .iter()
+                .map(|modulus| BigUint::from(*modulus))
+                .product::<BigUint>();
+            assert!(special_basis_modulus_product > data_block_modulus_product);
+        }
     }
 }

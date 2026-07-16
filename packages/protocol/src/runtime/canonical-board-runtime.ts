@@ -1,7 +1,7 @@
 import type { RefusalReason, VerificationResult } from '@sealed-lattice/types';
 import {
     openCanonicalBoardVerifierSession,
-    type CanonicalBoardVerifierConfiguration,
+    type CanonicalBoardContextInput,
     type CanonicalBoardVerifierSession,
     type TranscriptCoreKernel,
     type UntrustedCanonicalBoardCarrier,
@@ -25,11 +25,14 @@ export type CanonicalBoardRuntimeState = 'active' | 'closed';
 
 export type CanonicalBoardRuntime = Readonly<{
     close(): void;
-    copyConfiguration(): CanonicalBoardVerifierConfiguration;
+    copyCanonicalCarrierSet(
+        snapshot: VerifiedCanonicalBoardSnapshot,
+    ): VerificationResult<readonly UntrustedCanonicalBoardCarrier[]>;
     copyCachedCarrier(
         snapshot: VerifiedCanonicalBoardSnapshot,
         objectHash: Uint8Array,
     ): VerificationResult<Uint8Array>;
+    copyContextInput(): CanonicalBoardContextInput;
     findObject(
         snapshot: VerifiedCanonicalBoardSnapshot,
         objectHash: Uint8Array,
@@ -43,8 +46,13 @@ export type CanonicalBoardRuntime = Readonly<{
     state(): CanonicalBoardRuntimeState;
 }>;
 
+export type TransferableCanonicalBoardRuntime = CanonicalBoardRuntime &
+    Readonly<{
+        claimExclusiveOwner(): CanonicalBoardRuntime;
+    }>;
+
 export type CanonicalBoardRuntimeInput = Readonly<{
-    configuration: CanonicalBoardVerifierConfiguration;
+    contextInput: CanonicalBoardContextInput;
     kernel: TranscriptCoreKernel;
 }>;
 
@@ -120,21 +128,21 @@ const copyDescription = (
 };
 
 class CanonicalBoardRuntimeImplementation implements CanonicalBoardRuntime {
-    readonly #configuration: CanonicalBoardVerifierConfiguration;
+    readonly #contextInput: CanonicalBoardContextInput;
     readonly #objectsByHash = new Map<string, RetainedObject>();
     readonly #verifierSession: CanonicalBoardVerifierSession;
     #state: CanonicalBoardRuntimeState = 'active';
 
     public constructor(
         verifierSession: CanonicalBoardVerifierSession,
-        configuration: CanonicalBoardVerifierConfiguration,
+        contextInput: CanonicalBoardContextInput,
     ) {
         this.#verifierSession = verifierSession;
-        this.#configuration = copyConfiguration(configuration);
+        this.#contextInput = copyContextInput(contextInput);
     }
 
-    public copyConfiguration(): CanonicalBoardVerifierConfiguration {
-        return copyConfiguration(this.#configuration);
+    public copyContextInput(): CanonicalBoardContextInput {
+        return copyContextInput(this.#contextInput);
     }
 
     public state(): CanonicalBoardRuntimeState {
@@ -230,6 +238,28 @@ class CanonicalBoardRuntimeImplementation implements CanonicalBoardRuntime {
         );
     }
 
+    public copyCanonicalCarrierSet(
+        snapshot: VerifiedCanonicalBoardSnapshot,
+    ): VerificationResult<readonly UntrustedCanonicalBoardCarrier[]> {
+        const resolved = this.#resolveSnapshot(snapshot);
+        if ('refusalReason' in resolved) {
+            return refused(resolved.refusalReason);
+        }
+        const carriers: UntrustedCanonicalBoardCarrier[] = [];
+        for (const retained of resolved.record.objectsByHash.values()) {
+            const copied = this.#verifierSession.copyCachedCarrier(
+                retained.object,
+            );
+            if (!copied.isValid) {
+                throw new Error(
+                    `A retained transcript capability could not copy its canonical carrier: ${copied.refusalReason}.`,
+                );
+            }
+            carriers.push(Object.freeze({ canonicalCarrier: copied.value }));
+        }
+        return valid(Object.freeze(carriers));
+    }
+
     public close(): void {
         if (this.#state === 'closed') {
             return;
@@ -304,44 +334,120 @@ class CanonicalBoardRuntimeImplementation implements CanonicalBoardRuntime {
 
 export const openCanonicalBoardRuntime = (
     input: CanonicalBoardRuntimeInput,
-): VerificationResult<CanonicalBoardRuntime> => {
-    let configuration: CanonicalBoardVerifierConfiguration;
+): VerificationResult<TransferableCanonicalBoardRuntime> => {
+    let contextInput: CanonicalBoardContextInput;
     try {
-        configuration = copyConfiguration(input.configuration);
+        contextInput = copyContextInput(input.contextInput);
     } catch {
         return refused('wrongTypeOrLength');
     }
     const opened = openCanonicalBoardVerifierSession({
-        configuration,
+        contextInput,
         kernel: input.kernel,
     });
     if (!opened.isValid) {
         return opened;
     }
     return valid(
-        Object.freeze(
-            new CanonicalBoardRuntimeImplementation(
-                opened.value,
-                configuration,
-            ),
+        makeTransferableCanonicalBoardRuntime(
+            new CanonicalBoardRuntimeImplementation(opened.value, contextInput),
         ),
     );
 };
 
-const copyConfiguration = (
-    configuration: CanonicalBoardVerifierConfiguration,
-): CanonicalBoardVerifierConfiguration =>
+const makeTransferableCanonicalBoardRuntime = (
+    runtime: CanonicalBoardRuntime,
+): TransferableCanonicalBoardRuntime => {
+    let currentOwner: object = Object.freeze({});
+    let ownershipClaimed = false;
+    let closed = false;
+    const assertOwner = (owner: object): void => {
+        if (owner !== currentOwner) {
+            throw new TypeError(
+                'This canonical-board runtime wrapper is stale because ownership was transferred.',
+            );
+        }
+    };
+    const assertOpen = (owner: object): void => {
+        assertOwner(owner);
+        if (closed) {
+            throw new TypeError('The canonical-board runtime is closed.');
+        }
+    };
+    const createOwnedRuntime = (owner: object): CanonicalBoardRuntime =>
+        Object.freeze({
+            close: () => {
+                assertOwner(owner);
+                if (closed) {
+                    return;
+                }
+                closed = true;
+                runtime.close();
+            },
+            copyCachedCarrier: (snapshot, objectHash) => {
+                assertOwner(owner);
+                return runtime.copyCachedCarrier(snapshot, objectHash);
+            },
+            copyCanonicalCarrierSet: (snapshot) => {
+                assertOwner(owner);
+                return runtime.copyCanonicalCarrierSet(snapshot);
+            },
+            copyContextInput: () => {
+                assertOwner(owner);
+                return runtime.copyContextInput();
+            },
+            findObject: (snapshot, objectHash) => {
+                assertOwner(owner);
+                return runtime.findObject(snapshot, objectHash);
+            },
+            ingestUnordered: (carriers) => {
+                assertOwner(owner);
+                return runtime.ingestUnordered(carriers);
+            },
+            objects: (snapshot) => {
+                assertOwner(owner);
+                return runtime.objects(snapshot);
+            },
+            state: () => {
+                assertOwner(owner);
+                return closed ? 'closed' : runtime.state();
+            },
+        });
+    const initialOwner = currentOwner;
+    const initialRuntime = createOwnedRuntime(initialOwner);
+    return Object.freeze({
+        ...initialRuntime,
+        claimExclusiveOwner: () => {
+            assertOpen(initialOwner);
+            if (ownershipClaimed) {
+                throw new TypeError(
+                    'Exclusive ownership of the canonical-board runtime was already claimed.',
+                );
+            }
+            ownershipClaimed = true;
+            currentOwner = Object.freeze({});
+            return createOwnedRuntime(currentOwner);
+        },
+    });
+};
+
+const copyContextInput = (
+    contextInput: CanonicalBoardContextInput,
+): CanonicalBoardContextInput =>
     Object.freeze({
-        actionContextHash: configuration.actionContextHash.slice(),
-        canonicalRosterBytes: configuration.canonicalRosterBytes.slice(),
-        ceremonyContextHash: configuration.ceremonyContextHash.slice(),
-        maximumBallotAttemptsPerParticipant:
-            configuration.maximumBallotAttemptsPerParticipant,
-        maximumRetainedCanonicalCarrierByteLength:
-            configuration.maximumRetainedCanonicalCarrierByteLength,
-        maximumRetainedTranscriptObjects:
-            configuration.maximumRetainedTranscriptObjects,
-        maximumUnorderedCarriersPerBatch:
-            configuration.maximumUnorderedCarriersPerBatch,
-        suiteIdentifier: configuration.suiteIdentifier.slice(),
+        actionIdentifier: contextInput.actionIdentifier,
+        canonicalActionDefinitionBytes:
+            contextInput.canonicalActionDefinitionBytes.slice(),
+        canonicalBoardPolicyBytes:
+            contextInput.canonicalBoardPolicyBytes.slice(),
+        canonicalManifestBytes: contextInput.canonicalManifestBytes.slice(),
+        canonicalRosterBytes: contextInput.canonicalRosterBytes.slice(),
+        canonicalSuiteRecordBytes:
+            contextInput.canonicalSuiteRecordBytes.slice(),
+        ceremonyIdentifier: contextInput.ceremonyIdentifier,
+        expectedActionContextHash:
+            contextInput.expectedActionContextHash.slice(),
+        expectedCeremonyContextHash:
+            contextInput.expectedCeremonyContextHash.slice(),
+        expectedSuiteIdentifier: contextInput.expectedSuiteIdentifier.slice(),
     });

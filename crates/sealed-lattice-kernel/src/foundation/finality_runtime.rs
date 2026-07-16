@@ -6,6 +6,7 @@ use std::{
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
+use super::runtime_input::RuntimeInputReader as InputReader;
 use super::{
     CanonicalDecodeLimits, FOUNDATION_PROFILE, FinalityCertificate, FinalityStatement,
     FinalityVerificationInput, FinalityVerifier, Hash512, RefusalReason, Roster,
@@ -98,11 +99,12 @@ impl FinalityVerifierRuntimeRegistry {
         if verified_finality_object_handles.len() != certificate.ordered_signer_inputs().len() {
             return Err(refusal_status(RefusalReason::WrongTypeOrLength));
         }
-        let verified_finality_objects = board_ingestion_runtime::clone_verified_transcript_objects(
-            board_session_handle,
-            board_capability,
-            verified_finality_object_handles,
-        )?;
+        let verified_finality_objects =
+            board_ingestion_runtime::resolve_verified_transcript_objects(
+                board_session_handle,
+                board_capability,
+                verified_finality_object_handles,
+            )?;
         let verified_finality_object_references =
             verified_finality_objects.iter().collect::<Vec<_>>();
         let verified_finality = {
@@ -384,51 +386,6 @@ fn take_nonrepeating_handle(next_handle: &mut u32) -> RuntimeResult<u32> {
     let handle = *next_handle;
     *next_handle = next_handle.checked_add(1).unwrap_or(0);
     Ok(handle)
-}
-
-struct InputReader<'input> {
-    bytes: &'input [u8],
-    offset: usize,
-}
-
-impl<'input> InputReader<'input> {
-    const fn new(bytes: &'input [u8]) -> Self {
-        Self { bytes, offset: 0 }
-    }
-
-    fn read_u16(&mut self) -> RuntimeResult<u16> {
-        Ok(u16::from_le_bytes(self.read_array()?))
-    }
-
-    fn read_u32(&mut self) -> RuntimeResult<u32> {
-        Ok(u32::from_le_bytes(self.read_array()?))
-    }
-
-    fn read_array<const LENGTH: usize>(&mut self) -> RuntimeResult<[u8; LENGTH]> {
-        self.read_bytes(LENGTH)?
-            .try_into()
-            .map_err(|_| refusal_status(RefusalReason::MalformedEncoding))
-    }
-
-    fn read_bytes(&mut self, byte_length: usize) -> RuntimeResult<&'input [u8]> {
-        let end = self
-            .offset
-            .checked_add(byte_length)
-            .ok_or_else(|| refusal_status(RefusalReason::MalformedEncoding))?;
-        let value = self
-            .bytes
-            .get(self.offset..end)
-            .ok_or_else(|| refusal_status(RefusalReason::MalformedEncoding))?;
-        self.offset = end;
-        Ok(value)
-    }
-
-    fn finish(self) -> RuntimeResult<()> {
-        if self.offset != self.bytes.len() {
-            return Err(refusal_status(RefusalReason::MalformedEncoding));
-        }
-        Ok(())
-    }
 }
 
 fn with_finality_registry<Value>(

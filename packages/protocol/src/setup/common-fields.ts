@@ -59,17 +59,6 @@ export const assertNonNegativeSafeInteger = (
     return value;
 };
 
-export const assertJsonRecord = (
-    value: unknown,
-    fieldName: string,
-): JsonRecord => {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        throw new TypeError(`${fieldName} must be an object.`);
-    }
-
-    return value as JsonRecord;
-};
-
 const lowercaseHexBytesPattern = /^(?:[0-9a-f]{2})*$/u;
 
 const assertLowercaseHexBytes = (value: string, fieldName: string): void => {
@@ -90,9 +79,6 @@ export const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
 
     return bytes;
 };
-
-export const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 export const deriveCollectiveBgvSetupContextHash = (
     setupContext: CollectiveBgvSetupContext,

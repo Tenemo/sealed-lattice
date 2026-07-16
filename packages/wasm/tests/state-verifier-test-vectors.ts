@@ -127,16 +127,26 @@ const stateExactOutputHash = (
 
 export const createStateVerifierTestVector = (
     input: {
+        actionContextHash?: Uint8Array;
+        ceremonyContextHash?: Uint8Array;
         setupActionRandomnessAuthorizationHash?: Uint8Array;
+        suiteIdentifier?: Uint8Array;
     } = {},
 ): StateVerifierTestVector => {
-    if (
-        input.setupActionRandomnessAuthorizationHash !== undefined &&
-        input.setupActionRandomnessAuthorizationHash.byteLength !== 64
-    ) {
-        throw new TypeError(
-            'The setup action-randomness authorization hash must contain exactly 64 bytes.',
-        );
+    for (const [fieldName, value] of [
+        ['actionContextHash', input.actionContextHash],
+        ['ceremonyContextHash', input.ceremonyContextHash],
+        [
+            'setupActionRandomnessAuthorizationHash',
+            input.setupActionRandomnessAuthorizationHash,
+        ],
+        ['suiteIdentifier', input.suiteIdentifier],
+    ] as const) {
+        if (value !== undefined && value.byteLength !== 64) {
+            throw new TypeError(
+                `The ${fieldName} value must contain exactly 64 bytes.`,
+            );
+        }
     }
     const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
         foundationProfile.participantCount,
@@ -145,9 +155,12 @@ export const createStateVerifierTestVector = (
         foundationProfile.participantCount,
     );
     try {
-        const suiteIdentifier = new Uint8Array(64).fill(0x11);
-        const ceremonyContextHash = new Uint8Array(64).fill(0x22);
-        const actionContextHash = new Uint8Array(64).fill(0x33);
+        const suiteIdentifier =
+            input.suiteIdentifier?.slice() ?? new Uint8Array(64).fill(0x11);
+        const ceremonyContextHash =
+            input.ceremonyContextHash?.slice() ?? new Uint8Array(64).fill(0x22);
+        const actionContextHash =
+            input.actionContextHash?.slice() ?? new Uint8Array(64).fill(0x33);
         const canonicalRosterBytes = createCanonicalTestRosterBytes(
             signingKeyPairs.map(({ publicKey }, rosterPosition) => ({
                 signingVerificationKey: publicKey,

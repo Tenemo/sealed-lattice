@@ -602,7 +602,7 @@ mod tests {
         .expect("the authoritative ring degree must determine the exact sidecar length");
         assert_eq!(
             wrong_ring_degree_error.code,
-            CanonicalErrorCode::InvalidFixture
+            CanonicalErrorCode::InvalidProtocolObject
         );
 
         let wrong_key_switch_seed_hex = repeated_test_seed(0xb2);
@@ -649,7 +649,7 @@ mod tests {
             .unwrap_or_else(|| panic!("substituted {substituted_field} must be rejected"));
             assert_eq!(
                 error.code,
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "substituted {substituted_field} must fail the authenticated material binding"
             );
         }

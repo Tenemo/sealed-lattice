@@ -166,6 +166,160 @@ describe('IndexedDB untrusted storage adapter', () => {
         expect(await adapter.read('stable')).toEqual(new Uint8Array([1]));
     });
 
+    it('atomically preserves every cleanup candidate when an index references one', async () => {
+        const adapter = await openAdapter();
+        const firstObjectKey = 'objects/first';
+        const secondObjectKey = 'objects/second';
+        await adapter.write(firstObjectKey, new Uint8Array([1]));
+        await adapter.write(secondObjectKey, new Uint8Array([2]));
+        await adapter.write(
+            'indices/committed',
+            new TextEncoder().encode(firstObjectKey),
+        );
+
+        await expect(
+            adapter.deleteUnreferencedObjects({
+                indexPrefix: 'indices/',
+                objectKeys: [firstObjectKey, secondObjectKey],
+            }),
+        ).resolves.toBe(false);
+        expect(await adapter.read(firstObjectKey)).toEqual(new Uint8Array([1]));
+        expect(await adapter.read(secondObjectKey)).toEqual(
+            new Uint8Array([2]),
+        );
+
+        await adapter.delete('indices/committed');
+        await expect(
+            adapter.deleteUnreferencedObjects({
+                indexPrefix: 'indices/',
+                objectKeys: [firstObjectKey, secondObjectKey],
+            }),
+        ).resolves.toBe(true);
+        expect(await adapter.read(firstObjectKey)).toBeUndefined();
+        expect(await adapter.read(secondObjectKey)).toBeUndefined();
+    });
+
+    it('awaits an aborted transaction when request creation throws synchronously', async () => {
+        const adapter = await openAdapter();
+        const synchronousFailure = new Error(
+            'Injected synchronous IndexedDB request failure.',
+        );
+        const originalPutDescriptor = Object.getOwnPropertyDescriptor(
+            IDBObjectStore.prototype,
+            'put',
+        );
+        if (originalPutDescriptor === undefined) {
+            throw new Error('IndexedDB put descriptor is unavailable.');
+        }
+        Object.defineProperty(IDBObjectStore.prototype, 'put', {
+            configurable: true,
+            value: () => {
+                throw synchronousFailure;
+            },
+            writable: true,
+        });
+        try {
+            await expect(
+                adapter.write('synchronous-failure', new Uint8Array([1])),
+            ).rejects.toMatchObject({
+                code: 'TransactionFailed',
+                failureCause: synchronousFailure,
+                name: 'IndexedDbUntrustedStorageAdapterError',
+            });
+        } finally {
+            Object.defineProperty(
+                IDBObjectStore.prototype,
+                'put',
+                originalPutDescriptor,
+            );
+        }
+
+        await adapter.write('after-synchronous-failure', new Uint8Array([2]));
+        expect(await adapter.read('after-synchronous-failure')).toEqual(
+            new Uint8Array([2]),
+        );
+    });
+
+    it('observes aborted comparison transactions when cursor creation throws synchronously', async () => {
+        const adapter = await openAdapter();
+        const synchronousFailure = new Error(
+            'Injected synchronous IndexedDB cursor failure.',
+        );
+        const originalOpenCursorDescriptor = Object.getOwnPropertyDescriptor(
+            IDBObjectStore.prototype,
+            'openCursor',
+        );
+        if (originalOpenCursorDescriptor === undefined) {
+            throw new Error('IndexedDB openCursor descriptor is unavailable.');
+        }
+        const deviceKey = await crypto.subtle.generateKey(
+            { length: 256, name: 'AES-GCM' },
+            false,
+            ['decrypt', 'encrypt'],
+        );
+        const deviceWrappingStorage = adapter.createDeviceWrappingStateStorage({
+            binding: {
+                actionContextHash: new Uint8Array(64).fill(1),
+                ceremonyContextHash: new Uint8Array(64).fill(2),
+                participantId: new Uint8Array(64).fill(3),
+                suiteId: new Uint8Array(64).fill(4),
+            },
+            namespace: 'synchronous-cursor-failure',
+        });
+
+        Object.defineProperty(IDBObjectStore.prototype, 'openCursor', {
+            configurable: true,
+            value: () => {
+                throw synchronousFailure;
+            },
+            writable: true,
+        });
+        try {
+            await expect(
+                adapter.applyAtomicMutation({
+                    deletes: [],
+                    expectedValues: [
+                        { key: 'missing-record', value: undefined },
+                    ],
+                    writes: [
+                        {
+                            key: 'uncommitted-record',
+                            value: new Uint8Array([1]),
+                        },
+                    ],
+                }),
+            ).rejects.toMatchObject({
+                code: 'TransactionFailed',
+                failureCause: synchronousFailure,
+                name: 'IndexedDbUntrustedStorageAdapterError',
+            });
+            await expect(
+                deviceWrappingStorage.compareAndSwapState({
+                    expectedMutationIdentifier: undefined,
+                    replacement: {
+                        deviceKey,
+                        mutationIdentifier: new Uint8Array(32).fill(5),
+                        storageRootCommitment: new Uint8Array(64).fill(6),
+                        wrappedStorageRoot: new Uint8Array([7]),
+                    },
+                }),
+            ).rejects.toMatchObject({
+                code: 'TransactionFailed',
+                failureCause: synchronousFailure,
+                name: 'IndexedDbUntrustedStorageAdapterError',
+            });
+        } finally {
+            Object.defineProperty(
+                IDBObjectStore.prototype,
+                'openCursor',
+                originalOpenCursorDescriptor,
+            );
+        }
+
+        expect(await adapter.read('uncommitted-record')).toBeUndefined();
+        expect(await deviceWrappingStorage.readState()).toBeUndefined();
+    });
+
     it('persists strict transactions across safe close and reopen', async () => {
         const databaseName = createDatabaseName();
         const firstAdapter = await openAdapter(databaseName);

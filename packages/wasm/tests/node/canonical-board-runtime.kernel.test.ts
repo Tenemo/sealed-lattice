@@ -1,10 +1,9 @@
-import { foundationProfile } from '@sealed-lattice/types';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
     foundationObjectTypes,
     openCanonicalBoardVerifierSession,
-    type CanonicalBoardVerifierConfiguration,
+    type CanonicalBoardContextInput,
     type CanonicalBoardVerifierSession,
     type VerifiedTranscriptObject,
 } from '#packages/wasm/src/canonical-board-runtime';
@@ -12,31 +11,18 @@ import {
     loadFreshTranscriptCoreKernel,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import { createCanonicalBoardContextTestInput } from '#packages/wasm/tests/canonical-board-context-test-vector';
 import {
     createStateVerifierTestVector,
     type StateVerifierTestVector,
 } from '#packages/wasm/tests/state-verifier-test-vectors';
 
-const boardConfiguration = (
-    vector: StateVerifierTestVector,
-): CanonicalBoardVerifierConfiguration => ({
-    actionContextHash: vector.actionContextHash,
-    canonicalRosterBytes: vector.canonicalRosterBytes,
-    ceremonyContextHash: vector.ceremonyContextHash,
-    maximumBallotAttemptsPerParticipant: 4,
-    maximumRetainedCanonicalCarrierByteLength:
-        foundationProfile.maximumCopiedBufferByteLength,
-    maximumRetainedTranscriptObjects: 32,
-    maximumUnorderedCarriersPerBatch: 16,
-    suiteIdentifier: vector.suiteIdentifier,
-});
-
 const openSession = (
     kernel: TranscriptCoreKernel,
-    vector: StateVerifierTestVector,
+    contextInput: CanonicalBoardContextInput,
 ): CanonicalBoardVerifierSession => {
     const opened = openCanonicalBoardVerifierSession({
-        configuration: boardConfiguration(vector),
+        contextInput,
         kernel,
     });
     expect(opened.isValid).toBe(true);
@@ -60,18 +46,35 @@ const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
 
 describe('Canonical board real-WASM runtime in Node', () => {
     let kernel: TranscriptCoreKernel;
+    let contextInput: CanonicalBoardContextInput;
     let vector: StateVerifierTestVector;
-
-    beforeAll(() => {
-        vector = createStateVerifierTestVector();
-    });
 
     beforeEach(async () => {
         kernel = await loadFreshTranscriptCoreKernel();
+        const initialVector = createStateVerifierTestVector();
+        contextInput = createCanonicalBoardContextTestInput(
+            kernel,
+            initialVector.canonicalRosterBytes,
+        );
+        vector = createStateVerifierTestVector({
+            actionContextHash: contextInput.expectedActionContextHash,
+            ceremonyContextHash: contextInput.expectedCeremonyContextHash,
+            suiteIdentifier: contextInput.expectedSuiteIdentifier,
+        });
+        if (
+            !bytesEqual(
+                vector.canonicalRosterBytes,
+                contextInput.canonicalRosterBytes,
+            )
+        ) {
+            throw new Error(
+                'The deterministic state vector roster changed while deriving its canonical board context.',
+            );
+        }
     });
 
     it('resolves unordered typed state dependencies and preserves the first carrier', () => {
-        const session = openSession(kernel, vector);
+        const session = openSession(kernel, contextInput);
         try {
             const carriers = [
                 ...vector.reservationVoteCarriers

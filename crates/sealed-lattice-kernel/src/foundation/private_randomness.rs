@@ -1571,11 +1571,11 @@ fn read_optional_u64(item: &CanonicalItem) -> SchemaResult<Option<u64>> {
     )
 }
 
-fn read_optional_unsigned<'item>(
-    item: &'item CanonicalItem,
+fn read_optional_unsigned(
+    item: &CanonicalItem,
     expected_type: CanonicalItemType,
     expected_byte_length: usize,
-) -> SchemaResult<Option<&'item [u8]>> {
+) -> SchemaResult<Option<&[u8]>> {
     let bytes = read_item(item, CanonicalItemType::Optional)?;
     if bytes.len() < 3 || u16::from_le_bytes([bytes[0], bytes[1]]) != expected_type.canonical_code()
     {

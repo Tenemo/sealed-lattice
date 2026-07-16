@@ -4,6 +4,7 @@ import {
     type PollSpecValidation,
     type PollSpecValidationError,
 } from '@sealed-lattice/types';
+import type { FoundationManifestInput } from '@sealed-lattice/wasm';
 
 const invalidDataProperty = Symbol('invalid-data-property');
 
@@ -262,14 +263,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     };
 };
 
-export type FoundationManifestIngress = Readonly<{
-    readonly displayTitle: string;
-    readonly optionDefinitions: readonly Readonly<{
-        readonly displayLabel: string;
-        readonly optionIdentifier: string;
-        readonly optionIndex: number;
-    }>[];
-}>;
+export type FoundationManifestIngress = FoundationManifestInput;
 
 /** Converts validated pre-protocol input into the one canonical manifest shape. */
 export const prepareFoundationManifestIngress = (

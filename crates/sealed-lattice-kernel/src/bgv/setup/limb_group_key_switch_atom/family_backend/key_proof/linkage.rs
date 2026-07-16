@@ -10,10 +10,13 @@
 //! that auxiliary commitment.
 
 use super::*;
+#[cfg(test)]
+use crate::bgv::setup::commitment::SETUP_COMMITMENT_HIDING_SECRET_WIDTH;
+#[cfg(test)]
+use crate::bgv::setup::commitment::setup_commitment_randomness_coefficient_bound;
 use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_HIDING_SECRET_WIDTH, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-    SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
-    setup_commitment_randomness_coefficient_bound, setup_commitment_root,
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+    SETUP_COMMITMENT_ROW_COUNT, setup_commitment_root,
 };
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE, SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS,
@@ -23,12 +26,14 @@ use crate::bgv::setup::trustee_evaluation_key_proof::{
 
 const CARRY_CHUNK_COUNT: usize = 2;
 const CARRY_SHIFT_MULTIPLIER: usize = 8;
+#[cfg(test)]
 const CARRY_EXCLUSIVE_BOUND_MULTIPLIER: usize = 16;
 
 pub(in super::super) struct LinkageStatement<'a> {
     pub(in super::super) linkage: &'a SameSecretLinkageStatement,
 }
 
+#[cfg(test)]
 pub(in super::super) struct LinkageWitness<'a> {
     pub(in super::super) negative_indicator: &'a [i64],
     pub(in super::super) randomness_by_commitment_limb: &'a [Vec<Vec<i64>>],
@@ -127,6 +132,7 @@ fn carry_shift(ring_degree: usize) -> i128 {
     (CARRY_SHIFT_MULTIPLIER * ring_degree) as i128
 }
 
+#[cfg(test)]
 pub(in super::super) struct LinkageWitnessValues {
     pub(super) negative_indicator: Vec<i64>,
     pub(super) randomness_by_commitment_limb: Vec<Vec<Vec<i64>>>,
@@ -160,6 +166,7 @@ fn validate_statement(statement: &LinkageStatement<'_>, ring_degree: usize) -> C
     Ok(())
 }
 
+#[cfg(test)]
 pub(in super::super) fn build_linkage_witness_values(
     statement: &LinkageStatement<'_>,
     witness: &LinkageWitness<'_>,
@@ -232,20 +239,23 @@ fn draw_nonzero_extension_element(
     transcript: &mut Transcript,
     label: &str,
     modulus: u64,
-) -> [u64; SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE] {
-    loop {
+) -> CanonicalResult<[u64; SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE]> {
+    for _ in 0..transcript.maximum_candidate_draws_per_output() {
         let residues = transcript.challenge_residues(
             label,
             modulus,
             SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE,
-        );
+        )?;
         let element: [u64; SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE] = residues
             .try_into()
-            .expect("the transcript returned the requested extension degree");
+            .map_err(|_| invalid_linkage("the transcript returned a wrong extension degree"))?;
         if element.iter().any(|coefficient| *coefficient != 0) {
-            return element;
+            return Ok(element);
         }
     }
+    Err(invalid_linkage(
+        "the key-switch atom nonzero extension challenge draw limit was exhausted",
+    ))
 }
 
 fn draw_extension_elements(
@@ -253,13 +263,16 @@ fn draw_extension_elements(
     label: &str,
     modulus: u64,
     count: usize,
-) -> Vec<[u64; SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE]> {
+) -> CanonicalResult<Vec<[u64; SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE]>> {
     (0..count)
         .map(|_| {
             transcript
                 .challenge_residues(label, modulus, SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE)
-                .try_into()
-                .expect("the transcript returned the requested extension degree")
+                .and_then(|residues| {
+                    residues.try_into().map_err(|_| {
+                        invalid_linkage("the transcript returned a wrong extension degree")
+                    })
+                })
         })
         .collect()
 }
@@ -273,20 +286,24 @@ pub(in super::super) fn draw_linkage_challenges(
     let fields = statement.linkage.commitments[0]
         .limbs
         .iter()
-        .map(|limb| LinkageFieldChallenges {
-            lincheck_challenges: (0..SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS)
+        .map(|limb| {
+            let lincheck_challenges = (0..SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS)
                 .map(|_| {
                     draw_nonzero_extension_element(transcript, "key-linkage-lincheck", limb.modulus)
                 })
-                .collect(),
-            linkage_alpha: draw_extension_elements(
+                .collect::<CanonicalResult<Vec<_>>>()?;
+            let linkage_alpha = draw_extension_elements(
                 transcript,
                 "key-linkage-alpha",
                 limb.modulus,
                 SETUP_COMMITMENT_ROW_COUNT * SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS,
-            ),
+            )?;
+            Ok(LinkageFieldChallenges {
+                lincheck_challenges,
+                linkage_alpha,
+            })
         })
-        .collect();
+        .collect::<CanonicalResult<Vec<_>>>()?;
     Ok(LinkageChallenges { fields })
 }
 
@@ -361,6 +378,7 @@ pub(in super::super) fn build_linkage_public_forms(
     Ok(LinkagePublicForms { claims })
 }
 
+#[cfg(test)]
 pub(in super::super) fn populate_linkage_reduced_witness(
     values: &mut LinkageWitnessValues,
     public_forms: &LinkagePublicForms,
@@ -437,6 +455,7 @@ pub(in super::super) fn populate_linkage_reduced_witness(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn linkage_base_value_column<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     _layout: &LinkageLayout,
@@ -468,6 +487,7 @@ pub(super) fn linkage_base_value_column<const LIMB_COUNT: usize>(
     }
 }
 
+#[cfg(test)]
 pub(super) fn linkage_aux_value_column<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     layout: &LinkageLayout,

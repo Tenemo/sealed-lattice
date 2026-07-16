@@ -1,11 +1,12 @@
-import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { assertSetupContextHashMatches } from '../common-fields.js';
 import {
-    deriveEvaluatorKeyScheduleRoot,
-    type EvaluatorKeySchedule,
-} from '../evaluator-key-schedule.js';
+    assertNonEmptyString,
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    assertProtocolHash,
+    assertSetupContextHashMatches,
+} from '../common-fields.js';
 
 import {
     type EvaluationKeyProofCommonInput,
@@ -16,12 +17,6 @@ import {
     type RelinearizationKeyShareRounds,
     type RelinearizationKeyShareRoundsInput,
 } from './constants-and-types.js';
-import {
-    assertNonEmptyString,
-    assertNonNegativeSafeInteger,
-    assertPositiveSafeInteger,
-    assertProtocolHash,
-} from './encoding.js';
 
 const assertShareMaterialRoot = (
     keySwitchComponentMaterialRoot: ProtocolHash,
@@ -34,34 +29,6 @@ const contributionKey = (
     level: number,
     trusteeRosterPosition: number,
 ): string => `${String(level)}:${String(trusteeRosterPosition)}`;
-
-export const relinearizationKeySwitchSeed = (
-    evaluatorKeySchedule: EvaluatorKeySchedule,
-    round: 'round-one' | 'round-two',
-    level: number,
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        objectType: 'RelinearizationKeySwitchPublicSampleSeed',
-        publicMatrixSeedHash: evaluatorKeySchedule.publicMatrixSeedHash,
-        evaluatorKeyScheduleRoot:
-            deriveEvaluatorKeyScheduleRoot(evaluatorKeySchedule),
-        round,
-        level,
-    });
-
-export const galoisKeySwitchSeed = (
-    evaluatorKeySchedule: EvaluatorKeySchedule,
-    rotation: number,
-    level: number,
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        objectType: 'GaloisKeySwitchPublicSampleSeed',
-        publicMatrixSeedHash: evaluatorKeySchedule.publicMatrixSeedHash,
-        evaluatorKeyScheduleRoot:
-            deriveEvaluatorKeyScheduleRoot(evaluatorKeySchedule),
-        rotation,
-        level,
-    });
 
 const sortedTrusteeReferences = (
     input: Pick<
@@ -94,7 +61,7 @@ const sortedTrusteeReferences = (
     return references;
 };
 
-export const validateCommonInput = (
+const validateCommonInput = (
     input: EvaluationKeyProofCommonInput,
 ): EvaluationKeyTrusteeReference[] => {
     assertPositiveSafeInteger(
@@ -222,6 +189,15 @@ export const createRelinearizationKeyShareRounds = (
             );
         });
     });
+    const expectedContributionCount = levels.length * trusteeReferences.length;
+    if (
+        roundOneContributions.size !== expectedContributionCount ||
+        roundTwoContributions.size !== expectedContributionCount
+    ) {
+        throw new Error(
+            'relinearization contributions must match the scheduled trustees and levels exactly.',
+        );
+    }
 
     return {
         objectType: 'RelinearizationKeyShareRounds',
@@ -257,6 +233,11 @@ export const createGaloisKeyShareBatches = (
             contribution,
         );
     });
+    if (contributionsByRosterPosition.size !== trusteeReferences.length) {
+        throw new Error(
+            'batchContributions must contain one batch per participant.',
+        );
+    }
 
     return trusteeReferences.map((trusteeReference) => {
         const contribution = contributionsByRosterPosition.get(
@@ -301,5 +282,3 @@ export const createGaloisKeyShareBatches = (
         } satisfies GaloisKeyShareBatch;
     });
 };
-
-export { assertSetupContextHashMatches };

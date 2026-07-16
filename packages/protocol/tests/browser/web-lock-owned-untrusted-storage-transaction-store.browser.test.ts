@@ -184,48 +184,19 @@ const deleteDatabase = (databaseName: string): Promise<void> =>
         );
     });
 
-const waitForLockCounts = async (input: {
-    heldCount: number;
-    lockName: string;
-    pendingCount: number;
-}): Promise<void> => {
-    const deadlineMilliseconds = performance.now() + 2_000;
-    while (true) {
-        const snapshot = await navigator.locks.query();
-        const heldCount = snapshot.held?.filter(
-            (lock) => lock.name === input.lockName,
-        ).length;
-        const pendingCount = snapshot.pending?.filter(
-            (lock) => lock.name === input.lockName,
-        ).length;
-        if (
-            heldCount === input.heldCount &&
-            pendingCount === input.pendingCount
-        ) {
-            return;
-        }
-        if (performance.now() >= deadlineMilliseconds) {
-            throw new Error(
-                `Web Lock state did not reach ${input.heldCount} held and ${input.pendingCount} pending requests.`,
-            );
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+const exclusiveLockIsAvailable = async (lockName: string): Promise<boolean> => {
+    let lockWasAvailable: boolean | undefined;
+    await navigator.locks.request(
+        lockName,
+        { ifAvailable: true, mode: 'exclusive' },
+        (lock) => {
+            lockWasAvailable = lock !== null;
+        },
+    );
+    if (lockWasAvailable === undefined) {
+        throw new Error('The Web Lock availability probe did not run.');
     }
-};
-
-const waitForHandleState = async (
-    handle: WebLockOwnedStorageTransactionStore,
-    expectedState: ReturnType<WebLockOwnedStorageTransactionStore['state']>,
-): Promise<void> => {
-    const deadlineMilliseconds = performance.now() + 2_000;
-    while (handle.state() !== expectedState) {
-        if (performance.now() >= deadlineMilliseconds) {
-            throw new Error(
-                `Owned storage state did not reach ${expectedState}.`,
-            );
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 5));
-    }
+    return lockWasAvailable;
 };
 
 afterEach(async () => {
@@ -275,20 +246,12 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
             configurationFor(databaseName, separateDocumentProviders),
         );
 
-        await waitForLockCounts({
-            heldCount: 1,
-            lockName,
-            pendingCount: 1,
-        });
+        expect(await exclusiveLockIsAvailable(lockName)).toBe(false);
         expect(firstHandle.state()).toBe('open');
 
         await firstHandle.close();
         const secondHandle = await secondOpenRequest;
-        await waitForLockCounts({
-            heldCount: 1,
-            lockName,
-            pendingCount: 0,
-        });
+        expect(await exclusiveLockIsAvailable(lockName)).toBe(false);
         expect(secondHandle.state()).toBe('open');
 
         await secondHandle.close();
@@ -324,19 +287,18 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
             },
         );
         await stolenLockAcquired;
-        await waitForHandleState(handle, 'failed');
-
-        await expect(
-            handle.store.beginTransaction({ lifetimeMilliseconds: 1_000 }),
-        ).rejects.toMatchObject({
-            code: 'Closed',
-            name: 'IndexedDbUntrustedStorageAdapterError',
-        });
         releaseStolenLock?.();
         await stealingRequest;
         await expect(handle.close()).rejects.toMatchObject({
             code: 'LockCallbackExited',
             name: 'WebLockOwnedStorageError',
+        });
+        expect(handle.state()).toBe('failed');
+        await expect(
+            handle.store.beginTransaction({ lifetimeMilliseconds: 1_000 }),
+        ).rejects.toMatchObject({
+            code: 'Closed',
+            name: 'IndexedDbUntrustedStorageAdapterError',
         });
     });
 
@@ -359,11 +321,7 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
         const secondOpenRequest = openOwnedStore(
             configurationFor(databaseName, separateDocumentProviders),
         );
-        await waitForLockCounts({
-            heldCount: 1,
-            lockName,
-            pendingCount: 1,
-        });
+        expect(await exclusiveLockIsAvailable(lockName)).toBe(false);
         expect(firstHandle.state()).toBe('open');
 
         await firstHandle.close();

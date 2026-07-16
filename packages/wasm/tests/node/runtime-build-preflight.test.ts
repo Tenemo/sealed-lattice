@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -19,12 +22,15 @@ import {
     createSuiteArtifactHashAccumulator,
     createSuiteIdentifierAccumulator,
     decodeRuntimeBuildManifest,
+    proofRandomnessPurposeRanges,
     runtimeBuildBytesToHex,
     type RuntimeAssetRole,
 } from '#packages/wasm/src/runtime-build-canonical';
 import {
     compileRuntimeBuildBootstrap,
+    copyRuntimeBuildAuthorityBindingDescription,
     RuntimeBuildPreflightError,
+    type RuntimeBuildAuthorityBinding,
     type RuntimeBuildByteSource,
     type RuntimeBuildCache,
     type RuntimeBuildFetchResponse,
@@ -39,6 +45,29 @@ const artifactPaths = Object.freeze(
     Array.from({ length: 6 }, (_, index) => `/artifact-${index + 1}.canonical`),
 );
 const textEncoder = new TextEncoder();
+
+type PrivateRandomnessPurposeRangeVector = Readonly<{
+    familySchemaIdentifier: number;
+    firstPurpose: number;
+    lastPurpose: number;
+}>;
+
+type PrivateRandomnessPurposeRangesVector = Readonly<{
+    privateProofSaltPurpose: number;
+    ranges: readonly PrivateRandomnessPurposeRangeVector[];
+}>;
+
+const readPrivateRandomnessPurposeRangesVector =
+    async (): Promise<PrivateRandomnessPurposeRangesVector> =>
+        JSON.parse(
+            await readFile(
+                path.resolve(
+                    'test-vectors',
+                    'private-randomness-purpose-ranges.json',
+                ),
+                'utf8',
+            ),
+        ) as PrivateRandomnessPurposeRangesVector;
 
 const byteSource = (
     bytes: Uint8Array,
@@ -273,6 +302,7 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
         manifestHash,
         manifestHashHex: runtimeBuildBytesToHex(manifestHash),
         routes,
+        suiteIdentifier,
     };
 };
 
@@ -457,24 +487,22 @@ const runFixture = async (input: {
 };
 
 describe('runtime build preflight', () => {
-    it('matches the Rust proof-family randomness purpose ranges', () => {
-        const assignments = [
-            [0x1211, 1, 2],
-            [0x1212, 3, 4],
-            [0x1214, 5, 6],
-            [0x1216, 7, 8],
-            [0x1217, 9, 40],
-            [0x1302, 41, 42],
-            [0x1621, 43, 44],
-            [0x2110, 45, 46],
-            [0x2111, 47, 48],
-        ] as const;
+    it('matches the shared proof-family randomness purpose ranges', async () => {
+        const vector = await readPrivateRandomnessPurposeRangesVector();
+        expect(proofRandomnessPurposeRanges).toEqual(vector.ranges);
 
-        for (const [family, firstPurpose, lastPurpose] of assignments) {
-            for (const purpose of [firstPurpose, lastPurpose, 0xfffe]) {
+        for (const range of vector.ranges) {
+            for (const purpose of [
+                range.firstPurpose,
+                range.lastPurpose,
+                vector.privateProofSaltPurpose,
+            ]) {
                 const fixture = createFixture({
                     operationProfiles: [
-                        operationProfileForRandomUse(family, purpose),
+                        operationProfileForRandomUse(
+                            range.familySchemaIdentifier,
+                            purpose,
+                        ),
                     ],
                 });
                 expect(() =>
@@ -482,10 +510,16 @@ describe('runtime build preflight', () => {
                 ).not.toThrow();
             }
 
-            for (const purpose of [firstPurpose - 1, lastPurpose + 1]) {
+            for (const purpose of [
+                range.firstPurpose - 1,
+                range.lastPurpose + 1,
+            ]) {
                 const fixture = createFixture({
                     operationProfiles: [
-                        operationProfileForRandomUse(family, purpose),
+                        operationProfileForRandomUse(
+                            range.familySchemaIdentifier,
+                            purpose,
+                        ),
                     ],
                 });
                 expect(() =>
@@ -510,10 +544,38 @@ describe('runtime build preflight', () => {
     });
 
     it('authenticates every inert fetch and cache reread before activation', async () => {
-        const { activation, fetcher, workerHarness } = await runFixture({});
+        const { activation, fetcher, fixture, workerHarness } =
+            await runFixture({});
 
         expect(activation.application).toBe('application-imported');
         expect(activation.workerChannel).toEqual({ ready: true });
+        const authorityBindingDescription =
+            copyRuntimeBuildAuthorityBindingDescription(
+                activation.runtimeBuildAuthorityBinding,
+            );
+        expect(authorityBindingDescription.runtimeBuildManifestHash).toEqual(
+            fixture.manifestHash,
+        );
+        expect(authorityBindingDescription.suiteIdentifier).toEqual(
+            fixture.suiteIdentifier,
+        );
+        authorityBindingDescription.runtimeBuildManifestHash.fill(0xff);
+        authorityBindingDescription.suiteIdentifier.fill(0xff);
+        const copiedAuthorityBindingDescription =
+            copyRuntimeBuildAuthorityBindingDescription(
+                activation.runtimeBuildAuthorityBinding,
+            );
+        expect(
+            copiedAuthorityBindingDescription.runtimeBuildManifestHash,
+        ).not.toEqual(authorityBindingDescription.runtimeBuildManifestHash);
+        expect(copiedAuthorityBindingDescription.suiteIdentifier).not.toEqual(
+            authorityBindingDescription.suiteIdentifier,
+        );
+        expect(() =>
+            copyRuntimeBuildAuthorityBindingDescription(
+                Object.freeze({}) as RuntimeBuildAuthorityBinding,
+            ),
+        ).toThrow(TypeError);
         expect(workerHarness.observations).toEqual({
             artifactKinds: [1, 2, 3, 4, 5, 6],
             finished: 1,

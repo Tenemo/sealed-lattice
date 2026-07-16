@@ -1,0 +1,14 @@
+{
+    "privateProofSaltPurpose": 65534,
+    "ranges": [
+        { "familySchemaIdentifier": 4625, "firstPurpose": 1, "lastPurpose": 2 },
+        { "familySchemaIdentifier": 4626, "firstPurpose": 3, "lastPurpose": 4 },
+        { "familySchemaIdentifier": 4628, "firstPurpose": 5, "lastPurpose": 6 },
+        { "familySchemaIdentifier": 4630, "firstPurpose": 7, "lastPurpose": 8 },
+        { "familySchemaIdentifier": 4631, "firstPurpose": 9, "lastPurpose": 40 },
+        { "familySchemaIdentifier": 4866, "firstPurpose": 41, "lastPurpose": 42 },
+        { "familySchemaIdentifier": 5665, "firstPurpose": 43, "lastPurpose": 44 },
+        { "familySchemaIdentifier": 8464, "firstPurpose": 45, "lastPurpose": 46 },
+        { "familySchemaIdentifier": 8465, "firstPurpose": 47, "lastPurpose": 48 }
+    ]
+}

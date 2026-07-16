@@ -10,27 +10,7 @@ import {
     resolveNumberExport,
     resolveOptionalNumberExport,
     runKernelCommand,
-    TranscriptCoreKernelCommandError,
 } from './kernel-runtime.js';
-
-const translateAcceptedSetupCommandFailure = <Result>(
-    operation: () => Result,
-): Result => {
-    try {
-        return operation();
-    } catch (error) {
-        if (
-            error instanceof TranscriptCoreKernelCommandError &&
-            error.code === 'InvalidFixture'
-        ) {
-            throw new TranscriptCoreKernelCommandError({
-                code: 'InvalidProtocolObject',
-                message: error.message.replace(/^InvalidFixture: /u, ''),
-            });
-        }
-        throw error;
-    }
-};
 
 export const registerKernelContexts = (
     kernel: TranscriptCoreKernelContextOwner,
@@ -122,23 +102,21 @@ export const registerKernelContexts = (
         cancel: acceptedSetupSessionCancel,
         deallocate: runtime.deallocate,
         executeCommand: (request, sessionHandle, beforeKernelInvocation) =>
-            translateAcceptedSetupCommandFailure(() =>
-                runtime.runExclusive('accepted-setup command', () =>
-                    runKernelCommand<BgvCollectiveSetupVerification>(
-                        runtime.memory,
-                        runtime.allocate,
-                        runtime.deallocate,
-                        (pointer, length, outputLengthPointer) => {
-                            beforeKernelInvocation();
-                            return acceptedSetupCommandWithLength(
-                                pointer,
-                                length,
-                                sessionHandle,
-                                outputLengthPointer,
-                            );
-                        },
-                        request,
-                    ),
+            runtime.runExclusive('accepted-setup command', () =>
+                runKernelCommand<BgvCollectiveSetupVerification>(
+                    runtime.memory,
+                    runtime.allocate,
+                    runtime.deallocate,
+                    (pointer, length, outputLengthPointer) => {
+                        beforeKernelInvocation();
+                        return acceptedSetupCommandWithLength(
+                            pointer,
+                            length,
+                            sessionHandle,
+                            outputLengthPointer,
+                        );
+                    },
+                    request,
                 ),
             ),
         memory: runtime.memory,

@@ -107,6 +107,13 @@ impl<'source, Source: ProofByteSource + ?Sized> BoundedProofDecoder<'source, Sou
     }
 
     pub(crate) fn read_bytes(&mut self, byte_count: usize) -> Result<Vec<u8>, ProofDecodeError> {
+        let end = self
+            .offset
+            .checked_add(byte_count)
+            .ok_or(ProofDecodeError::OffsetOverflow)?;
+        if end > self.total_byte_length {
+            return Err(ProofDecodeError::Truncated);
+        }
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(byte_count)
@@ -335,5 +342,18 @@ mod tests {
             decoder.read_packed_u64_values(usize::MAX, 2),
             Err(ProofDecodeError::IntegerOverflow)
         );
+    }
+
+    #[test]
+    fn byte_reader_rejects_a_truncated_length_before_reserving() {
+        let bytes = [0x51_u8];
+        let mut decoder = BoundedProofDecoder::new(&bytes[..], bytes.len(), bytes.len())
+            .expect("bounded byte source");
+
+        assert_eq!(
+            decoder.read_bytes(usize::MAX),
+            Err(ProofDecodeError::Truncated)
+        );
+        assert_eq!(decoder.offset(), 0, "a rejected field must not advance");
     }
 }

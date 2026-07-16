@@ -10,14 +10,13 @@ import {
 } from '#tools/ci/classify-ci-changes.mjs';
 
 describe('CI heavy-lane change classification', () => {
-    it('skips documentation and tooling while failing closed for runtime and unknown changes', () => {
+    it('skips documentation and non-lane tooling while failing closed for lane definitions, runtime, and unknown changes', () => {
         for (const changedPaths of [
             ['README.md', 'SECURITY.md', 'reference-documents/paper.txt'],
             [
-                '.github/workflows/ci.yml',
                 'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/profile-and-state.kernel.test.ts',
                 'tests/node/tools/run-command.test.ts',
-                'tools/ci/run-command.ts',
+                'tools/internal/generate-fixture.ts',
             ],
         ]) {
             expect(shouldRunHeavyCiLanes(changedPaths)).toBe(false);
@@ -27,6 +26,9 @@ describe('CI heavy-lane change classification', () => {
             'packages/sdk/src/index.ts',
             'pnpm-lock.yaml',
             'crates/sealed-lattice-kernel/src/bgv/setup.rs',
+            '.github/workflows/ci.yml',
+            'tools/ci/run-rust-kernel-heavy-tests.ts',
+            'tools/ci/new-heavy-lane-runner.ts',
             'unclassified/generated.txt',
         ]) {
             expect(shouldRunHeavyCiLanes([changedPath])).toBe(true);

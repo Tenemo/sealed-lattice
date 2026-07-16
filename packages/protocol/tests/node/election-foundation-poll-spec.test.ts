@@ -73,6 +73,94 @@ describe('pre-protocol poll input validation', () => {
         });
     });
 
+    it('confines pre-protocol identifiers and top counts outside canonical manifest ingress', () => {
+        const firstValidation = validatePollSpec(
+            createValidPollSpecInput({
+                pollId: 'display-flow-a',
+                topOptionCount: 3,
+            }),
+        );
+        const secondValidation = validatePollSpec(
+            createValidPollSpecInput({
+                pollId: 'display-flow-b',
+                topOptionCount: 17,
+            }),
+        );
+        expect(firstValidation.isValid).toBe(true);
+        expect(secondValidation.isValid).toBe(true);
+        if (!firstValidation.isValid || !secondValidation.isValid) {
+            return;
+        }
+
+        const firstIngress = prepareFoundationManifestIngress(
+            firstValidation.normalized,
+        );
+        const secondIngress = prepareFoundationManifestIngress(
+            secondValidation.normalized,
+        );
+        expect(firstIngress).toEqual(secondIngress);
+        expect(Object.keys(firstIngress)).toEqual([
+            'displayTitle',
+            'optionDefinitions',
+        ]);
+    });
+
+    it('ignores untrusted protocol identity fields without invoking their accessors', () => {
+        let accessorInvocations = 0;
+        const untrustedInput = createValidPollSpecInput() as Record<
+            string,
+            unknown
+        >;
+        Object.defineProperties(untrustedInput, {
+            actionIdentifier: {
+                enumerable: true,
+                get: () => {
+                    accessorInvocations += 1;
+                    return 'untrusted-action';
+                },
+            },
+            ceremonyIdentifier: {
+                enumerable: true,
+                get: () => {
+                    accessorInvocations += 1;
+                    return 'untrusted-ceremony';
+                },
+            },
+            suiteIdentifier: {
+                enumerable: true,
+                get: () => {
+                    accessorInvocations += 1;
+                    return 'untrusted-suite';
+                },
+            },
+        });
+
+        const directIngress = prepareFoundationManifestIngress(
+            untrustedInput as unknown as PollSpecInput,
+        );
+        const validation = validatePollSpec(untrustedInput);
+        expect(validation.isValid).toBe(true);
+        expect(accessorInvocations).toBe(0);
+        if (!validation.isValid) {
+            return;
+        }
+
+        expect(Object.keys(validation.normalized)).toEqual([
+            'pollId',
+            'question',
+            'options',
+            'topOptionCount',
+        ]);
+        const expectedIngress = prepareFoundationManifestIngress(
+            createValidPollSpecInput(),
+        );
+        expect(directIngress).toEqual(expectedIngress);
+        expect(prepareFoundationManifestIngress(validation.normalized)).toEqual(
+            expectedIngress,
+        );
+        expect(accessorInvocations).toBe(0);
+    });
+
     it('rejects missing identifiers, labels, options, and top counts', () => {
         expectErrorCodes(
             createValidPollSpecInput({

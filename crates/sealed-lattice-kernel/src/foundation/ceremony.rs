@@ -672,7 +672,7 @@ mod tests {
         let suite = sample_suite();
         let suite_id = suite.suite_id().expect("suite identifier derives");
         let ceremony = CeremonyContext::new(&suite, &manifest, &roster, "ceremony-2026".to_owned())
-            .expect("ceremony context derives");
+            .expect("schema-level ceremony context derives");
         let action_definition =
             ActionDefinition::new(7, 1_800_000_000_000).expect("action definition is valid");
         let board_policy =
@@ -725,16 +725,41 @@ mod tests {
             "bad\nidentifier".to_owned(),
             "a".repeat(FOUNDATION_PROFILE.maximum_identifier_byte_length + 1),
         ] {
-            assert!(CeremonyContext::new(&suite, &manifest, &roster, invalid_identifier).is_err());
+            assert!(CeremonyContext::new(&suite, &manifest, &roster, invalid_identifier,).is_err());
         }
+    }
+
+    #[test]
+    fn ceremony_context_is_structural_and_does_not_select_a_suite() {
+        let suite = sample_suite();
+        let ceremony_context = CeremonyContext::new(
+            &suite,
+            &sample_manifest(),
+            &sample_roster(),
+            "ceremony-2026".to_owned(),
+        )
+        .expect("a structurally valid suite can bind a ceremony context");
+        assert_eq!(
+            ceremony_context.suite_id(),
+            suite.suite_id().expect("suite identifier derives")
+        );
+
+        let error = super::super::selected_suite::require_selected_suite_record(&suite)
+            .expect_err("structural validation must not grant selected-suite authority");
+        assert!(matches!(
+            error.refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite | RefusalReason::OutsideSupportedProfile
+        ));
     }
 
     #[test]
     fn manifest_decode_respects_caller_limits_and_schema_identity() {
         let manifest = sample_manifest();
         let encoded = manifest.encode().expect("manifest encodes");
-        let mut limits = CanonicalDecodeLimits::default();
-        limits.maximum_tuple_byte_length = encoded.len() - 1;
+        let limits = CanonicalDecodeLimits {
+            maximum_tuple_byte_length: encoded.len() - 1,
+            ..CanonicalDecodeLimits::default()
+        };
         assert_eq!(
             Manifest::decode(&encoded, &limits)
                 .expect_err("bounded decoder must reject oversized input")

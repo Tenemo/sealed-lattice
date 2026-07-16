@@ -110,7 +110,7 @@ describe('Action-randomness real-WASM runtime in Node', () => {
         expect(entropy.callCount()).toBe(1);
     });
 
-    it('requires matching live durable reservations for persistent and target attempts', () => {
+    it('requires a matching live durable reservation for a target attempt', () => {
         const vector = createStateVerifierTestVector();
         const openedStateSession = openStateVerifierSession({
             configuration: {
@@ -178,18 +178,6 @@ describe('Action-randomness real-WASM runtime in Node', () => {
                 suiteId: bytesToHex(vector.suiteIdentifier),
             },
         });
-        const persistentInput = {
-            applicationStatementHash: '66'.repeat(64),
-            rosterPosition: 0,
-            statementSchemaIdentifier: 0x1211 as const,
-            verifiedReservation: dealerSetReservation,
-        };
-        const firstPersistent =
-            session.derivePersistentProofAttempt(persistentInput);
-        const replayedPersistent =
-            session.derivePersistentProofAttempt(persistentInput);
-        expect(replayedPersistent).toEqual(firstPersistent);
-
         const targetInput = {
             rosterPosition: 0,
             verifiedReservation: targetReservation,
@@ -199,14 +187,6 @@ describe('Action-randomness real-WASM runtime in Node', () => {
         expect(replayedTarget).toEqual(firstTarget);
         expectRuntimeError(
             () =>
-                session.derivePersistentProofAttempt({
-                    ...persistentInput,
-                    verifiedReservation: targetReservation,
-                }),
-            'InvalidInput',
-        );
-        expectRuntimeError(
-            () =>
                 session.deriveTargetReleaseAttempt({
                     rosterPosition: 0,
                     verifiedReservation: dealerSetReservation,
@@ -214,8 +194,6 @@ describe('Action-randomness real-WASM runtime in Node', () => {
             'InvalidInput',
         );
 
-        firstPersistent.attemptIdentifier.fill(0);
-        replayedPersistent.attemptIdentifier.fill(0);
         firstTarget.attemptIdentifier.fill(0);
         replayedTarget.attemptIdentifier.fill(0);
         session.close();

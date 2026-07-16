@@ -23,7 +23,7 @@ pub(crate) fn top_k_indicator_and_order_value(
 ) -> CanonicalResult<(Ciphertext, Ciphertext)> {
     if top_count == 0 || top_count > option_count {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "top-k prefix evaluation requires 1 <= top_count <= option_count",
         ));
     }

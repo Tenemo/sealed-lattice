@@ -142,8 +142,7 @@ impl CheckedApplicationChallenges {
                 RelationChallengeRole::NonNativeTheta => sampled,
                 RelationChallengeRole::NonNativeAlpha => modular_power(
                     sampled,
-                    u64::try_from(descriptor.role_coordinates[2])
-                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    descriptor.role_coordinates[2],
                     context.base_field_modulus,
                 ),
                 _ => return Err(RelationPlanError::InvalidChallengeCatalog),
@@ -338,7 +337,9 @@ impl RelationPlanVariant {
     ) -> Result<Vec<ProofChallengeExtensionElement>, RelationPlanError> {
         if deep_points.len() != usize::from(context.deep_point_count)
             || self.trace_domain_size == 0
-            || self.evaluation_domain_size % self.trace_domain_size != 0
+            || !self
+                .evaluation_domain_size
+                .is_multiple_of(self.trace_domain_size)
         {
             return Err(RelationPlanError::InvalidDomain);
         }
@@ -380,7 +381,9 @@ impl RelationPlanVariant {
     ) -> Result<bool, RelationPlanError> {
         if self.trace_domain_size == 0
             || self.evaluation_domain_size == 0
-            || self.evaluation_domain_size % self.trace_domain_size != 0
+            || !self
+                .evaluation_domain_size
+                .is_multiple_of(self.trace_domain_size)
         {
             return Err(RelationPlanError::InvalidDomain);
         }
@@ -676,14 +679,14 @@ mod tests {
             )],
         };
         let input = CommittedMaterialRelationPlanInput {
-            ring_degree: 16,
+            ring_degree: 32,
             evaluation_domain_size,
             opening_degree_bound_exclusive: 128,
             material_column_degree_bound_exclusive: 10,
             participant_count: 3,
             threshold: 2,
             sharing_data_modulus_indices: vec![0],
-            trace_mask_degree_bound_exclusive: 7,
+            trace_mask_degree_bound_exclusive: 14,
             first_mask_purpose: 100,
         };
         let compiled = compile_vss_share_linkage_relation_plan(&input, &context)

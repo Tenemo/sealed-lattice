@@ -1,14 +1,22 @@
+#[cfg(test)]
 use super::super::evaluation_domain::EvaluationDomainPlan;
+use super::super::relation::{LimbColumnLayout, TrusteeEvaluationKeyStatement};
+#[cfg(test)]
 use super::super::relation::{
-    LimbColumnLayout, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
-    claim_mask_digit_count_for_global_claim,
+    TrusteeEvaluationKeyWitness, claim_mask_digit_count_for_global_claim,
 };
+#[cfg(test)]
 use super::super::{CLAIM_MASK_RADIX, column_mask_degree};
+#[cfg(test)]
 use super::CLAIM_MASK_DOMAIN;
+#[cfg(test)]
 use crate::bgv::evaluator::prg::DeterministicSampler;
+#[cfg(test)]
 use crate::bgv::modular_arithmetic::{add_mod_fast, sub_mod_fast};
+#[cfg(test)]
 use num_bigint::BigInt;
 
+#[cfg(test)]
 pub(in super::super) fn claim_mask_digits(
     proof_randomness_seed_hex: &str,
     global_claim_id: u64,
@@ -37,6 +45,7 @@ pub(in super::super) fn global_claim_id(
     local_claim_index as u64
 }
 
+#[cfg(test)]
 pub(super) fn mask_digit_columns(
     statement: &TrusteeEvaluationKeyStatement,
     layout: &LimbColumnLayout,
@@ -57,6 +66,7 @@ pub(super) fn mask_digit_columns(
     columns
 }
 
+#[cfg(test)]
 pub(super) fn masked_half_coefficients(
     plan: &EvaluationDomainPlan,
     half_values: &[u64],
@@ -70,6 +80,7 @@ pub(super) fn masked_half_coefficients(
     )
 }
 
+#[cfg(test)]
 pub(super) fn masked_half_coefficients_with_mask_degree(
     plan: &EvaluationDomainPlan,
     half_values: &[u64],
@@ -88,6 +99,7 @@ pub(super) fn masked_half_coefficients_with_mask_degree(
     coefficients
 }
 
+#[cfg(test)]
 pub(super) fn global_claim_integers(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,

@@ -582,4 +582,37 @@ describe('canonical setup material streaming in the public package', () => {
                 .verifyCollectiveBgvSetup,
         ).toHaveBeenCalledOnce();
     });
+
+    it('preserves setup verification and cancellation failures together', async () => {
+        const transportCase = setupProofMaterialTransportCases[0];
+        const verificationFailure = new Error('material staging failed');
+        const cancellationFailure = new Error('session cancellation failed');
+        readMaterial.mockRejectedValueOnce(verificationFailure);
+        createFreshMockKernel = () => {
+            const kernel = mockKernel;
+            kernel.acceptedSetupSession.cancel.mockImplementationOnce(() => {
+                throw cancellationFailure;
+            });
+            loadedFreshMockKernels.push(kernel);
+            return kernel;
+        };
+
+        const operation = publicPackage.verifySetupPackage({
+            setupPackage: setupPackageWithProofBytesHashes(transportCase, [
+                proofBytesHash,
+            ]),
+            ...setupVerificationBindings,
+            transportedPublicKeyShareProofMaterial: transportedProofMaterialSet(
+                transportCase,
+                proofMaterialSource(59),
+            ),
+        });
+
+        const error = await operation.catch((failure: unknown) => failure);
+        expect(error).toMatchObject({
+            name: 'SetupPackageVerificationCleanupError',
+            operationFailure: verificationFailure,
+            cleanupFailure: cancellationFailure,
+        });
+    });
 });

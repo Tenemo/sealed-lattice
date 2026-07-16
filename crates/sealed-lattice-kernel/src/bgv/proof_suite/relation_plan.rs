@@ -13,7 +13,7 @@ use num_traits::{One, Zero};
 
 use crate::foundation::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    StreamingFoundationTupleHash512,
+    ProofApplicationSlotCeilings, StreamingFoundationTupleHash512,
 };
 
 use super::transcript::{
@@ -91,10 +91,11 @@ const SCHEMA_VERSION: u16 = 1;
 const RELATION_PLAN_HASH_DOMAIN: &str = "sealed-lattice/proof/relation-plan/v1";
 const RELATION_PLAN_VARIANT_HASH_DOMAIN: &str = "sealed-lattice/proof/relation-plan-variant/v1";
 
-const PUBLIC_ONLY_FAMILIES: [u16; 3] = [0x1213, 0x1215, 0x1218];
-const SECRET_BEARING_FAMILIES: [u16; 9] = [
-    0x1211, 0x1212, 0x1214, 0x1216, 0x1217, 0x1302, 0x1621, 0x2110, 0x2111,
-];
+const PUBLIC_ONLY_FAMILIES: [u16; 3] =
+    ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS;
+const SECRET_BEARING_FAMILIES: [u16; 9] =
+    ProofApplicationSlotCeilings::SECRET_BEARING_FAMILY_SCHEMA_IDENTIFIERS;
+const MAXIMUM_EXHAUSTIVE_ZEROIFIER_COSET_CHECK_DOMAIN_SIZE: u64 = 1 << 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RelationPlanError {
@@ -127,6 +128,7 @@ pub(crate) enum RelationPlanError {
     InvalidOpening,
     InvalidChallengeCatalog,
     InvalidMaskGrammar,
+    MaskPurposeExhausted,
     InvalidApplicationSlot,
     MissingExactNegacyclicLowering,
     CountOverflow,
@@ -709,10 +711,8 @@ pub(crate) fn radix_decompose_scaled_residues(
             if residue >= modulus {
                 return Err(RelationPlanError::InvalidSource);
             }
-            Ok(u64::try_from(
-                (u128::from(residue) * u128::from(scale) / divisor) % u128::from(radix),
-            )
-            .map_err(|_| RelationPlanError::IntegerBoundOverflow)?)
+            u64::try_from((u128::from(residue) * u128::from(scale) / divisor) % u128::from(radix))
+                .map_err(|_| RelationPlanError::IntegerBoundOverflow)
         })
         .collect()
 }
@@ -3766,12 +3766,10 @@ impl RelationPlanVariant {
             .values()
             .try_fold(0_u64, |total, degree| total.checked_add(*degree))
             .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-        let quotient_component_degree = u64::from(
-            context
-                .quotient_component_degree_bound_exclusive
-                .checked_sub(1)
-                .ok_or(RelationPlanError::DegreeBoundExceeded)?,
-        );
+        let quotient_component_degree = context
+            .quotient_component_degree_bound_exclusive
+            .checked_sub(1)
+            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
         let quotient_degree = u64::from(
             context
                 .quotient_component_count
@@ -4202,7 +4200,7 @@ impl RelationPlanVariant {
             u16::try_from(context.quotient_component_count)
                 .map_err(|_| RelationPlanError::CountOverflow)?,
             context.deep_point_count,
-            u16::try_from(self.ordered_opening_claims.len())
+            u32::try_from(self.ordered_opening_claims.len())
                 .map_err(|_| RelationPlanError::CountOverflow)?,
             context.fri_fold_count,
             context.final_polynomial_degree_bound_exclusive,
@@ -4385,7 +4383,17 @@ impl CompiledRelationPlan {
     }
 
     pub(crate) fn canonical_hash(&self) -> Result<[u8; 64], RelationPlanError> {
-        hash_generated_variable_bytes(RELATION_PLAN_HASH_DOMAIN, &self.canonical_bytes()?)
+        self.canonical_byte_length_and_hash().map(|(_, hash)| hash)
+    }
+
+    pub(crate) fn canonical_byte_length_and_hash(
+        &self,
+    ) -> Result<(u64, [u8; 64]), RelationPlanError> {
+        let canonical_bytes = self.canonical_bytes()?;
+        let byte_length = u64::try_from(canonical_bytes.len())
+            .map_err(|_| RelationPlanError::CanonicalEncoding)?;
+        let hash = hash_generated_variable_bytes(RELATION_PLAN_HASH_DOMAIN, &canonical_bytes)?;
+        Ok((byte_length, hash))
     }
 
     pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
@@ -4588,9 +4596,12 @@ impl<'context> RelationPlanChecker<'context> {
         variant: &RelationPlanVariant,
     ) -> Result<(), RelationPlanError> {
         let valid = match application_statement_schema_identifier {
-            0x1214..=0x1217 => variant.schedule_position.is_some() && variant.top_count.is_none(),
-            0x1218 => {
-                variant.schedule_position.is_none() && matches!(variant.top_count, Some(1..=20))
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+                ..=ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                variant.schedule_position.is_some() && variant.top_count.is_none()
+            }
+            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+                variant.schedule_position.is_some() && matches!(variant.top_count, Some(1..=20))
             }
             _ => variant.schedule_position.is_none() && variant.top_count.is_none(),
         };
@@ -5404,7 +5415,7 @@ impl<'context> RelationPlanChecker<'context> {
             return Err(RelationPlanError::InvalidConstraint);
         }
         let mut roles = BTreeSet::new();
-        let mut checked_zeroifiers = BTreeSet::new();
+        let mut checked_zeroifiers = Vec::<Vec<RelationExpressionInstruction>>::new();
         for constraint in &variant.ordered_constraints {
             if !roles.insert((
                 constraint.constraint_role,
@@ -5430,20 +5441,16 @@ impl<'context> RelationPlanChecker<'context> {
             if zeroifier.degree == 0 && zeroifier.constant_value == Some(0) {
                 return Err(RelationPlanError::InvalidZeroifier);
             }
-            let zeroifier_bytes = canonical_nested_list(
-                constraint
-                    .zeroifier_postfix_expression
-                    .iter()
-                    .map(RelationExpressionInstruction::canonical_tuple)
-                    .collect::<Result<Vec<_>, _>>()?,
-            )?
-            .canonical_bytes()
-            .to_vec();
-            if checked_zeroifiers.insert(zeroifier_bytes) {
+            if !checked_zeroifiers
+                .iter()
+                .any(|checked| checked == &constraint.zeroifier_postfix_expression)
+            {
                 self.check_zeroifier_on_coset(
                     &constraint.zeroifier_postfix_expression,
+                    variant.trace_domain_size,
                     variant.evaluation_domain_size,
                 )?;
+                checked_zeroifiers.push(constraint.zeroifier_postfix_expression.clone());
             }
 
             if constraint.enforce_proof_base_field_no_wrap {
@@ -5518,8 +5525,36 @@ impl<'context> RelationPlanChecker<'context> {
     fn check_zeroifier_on_coset(
         &self,
         expression: &[RelationExpressionInstruction],
+        trace_domain_size: u64,
         evaluation_domain_size: u64,
     ) -> Result<(), RelationPlanError> {
+        // Every evaluation-coset point x = offset * generator^i has
+        // x^evaluation_domain_size = offset^evaluation_domain_size. Every
+        // trace root has evaluation_domain_size-th power one because the
+        // trace size divides the evaluation size. The domain checks establish
+        // that the offset power is not one, so an exact zeroifier whose roots
+        // are confined to the trace subgroup cannot vanish on the coset.
+        if zeroifier_roots_are_confined_to_trace_domain(
+            expression,
+            trace_domain_size,
+            self.context.base_field_modulus,
+        ) && evaluation_domain_size.is_multiple_of(trace_domain_size)
+            && modular_power(
+                self.context.evaluation_domain_generator,
+                evaluation_domain_size,
+                self.context.base_field_modulus,
+            ) == 1
+            && modular_power(
+                self.context.evaluation_coset_offset,
+                evaluation_domain_size,
+                self.context.base_field_modulus,
+            ) != 1
+        {
+            return Ok(());
+        }
+        if evaluation_domain_size > MAXIMUM_EXHAUSTIVE_ZEROIFIER_COSET_CHECK_DOMAIN_SIZE {
+            return Err(RelationPlanError::InvalidZeroifier);
+        }
         let polynomial = compile_base_field_polynomial(
             expression,
             self.context.base_field_modulus,
@@ -5549,10 +5584,13 @@ impl<'context> RelationPlanChecker<'context> {
         variant: &RelationPlanVariant,
         semantic_bounds: &BTreeMap<u32, SignedIntegerInterval>,
     ) -> Result<(), RelationPlanError> {
-        if application_statement_schema_identifier == 0x2111 {
+        if application_statement_schema_identifier
+            == ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        {
             return self.check_deterministic_coefficient_local_identities(variant, semantic_bounds);
         }
-        let is_coefficient_local_family = application_statement_schema_identifier == 0x2110;
+        let is_coefficient_local_family = application_statement_schema_identifier
+            == ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
         if !is_coefficient_local_family {
             return if variant
                 .ordered_coefficient_local_identity_batches
@@ -6058,7 +6096,8 @@ impl<'context> RelationPlanChecker<'context> {
                 return Err(RelationPlanError::NonCanonicalOrder);
             }
             for permutation in &batch.ordered_negacyclic_automorphism_permutations {
-                if application_statement_schema_identifier != 0x1217
+                if application_statement_schema_identifier
+                    != ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
                     || variant.ordered_non_native_moduli.first().copied()
                         != Some(batch.modulus_reference)
                     || !automorphism_permutation_coordinates
@@ -6542,7 +6581,9 @@ impl<'context> RelationPlanChecker<'context> {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
         let expected_automorphism_permutation_coordinates =
-            if application_statement_schema_identifier == 0x1217 {
+            if application_statement_schema_identifier
+                == ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            {
                 let modulus_reference = variant
                     .ordered_non_native_moduli
                     .first()
@@ -6557,7 +6598,8 @@ impl<'context> RelationPlanChecker<'context> {
                 BTreeSet::new()
             };
         if automorphism_permutation_coordinates != expected_automorphism_permutation_coordinates
-            || (application_statement_schema_identifier == 0x1217)
+            || (application_statement_schema_identifier
+                == ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER)
                 != automorphism_semantics.is_some()
         {
             return Err(RelationPlanError::InvalidConstraint);
@@ -7089,9 +7131,9 @@ fn integer_lift_coefficient_value(
     }
 }
 
-fn derive_semantic_cell_interval<'cell>(
+fn derive_semantic_cell_interval(
     column_ordinal: u32,
-    semantic_cells_by_column: &BTreeMap<u32, &'cell SemanticCellDescriptor>,
+    semantic_cells_by_column: &BTreeMap<u32, &SemanticCellDescriptor>,
     constraints: &[RelationConstraintDescriptor],
     trace_domain_size: u64,
     context: &RelationPlanCheckContext,
@@ -7265,11 +7307,11 @@ fn derive_semantic_cell_interval<'cell>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn validate_radix_digit_bounds<'cell>(
+fn validate_radix_digit_bounds(
     target_column_ordinal: u32,
     radix: u64,
     ordered_digit_column_ordinals: &[u32],
-    semantic_cells_by_column: &BTreeMap<u32, &'cell SemanticCellDescriptor>,
+    semantic_cells_by_column: &BTreeMap<u32, &SemanticCellDescriptor>,
     constraints: &[RelationConstraintDescriptor],
     trace_domain_size: u64,
     context: &RelationPlanCheckContext,
@@ -7315,7 +7357,7 @@ fn validate_radix_digit_bounds<'cell>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn validate_canonical_modulus_recomposition_bound<'cell>(
+fn validate_canonical_modulus_recomposition_bound(
     target_column_ordinal: u32,
     modulus_reference: SuiteModulusReference,
     radix: u64,
@@ -7323,7 +7365,7 @@ fn validate_canonical_modulus_recomposition_bound<'cell>(
     ordered_comparator_constraint_ordinals: &[u32],
     ordered_difference_digit_column_ordinals: &[u32],
     ordered_borrow_column_ordinals: &[u32],
-    semantic_cells_by_column: &BTreeMap<u32, &'cell SemanticCellDescriptor>,
+    semantic_cells_by_column: &BTreeMap<u32, &SemanticCellDescriptor>,
     constraints: &[RelationConstraintDescriptor],
     trace_domain_size: u64,
     context: &RelationPlanCheckContext,
@@ -7454,6 +7496,52 @@ fn validate_canonical_modulus_recomposition_bound<'cell>(
         }
     }
     SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(maximum))
+}
+
+fn zeroifier_roots_are_confined_to_trace_domain(
+    expression: &[RelationExpressionInstruction],
+    trace_domain_size: u64,
+    base_field_modulus: u64,
+) -> bool {
+    if trace_domain_size == 0 || base_field_modulus < 3 {
+        return false;
+    }
+    match expression {
+        [
+            RelationExpressionInstruction::EvaluationVariable,
+            RelationExpressionInstruction::NonnegativePower(exponent),
+            RelationExpressionInstruction::BaseFieldConstant(1),
+            RelationExpressionInstruction::Negation,
+            RelationExpressionInstruction::Addition,
+        ] => *exponent == trace_domain_size,
+        [
+            RelationExpressionInstruction::TraceDomainExceptRoots {
+                trace_domain_size: encoded_trace_domain_size,
+                ordered_excluded_roots,
+            },
+        ] => {
+            *encoded_trace_domain_size == trace_domain_size
+                && !ordered_excluded_roots.is_empty()
+                && (ordered_excluded_roots.len() as u64) < trace_domain_size
+                && strictly_sorted_unique(ordered_excluded_roots)
+                && ordered_excluded_roots.iter().all(|root| {
+                    *root > 0
+                        && *root < base_field_modulus
+                        && modular_power(*root, trace_domain_size, base_field_modulus) == 1
+                })
+        }
+        [
+            RelationExpressionInstruction::EvaluationVariable,
+            RelationExpressionInstruction::BaseFieldConstant(root),
+            RelationExpressionInstruction::Negation,
+            RelationExpressionInstruction::Addition,
+        ] => {
+            *root > 0
+                && *root < base_field_modulus
+                && modular_power(*root, trace_domain_size, base_field_modulus) == 1
+        }
+        _ => false,
+    }
 }
 
 fn full_trace_zeroifier_expression(trace_domain_size: u64) -> Vec<RelationExpressionInstruction> {
@@ -8387,7 +8475,7 @@ fn radix_digit_intervals(
             .ok_or(RelationPlanError::CountOverflow)?;
     }
     let most_significant_maximum = maximum_value / most_significant_place_value;
-    Ok((0..usize::from(digit_count))
+    (0..usize::from(digit_count))
         .map(|digit_ordinal| {
             let maximum = if digit_ordinal == most_significant_ordinal {
                 most_significant_maximum
@@ -8396,7 +8484,7 @@ fn radix_digit_intervals(
             };
             SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(maximum))
         })
-        .collect::<Result<Vec<_>, _>>()?)
+        .collect::<Result<Vec<_>, _>>()
 }
 
 fn convolve_interval_vectors(

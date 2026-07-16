@@ -173,7 +173,7 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
     if string_at_path(proof_statement, &["objectType"])? != "BgvTargetDecryptionShareProofStatement"
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "target decryption share proof statement must be BgvTargetDecryptionShareProofStatement version 1",
         ));
     }
@@ -224,7 +224,7 @@ fn validate_target_decryption_smudging_commitment_set(
 ) -> CanonicalResult<()> {
     if string_at_path(commitment_set, &["objectType"])? != "TargetDecryptionSmudgingCommitmentSet" {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "target decryption smudging commitment set must be TargetDecryptionSmudgingCommitmentSet",
         ));
     }
@@ -280,7 +280,7 @@ fn validate_smudging_commitment_record(
 ) -> CanonicalResult<()> {
     if string_at_path(record, &["objectType"])? != "TargetDecryptionSmudgingCommitment" {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "target decryption smudging commitment record must be TargetDecryptionSmudgingCommitment",
         ));
     }

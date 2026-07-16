@@ -208,6 +208,114 @@ impl VerifiedCanonicalStreamSummary {
     }
 }
 
+/// Authenticates browser-stored canonical chunks before a random-access
+/// verifier consumes them. Construction requires the terminal summary from a
+/// complete sequential canonical-stream verification of the same descriptor,
+/// so a descriptor or a set of independently matching chunk digests cannot
+/// mint stream authority by themselves.
+pub(crate) struct CanonicalStreamReadbackVerifier {
+    stream_domain: CanonicalStreamDomain,
+    descriptor: StreamDescriptor,
+    verified_summary: VerifiedCanonicalStreamSummary,
+    authenticated_chunks: Vec<bool>,
+    authenticated_chunk_count: usize,
+    refusal_reason: Option<RefusalReason>,
+}
+
+impl CanonicalStreamReadbackVerifier {
+    pub(crate) fn new(
+        stream_domain: CanonicalStreamDomain,
+        descriptor: StreamDescriptor,
+        verified_summary: VerifiedCanonicalStreamSummary,
+    ) -> Result<Self, RefusalReason> {
+        validate_descriptor(&descriptor)?;
+        if verified_summary.stream_domain() != stream_domain
+            || verified_summary.total_byte_length() != descriptor.total_byte_length
+            || verified_summary.full_object_digest() != descriptor.full_object_digest
+        {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
+        let chunk_count = descriptor.ordered_chunk_digests.len();
+        Ok(Self {
+            stream_domain,
+            descriptor,
+            verified_summary,
+            authenticated_chunks: vec![false; chunk_count],
+            authenticated_chunk_count: 0,
+            refusal_reason: None,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn total_byte_length(&self) -> u64 {
+        self.descriptor.total_byte_length
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn chunk_count(&self) -> usize {
+        self.descriptor.ordered_chunk_digests.len()
+    }
+
+    pub(crate) fn authenticate_chunk(
+        &mut self,
+        chunk_index: usize,
+        chunk_bytes: &[u8],
+    ) -> Result<(), RefusalReason> {
+        if let Some(refusal_reason) = self.refusal_reason {
+            return Err(refusal_reason);
+        }
+        let result = self.authenticate_chunk_inner(chunk_index, chunk_bytes);
+        if let Err(refusal_reason) = result {
+            self.refusal_reason = Some(refusal_reason);
+        }
+        result
+    }
+
+    pub(crate) fn finish(self) -> VerificationResult<VerifiedCanonicalStreamSummary> {
+        if let Some(refusal_reason) = self.refusal_reason {
+            return VerificationResult::refused(refusal_reason);
+        }
+        if self.authenticated_chunk_count != self.authenticated_chunks.len() {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        }
+        VerificationResult::valid(self.verified_summary)
+    }
+
+    fn authenticate_chunk_inner(
+        &mut self,
+        chunk_index: usize,
+        chunk_bytes: &[u8],
+    ) -> Result<(), RefusalReason> {
+        let expected_digest = self
+            .descriptor
+            .ordered_chunk_digests
+            .get(chunk_index)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let expected_byte_length = expected_chunk_byte_length(
+            self.descriptor.total_byte_length,
+            self.descriptor.ordered_chunk_digests.len(),
+            chunk_index,
+        )?;
+        if chunk_bytes.len() != expected_byte_length
+            || chunk_digest(self.stream_domain, chunk_index, chunk_bytes)? != *expected_digest
+        {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
+        let authenticated = self
+            .authenticated_chunks
+            .get_mut(chunk_index)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        if !*authenticated {
+            *authenticated = true;
+            self.authenticated_chunk_count = self
+                .authenticated_chunk_count
+                .checked_add(1)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        }
+        Ok(())
+    }
+}
+
 /// Incrementally authenticates one canonical stream without retaining its body.
 ///
 /// A refusal poisons the verifier so ignoring an intermediate result can never
@@ -827,6 +935,122 @@ mod tests {
             }
             assert_eq!(verifier.finish(), VerificationResult::valid(()));
         }
+    }
+
+    #[test]
+    fn authenticated_readback_accepts_every_descriptor_chunk_in_arbitrary_order() {
+        let stream_domain = CanonicalStreamDomain::BallotValidityProof;
+        let bytes = (0..FOUNDATION_PROFILE.stream_chunk_byte_length + 37)
+            .map(|index| (index.wrapping_mul(157) & 0xff) as u8)
+            .collect::<Vec<_>>();
+        let descriptor = descriptor_for(stream_domain, &bytes);
+        let chunks = bytes
+            .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .collect::<Vec<_>>();
+        let mut sequential_verifier =
+            CanonicalStreamVerifier::new(stream_domain, descriptor.clone())
+                .expect("descriptor begins sequential verification");
+        for (chunk_index, chunk) in chunks.iter().copied().enumerate() {
+            assert_eq!(
+                sequential_verifier.absorb_chunk(chunk_index, chunk),
+                VerificationResult::valid(())
+            );
+        }
+        let verified_summary = sequential_verifier
+            .finish_with_summary()
+            .into_result()
+            .expect("the sequential stream verifies");
+
+        let mut readback =
+            CanonicalStreamReadbackVerifier::new(stream_domain, descriptor, verified_summary)
+                .expect("the verified descriptor begins authenticated readback");
+        assert_eq!(readback.chunk_count(), 2);
+        assert_eq!(readback.total_byte_length(), bytes.len() as u64);
+        assert_eq!(readback.authenticate_chunk(1, chunks[1]), Ok(()));
+        assert_eq!(readback.authenticate_chunk(1, chunks[1]), Ok(()));
+        assert_eq!(readback.authenticate_chunk(0, chunks[0]), Ok(()));
+        let summary = readback
+            .finish()
+            .into_result()
+            .expect("every descriptor chunk was authenticated");
+        assert_eq!(summary.stream_domain(), stream_domain);
+        assert_eq!(summary.total_byte_length(), bytes.len() as u64);
+    }
+
+    #[test]
+    fn authenticated_readback_refuses_missing_substituted_and_mismatched_streams() {
+        let stream_domain = CanonicalStreamDomain::PublicKeyShareProof;
+        let bytes = vec![0x4d; FOUNDATION_PROFILE.stream_chunk_byte_length + 11];
+        let descriptor = descriptor_for(stream_domain, &bytes);
+        let chunks = bytes
+            .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .collect::<Vec<_>>();
+        let verified_summary = {
+            let mut verifier = CanonicalStreamVerifier::new(stream_domain, descriptor.clone())
+                .expect("descriptor begins sequential verification");
+            for (chunk_index, chunk) in chunks.iter().copied().enumerate() {
+                assert_eq!(
+                    verifier.absorb_chunk(chunk_index, chunk),
+                    VerificationResult::valid(())
+                );
+            }
+            verifier
+                .finish_with_summary()
+                .into_result()
+                .expect("the sequential stream verifies")
+        };
+
+        let mut missing = CanonicalStreamReadbackVerifier::new(
+            stream_domain,
+            descriptor.clone(),
+            verified_summary.clone(),
+        )
+        .expect("verified descriptor begins readback");
+        assert_eq!(missing.authenticate_chunk(0, chunks[0]), Ok(()));
+        assert!(matches!(
+            missing.finish().into_result(),
+            Err(RefusalReason::WrongTypeOrLength)
+        ));
+
+        let mut substituted_chunk = chunks[0].to_vec();
+        substituted_chunk[17] ^= 1;
+        let mut substituted = CanonicalStreamReadbackVerifier::new(
+            stream_domain,
+            descriptor.clone(),
+            verified_summary.clone(),
+        )
+        .expect("verified descriptor begins readback");
+        assert_eq!(
+            substituted.authenticate_chunk(0, &substituted_chunk),
+            Err(RefusalReason::WrongHashOrRoot)
+        );
+        assert_eq!(
+            substituted.authenticate_chunk(0, chunks[0]),
+            Err(RefusalReason::WrongHashOrRoot)
+        );
+        assert!(matches!(
+            substituted.finish().into_result(),
+            Err(RefusalReason::WrongHashOrRoot)
+        ));
+
+        let other_bytes = vec![0x93; bytes.len()];
+        let other_descriptor = descriptor_for(stream_domain, &other_bytes);
+        assert!(matches!(
+            CanonicalStreamReadbackVerifier::new(
+                stream_domain,
+                other_descriptor,
+                verified_summary.clone(),
+            ),
+            Err(RefusalReason::WrongHashOrRoot)
+        ));
+        assert!(matches!(
+            CanonicalStreamReadbackVerifier::new(
+                CanonicalStreamDomain::PublicKeyShareMaterial,
+                descriptor,
+                verified_summary,
+            ),
+            Err(RefusalReason::WrongHashOrRoot)
+        ));
     }
 
     #[test]

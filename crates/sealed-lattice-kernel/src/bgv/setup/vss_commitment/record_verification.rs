@@ -74,6 +74,7 @@ pub(crate) fn vss_public_coefficient_commitment_set_root(
     }))
 }
 
+#[cfg(test)]
 pub(crate) fn vss_public_source_recipient_share_record_root(
     source_record: &Value,
     source_trustee_identity: &str,
@@ -201,7 +202,7 @@ pub(crate) fn validate_standalone_vss_committed_material_commitment(
     let material_root_hex = string_at_path(commitment, &["materialRootHex"])?;
     if !is_lowercase_protocol_hash(material_root_hex) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{field_name} materialRootHex must be a 64-byte lowercase hex digest"),
         ));
     }

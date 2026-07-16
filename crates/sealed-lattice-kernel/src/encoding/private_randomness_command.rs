@@ -1,11 +1,15 @@
 use serde_json::{Map, Value, json};
 
+use super::command_fields::{
+    invalid_value, required_canonical_u64_decimal, required_exact_lowercase_hex,
+    required_lowercase_hex_bytes, required_object, required_value,
+};
 use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::foundation::{
     CanonicalDecodeLimits, Hash512, PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH,
     PrivateRandomCursor,
 };
-use crate::transcript_core::{decode_hex, encode_hex};
+use crate::transcript_core::encode_hex;
 
 pub(super) fn encode_private_random_cursor(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
@@ -17,7 +21,7 @@ pub(super) fn encode_private_random_cursor(request: &Value) -> CanonicalResult<V
 
 pub(super) fn decode_private_random_cursor(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
-    let canonical_bytes = decode_hex(required_string(request, "canonicalBytesHex")?)?;
+    let canonical_bytes = required_lowercase_hex_bytes(request, "canonicalBytesHex")?;
     let cursor = PrivateRandomCursor::decode(&canonical_bytes, &CanonicalDecodeLimits::default())
         .map_err(schema_error)?;
     Ok(json!({ "value": cursor_to_json(cursor) }))
@@ -28,12 +32,15 @@ fn cursor_from_json(value: &Value) -> CanonicalResult<PrivateRandomCursor> {
     PrivateRandomCursor::new(
         required_u16(object, "family")?,
         required_u16(object, "purpose")?,
-        Hash512::from_bytes(required_hex_array::<64>(object, "derivationContextHash")?),
-        required_hex_array::<PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH>(
+        Hash512::from_bytes(required_exact_lowercase_hex::<64>(
+            object,
+            "derivationContextHash",
+        )?),
+        required_exact_lowercase_hex::<PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH>(
             object,
             "streamAttemptIdentifierHex",
         )?,
-        required_u64_decimal(object, "nextCounter")?,
+        required_canonical_u64_decimal(object, "nextCounter")?,
         optional_u16(object, "nextUnreadBitOffsetInBufferedBlock")?,
     )
     .map_err(schema_error)
@@ -59,33 +66,6 @@ fn cursor_to_json(cursor: PrivateRandomCursor) -> Value {
     value
 }
 
-fn required_object<'a>(
-    value: &'a Value,
-    field_name: &str,
-) -> CanonicalResult<&'a Map<String, Value>> {
-    value
-        .as_object()
-        .ok_or_else(|| invalid_value(format!("{field_name} must be an object")))
-}
-
-fn required_value<'a>(
-    object: &'a Map<String, Value>,
-    field_name: &str,
-) -> CanonicalResult<&'a Value> {
-    object
-        .get(field_name)
-        .ok_or_else(|| invalid_value(format!("{field_name} is required")))
-}
-
-fn required_string<'a>(
-    object: &'a Map<String, Value>,
-    field_name: &str,
-) -> CanonicalResult<&'a str> {
-    required_value(object, field_name)?
-        .as_str()
-        .ok_or_else(|| invalid_value(format!("{field_name} must be a string")))
-}
-
 fn required_u16(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<u16> {
     let value = required_value(object, field_name)?
         .as_u64()
@@ -107,33 +87,6 @@ fn optional_u16(object: &Map<String, Value>, field_name: &str) -> CanonicalResul
     }
 }
 
-fn required_u64_decimal(object: &Map<String, Value>, field_name: &str) -> CanonicalResult<u64> {
-    let value = required_string(object, field_name)?;
-    if value.is_empty()
-        || (value.len() > 1 && value.starts_with('0'))
-        || value.bytes().any(|byte| !byte.is_ascii_digit())
-    {
-        return Err(invalid_value(format!(
-            "{field_name} must be a canonical unsigned decimal string"
-        )));
-    }
-    value
-        .parse()
-        .map_err(|_| invalid_value(format!("{field_name} does not fit u64")))
-}
-
-fn required_hex_array<const BYTE_LENGTH: usize>(
-    object: &Map<String, Value>,
-    field_name: &str,
-) -> CanonicalResult<[u8; BYTE_LENGTH]> {
-    let bytes = decode_hex(required_string(object, field_name)?)?;
-    bytes.try_into().map_err(|_| {
-        invalid_value(format!(
-            "{field_name} must contain exactly {BYTE_LENGTH} bytes"
-        ))
-    })
-}
-
 fn schema_error(error: crate::foundation::FoundationSchemaError) -> CanonicalError {
     CanonicalError::new(
         CanonicalErrorCode::InvalidProtocolObject,
@@ -142,10 +95,6 @@ fn schema_error(error: crate::foundation::FoundationSchemaError) -> CanonicalErr
             error.refusal_reason
         ),
     )
-}
-
-fn invalid_value(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
 #[cfg(test)]

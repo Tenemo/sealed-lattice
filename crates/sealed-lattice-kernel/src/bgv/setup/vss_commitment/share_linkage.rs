@@ -10,8 +10,11 @@ use super::*;
 pub(crate) struct VerifiedVssShareLinkageBindings {
     pub(crate) public_matrix_seed_hash: String,
     pub(crate) ring_degree: usize,
+    #[cfg(test)]
     pub(crate) coefficient_commitment_root: String,
+    #[cfg(test)]
     pub(crate) recipient_share_commitment_root: String,
+    #[cfg(test)]
     pub(crate) aggregate_threshold_commitment_root: String,
 }
 
@@ -67,19 +70,23 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(
         statement: VssShareLinkageStatementBinding {
             setup_context_hash,
             public_matrix_seed_hash,
-            ring_degree,
             participant_count,
             q_share_rns_limb_count,
             threshold_degree,
             trustee_identities,
         },
     })?;
+    #[cfg(not(test))]
+    let _verified_evidence_roots = evidence_roots;
 
     Ok(VerifiedVssShareLinkageBindings {
         public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
         ring_degree,
+        #[cfg(test)]
         coefficient_commitment_root: evidence_roots.coefficient_commitment_root,
+        #[cfg(test)]
         recipient_share_commitment_root: evidence_roots.recipient_share_commitment_root,
+        #[cfg(test)]
         aggregate_threshold_commitment_root: evidence_roots.aggregate_threshold_commitment_root,
     })
 }
@@ -87,7 +94,6 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(
 pub(super) struct VssShareLinkageStatementBinding<'a> {
     setup_context_hash: &'a str,
     public_matrix_seed_hash: &'a str,
-    ring_degree: usize,
     participant_count: usize,
     q_share_rns_limb_count: usize,
     threshold_degree: usize,
@@ -100,8 +106,11 @@ pub(super) struct VssShareLinkageEvidenceInput<'a> {
 }
 
 pub(super) struct VssShareLinkageEvidenceRoots {
+    #[cfg(test)]
     coefficient_commitment_root: String,
+    #[cfg(test)]
     recipient_share_commitment_root: String,
+    #[cfg(test)]
     aggregate_threshold_commitment_root: String,
 }
 
@@ -138,7 +147,7 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
     recipient_share_commitment_set: &Value,
     aggregate_threshold_commitment_set: &Value,
 ) -> CanonicalResult<VssShareLinkageEvidenceRoots> {
-    let coefficient_commitment_root = verify_vss_public_coefficient_commitment_set(
+    let _coefficient_commitment_root = verify_vss_public_coefficient_commitment_set(
         coefficient_commitment_set,
         &VssPublicCoefficientCommitmentSetContext {
             setup_context_hash: input.statement.setup_context_hash,
@@ -149,7 +158,7 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
             threshold_degree: input.statement.threshold_degree,
         },
     )?;
-    let recipient_share_commitment_root = verify_vss_public_recipient_share_commitment_set(
+    let _recipient_share_commitment_root = verify_vss_public_recipient_share_commitment_set(
         recipient_share_commitment_set,
         &VssPublicRecipientShareCommitmentSetContext {
             setup_context_hash: input.statement.setup_context_hash,
@@ -159,16 +168,17 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
             rns_limb_count: input.statement.q_share_rns_limb_count,
         },
     )?;
-    let aggregate_threshold_commitment_root = verify_vss_public_aggregate_threshold_commitment_set(
-        aggregate_threshold_commitment_set,
-        &VssPublicAggregateThresholdCommitmentSetContext {
-            setup_context_hash: input.statement.setup_context_hash,
-            public_matrix_seed_hash: input.statement.public_matrix_seed_hash,
-            participant_count: input.statement.participant_count,
-            trustee_identities: input.statement.trustee_identities,
-            rns_limb_count: input.statement.q_share_rns_limb_count,
-        },
-    )?;
+    let _aggregate_threshold_commitment_root =
+        verify_vss_public_aggregate_threshold_commitment_set(
+            aggregate_threshold_commitment_set,
+            &VssPublicAggregateThresholdCommitmentSetContext {
+                setup_context_hash: input.statement.setup_context_hash,
+                public_matrix_seed_hash: input.statement.public_matrix_seed_hash,
+                participant_count: input.statement.participant_count,
+                trustee_identities: input.statement.trustee_identities,
+                rns_limb_count: input.statement.q_share_rns_limb_count,
+            },
+        )?;
 
     // The proven "T = sum" aggregate binding is verified separately, on the
     // accepted-setup material-verification path, not here.
@@ -185,14 +195,18 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
         ));
     }
     Ok(VssShareLinkageEvidenceRoots {
-        coefficient_commitment_root,
-        recipient_share_commitment_root,
-        aggregate_threshold_commitment_root,
+        #[cfg(test)]
+        coefficient_commitment_root: _coefficient_commitment_root,
+        #[cfg(test)]
+        recipient_share_commitment_root: _recipient_share_commitment_root,
+        #[cfg(test)]
+        aggregate_threshold_commitment_root: _aggregate_threshold_commitment_root,
     })
 }
 
 // Each aggregate proof binds the committed threshold share to the modular sum
 // of its source recipient shares at the unit evaluation point.
+#[cfg(test)]
 pub(crate) struct VssAggregateThresholdProofContext<'a> {
     pub(crate) setup_context_hash: String,
     pub(crate) public_matrix_seed_hash: &'a str,
@@ -202,6 +216,7 @@ pub(crate) struct VssAggregateThresholdProofContext<'a> {
     pub(crate) trustee_identities: &'a [String],
 }
 
+#[cfg(test)]
 pub(in crate::bgv::setup) struct VssAggregateThresholdStatementInput<'a> {
     pub(in crate::bgv::setup) public_matrix_seed_hash: &'a str,
     pub(in crate::bgv::setup) participant_count: usize,
@@ -213,6 +228,7 @@ pub(in crate::bgv::setup) struct VssAggregateThresholdStatementInput<'a> {
     pub(in crate::bgv::setup) trustee_identities: &'a [String],
 }
 
+#[cfg(test)]
 pub(in crate::bgv::setup) fn vss_aggregate_threshold_statement_from_commitment_records(
     input: VssAggregateThresholdStatementInput<'_>,
 ) -> CanonicalResult<Value> {
@@ -314,6 +330,7 @@ pub(in crate::bgv::setup) fn vss_aggregate_threshold_statement_from_commitment_r
     }))
 }
 
+#[cfg(test)]
 pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
     _proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
     _coefficient_commitment_set: &Value,

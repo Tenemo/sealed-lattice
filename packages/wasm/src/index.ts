@@ -6,12 +6,27 @@ import {
     foundationObjectTypes,
     openCanonicalBoardVerifierSession,
 } from './canonical-board-runtime.js';
+import {
+    describeClosedWorkerPreparedCommonProofGeneration,
+    describeClosedWorkerPreparedCommonProofVerification,
+    releaseClosedWorkerPreparedCommonProofGeneration,
+    releaseClosedWorkerPreparedCommonProofVerification,
+    runClosedWorkerPreparedCommonProofGeneration,
+    runClosedWorkerPreparedCommonProofVerification,
+} from './common-proof-worker-runtime.js';
 import { openFinalityVerifierSession } from './finality-verifier-runtime.js';
 import { openFoundationCeremonyRuntime } from './foundation-ceremony-runtime.js';
 import {
+    certifyClosedWorkerActionRandomnessReservation,
     createWasmBrowserActionStorageWorkerKernel,
     openClosedWorkerSetupMailboxRandomness,
     openClosedWorkerStructuredCommitmentOpenings,
+    prepareClosedWorkerVerifiedCommonProofApplication,
+    openClosedWorkerVerifiedStateDurableBinding,
+    produceClosedWorkerActionRandomnessReservationIntent,
+    produceClosedWorkerActionRandomnessReservationWitnessVote,
+    verifyClosedWorkerActionRandomnessReservationIntentForWitness,
+    type ClosedWorkerPreparedCommonProofApplication,
     type ClosedWorkerStructuredCommitmentOpeningCapability,
     type ClosedWorkerStructuredCommitmentOpeningOperations,
     type ClosedWorkerSetupMailboxRandomnessOperations,
@@ -21,7 +36,6 @@ import {
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
     type AcceptedSetupSession,
-    type DecodedProofApplicationBinding,
     type DecodedPrivateRandomCursor,
     type EncodedPrivateRandomCursor,
     type PrivateRandomCursor,
@@ -37,13 +51,25 @@ const transcriptCoreKernelUrl = new URL(
 
 export {
     bgvCanonicalStreamFamilies,
+    certifyClosedWorkerActionRandomnessReservation,
     createWasmBrowserActionStorageWorkerKernel,
     createTranscriptCoreKernelLoader,
+    describeClosedWorkerPreparedCommonProofGeneration,
+    describeClosedWorkerPreparedCommonProofVerification,
+    releaseClosedWorkerPreparedCommonProofGeneration,
+    releaseClosedWorkerPreparedCommonProofVerification,
     foundationObjectTypes,
     openBgvCanonicalStreamRuntime,
     openCanonicalBoardVerifierSession,
     openClosedWorkerSetupMailboxRandomness,
     openClosedWorkerStructuredCommitmentOpenings,
+    prepareClosedWorkerVerifiedCommonProofApplication,
+    openClosedWorkerVerifiedStateDurableBinding,
+    produceClosedWorkerActionRandomnessReservationIntent,
+    produceClosedWorkerActionRandomnessReservationWitnessVote,
+    runClosedWorkerPreparedCommonProofGeneration,
+    runClosedWorkerPreparedCommonProofVerification,
+    verifyClosedWorkerActionRandomnessReservationIntentForWitness,
     openFinalityVerifierSession,
     openFoundationCeremonyRuntime,
     openMailboxGcmRuntime,
@@ -59,10 +85,10 @@ export type {
 export type {
     AcceptedSetupSession,
     ClosedWorkerSetupMailboxRandomnessOperations,
+    ClosedWorkerPreparedCommonProofApplication,
     ClosedWorkerStructuredCommitmentOpeningCapability,
     ClosedWorkerStructuredCommitmentOpeningOperations,
     TranscriptCoreKernel,
-    DecodedProofApplicationBinding,
     DecodedPrivateRandomCursor,
     EncodedPrivateRandomCursor,
     PrivateRandomCursor,
@@ -74,6 +100,22 @@ export type {
     BgvCanonicalStreamRuntime,
     BgvCanonicalStreamVerifierLease,
 } from './bgv-canonical-stream-runtime.js';
+export type {
+    AuthenticatedCommonProofInputStore,
+    ClosedWorkerPreparedCommonProofDescription,
+    ClosedWorkerPreparedCommonProofGeneration,
+    ClosedWorkerPreparedCommonProofVerification,
+    CommonProofCanonicalOutputStore,
+    CommonProofExternalMemoryOperation,
+    CommonProofExternalMemoryReadResult,
+    CommonProofExternalMemoryRequest,
+    CommonProofExternalMemoryTransactionExecutor,
+    CommonProofGenerationCheckpoint,
+    CommonProofGenerationWorkerOptions,
+    CommonProofApplicationFreshnessCoordinate,
+    CommonProofVerificationWorkerOptions,
+    VerifiedCommonProofCapability,
+} from './common-proof-worker-runtime.js';
 export {
     canonicalStreamDomains,
     openCanonicalStreamWorkerRuntime,
@@ -94,7 +136,7 @@ export type {
     CanonicalStreamWriterLease,
 } from './canonical-stream-runtime.js';
 export type {
-    CanonicalBoardVerifierConfiguration,
+    CanonicalBoardContextInput,
     CanonicalBoardVerifierSession,
     CanonicalBoardVerifierSessionState,
     FoundationObjectType,
@@ -116,17 +158,6 @@ export type {
     VerifiedFinality,
     VerifiedFinalityDescription,
 } from './finality-verifier-runtime.js';
-export {
-    copyProofApplicationReservationBindingDescription,
-    prepareProofApplicationReservationBinding,
-    ProofApplicationReservationBindingPreparationError,
-} from './proof-application-runtime.js';
-export type {
-    ProofApplicationAuthorityContext,
-    ProofApplicationReservationBinding,
-    ProofApplicationReservationBindingDescription,
-    ProofApplicationReservationBindingPreparationRefusalReason,
-} from './proof-application-runtime.js';
 export type {
     StateDurableBindingDescription,
     StateOutputIntentVerification,
@@ -148,12 +179,15 @@ export type {
 } from './state-verifier-runtime.js';
 export {
     compileRuntimeBuildBootstrap,
+    copyRuntimeBuildAuthorityBindingDescription,
     createBrowserRuntimeBuildFetcher,
     openBrowserRuntimeBuildCache,
     RuntimeBuildPreflightError,
 } from './runtime-build-preflight.js';
 export type {
     RuntimeBuildActivation,
+    RuntimeBuildAuthorityBinding,
+    RuntimeBuildAuthorityBindingDescription,
     RuntimeBuildBootstrapPin,
     RuntimeBuildByteSource,
     RuntimeBuildCache,

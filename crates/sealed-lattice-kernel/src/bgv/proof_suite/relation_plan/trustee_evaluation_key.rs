@@ -14,9 +14,10 @@ use super::{
     RelationVerifierSource, SuiteModulusReference,
 };
 
-const RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1214;
-const RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1216;
-const GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1217;
+const RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER: u16 = crate::foundation::ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER;
+const RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER: u16 = crate::foundation::ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER;
+const GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 =
+    crate::foundation::ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
 const ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL: u64 = 4;
 const ROUND_ONE_LEFT_ROOT_FIELD_ORDINAL: u64 = 5;
 const ROUND_ONE_RIGHT_ROOT_FIELD_ORDINAL: u64 = 6;
@@ -924,13 +925,13 @@ mod tests {
         negacyclic_automorphism_mapping_values, negacyclic_automorphism_semantics_match,
     };
     use super::*;
-    use crate::bgv::parameters::{DATA_PRIMES, SPECIAL_PRIME};
+    use crate::bgv::parameters::{DATA_PRIMES, SPECIAL_PRIMES};
 
     fn check_context() -> RelationPlanCheckContext {
         let mut context = key_relation_check_context(true);
         context.resolved_moduli.insert(
             3,
-            ResolvedSuiteModulus::new(SuiteModulusReference::special(0), SPECIAL_PRIME),
+            ResolvedSuiteModulus::new(SuiteModulusReference::special(0), SPECIAL_PRIMES[0]),
         );
         context
     }
@@ -942,7 +943,7 @@ mod tests {
             opening_degree_bound_exclusive: TEST_OPENING_DEGREE_BOUND_EXCLUSIVE,
             public_polynomial_column_degree_bound_exclusive: TEST_RING_DEGREE,
             data_moduli: vec![DATA_PRIMES[0], DATA_PRIMES[1], DATA_PRIMES[2]],
-            special_moduli: vec![SPECIAL_PRIME],
+            special_moduli: vec![SPECIAL_PRIMES[0]],
             plaintext_modulus: 257,
             decomposition_blocks: vec![TrusteeEvaluationKeyDecompositionBlock {
                 data_modulus_indices: vec![0, 1, 2],

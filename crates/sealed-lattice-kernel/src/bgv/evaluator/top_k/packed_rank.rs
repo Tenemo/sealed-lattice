@@ -8,20 +8,20 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
 ) -> CanonicalResult<PackedRankEvaluation> {
     if option_count < 2 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "batched packed-rank evaluation requires at least two options",
         ));
     }
     if option_count * 2 > POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "batched packed-rank evaluation exceeds the generator-ordered slot window",
         ));
     }
     let pair_count = option_count * option_count.saturating_sub(1) / 2;
     if pair_count > GENERATOR_SUBGROUP_ORDER {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "batched packed-rank evaluation exceeds the generator subgroup slot window",
         ));
     }

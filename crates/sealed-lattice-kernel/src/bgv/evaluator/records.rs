@@ -12,7 +12,7 @@ pub(crate) const DIRECT_TARGET_PROJECTION_ID: &str = "direct-encrypted-target-pr
 pub(crate) fn target_layout_hash(option_count: usize) -> CanonicalResult<String> {
     if option_count == 0 || option_count > MAXIMUM_OPTION_COUNT {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "target layout option count must be between 1 and the supported maximum",
         ));
     }

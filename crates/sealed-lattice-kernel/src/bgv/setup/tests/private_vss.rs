@@ -419,12 +419,13 @@ fn private_vss_share_envelope_verifier_refuses_unauthenticated_proof_material_re
         request["privateEnvelope"]["rnsShareOpenings"][0]["privateVssShareProofBytesHash"]
             .as_str()
             .expect("private VSS proof bytes hash");
-    let _removed_proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
-        "vss-opening-carry",
-        proof_bytes_hash,
-    )
-    .expect("private VSS proof material store lookup")
-    .expect("private VSS proof material was retained");
+    let _removed_proof_material =
+        crate::bgv::setup::take_authenticated_canonical_proof_material_bytes(
+            "vss-opening-carry",
+            proof_bytes_hash,
+        )
+        .expect("private VSS proof material store lookup")
+        .expect("private VSS proof material was retained");
 
     assert_private_vss_share_proof_refusal(&request);
 }

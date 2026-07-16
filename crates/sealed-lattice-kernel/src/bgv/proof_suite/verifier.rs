@@ -6,7 +6,10 @@
 //! canonical query section is hashed while the same first read is decoded and
 //! algebraically checked.
 
-use crate::foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple};
+use crate::foundation::{
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
+    ProofApplicationSlotCeilings, hash_foundation_tuple_512,
+};
 use crate::hashing::hash_framed_parts_512;
 
 use super::field::ProofChallengeExtensionElement;
@@ -23,15 +26,21 @@ use super::{
     ProofLeafVisibility, ProofOpeningClaimEvaluation, ProofOpeningError, ProofPolynomialError,
     ProofProfileError, ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeOpening,
     ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
-    RelationPlanCheckContext, RelationPlanError, RelationProofTreeInput, SetupPublicPolynomialTree,
+    RelationPlanCheckContext, RelationPlanError, RelationProofTreeInput,
+    SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
+    SelectedEvaluatorEntryPosition, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
     StatementOwnedProofTreeInput, TranscriptError, ValidatedRelationPlanArtifact,
     build_complete_proof_tree_catalog, decode_proof_body_prefix, decode_proof_body_prefix_owned,
     decode_proof_query_section_header_at, decode_proof_query_tree_at,
-    evaluate_normalized_opening_claim_pair, proof_body_prefix_byte_length,
+    decode_selected_application_statement, evaluate_normalized_opening_claim_pair,
+    proof_body_prefix_byte_length, proof_query_tree_byte_length,
+    selected_evaluator_aggregate_entry_roots, selected_evaluator_entry_positions,
+    selected_relation_plan_check_context,
 };
 
 const PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER: u16 = 0x0102;
 const PROOF_OBJECT_HEADER_SCHEMA_VERSION: u16 = 1;
+const PROOF_HEADER_HASH_DOMAIN: &str = "sealed-lattice/proof/header/v1";
 const SELECTED_PROOF_FIELD_INDEX: u16 = 0;
 const VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/verified-application-statement/v1";
@@ -103,20 +112,45 @@ impl From<ProofFriError> for CommonProofVerifierError {
 /// selected relation-plan variant. Family code consumes this capability
 /// instead of accepting a proof byte string or a caller-supplied verdict.
 pub(crate) struct VerifiedCommonProof {
+    protocol_version: u16,
+    suite_identifier: [u8; 64],
     application_statement_schema_identifier: u16,
     application_statement_hash: [u8; 64],
+    proof_header_hash: [u8; 64],
+    proof_byte_length: u64,
+    verified_query_count: u32,
     relation_plan_variant_hash: [u8; 64],
     schedule_position: Option<u32>,
     top_count: Option<u16>,
 }
 
 impl VerifiedCommonProof {
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.protocol_version
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; 64] {
+        self.suite_identifier
+    }
+
     pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
         self.application_statement_schema_identifier
     }
 
     pub(crate) const fn application_statement_hash(&self) -> [u8; 64] {
         self.application_statement_hash
+    }
+
+    pub(crate) const fn proof_header_hash(&self) -> [u8; 64] {
+        self.proof_header_hash
+    }
+
+    pub(crate) const fn proof_byte_length(&self) -> u64 {
+        self.proof_byte_length
+    }
+
+    pub(crate) const fn verified_query_count(&self) -> u32 {
+        self.verified_query_count
     }
 
     pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; 64] {
@@ -129,6 +163,16 @@ impl VerifiedCommonProof {
 
     pub(crate) const fn top_count(&self) -> Option<u16> {
         self.top_count
+    }
+
+    fn binds_application_statement(&self, canonical_application_statement_bytes: &[u8]) -> bool {
+        self.application_statement_hash
+            == verified_application_statement_hash(
+                self.protocol_version,
+                self.suite_identifier,
+                self.application_statement_schema_identifier,
+                canonical_application_statement_bytes,
+            )
     }
 }
 
@@ -184,6 +228,225 @@ impl VerifiedStatementOwnedTree {
     }
 }
 
+/// Verifier-owned linkage for the unproved A component of one evaluator key.
+/// Runtime B remains the only component in the 0x1218 aggregation relation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct VerifiedEvaluatorAuxiliaryRoot {
+    position: SelectedEvaluatorEntryPosition,
+    auxiliary_component_root: [u8; 64],
+}
+
+impl VerifiedEvaluatorAuxiliaryRoot {
+    pub(crate) fn from_verified_relinearization_round_one_aggregate(
+        verified_proof: &VerifiedCommonProof,
+        canonical_application_statement_bytes: &[u8],
+    ) -> Result<Self, CommonProofVerifierError> {
+        let schedule_position = verified_proof
+            .schedule_position
+            .filter(|_| {
+                verified_proof.application_statement_schema_identifier
+                    == ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                    && verified_proof.top_count.is_none()
+                    && verified_proof.binds_application_statement(
+                        canonical_application_statement_bytes,
+                    )
+            })
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        let statement = decode_selected_application_statement(
+            canonical_application_statement_bytes,
+            ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            SelectedApplicationStatementContext::new(
+                verified_proof.protocol_version,
+                verified_proof.suite_identifier,
+                Some(schedule_position),
+                None,
+            ),
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let auxiliary_component_root = statement
+            .items
+            .get(4)
+            .filter(|item| {
+                item.item_type() == CanonicalItemType::Hash512 && item.canonical_bytes().len() == 64
+            })
+            .and_then(|item| item.canonical_bytes().try_into().ok())
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        let position = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+            .into_iter()
+            .find(|position| {
+                position.schedule_position() == schedule_position
+                    && matches!(
+                        position.key_kind(),
+                        SelectedEvaluatorEntryKind::Relinearization { .. }
+                    )
+            })
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        Ok(Self {
+            position,
+            auxiliary_component_root,
+        })
+    }
+
+    /// Mints the Galois A linkage only from a verifier-recomputed role-11
+    /// public-polynomial tree at the exact selected catalog coordinate.
+    pub(crate) fn from_galois_common_public_polynomial_tree(
+        schedule_position: u32,
+        galois_element: usize,
+        catalog_level: usize,
+        tree: &SetupPublicPolynomialTree,
+    ) -> Result<Self, CommonProofVerifierError> {
+        let position = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+            .into_iter()
+            .find(|position| {
+                position.schedule_position() == schedule_position
+                    && position.key_kind()
+                        == SelectedEvaluatorEntryKind::Galois {
+                            galois_element,
+                            catalog_level,
+                        }
+            })
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        if tree.root_role() != SetupPublicPolynomialRootRole::GaloisCommon
+            || tree.schedule_position() != Some(schedule_position)
+        {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+        Ok(Self {
+            position,
+            auxiliary_component_root: tree.root(),
+        })
+    }
+
+    pub(crate) const fn position(self) -> SelectedEvaluatorEntryPosition {
+        self.position
+    }
+
+    pub(crate) const fn auxiliary_component_root(self) -> [u8; 64] {
+        self.auxiliary_component_root
+    }
+}
+
+/// One evaluator-store entry accepted only after its own aggregate proof has
+/// completed. The final store capability is minted from the complete ordered
+/// entry set, never from a statement digest alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct VerifiedEvaluatorAggregateEntry {
+    top_count: u16,
+    entry_ordinal: u32,
+    position: SelectedEvaluatorEntryPosition,
+    runtime_component_root: [u8; 64],
+    evaluator_key_store_digest: [u8; 64],
+}
+
+impl VerifiedEvaluatorAggregateEntry {
+    pub(crate) fn from_verified_common_proof(
+        verified_proof: &VerifiedCommonProof,
+        canonical_application_statement_bytes: &[u8],
+    ) -> Result<Self, CommonProofVerifierError> {
+        let entry_ordinal = verified_proof
+            .schedule_position
+            .filter(|_| {
+                verified_proof.application_statement_schema_identifier
+                    == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                    && verified_proof.binds_application_statement(
+                        canonical_application_statement_bytes,
+                    )
+            })
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        let top_count = verified_proof
+            .top_count
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        let statement = decode_selected_application_statement(
+            canonical_application_statement_bytes,
+            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            SelectedApplicationStatementContext::new(
+                verified_proof.protocol_version,
+                verified_proof.suite_identifier,
+                Some(entry_ordinal),
+                Some(top_count),
+            ),
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let entry = selected_evaluator_aggregate_entry_roots(&statement, top_count, entry_ordinal)
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let evaluator_key_store_digest = statement
+            .items
+            .get(2)
+            .filter(|item| {
+                item.item_type() == CanonicalItemType::Hash512 && item.canonical_bytes().len() == 64
+            })
+            .and_then(|item| item.canonical_bytes().try_into().ok())
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        Ok(Self {
+            top_count,
+            entry_ordinal,
+            position: entry.position(),
+            runtime_component_root: entry.runtime_component_root(),
+            evaluator_key_store_digest,
+        })
+    }
+
+    pub(crate) const fn entry_ordinal(self) -> u32 {
+        self.entry_ordinal
+    }
+
+    pub(crate) const fn position(self) -> SelectedEvaluatorEntryPosition {
+        self.position
+    }
+
+    pub(crate) const fn runtime_component_root(self) -> [u8; 64] {
+        self.runtime_component_root
+    }
+}
+
+/// Opaque authority for one complete selected evaluator-key store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct VerifiedEvaluatorKeyStore {
+    top_count: u16,
+    evaluator_key_store_digest: [u8; 64],
+}
+
+impl VerifiedEvaluatorKeyStore {
+    pub(crate) fn from_ordered_verified_entries(
+        top_count: u16,
+        ordered_entries: &[VerifiedEvaluatorAggregateEntry],
+    ) -> Result<Self, CommonProofVerifierError> {
+        let expected_positions = selected_evaluator_entry_positions(top_count)
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        if ordered_entries.len() != expected_positions.len() || ordered_entries.is_empty() {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+        let evaluator_key_store_digest = ordered_entries[0].evaluator_key_store_digest;
+        for (entry_ordinal, (entry, expected_position)) in
+            ordered_entries.iter().zip(expected_positions).enumerate()
+        {
+            if entry.top_count != top_count
+                || entry.entry_ordinal
+                    != u32::try_from(entry_ordinal)
+                        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+                || entry.position != expected_position
+                || entry.evaluator_key_store_digest != evaluator_key_store_digest
+            {
+                return Err(CommonProofVerifierError::InvalidApplicationStatement);
+            }
+        }
+        Ok(Self {
+            top_count,
+            evaluator_key_store_digest,
+        })
+    }
+
+    pub(crate) const fn top_count(self) -> u16 {
+        self.top_count
+    }
+
+    pub(crate) const fn evaluator_key_store_digest(self) -> [u8; 64] {
+        self.evaluator_key_store_digest
+    }
+}
+
 /// Inputs that have already crossed their family-specific trust boundaries.
 /// The application wrapper owns statement/source resolution; proof bytes never
 /// supply any value in this structure.
@@ -196,6 +459,7 @@ pub(crate) struct CommonProofVerificationInput<'input, Source: ProofByteSource +
     pub(crate) schedule_position: Option<u32>,
     pub(crate) top_count: Option<u16>,
     pub(crate) statement_owned_trees: &'input [VerifiedStatementOwnedTree],
+    pub(crate) evaluator_auxiliary_roots: &'input [VerifiedEvaluatorAuxiliaryRoot],
     pub(crate) proof_source: &'input Source,
     pub(crate) declared_proof_byte_length: usize,
     pub(crate) proof_byte_ceiling: usize,
@@ -210,6 +474,7 @@ pub(crate) struct PollableCommonProofVerificationInput<'input> {
     pub(crate) schedule_position: Option<u32>,
     pub(crate) top_count: Option<u16>,
     pub(crate) statement_owned_trees: &'input [VerifiedStatementOwnedTree],
+    pub(crate) evaluator_auxiliary_roots: &'input [VerifiedEvaluatorAuxiliaryRoot],
     pub(crate) declared_proof_byte_length: usize,
     pub(crate) proof_byte_ceiling: usize,
     pub(crate) maximum_resident_window_byte_length: usize,
@@ -252,13 +517,13 @@ enum CommonProofVerificationPhase {
 /// authenticated opening advances the transcript and algebra workspace once,
 /// and no verified token exists before the terminal query and trailing-byte
 /// checks complete.
-pub(crate) struct CommonProofVerificationStateMachine<'input> {
+pub(crate) struct CommonProofVerificationStateMachine {
     protocol_version: u16,
     suite_identifier: [u8; 64],
-    canonical_application_statement_bytes: &'input [u8],
+    canonical_application_statement_bytes: Vec<u8>,
     application_statement_schema_identifier: u16,
-    relation_context: &'input RelationPlanCheckContext,
-    variant: &'input RelationPlanVariant,
+    relation_context: RelationPlanCheckContext,
+    variant: RelationPlanVariant,
     schedule_position: Option<u32>,
     top_count: Option<u16>,
     declared_proof_byte_length: usize,
@@ -272,6 +537,7 @@ pub(crate) struct CommonProofVerificationStateMachine<'input> {
     layout: ProofBodyLayout,
     phase: CommonProofVerificationPhase,
     current_body_offset: usize,
+    query_tree_byte_lengths: Vec<usize>,
     tree_roots: Vec<[u8; 64]>,
     sorted_query_representatives: Vec<u64>,
     transcript: Option<CommonProofTranscript>,
@@ -305,9 +571,9 @@ impl<Source: ProofByteSource + ?Sized> ProofByteSource for ProofBodyByteSource<'
     }
 }
 
-impl<'input> CommonProofVerificationStateMachine<'input> {
+impl CommonProofVerificationStateMachine {
     pub(crate) fn new(
-        input: PollableCommonProofVerificationInput<'input>,
+        input: PollableCommonProofVerificationInput<'_>,
     ) -> Result<Self, CommonProofVerifierError> {
         let _validated_artifact = ValidatedRelationPlanArtifact::from_compiled_plan(
             input.relation_plan,
@@ -318,6 +584,21 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
             input
                 .relation_plan
                 .application_statement_schema_identifier(),
+            input.protocol_version,
+            input.suite_identifier,
+            input.schedule_position,
+            input.top_count,
+            input.relation_context,
+        )?;
+        validate_evaluator_auxiliary_root_linkage(
+            &application_statement,
+            input
+                .relation_plan
+                .application_statement_schema_identifier(),
+            input.schedule_position,
+            input.top_count,
+            input.evaluator_auxiliary_roots,
+            input.relation_context,
         )?;
         let canonical_proof_object_header_bytes = CanonicalTuple::new(
             PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
@@ -333,9 +614,7 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
             return Err(ProofBodyError::Decode(ProofDecodeError::EmptyProof).into());
         }
         if input.declared_proof_byte_length > input.proof_byte_ceiling {
-            return Err(
-                ProofBodyError::Decode(ProofDecodeError::ProofByteCeilingExceeded).into(),
-            );
+            return Err(ProofBodyError::Decode(ProofDecodeError::ProofByteCeilingExceeded).into());
         }
         let proof_body_byte_length = input
             .declared_proof_byte_length
@@ -394,12 +673,14 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
         Ok(Self {
             protocol_version: input.protocol_version,
             suite_identifier: input.suite_identifier,
-            canonical_application_statement_bytes: input.canonical_application_statement_bytes,
+            canonical_application_statement_bytes: input
+                .canonical_application_statement_bytes
+                .to_vec(),
             application_statement_schema_identifier: input
                 .relation_plan
                 .application_statement_schema_identifier(),
-            relation_context: input.relation_context,
-            variant,
+            relation_context: input.relation_context.clone(),
+            variant: variant.clone(),
             schedule_position: input.schedule_position,
             top_count: input.top_count,
             declared_proof_byte_length: input.declared_proof_byte_length,
@@ -413,6 +694,7 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
             layout,
             phase: CommonProofVerificationPhase::AwaitingPrefix,
             current_body_offset: 0,
+            query_tree_byte_lengths: Vec::new(),
             tree_roots: Vec::new(),
             sorted_query_representatives: Vec::new(),
             transcript: None,
@@ -428,23 +710,29 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
                 offset: 0,
                 byte_length: self.prefix_end_absolute_offset,
             }),
-            CommonProofVerificationPhase::AwaitingQueryHeader
-            | CommonProofVerificationPhase::AwaitingQueryTree { .. } => {
+            CommonProofVerificationPhase::AwaitingQueryHeader => {
                 let absolute_offset = self
                     .canonical_proof_object_header_bytes
                     .len()
                     .checked_add(self.current_body_offset)?;
-                let remaining_byte_length = self
-                    .declared_proof_byte_length
-                    .checked_sub(absolute_offset)?;
                 Some(CommonProofRequiredByteRange {
                     offset: absolute_offset,
-                    byte_length: remaining_byte_length
-                        .min(self.maximum_resident_window_byte_length),
+                    byte_length: 4,
                 })
             }
-            CommonProofVerificationPhase::Complete
-            | CommonProofVerificationPhase::Cancelled => None,
+            CommonProofVerificationPhase::AwaitingQueryTree { catalog_index } => {
+                let absolute_offset = self
+                    .canonical_proof_object_header_bytes
+                    .len()
+                    .checked_add(self.current_body_offset)?;
+                Some(CommonProofRequiredByteRange {
+                    offset: absolute_offset,
+                    byte_length: *self.query_tree_byte_lengths.get(catalog_index)?,
+                })
+            }
+            CommonProofVerificationPhase::Complete | CommonProofVerificationPhase::Cancelled => {
+                None
+            }
         }
     }
 
@@ -489,12 +777,20 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
             .required_byte_range()
             .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
         ensure_required_range_is_resident(source, required_range)?;
-        let proof_body_source = verify_and_slice_proof_header(
-            source,
-            self.declared_proof_byte_length,
-            self.proof_byte_ceiling,
-            &self.canonical_proof_object_header_bytes,
-        )?;
+        let proof_body_source = if self.phase == CommonProofVerificationPhase::AwaitingPrefix {
+            verify_and_slice_proof_header(
+                source,
+                self.declared_proof_byte_length,
+                self.proof_byte_ceiling,
+                &self.canonical_proof_object_header_bytes,
+            )?
+        } else {
+            ProofBodyByteSource {
+                source,
+                body_offset: self.canonical_proof_object_header_bytes.len(),
+                body_byte_length: self.proof_body_byte_length,
+            }
+        };
 
         match self.phase {
             CommonProofVerificationPhase::AwaitingPrefix => {
@@ -526,18 +822,28 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
                     self.current_body_offset,
                     self.layout.catalog().entries().len(),
                 )?;
+                if next_body_offset
+                    != self
+                        .current_body_offset
+                        .checked_add(4)
+                        .ok_or(CommonProofVerifierError::InvalidTreeLayout)?
+                {
+                    return Err(CommonProofVerifierError::InvalidTreeLayout);
+                }
                 self.absorb_body_range(
                     &proof_body_source,
                     self.current_body_offset,
                     next_body_offset,
                 )?;
                 self.current_body_offset = next_body_offset;
-                self.phase = CommonProofVerificationPhase::AwaitingQueryTree {
-                    catalog_index: 0,
-                };
+                self.phase = CommonProofVerificationPhase::AwaitingQueryTree { catalog_index: 0 };
                 Ok(CommonProofVerificationPoll::QueryHeaderAccepted)
             }
             CommonProofVerificationPhase::AwaitingQueryTree { catalog_index } => {
+                let expected_tree_byte_length = *self
+                    .query_tree_byte_lengths
+                    .get(catalog_index)
+                    .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
                 let expected_root = *self
                     .tree_roots
                     .get(catalog_index)
@@ -550,6 +856,14 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
                     expected_root,
                     &self.sorted_query_representatives,
                 )?;
+                if next_body_offset
+                    != self
+                        .current_body_offset
+                        .checked_add(expected_tree_byte_length)
+                        .ok_or(CommonProofVerifierError::InvalidTreeLayout)?
+                {
+                    return Err(CommonProofVerifierError::InvalidTreeLayout);
+                }
                 {
                     let catalog_entry = self
                         .layout
@@ -562,7 +876,7 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
                         .ok_or(CommonProofVerifierError::InvalidTreeLayout)?
                         .consume_opening(
                             decoded_opening.as_opening(catalog_entry),
-                            self.variant,
+                            &self.variant,
                             self.layout.catalog(),
                             &self.sorted_query_representatives,
                             evaluate_verified_column,
@@ -588,8 +902,9 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
                     Ok(CommonProofVerificationPoll::Complete)
                 }
             }
-            CommonProofVerificationPhase::Complete
-            | CommonProofVerificationPhase::Cancelled => unreachable!(),
+            CommonProofVerificationPhase::Complete | CommonProofVerificationPhase::Cancelled => {
+                unreachable!()
+            }
         }
     }
 
@@ -651,8 +966,7 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
             self.layout.catalog(),
             prefix.tree_roots(),
             ProofTreeRole::AuxiliaryOracle,
-            self.transcript_schedule
-                .ordered_auxiliary_tree_ordinals(),
+            self.transcript_schedule.ordered_auxiliary_tree_ordinals(),
         )?;
 
         let mut composition_challenges = Vec::new();
@@ -682,7 +996,7 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
             let mut relation_error = None;
             let sampled = transcript.sample_deep_point(point_ordinal, |candidate| {
                 match self.variant.deep_point_candidate_is_forbidden(
-                    self.relation_context,
+                    &self.relation_context,
                     point_ordinal,
                     candidate,
                     &deep_points,
@@ -701,15 +1015,15 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
         }
         let opening_points = self
             .variant
-            .derive_opening_points(self.relation_context, &deep_points)?;
+            .derive_opening_points(&self.relation_context, &deep_points)?;
         verify_statement_derived_deep_values(
-            self.variant,
+            &self.variant,
             &opening_points,
             prefix.deep_evaluations(),
             evaluate_verified_column,
         )?;
         self.variant.verify_deep_composition(
-            self.relation_context,
+            &self.relation_context,
             &application_challenges,
             &composition_challenges,
             &deep_points,
@@ -725,10 +1039,10 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
             )?)?;
         }
         let mut opening_batch_coefficients = Vec::new();
+        let opening_claim_count = usize::try_from(self.transcript_schedule.opening_claim_count())
+            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
         opening_batch_coefficients
-            .try_reserve_exact(usize::from(
-                self.transcript_schedule.opening_claim_count(),
-            ))
+            .try_reserve_exact(opening_claim_count)
             .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
         for claim_ordinal in 0..self.transcript_schedule.opening_claim_count() {
             opening_batch_coefficients
@@ -759,7 +1073,7 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
         }
 
         let claim_groups = build_runtime_claim_groups(
-            self.variant,
+            &self.variant,
             self.layout.catalog(),
             &opening_points,
             prefix.deep_evaluations(),
@@ -769,8 +1083,11 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
             self.evaluation_domain,
             fri_fold_challenges,
             prefix.terminal_coefficients().to_vec(),
-            usize::try_from(self.relation_context.final_polynomial_degree_bound_exclusive)
-                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+            usize::try_from(
+                self.relation_context
+                    .final_polynomial_degree_bound_exclusive,
+            )
+            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
         )?;
         let workspace = QueryVerificationWorkspace::new(
             self.layout.catalog().entries().len(),
@@ -783,10 +1100,33 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
             .proof_body_byte_length
             .checked_sub(prefix.query_section_offset())
             .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+        let mut query_tree_byte_lengths = Vec::new();
+        query_tree_byte_lengths
+            .try_reserve_exact(self.layout.catalog().entries().len())
+            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
+        let mut expected_query_section_byte_length = 4_usize;
+        for catalog_index in 0..self.layout.catalog().entries().len() {
+            let tree_byte_length = proof_query_tree_byte_length(
+                &self.layout,
+                catalog_index,
+                &sorted_query_representatives,
+            )?;
+            if tree_byte_length > self.maximum_resident_window_byte_length {
+                return Err(CommonProofVerifierError::InvalidTreeLayout);
+            }
+            expected_query_section_byte_length = expected_query_section_byte_length
+                .checked_add(tree_byte_length)
+                .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+            query_tree_byte_lengths.push(tree_byte_length);
+        }
+        if expected_query_section_byte_length > query_section_byte_length {
+            return Err(ProofBodyError::Decode(ProofDecodeError::Truncated).into());
+        }
         let query_opening_absorber = transcript.begin_query_openings(query_section_byte_length)?;
 
         self.tree_roots = prefix.tree_roots().to_vec();
         self.sorted_query_representatives = sorted_query_representatives;
+        self.query_tree_byte_lengths = query_tree_byte_lengths;
         self.transcript = Some(transcript);
         self.query_opening_absorber = Some(query_opening_absorber);
         self.workspace = Some(workspace);
@@ -842,20 +1182,22 @@ impl<'input> CommonProofVerificationStateMachine<'input> {
         transcript.finish_query_openings(query_opening_absorber)?;
         transcript.finish()?;
 
-        let protocol_version_bytes = self.protocol_version.to_le_bytes();
-        let application_statement_schema_identifier_bytes =
-            self.application_statement_schema_identifier.to_le_bytes();
         self.verified_common_proof = Some(VerifiedCommonProof {
+            protocol_version: self.protocol_version,
+            suite_identifier: self.suite_identifier,
             application_statement_schema_identifier: self.application_statement_schema_identifier,
-            application_statement_hash: hash_framed_parts_512(
-                VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN,
-                &[
-                    &protocol_version_bytes,
-                    &self.suite_identifier,
-                    &application_statement_schema_identifier_bytes,
-                    self.canonical_application_statement_bytes,
-                ],
+            application_statement_hash: verified_application_statement_hash(
+                self.protocol_version,
+                self.suite_identifier,
+                self.application_statement_schema_identifier,
+                &self.canonical_application_statement_bytes,
             ),
+            proof_header_hash: verified_proof_header_hash(
+                &self.canonical_proof_object_header_bytes,
+            )?,
+            proof_byte_length: u64::try_from(self.declared_proof_byte_length)
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+            verified_query_count: self.transcript_schedule.unique_query_count(),
             relation_plan_variant_hash: self.variant.canonical_hash()?,
             schedule_position: self.schedule_position,
             top_count: self.top_count,
@@ -983,6 +1325,7 @@ pub(crate) trait VerifiedRelationColumnEvaluator {
 
 /// Verifies one complete common proof. Returning `None` from a verified-column
 /// evaluator fails closed; prover and bound-tree columns never call it.
+#[cfg(test)]
 pub(crate) fn verify_common_proof<Source, ColumnEvaluator>(
     input: CommonProofVerificationInput<'_, Source>,
     evaluate_verified_column: &mut ColumnEvaluator,
@@ -1000,6 +1343,21 @@ where
         input
             .relation_plan
             .application_statement_schema_identifier(),
+        input.protocol_version,
+        input.suite_identifier,
+        input.schedule_position,
+        input.top_count,
+        input.relation_context,
+    )?;
+    validate_evaluator_auxiliary_root_linkage(
+        &application_statement,
+        input
+            .relation_plan
+            .application_statement_schema_identifier(),
+        input.schedule_position,
+        input.top_count,
+        input.evaluator_auxiliary_roots,
+        input.relation_context,
     )?;
     let canonical_proof_object_header_bytes = CanonicalTuple::new(
         PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
@@ -1186,8 +1544,10 @@ where
     }
 
     let mut opening_batch_coefficients = Vec::new();
+    let opening_claim_count = usize::try_from(transcript_schedule.opening_claim_count())
+        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
     opening_batch_coefficients
-        .try_reserve_exact(usize::from(transcript_schedule.opening_claim_count()))
+        .try_reserve_exact(opening_claim_count)
         .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
     for claim_ordinal in 0..transcript_schedule.opening_claim_count() {
         opening_batch_coefficients.push(transcript.sample_opening_batch_challenge(claim_ordinal)?);
@@ -1275,30 +1635,84 @@ where
     let application_statement_schema_identifier = input
         .relation_plan
         .application_statement_schema_identifier();
-    let protocol_version_bytes = input.protocol_version.to_le_bytes();
-    let application_statement_schema_identifier_bytes =
-        application_statement_schema_identifier.to_le_bytes();
     Ok(VerifiedCommonProof {
+        protocol_version: input.protocol_version,
+        suite_identifier: input.suite_identifier,
         application_statement_schema_identifier,
-        application_statement_hash: hash_framed_parts_512(
-            VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN,
-            &[
-                &protocol_version_bytes,
-                &input.suite_identifier,
-                &application_statement_schema_identifier_bytes,
-                input.canonical_application_statement_bytes,
-            ],
+        application_statement_hash: verified_application_statement_hash(
+            input.protocol_version,
+            input.suite_identifier,
+            application_statement_schema_identifier,
+            input.canonical_application_statement_bytes,
         ),
+        proof_header_hash: verified_proof_header_hash(&canonical_proof_object_header_bytes)?,
+        proof_byte_length: u64::try_from(input.declared_proof_byte_length)
+            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+        verified_query_count: transcript_schedule.unique_query_count(),
         relation_plan_variant_hash: variant.canonical_hash()?,
         schedule_position: input.schedule_position,
         top_count: input.top_count,
     })
 }
 
+pub(crate) fn verified_application_statement_hash(
+    protocol_version: u16,
+    suite_identifier: [u8; 64],
+    application_statement_schema_identifier: u16,
+    canonical_application_statement_bytes: &[u8],
+) -> [u8; 64] {
+    hash_framed_parts_512(
+        VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN,
+        &[
+            &protocol_version.to_le_bytes(),
+            &suite_identifier,
+            &application_statement_schema_identifier.to_le_bytes(),
+            canonical_application_statement_bytes,
+        ],
+    )
+}
+
+fn verified_proof_header_hash(
+    canonical_proof_object_header_bytes: &[u8],
+) -> Result<[u8; 64], CommonProofVerifierError> {
+    hash_foundation_tuple_512(
+        PROOF_HEADER_HASH_DOMAIN,
+        &[
+            CanonicalItem::variable_bytes(canonical_proof_object_header_bytes)
+                .map_err(|_| CommonProofVerifierError::CanonicalEncoding)?,
+        ],
+    )
+    .map(|hash| hash.into_bytes())
+    .map_err(|_| CommonProofVerifierError::CanonicalEncoding)
+}
+
 fn decode_application_statement(
     canonical_bytes: &[u8],
     expected_schema_identifier: u16,
+    protocol_version: u16,
+    suite_identifier: [u8; 64],
+    schedule_position: Option<u32>,
+    top_count: Option<u16>,
+    relation_context: &RelationPlanCheckContext,
 ) -> Result<CanonicalTuple, CommonProofVerifierError> {
+    if canonical_bytes.is_empty()
+        || canonical_bytes.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    if relation_context == &selected_relation_plan_check_context() {
+        return decode_selected_application_statement(
+            canonical_bytes,
+            expected_schema_identifier,
+            SelectedApplicationStatementContext::new(
+                protocol_version,
+                suite_identifier,
+                schedule_position,
+                top_count,
+            ),
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement);
+    }
     let statement = CanonicalTuple::decode(canonical_bytes, &CanonicalDecodeLimits::default())
         .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
     if statement.schema_identifier != expected_schema_identifier
@@ -1311,6 +1725,49 @@ fn decode_application_statement(
         return Err(CommonProofVerifierError::InvalidApplicationStatement);
     }
     Ok(statement)
+}
+
+fn validate_evaluator_auxiliary_root_linkage(
+    application_statement: &CanonicalTuple,
+    application_statement_schema_identifier: u16,
+    schedule_position: Option<u32>,
+    top_count: Option<u16>,
+    verified_auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
+    relation_context: &RelationPlanCheckContext,
+) -> Result<(), CommonProofVerifierError> {
+    if relation_context != &selected_relation_plan_check_context() {
+        return if verified_auxiliary_roots.is_empty() {
+            Ok(())
+        } else {
+            Err(CommonProofVerifierError::InvalidApplicationStatement)
+        };
+    }
+    if application_statement_schema_identifier
+        != ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+    {
+        return if verified_auxiliary_roots.is_empty() {
+            Ok(())
+        } else {
+            Err(CommonProofVerifierError::InvalidApplicationStatement)
+        };
+    }
+    let entry_ordinal =
+        schedule_position.ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+    let entry = selected_evaluator_aggregate_entry_roots(
+        application_statement,
+        top_count.ok_or(CommonProofVerifierError::InvalidApplicationStatement)?,
+        entry_ordinal,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    if verified_auxiliary_roots.len() != 1
+        || entry.entry_ordinal() != entry_ordinal
+        || entry.position() != verified_auxiliary_roots[0].position()
+        || entry.auxiliary_component_root()
+            != verified_auxiliary_roots[0].auxiliary_component_root()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    Ok(())
 }
 
 fn derive_relation_tree_inputs(
@@ -2219,6 +2676,11 @@ fn add_pairs(left: OpenedFriLayerPair, right: OpenedFriLayerPair) -> OpenedFriLa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::{
+        ProofBaseFieldElement, SelectedEvaluatorAggregateEntryInput, SetupPublicPolynomialContext,
+        SetupPublicPolynomialTreeInput, canonical_selected_application_statement_for_ceiling,
+        canonical_selected_evaluator_aggregate_statement,
+    };
 
     #[test]
     fn proof_header_is_consumed_before_the_body_source_is_exposed() {
@@ -2281,5 +2743,244 @@ mod tests {
                 super::super::ProofDecodeError::ProofByteCeilingExceeded,
             ))),
         );
+    }
+
+    #[test]
+    fn evaluator_linkage_rejects_relinearization_auxiliary_root_mutation() {
+        let capabilities = selected_evaluator_auxiliary_capabilities();
+        let canonical_statement = selected_evaluator_statement(&capabilities, 0, false);
+        assert_selected_evaluator_linkage(&canonical_statement, 0, &capabilities[..1], true);
+
+        let mutated_statement = selected_evaluator_statement(&capabilities, 0, true);
+        assert_selected_evaluator_linkage(&mutated_statement, 0, &capabilities[..1], false);
+        assert_selected_evaluator_linkage(&canonical_statement, 0, &capabilities, false);
+    }
+
+    #[test]
+    fn evaluator_linkage_rejects_galois_auxiliary_root_mutation() {
+        let capabilities = selected_evaluator_auxiliary_capabilities();
+        let canonical_statement = selected_evaluator_statement(&capabilities, 1, false);
+        assert_selected_evaluator_linkage(&canonical_statement, 1, &capabilities[1..2], true);
+
+        let mutated_statement = selected_evaluator_statement(&capabilities, 1, true);
+        assert_selected_evaluator_linkage(&mutated_statement, 1, &capabilities[1..2], false);
+    }
+
+    #[test]
+    fn evaluator_key_store_requires_the_complete_ordered_verified_entry_set() {
+        let auxiliary_capabilities = selected_evaluator_auxiliary_capabilities();
+        let mut verified_entries = (0..auxiliary_capabilities.len())
+            .map(|entry_ordinal| {
+                selected_verified_evaluator_entry(&auxiliary_capabilities, entry_ordinal)
+            })
+            .collect::<Vec<_>>();
+        let complete = VerifiedEvaluatorKeyStore::from_ordered_verified_entries(
+            FOUNDATION_PROFILE.option_count,
+            &verified_entries,
+        )
+        .expect("the complete ordered proof set mints the evaluator store capability");
+        assert_eq!(complete.top_count(), FOUNDATION_PROFILE.option_count);
+        assert_eq!(complete.evaluator_key_store_digest(), [0x63; 64]);
+
+        assert!(
+            VerifiedEvaluatorKeyStore::from_ordered_verified_entries(
+                FOUNDATION_PROFILE.option_count,
+                &verified_entries[..verified_entries.len() - 1],
+            )
+            .is_err()
+        );
+        verified_entries.swap(0, 1);
+        assert!(
+            VerifiedEvaluatorKeyStore::from_ordered_verified_entries(
+                FOUNDATION_PROFILE.option_count,
+                &verified_entries,
+            )
+            .is_err()
+        );
+        verified_entries.swap(0, 1);
+        verified_entries[1].evaluator_key_store_digest[0] ^= 1;
+        assert!(
+            VerifiedEvaluatorKeyStore::from_ordered_verified_entries(
+                FOUNDATION_PROFILE.option_count,
+                &verified_entries,
+            )
+            .is_err()
+        );
+    }
+
+    fn selected_evaluator_auxiliary_capabilities() -> Vec<VerifiedEvaluatorAuxiliaryRoot> {
+        let suite_identifier = [0x51; 64];
+        let round_one_statement = canonical_selected_application_statement_for_ceiling(
+            ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            SelectedApplicationStatementContext::new(
+                FOUNDATION_PROFILE.protocol_version,
+                suite_identifier,
+                Some(0),
+                None,
+            ),
+        )
+        .expect("round-one aggregate statement");
+        let verified_round_one = VerifiedCommonProof {
+            protocol_version: FOUNDATION_PROFILE.protocol_version,
+            suite_identifier,
+            application_statement_schema_identifier:
+                ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            application_statement_hash: verified_application_statement_hash(
+                FOUNDATION_PROFILE.protocol_version,
+                suite_identifier,
+                ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                &round_one_statement,
+            ),
+            proof_header_hash: verified_proof_header_hash(
+                &CanonicalTuple::new(
+                    PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
+                    PROOF_OBJECT_HEADER_SCHEMA_VERSION,
+                    vec![
+                        CanonicalItem::variable_bytes(&round_one_statement)
+                            .expect("round-one statement fits the proof header"),
+                    ],
+                )
+                .encode()
+                .expect("round-one proof header encodes"),
+            )
+            .expect("round-one proof header hashes"),
+            proof_byte_length: 1,
+            verified_query_count: 1,
+            relation_plan_variant_hash: [0x52; 64],
+            schedule_position: Some(0),
+            top_count: None,
+        };
+        let mut capabilities = vec![
+            VerifiedEvaluatorAuxiliaryRoot::from_verified_relinearization_round_one_aggregate(
+                &verified_round_one,
+                &round_one_statement,
+            )
+            .expect("verified round-one aggregate mints the RKG linkage"),
+        ];
+
+        for position in selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+            .expect("selected evaluator positions")
+            .into_iter()
+            .skip(1)
+        {
+            let SelectedEvaluatorEntryKind::Galois {
+                galois_element,
+                catalog_level,
+            } = position.key_kind()
+            else {
+                panic!("only the first selected entry is an RKG entry");
+            };
+            let context = SetupPublicPolynomialContext::galois_common(
+                [0x53; 64],
+                position.schedule_position(),
+            )
+            .expect("Galois common context");
+            let coefficients = vec![vec![
+                ProofBaseFieldElement::from_canonical(
+                    u64::try_from(galois_element)
+                        .expect("Galois element fits")
+                        .wrapping_add(u64::try_from(catalog_level).expect("level fits")),
+                )
+                .expect("small coefficient is canonical"),
+            ]];
+            let tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
+                context: &context,
+                evaluation_domain_size: 8,
+                source_polynomial_degree_bound_exclusive: 4,
+                ordered_coefficient_columns: &coefficients,
+            })
+            .expect("verifier-derived Galois public-polynomial tree");
+            capabilities.push(
+                VerifiedEvaluatorAuxiliaryRoot::from_galois_common_public_polynomial_tree(
+                    position.schedule_position(),
+                    galois_element,
+                    catalog_level,
+                    &tree,
+                )
+                .expect("Galois public-polynomial tree mints the exact linkage"),
+            );
+        }
+        capabilities
+    }
+
+    fn selected_evaluator_statement(
+        capabilities: &[VerifiedEvaluatorAuxiliaryRoot],
+        entry_ordinal: usize,
+        mutate_auxiliary_root: bool,
+    ) -> Vec<u8> {
+        let source_roots = [[0x61; 64]; FOUNDATION_PROFILE.participant_count as usize];
+        let mut auxiliary_root = capabilities[entry_ordinal].auxiliary_component_root();
+        if mutate_auxiliary_root {
+            auxiliary_root[0] ^= 1;
+        }
+        let entry = SelectedEvaluatorAggregateEntryInput::new(
+            &source_roots,
+            [0x70_u8.wrapping_add(entry_ordinal as u8); 64],
+            auxiliary_root,
+        );
+        canonical_selected_evaluator_aggregate_statement(
+            [0x62; 64],
+            FOUNDATION_PROFILE.option_count,
+            u32::try_from(entry_ordinal).expect("entry ordinal fits u32"),
+            &entry,
+            [0x63; 64],
+        )
+        .expect("selected evaluator statement")
+    }
+
+    fn selected_verified_evaluator_entry(
+        capabilities: &[VerifiedEvaluatorAuxiliaryRoot],
+        entry_ordinal: usize,
+    ) -> VerifiedEvaluatorAggregateEntry {
+        let statement = selected_evaluator_statement(capabilities, entry_ordinal, false);
+        let suite_identifier = [0x64; 64];
+        let verified_proof = VerifiedCommonProof {
+            protocol_version: FOUNDATION_PROFILE.protocol_version,
+            suite_identifier,
+            application_statement_schema_identifier:
+                ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            application_statement_hash: verified_application_statement_hash(
+                FOUNDATION_PROFILE.protocol_version,
+                suite_identifier,
+                ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                &statement,
+            ),
+            proof_header_hash: [0x65; 64],
+            proof_byte_length: 1,
+            verified_query_count: 1,
+            relation_plan_variant_hash: [0x66; 64],
+            schedule_position: Some(u32::try_from(entry_ordinal).expect("entry ordinal fits u32")),
+            top_count: Some(FOUNDATION_PROFILE.option_count),
+        };
+        VerifiedEvaluatorAggregateEntry::from_verified_common_proof(&verified_proof, &statement)
+            .expect("a verified per-entry proof mints one evaluator entry capability")
+    }
+
+    fn assert_selected_evaluator_linkage(
+        canonical_statement: &[u8],
+        entry_ordinal: u32,
+        capabilities: &[VerifiedEvaluatorAuxiliaryRoot],
+        expected_to_pass: bool,
+    ) {
+        let statement = decode_selected_application_statement(
+            canonical_statement,
+            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            SelectedApplicationStatementContext::new(
+                FOUNDATION_PROFILE.protocol_version,
+                [0; 64],
+                Some(entry_ordinal),
+                Some(FOUNDATION_PROFILE.option_count),
+            ),
+        )
+        .expect("selected evaluator statement decodes");
+        let result = validate_evaluator_auxiliary_root_linkage(
+            &statement,
+            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            Some(entry_ordinal),
+            Some(FOUNDATION_PROFILE.option_count),
+            capabilities,
+            &selected_relation_plan_check_context(),
+        );
+        assert_eq!(result.is_ok(), expected_to_pass);
     }
 }

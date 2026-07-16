@@ -7,11 +7,12 @@ use sha3::{
 
 use super::canonical_stream::VerifiedCanonicalStreamSummary;
 use super::{
-    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
-    CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
-    CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError, Hash512,
-    ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster, SignedCarrier, VerificationResult,
-    hash_foundation_tuple_512 as hash512,
+    ActionRandomnessDerivationInput, CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION,
+    CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem,
+    CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType,
+    FoundationSchemaError, Hash512, ML_DSA_65_SIGNATURE_BYTE_LENGTH, ObjectEnvelope,
+    ParticipantIdentity, RefusalReason, Roster, SignedCarrier, VerificationResult,
+    hash_foundation_tuple_512 as hash512, signature_message,
 };
 
 pub const STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER: u16 = 0x1610;
@@ -686,6 +687,35 @@ impl VerifiedStateReservationIntent {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct PreparedStateReservationIntent {
+    envelope: ObjectEnvelope,
+    authorization_hash: Hash512,
+    subject_participant_id: ParticipantIdentity,
+}
+
+pub(crate) struct ProducedStateReservationIntent {
+    canonical_carrier: Vec<u8>,
+    verified_intent: VerifiedStateReservationIntent,
+}
+
+impl ProducedStateReservationIntent {
+    pub(crate) fn into_parts(self) -> (Vec<u8>, VerifiedStateReservationIntent) {
+        (self.canonical_carrier, self.verified_intent)
+    }
+}
+
+pub(crate) struct ProducedStateReservation {
+    canonical_certificate: Vec<u8>,
+    verified_reservation: VerifiedStateReservation,
+}
+
+impl ProducedStateReservation {
+    pub(crate) fn into_parts(self) -> (Vec<u8>, VerifiedStateReservation) {
+        (self.canonical_certificate, self.verified_reservation)
+    }
+}
+
 pub struct VerifiedStateReservation {
     binding: StateReservationBinding,
 }
@@ -868,6 +898,217 @@ impl StateVerifier {
         })
     }
 
+    pub(crate) fn roster_hash(&self) -> StateResult<Hash512> {
+        self.roster.roster_hash().map_err(StateError::from_schema)
+    }
+
+    pub(crate) fn prepare_setup_action_randomness_reservation_intent(
+        &self,
+        derivation_input: ActionRandomnessDerivationInput,
+        authorization_hash: Hash512,
+    ) -> VerificationResult<PreparedStateReservationIntent> {
+        let result = self.prepare_setup_action_randomness_reservation_intent_inner(
+            derivation_input,
+            authorization_hash,
+        );
+        match result {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    fn prepare_setup_action_randomness_reservation_intent_inner(
+        &self,
+        derivation_input: ActionRandomnessDerivationInput,
+        authorization_hash: Hash512,
+    ) -> StateResult<PreparedStateReservationIntent> {
+        if derivation_input.suite_identifier() != self.suite_id
+            || derivation_input.ceremony_context_hash() != self.ceremony_context_hash
+            || derivation_input.action_context_hash() != self.action_context_hash
+        {
+            return Err(StateError::new(
+                RefusalReason::WrongContext,
+                "action randomness belongs to another state verifier context",
+            ));
+        }
+        let subject_participant_id = derivation_input.participant_identity();
+        self.roster_position(subject_participant_id)?;
+        let payload_bytes = StateReservationIntentPayload {
+            capability_kind: StateCapabilityKind::SetupActionRandomnessRoot,
+            authorization_hash,
+        }
+        .encode()?;
+        let envelope = ObjectEnvelope {
+            suite_id: self.suite_id,
+            object_type: FoundationObjectType::StateReservation,
+            ceremony_context_hash: self.ceremony_context_hash,
+            action_context_hash: self.action_context_hash,
+            producer_participant_id: Some(subject_participant_id),
+            producer_sequence: 0,
+            ordered_prerequisite_hashes: Vec::new(),
+            payload_bytes,
+        };
+        signature_message(&envelope, self.roster_hash()?).map_err(StateError::from_schema)?;
+        Ok(PreparedStateReservationIntent {
+            envelope,
+            authorization_hash,
+            subject_participant_id,
+        })
+    }
+
+    pub(crate) fn reservation_intent_signature_message(
+        &self,
+        prepared_intent: &PreparedStateReservationIntent,
+    ) -> VerificationResult<Hash512> {
+        let result = self
+            .require_prepared_reservation_intent_context(prepared_intent)
+            .and_then(|()| {
+                signature_message(&prepared_intent.envelope, self.roster_hash()?)
+                    .map_err(StateError::from_schema)
+            });
+        match result {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    pub(crate) fn construct_and_verify_reservation_intent_carrier(
+        &self,
+        prepared_intent: &PreparedStateReservationIntent,
+        signature: [u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+    ) -> VerificationResult<ProducedStateReservationIntent> {
+        let result = self
+            .require_prepared_reservation_intent_context(prepared_intent)
+            .and_then(|()| {
+                let canonical_carrier = SignedCarrier {
+                    envelope: prepared_intent.envelope.clone(),
+                    signature,
+                }
+                .encode()
+                .map_err(StateError::from_schema)?;
+                let verified_intent = self.verify_reservation_intent_inner(
+                    StateReservationIntentVerificationInput {
+                        subject_participant_id: prepared_intent.subject_participant_id,
+                        capability_kind: StateCapabilityKind::SetupActionRandomnessRoot,
+                        expected_authorization_hash: prepared_intent.authorization_hash,
+                        canonical_reservation_intent_carrier: &canonical_carrier,
+                    },
+                )?;
+                Ok(ProducedStateReservationIntent {
+                    canonical_carrier,
+                    verified_intent,
+                })
+            });
+        match result {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    pub(crate) fn verify_setup_action_randomness_intent_for_witness(
+        &self,
+        subject_participant_id: ParticipantIdentity,
+        canonical_reservation_intent_carrier: &[u8],
+    ) -> VerificationResult<VerifiedStateReservationIntent> {
+        let result = self.verify_reservation_intent_binding(
+            subject_participant_id,
+            StateCapabilityKind::SetupActionRandomnessRoot,
+            None,
+            canonical_reservation_intent_carrier,
+        );
+        match result {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    pub(crate) fn derive_state_witness_vote_signature_message(
+        &self,
+        verified_intent: &VerifiedStateReservationIntent,
+        witness_participant_id: ParticipantIdentity,
+    ) -> VerificationResult<Hash512> {
+        let result = self
+            .state_witness_vote_envelope(verified_intent, witness_participant_id)
+            .and_then(|envelope| {
+                signature_message(&envelope, self.roster_hash()?).map_err(StateError::from_schema)
+            });
+        match result {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    pub(crate) fn construct_and_verify_state_witness_vote_carrier(
+        &self,
+        verified_intent: &VerifiedStateReservationIntent,
+        witness_participant_id: ParticipantIdentity,
+        signature: [u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+    ) -> VerificationResult<Vec<u8>> {
+        let result = self
+            .state_witness_vote_envelope(verified_intent, witness_participant_id)
+            .and_then(|envelope| {
+                let canonical_carrier = SignedCarrier {
+                    envelope,
+                    signature,
+                }
+                .encode()
+                .map_err(StateError::from_schema)?;
+                let binding = verified_intent.binding;
+                let verified_vote = self.verify_vote_carrier(
+                    &canonical_carrier,
+                    &ResolvedStateIntent {
+                        intent_object_hash: binding.intent_object_hash,
+                        subject_participant_id: binding.subject_participant_id,
+                        vote_kind: StateWitnessVoteKind::Reservation,
+                    },
+                    derive_state_witness_vote_sequence(StateWitnessVoteKind::Reservation),
+                )?;
+                if verified_vote.roster_position != self.roster_position(witness_participant_id)? {
+                    return Err(StateError::new(
+                        RefusalReason::WrongContext,
+                        "constructed state witness vote belongs to another witness",
+                    ));
+                }
+                Ok(canonical_carrier)
+            });
+        match result {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    pub(crate) fn certify_reservation_intent_and_encode_certificate(
+        &self,
+        verified_intent: &VerifiedStateReservationIntent,
+        canonical_vote_carriers: &[Vec<u8>],
+    ) -> VerificationResult<ProducedStateReservation> {
+        let binding = verified_intent.binding;
+        let result = self
+            .require_reservation_binding_context(binding)
+            .and_then(|()| {
+                let expected_intent = ResolvedStateIntent {
+                    intent_object_hash: binding.intent_object_hash,
+                    subject_participant_id: binding.subject_participant_id,
+                    vote_kind: StateWitnessVoteKind::Reservation,
+                };
+                let ordered_vote_carriers = self.canonicalize_unordered_vote_carriers(
+                    canonical_vote_carriers,
+                    &expected_intent,
+                )?;
+                let canonical_certificate =
+                    StateCertificate::new(ordered_vote_carriers)?.encode()?;
+                self.verify_certificate(&canonical_certificate, &expected_intent)?;
+                Ok(ProducedStateReservation {
+                    canonical_certificate,
+                    verified_reservation: VerifiedStateReservation { binding },
+                })
+            });
+        match result {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
     pub fn verify_reservation(
         &self,
         input: StateReservationVerificationInput<'_>,
@@ -906,23 +1147,40 @@ impl StateVerifier {
         &self,
         input: StateReservationIntentVerificationInput<'_>,
     ) -> StateResult<VerifiedStateReservationIntent> {
-        let carrier = self.decode_and_verify_subject_carrier(
-            input.canonical_reservation_intent_carrier,
-            FoundationObjectType::StateReservation,
+        self.verify_reservation_intent_binding(
             input.subject_participant_id,
+            input.capability_kind,
+            Some(input.expected_authorization_hash),
+            input.canonical_reservation_intent_carrier,
+        )
+    }
+
+    fn verify_reservation_intent_binding(
+        &self,
+        subject_participant_id: ParticipantIdentity,
+        capability_kind: StateCapabilityKind,
+        expected_authorization_hash: Option<Hash512>,
+        canonical_reservation_intent_carrier: &[u8],
+    ) -> StateResult<VerifiedStateReservationIntent> {
+        let carrier = self.decode_and_verify_subject_carrier(
+            canonical_reservation_intent_carrier,
+            FoundationObjectType::StateReservation,
+            subject_participant_id,
             0,
         )?;
         let payload = StateReservationIntentPayload::decode(
             &carrier.envelope.payload_bytes,
             &self.canonical_decode_limits,
         )?;
-        if payload.capability_kind != input.capability_kind {
+        if payload.capability_kind != capability_kind {
             return Err(StateError::new(
                 RefusalReason::WrongTypeOrLength,
                 "reservation capability kind does not match the expected operation",
             ));
         }
-        if payload.authorization_hash != input.expected_authorization_hash {
+        if expected_authorization_hash
+            .is_some_and(|expected| payload.authorization_hash != expected)
+        {
             return Err(StateError::new(
                 RefusalReason::WrongHashOrRoot,
                 "reservation authorization hash does not match the expected operation",
@@ -932,8 +1190,8 @@ impl StateVerifier {
             self.suite_id,
             self.ceremony_context_hash,
             self.action_context_hash,
-            input.subject_participant_id,
-            input.capability_kind,
+            subject_participant_id,
+            capability_kind,
         )?;
         let intent_object_hash = carrier
             .envelope
@@ -942,8 +1200,8 @@ impl StateVerifier {
         Ok(VerifiedStateReservationIntent {
             binding: StateReservationBinding {
                 intent_object_hash,
-                subject_participant_id: input.subject_participant_id,
-                capability_kind: input.capability_kind,
+                subject_participant_id,
+                capability_kind,
                 suite_id: self.suite_id,
                 ceremony_context_hash: self.ceremony_context_hash,
                 action_context_hash: self.action_context_hash,
@@ -1196,6 +1454,78 @@ impl StateVerifier {
         Ok(())
     }
 
+    fn require_prepared_reservation_intent_context(
+        &self,
+        prepared_intent: &PreparedStateReservationIntent,
+    ) -> StateResult<()> {
+        self.require_envelope_context(&prepared_intent.envelope)?;
+        if prepared_intent.envelope.object_type != FoundationObjectType::StateReservation
+            || prepared_intent.envelope.producer_participant_id
+                != Some(prepared_intent.subject_participant_id)
+            || prepared_intent.envelope.producer_sequence != 0
+            || !prepared_intent
+                .envelope
+                .ordered_prerequisite_hashes
+                .is_empty()
+        {
+            return Err(StateError::new(
+                RefusalReason::WrongContext,
+                "prepared reservation intent belongs to another producer slot",
+            ));
+        }
+        let payload = StateReservationIntentPayload::decode(
+            &prepared_intent.envelope.payload_bytes,
+            &self.canonical_decode_limits,
+        )?;
+        if payload.capability_kind != StateCapabilityKind::SetupActionRandomnessRoot
+            || payload.authorization_hash != prepared_intent.authorization_hash
+        {
+            return Err(StateError::new(
+                RefusalReason::WrongHashOrRoot,
+                "prepared reservation intent no longer matches its retained authorization",
+            ));
+        }
+        self.roster_position(prepared_intent.subject_participant_id)?;
+        Ok(())
+    }
+
+    fn state_witness_vote_envelope(
+        &self,
+        verified_intent: &VerifiedStateReservationIntent,
+        witness_participant_id: ParticipantIdentity,
+    ) -> StateResult<ObjectEnvelope> {
+        let binding = verified_intent.binding;
+        self.require_reservation_binding_context(binding)?;
+        if binding.capability_kind != StateCapabilityKind::SetupActionRandomnessRoot {
+            return Err(StateError::new(
+                RefusalReason::WrongTypeOrLength,
+                "state witness vote producer supports only setup action-randomness reservations",
+            ));
+        }
+        if witness_participant_id == binding.subject_participant_id {
+            return Err(StateError::new(
+                RefusalReason::WrongContext,
+                "the state subject cannot witness its own intent",
+            ));
+        }
+        self.roster_position(witness_participant_id)?;
+        Ok(ObjectEnvelope {
+            suite_id: self.suite_id,
+            object_type: FoundationObjectType::StateWitnessVote,
+            ceremony_context_hash: self.ceremony_context_hash,
+            action_context_hash: self.action_context_hash,
+            producer_participant_id: Some(witness_participant_id),
+            producer_sequence: derive_state_witness_vote_sequence(
+                StateWitnessVoteKind::Reservation,
+            ),
+            ordered_prerequisite_hashes: Vec::new(),
+            payload_bytes: StateWitnessVotePayload {
+                intent_object_hash: binding.intent_object_hash,
+            }
+            .encode()?,
+        })
+    }
+
     fn decode_and_verify_subject_carrier(
         &self,
         canonical_carrier: &[u8],
@@ -1295,6 +1625,15 @@ impl StateVerifier {
         canonical_vote_carriers: &[Vec<u8>],
         expected_intent: &ResolvedStateIntent,
     ) -> StateResult<()> {
+        self.canonicalize_unordered_vote_carriers(canonical_vote_carriers, expected_intent)
+            .map(|_| ())
+    }
+
+    fn canonicalize_unordered_vote_carriers(
+        &self,
+        canonical_vote_carriers: &[Vec<u8>],
+        expected_intent: &ResolvedStateIntent,
+    ) -> StateResult<Vec<Vec<u8>>> {
         const MAXIMUM_UNTRUSTED_STATE_VOTE_CARRIER_COUNT: usize =
             FOUNDATION_PROFILE.participant_count as usize * 2;
         if canonical_vote_carriers.is_empty()
@@ -1306,16 +1645,16 @@ impl StateVerifier {
             ));
         }
         let expected_sequence = derive_state_witness_vote_sequence(expected_intent.vote_kind);
-        let mut unique_votes: Vec<VerifiedStateWitnessVote> = Vec::new();
+        let mut unique_votes: Vec<(VerifiedStateWitnessVote, Vec<u8>)> = Vec::new();
         for canonical_vote_carrier in canonical_vote_carriers {
             let verified_vote = self.verify_vote_carrier(
                 canonical_vote_carrier,
                 expected_intent,
                 expected_sequence,
             )?;
-            if let Some(previous_vote) = unique_votes
-                .iter()
-                .find(|previous| previous.roster_position == verified_vote.roster_position)
+            if let Some((previous_vote, selected_carrier)) = unique_votes
+                .iter_mut()
+                .find(|(previous, _)| previous.roster_position == verified_vote.roster_position)
             {
                 if previous_vote.intent_object_hash != verified_vote.intent_object_hash {
                     return Err(StateError::new(
@@ -1323,22 +1662,28 @@ impl StateVerifier {
                         "one authenticated witness slot contains conflicting state votes",
                     ));
                 }
+                if canonical_vote_carrier.as_slice() < selected_carrier.as_slice() {
+                    *selected_carrier = canonical_vote_carrier.clone();
+                }
                 continue;
             }
-            unique_votes.push(verified_vote);
+            unique_votes.push((verified_vote, canonical_vote_carrier.clone()));
         }
-        unique_votes.sort_unstable_by_key(|vote| vote.roster_position);
+        unique_votes.sort_unstable_by_key(|(vote, _)| vote.roster_position);
         validate_state_certificate_count(unique_votes.len())?;
         if unique_votes
             .iter()
-            .any(|vote| vote.intent_object_hash != expected_intent.intent_object_hash)
+            .any(|(vote, _)| vote.intent_object_hash != expected_intent.intent_object_hash)
         {
             return Err(StateError::new(
                 RefusalReason::WrongHashOrRoot,
                 "state witness vote does not resolve to the exact expected intent",
             ));
         }
-        Ok(())
+        Ok(unique_votes
+            .into_iter()
+            .map(|(_, canonical_carrier)| canonical_carrier)
+            .collect())
     }
 
     fn verify_vote_carrier(

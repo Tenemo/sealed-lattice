@@ -15,6 +15,7 @@ import {
 import {
     bytesEqual,
     bytesToHex,
+    copyRuntimeRecordProtectionAuthorityContext,
     createRuntimeRecordProtection,
     mapStorageError,
     readRuntimeRecord,
@@ -875,6 +876,8 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
         encryptionKey: configuration.encryptionKey,
         maximumRecordSealingCount: limits.maximumRecordSealingCount,
     });
+    const authorityContext =
+        copyRuntimeRecordProtectionAuthorityContext(protection);
     const issuedIdentifiers = new Set<string>();
     const activeOutboundSlots = new Map<string, number>();
     const activeInboundSlots = new Map<string, AuthenticatedMailboxCarrier>();
@@ -1104,7 +1107,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                     untrustedProducerSlot,
                 );
                 validateProducerSlotAuthority({
-                    authorityContext: protection.authorityContext,
+                    authorityContext,
                     direction: 'outbound',
                     producerSlot,
                 });
@@ -1610,7 +1613,7 @@ export const createBrowserLocalAuthenticatedMailboxStorage = (
                         untrustedProducerSlot,
                     );
                     validateProducerSlotAuthority({
-                        authorityContext: protection.authorityContext,
+                        authorityContext,
                         direction: 'inbound',
                         producerSlot,
                     });

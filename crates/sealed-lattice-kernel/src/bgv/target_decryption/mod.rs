@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod bindings;
+mod canonical_partial_stream;
 mod ciphertext_codec;
 #[cfg(test)]
 mod command;
@@ -24,6 +25,7 @@ mod share_statement;
 
 #[cfg(test)]
 use bindings::*;
+pub(crate) use canonical_partial_stream::selected_target_partial_decryption_stream_byte_length;
 pub(crate) use ciphertext_codec::direct_target_ciphertext_hash;
 #[cfg(test)]
 use ciphertext_codec::*;

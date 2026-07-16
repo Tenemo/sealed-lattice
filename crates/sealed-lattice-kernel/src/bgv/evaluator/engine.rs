@@ -107,7 +107,7 @@ impl Ciphertext {
     fn assert_two_components(&self) -> CanonicalResult<()> {
         if self.components.len() != 2 {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "BGV evaluator operation requires a two-component ciphertext",
             ));
         }
@@ -450,7 +450,7 @@ fn validate_public_key_component_shape(component: &[Vec<u64>], label: &str) -> C
         let modulus = DATA_PRIMES[limb_index];
         if limb.iter().any(|coefficient| *coefficient >= modulus) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("BGV evaluator public key {label} limb has non-canonical residues"),
             ));
         }

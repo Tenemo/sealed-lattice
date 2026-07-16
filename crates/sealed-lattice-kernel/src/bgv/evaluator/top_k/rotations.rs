@@ -19,7 +19,7 @@ pub(crate) fn galois_power(exponent: usize) -> CanonicalResult<usize> {
 pub(crate) fn logical_slot_galois_element(logical_slot_index: usize) -> CanonicalResult<usize> {
     if logical_slot_index >= POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "logical slot index is outside the selected ring",
         ));
     }
@@ -52,7 +52,7 @@ pub(crate) fn inverse_galois_element(galois_element: usize) -> CanonicalResult<u
     }
     if previous_remainder != 1 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "Galois element is not invertible modulo the ring order",
         ));
     }
@@ -69,13 +69,13 @@ pub(crate) fn generator_exponent_or_conjugated(
     // merge slots.
     if galois_element.is_multiple_of(2) || galois_element >= 2 * POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "Galois element must be an odd element modulo the ring order",
         ));
     }
     galois_element_positions()[galois_element].ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "Galois element is outside the selected compact generator basis",
         )
     })
@@ -139,7 +139,7 @@ pub(crate) fn packed_rank_shift_basis_exponents(
 ) -> CanonicalResult<Vec<usize>> {
     if option_count < 2 || option_count * 2 > POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "packed rank compact rotation basis requires 2 <= option count and a valid slot window",
         ));
     }
@@ -167,7 +167,7 @@ pub(crate) fn direct_score_packing_basis_galois_elements(
     });
     if exact_rotations.as_slice() != [composed_rotation] {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "direct score-packing rotation does not match the canonical logical-slot basis",
         ));
     }
@@ -239,7 +239,7 @@ pub(crate) fn selected_evaluator_rotation_key_schedule(
         || DIRECT_COMPARISON_OUTPUT_LEVEL > SELECTED_EVALUATOR_WORKING_LEVEL
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "selected evaluator rotation schedule levels must fit the data basis",
         ));
     }

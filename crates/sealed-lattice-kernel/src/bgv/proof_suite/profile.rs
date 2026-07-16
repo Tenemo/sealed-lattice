@@ -8,11 +8,19 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    bgv::evaluator::suite_closure::EvaluatorCandidateInput,
+    bgv::{
+        evaluator::{
+            candidate_evidence::EvaluatorCandidateInput, program::selected_evaluator_program_set,
+        },
+        setup::SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+    },
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
     },
 };
+
+#[cfg(test)]
+use crate::foundation::{ArtifactKind, ArtifactReference};
 
 use super::relation_plan::{
     BoundTreeConstructionKind, BoundTreeRootUse, RelationColumnValueType,
@@ -29,10 +37,11 @@ const PROOF_PROFILE_SET_SCHEMA_IDENTIFIER: u16 = 0x2200;
 const PROOF_FIELD_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2201;
 const PROOF_FAMILY_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2202;
 const PROOF_FIELD_SCHEDULE_SCHEMA_IDENTIFIER: u16 = 0x2203;
-const RELATION_PLAN_SCHEMA_IDENTIFIER: u16 = 0x2204;
+const RELATION_PLAN_REFERENCE_SCHEMA_IDENTIFIER: u16 = 0x222c;
 const RELATION_ROOT_COMPATIBILITY_EDGE_SCHEMA_IDENTIFIER: u16 = 0x222a;
 const RELATION_ROOT_ENDPOINT_SCHEMA_IDENTIFIER: u16 = 0x222b;
 const SCHEMA_VERSION: u16 = 1;
+const PROOF_PROFILE_SET_VERSION: u16 = 2;
 
 pub(crate) const FIRST_PROFILE_APPLICATION_FAMILIES: [u16; 12] = [
     0x1211, 0x1212, 0x1213, 0x1214, 0x1215, 0x1216, 0x1217, 0x1218, 0x1302, 0x1621, 0x2110, 0x2111,
@@ -247,7 +256,8 @@ impl ProofFamilyProfile {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ValidatedRelationPlanArtifact {
     application_statement_schema_identifier: u16,
-    canonical_plan_tuple: CanonicalTuple,
+    canonical_plan_byte_length: u64,
+    canonical_plan_hash: [u8; 64],
     compiled_plan: CompiledRelationPlan,
 }
 
@@ -256,17 +266,16 @@ impl ValidatedRelationPlanArtifact {
         plan: &CompiledRelationPlan,
         context: &RelationPlanCheckContext,
     ) -> Result<Self, ProofProfileError> {
+        Self::from_owned_compiled_plan(plan.clone(), context)
+    }
+
+    pub(crate) fn from_owned_compiled_plan(
+        plan: CompiledRelationPlan,
+        context: &RelationPlanCheckContext,
+    ) -> Result<Self, ProofProfileError> {
         plan.check(context)?;
-        let canonical_plan_tuple = plan.canonical_tuple()?;
-        let canonical_bytes = plan.canonical_bytes()?;
-        if canonical_plan_tuple.schema_identifier != RELATION_PLAN_SCHEMA_IDENTIFIER
-            || canonical_plan_tuple.schema_version != SCHEMA_VERSION
-            || canonical_plan_tuple.items.len() != 2
-        {
-            return Err(ProofProfileError::InvalidRelationPlan);
-        }
         let application_statement_schema_identifier =
-            read_canonical_u16(&canonical_plan_tuple.items[0])?;
+            plan.application_statement_schema_identifier();
         let family_profile = ProofFamilyProfile::selected(application_statement_schema_identifier)?;
         if !family_profile
             .field_schedule
@@ -274,13 +283,16 @@ impl ValidatedRelationPlanArtifact {
         {
             return Err(ProofProfileError::InvalidSchedule);
         }
-        if plan.encode_canonical_tuple(&canonical_plan_tuple)? != canonical_bytes {
+        let (canonical_plan_byte_length, canonical_plan_hash) =
+            plan.canonical_byte_length_and_hash()?;
+        if canonical_plan_byte_length == 0 {
             return Err(ProofProfileError::CanonicalEncoding);
         }
         Ok(Self {
             application_statement_schema_identifier,
-            canonical_plan_tuple,
-            compiled_plan: plan.clone(),
+            canonical_plan_byte_length,
+            canonical_plan_hash,
+            compiled_plan: plan,
         })
     }
 
@@ -288,8 +300,16 @@ impl ValidatedRelationPlanArtifact {
         self.application_statement_schema_identifier
     }
 
-    fn canonical_tuple(&self) -> &CanonicalTuple {
-        &self.canonical_plan_tuple
+    fn canonical_reference_tuple(&self) -> CanonicalTuple {
+        CanonicalTuple::new(
+            RELATION_PLAN_REFERENCE_SCHEMA_IDENTIFIER,
+            SCHEMA_VERSION,
+            vec![
+                CanonicalItem::unsigned16(self.application_statement_schema_identifier),
+                CanonicalItem::unsigned64(self.canonical_plan_byte_length),
+                CanonicalItem::hash512(self.canonical_plan_hash),
+            ],
+        )
     }
 
     pub(crate) fn compiled_plan(&self) -> &CompiledRelationPlan {
@@ -330,7 +350,7 @@ pub(crate) struct EvaluatorKeyAggregateEntryTopology {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FirstProfileRootTopology {
     roster_size: u16,
-    ordered_evaluator_key_entries: Vec<EvaluatorKeyAggregateEntryTopology>,
+    ordered_evaluator_key_entries_by_top_count: Vec<Vec<EvaluatorKeyAggregateEntryTopology>>,
     ordered_ballot_producer_sequences: Vec<u64>,
 }
 
@@ -341,37 +361,10 @@ impl FirstProfileRootTopology {
         if maximum_ballot_attempts_per_participant == 0 {
             return Err(ProofProfileError::InvalidRootTopology);
         }
-        let evaluator_candidate = EvaluatorCandidateInput::implemented()
-            .map_err(|_| ProofProfileError::InvalidRootTopology)?;
-        let mut ordered_evaluator_key_entries = evaluator_candidate
-            .relinearization_levels
-            .iter()
-            .enumerate()
-            .map(|(schedule_position, _)| {
-                Ok(EvaluatorKeyAggregateEntryTopology {
-                    source_kind: EvaluatorKeyShareSourceKind::Relinearization,
-                    schedule_position: u32::try_from(schedule_position)
-                        .map_err(|_| ProofProfileError::CountOverflow)?,
-                })
-            })
-            .collect::<Result<Vec<_>, ProofProfileError>>()?;
-        ordered_evaluator_key_entries.extend(
-            evaluator_candidate
-                .galois_key_schedule
-                .iter()
-                .enumerate()
-                .map(|(schedule_position, _)| {
-                    Ok(EvaluatorKeyAggregateEntryTopology {
-                        source_kind: EvaluatorKeyShareSourceKind::Galois,
-                        schedule_position: u32::try_from(schedule_position)
-                            .map_err(|_| ProofProfileError::CountOverflow)?,
-                    })
-                })
-                .collect::<Result<Vec<_>, ProofProfileError>>()?,
-        );
         let topology = Self {
             roster_size: FOUNDATION_PROFILE.participant_count,
-            ordered_evaluator_key_entries,
+            ordered_evaluator_key_entries_by_top_count:
+                Self::selected_evaluator_key_entries_by_top_count()?,
             ordered_ballot_producer_sequences: (0..u64::from(
                 maximum_ballot_attempts_per_participant,
             ))
@@ -383,8 +376,12 @@ impl FirstProfileRootTopology {
 
     fn validate(&self) -> Result<(), ProofProfileError> {
         if self.roster_size != FOUNDATION_PROFILE.participant_count
-            || self.ordered_evaluator_key_entries.is_empty()
-            || self.ordered_evaluator_key_entries.len() != 20
+            || self.ordered_evaluator_key_entries_by_top_count.len()
+                != usize::from(FOUNDATION_PROFILE.option_count)
+            || self
+                .ordered_evaluator_key_entries_by_top_count
+                .iter()
+                .any(Vec::is_empty)
             || self.ordered_ballot_producer_sequences.is_empty()
             || self
                 .ordered_ballot_producer_sequences
@@ -398,44 +395,73 @@ impl FirstProfileRootTopology {
             return Err(ProofProfileError::InvalidRootTopology);
         }
 
-        let selected = Self::selected_evaluator_key_entries()?;
-        if self.ordered_evaluator_key_entries != selected {
+        let selected = Self::selected_evaluator_key_entries_by_top_count()?;
+        if self.ordered_evaluator_key_entries_by_top_count != selected {
             return Err(ProofProfileError::InvalidRootTopology);
         }
         Ok(())
     }
 
-    fn selected_evaluator_key_entries()
-    -> Result<Vec<EvaluatorKeyAggregateEntryTopology>, ProofProfileError> {
+    fn selected_evaluator_key_entries_by_top_count()
+    -> Result<Vec<Vec<EvaluatorKeyAggregateEntryTopology>>, ProofProfileError> {
         let evaluator_candidate = EvaluatorCandidateInput::implemented()
             .map_err(|_| ProofProfileError::InvalidRootTopology)?;
-        let mut entries = evaluator_candidate
-            .relinearization_levels
-            .iter()
-            .enumerate()
-            .map(|(schedule_position, _)| {
-                Ok(EvaluatorKeyAggregateEntryTopology {
-                    source_kind: EvaluatorKeyShareSourceKind::Relinearization,
-                    schedule_position: u32::try_from(schedule_position)
-                        .map_err(|_| ProofProfileError::CountOverflow)?,
-                })
-            })
-            .collect::<Result<Vec<_>, ProofProfileError>>()?;
-        entries.extend(
-            evaluator_candidate
-                .galois_key_schedule
+        let key_positions = selected_evaluator_program_set()
+            .and_then(|program| program.key_positions())
+            .map_err(|_| ProofProfileError::InvalidRootTopology)?;
+        if key_positions.relinearization_catalog_levels()
+            != evaluator_candidate.relinearization_levels
+            || key_positions.galois_catalog_positions().len()
+                != evaluator_candidate.galois_key_schedule.len()
+            || key_positions
+                .galois_catalog_positions()
                 .iter()
-                .enumerate()
-                .map(|(schedule_position, _)| {
-                    Ok(EvaluatorKeyAggregateEntryTopology {
-                        source_kind: EvaluatorKeyShareSourceKind::Galois,
-                        schedule_position: u32::try_from(schedule_position)
-                            .map_err(|_| ProofProfileError::CountOverflow)?,
-                    })
+                .zip(&evaluator_candidate.galois_key_schedule)
+                .any(|(position, expected)| {
+                    (position.galois_element(), position.catalog_level()) != *expected
                 })
-                .collect::<Result<Vec<_>, ProofProfileError>>()?,
-        );
-        Ok(entries)
+        {
+            return Err(ProofProfileError::InvalidRootTopology);
+        }
+        key_positions
+            .streams()
+            .iter()
+            .map(|stream| {
+                let mut entries = stream
+                    .relinearization_catalog_levels()
+                    .iter()
+                    .map(|level| {
+                        let schedule_position = key_positions
+                            .relinearization_catalog_levels()
+                            .binary_search(level)
+                            .map_err(|_| ProofProfileError::InvalidRootTopology)?;
+                        Ok(EvaluatorKeyAggregateEntryTopology {
+                            source_kind: EvaluatorKeyShareSourceKind::Relinearization,
+                            schedule_position: u32::try_from(schedule_position)
+                                .map_err(|_| ProofProfileError::CountOverflow)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ProofProfileError>>()?;
+                entries.extend(
+                    stream
+                        .galois_catalog_positions()
+                        .iter()
+                        .map(|position| {
+                            let schedule_position = key_positions
+                                .galois_catalog_positions()
+                                .binary_search(position)
+                                .map_err(|_| ProofProfileError::InvalidRootTopology)?;
+                            Ok(EvaluatorKeyAggregateEntryTopology {
+                                source_kind: EvaluatorKeyShareSourceKind::Galois,
+                                schedule_position: u32::try_from(schedule_position)
+                                    .map_err(|_| ProofProfileError::CountOverflow)?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, ProofProfileError>>()?,
+                );
+                Ok(entries)
+            })
+            .collect()
     }
 }
 
@@ -480,7 +506,7 @@ impl RelationRootEndpoint {
             family,
             0x2110 | 0x2111 | 0x1211 | 0x1212 | 0x1214 | 0x1216 | 0x1217 | 0x1302 | 0x1621
         );
-        let schedule_expected = matches!(family, 0x1214 | 0x1215 | 0x1216 | 0x1217);
+        let schedule_expected = matches!(family, 0x1214..=0x1218);
         let top_count_expected = family == 0x1218;
         let producer_sequence_expected = family == 0x1302;
         if self.roster_position.is_some() != roster_expected
@@ -645,7 +671,7 @@ impl ProofProfileSet {
         self.validate()?;
         let tuple = CanonicalTuple::new(
             PROOF_PROFILE_SET_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
+            PROOF_PROFILE_SET_VERSION,
             vec![
                 canonical_nested_list(
                     self.proof_fields
@@ -662,7 +688,7 @@ impl ProofProfileSet {
                 canonical_nested_list(
                     self.relation_plans
                         .iter()
-                        .map(|plan| plan.canonical_tuple().clone()),
+                        .map(ValidatedRelationPlanArtifact::canonical_reference_tuple),
                 )?,
                 canonical_nested_list(
                     self.root_compatibility_edges
@@ -683,6 +709,90 @@ impl ProofProfileSet {
     pub(crate) fn root_compatibility_edges(&self) -> &[RelationRootCompatibilityEdge] {
         &self.root_compatibility_edges
     }
+
+    #[cfg(test)]
+    pub(crate) fn assert_catalog_mutation_boundaries(&mut self) {
+        let baseline_bytes = self
+            .canonical_bytes()
+            .expect("selected proof-profile artifact encodes");
+        let baseline_reference = proof_profile_artifact_reference(&baseline_bytes);
+
+        let original_plan_byte_length = self.relation_plans[0].canonical_plan_byte_length;
+        self.relation_plans[0].canonical_plan_byte_length = original_plan_byte_length + 1;
+        let wrong_plan_length_bytes = self
+            .canonical_bytes()
+            .expect("a mutated positive plan length remains structurally canonical");
+        assert_ne!(wrong_plan_length_bytes, baseline_bytes);
+        assert_ne!(
+            proof_profile_artifact_reference(&wrong_plan_length_bytes).artifact_hash(),
+            baseline_reference.artifact_hash()
+        );
+        self.relation_plans[0].canonical_plan_byte_length = original_plan_byte_length;
+
+        self.relation_plans[0].canonical_plan_hash[0] ^= 1;
+        let wrong_plan_hash_bytes = self
+            .canonical_bytes()
+            .expect("a mutated plan hash remains structurally canonical");
+        assert_ne!(wrong_plan_hash_bytes, baseline_bytes);
+        assert_ne!(
+            proof_profile_artifact_reference(&wrong_plan_hash_bytes).artifact_hash(),
+            baseline_reference.artifact_hash()
+        );
+        self.relation_plans[0].canonical_plan_hash[0] ^= 1;
+
+        self.relation_plans.swap(0, 1);
+        assert_eq!(
+            self.canonical_bytes(),
+            Err(ProofProfileError::NonCanonicalOrder)
+        );
+        self.relation_plans.swap(0, 1);
+
+        self.root_compatibility_edges.swap(0, 1);
+        assert_eq!(
+            self.canonical_bytes(),
+            Err(ProofProfileError::NonCanonicalOrder)
+        );
+        self.root_compatibility_edges.swap(0, 1);
+
+        let original_edge = self.root_compatibility_edges[0];
+        self.root_compatibility_edges[0].construction_kind = match original_edge.construction_kind {
+            RelationRootConstructionKind::CommittedMaterial => {
+                RelationRootConstructionKind::SetupPolynomial
+            }
+            RelationRootConstructionKind::SetupPolynomial => {
+                RelationRootConstructionKind::CommittedMaterial
+            }
+        };
+        assert!(self.canonical_bytes().is_err());
+        self.root_compatibility_edges[0] = original_edge;
+
+        assert_eq!(
+            self.canonical_bytes()
+                .expect("restored proof-profile artifact encodes"),
+            baseline_bytes
+        );
+    }
+}
+
+#[cfg(test)]
+fn proof_profile_artifact_reference(bytes: &[u8]) -> ArtifactReference {
+    let cumulative_limit = bytes
+        .len()
+        .checked_mul(64)
+        .expect("generated profile decode limit fits usize");
+    ArtifactReference::from_canonical_artifact_bytes(
+        ArtifactKind::ProofProfileSet,
+        bytes,
+        &CanonicalDecodeLimits {
+            maximum_tuple_byte_length: bytes.len(),
+            maximum_item_count: 100_000,
+            maximum_item_byte_length: bytes.len(),
+            maximum_nesting_depth: 32,
+            maximum_cumulative_work_byte_length: cumulative_limit,
+            maximum_cumulative_allocation_byte_length: cumulative_limit,
+        },
+    )
+    .expect("generated proof-profile artifact reference derives")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -707,6 +817,33 @@ struct BoundRootSlot {
     root_use: BoundTreeRootUse,
     ordered_column_ordinals: Vec<u32>,
     shape: RelationRootShape,
+}
+
+#[derive(Clone, Copy)]
+struct RelationRootApplicationCoordinates {
+    application_statement_schema_identifier: u16,
+    roster_position: Option<u16>,
+    schedule_position: Option<u32>,
+    top_count: Option<u16>,
+    producer_sequence: Option<u64>,
+}
+
+impl RelationRootApplicationCoordinates {
+    const fn new(
+        application_statement_schema_identifier: u16,
+        roster_position: Option<u16>,
+        schedule_position: Option<u32>,
+        top_count: Option<u16>,
+        producer_sequence: Option<u64>,
+    ) -> Self {
+        Self {
+            application_statement_schema_identifier,
+            roster_position,
+            schedule_position,
+            top_count,
+            producer_sequence,
+        }
+    }
 }
 
 fn validate_relation_plan_catalog(
@@ -777,14 +914,17 @@ fn root_shape(
 
 fn ordered_bound_root_slots(
     relation_plans: &[ValidatedRelationPlanArtifact],
-    application_statement_schema_identifier: u16,
-    roster_position: Option<u16>,
-    schedule_position: Option<u32>,
-    top_count: Option<u16>,
-    producer_sequence: Option<u64>,
+    coordinates: RelationRootApplicationCoordinates,
     construction_kind: RelationRootConstructionKind,
     root_use: BoundTreeRootUse,
 ) -> Result<Vec<BoundRootSlot>, ProofProfileError> {
+    let RelationRootApplicationCoordinates {
+        application_statement_schema_identifier,
+        roster_position,
+        schedule_position,
+        top_count,
+        producer_sequence,
+    } = coordinates;
     let artifact = relation_plan_artifact(relation_plans, application_statement_schema_identifier)?;
     let variant = artifact
         .compiled_plan()
@@ -839,11 +979,13 @@ fn bound_root_slot_for_endpoint(
 ) -> Result<BoundRootSlot, ProofProfileError> {
     let mut roots = ordered_bound_root_slots(
         relation_plans,
-        endpoint.application_statement_schema_identifier,
-        endpoint.roster_position,
-        endpoint.schedule_position,
-        endpoint.top_count,
-        endpoint.producer_sequence,
+        RelationRootApplicationCoordinates::new(
+            endpoint.application_statement_schema_identifier,
+            endpoint.roster_position,
+            endpoint.schedule_position,
+            endpoint.top_count,
+            endpoint.producer_sequence,
+        ),
         construction_kind,
         root_use,
     )?
@@ -925,31 +1067,19 @@ fn derive_root_compatibility_edges(
     // recipients by presenting a different edge list.
     let vss_output_template = ordered_bound_root_slots(
         relation_plans,
-        0x2110,
-        Some(0),
-        None,
-        None,
-        None,
+        RelationRootApplicationCoordinates::new(0x2110, Some(0), None, None, None),
         RelationRootConstructionKind::CommittedMaterial,
         BoundTreeRootUse::Output,
     )?;
     let aggregate_input_template = ordered_bound_root_slots(
         relation_plans,
-        0x2111,
-        Some(0),
-        None,
-        None,
-        None,
+        RelationRootApplicationCoordinates::new(0x2111, Some(0), None, None, None),
         RelationRootConstructionKind::CommittedMaterial,
         BoundTreeRootUse::Input,
     )?;
     let aggregate_output_template = ordered_bound_root_slots(
         relation_plans,
-        0x2111,
-        Some(0),
-        None,
-        None,
-        None,
+        RelationRootApplicationCoordinates::new(0x2111, Some(0), None, None, None),
         RelationRootConstructionKind::CommittedMaterial,
         BoundTreeRootUse::Output,
     )?;
@@ -972,11 +1102,13 @@ fn derive_root_compatibility_edges(
     for dealer_position in 0..topology.roster_size {
         let dealer_outputs = ordered_bound_root_slots(
             relation_plans,
-            0x2110,
-            Some(dealer_position),
-            None,
-            None,
-            None,
+            RelationRootApplicationCoordinates::new(
+                0x2110,
+                Some(dealer_position),
+                None,
+                None,
+                None,
+            ),
             RelationRootConstructionKind::CommittedMaterial,
             BoundTreeRootUse::Output,
         )?;
@@ -984,22 +1116,24 @@ fn derive_root_compatibility_edges(
 
         let same_secret_inputs = ordered_bound_root_slots(
             relation_plans,
-            0x1211,
-            Some(dealer_position),
-            None,
-            None,
-            None,
+            RelationRootApplicationCoordinates::new(
+                0x1211,
+                Some(dealer_position),
+                None,
+                None,
+                None,
+            ),
             RelationRootConstructionKind::CommittedMaterial,
             BoundTreeRootUse::Input,
         )?;
         require_root_count(&same_secret_inputs, sharing_limb_count)?;
-        for sharing_limb_ordinal in 0..sharing_limb_count {
+        for (sharing_limb_ordinal, same_secret_input) in same_secret_inputs.iter().enumerate() {
             let coefficient_zero_index = checked_product(sharing_limb_ordinal, roots_per_vss_limb)?;
             append_root_edge(
                 &mut edges,
                 &mut assigned_consumers,
                 &dealer_outputs[coefficient_zero_index],
-                &same_secret_inputs[sharing_limb_ordinal],
+                same_secret_input,
                 RelationRootConstructionKind::CommittedMaterial,
             )?;
         }
@@ -1007,11 +1141,13 @@ fn derive_root_compatibility_edges(
         for recipient_position in 0..topology.roster_size {
             let recipient_inputs = ordered_bound_root_slots(
                 relation_plans,
-                0x2111,
-                Some(recipient_position),
-                None,
-                None,
-                None,
+                RelationRootApplicationCoordinates::new(
+                    0x2111,
+                    Some(recipient_position),
+                    None,
+                    None,
+                    None,
+                ),
                 RelationRootConstructionKind::CommittedMaterial,
                 BoundTreeRootUse::Input,
             )?;
@@ -1039,21 +1175,25 @@ fn derive_root_compatibility_edges(
     for recipient_position in 0..topology.roster_size {
         let aggregate_outputs = ordered_bound_root_slots(
             relation_plans,
-            0x2111,
-            Some(recipient_position),
-            None,
-            None,
-            None,
+            RelationRootApplicationCoordinates::new(
+                0x2111,
+                Some(recipient_position),
+                None,
+                None,
+                None,
+            ),
             RelationRootConstructionKind::CommittedMaterial,
             BoundTreeRootUse::Output,
         )?;
         let target_inputs = ordered_bound_root_slots(
             relation_plans,
-            0x1621,
-            Some(recipient_position),
-            None,
-            None,
-            None,
+            RelationRootApplicationCoordinates::new(
+                0x1621,
+                Some(recipient_position),
+                None,
+                None,
+                None,
+            ),
             RelationRootConstructionKind::CommittedMaterial,
             BoundTreeRootUse::Input,
         )?;
@@ -1078,21 +1218,25 @@ fn derive_root_compatibility_edges(
     for roster_position in 0..topology.roster_size {
         let anchor_outputs = ordered_bound_root_slots(
             relation_plans,
-            0x1211,
-            Some(roster_position),
-            None,
-            None,
-            None,
+            RelationRootApplicationCoordinates::new(
+                0x1211,
+                Some(roster_position),
+                None,
+                None,
+                None,
+            ),
             RelationRootConstructionKind::SetupPolynomial,
             BoundTreeRootUse::Output,
         )?;
         let public_key_anchor_inputs = ordered_bound_root_slots(
             relation_plans,
-            0x1212,
-            Some(roster_position),
-            None,
-            None,
-            None,
+            RelationRootApplicationCoordinates::new(
+                0x1212,
+                Some(roster_position),
+                None,
+                None,
+                None,
+            ),
             RelationRootConstructionKind::SetupPolynomial,
             BoundTreeRootUse::Input,
         )?;
@@ -1106,25 +1250,74 @@ fn derive_root_compatibility_edges(
                 RelationRootConstructionKind::SetupPolynomial,
             )?;
         }
+
+        // The trustee evaluation-key relations re-open the same ordered
+        // commitment-modulus anchors. Their statement-root ordinals differ
+        // because each family precedes the anchors with its own public key
+        // material, so bind the compiler-fixed input suffix explicitly.
+        let trustee_anchor_outputs = anchor_outputs
+            .get(..SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
+            .ok_or(ProofProfileError::InvalidRootTopology)?;
+        for (trustee_family, preceding_input_root_count, first_anchor_source_ordinal) in
+            [(0x1214, 0_usize, 2_u32), (0x1216, 4, 5), (0x1217, 0, 1)]
+        {
+            let trustee_plan = relation_plan_artifact(relation_plans, trustee_family)?;
+            for variant in trustee_plan.compiled_plan().variants() {
+                let schedule_position = variant
+                    .schedule_position()
+                    .ok_or(ProofProfileError::InvalidRootTopology)?;
+                let trustee_inputs = ordered_bound_root_slots(
+                    relation_plans,
+                    RelationRootApplicationCoordinates::new(
+                        trustee_family,
+                        Some(roster_position),
+                        Some(schedule_position),
+                        None,
+                        None,
+                    ),
+                    RelationRootConstructionKind::SetupPolynomial,
+                    BoundTreeRootUse::Input,
+                )?;
+                require_root_count(
+                    &trustee_inputs,
+                    checked_sum(preceding_input_root_count, trustee_anchor_outputs.len())?,
+                )?;
+                let anchor_inputs = &trustee_inputs[preceding_input_root_count..];
+                for (anchor_ordinal, (producer, consumer)) in trustee_anchor_outputs
+                    .iter()
+                    .zip(anchor_inputs.iter())
+                    .enumerate()
+                {
+                    let expected_source_ordinal = first_anchor_source_ordinal
+                        .checked_add(
+                            u32::try_from(anchor_ordinal)
+                                .map_err(|_| ProofProfileError::CountOverflow)?,
+                        )
+                        .ok_or(ProofProfileError::CountOverflow)?;
+                    if consumer.endpoint.verifier_source_ordinal != expected_source_ordinal {
+                        return Err(ProofProfileError::InvalidRootTopology);
+                    }
+                    append_root_edge(
+                        &mut edges,
+                        &mut assigned_consumers,
+                        producer,
+                        consumer,
+                        RelationRootConstructionKind::SetupPolynomial,
+                    )?;
+                }
+            }
+        }
     }
 
     let collective_public_key_inputs = ordered_bound_root_slots(
         relation_plans,
-        0x1213,
-        None,
-        None,
-        None,
-        None,
+        RelationRootApplicationCoordinates::new(0x1213, None, None, None, None),
         RelationRootConstructionKind::SetupPolynomial,
         BoundTreeRootUse::Input,
     )?;
     let collective_public_key_outputs = ordered_bound_root_slots(
         relation_plans,
-        0x1213,
-        None,
-        None,
-        None,
-        None,
+        RelationRootApplicationCoordinates::new(0x1213, None, None, None, None),
         RelationRootConstructionKind::SetupPolynomial,
         BoundTreeRootUse::Output,
     )?;
@@ -1133,11 +1326,13 @@ fn derive_root_compatibility_edges(
     for roster_position in 0..topology.roster_size {
         let public_key_outputs = ordered_bound_root_slots(
             relation_plans,
-            0x1212,
-            Some(roster_position),
-            None,
-            None,
-            None,
+            RelationRootApplicationCoordinates::new(
+                0x1212,
+                Some(roster_position),
+                None,
+                None,
+                None,
+            ),
             RelationRootConstructionKind::SetupPolynomial,
             BoundTreeRootUse::Output,
         )?;
@@ -1154,6 +1349,7 @@ fn derive_root_compatibility_edges(
     derive_rkg_aggregate_edges(
         relation_plans,
         topology,
+        SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len(),
         &mut edges,
         &mut assigned_consumers,
     )?;
@@ -1163,14 +1359,6 @@ fn derive_root_compatibility_edges(
         &mut edges,
         &mut assigned_consumers,
     )?;
-    derive_public_key_to_ballot_edges(
-        relation_plans,
-        topology,
-        &collective_public_key_outputs[0],
-        &mut edges,
-        &mut assigned_consumers,
-    )?;
-
     // The remaining setup-polynomial inputs are the per-trustee anchor and
     // round-one-aggregate consumers.  Exact root geometry and slot scope make
     // their producer unique; any missing or second compatible producer is a
@@ -1350,6 +1538,7 @@ fn validate_persistent_committed_material_mask_images(
 fn derive_rkg_aggregate_edges(
     relation_plans: &[ValidatedRelationPlanArtifact],
     topology: &FirstProfileRootTopology,
+    anchor_root_count: usize,
     edges: &mut Vec<RelationRootCompatibilityEdge>,
     assigned_consumers: &mut BTreeSet<RelationRootEndpoint>,
 ) -> Result<(), ProofProfileError> {
@@ -1364,21 +1553,25 @@ fn derive_rkg_aggregate_edges(
         }
         let aggregate_inputs = ordered_bound_root_slots(
             relation_plans,
-            0x1215,
-            None,
-            Some(schedule_position),
-            None,
-            None,
+            RelationRootApplicationCoordinates::new(
+                0x1215,
+                None,
+                Some(schedule_position),
+                None,
+                None,
+            ),
             RelationRootConstructionKind::SetupPolynomial,
             BoundTreeRootUse::Input,
         )?;
         let aggregate_outputs = ordered_bound_root_slots(
             relation_plans,
-            0x1215,
-            None,
-            Some(schedule_position),
-            None,
-            None,
+            RelationRootApplicationCoordinates::new(
+                0x1215,
+                None,
+                Some(schedule_position),
+                None,
+                None,
+            ),
             RelationRootConstructionKind::SetupPolynomial,
             BoundTreeRootUse::Output,
         )?;
@@ -1387,16 +1580,18 @@ fn derive_rkg_aggregate_edges(
         for roster_position in 0..topology.roster_size {
             let trustee_outputs = ordered_bound_root_slots(
                 relation_plans,
-                0x1214,
-                Some(roster_position),
-                Some(schedule_position),
-                None,
-                None,
+                RelationRootApplicationCoordinates::new(
+                    0x1214,
+                    Some(roster_position),
+                    Some(schedule_position),
+                    None,
+                    None,
+                ),
                 RelationRootConstructionKind::SetupPolynomial,
                 BoundTreeRootUse::Output,
             )?;
             require_root_count(&trustee_outputs, 2)?;
-            for component_ordinal in 0..2 {
+            for (component_ordinal, trustee_output) in trustee_outputs.iter().enumerate() {
                 let consumer_index = checked_sum(
                     checked_product(component_ordinal, roster_size)?,
                     usize::from(roster_position),
@@ -1404,8 +1599,37 @@ fn derive_rkg_aggregate_edges(
                 append_root_edge(
                     edges,
                     assigned_consumers,
-                    &trustee_outputs[component_ordinal],
+                    trustee_output,
                     &aggregate_inputs[consumer_index],
+                    RelationRootConstructionKind::SetupPolynomial,
+                )?;
+            }
+            let round_two_inputs = ordered_bound_root_slots(
+                relation_plans,
+                RelationRootApplicationCoordinates::new(
+                    0x1216,
+                    Some(roster_position),
+                    Some(schedule_position),
+                    None,
+                    None,
+                ),
+                RelationRootConstructionKind::SetupPolynomial,
+                BoundTreeRootUse::Input,
+            )?;
+            require_root_count(&round_two_inputs, checked_sum(4, anchor_root_count)?)?;
+            for component_ordinal in 0..2 {
+                append_root_edge(
+                    edges,
+                    assigned_consumers,
+                    &trustee_outputs[component_ordinal],
+                    &round_two_inputs[component_ordinal],
+                    RelationRootConstructionKind::SetupPolynomial,
+                )?;
+                append_root_edge(
+                    edges,
+                    assigned_consumers,
+                    &aggregate_outputs[component_ordinal],
+                    &round_two_inputs[component_ordinal + 2],
                     RelationRootConstructionKind::SetupPolynomial,
                 )?;
             }
@@ -1422,100 +1646,65 @@ fn derive_evaluator_aggregate_edges(
 ) -> Result<(), ProofProfileError> {
     let roster_size = usize::from(topology.roster_size);
     for top_count in 1..=20_u16 {
-        let evaluator_inputs = ordered_bound_root_slots(
-            relation_plans,
-            0x1218,
-            None,
-            None,
-            Some(top_count),
-            None,
-            RelationRootConstructionKind::SetupPolynomial,
-            BoundTreeRootUse::Input,
-        )?;
-        let evaluator_outputs = ordered_bound_root_slots(
-            relation_plans,
-            0x1218,
-            None,
-            None,
-            Some(top_count),
-            None,
-            RelationRootConstructionKind::SetupPolynomial,
-            BoundTreeRootUse::Output,
-        )?;
-        require_root_count(
-            &evaluator_inputs,
-            checked_product(usize::from(top_count), roster_size)?,
-        )?;
-        require_root_count(&evaluator_outputs, usize::from(top_count))?;
-        for (entry_ordinal, entry) in topology
-            .ordered_evaluator_key_entries
-            .iter()
-            .take(usize::from(top_count))
-            .enumerate()
-        {
+        let selected_entries = topology
+            .ordered_evaluator_key_entries_by_top_count
+            .get(usize::from(top_count - 1))
+            .ok_or(ProofProfileError::InvalidRootTopology)?;
+        for (entry_ordinal, entry) in selected_entries.iter().enumerate() {
+            let entry_ordinal =
+                u32::try_from(entry_ordinal).map_err(|_| ProofProfileError::CountOverflow)?;
+            let evaluator_inputs = ordered_bound_root_slots(
+                relation_plans,
+                RelationRootApplicationCoordinates::new(
+                    0x1218,
+                    None,
+                    Some(entry_ordinal),
+                    Some(top_count),
+                    None,
+                ),
+                RelationRootConstructionKind::SetupPolynomial,
+                BoundTreeRootUse::Input,
+            )?;
+            let evaluator_outputs = ordered_bound_root_slots(
+                relation_plans,
+                RelationRootApplicationCoordinates::new(
+                    0x1218,
+                    None,
+                    Some(entry_ordinal),
+                    Some(top_count),
+                    None,
+                ),
+                RelationRootConstructionKind::SetupPolynomial,
+                BoundTreeRootUse::Output,
+            )?;
+            require_root_count(&evaluator_inputs, roster_size)?;
+            require_root_count(&evaluator_outputs, 1)?;
             let producer_family = entry.source_kind.application_statement_schema_identifier();
             for roster_position in 0..topology.roster_size {
                 let trustee_outputs = ordered_bound_root_slots(
                     relation_plans,
-                    producer_family,
-                    Some(roster_position),
-                    Some(entry.schedule_position),
-                    None,
-                    None,
+                    RelationRootApplicationCoordinates::new(
+                        producer_family,
+                        Some(roster_position),
+                        Some(entry.schedule_position),
+                        None,
+                        None,
+                    ),
                     RelationRootConstructionKind::SetupPolynomial,
                     BoundTreeRootUse::Output,
                 )?;
                 require_root_count(&trustee_outputs, 1)?;
-                let consumer_index = checked_sum(
-                    checked_product(entry_ordinal, roster_size)?,
-                    usize::from(roster_position),
-                )?;
                 append_root_edge(
                     edges,
                     assigned_consumers,
                     &trustee_outputs[0],
-                    &evaluator_inputs[consumer_index],
+                    &evaluator_inputs[usize::from(roster_position)],
                     RelationRootConstructionKind::SetupPolynomial,
                 )?;
             }
         }
     }
 
-    Ok(())
-}
-
-fn derive_public_key_to_ballot_edges(
-    relation_plans: &[ValidatedRelationPlanArtifact],
-    topology: &FirstProfileRootTopology,
-    collective_public_key_output: &BoundRootSlot,
-    edges: &mut Vec<RelationRootCompatibilityEdge>,
-    assigned_consumers: &mut BTreeSet<RelationRootEndpoint>,
-) -> Result<(), ProofProfileError> {
-    for producer_sequence in topology.ordered_ballot_producer_sequences.iter().copied() {
-        // The roster position is a real 0x1302 endpoint component, not a
-        // placeholder.  Expand one ballot application for every roster slot
-        // at this producer sequence.
-        for roster_position in 0..topology.roster_size {
-            let ballot_inputs = ordered_bound_root_slots(
-                relation_plans,
-                0x1302,
-                Some(roster_position),
-                None,
-                None,
-                Some(producer_sequence),
-                RelationRootConstructionKind::SetupPolynomial,
-                BoundTreeRootUse::Input,
-            )?;
-            require_root_count(&ballot_inputs, 1)?;
-            append_root_edge(
-                edges,
-                assigned_consumers,
-                collective_public_key_output,
-                &ballot_inputs[0],
-                RelationRootConstructionKind::SetupPolynomial,
-            )?;
-        }
-    }
     Ok(())
 }
 
@@ -1530,11 +1719,9 @@ fn all_bound_root_slots(
         for variant in artifact.compiled_plan().variants() {
             let schedule_position = variant.schedule_position();
             let top_count = variant.top_count();
-            let roster_positions = if family == 0x1302 {
-                (0..topology.roster_size).map(Some).collect::<Vec<_>>()
-            } else if matches!(
+            let roster_positions = if matches!(
                 family,
-                0x2110 | 0x2111 | 0x1211 | 0x1212 | 0x1214 | 0x1216 | 0x1217 | 0x1621
+                0x2110 | 0x2111 | 0x1211 | 0x1212 | 0x1214 | 0x1216 | 0x1217 | 0x1302 | 0x1621
             ) {
                 (0..topology.roster_size).map(Some).collect::<Vec<_>>()
             } else {
@@ -1558,11 +1745,13 @@ fn all_bound_root_slots(
                     ] {
                         roots.extend(ordered_bound_root_slots(
                             relation_plans,
-                            family,
-                            roster_position,
-                            schedule_position,
-                            top_count,
-                            producer_sequence,
+                            RelationRootApplicationCoordinates::new(
+                                family,
+                                roster_position,
+                                schedule_position,
+                                top_count,
+                                producer_sequence,
+                            ),
                             construction_kind,
                             root_use,
                         )?);
@@ -1581,8 +1770,7 @@ fn allowed_root_transition(producer_family: u16, consumer_family: u16) -> bool {
             | (0x2111, 0x1621)
             | (0x1211, 0x1212 | 0x1214 | 0x1216 | 0x1217)
             | (0x1212, 0x1213)
-            | (0x1213, 0x1302)
-            | (0x1214, 0x1215)
+            | (0x1214, 0x1215 | 0x1216)
             | (0x1215, 0x1216 | 0x1217)
             | (0x1216 | 0x1217, 0x1218)
     )
@@ -1597,21 +1785,18 @@ fn root_scopes_are_compatible(
         consumer.application_statement_schema_identifier,
     );
     let roster_matches = match families {
-        (0x2110, 0x2111)
-        | (0x1212, 0x1213)
-        | (0x1213, 0x1302)
-        | (0x1214, 0x1215)
-        | (0x1216 | 0x1217, 0x1218) => true,
+        (0x2110, 0x2111) | (0x1212, 0x1213) | (0x1214, 0x1215) | (0x1216 | 0x1217, 0x1218) => true,
         _ => producer
             .roster_position
             .zip(consumer.roster_position)
             .is_none_or(|(left, right)| left == right),
     };
-    roster_matches
-        && producer
+    let schedule_matches = matches!(families, (0x1216 | 0x1217, 0x1218))
+        || producer
             .schedule_position
             .zip(consumer.schedule_position)
-            .is_none_or(|(left, right)| left == right)
+            .is_none_or(|(left, right)| left == right);
+    roster_matches && schedule_matches
 }
 
 fn validate_root_compatibility_edges(
@@ -1647,17 +1832,6 @@ fn validate_root_compatibility_edges(
         }
     }
     Ok(())
-}
-
-fn read_canonical_u16(item: &CanonicalItem) -> Result<u16, ProofProfileError> {
-    if item.item_type() != CanonicalItemType::Unsigned16 || item.canonical_bytes().len() != 2 {
-        return Err(ProofProfileError::CanonicalEncoding);
-    }
-    Ok(u16::from_le_bytes(
-        item.canonical_bytes()
-            .try_into()
-            .map_err(canonical_encoding_error)?,
-    ))
 }
 
 fn canonical_u64_list(values: &[u64]) -> Result<CanonicalItem, ProofProfileError> {
@@ -1791,9 +1965,13 @@ mod tests {
             RelationRootEndpoint::new(0x1216, Some(0), None, None, None, 4),
             Err(ProofProfileError::InvalidRootEndpoint),
         );
-        assert!(RelationRootEndpoint::new(0x1218, None, None, Some(20), None, 0).is_ok());
+        assert!(RelationRootEndpoint::new(0x1218, None, Some(0), Some(20), None, 0).is_ok());
         assert_eq!(
-            RelationRootEndpoint::new(0x1218, None, None, Some(21), None, 0),
+            RelationRootEndpoint::new(0x1218, None, Some(0), Some(21), None, 0),
+            Err(ProofProfileError::InvalidRootEndpoint),
+        );
+        assert_eq!(
+            RelationRootEndpoint::new(0x1218, None, None, Some(20), None, 0),
             Err(ProofProfileError::InvalidRootEndpoint),
         );
         assert!(RelationRootEndpoint::new(0x1302, Some(9), None, None, Some(2), 1).is_ok());

@@ -1,11 +1,13 @@
 use super::key_relation::{
-    BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
-    PublicKeyShareRelationPlanInput, public_key_common_reference_source, statement_root_source,
+    AnchorEquationInputs, BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder,
+    KeyVerifierSourceKey, PublicKeyEquationInputs, PublicKeyShareRelationPlanInput,
+    public_key_common_reference_source, statement_root_source,
 };
 use super::same_secret_anchor::{add_matrix_columns, append_matrix_sources};
 use super::*;
 
-const PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1212;
+const PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 =
+    crate::foundation::ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
 const ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL: u64 = 3;
 const PUBLIC_KEY_SHARE_ROOT_FIELD_ORDINAL: u64 = 4;
 
@@ -71,11 +73,13 @@ pub(crate) fn compile_public_key_share_relation_plan(
             builder.add_public_key_equation(
                 modulus_reference,
                 challenge_ordinal,
-                &public_key_share_limbs[limb_ordinal],
-                &common_reference,
-                &secret,
-                &public_key_error,
-                quotient_columns,
+                PublicKeyEquationInputs::new(
+                    &public_key_share_limbs[limb_ordinal],
+                    &common_reference,
+                    &secret,
+                    &public_key_error,
+                    quotient_columns,
+                ),
             )?;
         }
     }
@@ -108,12 +112,14 @@ pub(crate) fn compile_public_key_share_relation_plan(
             builder.add_anchor_equations(
                 modulus_reference,
                 challenge_ordinal,
-                &commitments,
-                &first_matrix,
-                &second_matrix,
-                &opening,
-                &secret.source,
-                &quotients,
+                AnchorEquationInputs::new(
+                    &commitments,
+                    &first_matrix,
+                    &second_matrix,
+                    &opening,
+                    &secret.source,
+                    &quotients,
+                ),
             )?;
         }
     }

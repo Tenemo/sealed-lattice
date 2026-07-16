@@ -74,7 +74,6 @@ fn collective_setup_intent_accepts_signed_canonical_registrations() {
         .expect("setup-intent verification response");
 
     assert_eq!(result["isValid"], true, "unexpected result: {result}");
-    assert_eq!(result["value"], serde_json::json!({}));
 }
 
 #[test]

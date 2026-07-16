@@ -77,7 +77,7 @@ impl EvaluatorContext {
     fn relinearization_key(&self, level: usize) -> CanonicalResult<&KeySwitchKey> {
         if self.relinearization_key.level < level {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "no relinearization key for the requested level",
             ));
         }
@@ -92,7 +92,7 @@ impl EvaluatorContext {
     ) -> CanonicalResult<Arc<KeySwitchKey>> {
         if requested_level > self.working_level {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "requested Galois-key level exceeds the evaluator working level",
             ));
         }
@@ -120,7 +120,7 @@ impl EvaluatorContext {
                 let generated_rotation_keys =
                     self.generated_rotation_keys.read().map_err(|_| {
                         CanonicalError::new(
-                            CanonicalErrorCode::InvalidFixture,
+                            CanonicalErrorCode::InvalidProtocolObject,
                             "generated rotation-key cache is poisoned",
                         )
                     })?;
@@ -132,7 +132,7 @@ impl EvaluatorContext {
             let mut generated_rotation_keys =
                 self.generated_rotation_keys.write().map_err(|_| {
                     CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
+                        CanonicalErrorCode::InvalidProtocolObject,
                         "generated rotation-key cache is poisoned",
                     )
                 })?;
@@ -265,7 +265,7 @@ fn evaluate_polynomial_by_power_table(
 ) -> CanonicalResult<Ciphertext> {
     if coefficients.is_empty() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "polynomial evaluation requires at least the constant coefficient",
         ));
     }
@@ -326,13 +326,13 @@ fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
 ) -> CanonicalResult<Ciphertext> {
     if coefficients.is_empty() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "polynomial evaluation requires at least the constant coefficient",
         ));
     }
     if baby_step_count < 2 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "Paterson-Stockmeyer baby-step count must be at least two",
         ));
     }
@@ -470,7 +470,7 @@ fn linear_combination_from_powers(
 fn sum_ciphertexts_at_common_level(ciphertexts: &[Ciphertext]) -> CanonicalResult<Ciphertext> {
     if ciphertexts.is_empty() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "cannot sum an empty ciphertext set",
         ));
     }
@@ -499,7 +499,7 @@ fn higher_power_needed(coefficients: &[u64], power: usize) -> bool {
 
 fn missing_power() -> CanonicalError {
     CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
+        CanonicalErrorCode::InvalidProtocolObject,
         "polynomial evaluation reached a power that was not built",
     )
 }

@@ -37,7 +37,7 @@ impl ChallengeExtensionTower {
     pub(super) fn for_modulus(modulus: u64) -> CanonicalResult<Self> {
         if modulus < 3 || modulus.is_multiple_of(2) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "challenge extension tower requires an odd prime modulus",
             ));
         }
@@ -50,7 +50,7 @@ impl ChallengeExtensionTower {
         }
         if quadratic_non_residue == 0 {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "no quadratic non-residue exists below the modulus",
             ));
         }
@@ -78,7 +78,7 @@ impl ChallengeExtensionTower {
         }
 
         Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "no quartic tower seed exists for the modulus",
         ))
     }
@@ -214,7 +214,7 @@ impl ChallengeExtensionTower {
     ) -> CanonicalResult<ChallengeExtensionElement> {
         if Self::is_zero(value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "zero has no challenge extension inverse",
             ));
         }
@@ -280,7 +280,7 @@ impl ChallengeExtensionTower {
         for element in elements {
             if Self::is_zero(element) {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "challenge extension batch inversion requires nonzero elements",
                 ));
             }

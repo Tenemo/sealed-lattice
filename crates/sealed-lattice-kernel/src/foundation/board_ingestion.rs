@@ -287,6 +287,7 @@ pub struct CanonicalBoardVerifier {
     ceremony_context_hash: Hash512,
     action_context_hash: Hash512,
     roster: Roster,
+    roster_hash: Hash512,
     roster_positions: HashMap<ParticipantIdentity, u16>,
     limits: CanonicalBoardLimits,
     canonical_decode_limits: CanonicalDecodeLimits,
@@ -306,6 +307,7 @@ impl CanonicalBoardVerifier {
     ) -> Result<Self, CanonicalBoardError> {
         limits.validate()?;
         let canonical_roster = Roster::decode(&roster.encode()?, &canonical_decode_limits)?;
+        let roster_hash = canonical_roster.roster_hash()?;
         let mut roster_positions = HashMap::with_capacity(canonical_roster.entries.len());
         for (roster_position, entry) in canonical_roster.entries.iter().enumerate() {
             let roster_position = u16::try_from(roster_position).map_err(|_| {
@@ -321,6 +323,7 @@ impl CanonicalBoardVerifier {
             ceremony_context_hash,
             action_context_hash,
             roster: canonical_roster,
+            roster_hash,
             roster_positions,
             limits,
             canonical_decode_limits,
@@ -328,6 +331,22 @@ impl CanonicalBoardVerifier {
             object_hashes_by_producer_slot: HashMap::new(),
             retained_canonical_carrier_byte_length: 0,
         })
+    }
+
+    pub(crate) const fn suite_id(&self) -> Hash512 {
+        self.suite_id
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> Hash512 {
+        self.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> Hash512 {
+        self.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> Hash512 {
+        self.roster_hash
     }
 
     pub fn verify_unordered_carriers<Carrier: AsRef<[u8]>>(
@@ -384,8 +403,13 @@ impl CanonicalBoardVerifier {
         let mut requested_object_hashes = Vec::with_capacity(canonical_carriers.len());
         let mut requested_hash_set = HashSet::with_capacity(canonical_carriers.len());
         let mut pending_objects = HashMap::with_capacity(canonical_carriers.len());
+        let mut unique_canonical_carriers = HashSet::with_capacity(canonical_carriers.len());
         for canonical_carrier in canonical_carriers {
-            let parsed = self.parse_and_authenticate_carrier(canonical_carrier.as_ref())?;
+            let canonical_carrier = canonical_carrier.as_ref();
+            if !unique_canonical_carriers.insert(canonical_carrier) {
+                continue;
+            }
+            let parsed = self.parse_and_authenticate_carrier(canonical_carrier)?;
             if requested_hash_set.insert(parsed.object_hash) {
                 requested_object_hashes.push(parsed.object_hash);
             }
@@ -581,7 +605,7 @@ impl CanonicalBoardVerifier {
         }
         let envelope = match decoded {
             DecodedBoardCarrier::Signed(carrier) => carrier.envelope,
-            DecodedBoardCarrier::Unsigned(envelope) => envelope,
+            DecodedBoardCarrier::Unsigned(envelope) => *envelope,
         };
         Ok(ParsedBoardObject {
             object_hash: envelope.object_hash()?,
@@ -982,7 +1006,7 @@ impl CanonicalBoardVerifier {
         Ok(())
     }
 
-    fn roster_position(&self, participant_id: ParticipantIdentity) -> BoardResult<u16> {
+    pub(crate) fn roster_position(&self, participant_id: ParticipantIdentity) -> BoardResult<u16> {
         self.roster_positions
             .get(&participant_id)
             .copied()
@@ -1017,8 +1041,8 @@ impl CanonicalBoardVerifier {
 }
 
 enum DecodedBoardCarrier {
-    Signed(SignedCarrier),
-    Unsigned(ObjectEnvelope),
+    Signed(Box<SignedCarrier>),
+    Unsigned(Box<ObjectEnvelope>),
 }
 
 enum ResolveError {
@@ -1059,17 +1083,15 @@ fn decode_board_carrier(
             }
             let envelope_bytes = carrier_tuple.items[0].variable_value_bytes()?;
             preflight_envelope_family(envelope_bytes, limits)?;
-            Ok(DecodedBoardCarrier::Signed(SignedCarrier::decode(
-                canonical_carrier_bytes,
-                limits,
-            )?))
+            Ok(DecodedBoardCarrier::Signed(Box::new(
+                SignedCarrier::decode(canonical_carrier_bytes, limits)?,
+            )))
         }
         super::OBJECT_ENVELOPE_SCHEMA_IDENTIFIER => {
             preflight_envelope_family(canonical_carrier_bytes, limits)?;
-            Ok(DecodedBoardCarrier::Unsigned(ObjectEnvelope::decode(
-                canonical_carrier_bytes,
-                limits,
-            )?))
+            Ok(DecodedBoardCarrier::Unsigned(Box::new(
+                ObjectEnvelope::decode(canonical_carrier_bytes, limits)?,
+            )))
         }
         _ => Err(CanonicalBoardError::new(
             RefusalReason::WrongTypeOrLength,

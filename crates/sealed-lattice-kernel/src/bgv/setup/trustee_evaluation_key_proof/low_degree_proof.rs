@@ -1,14 +1,17 @@
+#[cfg(test)]
 use super::evaluation_domain::{batch_inverse, coefficients_from_coset_evaluations};
-use super::extension_field::{
-    CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
-};
+#[cfg(test)]
+use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
+use super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
 use super::*;
 use crate::bgv::modular_arithmetic::{inverse_mod, pow_mod};
 use fiat_shamir_transcript::FiatShamirTranscript;
 use merkle_commitment::{
-    BatchedMerkleOpening, MerkleContext, MerkleDigest, MerkleTree, consistent_sorted_leaves,
-    leaf_hash, sorted_unique_indices, verify_merkle_batch,
+    BatchedMerkleOpening, MerkleContext, MerkleDigest, consistent_sorted_leaves, leaf_hash,
+    verify_merkle_batch,
 };
+#[cfg(test)]
+use merkle_commitment::{MerkleTree, sorted_unique_indices};
 
 // Batched FRI low-degree argument. The initial layer is a codeword over the
 // extension coset; it is not committed here because the verifier re-derives
@@ -52,6 +55,7 @@ pub(super) struct LowDegreeSiblingOpening {
     pub(super) sibling: ChallengeExtensionElement,
 }
 
+#[cfg(test)]
 pub(super) struct LowDegreeProverState {
     initial_domain_size: usize,
     folded_layer_roots: Vec<MerkleDigest>,
@@ -122,6 +126,7 @@ fn flatten_extension_elements(elements: &[ChallengeExtensionElement]) -> Vec<u64
     elements.iter().flatten().copied().collect()
 }
 
+#[cfg(test)]
 fn fold_layer(
     tower: &ChallengeExtensionTower,
     layer: &[ChallengeExtensionElement],
@@ -162,6 +167,7 @@ fn fold_layer(
 // Fold-layer values are deterministic functions of the batched codeword, so
 // their leaves are unsalted. Phase-tree leaves commit witness rows and remain
 // salted.
+#[cfg(test)]
 fn pair_leaf_hashes(
     merkle_context: MerkleContext,
     layer: &[ChallengeExtensionElement],
@@ -179,6 +185,7 @@ fn pair_leaf_hashes(
         .collect()
 }
 
+#[cfg(test)]
 fn final_layer_coefficients(
     layer: &[ChallengeExtensionElement],
     offset: u64,
@@ -219,6 +226,7 @@ fn evaluate_coefficients(
 // The caller may then use one shared query set for several related low-degree
 // claims without letting the prover see those positions before all commitment
 // roots and final coefficients are bound.
+#[cfg(test)]
 pub(super) fn commit_low_degree(
     merkle_context: MerkleContext,
     transcript: &mut FiatShamirTranscript,
@@ -296,6 +304,7 @@ pub(super) fn commit_low_degree(
     ))
 }
 
+#[cfg(test)]
 pub(super) fn open_low_degree_at_positions(
     state: LowDegreeProverState,
     query_positions: &[usize],

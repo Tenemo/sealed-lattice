@@ -8,7 +8,22 @@ pub(crate) mod commands;
 )]
 pub(crate) mod direct_ballots;
 pub(crate) mod parameters;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        unused_imports,
+        reason = "the generic browser proof worker and later exact-family adapters remain compiled while fixed suite selection refuses the exact-family browser resource mismatch"
+    )
+)]
 pub(crate) mod proof_suite;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "target partial-decryption framing remains browser-compiled for the later exact release-family adapter"
+    )
+)]
 pub(crate) mod target_decryption;
 
 #[cfg(test)]

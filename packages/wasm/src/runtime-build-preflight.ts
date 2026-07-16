@@ -74,9 +74,66 @@ export type RuntimeBuildWorkerPreflight<WorkerChannel> = Readonly<{
     }): Promise<void>;
 }>;
 
+declare const runtimeBuildAuthorityBindingBrand: unique symbol;
+
+export type RuntimeBuildAuthorityBinding = Readonly<{
+    readonly [runtimeBuildAuthorityBindingBrand]: true;
+}>;
+
+export type RuntimeBuildAuthorityBindingDescription = Readonly<{
+    runtimeBuildManifestHash: Uint8Array;
+    suiteIdentifier: Uint8Array;
+}>;
+
+const runtimeBuildAuthorityBindingDescriptions = new WeakMap<
+    object,
+    RuntimeBuildAuthorityBindingDescription
+>();
+
+const mintRuntimeBuildAuthorityBinding = (
+    runtimeBuildManifestHash: Uint8Array,
+    suiteIdentifier: Uint8Array,
+): RuntimeBuildAuthorityBinding => {
+    const binding = Object.freeze(
+        Object.create(null) as object,
+    ) as RuntimeBuildAuthorityBinding;
+    runtimeBuildAuthorityBindingDescriptions.set(
+        binding,
+        Object.freeze({
+            runtimeBuildManifestHash: runtimeBuildManifestHash.slice(),
+            suiteIdentifier: suiteIdentifier.slice(),
+        }),
+    );
+    return binding;
+};
+
+export const copyRuntimeBuildAuthorityBindingDescription = (
+    binding: RuntimeBuildAuthorityBinding,
+): RuntimeBuildAuthorityBindingDescription => {
+    if (
+        (typeof binding !== 'object' && typeof binding !== 'function') ||
+        binding === null
+    ) {
+        throw new TypeError(
+            'The runtime-build authority binding was not issued by a completed runtime preflight.',
+        );
+    }
+    const description = runtimeBuildAuthorityBindingDescriptions.get(binding);
+    if (description === undefined) {
+        throw new TypeError(
+            'The runtime-build authority binding was not issued by a completed runtime preflight.',
+        );
+    }
+    return Object.freeze({
+        runtimeBuildManifestHash: description.runtimeBuildManifestHash.slice(),
+        suiteIdentifier: description.suiteIdentifier.slice(),
+    });
+};
+
 export type RuntimeBuildActivation<WorkerChannel, Application> = Readonly<{
     application: Application;
     manifest: RuntimeBuildManifest;
+    runtimeBuildAuthorityBinding: RuntimeBuildAuthorityBinding;
     workerChannel: WorkerChannel;
 }>;
 
@@ -675,7 +732,17 @@ export const compileRuntimeBuildBootstrap = (
                 manifest,
                 workerChannel,
             });
-            return Object.freeze({ application, manifest, workerChannel });
+            const runtimeBuildAuthorityBinding =
+                mintRuntimeBuildAuthorityBinding(
+                    expectedManifestHash,
+                    manifest.suiteIdentifier,
+                );
+            return Object.freeze({
+                application,
+                manifest,
+                runtimeBuildAuthorityBinding,
+                workerChannel,
+            });
         } catch (error) {
             return cleanupAfterFailure(
                 environment.cache,

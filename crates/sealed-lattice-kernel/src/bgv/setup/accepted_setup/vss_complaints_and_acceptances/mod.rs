@@ -18,7 +18,7 @@ impl<'a> VssRecordVerificationContext<'a> {
     ) -> CanonicalResult<Self> {
         let setup_context = setup_package.get("setupContext").ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "setupContext was required before VSS response verification",
             )
         })?;
@@ -216,7 +216,7 @@ pub(super) fn verify_vss_response_record_binding(
         .map(String::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "source trustee commitment root missing for VSS response verification",
             )
         })?;
@@ -396,7 +396,7 @@ pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "VSS source trustee commitments were required before VSS share acceptance verification",
             )
         })?;

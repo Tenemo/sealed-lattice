@@ -1,8 +1,8 @@
 use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
 use super::super::{
-    CommonProofTranscript, PROOF_BASE_FIELD_MODULUS, field::ProofBaseFieldElement,
-    merkle::CanonicalProofMerkleTree,
+    CommonProofTranscript, PROOF_BASE_FIELD_MODULUS, ResidentCommonProofByteSource,
+    ResidentCommonProofInputChunk, field::ProofBaseFieldElement, merkle::CanonicalProofMerkleTree,
 };
 use super::*;
 
@@ -33,7 +33,7 @@ fn transcript_schedule(
     ordered_base_tree_ordinals: Vec<u16>,
     ordered_auxiliary_tree_ordinals: Vec<u16>,
     quotient_component_count: u16,
-    opening_claim_count: u16,
+    opening_claim_count: u32,
     fri_fold_count: u16,
     unique_query_count: u32,
     query_orbit_count: u64,
@@ -508,6 +508,207 @@ fn decoder_accepts_exact_public_body_and_streams_one_opening_at_a_time() {
     assert_eq!(decoded.deep_evaluations(), deep_evaluations);
     assert_eq!(decoded.terminal_coefficients(), terminal_coefficients);
     assert_eq!(observed_openings, [(0, 2), (1, 1)]);
+}
+
+#[test]
+fn incremental_query_decoders_cross_header_leaf_and_frontier_chunk_boundaries() {
+    let (layout, tree_openings, _, _, bytes) = simple_public_body();
+    let query_section_offset =
+        proof_body_prefix_byte_length(&layout).expect("the prefix length derives");
+    let query_header_end = query_section_offset + 4;
+    let query_header_source = ResidentCommonProofByteSource::new(
+        bytes.len(),
+        vec![
+            ResidentCommonProofInputChunk::new(
+                query_section_offset,
+                &bytes[query_section_offset..query_section_offset + 2],
+            ),
+            ResidentCommonProofInputChunk::new(
+                query_section_offset + 2,
+                &bytes[query_section_offset + 2..query_header_end],
+            ),
+        ],
+    )
+    .expect("the query header fits two resident chunks");
+    assert_eq!(
+        decode_proof_query_section_header_at(
+            &query_header_source,
+            query_section_offset,
+            layout.catalog.entries.len(),
+        )
+        .expect("the query header decodes across its chunk boundary"),
+        query_header_end,
+    );
+
+    let entry = &layout.catalog.entries[0];
+    let opening_record = canonical_opening_record(
+        entry.tree_catalog_index,
+        &tree_openings[0].opened_leaf_bytes,
+    );
+    let expected_tree_byte_length =
+        proof_query_tree_byte_length(&layout, 0, &[0]).expect("the tree length derives");
+    let tree_end = query_header_end + expected_tree_byte_length;
+    let encoded_frontier = canonical_frontier(entry.tree_catalog_index, &tree_openings[0].frontier);
+    assert_eq!(
+        expected_tree_byte_length,
+        opening_record.len() + encoded_frontier.len(),
+    );
+
+    let leaf_midpoint = query_header_end + 32 + tree_openings[0].opened_leaf_bytes[0].len() / 2;
+    let frontier_header_midpoint = query_header_end + opening_record.len() + 1;
+    for split_offset in [
+        query_header_end + 1,
+        leaf_midpoint,
+        frontier_header_midpoint,
+    ] {
+        let source = ResidentCommonProofByteSource::new(
+            bytes.len(),
+            vec![
+                ResidentCommonProofInputChunk::new(
+                    query_header_end,
+                    &bytes[query_header_end..split_offset],
+                ),
+                ResidentCommonProofInputChunk::new(split_offset, &bytes[split_offset..tree_end]),
+            ],
+        )
+        .expect("the exact tree range fits two resident chunks");
+        let (next_offset, opening) = decode_proof_query_tree_at(
+            &source,
+            query_header_end,
+            &layout,
+            0,
+            tree_openings[0].root,
+            &[0],
+        )
+        .expect("the tree decodes across a semantic chunk boundary");
+        assert_eq!(next_offset, tree_end);
+        let opening = opening.as_opening(entry);
+        assert_eq!(opening.leaves().len(), 1);
+        assert_eq!(opening.leaves()[0].leaf_index(), 0);
+    }
+}
+
+#[test]
+fn frontier_maximum_recurrence_matches_every_small_tree_subset() {
+    for leaf_count in [1_usize, 2, 4, 8, 16] {
+        let mut exhaustive_maxima = vec![0_usize; leaf_count + 1];
+        let subset_count = 1_u32 << u32::try_from(leaf_count).expect("small test tree fits");
+        for subset_mask in 1..subset_count {
+            let selected_leaf_indexes = (0..leaf_count)
+                .filter(|leaf_index| subset_mask & (1_u32 << leaf_index) != 0)
+                .map(|leaf_index| u64::try_from(leaf_index).expect("small test index fits"))
+                .collect::<Vec<_>>();
+            let selected_leaf_count = selected_leaf_indexes.len();
+            exhaustive_maxima[selected_leaf_count] = exhaustive_maxima[selected_leaf_count].max(
+                minimal_frontier_node_count(&selected_leaf_indexes, leaf_count)
+                    .expect("small tree frontier derives"),
+            );
+        }
+        for (selected_leaf_count, exhaustive_maximum) in exhaustive_maxima
+            .iter()
+            .copied()
+            .enumerate()
+            .take(leaf_count + 1)
+            .skip(1)
+        {
+            assert_eq!(
+                maximum_minimal_frontier_node_count(leaf_count, selected_leaf_count)
+                    .expect("frontier maximum derives"),
+                exhaustive_maximum,
+                "leaf count {leaf_count}, selected leaf count {selected_leaf_count}",
+            );
+        }
+    }
+}
+
+#[test]
+fn canonical_proof_ceiling_matches_each_tree_maximum_across_folded_query_orbits() {
+    let schedule = transcript_schedule(
+        CommonProofPrivacyMode::PublicOnly,
+        vec![0],
+        Vec::new(),
+        1,
+        1,
+        3,
+        3,
+        8,
+    );
+    let catalog = build_complete_proof_tree_catalog(
+        catalog_input(
+            16,
+            vec![RelationProofTreeInput::ProofCreated {
+                tree_role: ProofTreeRole::BaseOracle,
+                row_width: 2,
+                leaf_visibility: ProofLeafVisibility::Public,
+            }],
+        ),
+        &schedule,
+    )
+    .expect("test catalog derives");
+    let layout = ProofBodyLayout::new(catalog, &schedule, 1).expect("test layout derives");
+    let canonical_header_byte_length = 96;
+    let ceiling = canonical_common_proof_byte_length_ceiling(canonical_header_byte_length, &layout)
+        .expect("canonical proof ceiling derives");
+    assert_eq!(ceiling.canonical_header_byte_length(), 96);
+    assert_eq!(
+        ceiling.body_prefix_byte_length(),
+        proof_body_prefix_byte_length(&layout).expect("prefix length derives")
+    );
+    assert_eq!(ceiling.query_trees().len(), layout.catalog.entries.len());
+    assert_eq!(
+        ceiling.proof_byte_length(),
+        ceiling.canonical_header_byte_length()
+            + ceiling.body_prefix_byte_length()
+            + ceiling.query_section_byte_length()
+    );
+
+    let mut exact_tree_maxima = vec![0_usize; layout.catalog.entries.len()];
+    for first_query in 0..6_u64 {
+        for second_query in first_query + 1..7_u64 {
+            for third_query in second_query + 1..8_u64 {
+                let query_representatives = [first_query, second_query, third_query];
+                let mut exact_proof_byte_length =
+                    canonical_header_byte_length + ceiling.body_prefix_byte_length() + 4;
+                for (catalog_index, exact_tree_maximum) in exact_tree_maxima.iter_mut().enumerate()
+                {
+                    let exact_tree_byte_length = proof_query_tree_byte_length(
+                        &layout,
+                        catalog_index,
+                        &query_representatives,
+                    )
+                    .expect("exact tree length derives");
+                    *exact_tree_maximum = (*exact_tree_maximum).max(exact_tree_byte_length);
+                    exact_proof_byte_length += exact_tree_byte_length;
+                }
+                assert!(exact_proof_byte_length <= ceiling.proof_byte_length());
+            }
+        }
+    }
+    assert_eq!(
+        ceiling
+            .query_trees()
+            .iter()
+            .map(ProofQueryTreeByteLengthCeiling::byte_length)
+            .collect::<Vec<_>>(),
+        exact_tree_maxima
+    );
+    assert_eq!(
+        ceiling.maximum_query_tree_byte_length(),
+        exact_tree_maxima.into_iter().max().unwrap()
+    );
+
+    let final_fri_tree = ceiling.query_trees().last().expect("FRI tree exists");
+    assert!(matches!(
+        final_fri_tree.source(),
+        ProofTreeCatalogSource::NonterminalFriLayer { fold_ordinal: 1 }
+    ));
+    assert_eq!(final_fri_tree.tree_height(), 1);
+    assert_eq!(final_fri_tree.leaf_count(), 2);
+    assert_eq!(final_fri_tree.minimum_opened_leaf_count(), 1);
+    assert_eq!(final_fri_tree.maximum_opened_leaf_count(), 2);
+    assert!(final_fri_tree.canonical_leaf_byte_length() > 0);
+    assert!(final_fri_tree.opened_leaf_count_at_ceiling() > 0);
+    assert!(final_fri_tree.authentication_frontier_node_count_at_ceiling() <= 1);
 }
 
 #[test]

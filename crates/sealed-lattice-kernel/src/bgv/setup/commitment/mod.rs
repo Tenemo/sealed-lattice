@@ -20,29 +20,33 @@ use crate::{
 mod algebra;
 mod commitment_parameters;
 mod computation;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the canonical commitment decoder is live while deterministic anchor construction remains owned by later exact-family adapters and tests"
+    )
+)]
 mod lattice_anchor;
 mod matrix;
 mod opening;
 mod serialization;
 mod validation;
+mod worker_response;
 
 #[cfg(test)]
 pub(super) use algebra::*;
 #[cfg(test)]
 pub(super) use commitment_parameters::setup_coefficient_fits_commitment_modulus_product;
 use commitment_parameters::setup_coefficients_fit_commitment_modulus_product;
-pub(super) use commitment_parameters::{
-    SETUP_COMMITMENT_HIDING_ERROR_COEFFICIENT_BOUND,
-    SETUP_COMMITMENT_HIDING_ERROR_DISTRIBUTION_PURPOSE,
-    SETUP_COMMITMENT_HIDING_SECRET_COEFFICIENT_BOUND,
-    SETUP_COMMITMENT_HIDING_SECRET_DISTRIBUTION_PURPOSE, SETUP_COMMITMENT_ROW_COUNT,
-    setup_commitment_randomness_coefficient_bound,
-    setup_commitment_randomness_distribution_purpose,
-};
 pub(crate) use commitment_parameters::{
     SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
     SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
     SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+};
+pub(super) use commitment_parameters::{
+    SETUP_COMMITMENT_ROW_COUNT, setup_commitment_randomness_coefficient_bound,
+    setup_commitment_randomness_distribution_purpose,
 };
 #[cfg(test)]
 use commitment_parameters::{
@@ -54,23 +58,22 @@ pub(super) use matrix::*;
 pub(super) use opening::*;
 pub(super) use serialization::*;
 
+pub(crate) use computation::compute_setup_commitment_from_typed_opening;
 #[cfg(test)]
 pub(super) use computation::{
     compute_setup_big_signed_lifted_commitment, compute_setup_commitment_for_tests,
+    compute_setup_commitment_from_typed_opening_for_degree,
 };
 #[cfg(test)]
 use computation::{
     compute_setup_commitment_for_degree, compute_setup_signed_lifted_commitment_for_degree,
 };
-pub(crate) use computation::{
-    compute_setup_commitment_from_opening_request, compute_setup_commitment_from_typed_opening,
-};
-pub(crate) use lattice_anchor::LatticeAnchorCommitment;
+pub(crate) use lattice_anchor::parse_lattice_anchor_commitment_canonical_bytes;
+#[cfg(test)]
 pub(crate) use lattice_anchor::{
-    compute_lattice_anchor_commitment_from_opening_request,
-    compute_lattice_anchor_commitment_from_typed_opening,
-    lattice_anchor_commitment_canonical_bytes, parse_lattice_anchor_commitment_canonical_bytes,
+    LatticeAnchorCommitment, lattice_anchor_commitment_canonical_bytes,
 };
+pub(crate) use worker_response::setup_commitment_worker_response_bytes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StructuralMatrixPolynomial {
@@ -86,7 +89,7 @@ pub(super) struct SetupCommitmentLimb {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SetupCommitmentValue {
+pub(crate) struct SetupCommitmentValue {
     pub(super) source_rns_limb_index: usize,
     pub(super) shamir_coefficient_index: u64,
     pub(super) ring_degree: usize,
@@ -102,16 +105,15 @@ pub(super) struct SetupCommitmentOpeningVerification {
 }
 
 fn invalid_commitment_input(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::{
         SETUP_COMMITMENT_HIDING_SECRET_WIDTH, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-        compute_setup_commitment_for_degree, compute_setup_commitment_from_opening_request,
+        compute_setup_commitment_for_degree,
+        compute_setup_commitment_from_typed_opening_for_degree,
         compute_setup_signed_lifted_commitment_for_degree,
         setup_coefficient_fits_commitment_modulus_product, setup_commitment_matrix_polynomial,
         setup_commitment_root, verify_setup_commitment_opening,
@@ -196,41 +198,38 @@ mod tests {
     }
 
     #[test]
-    fn commitment_command_derives_source_domain_from_limb_index() -> CanonicalResult<()> {
+    fn typed_commitment_derives_source_domain_from_limb_index() -> CanonicalResult<()> {
         let public_matrix_seed_hash = valid_hash('e');
         let message = message_coefficients();
         let randomness = randomness_columns(1);
-        let response = compute_setup_commitment_from_opening_request(&json!({
-            "command": "ComputeSetupCommitmentFromOpening",
-            "publicMatrixSeedHash": public_matrix_seed_hash,
-            "sourceRnsLimbIndex": 0,
-            "shamirCoefficientIndex": 1,
-            "messageCoefficients": message,
-            "randomnessByCommitmentLimb": randomness,
-            "ringDegree": TEST_RING_DEGREE,
-        }))?;
-
-        let commitment = super::parse_setup_commitment_full_value(&response["commitment"])?;
+        let commitment = compute_setup_commitment_from_typed_opening_for_degree(
+            &public_matrix_seed_hash,
+            0,
+            1,
+            &message,
+            &randomness,
+            TEST_RING_DEGREE,
+        )?;
         assert_eq!(commitment.source_rns_limb_index, 0);
         assert_eq!(commitment.shamir_coefficient_index, 1);
-        assert!(response.get("commitmentRoot").is_none());
 
         Ok(())
     }
 
     #[test]
-    fn commitment_command_rejects_an_out_of_range_source_limb() {
+    fn typed_commitment_rejects_an_out_of_range_source_limb() {
         let public_matrix_seed_hash = valid_hash('f');
-        let request = json!({
-            "command": "ComputeSetupCommitmentFromOpening",
-            "publicMatrixSeedHash": public_matrix_seed_hash,
-            "sourceRnsLimbIndex": DATA_PRIMES.len(),
-            "shamirCoefficientIndex": 1,
-            "messageCoefficients": message_coefficients(),
-            "randomnessByCommitmentLimb": randomness_columns(1),
-            "ringDegree": TEST_RING_DEGREE,
-        });
-        assert!(compute_setup_commitment_from_opening_request(&request).is_err());
+        assert!(
+            compute_setup_commitment_from_typed_opening_for_degree(
+                &public_matrix_seed_hash,
+                DATA_PRIMES.len(),
+                1,
+                &message_coefficients(),
+                &randomness_columns(1),
+                TEST_RING_DEGREE,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -268,50 +267,48 @@ mod tests {
     }
 
     #[test]
-    fn commitment_command_rejects_one_opening_tape_shared_across_commitment_limbs() {
-        let request = json!({
-            "command": "ComputeSetupCommitmentFromOpening",
-            "publicMatrixSeedHash": valid_hash('8'),
-            "sourceRnsLimbIndex": 0,
-            "shamirCoefficientIndex": 0,
-            "messageCoefficients": message_coefficients(),
-            "randomnessByCommitmentLimb": randomness_columns(1)[0],
-            "ringDegree": TEST_RING_DEGREE,
-        });
-
-        assert!(compute_setup_commitment_from_opening_request(&request).is_err());
+    fn typed_commitment_rejects_one_opening_tape_shared_across_commitment_limbs() {
+        let one_opening_tape = vec![randomness_columns(1)[0].clone()];
+        assert!(
+            compute_setup_commitment_from_typed_opening_for_degree(
+                &valid_hash('8'),
+                0,
+                0,
+                &message_coefficients(),
+                &one_opening_tape,
+                TEST_RING_DEGREE,
+            )
+            .is_err()
+        );
     }
 
     #[test]
-    fn commitment_command_enforces_the_all_ternary_fresh_opening_profile() -> CanonicalResult<()> {
+    fn typed_commitment_enforces_the_all_ternary_fresh_opening_profile() -> CanonicalResult<()> {
         let public_matrix_seed_hash = valid_hash('7');
         let ternary_randomness = fresh_randomness_columns();
-        let request = |randomness: Vec<Vec<Vec<i128>>>| {
-            json!({
-                "command": "ComputeSetupCommitmentFromOpening",
-                "publicMatrixSeedHash": public_matrix_seed_hash,
-                "sourceRnsLimbIndex": 0,
-                "shamirCoefficientIndex": 0,
-                "messageCoefficients": message_coefficients(),
-                "randomnessByCommitmentLimb": randomness,
-                "ringDegree": TEST_RING_DEGREE,
-            })
+        let compute = |randomness: &[Vec<Vec<i128>>]| {
+            compute_setup_commitment_from_typed_opening_for_degree(
+                &public_matrix_seed_hash,
+                0,
+                0,
+                &message_coefficients(),
+                randomness,
+                TEST_RING_DEGREE,
+            )
         };
 
-        compute_setup_commitment_from_opening_request(&request(ternary_randomness.clone()))?;
+        compute(&ternary_randomness)?;
 
         let mut ternary_out_of_support = ternary_randomness.clone();
         ternary_out_of_support[0][0][0] = 2;
         let ternary_error =
-            compute_setup_commitment_from_opening_request(&request(ternary_out_of_support))
-                .expect_err("purpose-11 value two must be rejected");
+            compute(&ternary_out_of_support).expect_err("purpose-11 value two must be rejected");
         assert!(ternary_error.message.contains("purpose 11 support"));
 
         let mut hiding_error_out_of_support = ternary_randomness;
         hiding_error_out_of_support[0][SETUP_COMMITMENT_HIDING_SECRET_WIDTH][0] = -2;
-        let hiding_error =
-            compute_setup_commitment_from_opening_request(&request(hiding_error_out_of_support))
-                .expect_err("purpose-12 value minus two must be rejected");
+        let hiding_error = compute(&hiding_error_out_of_support)
+            .expect_err("purpose-12 value minus two must be rejected");
         assert!(hiding_error.message.contains("purpose 12 support"));
         Ok(())
     }

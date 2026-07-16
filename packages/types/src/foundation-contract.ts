@@ -109,7 +109,16 @@ export const parseParticipantIdentity = (
 
 /** Fixed public parameters of the first supported foundation profile. */
 export const foundationProfile = Object.freeze({
+    protocolName: 'sealed-lattice',
+    protocolVersion: 1,
     participantCount: 10,
+    activeFaultBound: 3,
+    reconstructionThreshold: 4,
+    finalityQuorum: 7,
+    stateWitnessQuorum: 7,
+    optionCount: 20,
+    minimumScore: 1,
+    maximumScore: 10,
     maximumIdentifierByteLength: 128,
     streamChunkByteLength: 1_048_576,
     maximumCanonicalStreamByteLength: 2_147_483_648,

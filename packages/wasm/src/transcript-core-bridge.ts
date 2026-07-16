@@ -5,7 +5,6 @@ export type {
     BgvCollectiveSetupVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
-    DecodedProofApplicationBinding,
     DecodedPrivateRandomCursor,
     EncodedPrivateRandomCursor,
     PrivateRandomCursor,

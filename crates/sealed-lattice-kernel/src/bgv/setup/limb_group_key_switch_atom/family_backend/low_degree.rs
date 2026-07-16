@@ -13,14 +13,20 @@
 //! query leaves, which lets the verifier recompute each authenticated leaf.
 
 use super::super::proof_field::ProofFieldParameters;
-use super::domain::{CyclicDomain, CyclicDomainGeometry, evaluate_polynomial_at};
+#[cfg(test)]
+use super::domain::CyclicDomain;
+use super::domain::{CyclicDomainGeometry, evaluate_polynomial_at};
 use super::merkle::{
-    BatchedMerkleOpening, MerkleDigest, MerkleTree, consistent_sorted_leaves, leaf_hash,
-    sorted_unique_indices, verify_merkle_batch,
+    BatchedMerkleOpening, MerkleDigest, consistent_sorted_leaves, leaf_hash, verify_merkle_batch,
 };
+#[cfg(test)]
+use super::merkle::{MerkleTree, sorted_unique_indices};
+#[cfg(test)]
 use super::private_randomness::PrivateProofRandomness;
 use super::transcript::Transcript;
-use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+use crate::encoding::CanonicalResult;
+#[cfg(test)]
+use crate::encoding::{CanonicalError, CanonicalErrorCode};
 
 // Fold until the layer domain reaches this size, then send coefficients.
 pub(super) const FINAL_LAYER_MAX_SIZE: usize = 8;
@@ -49,6 +55,7 @@ pub(super) struct FriLayerOpening<const LIMB_COUNT: usize> {
     pub(super) opening: BatchedMerkleOpening,
 }
 
+#[cfg(test)]
 struct ProverLayer<const LIMB_COUNT: usize> {
     codeword: Vec<[u64; LIMB_COUNT]>,
     salts: Vec<Vec<u8>>,
@@ -56,6 +63,7 @@ struct ProverLayer<const LIMB_COUNT: usize> {
     domain: usize,
 }
 
+#[cfg(test)]
 fn invalid_fri(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
@@ -64,6 +72,7 @@ fn leaf_words<const LIMB_COUNT: usize>(value: &[u64; LIMB_COUNT]) -> Vec<u64> {
     value.to_vec()
 }
 
+#[cfg(test)]
 fn commit_layer<const LIMB_COUNT: usize>(
     codeword: &[[u64; LIMB_COUNT]],
     private_randomness: &mut PrivateProofRandomness,
@@ -101,6 +110,7 @@ fn fold_pair<const LIMB_COUNT: usize>(
     parameters.add(&even, &parameters.multiply(beta, &odd))
 }
 
+#[cfg(test)]
 fn fold_codeword<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     codeword: &[[u64; LIMB_COUNT]],
@@ -129,6 +139,7 @@ fn fold_codeword<const LIMB_COUNT: usize>(
 // The prover's committed FRI layers, held between the commit phase (which
 // absorbs the layer roots and the final coefficients into the transcript) and
 // the answer phase (which opens the shared query positions the caller derives).
+#[cfg(test)]
 pub(super) struct FriCommitment<const LIMB_COUNT: usize> {
     layers: Vec<ProverLayer<LIMB_COUNT>>,
     layer_roots: Vec<MerkleDigest>,
@@ -140,6 +151,7 @@ pub(super) struct FriCommitment<const LIMB_COUNT: usize> {
 // with the transcript challenges, and absorbs the final layer's coefficients.
 // The caller derives the shared query positions from the transcript afterwards
 // (so trace and FRI open the same positions), then calls `fri_answer`.
+#[cfg(test)]
 pub(super) fn fri_commit<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     transcript: &mut Transcript,
@@ -170,7 +182,7 @@ pub(super) fn fri_commit<const LIMB_COUNT: usize>(
         let layer = commit_layer(&current, private_randomness)?;
         transcript.absorb_digest("fri-layer-root", &layer.tree.root());
         layer_roots.push(layer.tree.root());
-        let beta = transcript.challenge_field_element(parameters, "fri-fold");
+        let beta = transcript.challenge_field_element(parameters, "fri-fold")?;
         let layer_domain = CyclicDomainGeometry::new(parameters, current.len())?;
         let folded = fold_codeword(
             parameters,
@@ -196,6 +208,7 @@ pub(super) fn fri_commit<const LIMB_COUNT: usize>(
 
 // Answer phase: open every layer's folding pair at each caller-supplied top
 // query position.
+#[cfg(test)]
 pub(super) fn fri_answer<const LIMB_COUNT: usize>(
     commitment: &FriCommitment<LIMB_COUNT>,
     query_positions: &[usize],
@@ -269,7 +282,7 @@ pub(super) fn fri_verify_structure<'a, const LIMB_COUNT: usize>(
             return Ok(None);
         };
         transcript.absorb_digest("fri-layer-root", root);
-        betas.push(transcript.challenge_field_element(parameters, "fri-fold"));
+        betas.push(transcript.challenge_field_element(parameters, "fri-fold")?);
         layer_sizes.push(size);
         size /= 2;
         layer_index += 1;
@@ -433,7 +446,7 @@ pub(super) fn prove_low_degree<const LIMB_COUNT: usize>(
         initial_offset,
         private_randomness,
     )?;
-    let positions = transcript.challenge_positions("fri-query", top_size, query_count);
+    let positions = transcript.challenge_positions("fri-query", top_size, query_count)?;
     Ok(fri_answer(&commitment, &positions))
 }
 
@@ -458,7 +471,7 @@ pub(super) fn verify_low_degree<const LIMB_COUNT: usize>(
     else {
         return Ok(false);
     };
-    let positions = transcript.challenge_positions("fri-query", top_size, query_count);
+    let positions = transcript.challenge_positions("fri-query", top_size, query_count)?;
     Ok(fri_verify_queries(
         parameters,
         &verification,

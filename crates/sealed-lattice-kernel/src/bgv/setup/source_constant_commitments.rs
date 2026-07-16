@@ -23,13 +23,13 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "VSS source trustee commitment records were required for the source linkage",
             )
         })?;
     let source_trustee_index = usize::try_from(trustee_roster_position).map_err(|_| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "source trustee roster position does not fit usize",
         )
     })?;
@@ -37,7 +37,7 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
         .get(source_trustee_index)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "accepted VSS commitments are missing the source trustee record",
             )
         })?;
@@ -60,7 +60,7 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "source trustee coefficient commitments were required for the source linkage",
             )
         })?;
@@ -69,7 +69,7 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "VSS coefficient commitment material records were required for the source linkage",
             )
         })?;
@@ -80,7 +80,7 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
         .filter(|value| *value > 0)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "VSS coefficient commitment material threshold degree was required",
             )
         })?;
@@ -92,14 +92,14 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
             .get(source_rns_limb_index * threshold_degree)
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "accepted VSS commitments must contain one canonical public constant root per Q_share limb",
                 )
             })?
             .as_str()
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "public source constant commitment root was missing",
                 )
             })?;
@@ -110,7 +110,7 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
             .get(material_record_index)
             .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "accepted VSS material must contain one canonical source constant commitment per Q_share limb",
             )
         })?;
@@ -158,13 +158,13 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_s
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "VSS source trustee commitment records were required for the source linkage",
             )
         })?;
     let source_trustee_index = usize::try_from(trustee_roster_position).map_err(|_| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "source trustee roster position does not fit usize",
         )
     })?;
@@ -172,7 +172,7 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_s
         .get(source_trustee_index)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "accepted VSS commitments are missing the source trustee record",
             )
         })?;
@@ -195,7 +195,7 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_s
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "source trustee coefficient commitments were required for the source linkage",
             )
         })?;
@@ -204,7 +204,7 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_s
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "same-secret bridge statement must retain the full source constant commitment bodies",
             )
         })?;
@@ -243,14 +243,14 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_s
             .get(source_rns_limb_index * threshold_degree)
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "accepted VSS commitments must contain one canonical public constant root per Q_share limb",
                 )
             })?
             .as_str()
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "public source constant commitment root was missing",
                 )
             })?;

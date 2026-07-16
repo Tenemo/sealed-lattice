@@ -29,7 +29,7 @@ pub(super) fn validate_direct_ballot_input(ballot: &DirectBallotInput) -> Canoni
     for (option_index, score) in ballot.scores.iter().enumerate() {
         if !(MINIMUM_SCORE..=MAXIMUM_SCORE).contains(score) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!(
                     "direct encrypted ballot score at option {option_index} must be between 1 and 10"
                 ),
@@ -47,6 +47,12 @@ pub(super) fn validate_one_hot_witnesses(
     scores: &[u64],
     one_hot_witnesses: &[Vec<u64>],
 ) -> CanonicalResult<()> {
+    if scores.len() != OPTION_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "direct encrypted ballot one-hot witness requires one score per option",
+        ));
+    }
     if one_hot_witnesses.len() != OPTION_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -62,14 +68,14 @@ pub(super) fn validate_one_hot_witnesses(
         }
         if one_hot_row.iter().any(|entry| *entry > 1) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "direct encrypted ballot one-hot witness entries must be zero or one",
             ));
         }
         let one_hot_sum = one_hot_row.iter().sum::<u64>();
         if one_hot_sum != 1 {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "direct encrypted ballot one-hot witness must select exactly one score",
             ));
         }
@@ -83,7 +89,7 @@ pub(super) fn validate_one_hot_witnesses(
             .sum::<u64>();
         if derived_score != scores[option_index] {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "direct encrypted ballot one-hot witness does not match its scalar score",
             ));
         }
@@ -129,7 +135,7 @@ pub(super) fn validate_signed_support(
         .any(|coefficient| coefficient.abs() > maximum_abs)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{label} has a coefficient outside the expected support"),
         ));
     }
@@ -207,7 +213,7 @@ pub(super) fn validate_limb_encryption_relation(
         if expected_component_zero != ballot.ciphertext.components[0][limb_index][coefficient_index]
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("direct encrypted ballot RNS limb {limb_index} c0 relation failed"),
             ));
         }
@@ -223,7 +229,7 @@ pub(super) fn validate_limb_encryption_relation(
         if expected_component_one != ballot.ciphertext.components[1][limb_index][coefficient_index]
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("direct encrypted ballot RNS limb {limb_index} c1 relation failed"),
             ));
         }

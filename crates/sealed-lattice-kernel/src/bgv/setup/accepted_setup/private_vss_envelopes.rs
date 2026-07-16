@@ -43,7 +43,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
 
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupContext was required before private VSS envelope verification",
         )
     })?;
@@ -88,13 +88,13 @@ pub(super) fn private_vss_envelope_commitment_root(
         .get("privateVssEnvelopeCommitments")
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "private VSS envelope commitments are required",
             )
         })?;
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setup context is required for the private VSS envelope commitment root",
         )
     })?;
@@ -104,7 +104,7 @@ pub(super) fn private_vss_envelope_commitment_root(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "public matrix seed hash is required for the private VSS envelope commitment root",
             )
         })?;
@@ -144,13 +144,13 @@ pub(super) fn private_vss_envelope_bindings_from_package(
         .get("privateVssEnvelopeCommitments")
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "privateVssEnvelopeCommitments was required before private VSS binding extraction",
             )
         })?;
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupContext was required before private VSS binding extraction",
         )
     })?;
@@ -165,7 +165,7 @@ pub(super) fn private_vss_envelope_bindings_from_package(
     )? {
         Ok(bindings) => Ok(bindings),
         Err(refusal) => Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             refusal.message,
         )),
     }
@@ -298,7 +298,7 @@ fn private_vss_envelope_binding_from_reference(
         Some(value) => value,
         None => {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "source trustee commitment root missing for private VSS envelope verification",
             ));
         }

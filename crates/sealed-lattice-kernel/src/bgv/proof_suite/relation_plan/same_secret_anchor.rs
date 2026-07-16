@@ -1,10 +1,12 @@
 use super::key_relation::{
-    BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
-    SameSecretRelationPlanInput, SplitIntegerVector, bdlop_matrix_source, statement_root_source,
+    AnchorEquationInputs, BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder,
+    KeyVerifierSourceKey, SameSecretRelationPlanInput, SplitIntegerVector, bdlop_matrix_source,
+    statement_root_source,
 };
 use super::*;
 
-const SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1211;
+const SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER: u16 =
+    crate::foundation::ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
 const DEGREE_ZERO_VSS_MATERIAL_ROOTS_FIELD_ORDINAL: u64 = 3;
 const ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL: u64 = 4;
 
@@ -93,12 +95,14 @@ pub(crate) fn compile_same_secret_relation_plan(
             builder.add_anchor_equations(
                 modulus_reference,
                 challenge_ordinal,
-                &commitments,
-                &first_matrix,
-                &second_matrix,
-                &opening,
-                &secret,
-                &quotients,
+                AnchorEquationInputs::new(
+                    &commitments,
+                    &first_matrix,
+                    &second_matrix,
+                    &opening,
+                    &secret,
+                    &quotients,
+                ),
             )?;
         }
     }

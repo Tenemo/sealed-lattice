@@ -7,12 +7,7 @@ export type PollSpecInput = {
 };
 
 /** Pre-protocol poll input whose twenty options can be encoded as a canonical manifest. */
-export type PollSpec = {
-    readonly pollId: string;
-    readonly question: string;
-    readonly options: readonly string[];
-    readonly topOptionCount: number;
-};
+export type PollSpec = Readonly<PollSpecInput>;
 
 /** Stable poll specification validation error code. */
 export type PollSpecValidationErrorCode =

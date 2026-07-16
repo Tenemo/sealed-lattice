@@ -4,6 +4,7 @@ import {
     beginAcceptedSetupCanonicalStream,
     requireAcceptedSetupSessionKernelOwner,
 } from './accepted-setup-session-runtime.js';
+import { pumpCanonicalStreamChunks } from './canonical-stream-chunk-pump.js';
 import {
     canonicalStreamDomains,
     canonicalStreamKernelContext,
@@ -21,16 +22,15 @@ import {
     type CanonicalStreamLeaseState,
     type CanonicalStreamWriterLease,
 } from './canonical-stream-runtime.js';
-import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
 import type {
     TranscriptCoreKernelContextOwner,
     AcceptedSetupSession,
 } from './transcript-core-bridge/kernel-types.js';
+import { WasmMemoryBoundary } from './wasm-memory-boundary.js';
+import { WasmStatusBoundary } from './wasm-status-boundary.js';
 
 const materialRootByteLength = 64;
 const wasm32WordByteLength = 4;
-const runtimeInternalFailureStatus = 0xffff_ffff;
-const runtimeInvalidSessionStatus = 0xffff_fffe;
 
 export const bgvCanonicalStreamFamilies = Object.freeze({
     vssOpeningCarry: 1,
@@ -159,6 +159,8 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
     readonly #acceptedSetupSession: AcceptedSetupSession | undefined;
     readonly #context: CanonicalStreamKernelContext;
     readonly #kernel: TranscriptCoreKernelContextOwner;
+    readonly #memoryBoundary: WasmMemoryBoundary;
+    readonly #statusBoundary: WasmStatusBoundary;
     #activeLease: ActiveLease | undefined;
 
     public constructor(
@@ -169,6 +171,25 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
         this.#kernel = kernel;
         this.#context = context;
         this.#acceptedSetupSession = acceptedSetupSession;
+        this.#memoryBoundary = new WasmMemoryBoundary({
+            context,
+            createInternalError: (message) =>
+                new CanonicalStreamInternalError(message),
+            createResourceError: (message) =>
+                new CanonicalStreamResourceError(message),
+            label: 'BGV canonical stream',
+        });
+        this.#statusBoundary = new WasmStatusBoundary({
+            createInternalError: (message) =>
+                new CanonicalStreamInternalError(message),
+            createRefusalError: (refusalReason) =>
+                new CanonicalStreamRefusalError(refusalReason),
+            createResourceError: () => new CanonicalStreamResourceError(),
+            internalFailureMessage:
+                'The WASM BGV canonical stream session failed internally.',
+            unknownStatusMessage:
+                'The WASM BGV canonical stream returned an unknown status code.',
+        });
         this.#requireBoundary();
     }
 
@@ -233,7 +254,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 metadataPointer,
                 2,
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             if (handle === 0 || totalByteLength === 0) {
                 throw new CanonicalStreamInternalError(
                     'The BGV canonical stream returned malformed begin metadata.',
@@ -314,7 +335,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 metadataPointer,
                 2,
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             if (handle === 0 || totalByteLength === 0) {
                 throw new CanonicalStreamInternalError(
                     'The BGV material reader returned malformed begin metadata.',
@@ -354,7 +375,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                                 chunkByteLength,
                             ),
                     );
-                    this.#throwStatus(readStatus);
+                    this.#statusBoundary.throwIfError(readStatus);
                     chunk = new Uint8Array(
                         this.#context.memory.buffer,
                         outputPointer,
@@ -382,7 +403,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 'BGV canonical material reader finish',
                 () => this.#context.bgvMaterialReaderFinish!(handle),
             );
-            this.#throwStatus(finishStatus);
+            this.#statusBoundary.throwIfError(finishStatus);
             readerLease.state = 'completed';
             this.#release(readerLease);
             readerLease = undefined;
@@ -408,8 +429,8 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                                 readerLease!.handle,
                             ),
                     );
-                    if (cancelStatus >>> 0 !== runtimeInvalidSessionStatus) {
-                        this.#throwStatus(cancelStatus);
+                    if (!this.#statusBoundary.isInvalidSession(cancelStatus)) {
+                        this.#statusBoundary.throwIfError(cancelStatus);
                     }
                 } catch (error) {
                     cleanupFailure ??= error;
@@ -423,8 +444,8 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                         'BGV canonical material reader begin cleanup',
                         () => this.#context.bgvMaterialReaderCancel!(handle),
                     );
-                    if (cancelStatus >>> 0 !== runtimeInvalidSessionStatus) {
-                        this.#throwStatus(cancelStatus);
+                    if (!this.#statusBoundary.isInvalidSession(cancelStatus)) {
+                        this.#statusBoundary.throwIfError(cancelStatus);
                     }
                 } catch (error) {
                     cleanupFailure ??= error;
@@ -490,60 +511,16 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
         const verifier = this.openVerifier(input);
         let operationFailure: unknown;
         let operationFailed = false;
-        let sourceEndedBeforeTrailingCheck = false;
         try {
-            for (
-                let chunkIndex = 0;
-                chunkIndex < verifier.chunkCount;
-                chunkIndex += 1
-            ) {
-                this.#throwIfCancelled(input.abortSignal);
-                const bytes = await input.pullChunk({
-                    ...(input.abortSignal === undefined
-                        ? {}
-                        : { abortSignal: input.abortSignal }),
-                    chunkIndex,
-                    expectedByteLength: this.#expectedChunkByteLength(
-                        verifier,
-                        chunkIndex,
-                    ),
-                });
-                if (bytes === undefined) {
-                    this.#throwIfCancelled(input.abortSignal);
-                    verifier.finish();
-                    sourceEndedBeforeTrailingCheck = true;
-                    break;
-                }
-                try {
-                    this.#throwIfCancelled(input.abortSignal);
-                    verifier.absorbChunk(chunkIndex, bytes);
-                } finally {
-                    this.#releaseBuffer(bytes);
-                }
-            }
-            if (!sourceEndedBeforeTrailingCheck) {
-                const trailingBytes = await input.pullChunk({
-                    ...(input.abortSignal === undefined
-                        ? {}
-                        : { abortSignal: input.abortSignal }),
-                    chunkIndex: verifier.chunkCount,
-                    expectedByteLength: 0,
-                });
-                if (trailingBytes !== undefined) {
-                    try {
-                        this.#throwIfCancelled(input.abortSignal);
-                        verifier.absorbChunk(
-                            verifier.chunkCount,
-                            trailingBytes,
-                        );
-                    } finally {
-                        this.#releaseBuffer(trailingBytes);
-                    }
-                } else {
-                    this.#throwIfCancelled(input.abortSignal);
-                }
-                verifier.finish();
-            }
+            await pumpCanonicalStreamChunks({
+                ...(input.abortSignal === undefined
+                    ? {}
+                    : { abortSignal: input.abortSignal }),
+                createCancellationError: () =>
+                    new CanonicalStreamCancellationError(),
+                lease: verifier,
+                pullChunk: input.pullChunk,
+            });
         } catch (error) {
             operationFailure = error;
             operationFailed = true;
@@ -649,7 +626,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                             bytes.byteLength,
                         ),
                 );
-                this.#throwStatus(status);
+                this.#statusBoundary.throwIfError(status);
             } finally {
                 this.#context.deallocate(chunkPointer, bytes.byteLength);
             }
@@ -670,7 +647,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 'BGV canonical stream finish',
                 () => this.#context.bgvFinish!(lease.handle),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             lease.state = 'completed';
             this.#release(lease);
         } catch (error) {
@@ -690,7 +667,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                         ? this.#context.bgvMaterialReaderCancel!(lease.handle)
                         : this.#context.bgvCancel!(lease.handle),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             lease.state = 'cancelled';
             this.#release(lease);
         } catch (error) {
@@ -708,8 +685,8 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                     'BGV canonical stream failure cleanup',
                     () => this.#context.bgvCancel!(lease.handle),
                 );
-                if (status >>> 0 !== runtimeInvalidSessionStatus) {
-                    this.#throwStatus(status);
+                if (!this.#statusBoundary.isInvalidSession(status)) {
+                    this.#statusBoundary.throwIfError(status);
                 }
             } catch (error) {
                 cleanupFailure = error;
@@ -732,7 +709,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 'BGV canonical stream begin failure cleanup',
                 () => this.#context.bgvCancel!(handle),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
         } catch (cleanupFailure) {
             throw new CanonicalStreamCleanupError(
                 operationFailure,
@@ -757,19 +734,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
         if (abortSignal?.aborted === true) {
             throw new CanonicalStreamCancellationError();
         }
-    }
-
-    #expectedChunkByteLength(
-        lease: BgvCanonicalStreamVerifierLease,
-        chunkIndex: number,
-    ): number {
-        if (chunkIndex + 1 < lease.chunkCount) {
-            return foundationProfile.streamChunkByteLength;
-        }
-        return (
-            lease.totalByteLength -
-            (lease.chunkCount - 1) * foundationProfile.streamChunkByteLength
-        );
     }
 
     #releaseBuffer(buffer: ArrayBuffer): void {
@@ -819,106 +783,27 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
     }
 
     #copyMetadataIntoWasm(bytes: Uint8Array): number {
-        const pointer = this.#allocate(bytes.byteLength);
-        new Uint8Array(this.#context.memory.buffer).set(bytes, pointer);
-        return pointer;
+        return this.#memoryBoundary.copy(bytes);
     }
 
     #copyPayloadIntoWasm(bytes: ArrayBuffer): number {
-        const pointer = this.#allocate(bytes.byteLength);
-        new Uint8Array(this.#context.memory.buffer).set(
-            new Uint8Array(bytes),
-            pointer,
-        );
-        return pointer;
+        return this.#memoryBoundary.copy(new Uint8Array(bytes));
     }
 
     #allocateMetadata(wordCount: number): number {
-        const byteLength = wordCount * wasm32WordByteLength;
-        const pointer = this.#allocate(byteLength);
-        new Uint8Array(this.#context.memory.buffer, pointer, byteLength).fill(
-            0,
-        );
-        return pointer;
+        return this.#memoryBoundary.allocateZeroedWords(wordCount);
     }
 
     #allocate(byteLength: number): number {
-        if (
-            !Number.isSafeInteger(byteLength) ||
-            byteLength <= 0 ||
-            byteLength > foundationProfile.maximumCopiedBufferByteLength ||
-            this.#context.memory.buffer.byteLength >
-                foundationProfile.maximumWasmMemoryByteLength - byteLength
-        ) {
-            throw new CanonicalStreamResourceError(
-                'The BGV canonical stream allocation exceeds the WASM profile.',
-            );
-        }
-        const pointer = this.#context.allocate(byteLength) >>> 0;
-        if (
-            pointer === 0 ||
-            pointer + byteLength > this.#context.memory.buffer.byteLength
-        ) {
-            throw new CanonicalStreamInternalError(
-                'The WASM allocator returned an invalid BGV stream range.',
-            );
-        }
-        return pointer;
+        return this.#memoryBoundary.allocate(byteLength);
     }
 
     #readWords(pointer: number, wordCount: number): readonly number[] {
-        const byteLength = wordCount * wasm32WordByteLength;
-        if (
-            pointer === 0 ||
-            pointer + byteLength > this.#context.memory.buffer.byteLength
-        ) {
-            throw new CanonicalStreamInternalError(
-                'The BGV stream metadata range is invalid.',
-            );
-        }
-        const view = new DataView(
-            this.#context.memory.buffer,
-            pointer,
-            byteLength,
-        );
-        return Array.from({ length: wordCount }, (_, wordIndex) =>
-            view.getUint32(wordIndex * wasm32WordByteLength, true),
-        );
+        return this.#memoryBoundary.readWords(pointer, wordCount);
     }
 
     #zeroAndDeallocate(pointer: number, byteLength: number): void {
-        if (pointer === 0) {
-            return;
-        }
-        new Uint8Array(this.#context.memory.buffer, pointer, byteLength).fill(
-            0,
-        );
-        this.#context.deallocate(pointer, byteLength);
-    }
-
-    #throwStatus(status: number): void {
-        const normalizedStatus = status >>> 0;
-        if (normalizedStatus === 0) {
-            return;
-        }
-        if (
-            normalizedStatus === runtimeInternalFailureStatus ||
-            normalizedStatus === runtimeInvalidSessionStatus
-        ) {
-            throw new CanonicalStreamInternalError(
-                'The WASM BGV canonical stream session failed internally.',
-            );
-        }
-        const refusalReason = refusalReasonByCode.get(normalizedStatus);
-        if (refusalReason === undefined) {
-            throw new CanonicalStreamInternalError(
-                'The WASM BGV canonical stream returned an unknown status code.',
-            );
-        }
-        if (refusalReason === 'outsideSupportedProfile') {
-            throw new CanonicalStreamResourceError();
-        }
-        throw new CanonicalStreamRefusalError(refusalReason);
+        this.#memoryBoundary.zeroAndDeallocate(pointer, byteLength);
     }
 }
 

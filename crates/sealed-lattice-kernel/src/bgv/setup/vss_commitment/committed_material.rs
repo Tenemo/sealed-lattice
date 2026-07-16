@@ -56,7 +56,7 @@ pub(crate) fn compute_vss_committed_material_commitment(
     for (coefficient_index, coefficient) in input.message_coefficients.iter().enumerate() {
         if *coefficient >= message_coefficient_bound {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!(
                     "VSS message coefficient {coefficient_index} must be below messageCoefficientBound"
                 ),
@@ -127,7 +127,7 @@ fn committed_material_error(
     error: crate::bgv::proof_suite::CommittedMaterialError,
 ) -> CanonicalError {
     CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
+        CanonicalErrorCode::InvalidProtocolObject,
         format!("committed-material tree construction failed: {error:?}"),
     )
 }
@@ -177,31 +177,6 @@ fn vss_committed_material_opening_payload_hash(
     ))
 }
 
-pub(crate) fn compute_vss_committed_material_commitment_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let commitment_role = string_at_path(request, &["commitmentRole"])?;
-    let commitment_context = value_at_path(request, &["commitmentContext"])?;
-    let rns_limb_index = usize_at_path(request, &["rnsLimbIndex"])?;
-    let message_coefficients =
-        read_vss_public_message_coefficients(request, "messageCoefficients")?;
-    let material_seed_hex = string_at_path(request, &["materialSeedHex"])?;
-
-    let computation =
-        compute_vss_committed_material_commitment(VssCommittedMaterialCommitmentInput {
-            commitment_role,
-            commitment_context,
-            rns_limb_index,
-            message_coefficients: &message_coefficients,
-            material_seed_hex,
-        })?;
-
-    Ok(json!({
-        "commitment": computation.commitment,
-        "openingRoot": computation.opening_root,
-    }))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,22 +209,31 @@ mod tests {
             .collect()
     }
 
-    fn commitment_request(message_coefficients: &[u64], material_seed_hex: &str) -> Value {
+    fn commitment_context() -> Value {
         json!({
-            "commitmentRole": "coefficient",
-            "commitmentContext": {
-                "ceremonyId": "test-ceremony",
-                "sourceTrusteeRosterPosition": 2,
-                "shamirCoefficientIndex": 1,
-            },
-            "rnsLimbIndex": 0,
-            "messageCoefficients": message_coefficients,
-            "materialSeedHex": material_seed_hex,
+            "ceremonyId": "test-ceremony",
+            "sourceTrusteeRosterPosition": 2,
+            "shamirCoefficientIndex": 1,
         })
     }
 
-    fn material_root_hex(response: &Value) -> String {
-        response["commitment"]["materialRootHex"]
+    fn commitment_computation(
+        commitment_role: &str,
+        commitment_context: &Value,
+        message_coefficients: &[u64],
+        material_seed_hex: &str,
+    ) -> CanonicalResult<VssCommittedMaterialCommitmentComputation> {
+        compute_vss_committed_material_commitment(VssCommittedMaterialCommitmentInput {
+            commitment_role,
+            commitment_context,
+            rns_limb_index: 0,
+            message_coefficients,
+            material_seed_hex,
+        })
+    }
+
+    fn material_root_hex(computation: &VssCommittedMaterialCommitmentComputation) -> String {
+        computation.commitment["materialRootHex"]
             .as_str()
             .expect("material root hex")
             .to_string()
@@ -260,43 +244,43 @@ mod tests {
     -> CanonicalResult<()> {
         let message = test_message(DATA_PRIMES[0]);
         let seed = test_material_seed_hex(0x5a);
-        let request = commitment_request(&message, &seed);
+        let context = commitment_context();
 
-        let first = compute_vss_committed_material_commitment_request(&request)?;
-        let second = compute_vss_committed_material_commitment_request(&request)?;
+        let first = commitment_computation("coefficient", &context, &message, &seed)?;
+        let second = commitment_computation("coefficient", &context, &message, &seed)?;
         assert_eq!(
-            first, second,
+            first.commitment, second.commitment,
             "the committed-material commitment must regenerate byte-identically from the same message and seed"
         );
+        assert_eq!(first.opening_root, second.opening_root);
         let material_root = material_root_hex(&first);
         assert_eq!(
             material_root.len(),
             128,
             "material root is a 64-byte H_512 digest in hex"
         );
-        assert!(first.get("commitmentRoot").is_none());
-
         // A different private seed hides differently: the context hash stays
         // fixed while the material root and opening reference both change.
-        let other_seed_response = compute_vss_committed_material_commitment_request(
-            &commitment_request(&message, &test_material_seed_hex(0xa5)),
+        let other_seed_response = commitment_computation(
+            "coefficient",
+            &context,
+            &message,
+            &test_material_seed_hex(0xa5),
         )?;
         assert_eq!(
-            first["commitment"]["commitmentContextHash"],
-            other_seed_response["commitment"]["commitmentContextHash"]
+            first.commitment["commitmentContextHash"],
+            other_seed_response.commitment["commitmentContextHash"]
         );
         assert_ne!(material_root, material_root_hex(&other_seed_response));
-        assert_ne!(first["openingRoot"], other_seed_response["openingRoot"]);
+        assert_ne!(first.opening_root, other_seed_response.opening_root);
 
         // A different role re-derives the context hash and therefore the mask
         // and salt streams: the root changes even for the same message and
         // seed, so trees are never shared across roles.
-        let mut role_request = commitment_request(&message, &seed);
-        role_request["commitmentRole"] = json!("recipient-share");
-        let role_response = compute_vss_committed_material_commitment_request(&role_request)?;
+        let role_response = commitment_computation("recipient-share", &context, &message, &seed)?;
         assert_ne!(
-            first["commitment"]["commitmentContextHash"],
-            role_response["commitment"]["commitmentContextHash"]
+            first.commitment["commitmentContextHash"],
+            role_response.commitment["commitmentContextHash"]
         );
         assert_ne!(material_root, material_root_hex(&role_response));
 
@@ -310,9 +294,8 @@ mod tests {
     fn committed_material_commitment_separates_distinct_messages() -> CanonicalResult<()> {
         let seed = test_material_seed_hex(0x33);
         let base_message = test_message(DATA_PRIMES[0]);
-        let base_response = compute_vss_committed_material_commitment_request(
-            &commitment_request(&base_message, &seed),
-        )?;
+        let context = commitment_context();
+        let base_response = commitment_computation("coefficient", &context, &base_message, &seed)?;
         let base_root = material_root_hex(&base_response);
 
         let mut variants: Vec<(String, Vec<u64>)> = Vec::new();
@@ -336,10 +319,7 @@ mod tests {
 
         let mut all_roots = vec![base_root];
         for (variant_label, variant_message) in &variants {
-            let response = compute_vss_committed_material_commitment_request(&commitment_request(
-                variant_message,
-                &seed,
-            ))?;
+            let response = commitment_computation("coefficient", &context, variant_message, &seed)?;
             let variant_root = material_root_hex(&response);
             for existing_root in &all_roots {
                 assert_ne!(
@@ -357,57 +337,68 @@ mod tests {
     fn committed_material_commitment_rejects_malformed_input() {
         let seed = test_material_seed_hex(0x11);
         let message = test_message(DATA_PRIMES[0]);
+        let context = commitment_context();
 
         // A coefficient at the bound.
-        let mut out_of_bound_request = commitment_request(&message, &seed);
-        out_of_bound_request["messageCoefficients"][3] = json!(DATA_PRIMES[0]);
+        let mut out_of_bound_message = message.clone();
+        out_of_bound_message[3] = DATA_PRIMES[0];
         assert!(
-            compute_vss_committed_material_commitment_request(&out_of_bound_request).is_err(),
+            commitment_computation("coefficient", &context, &out_of_bound_message, &seed).is_err(),
             "a message coefficient at the bound must be rejected"
         );
 
         // An unsupported role.
-        let mut unsupported_role_request = commitment_request(&message, &seed);
-        unsupported_role_request["commitmentRole"] = json!("unsupported-role");
         assert!(
-            compute_vss_committed_material_commitment_request(&unsupported_role_request).is_err(),
+            commitment_computation("unsupported-role", &context, &message, &seed).is_err(),
             "an unsupported commitment role must be rejected"
         );
 
         // A malformed seed (wrong length / alphabet).
-        let mut short_seed_request = commitment_request(&message, &seed);
-        short_seed_request["materialSeedHex"] = json!("abc123");
         assert!(
-            compute_vss_committed_material_commitment_request(&short_seed_request).is_err(),
+            commitment_computation("coefficient", &context, &message, "abc123").is_err(),
             "a malformed material seed must be rejected"
         );
 
         // A non-power-of-two ring degree cannot host the trace split.
-        let odd_degree_request = commitment_request(&message[..TEST_RING_DEGREE - 1], &seed);
         assert!(
-            compute_vss_committed_material_commitment_request(&odd_degree_request).is_err(),
+            commitment_computation(
+                "coefficient",
+                &context,
+                &message[..TEST_RING_DEGREE - 1],
+                &seed,
+            )
+            .is_err(),
             "a non-power-of-two ring degree must be rejected"
         );
 
         // A ring below the selected profile's minimum size is refused by the
         // domain plan, not silently committed.
         let tiny_message = &message[..4];
-        let tiny_degree_request = commitment_request(tiny_message, &seed);
         assert!(
-            compute_vss_committed_material_commitment_request(&tiny_degree_request).is_err(),
+            commitment_computation("coefficient", &context, tiny_message, &seed).is_err(),
             "a ring degree below the selected profile minimum must be rejected"
         );
 
-        let flooding_noise_message = vec![32; TEST_RING_DEGREE];
-        let mut flooding_noise_request = commitment_request(&flooding_noise_message, &seed);
-        flooding_noise_request["commitmentRole"] = json!("target-decryption-flooding-noise");
+        let mut flooding_noise_message = vec![32; TEST_RING_DEGREE];
         assert!(
-            compute_vss_committed_material_commitment_request(&flooding_noise_request).is_ok(),
+            commitment_computation(
+                "target-decryption-flooding-noise",
+                &context,
+                &flooding_noise_message,
+                &seed,
+            )
+            .is_ok(),
             "the largest canonical encoded flooding-noise coefficient must be accepted"
         );
-        flooding_noise_request["messageCoefficients"][0] = json!(33);
+        flooding_noise_message[0] = 33;
         assert!(
-            compute_vss_committed_material_commitment_request(&flooding_noise_request).is_err(),
+            commitment_computation(
+                "target-decryption-flooding-noise",
+                &context,
+                &flooding_noise_message,
+                &seed,
+            )
+            .is_err(),
             "the fixed flooding-noise range must be enforced by the kernel"
         );
     }

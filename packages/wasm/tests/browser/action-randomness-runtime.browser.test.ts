@@ -90,27 +90,6 @@ describe('Action-randomness real-WASM runtime in browsers', () => {
         if (!targetReservation.isValid) {
             throw new Error(targetReservation.refusalReason);
         }
-        const dealerSetVector = stateVector.reservationOnly.find(
-            (candidate) =>
-                candidate.capabilityKind ===
-                stateCapabilityKinds.setupActionRandomnessRoot,
-        );
-        if (dealerSetVector === undefined) {
-            throw new Error('Missing dealer-set reservation vector.');
-        }
-        const dealerSetReservation = stateSession.verifyReservation({
-            canonicalReservationIntentCarrier:
-                dealerSetVector.certifiedIntent.canonicalIntentCarrier,
-            canonicalStateCertificate:
-                dealerSetVector.certifiedIntent.canonicalStateCertificate,
-            capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
-            expectedAuthorizationHash: stateVector.authorizationHash,
-            subjectParticipantIdentity: stateVector.subjectParticipantIdentity,
-        });
-        expect(dealerSetReservation.isValid).toBe(true);
-        if (!dealerSetReservation.isValid) {
-            throw new Error(dealerSetReservation.refusalReason);
-        }
         const reservedActionSession = openActionRandomnessSession({
             cryptoProvider: createDeterministicCryptoProvider([
                 {
@@ -130,17 +109,6 @@ describe('Action-randomness real-WASM runtime in browsers', () => {
                 suiteId: bytesToHex(stateVector.suiteIdentifier),
             },
         });
-        const persistentInput = {
-            applicationStatementHash: '66'.repeat(64),
-            rosterPosition: 0,
-            statementSchemaIdentifier: 0x1211 as const,
-            verifiedReservation: dealerSetReservation.value,
-        };
-        const persistentAttempt =
-            reservedActionSession.derivePersistentProofAttempt(persistentInput);
-        expect(
-            reservedActionSession.derivePersistentProofAttempt(persistentInput),
-        ).toEqual(persistentAttempt);
         const targetInput = {
             rosterPosition: 0,
             verifiedReservation: targetReservation.value,
@@ -150,7 +118,6 @@ describe('Action-randomness real-WASM runtime in browsers', () => {
         expect(
             reservedActionSession.deriveTargetReleaseAttempt(targetInput),
         ).toEqual(targetAttempt);
-        persistentAttempt.attemptIdentifier.fill(0);
         targetAttempt.attemptIdentifier.fill(0);
         reservedActionSession.close();
         stateSession.cancel();

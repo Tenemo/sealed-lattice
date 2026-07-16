@@ -369,9 +369,9 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         }
         None => None,
     };
-    let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree);
-    let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count);
-    let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1);
+    let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree)?;
+    let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count)?;
+    let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1)?;
     let mu = lookup_challenge[0];
 
     // Round 2 (streamed): the logUp fraction columns, which depend on `mu`. The
@@ -396,23 +396,26 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     // fixed by the auxiliary commitment. Draw the final coordinate batching
     // weights only now, so a prover cannot choose those chunks to cancel
     // malformed claims across commitment fields or extension coordinates.
-    let linkage_weights = linkage_public_forms.as_ref().map(|_| {
-        transcript.challenge_field_elements(
-            parameters,
-            "key-linkage-omega",
-            linkage::linkage_claim_count(),
-        )
-    });
+    let linkage_weights = linkage_public_forms
+        .as_ref()
+        .map(|_| {
+            transcript.challenge_field_elements(
+                parameters,
+                "key-linkage-omega",
+                linkage::linkage_claim_count(),
+            )
+        })
+        .transpose()?;
 
     // Batching challenges: one for the lookup terminal, one per table terminal,
     // folded into the single sumcheck; and the support-constraint weights.
     let sum_batch =
-        transcript.challenge_field_elements(parameters, "key-sum-batch", 1 + table_count);
+        transcript.challenge_field_elements(parameters, "key-sum-batch", 1 + table_count)?;
     let alpha = transcript.challenge_field_elements(
         parameters,
         "key-support-alpha",
         support_constraint_count(ring_degree, digit_count, plan.linkage_layout()),
-    );
+    )?;
     #[cfg(all(test, not(target_arch = "wasm32")))]
     drop(auxiliary_round_timer);
     #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -853,7 +856,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         parameters,
         "key-combination",
         base_count + material_count + aux_count + QUOTIENT_COLUMN_COUNT + 1,
-    );
+    )?;
 
     // Combination pass: form the weighted coefficient sum in the fixed order
     // base + material + aux + quotient, then perform its coset extension once.
@@ -937,7 +940,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         "key-query",
         layout.coset_size,
         proof_parameters.query_count,
-    );
+    )?;
     let fri = fri_answer(&fri_commitment, &query_positions);
     #[cfg(all(test, not(target_arch = "wasm32")))]
     drop(fri_timer);

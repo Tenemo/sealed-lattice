@@ -19,18 +19,18 @@ mod source_constant_commitments;
 #[cfg(test)]
 mod transcript_order_audit;
 mod trustee_evaluation_key_proof;
-mod vss_commitment;
-pub(crate) use trustee_evaluation_key_proof::generate_trustee_evaluation_key_proof_from_request;
 mod vss;
+mod vss_commitment;
 
 #[cfg(test)]
 mod tests;
 
 #[cfg(test)]
 pub(crate) use accepted_setup::accepted_setup_participant_roster_from_package;
+#[cfg(test)]
+pub(in crate::bgv) use accepted_setup::decryption_threshold_for_participant_count;
 pub(in crate::bgv) use accepted_setup::{
-    decryption_threshold_for_participant_count, decryption_threshold_for_roster_length,
-    derive_collective_setup_package_hash,
+    decryption_threshold_for_roster_length, derive_collective_setup_package_hash,
 };
 pub(crate) use accepted_setup::{
     describe_collective_bgv_setup_parameters,
@@ -39,6 +39,8 @@ pub(crate) use accepted_setup::{
 };
 #[cfg(test)]
 pub(crate) use canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_AGGREGATE_OPENING;
+#[cfg(test)]
+pub(crate) use canonical_stream_transport::retain_generated_canonical_proof_material;
 pub(in crate::bgv::setup) use canonical_stream_transport::{
     AcceptedSetupProofBindingSession, accepted_setup_component_material,
     accepted_setup_public_key_share_material, consume_accepted_setup_proof_binding,
@@ -47,12 +49,12 @@ pub(in crate::bgv::setup) use canonical_stream_transport::{
 #[cfg(test)]
 pub(in crate::bgv::setup) use canonical_stream_transport::{
     CanonicalSetupProofBindingLease, accepted_setup_proof_binding_lease,
-    evict_verified_canonical_setup_proof_materials, restore_accepted_setup_proof_binding_lease,
-    retain_accepted_setup_proof_binding, verified_canonical_setup_proof_material_bytes,
+    restore_accepted_setup_proof_binding_lease, retain_accepted_setup_proof_binding,
 };
 #[cfg(test)]
 pub(crate) use canonical_stream_transport::{
-    TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY, evict_verified_canonical_proof_materials,
+    TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY,
+    evict_authenticated_canonical_proof_materials,
 };
 pub(crate) use canonical_stream_transport::{
     absorb_bgv_canonical_stream_chunk, active_accepted_setup_proof_binding_session,
@@ -60,24 +62,36 @@ pub(crate) use canonical_stream_transport::{
     begin_bgv_canonical_material_reader, begin_bgv_canonical_stream,
     cancel_accepted_setup_proof_binding_session, cancel_bgv_canonical_material_reader,
     cancel_bgv_canonical_stream, finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
-    read_bgv_canonical_material_chunk, retain_generated_canonical_proof_material,
-    take_verified_canonical_proof_material_bytes,
+    read_bgv_canonical_material_chunk, take_authenticated_canonical_proof_material_bytes,
+};
+#[cfg(test)]
+pub(crate) use commitment::{
+    LatticeAnchorCommitment, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+    lattice_anchor_commitment_canonical_bytes,
 };
 pub(crate) use commitment::{
-    LatticeAnchorCommitment, SETUP_COMMITMENT_HIDING_ERROR_WIDTH,
-    SETUP_COMMITMENT_HIDING_SECRET_WIDTH, SETUP_COMMITMENT_MODULE_RANK,
-    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-    compute_lattice_anchor_commitment_from_opening_request,
-    compute_lattice_anchor_commitment_from_typed_opening,
-    compute_setup_commitment_from_opening_request, compute_setup_commitment_from_typed_opening,
-    lattice_anchor_commitment_canonical_bytes, parse_lattice_anchor_commitment_canonical_bytes,
+    SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
+    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+    compute_setup_commitment_from_typed_opening, parse_lattice_anchor_commitment_canonical_bytes,
+    setup_commitment_worker_response_bytes,
 };
 pub(crate) use private_vss::verify_private_vss_share_envelope_from_request;
+
+pub(crate) fn derive_succinct_setup_statement_hash_from_request(
+    request: &Value,
+) -> crate::encoding::CanonicalResult<Value> {
+    match request.get("proofFamily").and_then(Value::as_str) {
+        Some("private-vss-share") => {
+            private_vss::derive_private_vss_share_statement_hash_from_request(request)
+        }
+        _ => Err(crate::encoding::CanonicalError::new(
+            crate::encoding::CanonicalErrorCode::InvalidProtocolObject,
+            "proofFamily must select a supported succinct setup statement",
+        )),
+    }
+}
 #[cfg(test)]
-pub(in crate::bgv::setup) use same_secret_bridge::{
-    same_secret_bridge_proof_verification_request_from_public_records,
-    verify_and_retain_same_secret_bridge_proof_binding,
-};
+pub(in crate::bgv::setup) use same_secret_bridge::same_secret_bridge_proof_verification_request_from_public_records;
 pub(crate) use same_secret_bridge::{
     verify_vss_same_secret_bridge_proof_material_set_request,
     verify_vss_same_secret_bridge_statement_set_request,
@@ -87,9 +101,11 @@ pub(crate) use setup_proof::ProofByteSource;
 pub(crate) use setup_proof::{
     BgvProofMaterialBytes, authenticate_setup_proof_material_stream_for_test,
 };
+#[cfg(test)]
 pub(in crate::bgv) use trustee_evaluation_key_proof::TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND;
 #[cfg(test)]
 pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMILY;
+#[cfg(test)]
 pub(in crate::bgv) use trustee_evaluation_key_proof::target_decryption_interpolation_denominator_clearing_factor;
 
 pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
@@ -100,9 +116,9 @@ pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
     verify_collective_bgv_setup_package_in_session_from_request(request, session)
 }
 
+#[cfg(test)]
 pub(crate) use vss_commitment::{
-    VssAggregateThresholdProofContext, compute_vss_committed_material_commitment_request,
-    verify_vss_public_aggregate_threshold_proofs,
+    VssAggregateThresholdProofContext, verify_vss_public_aggregate_threshold_proofs,
 };
 #[cfg(test)]
 pub(crate) use vss_commitment::{
@@ -135,13 +151,16 @@ use crate::{
         modular_arithmetic::add_mod,
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         setup_helpers::{
-            array_at_path, hash_at_path, string_at_path, unsigned_at_path, usize_at_path,
-            validate_hash_string, value_at_path,
+            array_at_path, hash_at_path, string_at_path, unsigned_at_path, validate_hash_string,
+            value_at_path,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{derive_canonical_object_hash, hash_framed_parts_512 as hash512, hash512_hex},
+    hashing::derive_canonical_object_hash,
 };
+
+#[cfg(test)]
+use crate::hashing::{hash_framed_parts_512 as hash512, hash512_hex};
 
 #[cfg(test)]
 use crate::bgv::{

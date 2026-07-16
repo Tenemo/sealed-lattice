@@ -12,13 +12,13 @@ pub(super) fn read_non_empty_string<'a>(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{field_name} must be a string"),
             )
         })?;
     if field.trim().is_empty() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{field_name} must not be empty"),
         ));
     }
@@ -45,7 +45,7 @@ pub(super) fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<us
 pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
     if !is_lowercase_protocol_hash(hash) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{field_name} must be a 128-character lowercase hexadecimal protocol hash"),
         ));
     }
@@ -55,7 +55,7 @@ pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalRes
 
 #[cfg(test)]
 fn invalid_setup_fixture(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 pub(super) fn is_lowercase_protocol_hash(hash: &str) -> bool {
@@ -70,14 +70,14 @@ pub(super) fn string_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalRe
     for field_name in path {
         current = current.get(*field_name).ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("missing setup package field {}", path.join(".")),
             )
         })?;
     }
     current.as_str().ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("setup package field {} must be a string", path.join(".")),
         )
     })
@@ -88,7 +88,7 @@ pub(super) fn value_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalRes
     for field_name in path {
         current = current.get(*field_name).ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("missing setup package field {}", path.join(".")),
             )
         })?;
@@ -103,7 +103,7 @@ pub(super) fn array_at_path<'a>(
 ) -> CanonicalResult<&'a Vec<Value>> {
     value_at_path(value, path)?.as_array().ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("setup package field {} must be an array", path.join(".")),
         )
     })
@@ -112,7 +112,7 @@ pub(super) fn array_at_path<'a>(
 pub(super) fn unsigned_at_path(value: &Value, path: &[&str]) -> CanonicalResult<u64> {
     value_at_path(value, path)?.as_u64().ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!(
                 "setup package field {} must be a non-negative integer",
                 path.join(".")
@@ -176,23 +176,7 @@ pub(super) fn read_positive_usize_at_path(
     let field = usize_at_path(value, path)?;
     if field == 0 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{description} must be positive"),
-        ));
-    }
-
-    Ok(field)
-}
-
-pub(super) fn read_positive_u64_at_path(
-    value: &Value,
-    path: &[&str],
-    description: &str,
-) -> CanonicalResult<u64> {
-    let field = unsigned_at_path(value, path)?;
-    if field == 0 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("{description} must be positive"),
         ));
     }

@@ -36,7 +36,7 @@ pub(super) fn take_target_decryption_share_proof_material_for_active_attempt(
     // Crossing this boundary transfers the family-scoped authenticated bytes
     // out of the store. Every later refusal aborts the active release session,
     // and a retry must authenticate the proof stream again.
-    let proof_bytes = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+    let proof_bytes = crate::bgv::setup::take_authenticated_canonical_proof_material_bytes(
         crate::bgv::setup::TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
         proof_bytes_hash,
     )?
@@ -93,7 +93,7 @@ pub(super) fn verify_target_decryption_share_proof_material(
         != TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "target-decryption proof material must use the current target proof-material layout",
         ));
     }

@@ -1,14 +1,21 @@
+import { shake256 } from '@noble/hashes/sha3.js';
 import {
     BrowserActionStorageCustodyError,
+    foundationProfile,
     isProtocolHash,
     stateCapabilityKinds,
     type BrowserActionProofAttemptBinding,
     type BrowserActionRandomnessRecordContext,
+    type BrowserActionRandomnessReservationCertificationInput,
+    type BrowserActionRandomnessReservationIntentProductionInput,
+    type BrowserActionRandomnessReservationIntentWitnessVerificationInput,
     type BrowserActionRandomnessReservationVerificationInput,
+    type BrowserActionRandomnessReservationWitnessVoteProductionInput,
     type BrowserActionStateReservationVerificationInput,
     type BrowserActionStateVerifierSessionInput,
     type BrowserOpenedActionRandomnessSession,
-    type BrowserPersistentProofAttemptInput,
+    type BrowserProducedActionRandomnessReservation,
+    type BrowserProducedActionRandomnessReservationIntent,
     type BrowserSealedActionRandomnessSession,
     type BrowserTargetReleaseAttemptInput,
     type ProtocolHash,
@@ -19,26 +26,53 @@ import {
     type BrowserLocalRecordSealInput,
     type BrowserActionStorageRootBinding,
     type BrowserActionStorageWorkerKernel,
+    type BrowserAuthenticatedRepairProtectionInput,
+    type BrowserFoundationWitnessProvisioningBinding,
     type UntrustedExpectedStorageRootCommitment,
+    type WorkerPreparedBrowserFoundationInitialization,
+    type WorkerDerivedBrowserFoundationInitializationRecords,
     type WorkerPreparedDeviceWrappingState,
+    type WorkerOpenedBrowserAuthenticatedRepairProtection,
+    type WorkerBrowserFoundationInitializationPreparationInput,
 } from '@sealed-lattice/types';
 
-import { actionRandomnessCommandIdentifiers } from './action-randomness-command-identifiers.js';
 import {
+    actionRandomnessCommandOutputByteLimit,
+    maximumClosedWorkerCommandByteLength,
+} from './action-randomness-command-byte-limits.js';
+import { actionRandomnessCommandIdentifiers } from './action-randomness-command-identifiers.js';
+import { byteArraysEqual } from './byte-array.js';
+import {
+    abortVerifiedCommonProofApplication,
+    confirmVerifiedCommonProofApplication,
+    prepareVerifiedCommonProofApplication,
+    type CommonProofApplicationFreshnessCoordinate,
+    type VerifiedCommonProofCapability,
+} from './common-proof-worker-runtime.js';
+import {
+    constructVerifiedStateWitnessVoteCarrierForWorker,
     openStateVerifierSession,
+    produceSetupActionRandomnessReservationIntentFromRetainedKernelHandle,
     resolveVerifiedStateReservationKernelAuthorization,
     type StateVerifierSession,
+    type VerifiedStateDurableBinding,
     type VerifiedStateReservation,
+    type VerifiedStateReservationIntent,
 } from './state-verifier-runtime.js';
+import {
+    decodeStructuredCommitmentWorkerResponse,
+    type BgvSetupCommitmentOpeningComputation,
+} from './structured-commitment-worker-response.js';
 import {
     resolveActionRandomnessKernelContext,
     type ActionRandomnessKernelContext,
 } from './transcript-core-bridge/action-randomness-kernel-context.js';
+import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type {
-    BgvSetupCommitmentOpeningComputation,
     SetupMailboxSlot,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-types.js';
+import { bytesToHex } from './transcript-core-bridge/kernel-wasm-hash.js';
 import {
     resolveLocalStorageRootKernelContext,
     type LocalStorageRootKernelContext,
@@ -54,7 +88,7 @@ const foundationHashByteLength = 64;
 const handleByteLength = 4;
 const localRecordNonceByteLength = 12;
 const maximumLocalRecordPlaintextByteLength = 1_048_576;
-const maximumCommandByteLength = 1_572_864;
+const maximumCommandByteLength = maximumClosedWorkerCommandByteLength;
 const maximumWrappedStorageRootByteLength = 492;
 const mlDsa65VerificationKeyByteLength = 1_952;
 const mlDsa65SignatureByteLength = 3_309;
@@ -63,12 +97,21 @@ const mlKem768EncapsulationKeyByteLength = 1_184;
 const mlKem768SharedSecretByteLength = 32;
 const wasm32WordByteLength = 4;
 const opaqueWorkerIdentifierPattern = /^[0-9a-f]{64}$/u;
+const storageNamespacePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const repairTextEncoder = new TextEncoder();
 const setupMailboxSignatureContext = new TextEncoder().encode(
     'sealed-lattice/mailbox-signature/v1',
 );
 const objectSignatureContext = new TextEncoder().encode(
     'sealed-lattice/object-signature/v1',
 );
+const foundationWitnessAuthorizedEmptyRecordDomain = new TextEncoder().encode(
+    'sealed-lattice/runtime/foundation-state-witness-authorized-empty/v1',
+);
+const foundationWitnessStateKeyDomain = new TextEncoder().encode(
+    'sealed-lattice/runtime/foundation-state-witness-state-key/v1',
+);
+const foundationWitnessRecordVersion = 1;
 
 const localStorageRootCommands = Object.freeze({
     associatedData: 4,
@@ -83,6 +126,10 @@ const localStorageRootCommands = Object.freeze({
     sealRecord: 15,
     openRecord: 16,
     hashRecordEnvelope: 17,
+    deriveRepairIdentity: 18,
+    sealRepairHead: 19,
+    openRepairHead: 20,
+    digestRepairHead: 21,
     stageNew: 1,
     stageOpened: 2,
 } as const);
@@ -108,6 +155,16 @@ type RootLease = {
 };
 
 type WorkerActionRandomnessRecordContext = BrowserActionRandomnessRecordContext;
+
+type WorkerActionRandomnessSessionRecord = Readonly<{
+    actionRandomnessCommitment: Uint8Array<ArrayBuffer>;
+    handle: number;
+}>;
+
+type WorkerAuthenticatedRepairProtectionRecord = Readonly<{
+    namespaceBytes: Uint8Array<ArrayBuffer>;
+    runtimeBuildManifestHash: Uint8Array<ArrayBuffer>;
+}>;
 
 type WorkerSealedActionRandomnessSession = BrowserSealedActionRandomnessSession;
 
@@ -163,6 +220,16 @@ export type ClosedWorkerStructuredCommitmentOpeningOperations = Readonly<{
     revoke(): void;
 }>;
 
+export type ClosedWorkerPreparedCommonProofApplication = Readonly<{
+    authorizationFrame: Uint8Array<ArrayBuffer>;
+    proofApplicationSlotHash: Uint8Array<ArrayBuffer>;
+    abort(): Promise<void>;
+    confirm(input: {
+        authenticatedAuthorizationFrame: Uint8Array;
+        successor: CommonProofApplicationFreshnessCoordinate;
+    }): Promise<void>;
+}>;
+
 type WorkerSetupMailboxSigningOperations = Readonly<{
     readonly verificationKey: Uint8Array;
     signClosedMessage(input: {
@@ -203,15 +270,26 @@ type WorkerActionRandomnessKernelRunner = Readonly<{
     openStructuredCommitmentOpenings(
         input: WorkerStructuredCommitmentOpeningInput,
     ): Promise<ClosedWorkerStructuredCommitmentOpeningOperations>;
+    durableBindingForStateObject(
+        stateObjectIdentifier: string,
+    ): Promise<VerificationResult<VerifiedStateDurableBinding>>;
 }>;
 
-type WorkerStateObject = Readonly<{
-    capabilityKind: number;
-    kind: 'reservation';
-    sessionIdentifier: string;
-    subjectParticipantIdentity: Uint8Array<ArrayBuffer>;
-    value: VerifiedStateReservation;
-}>;
+type WorkerStateObject =
+    | Readonly<{
+          capabilityKind: number;
+          kind: 'reservation';
+          sessionIdentifier: string;
+          subjectParticipantIdentity: Uint8Array<ArrayBuffer>;
+          value: VerifiedStateReservation;
+      }>
+    | Readonly<{
+          capabilityKind: number;
+          kind: 'reservation-intent';
+          sessionIdentifier: string;
+          subjectParticipantIdentity: Uint8Array<ArrayBuffer>;
+          value: VerifiedStateReservationIntent;
+      }>;
 
 type WorkerStateVerifierSession = Readonly<{
     canonicalRosterBytes: Uint8Array<ArrayBuffer>;
@@ -221,6 +299,40 @@ type WorkerStateVerifierSession = Readonly<{
 const workerActionRandomnessKernelRunners = new WeakMap<
     BrowserActionStorageWorkerKernel,
     WorkerActionRandomnessKernelRunner
+>();
+
+type WorkerFoundationStateProducerRunner = Readonly<{
+    certifyReservation(
+        input: BrowserActionRandomnessReservationCertificationInput,
+    ): Promise<VerificationResult<BrowserProducedActionRandomnessReservation>>;
+    produceIntent(
+        input: BrowserActionRandomnessReservationIntentProductionInput,
+    ): Promise<
+        VerificationResult<BrowserProducedActionRandomnessReservationIntent>
+    >;
+    produceWitnessVote(
+        input: BrowserActionRandomnessReservationWitnessVoteProductionInput,
+    ): Promise<VerificationResult<Uint8Array>>;
+    verifyIntentForWitness(
+        input: BrowserActionRandomnessReservationIntentWitnessVerificationInput,
+    ): Promise<VerificationResult<string>>;
+}>;
+
+const workerFoundationStateProducerRunners = new WeakMap<
+    BrowserActionStorageWorkerKernel,
+    WorkerFoundationStateProducerRunner
+>();
+
+type WorkerCommonProofApplicationRunner = Readonly<{
+    prepare(
+        capability: VerifiedCommonProofCapability,
+        predecessor: CommonProofApplicationFreshnessCoordinate,
+    ): Promise<ClosedWorkerPreparedCommonProofApplication>;
+}>;
+
+const workerCommonProofApplicationRunners = new WeakMap<
+    BrowserActionStorageWorkerKernel,
+    WorkerCommonProofApplicationRunner
 >();
 
 type DecodedDeviceEnvelope = Readonly<{
@@ -249,21 +361,6 @@ const terminalSetupCheckpointKernelCommandRunners = new WeakMap<
     BrowserActionStorageWorkerKernel,
     TerminalSetupCheckpointKernelCommandRunner
 >();
-
-const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
-    if (left.byteLength !== right.byteLength) {
-        return false;
-    }
-    let difference = 0;
-    for (let byteIndex = 0; byteIndex < left.byteLength; byteIndex += 1) {
-        difference |= left[byteIndex] ^ right[byteIndex];
-    }
-
-    return difference === 0;
-};
-
-const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const protocolHashBytes = (
     value: unknown,
@@ -321,7 +418,7 @@ const copyBoundedBytes = (
 };
 
 const copyExactBytes = (
-    value: Uint8Array,
+    value: unknown,
     expectedByteLength: number,
     label: string,
 ): Uint8Array<ArrayBuffer> => {
@@ -431,6 +528,140 @@ const encodeCanonicalUnsigned64 = (
 
     return bytes;
 };
+
+type CopiedBrowserFoundationInitializationInput = Readonly<{
+    actionRandomnessRecordContext: BrowserActionRandomnessRecordContext;
+    orderedWitnessBindings: readonly BrowserFoundationWitnessProvisioningBinding[];
+    runtimeBuildManifestHash: Uint8Array<ArrayBuffer>;
+}>;
+
+const destroyBrowserFoundationInitializationInput = (
+    input: CopiedBrowserFoundationInitializationInput,
+): void => {
+    input.runtimeBuildManifestHash.fill(0);
+    for (const binding of input.orderedWitnessBindings) {
+        binding.subjectParticipantIdentity.fill(0);
+        binding.witnessParticipantIdentity.fill(0);
+    }
+};
+
+const copyBrowserFoundationInitializationInput = (
+    input: WorkerBrowserFoundationInitializationPreparationInput,
+): CopiedBrowserFoundationInitializationInput => {
+    const untrustedOrderedWitnessBindings: unknown =
+        input?.orderedWitnessBindings;
+    if (
+        typeof input !== 'object' ||
+        input === null ||
+        !Array.isArray(untrustedOrderedWitnessBindings) ||
+        untrustedOrderedWitnessBindings.length !==
+            foundationProfile.participantCount - 1
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            `Browser foundation initialization requires exactly ${String(foundationProfile.participantCount - 1)} ordered witness bindings.`,
+        );
+    }
+    if (
+        typeof input.actionRandomnessRecordContext !== 'object' ||
+        input.actionRandomnessRecordContext === null ||
+        input.actionRandomnessRecordContext.recordVersion !== 0n ||
+        input.actionRandomnessRecordContext.predecessorRecordHash !== undefined
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'Fresh browser foundation initialization requires action-randomness record version zero without a predecessor.',
+        );
+    }
+    const runtimeBuildManifestHash = copyExactBytes(
+        input.runtimeBuildManifestHash,
+        foundationHashByteLength,
+        'Runtime build-manifest hash',
+    );
+    const orderedWitnessBindings = untrustedOrderedWitnessBindings.map(
+        (binding: unknown, bindingIndex) => {
+            if (typeof binding !== 'object' || binding === null) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    `Foundation witness provisioning binding ${String(bindingIndex)} must be an object.`,
+                );
+            }
+            const bindingRecord = binding as Record<string, unknown>;
+            return Object.freeze({
+                subjectParticipantIdentity: copyExactBytes(
+                    bindingRecord.subjectParticipantIdentity,
+                    foundationHashByteLength,
+                    `Witness provisioning subject participant identity ${String(bindingIndex)}`,
+                ),
+                witnessParticipantIdentity: copyExactBytes(
+                    bindingRecord.witnessParticipantIdentity,
+                    foundationHashByteLength,
+                    `Witness provisioning witness participant identity ${String(bindingIndex)}`,
+                ),
+            });
+        },
+    );
+    return Object.freeze({
+        actionRandomnessRecordContext: Object.freeze({ recordVersion: 0n }),
+        orderedWitnessBindings: Object.freeze(orderedWitnessBindings),
+        runtimeBuildManifestHash,
+    });
+};
+
+const encodeFoundationWitnessRole = (input: {
+    binding: BrowserActionStorageRootBinding;
+    roleIndex: number;
+    runtimeBuildManifestHash: Uint8Array;
+    witnessBinding: BrowserFoundationWitnessProvisioningBinding;
+}): Uint8Array<ArrayBuffer> =>
+    concatenateBytes(
+        encodeCanonicalUnsigned16(
+            foundationWitnessRecordVersion,
+            'Witness state record version',
+        ),
+        encodeBinding(input.binding),
+        input.runtimeBuildManifestHash,
+        encodeCanonicalUnsigned16(input.roleIndex, 'Witness state role index'),
+        input.witnessBinding.subjectParticipantIdentity,
+        input.witnessBinding.witnessParticipantIdentity,
+    );
+
+const domainSeparatedHash = (
+    domain: Uint8Array,
+    canonicalInput: Uint8Array,
+    label: string,
+): Uint8Array<ArrayBuffer> => {
+    const hash = shake256.create({ dkLen: foundationHashByteLength });
+    hash.update(
+        encodeCanonicalUnsigned32(domain.byteLength, `${label} domain length`),
+    );
+    hash.update(domain);
+    hash.update(
+        encodeCanonicalUnsigned32(
+            canonicalInput.byteLength,
+            `${label} input length`,
+        ),
+    );
+    hash.update(canonicalInput);
+
+    return hash.digest();
+};
+
+const encodeFoundationWitnessAuthorizedEmpty = (
+    canonicalRole: Uint8Array,
+): Uint8Array<ArrayBuffer> =>
+    concatenateBytes(
+        encodeCanonicalUnsigned32(
+            foundationWitnessAuthorizedEmptyRecordDomain.byteLength,
+            'Witness authorized-empty domain length',
+        ),
+        foundationWitnessAuthorizedEmptyRecordDomain,
+        encodeCanonicalUnsigned32(
+            canonicalRole.byteLength,
+            'Witness authorized-empty role length',
+        ),
+        canonicalRole,
+    );
 
 const encodeStructuredCommitmentMessage = (
     coefficients: unknown,
@@ -669,6 +900,58 @@ const encodeLocalRecordIdentifierInput = (
                 ),
                 recordTypeCode: 11,
             };
+        case 'commonProofExternalMemory': {
+            const externalMemoryRecordKindCode =
+                input.externalMemoryRecordKind === 'object-header'
+                    ? 1
+                    : input.externalMemoryRecordKind === 'data-chunk'
+                      ? 2
+                      : input.externalMemoryRecordKind === 'seal-marker'
+                        ? 3
+                        : 0;
+            if (externalMemoryRecordKindCode === 0) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Common-proof external-memory record kind is unsupported.',
+                );
+            }
+            return {
+                context: concatenateBytes(
+                    copyExactBytes(
+                        input.commonProofEnvironmentIdentifier,
+                        32,
+                        'Common-proof environment identifier',
+                    ),
+                    copyExactBytes(
+                        input.commonProofRuntimeBindingHash,
+                        foundationHashByteLength,
+                        'Common-proof runtime-binding hash',
+                    ),
+                    copyExactBytes(
+                        input.proofAttemptLineageIdentifier,
+                        32,
+                        'Proof-attempt lineage identifier',
+                    ),
+                    encodeCanonicalUnsigned16(
+                        externalMemoryRecordKindCode,
+                        'Common-proof external-memory record kind',
+                    ),
+                    encodeCanonicalUnsigned32(
+                        input.externalMemoryObjectOrdinal,
+                        'Common-proof external-memory object ordinal',
+                    ),
+                    encodeCanonicalUnsigned32(
+                        input.externalMemoryChunkOrdinal,
+                        'Common-proof external-memory chunk ordinal',
+                    ),
+                    encodeCanonicalUnsigned64(
+                        input.externalMemoryByteOffset,
+                        'Common-proof external-memory byte offset',
+                    ),
+                ),
+                recordTypeCode: 12,
+            };
+        }
     }
 };
 
@@ -848,8 +1131,18 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     readonly #cryptoProvider: Crypto;
     readonly #kernel: TranscriptCoreKernel;
     #activeLease: RootLease | undefined;
-    readonly #actionRandomnessSessions = new Map<string, number>();
+    #actionRandomnessRootMintConsumed = true;
+    #actionRandomnessSessionAcquisitionConsumed = true;
+    readonly #actionRandomnessSessions = new Map<
+        string,
+        WorkerActionRandomnessSessionRecord
+    >();
+    readonly #authenticatedRepairProtectionSessions = new Map<
+        string,
+        WorkerAuthenticatedRepairProtectionRecord
+    >();
     #operationTail: Promise<void> = Promise.resolve();
+    #stagedRootAllowsActionRandomnessMint = false;
     readonly #stateObjects = new Map<string, WorkerStateObject>();
     readonly #stateVerifierSessions = new Map<
         string,
@@ -919,6 +1212,61 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         return this.#enqueue(() => this.#hashLocalRecordEnvelope(envelope));
     }
 
+    public openActiveAuthenticatedRepairProtection(
+        input: BrowserAuthenticatedRepairProtectionInput,
+    ): Promise<WorkerOpenedBrowserAuthenticatedRepairProtection> {
+        return this.#enqueue(() =>
+            this.#openActiveAuthenticatedRepairProtection(input),
+        );
+    }
+
+    public sealAuthenticatedRepairHead(input: {
+        plaintext: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() => this.#sealAuthenticatedRepairHead(input));
+    }
+
+    public openAuthenticatedRepairHead(input: {
+        canonicalEnvelope: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() => this.#openAuthenticatedRepairHead(input));
+    }
+
+    public deriveAuthenticatedRepairHeadDigest(input: {
+        sealedHeadBytes: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() =>
+            this.#deriveAuthenticatedRepairHeadDigest(input),
+        );
+    }
+
+    public closeAuthenticatedRepairProtection(
+        identifier: string,
+    ): Promise<void> {
+        return this.#enqueue(() =>
+            this.#closeAuthenticatedRepairProtection(identifier),
+        );
+    }
+
+    public prepareBrowserFoundationInitialization(
+        input: WorkerBrowserFoundationInitializationPreparationInput,
+    ): Promise<WorkerPreparedBrowserFoundationInitialization> {
+        return this.#enqueue(() =>
+            this.#prepareBrowserFoundationInitialization(input),
+        );
+    }
+
+    public deriveBrowserFoundationInitializationRecords(
+        input: WorkerBrowserFoundationInitializationPreparationInput,
+    ): Promise<WorkerDerivedBrowserFoundationInitializationRecords> {
+        return this.#enqueue(() =>
+            this.#deriveBrowserFoundationInitializationRecords(input),
+        );
+    }
+
     public openActionStateVerifierSession(
         input: BrowserActionStateVerifierSessionInput,
     ): Promise<VerificationResult<string>> {
@@ -939,8 +1287,50 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         );
     }
 
+    public produceActionRandomnessReservationIntent(
+        input: BrowserActionRandomnessReservationIntentProductionInput,
+    ): Promise<
+        VerificationResult<BrowserProducedActionRandomnessReservationIntent>
+    > {
+        return this.#enqueue(() =>
+            this.#produceActionRandomnessReservationIntent(input),
+        );
+    }
+
+    public verifyActionRandomnessReservationIntentForWitness(
+        input: BrowserActionRandomnessReservationIntentWitnessVerificationInput,
+    ): Promise<VerificationResult<string>> {
+        return this.#enqueue(() =>
+            this.#verifyActionRandomnessReservationIntentForWitness(input),
+        );
+    }
+
+    public produceActionRandomnessReservationWitnessVote(
+        input: BrowserActionRandomnessReservationWitnessVoteProductionInput,
+    ): Promise<VerificationResult<Uint8Array>> {
+        return this.#enqueue(() =>
+            this.#produceActionRandomnessReservationWitnessVote(input),
+        );
+    }
+
+    public certifyActionRandomnessReservation(
+        input: BrowserActionRandomnessReservationCertificationInput,
+    ): Promise<VerificationResult<BrowserProducedActionRandomnessReservation>> {
+        return this.#enqueue(() =>
+            this.#certifyActionRandomnessReservation(input),
+        );
+    }
+
     public releaseActionStateObject(identifier: string): Promise<void> {
         return this.#enqueue(() => this.#releaseActionStateObject(identifier));
+    }
+
+    public durableBindingForStateObject(
+        identifier: string,
+    ): Promise<VerificationResult<VerifiedStateDurableBinding>> {
+        return this.#enqueue(() =>
+            this.#durableBindingForStateObject(identifier),
+        );
     }
 
     public closeActionStateVerifierSession(identifier: string): Promise<void> {
@@ -1021,16 +1411,85 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         return this.#openClosedStructuredCommitmentOpenings(input);
     }
 
-    public derivePersistentProofAttempt(
-        input: BrowserPersistentProofAttemptInput,
-    ): Promise<BrowserActionProofAttemptBinding> {
-        return this.#enqueue(() => this.#derivePersistentProofAttempt(input));
+    public prepareClosedCommonProofApplication(
+        capability: VerifiedCommonProofCapability,
+        predecessor: CommonProofApplicationFreshnessCoordinate,
+    ): Promise<ClosedWorkerPreparedCommonProofApplication> {
+        return this.#enqueue(() =>
+            this.#prepareClosedCommonProofApplication(capability, predecessor),
+        );
     }
 
     public deriveTargetReleaseAttempt(
         input: BrowserTargetReleaseAttemptInput,
     ): Promise<BrowserActionProofAttemptBinding> {
         return this.#enqueue(() => this.#deriveTargetReleaseAttempt(input));
+    }
+
+    #prepareClosedCommonProofApplication(
+        capability: VerifiedCommonProofCapability,
+        predecessor: CommonProofApplicationFreshnessCoordinate,
+    ): ClosedWorkerPreparedCommonProofApplication {
+        const prepared = prepareVerifiedCommonProofApplication(
+            capability,
+            this.#commonProofStorageRootAccess(this.#requireActiveLease()),
+            predecessor,
+        );
+        let state: 'pending' | 'settling' | 'settled' = 'pending';
+        const requirePending = (): void => {
+            if (state !== 'pending') {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'The prepared common-proof application is already settling or consumed.',
+                );
+            }
+            state = 'settling';
+        };
+        const settle = (): void => {
+            state = 'settled';
+            prepared.authorizationFrame.fill(0);
+            prepared.proofApplicationSlotHash.fill(0);
+        };
+        const retryableFailure = (error: unknown): never => {
+            state = 'pending';
+            throw error;
+        };
+        return Object.freeze({
+            abort: (): Promise<void> => {
+                requirePending();
+                return this.#enqueue(() => {
+                    try {
+                        abortVerifiedCommonProofApplication(prepared.authority);
+                        settle();
+                    } catch (error) {
+                        retryableFailure(error);
+                    }
+                });
+            },
+            authorizationFrame: prepared.authorizationFrame,
+            confirm: ({
+                authenticatedAuthorizationFrame,
+                successor,
+            }): Promise<void> => {
+                requirePending();
+                return this.#enqueue(() => {
+                    try {
+                        confirmVerifiedCommonProofApplication(
+                            prepared.authority,
+                            this.#commonProofStorageRootAccess(
+                                this.#requireActiveLease(),
+                            ),
+                            successor,
+                            authenticatedAuthorizationFrame,
+                        );
+                        settle();
+                    } catch (error) {
+                        retryableFailure(error);
+                    }
+                });
+            },
+            proofApplicationSlotHash: prepared.proofApplicationSlotHash,
+        });
     }
 
     #openActionStateVerifierSession(
@@ -1197,6 +1656,303 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         }
     }
 
+    #produceActionRandomnessReservationIntent(
+        input: BrowserActionRandomnessReservationIntentProductionInput,
+    ): VerificationResult<BrowserProducedActionRandomnessReservationIntent> {
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            typeof input.signatureOperation !== 'object' ||
+            input.signatureOperation === null ||
+            typeof input.signatureOperation.signStateObjectMessage !==
+                'function'
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The action-randomness reservation-intent production input is invalid.',
+            );
+        }
+        const stateVerifierSessionIdentifier = requireOpaqueWorkerIdentifier(
+            input.stateVerifierSessionIdentifier,
+            'State-verifier session identifier',
+        );
+        const session = this.#requireStateVerifierSession(
+            stateVerifierSessionIdentifier,
+        );
+        const actionRandomnessHandle = this.#requireActionRandomnessSession(
+            input.actionRandomnessSessionIdentifier,
+        );
+        const produced =
+            produceSetupActionRandomnessReservationIntentFromRetainedKernelHandle(
+                {
+                    actionRandomnessHandle,
+                    session,
+                    signatureOperation: input.signatureOperation,
+                },
+            );
+        if (!produced.isValid) {
+            return produced;
+        }
+        let identifier: string | undefined;
+        try {
+            identifier = this.#issueOpaqueWorkerIdentifier();
+            this.#stateObjects.set(identifier, {
+                capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
+                kind: 'reservation-intent',
+                sessionIdentifier: stateVerifierSessionIdentifier,
+                subjectParticipantIdentity:
+                    this.#requireActiveLease().binding.participantId.slice(),
+                value: produced.value.verifiedIntent,
+            });
+            return Object.freeze({
+                isValid: true,
+                value: Object.freeze({
+                    canonicalReservationIntentCarrier:
+                        produced.value.canonicalReservationIntentCarrier.slice(),
+                    stateIntentIdentifier: identifier,
+                }),
+            });
+        } catch (operationFailure) {
+            if (identifier !== undefined) {
+                this.#stateObjects.delete(identifier);
+            }
+            const released = session.releaseVerifiedObject(
+                produced.value.verifiedIntent,
+            );
+            if (!released.isValid) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'Registering and releasing a produced state reservation intent both failed.',
+                    Object.freeze({
+                        cleanupRefusalReason: released.refusalReason,
+                        operationFailure,
+                    }),
+                );
+            }
+            throw operationFailure;
+        }
+    }
+
+    #verifyActionRandomnessReservationIntentForWitness(
+        input: BrowserActionRandomnessReservationIntentWitnessVerificationInput,
+    ): VerificationResult<string> {
+        if (typeof input !== 'object' || input === null) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The witnessed action-randomness reservation intent is invalid.',
+            );
+        }
+        const stateVerifierSessionIdentifier = requireOpaqueWorkerIdentifier(
+            input.stateVerifierSessionIdentifier,
+            'State-verifier session identifier',
+        );
+        const session = this.#requireStateVerifierSession(
+            stateVerifierSessionIdentifier,
+        );
+        const canonicalReservationIntentCarrier = copyBoundedBytes(
+            input.canonicalReservationIntentCarrier,
+            'Canonical action-randomness reservation intent carrier',
+        );
+        const subjectParticipantIdentity = copyExactBytes(
+            input.subjectParticipantIdentity,
+            foundationHashByteLength,
+            'State subject participant identity',
+        );
+        try {
+            const verified =
+                session.verifySetupActionRandomnessIntentForWitness({
+                    canonicalReservationIntentCarrier,
+                    subjectParticipantIdentity,
+                });
+            if (!verified.isValid) {
+                return verified;
+            }
+            let identifier: string | undefined;
+            try {
+                identifier = this.#issueOpaqueWorkerIdentifier();
+                this.#stateObjects.set(identifier, {
+                    capabilityKind:
+                        stateCapabilityKinds.setupActionRandomnessRoot,
+                    kind: 'reservation-intent',
+                    sessionIdentifier: stateVerifierSessionIdentifier,
+                    subjectParticipantIdentity:
+                        subjectParticipantIdentity.slice(),
+                    value: verified.value,
+                });
+                return Object.freeze({ isValid: true, value: identifier });
+            } catch (operationFailure) {
+                if (identifier !== undefined) {
+                    this.#stateObjects.delete(identifier);
+                }
+                const released = session.releaseVerifiedObject(verified.value);
+                if (!released.isValid) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'Registering and releasing a witnessed state reservation intent both failed.',
+                        Object.freeze({
+                            cleanupRefusalReason: released.refusalReason,
+                            operationFailure,
+                        }),
+                    );
+                }
+                throw operationFailure;
+            }
+        } finally {
+            canonicalReservationIntentCarrier.fill(0);
+            subjectParticipantIdentity.fill(0);
+        }
+    }
+
+    #produceActionRandomnessReservationWitnessVote(
+        input: BrowserActionRandomnessReservationWitnessVoteProductionInput,
+    ): VerificationResult<Uint8Array> {
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            typeof input.signatureOperation !== 'object' ||
+            input.signatureOperation === null ||
+            typeof input.signatureOperation.signStateObjectMessage !==
+                'function'
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The state witness-vote production input is invalid.',
+            );
+        }
+        const intent = this.#requireStateReservationIntent(
+            input.stateIntentIdentifier,
+        );
+        const witnessParticipantIdentity = copyExactBytes(
+            input.witnessParticipantIdentity,
+            foundationHashByteLength,
+            'State witness participant identity',
+        );
+        try {
+            if (
+                !byteArraysEqual(
+                    witnessParticipantIdentity,
+                    this.#requireActiveLease().binding.participantId,
+                )
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The state witness identity does not belong to this worker-owned participant.',
+                );
+            }
+            return constructVerifiedStateWitnessVoteCarrierForWorker({
+                session: this.#requireStateVerifierSession(
+                    intent.sessionIdentifier,
+                ),
+                signatureOperation: input.signatureOperation,
+                verifiedIntent: intent.value,
+                witnessParticipantIdentity,
+            });
+        } finally {
+            witnessParticipantIdentity.fill(0);
+        }
+    }
+
+    #certifyActionRandomnessReservation(
+        input: BrowserActionRandomnessReservationCertificationInput,
+    ): VerificationResult<BrowserProducedActionRandomnessReservation> {
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            !Array.isArray(input.untrustedVoteCarriers)
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The action-randomness reservation certification input is invalid.',
+            );
+        }
+        const stateIntentIdentifier = requireOpaqueWorkerIdentifier(
+            input.stateIntentIdentifier,
+            'State reservation-intent identifier',
+        );
+        const intent = this.#requireStateReservationIntent(
+            stateIntentIdentifier,
+        );
+        if (
+            !byteArraysEqual(
+                intent.subjectParticipantIdentity,
+                this.#requireActiveLease().binding.participantId,
+            )
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'Only the worker-owned subject can certify its produced state reservation intent.',
+            );
+        }
+        const session = this.#requireStateVerifierSession(
+            intent.sessionIdentifier,
+        );
+        const canonicalVoteCarriers = input.untrustedVoteCarriers.map(
+            (carrier) =>
+                copyBoundedBytes(
+                    carrier,
+                    'Canonical state witness-vote carrier',
+                ),
+        );
+        try {
+            const certified =
+                session.certifyReservationIntentFromUntrustedVoteCarriers({
+                    untrustedVoteCarriers: canonicalVoteCarriers.map(
+                        (canonicalCarrier) => ({ canonicalCarrier }),
+                    ),
+                    verifiedIntent: intent.value,
+                });
+            if (!certified.isValid) {
+                return certified;
+            }
+            this.#stateObjects.delete(stateIntentIdentifier);
+            intent.subjectParticipantIdentity.fill(0);
+            let stateReservationIdentifier: string | undefined;
+            try {
+                stateReservationIdentifier =
+                    this.#issueOpaqueWorkerIdentifier();
+                this.#stateObjects.set(stateReservationIdentifier, {
+                    capabilityKind:
+                        stateCapabilityKinds.setupActionRandomnessRoot,
+                    kind: 'reservation',
+                    sessionIdentifier: intent.sessionIdentifier,
+                    subjectParticipantIdentity:
+                        this.#requireActiveLease().binding.participantId.slice(),
+                    value: certified.value.verifiedReservation,
+                });
+                return Object.freeze({
+                    isValid: true,
+                    value: Object.freeze({
+                        canonicalStateCertificate:
+                            certified.value.canonicalStateCertificate.slice(),
+                        stateReservationIdentifier,
+                    }),
+                });
+            } catch (operationFailure) {
+                if (stateReservationIdentifier !== undefined) {
+                    this.#stateObjects.delete(stateReservationIdentifier);
+                }
+                const released = session.releaseVerifiedObject(
+                    certified.value.verifiedReservation,
+                );
+                if (!released.isValid) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'Registering and releasing a produced state reservation both failed.',
+                        Object.freeze({
+                            cleanupRefusalReason: released.refusalReason,
+                            operationFailure,
+                        }),
+                    );
+                }
+                throw operationFailure;
+            }
+        } finally {
+            for (const canonicalVoteCarrier of canonicalVoteCarriers) {
+                canonicalVoteCarrier.fill(0);
+            }
+        }
+    }
+
     #releaseActionStateObject(identifier: string): void {
         const copiedIdentifier = requireOpaqueWorkerIdentifier(
             identifier,
@@ -1216,7 +1972,28 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 `The state verifier refused object release: ${released.refusalReason}.`,
             );
         }
+        stateObject.subjectParticipantIdentity.fill(0);
         this.#stateObjects.delete(copiedIdentifier);
+    }
+
+    #durableBindingForStateObject(
+        identifier: string,
+    ): VerificationResult<VerifiedStateDurableBinding> {
+        const copiedIdentifier = requireOpaqueWorkerIdentifier(
+            identifier,
+            'State object identifier',
+        );
+        const stateObject = this.#stateObjects.get(copiedIdentifier);
+        if (stateObject === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The verified state object is unavailable in this worker.',
+            );
+        }
+        const session = this.#requireStateVerifierSession(
+            stateObject.sessionIdentifier,
+        );
+        return session.durableBindingFor(stateObject.value);
     }
 
     #closeActionStateVerifierSession(identifier: string): void {
@@ -1233,6 +2010,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         this.#stateVerifierSessions.delete(copiedIdentifier);
         for (const [stateObjectIdentifier, stateObject] of this.#stateObjects) {
             if (stateObject.sessionIdentifier === copiedIdentifier) {
+                stateObject.subjectParticipantIdentity.fill(0);
                 this.#stateObjects.delete(stateObjectIdentifier);
             }
         }
@@ -1242,27 +2020,42 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         input: WorkerActionRandomnessRecordContext,
     ): WorkerSealedActionRandomnessSession {
         const activeLease = this.#requireActiveLease();
-        const actionRoot = this.#randomBytes(
-            actionRandomnessRootByteLength,
-            'action-randomness root',
+        const encodedRecordContext = encodeActionRandomnessRecordContext(
+            activeLease.binding,
+            input,
         );
-        const nonce = this.#randomBytes(
-            localRecordNonceByteLength,
-            'action-randomness record nonce',
-        );
+        if (
+            this.#actionRandomnessRootMintConsumed ||
+            this.#actionRandomnessSessionAcquisitionConsumed
+        ) {
+            encodedRecordContext.fill(0);
+            throw new BrowserActionStorageCustodyError(
+                'Conflict',
+                'The active storage root has already consumed its one action-randomness mint.',
+            );
+        }
+        this.#actionRandomnessRootMintConsumed = true;
+        this.#actionRandomnessSessionAcquisitionConsumed = true;
+        let actionRoot: Uint8Array<ArrayBuffer> | undefined;
+        let nonce: Uint8Array<ArrayBuffer> | undefined;
         let output: Uint8Array<ArrayBuffer> | undefined;
         let sessionHandle = 0;
         let sessionRetained = false;
         try {
+            actionRoot = this.#randomBytes(
+                actionRandomnessRootByteLength,
+                'action-randomness root',
+            );
+            nonce = this.#randomBytes(
+                localRecordNonceByteLength,
+                'action-randomness record nonce',
+            );
             output = this.#runActionRandomnessCommand(
                 actionRandomnessCommandIdentifiers.createAndSeal,
                 concatenateBytes(
                     this.#leaseCommandInput(activeLease),
                     actionRoot,
-                    encodeActionRandomnessRecordContext(
-                        activeLease.binding,
-                        input,
-                    ),
+                    encodedRecordContext,
                     nonce,
                 ),
                 'create and seal action randomness',
@@ -1285,10 +2078,14 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 );
             }
             const sessionIdentifier = this.#issueOpaqueWorkerIdentifier();
-            this.#actionRandomnessSessions.set(
-                sessionIdentifier,
-                sessionHandle,
+            const retainedCommitment = output.slice(
+                handleByteLength,
+                handleByteLength + foundationHashByteLength,
             );
+            this.#actionRandomnessSessions.set(sessionIdentifier, {
+                actionRandomnessCommitment: retainedCommitment,
+                handle: sessionHandle,
+            });
             sessionRetained = true;
             return Object.freeze({
                 actionRandomnessCommitment: output.slice(
@@ -1306,8 +2103,9 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             }
             throw error;
         } finally {
-            actionRoot.fill(0);
-            nonce.fill(0);
+            actionRoot?.fill(0);
+            encodedRecordContext.fill(0);
+            nonce?.fill(0);
             output?.fill(0);
         }
     }
@@ -1335,6 +2133,19 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             foundationHashByteLength,
             'Action-randomness commitment',
         );
+        const encodedRecordContext = encodeActionRandomnessRecordContext(
+            activeLease.binding,
+            input,
+        );
+        if (this.#actionRandomnessSessionAcquisitionConsumed) {
+            expectedCommitment.fill(0);
+            encodedRecordContext.fill(0);
+            throw new BrowserActionStorageCustodyError(
+                'Conflict',
+                'The active storage root already has or consumed an action-randomness session.',
+            );
+        }
+        this.#actionRandomnessSessionAcquisitionConsumed = true;
         let output: Uint8Array<ArrayBuffer> | undefined;
         let sessionHandle = 0;
         let sessionRetained = false;
@@ -1344,10 +2155,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 concatenateBytes(
                     this.#leaseCommandInput(activeLease),
                     expectedCommitment,
-                    encodeActionRandomnessRecordContext(
-                        activeLease.binding,
-                        input,
-                    ),
+                    encodedRecordContext,
                     input.canonicalEnvelope,
                 ),
                 'open sealed action randomness',
@@ -1366,7 +2174,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             const commitment = output.slice(handleByteLength);
             if (
                 sessionHandle === 0 ||
-                !bytesEqual(commitment, expectedCommitment)
+                !byteArraysEqual(commitment, expectedCommitment)
             ) {
                 commitment.fill(0);
                 throw new BrowserActionStorageCustodyError(
@@ -1375,10 +2183,10 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 );
             }
             const sessionIdentifier = this.#issueOpaqueWorkerIdentifier();
-            this.#actionRandomnessSessions.set(
-                sessionIdentifier,
-                sessionHandle,
-            );
+            this.#actionRandomnessSessions.set(sessionIdentifier, {
+                actionRandomnessCommitment: commitment.slice(),
+                handle: sessionHandle,
+            });
             sessionRetained = true;
             return Object.freeze({
                 actionRandomnessCommitment: commitment,
@@ -1391,6 +2199,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             throw error;
         } finally {
             expectedCommitment.fill(0);
+            encodedRecordContext.fill(0);
             output?.fill(0);
         }
     }
@@ -1400,12 +2209,13 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             sessionIdentifier,
             'Action-randomness session identifier',
         );
-        const sessionHandle =
+        const sessionRecord =
             this.#actionRandomnessSessions.get(copiedIdentifier);
-        if (sessionHandle === undefined) {
+        if (sessionRecord === undefined) {
             return;
         }
-        this.#closeRawActionRandomness(sessionHandle);
+        this.#closeRawActionRandomness(sessionRecord.handle);
+        sessionRecord.actionRandomnessCommitment.fill(0);
         this.#actionRandomnessSessions.delete(copiedIdentifier);
     }
 
@@ -1779,6 +2589,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             stateCapabilityKinds.setupActionRandomnessRoot,
             initialBinding,
         );
+        const structuredCommitmentParameters =
+            this.#kernel.describeBgvRnsParameters().parameters;
 
         type RetainedOpeningRecord = {
             readonly capability: ClosedWorkerStructuredCommitmentOpeningCapability;
@@ -2040,40 +2852,15 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                         'compute a commitment from retained structured-opening material',
                         'runtime',
                     );
-                    let parsed: unknown;
-                    try {
-                        parsed = JSON.parse(
-                            new TextDecoder('utf-8', { fatal: true }).decode(
-                                output,
-                            ),
-                        ) as unknown;
-                    } catch {
-                        throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM action-randomness kernel returned malformed structured-commitment JSON.',
-                        );
-                    }
-                    if (
-                        typeof parsed !== 'object' ||
-                        parsed === null ||
-                        !('commitment' in parsed) ||
-                        typeof parsed.commitment !== 'object' ||
-                        parsed.commitment === null ||
-                        !('objectType' in parsed.commitment) ||
-                        parsed.commitment.objectType !== 'SetupCommitment' ||
-                        !('sourceRnsLimbIndex' in parsed.commitment) ||
-                        parsed.commitment.sourceRnsLimbIndex !==
-                            record.sourceRnsLimbIndex ||
-                        !('shamirCoefficientIndex' in parsed.commitment) ||
-                        parsed.commitment.shamirCoefficientIndex !==
-                            record.shamirCoefficientIndex
-                    ) {
-                        throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM action-randomness kernel returned an inconsistent structured commitment.',
-                        );
-                    }
-                    return parsed as BgvSetupCommitmentOpeningComputation;
+                    return decodeStructuredCommitmentWorkerResponse({
+                        bytes: output,
+                        dataPrimes: structuredCommitmentParameters.dataPrimes,
+                        expectedRingDegree:
+                            structuredCommitmentParameters.polynomialDegree,
+                        expectedShamirCoefficientIndex:
+                            record.shamirCoefficientIndex,
+                        expectedSourceRnsLimbIndex: record.sourceRnsLimbIndex,
+                    });
                 } finally {
                     output?.fill(0);
                     publicMatrixSeedHashBytes.fill(0);
@@ -2148,74 +2935,19 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         }
     }
 
+    #closeAllAuthenticatedRepairProtectionSessions(): void {
+        for (const identifier of [
+            ...this.#authenticatedRepairProtectionSessions.keys(),
+        ]) {
+            this.#closeAuthenticatedRepairProtection(identifier);
+        }
+    }
+
     #closeAllStateVerifierSessions(): void {
         for (const sessionIdentifier of [
             ...this.#stateVerifierSessions.keys(),
         ]) {
             this.#closeActionStateVerifierSession(sessionIdentifier);
-        }
-    }
-
-    #derivePersistentProofAttempt(
-        input: BrowserPersistentProofAttemptInput,
-    ): BrowserActionProofAttemptBinding {
-        if (typeof input !== 'object' || input === null) {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The persistent proof-attempt input must be an object.',
-            );
-        }
-        const sessionHandle = this.#requireActionRandomnessSession(
-            input.actionRandomnessSessionIdentifier,
-        );
-        const expectedCapabilityKind = this.#persistentProofCapabilityKind(
-            input.statementSchemaIdentifier,
-            input.schedulePosition,
-        );
-        const reservation = this.#requireStateReservation(
-            input.stateReservationIdentifier,
-            expectedCapabilityKind,
-            this.#requireActiveLease().binding,
-        );
-        const reservationAuthorization = this.#reservationAuthorizationBytes(
-            reservation.value,
-        );
-        try {
-            return this.#parseProofAttemptOutput(
-                this.#runActionRandomnessCommand(
-                    actionRandomnessCommandIdentifiers.persistentProofAttempt,
-                    concatenateBytes(
-                        encodeUnsigned32(sessionHandle),
-                        reservationAuthorization,
-                        encodeCanonicalUnsigned16(
-                            input.statementSchemaIdentifier,
-                            'Proof statement schema identifier',
-                        ),
-                        encodeCanonicalUnsigned16(
-                            input.rosterPosition,
-                            'Proof roster position',
-                        ),
-                        input.schedulePosition === undefined
-                            ? new Uint8Array([0])
-                            : concatenateBytes(
-                                  new Uint8Array([1]),
-                                  encodeCanonicalUnsigned32(
-                                      input.schedulePosition,
-                                      'Proof schedule position',
-                                  ),
-                              ),
-                        copyExactBytes(
-                            input.applicationStatementHash,
-                            foundationHashByteLength,
-                            'Application statement hash',
-                        ),
-                    ),
-                    'derive a persistent proof attempt',
-                    'runtime',
-                ),
-            );
-        } finally {
-            reservationAuthorization.fill(0);
         }
     }
 
@@ -2295,7 +3027,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             stateObject === undefined ||
             stateObject.kind !== 'reservation' ||
             stateObject.capabilityKind !== expectedCapabilityKind ||
-            !bytesEqual(
+            !byteArraysEqual(
                 stateObject.subjectParticipantIdentity,
                 binding.participantId,
             ) ||
@@ -2307,6 +3039,29 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             );
         }
 
+        return stateObject;
+    }
+
+    #requireStateReservationIntent(
+        identifier: string,
+    ): Extract<WorkerStateObject, Readonly<{ kind: 'reservation-intent' }>> {
+        const copiedIdentifier = requireOpaqueWorkerIdentifier(
+            identifier,
+            'State reservation-intent identifier',
+        );
+        const stateObject = this.#stateObjects.get(copiedIdentifier);
+        if (
+            stateObject === undefined ||
+            stateObject.kind !== 'reservation-intent' ||
+            stateObject.capabilityKind !==
+                stateCapabilityKinds.setupActionRandomnessRoot ||
+            !this.#stateVerifierSessions.has(stateObject.sessionIdentifier)
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The required state reservation intent is unavailable in this worker.',
+            );
+        }
         return stateObject;
     }
 
@@ -2365,58 +3120,15 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             identifier,
             'Action-randomness session identifier',
         );
-        const handle = this.#actionRandomnessSessions.get(copiedIdentifier);
-        if (handle === undefined) {
+        const record = this.#actionRandomnessSessions.get(copiedIdentifier);
+        if (record === undefined) {
             throw new BrowserActionStorageCustodyError(
                 'InvalidState',
                 'The action-randomness session is closed or unavailable in this worker.',
             );
         }
 
-        return handle;
-    }
-
-    #persistentProofCapabilityKind(
-        statementSchemaIdentifier: number,
-        schedulePosition: number | undefined,
-    ): number {
-        let capabilityKind: number;
-        let requiresSchedulePosition = false;
-        switch (statementSchemaIdentifier) {
-            case 0x2110:
-            case 0x2111:
-            case 0x1211:
-            case 0x1212:
-                capabilityKind = stateCapabilityKinds.setupActionRandomnessRoot;
-                break;
-            case 0x1214:
-            case 0x1217:
-                capabilityKind = stateCapabilityKinds.setupActionRandomnessRoot;
-                requiresSchedulePosition = true;
-                break;
-            case 0x1216:
-                capabilityKind = stateCapabilityKinds.setupActionRandomnessRoot;
-                requiresSchedulePosition = true;
-                break;
-            case 0x1621:
-                capabilityKind = stateCapabilityKinds.targetRelease;
-                break;
-            default:
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'The statement schema is not a reset-safe proof family.',
-                );
-        }
-        if (requiresSchedulePosition !== (schedulePosition !== undefined)) {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                requiresSchedulePosition
-                    ? 'The selected proof family requires a schedule position.'
-                    : 'The selected proof family does not accept a schedule position.',
-            );
-        }
-
-        return capabilityKind;
+        return record.handle;
     }
 
     #parseProofAttemptOutput(
@@ -2453,7 +3165,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             if (
                 !this.#stateVerifierSessions.has(identifier) &&
                 !this.#stateObjects.has(identifier) &&
-                !this.#actionRandomnessSessions.has(identifier)
+                !this.#actionRandomnessSessions.has(identifier) &&
+                !this.#authenticatedRepairProtectionSessions.has(identifier)
             ) {
                 return identifier;
             }
@@ -2595,6 +3308,490 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         return envelopeHash;
     }
 
+    #openActiveAuthenticatedRepairProtection(
+        input: BrowserAuthenticatedRepairProtectionInput,
+    ): WorkerOpenedBrowserAuthenticatedRepairProtection {
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            typeof input.namespace !== 'string' ||
+            input.namespace.length > 64 ||
+            !storageNamespacePattern.test(input.namespace)
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The authenticated-repair namespace must be lowercase kebab-case with at most 64 characters.',
+            );
+        }
+        const runtimeBuildManifestHash = copyExactBytes(
+            input.runtimeBuildManifestHash,
+            foundationHashByteLength,
+            'Authenticated-repair runtime build-manifest hash',
+        );
+        const namespaceBytes = repairTextEncoder.encode(input.namespace);
+        if (namespaceBytes.byteLength === 0 || namespaceBytes.byteLength > 64) {
+            runtimeBuildManifestHash.fill(0);
+            namespaceBytes.fill(0);
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The authenticated-repair namespace has an unsupported encoded length.',
+            );
+        }
+        const sessionIdentifier = this.#issueOpaqueWorkerIdentifier();
+        try {
+            const repairIdentity = this.#runCommand(
+                localStorageRootCommands.deriveRepairIdentity,
+                this.#authenticatedRepairCommandInput(
+                    this.#requireActiveLease(),
+                    runtimeBuildManifestHash,
+                    namespaceBytes,
+                ),
+                'derive authenticated-repair identity',
+                'runtime',
+            );
+            if (repairIdentity.byteLength !== foundationHashByteLength) {
+                repairIdentity.fill(0);
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The WASM kernel returned a malformed authenticated-repair identity.',
+                );
+            }
+            this.#authenticatedRepairProtectionSessions.set(
+                sessionIdentifier,
+                Object.freeze({
+                    namespaceBytes,
+                    runtimeBuildManifestHash,
+                }),
+            );
+            return Object.freeze({
+                repairIdentity,
+                repairProtectionSessionIdentifier: sessionIdentifier,
+            });
+        } catch (error) {
+            namespaceBytes.fill(0);
+            runtimeBuildManifestHash.fill(0);
+            throw error;
+        }
+    }
+
+    #sealAuthenticatedRepairHead(input: {
+        plaintext: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Uint8Array<ArrayBuffer> {
+        const plaintext = copyBoundedBytes(
+            input?.plaintext,
+            'Authenticated-repair head plaintext',
+        );
+        const nonce = this.#randomBytes(
+            localRecordNonceByteLength,
+            'authenticated-repair head nonce',
+        );
+        try {
+            return this.#runCommand(
+                localStorageRootCommands.sealRepairHead,
+                concatenateBytes(
+                    this.#authenticatedRepairSessionCommandInput(
+                        input.repairProtectionSessionIdentifier,
+                    ),
+                    nonce,
+                    plaintext,
+                ),
+                'seal an authenticated-repair head',
+                'recordSeal',
+            );
+        } finally {
+            nonce.fill(0);
+            plaintext.fill(0);
+        }
+    }
+
+    #openAuthenticatedRepairHead(input: {
+        canonicalEnvelope: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Uint8Array<ArrayBuffer> {
+        const canonicalEnvelope = copyBoundedBytes(
+            input?.canonicalEnvelope,
+            'Authenticated-repair head envelope',
+        );
+        try {
+            return this.#runCommand(
+                localStorageRootCommands.openRepairHead,
+                concatenateBytes(
+                    this.#authenticatedRepairSessionCommandInput(
+                        input.repairProtectionSessionIdentifier,
+                    ),
+                    canonicalEnvelope,
+                ),
+                'open an authenticated-repair head',
+                'recordOpen',
+            );
+        } finally {
+            canonicalEnvelope.fill(0);
+        }
+    }
+
+    #deriveAuthenticatedRepairHeadDigest(input: {
+        sealedHeadBytes: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Uint8Array<ArrayBuffer> {
+        const sealedHeadBytes = copyBoundedBytes(
+            input?.sealedHeadBytes,
+            'Authenticated-repair sealed-head bytes',
+        );
+        try {
+            const digest = this.#runCommand(
+                localStorageRootCommands.digestRepairHead,
+                concatenateBytes(
+                    this.#authenticatedRepairSessionCommandInput(
+                        input.repairProtectionSessionIdentifier,
+                    ),
+                    sealedHeadBytes,
+                ),
+                'derive an authenticated-repair head digest',
+                'recordHash',
+            );
+            if (digest.byteLength !== foundationHashByteLength) {
+                digest.fill(0);
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The WASM kernel returned a malformed authenticated-repair head digest.',
+                );
+            }
+            return digest;
+        } finally {
+            sealedHeadBytes.fill(0);
+        }
+    }
+
+    #authenticatedRepairSessionCommandInput(
+        identifier: string,
+    ): Uint8Array<ArrayBuffer> {
+        const copiedIdentifier = requireOpaqueWorkerIdentifier(
+            identifier,
+            'Authenticated-repair protection session identifier',
+        );
+        const record =
+            this.#authenticatedRepairProtectionSessions.get(copiedIdentifier);
+        if (record === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The authenticated-repair protection session is closed or unavailable in this worker.',
+            );
+        }
+        return this.#authenticatedRepairCommandInput(
+            this.#requireActiveLease(),
+            record.runtimeBuildManifestHash,
+            record.namespaceBytes,
+        );
+    }
+
+    #authenticatedRepairCommandInput(
+        activeLease: RootLease,
+        runtimeBuildManifestHash: Uint8Array,
+        namespaceBytes: Uint8Array,
+    ): Uint8Array<ArrayBuffer> {
+        return this.#leaseCommandInput(
+            activeLease,
+            runtimeBuildManifestHash,
+            encodeCanonicalUnsigned32(
+                namespaceBytes.byteLength,
+                'Authenticated-repair namespace length',
+            ),
+            namespaceBytes,
+        );
+    }
+
+    #closeAuthenticatedRepairProtection(identifier: string): void {
+        const copiedIdentifier = requireOpaqueWorkerIdentifier(
+            identifier,
+            'Authenticated-repair protection session identifier',
+        );
+        const record =
+            this.#authenticatedRepairProtectionSessions.get(copiedIdentifier);
+        if (record === undefined) {
+            return;
+        }
+        record.namespaceBytes.fill(0);
+        record.runtimeBuildManifestHash.fill(0);
+        this.#authenticatedRepairProtectionSessions.delete(copiedIdentifier);
+    }
+
+    #prepareBrowserFoundationInitialization(
+        input: WorkerBrowserFoundationInitializationPreparationInput,
+    ): WorkerPreparedBrowserFoundationInitialization {
+        const activeLease = this.#requireActiveLease();
+        const copiedInput = copyBrowserFoundationInitializationInput(input);
+        let actionRandomness:
+            | WorkerPreparedBrowserFoundationInitialization['actionRandomness']
+            | undefined;
+        const witnessStateRecords: Array<
+            WorkerPreparedBrowserFoundationInitialization['witnessStateRecords'][number]
+        > = [];
+        try {
+            const subjectIdentityKeys = new Set<string>();
+            for (const [
+                bindingIndex,
+                binding,
+            ] of copiedInput.orderedWitnessBindings.entries()) {
+                if (
+                    !byteArraysEqual(
+                        binding.witnessParticipantIdentity,
+                        activeLease.binding.participantId,
+                    )
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        `Witness provisioning binding ${String(bindingIndex)} is not witnessed by the local custody participant.`,
+                    );
+                }
+                if (
+                    byteArraysEqual(
+                        binding.subjectParticipantIdentity,
+                        activeLease.binding.participantId,
+                    )
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        `Witness provisioning binding ${String(bindingIndex)} makes the local participant witness itself.`,
+                    );
+                }
+                const subjectIdentityKey = bytesToHex(
+                    binding.subjectParticipantIdentity,
+                );
+                if (subjectIdentityKeys.has(subjectIdentityKey)) {
+                    throw new BrowserActionStorageCustodyError(
+                        'Conflict',
+                        'Foundation witness provisioning contains a repeated subject participant.',
+                    );
+                }
+                subjectIdentityKeys.add(subjectIdentityKey);
+            }
+
+            const sealedActionRandomness = this.#createAndSealActionRandomness(
+                copiedInput.actionRandomnessRecordContext,
+            );
+            const actionRandomnessLocalRecordIdentifier =
+                this.#deriveLocalRecordIdentifier({
+                    recordType: 'actionRandomness',
+                });
+            try {
+                actionRandomness = Object.freeze({
+                    ...sealedActionRandomness,
+                    envelopeHash: this.#hashLocalRecordEnvelope(
+                        sealedActionRandomness.canonicalEnvelope,
+                    ),
+                    localRecordIdentifier:
+                        actionRandomnessLocalRecordIdentifier,
+                });
+            } catch (error) {
+                actionRandomnessLocalRecordIdentifier.fill(0);
+                sealedActionRandomness.actionRandomnessCommitment.fill(0);
+                sealedActionRandomness.canonicalEnvelope.fill(0);
+                this.#closeActionRandomness(
+                    sealedActionRandomness.actionRandomnessSessionIdentifier,
+                );
+                throw error;
+            }
+
+            for (const [
+                roleIndex,
+                witnessBinding,
+            ] of copiedInput.orderedWitnessBindings.entries()) {
+                let canonicalRole: Uint8Array<ArrayBuffer> | undefined;
+                let stateKey: Uint8Array<ArrayBuffer> | undefined;
+                let authorizedEmptyPlaintext:
+                    | Uint8Array<ArrayBuffer>
+                    | undefined;
+                let localRecordIdentifier: Uint8Array<ArrayBuffer> | undefined;
+                let canonicalEnvelope: Uint8Array<ArrayBuffer> | undefined;
+                try {
+                    canonicalRole = encodeFoundationWitnessRole({
+                        binding: activeLease.binding,
+                        roleIndex,
+                        runtimeBuildManifestHash:
+                            copiedInput.runtimeBuildManifestHash,
+                        witnessBinding,
+                    });
+                    stateKey = domainSeparatedHash(
+                        foundationWitnessStateKeyDomain,
+                        canonicalRole,
+                        'Witness state key',
+                    );
+                    authorizedEmptyPlaintext =
+                        encodeFoundationWitnessAuthorizedEmpty(canonicalRole);
+                    const expectedContext = Object.freeze({
+                        actionRandomnessCommitment:
+                            actionRandomness.actionRandomnessCommitment,
+                        identifierInput: Object.freeze({
+                            recordType: 'witnessState' as const,
+                            stateKey,
+                        }),
+                        recordVersion: 0n,
+                    });
+                    localRecordIdentifier = this.#deriveLocalRecordIdentifier(
+                        expectedContext.identifierInput,
+                    );
+                    canonicalEnvelope = this.#sealLocalRecord({
+                        ...expectedContext,
+                        plaintext: authorizedEmptyPlaintext,
+                    });
+                    const envelopeHash =
+                        this.#hashLocalRecordEnvelope(canonicalEnvelope);
+                    witnessStateRecords.push(
+                        Object.freeze({
+                            authorizedEmptyPlaintext:
+                                authorizedEmptyPlaintext.slice(),
+                            canonicalEnvelope,
+                            envelopeHash,
+                            localRecordIdentifier,
+                            roleIndex,
+                            stateKey: stateKey.slice(),
+                        }),
+                    );
+                    canonicalEnvelope = undefined;
+                    localRecordIdentifier = undefined;
+                } finally {
+                    canonicalEnvelope?.fill(0);
+                    localRecordIdentifier?.fill(0);
+                    authorizedEmptyPlaintext?.fill(0);
+                    stateKey?.fill(0);
+                    canonicalRole?.fill(0);
+                }
+            }
+
+            return Object.freeze({
+                actionRandomness,
+                witnessStateRecords: Object.freeze(witnessStateRecords),
+            });
+        } catch (error) {
+            if (actionRandomness !== undefined) {
+                this.#closeActionRandomness(
+                    actionRandomness.actionRandomnessSessionIdentifier,
+                );
+                actionRandomness.actionRandomnessCommitment.fill(0);
+                actionRandomness.canonicalEnvelope.fill(0);
+                actionRandomness.envelopeHash.fill(0);
+                actionRandomness.localRecordIdentifier.fill(0);
+            }
+            for (const record of witnessStateRecords) {
+                record.canonicalEnvelope.fill(0);
+                record.envelopeHash.fill(0);
+                record.localRecordIdentifier.fill(0);
+                record.authorizedEmptyPlaintext.fill(0);
+                record.stateKey.fill(0);
+            }
+            throw error;
+        } finally {
+            destroyBrowserFoundationInitializationInput(copiedInput);
+        }
+    }
+
+    #deriveBrowserFoundationInitializationRecords(
+        input: WorkerBrowserFoundationInitializationPreparationInput,
+    ): WorkerDerivedBrowserFoundationInitializationRecords {
+        const activeLease = this.#requireActiveLease();
+        const copiedInput = copyBrowserFoundationInitializationInput(input);
+        const witnessStateRecords: Array<
+            WorkerDerivedBrowserFoundationInitializationRecords['witnessStateRecords'][number]
+        > = [];
+        let actionRandomnessLocalRecordIdentifier:
+            | Uint8Array<ArrayBuffer>
+            | undefined;
+        try {
+            const subjectIdentityKeys = new Set<string>();
+            actionRandomnessLocalRecordIdentifier =
+                this.#deriveLocalRecordIdentifier({
+                    recordType: 'actionRandomness',
+                });
+            for (const [
+                roleIndex,
+                witnessBinding,
+            ] of copiedInput.orderedWitnessBindings.entries()) {
+                if (
+                    !byteArraysEqual(
+                        witnessBinding.witnessParticipantIdentity,
+                        activeLease.binding.participantId,
+                    ) ||
+                    byteArraysEqual(
+                        witnessBinding.subjectParticipantIdentity,
+                        activeLease.binding.participantId,
+                    )
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        `Witness recovery binding ${String(roleIndex)} is not a fixed-roster role owned by the local participant.`,
+                    );
+                }
+                const subjectIdentityKey = bytesToHex(
+                    witnessBinding.subjectParticipantIdentity,
+                );
+                if (subjectIdentityKeys.has(subjectIdentityKey)) {
+                    throw new BrowserActionStorageCustodyError(
+                        'Conflict',
+                        'Witness recovery bindings contain a repeated subject participant.',
+                    );
+                }
+                subjectIdentityKeys.add(subjectIdentityKey);
+                const canonicalRole = encodeFoundationWitnessRole({
+                    binding: activeLease.binding,
+                    roleIndex,
+                    runtimeBuildManifestHash:
+                        copiedInput.runtimeBuildManifestHash,
+                    witnessBinding,
+                });
+                const stateKey = domainSeparatedHash(
+                    foundationWitnessStateKeyDomain,
+                    canonicalRole,
+                    'Witness state key',
+                );
+                const authorizedEmptyPlaintext =
+                    encodeFoundationWitnessAuthorizedEmpty(canonicalRole);
+                const localRecordIdentifier = this.#deriveLocalRecordIdentifier(
+                    {
+                        recordType: 'witnessState',
+                        stateKey,
+                    },
+                );
+                try {
+                    witnessStateRecords.push(
+                        Object.freeze({
+                            authorizedEmptyPlaintext:
+                                authorizedEmptyPlaintext.slice(),
+                            localRecordIdentifier,
+                            roleIndex,
+                            stateKey: stateKey.slice(),
+                        }),
+                    );
+                } catch (error) {
+                    localRecordIdentifier.fill(0);
+                    throw error;
+                } finally {
+                    authorizedEmptyPlaintext.fill(0);
+                    stateKey.fill(0);
+                    canonicalRole.fill(0);
+                }
+            }
+            const retainedActionRandomnessLocalRecordIdentifier =
+                actionRandomnessLocalRecordIdentifier;
+            actionRandomnessLocalRecordIdentifier = undefined;
+            return Object.freeze({
+                actionRandomnessLocalRecordIdentifier:
+                    retainedActionRandomnessLocalRecordIdentifier,
+                witnessStateRecords: Object.freeze(witnessStateRecords),
+            });
+        } catch (error) {
+            actionRandomnessLocalRecordIdentifier?.fill(0);
+            for (const record of witnessStateRecords) {
+                record.authorizedEmptyPlaintext.fill(0);
+                record.localRecordIdentifier.fill(0);
+                record.stateKey.fill(0);
+            }
+            throw error;
+        } finally {
+            destroyBrowserFoundationInitializationInput(copiedInput);
+        }
+    }
+
     async #createAndStage(
         binding: BrowserActionStorageRootBinding,
     ): Promise<WorkerPreparedDeviceWrappingState> {
@@ -2628,6 +3825,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 binding,
             );
             this.#stagedLease = staged.lease;
+            this.#stagedRootAllowsActionRandomnessMint = true;
             try {
                 const wrapped = await this.#wrapStagedRoot();
 
@@ -2660,7 +3858,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             foundationHashByteLength,
             'Stored storage-root commitment',
         );
-        if (!bytesEqual(storedCommitment, expectedCommitment)) {
+        if (!byteArraysEqual(storedCommitment, expectedCommitment)) {
             throw new BrowserActionStorageCustodyError(
                 'CommitmentMismatch',
                 'The stored storage-root commitment does not match the untrusted expected commitment.',
@@ -2719,6 +3917,27 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                     `The opened action storage root must contain exactly ${actionStorageRootByteLength} bytes.`,
                 );
             }
+            const alreadyStagedLease = this.#stagedLease;
+            if (alreadyStagedLease !== undefined) {
+                const alreadyStagedRoot = this.#runCommand(
+                    localStorageRootCommands.copyForDeviceWrap,
+                    this.#leaseCommandInput(alreadyStagedLease),
+                    'copy an already-staged root for authenticated comparison',
+                    'runtime',
+                );
+                try {
+                    if (!byteArraysEqual(alreadyStagedRoot, openedRoot)) {
+                        throw new BrowserActionStorageCustodyError(
+                            'CommitmentMismatch',
+                            'The authenticated device-wrapped storage root does not match the root already staged in this worker.',
+                        );
+                    }
+
+                    return;
+                } finally {
+                    alreadyStagedRoot.fill(0);
+                }
+            }
             this.#discardStaged();
             capability = this.#randomCapability();
             stageOutput = this.#runCommand(
@@ -2737,13 +3956,14 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                 capability,
                 input.binding,
             );
-            if (!bytesEqual(staged.commitment, expectedCommitment)) {
+            if (!byteArraysEqual(staged.commitment, expectedCommitment)) {
                 throw new BrowserActionStorageCustodyError(
                     'CommitmentMismatch',
                     'The opened storage root does not match the expected commitment.',
                 );
             }
             this.#stagedLease = staged.lease;
+            this.#stagedRootAllowsActionRandomnessMint = false;
         } finally {
             combinedCiphertext.fill(0);
             decoded.canonicalAssociatedData.fill(0);
@@ -2770,10 +3990,15 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             'runtime',
         );
         this.#closeAllActionRandomness();
+        this.#closeAllAuthenticatedRepairProtectionSessions();
         this.#closeAllStateVerifierSessions();
         this.#activeLease?.capability.fill(0);
         this.#activeLease = stagedLease;
         this.#stagedLease = undefined;
+        this.#actionRandomnessRootMintConsumed =
+            !this.#stagedRootAllowsActionRandomnessMint;
+        this.#actionRandomnessSessionAcquisitionConsumed = false;
+        this.#stagedRootAllowsActionRandomnessMint = false;
     }
 
     #discardStaged(): void {
@@ -2789,6 +4014,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         );
         stagedLease.capability.fill(0);
         this.#stagedLease = undefined;
+        this.#stagedRootAllowsActionRandomnessMint = false;
     }
 
     #destroyActive(): void {
@@ -2797,6 +4023,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
             return;
         }
         this.#closeAllActionRandomness();
+        this.#closeAllAuthenticatedRepairProtectionSessions();
         this.#closeAllStateVerifierSessions();
         this.#runCommand(
             localStorageRootCommands.destroy,
@@ -2806,6 +4033,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         );
         activeLease.capability.fill(0);
         this.#activeLease = undefined;
+        this.#actionRandomnessRootMintConsumed = true;
+        this.#actionRandomnessSessionAcquisitionConsumed = true;
     }
 
     async #wrapStagedRoot(): Promise<WorkerPreparedDeviceWrappingState> {
@@ -3078,7 +4307,8 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
                         this.#throwCommandStatus(status, failureContext);
                     }
                     if (
-                        outputByteLength > maximumCommandByteLength ||
+                        outputByteLength >
+                            actionRandomnessCommandOutputByteLimit(command) ||
                         (outputByteLength === 0) !== (outputPointer === 0) ||
                         outputPointer + outputByteLength >
                             context.memory.buffer.byteLength
@@ -3383,7 +4613,7 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
     #assertCompatibleStagedCommitment(expectedCommitment: Uint8Array): void {
         if (
             this.#stagedLease !== undefined &&
-            !bytesEqual(
+            !byteArraysEqual(
                 this.#stagedLease.storageRootCommitment,
                 expectedCommitment,
             )
@@ -3415,6 +4645,27 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         }
 
         return this.#activeLease;
+    }
+
+    #commonProofStorageRootAccess(activeLease: RootLease): Readonly<{
+        context: NonNullable<
+            ReturnType<typeof resolveCommonProofKernelContext>
+        >;
+        storageRootCapability: Uint8Array;
+        storageRootHandle: number;
+    }> {
+        const context = resolveCommonProofKernelContext(this.#kernel);
+        if (context === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'Unavailable',
+                'The loaded WASM kernel does not expose the common-proof worker runtime.',
+            );
+        }
+        return Object.freeze({
+            context,
+            storageRootCapability: activeLease.capability,
+            storageRootHandle: activeLease.handle,
+        });
     }
 
     #discardAfterFailure(originalFailure: unknown): never {
@@ -3509,6 +4760,61 @@ class DeferredWasmBrowserActionStorageWorkerKernel implements BrowserActionStora
         );
     }
 
+    public async openActiveAuthenticatedRepairProtection(
+        input: BrowserAuthenticatedRepairProtectionInput,
+    ): Promise<WorkerOpenedBrowserAuthenticatedRepairProtection> {
+        return (
+            await this.#workerKernel
+        ).openActiveAuthenticatedRepairProtection(input);
+    }
+
+    public async sealAuthenticatedRepairHead(input: {
+        plaintext: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Promise<Uint8Array> {
+        return (await this.#workerKernel).sealAuthenticatedRepairHead(input);
+    }
+
+    public async openAuthenticatedRepairHead(input: {
+        canonicalEnvelope: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Promise<Uint8Array> {
+        return (await this.#workerKernel).openAuthenticatedRepairHead(input);
+    }
+
+    public async deriveAuthenticatedRepairHeadDigest(input: {
+        sealedHeadBytes: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Promise<Uint8Array> {
+        return (await this.#workerKernel).deriveAuthenticatedRepairHeadDigest(
+            input,
+        );
+    }
+
+    public async closeAuthenticatedRepairProtection(
+        identifier: string,
+    ): Promise<void> {
+        return (await this.#workerKernel).closeAuthenticatedRepairProtection(
+            identifier,
+        );
+    }
+
+    public async prepareBrowserFoundationInitialization(
+        input: WorkerBrowserFoundationInitializationPreparationInput,
+    ): Promise<WorkerPreparedBrowserFoundationInitialization> {
+        return (
+            await this.#workerKernel
+        ).prepareBrowserFoundationInitialization(input);
+    }
+
+    public async deriveBrowserFoundationInitializationRecords(
+        input: WorkerBrowserFoundationInitializationPreparationInput,
+    ): Promise<WorkerDerivedBrowserFoundationInitializationRecords> {
+        return (
+            await this.#workerKernel
+        ).deriveBrowserFoundationInitializationRecords(input);
+    }
+
     public async openActionStateVerifierSession(
         input: BrowserActionStateVerifierSessionInput,
     ): Promise<VerificationResult<string>> {
@@ -3559,12 +4865,6 @@ class DeferredWasmBrowserActionStorageWorkerKernel implements BrowserActionStora
 
     public async closeActionRandomness(identifier: string): Promise<void> {
         return (await this.#workerKernel).closeActionRandomness(identifier);
-    }
-
-    public async derivePersistentProofAttempt(
-        input: BrowserPersistentProofAttemptInput,
-    ): Promise<BrowserActionProofAttemptBinding> {
-        return (await this.#workerKernel).derivePersistentProofAttempt(input);
     }
 
     public async deriveTargetReleaseAttempt(
@@ -3644,10 +4944,34 @@ const createWorkerKernelFromLoadedKernel = (input: {
                     operationInput,
                 ),
             ),
+        durableBindingForStateObject: (stateObjectIdentifier) =>
+            workerKernel.durableBindingForStateObject(stateObjectIdentifier),
         openSealed: (operationInput) =>
             workerKernel.openSealedActionRandomness(operationInput),
     });
-
+    workerFoundationStateProducerRunners.set(workerKernel, {
+        certifyReservation: (operationInput) =>
+            workerKernel.certifyActionRandomnessReservation(operationInput),
+        produceIntent: (operationInput) =>
+            workerKernel.produceActionRandomnessReservationIntent(
+                operationInput,
+            ),
+        produceWitnessVote: (operationInput) =>
+            workerKernel.produceActionRandomnessReservationWitnessVote(
+                operationInput,
+            ),
+        verifyIntentForWitness: (operationInput) =>
+            workerKernel.verifyActionRandomnessReservationIntentForWitness(
+                operationInput,
+            ),
+    });
+    workerCommonProofApplicationRunners.set(workerKernel, {
+        prepare: (capability, predecessor) =>
+            workerKernel.prepareClosedCommonProofApplication(
+                capability,
+                predecessor,
+            ),
+    });
     return workerKernel;
 };
 
@@ -3675,9 +4999,23 @@ export const createWasmBrowserActionStorageWorkerKernel = (input: {
         });
     }
 
-    const resolvedWorkerKernel = Promise.resolve(input.kernel).then((kernel) =>
-        createWorkerKernelFromLoadedKernel({ cryptoProvider, kernel }),
-    );
+    const resolvedWorkerKernel = Promise.resolve(input.kernel)
+        .then((kernel) =>
+            createWorkerKernelFromLoadedKernel({ cryptoProvider, kernel }),
+        )
+        .catch((error: unknown) => {
+            if (error instanceof BrowserActionStorageCustodyError) {
+                throw error;
+            }
+            throw new BrowserActionStorageCustodyError(
+                'Unavailable',
+                'The WebAssembly storage-root kernel could not be loaded.',
+                error,
+            );
+        });
+    // Observe startup failure immediately. Operations still await the original
+    // rejected promise and receive the typed error above.
+    void resolvedWorkerKernel.catch(() => undefined);
     const deferredWorkerKernel =
         new DeferredWasmBrowserActionStorageWorkerKernel(resolvedWorkerKernel);
     terminalSetupCheckpointKernelCommandRunners.set(deferredWorkerKernel, {
@@ -3715,13 +5053,47 @@ export const createWasmBrowserActionStorageWorkerKernel = (input: {
                 await resolvedWorkerKernel,
                 operationInput,
             ),
+        durableBindingForStateObject: async (stateObjectIdentifier) =>
+            openClosedWorkerVerifiedStateDurableBinding(
+                await resolvedWorkerKernel,
+                stateObjectIdentifier,
+            ),
         openSealed: async (operationInput) =>
             openSealedWorkerActionRandomness(
                 await resolvedWorkerKernel,
                 operationInput,
             ),
     });
-
+    workerFoundationStateProducerRunners.set(deferredWorkerKernel, {
+        certifyReservation: async (operationInput) =>
+            certifyClosedWorkerActionRandomnessReservation(
+                await resolvedWorkerKernel,
+                operationInput,
+            ),
+        produceIntent: async (operationInput) =>
+            produceClosedWorkerActionRandomnessReservationIntent(
+                await resolvedWorkerKernel,
+                operationInput,
+            ),
+        produceWitnessVote: async (operationInput) =>
+            produceClosedWorkerActionRandomnessReservationWitnessVote(
+                await resolvedWorkerKernel,
+                operationInput,
+            ),
+        verifyIntentForWitness: async (operationInput) =>
+            verifyClosedWorkerActionRandomnessReservationIntentForWitness(
+                await resolvedWorkerKernel,
+                operationInput,
+            ),
+    });
+    workerCommonProofApplicationRunners.set(deferredWorkerKernel, {
+        prepare: async (capability, predecessor) =>
+            prepareClosedWorkerVerifiedCommonProofApplication(
+                await resolvedWorkerKernel,
+                capability,
+                predecessor,
+            ),
+    });
     return deferredWorkerKernel;
 };
 
@@ -3737,6 +5109,53 @@ const requireWorkerActionRandomnessRunner = (
     }
     return runner;
 };
+
+const requireWorkerFoundationStateProducerRunner = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+): WorkerFoundationStateProducerRunner => {
+    const runner = workerFoundationStateProducerRunners.get(workerKernel);
+    if (runner === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The action storage worker has no closed foundation state producer.',
+        );
+    }
+    return runner;
+};
+
+export const produceClosedWorkerActionRandomnessReservationIntent = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+    input: BrowserActionRandomnessReservationIntentProductionInput,
+): Promise<
+    VerificationResult<BrowserProducedActionRandomnessReservationIntent>
+> =>
+    requireWorkerFoundationStateProducerRunner(workerKernel).produceIntent(
+        input,
+    );
+
+export const verifyClosedWorkerActionRandomnessReservationIntentForWitness = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+    input: BrowserActionRandomnessReservationIntentWitnessVerificationInput,
+): Promise<VerificationResult<string>> =>
+    requireWorkerFoundationStateProducerRunner(
+        workerKernel,
+    ).verifyIntentForWitness(input);
+
+export const produceClosedWorkerActionRandomnessReservationWitnessVote = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+    input: BrowserActionRandomnessReservationWitnessVoteProductionInput,
+): Promise<VerificationResult<Uint8Array>> =>
+    requireWorkerFoundationStateProducerRunner(workerKernel).produceWitnessVote(
+        input,
+    );
+
+export const certifyClosedWorkerActionRandomnessReservation = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+    input: BrowserActionRandomnessReservationCertificationInput,
+): Promise<VerificationResult<BrowserProducedActionRandomnessReservation>> =>
+    requireWorkerFoundationStateProducerRunner(workerKernel).certifyReservation(
+        input,
+    );
 
 export const createAndSealWorkerActionRandomness = (
     workerKernel: BrowserActionStorageWorkerKernel,
@@ -3788,6 +5207,42 @@ export const openClosedWorkerStructuredCommitmentOpenings = (
     return requireWorkerActionRandomnessRunner(
         workerKernel,
     ).openStructuredCommitmentOpenings(input);
+};
+
+export const prepareClosedWorkerVerifiedCommonProofApplication = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+    capability: VerifiedCommonProofCapability,
+    predecessor: CommonProofApplicationFreshnessCoordinate,
+): Promise<ClosedWorkerPreparedCommonProofApplication> => {
+    if (typeof globalThis.document !== 'undefined') {
+        throw new BrowserActionStorageCustodyError(
+            'Unavailable',
+            'Verified common-proof authority may only be applied inside the dedicated custody worker.',
+        );
+    }
+    const runner = workerCommonProofApplicationRunners.get(workerKernel);
+    if (runner === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The action storage worker does not belong to this WASM runtime.',
+        );
+    }
+    return runner.prepare(capability, predecessor);
+};
+
+export const openClosedWorkerVerifiedStateDurableBinding = (
+    workerKernel: BrowserActionStorageWorkerKernel,
+    stateObjectIdentifier: string,
+): Promise<VerificationResult<VerifiedStateDurableBinding>> => {
+    if (typeof globalThis.document !== 'undefined') {
+        throw new BrowserActionStorageCustodyError(
+            'Unavailable',
+            'Verified state durable bindings may only be consumed inside the dedicated custody worker.',
+        );
+    }
+    return requireWorkerActionRandomnessRunner(
+        workerKernel,
+    ).durableBindingForStateObject(stateObjectIdentifier);
 };
 
 const runTerminalSetupCheckpointKernelCommand = async (

@@ -1,4 +1,4 @@
-//! Deterministic evaluator candidate generation and closure evidence.
+//! Deterministic evaluator candidate generation and parameter evidence.
 //!
 //! These records are independent parameter evidence. They are not protocol
 //! artifacts, are never accepted from a producer, and never mint a suite
@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 use crate::{
     bgv::{
         direct_ballots::{MAXIMUM_SCORE, MINIMUM_SCORE},
-        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME},
+        key_switch_topology::KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::FOUNDATION_PROFILE,
@@ -19,10 +20,9 @@ use crate::{
 };
 
 use super::{
-    key_switch::KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
     noise_recurrence::{
-        DirectBallotTargetNoiseBound, SINGLE_BALLOT_EVALUATOR_WORKING_LEVEL,
-        SymbolicCiphertextBound, direct_ballot_target_noise_bounds_at_working_level,
+        DirectBallotTargetNoiseBound, SymbolicCiphertextBound,
+        direct_ballot_target_noise_bounds_at_working_level,
     },
     top_k::{
         CANONICAL_TARGET_CIPHERTEXT_LEVEL, DIRECT_COMPARISON_OUTPUT_LEVEL,
@@ -78,8 +78,7 @@ pub(crate) struct EvaluatorCandidateInput {
     pub(crate) special_primes: Vec<u64>,
     pub(crate) key_switch_method: EvaluatorKeySwitchMethod,
     pub(crate) key_switch_data_primes_per_block: usize,
-    pub(crate) single_ballot_working_level: usize,
-    pub(crate) multi_ballot_working_level: usize,
+    pub(crate) evaluator_working_level: usize,
     pub(crate) comparison_output_level: usize,
     pub(crate) target_ciphertext_level: usize,
     pub(crate) comparison_baby_step_count: usize,
@@ -96,7 +95,7 @@ impl EvaluatorCandidateInput {
         let option_count = usize::from(FOUNDATION_PROFILE.option_count);
         let score_difference_bound = (MAXIMUM_SCORE - MINIMUM_SCORE)
             .checked_mul(participant_count)
-            .ok_or_else(|| invalid_closure("comparison domain overflowed"))?;
+            .ok_or_else(|| invalid_candidate_evidence("comparison domain overflowed"))?;
         let (_, comparison_coefficients) = comparison_polynomials(score_difference_bound)?;
         let target_selections = (1..=option_count)
             .map(|top_count| {
@@ -137,11 +136,10 @@ impl EvaluatorCandidateInput {
             polynomial_degree: POLYNOMIAL_DEGREE,
             plaintext_modulus: PLAINTEXT_MODULUS,
             data_primes: DATA_PRIMES.to_vec(),
-            special_primes: vec![SPECIAL_PRIME],
+            special_primes: SPECIAL_PRIMES.to_vec(),
             key_switch_method: EvaluatorKeySwitchMethod::HybridExactInteger,
             key_switch_data_primes_per_block: KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
-            single_ballot_working_level: SINGLE_BALLOT_EVALUATOR_WORKING_LEVEL,
-            multi_ballot_working_level: SELECTED_EVALUATOR_WORKING_LEVEL,
+            evaluator_working_level: SELECTED_EVALUATOR_WORKING_LEVEL,
             comparison_output_level: DIRECT_COMPARISON_OUTPUT_LEVEL,
             target_ciphertext_level: CANONICAL_TARGET_CIPHERTEXT_LEVEL,
             comparison_baby_step_count: direct_comparison_baby_step_count(score_difference_bound)?,
@@ -168,8 +166,7 @@ impl EvaluatorCandidateInput {
             "specialPrimes": self.special_primes,
             "keySwitchMethod": self.key_switch_method.identifier(),
             "keySwitchDataPrimesPerBlock": self.key_switch_data_primes_per_block,
-            "singleBallotWorkingLevel": self.single_ballot_working_level,
-            "multiBallotWorkingLevel": self.multi_ballot_working_level,
+            "evaluatorWorkingLevel": self.evaluator_working_level,
             "comparisonOutputLevel": self.comparison_output_level,
             "targetCiphertextLevel": self.target_ciphertext_level,
             "comparisonBabyStepCount": self.comparison_baby_step_count,
@@ -366,12 +363,11 @@ fn generate_ballot_count_evidence(
     input: &EvaluatorCandidateInput,
     ballot_count: usize,
 ) -> EvaluatorBallotCountEvidence {
-    let working_level = if ballot_count == 1 {
-        input.single_ballot_working_level
-    } else {
-        input.multi_ballot_working_level
-    };
-    generate_ballot_count_evidence_at_working_level(input, ballot_count, working_level)
+    generate_ballot_count_evidence_at_working_level(
+        input,
+        ballot_count,
+        input.evaluator_working_level,
+    )
 }
 
 fn generate_ballot_count_evidence_at_working_level(
@@ -661,8 +657,8 @@ pub(crate) fn apply_evaluator_candidate_gates(
     }
 }
 
-fn invalid_closure(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+fn invalid_candidate_evidence(message: impl Into<String>) -> CanonicalError {
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 #[cfg(test)]
@@ -709,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    fn current_candidate_certificate_preserves_recomputed_failures() {
+    fn current_candidate_certificate_preserves_recomputed_margin_failures() {
         let (input, output) = implemented_evidence();
         assert_eq!(
             input.key_switch_method,
@@ -735,16 +731,17 @@ mod tests {
                 )
             })
             .count();
-        assert_eq!(recurrence_failure_count, 1);
-        assert_eq!(nonpositive_margin_failure_count, 171);
+        assert_eq!(recurrence_failure_count, 0);
+        assert_eq!(nonpositive_margin_failure_count, 190);
         assert_eq!(
             certificate.failures.len(),
             recurrence_failure_count + nonpositive_margin_failure_count
         );
         assert!(matches!(
             certificate.failures.first(),
-            Some(EvaluatorCandidateFailure::RecurrenceFailure {
+            Some(EvaluatorCandidateFailure::NonpositiveDecryptionMargin {
                 ballot_count: 1,
+                top_count: 1,
                 ..
             })
         ));
@@ -824,20 +821,45 @@ mod tests {
     }
 
     #[test]
-    fn one_ballot_underflow_is_an_explicit_evidence_row() {
+    fn one_ballot_evidence_uses_the_canonical_working_level() {
         let (_, output) = implemented_evidence();
-        let EvaluatorBallotCountEvidence::RecurrenceFailure {
+        let EvaluatorBallotCountEvidence::Outputs {
             ballot_count,
-            error_code,
-            message,
+            targets,
         } = &output.ballot_counts[0]
         else {
-            panic!("one-ballot schedule must retain its level underflow");
+            panic!("one-ballot recurrence must use the canonical evaluator level");
         };
         assert_eq!(*ballot_count, 1);
-        assert_eq!(*error_code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(targets.len(), 20);
         assert!(
-            message.contains("modulus switching requires a two-component bound above level zero")
+            targets
+                .iter()
+                .enumerate()
+                .all(|(target_index, target)| target.top_count == target_index + 1)
         );
+        let (all_options_target, bounded_targets) = targets
+            .split_last()
+            .expect("one-ballot evidence retains every target");
+        assert_eq!(all_options_target.top_count, 20);
+        assert!(
+            all_options_target
+                .target_identifier
+                .minimum_decryption_margin
+                .is_positive()
+        );
+        assert!(
+            all_options_target
+                .target_order
+                .minimum_decryption_margin
+                .is_positive()
+        );
+        assert!(bounded_targets.iter().all(|target| {
+            target
+                .target_identifier
+                .minimum_decryption_margin
+                .is_negative()
+                && target.target_order.minimum_decryption_margin.is_negative()
+        }));
     }
 }

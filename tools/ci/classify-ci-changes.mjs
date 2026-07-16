@@ -10,11 +10,13 @@ import { isDeepStrictEqual } from 'node:util';
 const publicPackageManifestPath = 'packages/sdk/package.json';
 const documentationDirectoryPrefixes = ['reference-documents/'];
 const toolingDirectoryPrefixes = [
-    '.github/',
     '.husky/',
     'tests/node/tools/',
-    'tools/ci/',
     'tools/internal/',
+];
+const heavyLaneDefinitionDirectoryPrefixes = [
+    '.github/workflows/',
+    'tools/ci/',
 ];
 const toolingFiles = new Set([
     '.editorconfig',
@@ -117,6 +119,9 @@ export const shouldRunHeavyCiLanes = (
     return changedPaths.some((changedPath) => {
         const normalizedPath = normalizeChangedPath(changedPath);
         if (
+            heavyLaneDefinitionDirectoryPrefixes.some((directoryPrefix) =>
+                normalizedPath.startsWith(directoryPrefix),
+            ) ||
             heavyRuntimeDirectoryPrefixes.some((directoryPrefix) =>
                 normalizedPath.startsWith(directoryPrefix),
             )

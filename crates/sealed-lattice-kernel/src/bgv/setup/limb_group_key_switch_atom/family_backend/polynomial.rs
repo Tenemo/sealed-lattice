@@ -4,6 +4,7 @@
 //! Montgomery field of `proof_field`.
 
 use super::super::proof_field::ProofFieldParameters;
+#[cfg(test)]
 use super::domain::CyclicDomain;
 
 // Product via cyclic NTT: evaluate both operands on a subgroup at least as
@@ -14,6 +15,7 @@ use super::domain::CyclicDomain;
 // requires the product length to fit the field's two-adic order (65536); the
 // caller falls back to schoolbook for tiny inputs where the NTT setup does not
 // pay off.
+#[cfg(test)]
 pub(super) fn multiply_via_ntt<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     left: &[[u64; LIMB_COUNT]],
@@ -41,6 +43,7 @@ pub(super) fn multiply_via_ntt<const LIMB_COUNT: usize>(
     coefficients
 }
 
+#[cfg(test)]
 pub(super) fn trim<const LIMB_COUNT: usize>(coefficients: &mut Vec<[u64; LIMB_COUNT]>) {
     while coefficients.len() > 1
         && coefficients
@@ -65,6 +68,7 @@ pub(super) fn evaluate<const LIMB_COUNT: usize>(
     accumulator
 }
 
+#[cfg(test)]
 pub(super) fn add<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     left: &[[u64; LIMB_COUNT]],
@@ -86,6 +90,7 @@ pub(super) fn add<const LIMB_COUNT: usize>(
     result
 }
 
+#[cfg(test)]
 pub(super) fn subtract<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     left: &[[u64; LIMB_COUNT]],
@@ -107,6 +112,7 @@ pub(super) fn subtract<const LIMB_COUNT: usize>(
     result
 }
 
+#[cfg(test)]
 pub(super) fn scale<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     coefficients: &[[u64; LIMB_COUNT]],
@@ -118,6 +124,7 @@ pub(super) fn scale<const LIMB_COUNT: usize>(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn multiply<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     left: &[[u64; LIMB_COUNT]],
@@ -171,6 +178,7 @@ pub(super) fn divide_by_linear<const LIMB_COUNT: usize>(
 // polynomial of a size-`m` multiplicative subgroup. Requires the numerator to
 // be divisible (the caller guarantees it vanishes on H); any remainder is
 // dropped.
+#[cfg(test)]
 pub(super) fn divide_by_vanishing<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     coefficients: &[[u64; LIMB_COUNT]],

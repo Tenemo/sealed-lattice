@@ -24,7 +24,9 @@ pub(super) struct EvaluationDomainPlan {
     pub(super) trace_root: u64,
     pub(super) extension_root: u64,
     pub(super) coset_offset: u64,
+    #[cfg(test)]
     trace_plan: CyclicTransformPlan,
+    #[cfg(test)]
     extension_plan: CyclicTransformPlan,
 }
 
@@ -164,12 +166,15 @@ impl EvaluationDomainPlan {
             trace_root,
             extension_root,
             coset_offset,
+            #[cfg(test)]
             trace_plan: build_cyclic_transform_plan(trace_size, trace_root, modulus)?,
+            #[cfg(test)]
             extension_plan: build_cyclic_transform_plan(extension_size, extension_root, modulus)?,
         })
     }
 
     // Interpolate trace values indexed by H into coefficient form.
+    #[cfg(test)]
     pub(super) fn coefficients_from_trace_values(&self, trace_values: &[u64]) -> Vec<u64> {
         debug_assert_eq!(trace_values.len(), self.trace_size);
         let mut coefficients = trace_values.to_vec();
@@ -180,6 +185,7 @@ impl EvaluationDomainPlan {
 
     // Evaluate a coefficient vector of length at most the extension size over
     // the extension coset offset * <extension_root>.
+    #[cfg(test)]
     pub(super) fn extension_evaluations_from_coefficients(&self, coefficients: &[u64]) -> Vec<u64> {
         debug_assert!(coefficients.len() <= self.extension_size);
         let mut padded = vec![0_u64; self.extension_size];
@@ -194,6 +200,7 @@ impl EvaluationDomainPlan {
     }
 
     // Interpolate extension-coset evaluations back into coefficient form.
+    #[cfg(test)]
     pub(super) fn coefficients_from_extension_evaluations(
         &self,
         evaluations: &[u64],
@@ -225,6 +232,7 @@ impl EvaluationDomainPlan {
     // outside H: F(z) = (z^m - 1) / m * sum_i values_i * omega^i / (z - omega^i).
 }
 
+#[cfg(test)]
 pub(super) fn coefficients_from_coset_evaluations(
     evaluations: &[u64],
     offset: u64,
@@ -245,6 +253,7 @@ pub(super) fn coefficients_from_coset_evaluations(
 }
 
 // Montgomery batch inversion; fails on a zero element.
+#[cfg(test)]
 pub(super) fn batch_inverse(values: &[u64], modulus: u64) -> CanonicalResult<Vec<u64>> {
     let mut prefix_products = Vec::with_capacity(values.len());
     let mut running = 1_u64;

@@ -9,7 +9,15 @@ import {
     type CheckpointOperationIdentity,
     type CheckpointRandomCursor,
     type ExpectedCheckpointBoundary,
-} from '#packages/protocol/src/index';
+    type TransferableAuthenticatedCheckpointStore,
+} from '#packages/protocol/src/runtime/authenticated-checkpoint-store';
+import {
+    bytesToHex,
+    createRuntimeRecordProtection,
+    readRuntimeRecord,
+    releaseRuntimeRecordProtection,
+    stageRuntimeRecordWrite,
+} from '#packages/protocol/src/runtime/authenticated-runtime-record';
 import {
     generateRuntimeStorageEncryptionKey,
     hashFilledWith,
@@ -52,9 +60,7 @@ const boundaryPolicy: CheckpointBoundaryPolicy = {
     validateResume: () => undefined,
 };
 
-const proofAttemptIdentifiers = (
-    count: number,
-): readonly Uint8Array[] =>
+const proofAttemptIdentifiers = (count: number): readonly Uint8Array[] =>
     Object.freeze(
         Array.from({ length: count }, (_unused, index) =>
             new Uint8Array(32).fill(index + 1),
@@ -230,7 +236,7 @@ describe('Authenticated checkpoint store', () => {
     const openStore = (input?: {
         cryptoProvider?: Crypto;
         encryptionKey?: CryptoKey;
-    }): AuthenticatedCheckpointStore =>
+    }): TransferableAuthenticatedCheckpointStore =>
         openAuthenticatedCheckpointStore({
             authorityContext: runtimeAuthorityContext(),
             boundaryPolicy,
@@ -240,6 +246,31 @@ describe('Authenticated checkpoint store', () => {
             limits: checkpointLimits,
             store,
         });
+
+    it('transfers exclusive ownership and revokes identities on close', async () => {
+        const retainedStore = openStore();
+        const ownedStore = retainedStore.claimExclusiveOwner();
+
+        expect(() => retainedStore.copyAuthorityContext()).toThrowError(
+            expect.objectContaining({ code: 'InvalidState' }),
+        );
+        expect(() => retainedStore.claimExclusiveOwner()).toThrowError(
+            expect.objectContaining({ code: 'InvalidState' }),
+        );
+
+        const identity = await ownedStore.beginOperation([]);
+        const firstClose = ownedStore.close();
+        const secondClose = ownedStore.close();
+        expect(secondClose).toBe(firstClose);
+        await firstClose;
+
+        expect(() => ownedStore.beginOperation([])).toThrowError(
+            expect.objectContaining({ code: 'InvalidState' }),
+        );
+        expect(identity.checkpointLineageIdentifier).toEqual(
+            new Uint8Array(32),
+        );
+    });
 
     it('publishes and resumes exact multi-chunk state with shared-attempt cursors', async () => {
         const checkpointStore = openStore();
@@ -268,6 +299,159 @@ describe('Authenticated checkpoint store', () => {
             boundary.stateStreamDescriptorBytes,
         );
         expect(await restoreBytes(resumed)).toEqual(stateBytes);
+    });
+
+    it('refuses authenticated manifest storage records with noncanonical binary framing', async () => {
+        const checkpointStore = openStore();
+        const identity = await checkpointStore.beginOperation([]);
+        const stateBytes = stateBytesFor(24);
+        const boundary = deterministicBoundaryFor({ stateBytes });
+        await checkpointStore.publish({
+            boundary,
+            identity,
+            stateChunks: chunkState(stateBytes),
+        });
+
+        const logicalRecordKey = `checkpoint/manifest/${bytesToHex(
+            identity.checkpointLineageIdentifier,
+        )}`;
+        const operationDomain =
+            'sealed-lattice/runtime/checkpoint-manifest-record/v1';
+        const protection = createRuntimeRecordProtection({
+            authorityContext: runtimeAuthorityContext(),
+            encryptionKey,
+            maximumRecordSealingCount: 32,
+        });
+        const openedManifest = await readRuntimeRecord({
+            logicalRecordKey,
+            operationDomain,
+            protection,
+            store,
+        });
+        expect(openedManifest).toBeDefined();
+        if (openedManifest === undefined) {
+            await releaseRuntimeRecordProtection(protection);
+            return;
+        }
+        const originalPlaintext = openedManifest.plaintext.slice();
+        expect(new DataView(originalPlaintext.buffer).getUint16(0, true)).toBe(
+            1,
+        );
+        expect(new DataView(originalPlaintext.buffer).getUint32(34, true)).toBe(
+            originalPlaintext.byteLength - 38,
+        );
+
+        const malformedRecords = [
+            (() => {
+                const bytes = originalPlaintext.slice();
+                new DataView(bytes.buffer).setUint16(0, 2, true);
+                return bytes;
+            })(),
+            (() => {
+                const bytes = originalPlaintext.slice();
+                new DataView(bytes.buffer).setUint32(34, 0, true);
+                return bytes;
+            })(),
+            (() => {
+                const bytes = originalPlaintext.slice();
+                bytes.fill(0, 2, 34);
+                return bytes;
+            })(),
+            originalPlaintext.slice(0, -1),
+            concatenateBytes(originalPlaintext, Uint8Array.of(0)),
+        ];
+
+        let currentSealedBytes = openedManifest.sealedBytes;
+        try {
+            for (const malformedRecord of malformedRecords) {
+                const transaction = await store.beginTransaction({
+                    lifetimeMilliseconds:
+                        checkpointLimits.transactionLifetimeMilliseconds,
+                });
+                currentSealedBytes = await stageRuntimeRecordWrite({
+                    expectedCurrentSealedBytes: currentSealedBytes,
+                    logicalRecordKey,
+                    operationDomain,
+                    plaintext: malformedRecord,
+                    protection,
+                    transaction,
+                });
+                await transaction.commit();
+
+                const malformedCheckpointStore = openStore();
+                await expect(
+                    malformedCheckpointStore.resume({
+                        checkpointLineageIdentifier:
+                            identity.checkpointLineageIdentifier,
+                        expectedBoundary: expectedBoundary(boundary),
+                    }),
+                ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
+                await malformedCheckpointStore.close();
+
+                const restoreTransaction = await store.beginTransaction({
+                    lifetimeMilliseconds:
+                        checkpointLimits.transactionLifetimeMilliseconds,
+                });
+                currentSealedBytes = await stageRuntimeRecordWrite({
+                    expectedCurrentSealedBytes: currentSealedBytes,
+                    logicalRecordKey,
+                    operationDomain,
+                    plaintext: originalPlaintext,
+                    protection,
+                    transaction: restoreTransaction,
+                });
+                await restoreTransaction.commit();
+            }
+        } finally {
+            originalPlaintext.fill(0);
+            openedManifest.plaintext.fill(0);
+            for (const malformedRecord of malformedRecords) {
+                malformedRecord.fill(0);
+            }
+            await releaseRuntimeRecordProtection(protection);
+            await checkpointStore.close();
+        }
+    });
+
+    it('retains exact issued proof-attempt identifiers and rejects malformed attempt sets', async () => {
+        const checkpointStore = openStore();
+        const firstAttemptIdentifier = new Uint8Array(32).fill(0x31);
+        const secondAttemptIdentifier = new Uint8Array(32).fill(0x42);
+        const beginPromise = checkpointStore.beginOperation([
+            firstAttemptIdentifier,
+            secondAttemptIdentifier,
+        ]);
+        firstAttemptIdentifier.fill(0x91);
+        secondAttemptIdentifier.fill(0x92);
+
+        const identity = await beginPromise;
+        expect(identity.streamAttemptIdentifiers).toEqual([
+            new Uint8Array(32).fill(0x31),
+            new Uint8Array(32).fill(0x42),
+        ]);
+
+        const copiedIdentifiers = identity.streamAttemptIdentifiers;
+        copiedIdentifiers[0]?.fill(0xff);
+        expect(identity.streamAttemptIdentifiers[0]).toEqual(
+            new Uint8Array(32).fill(0x31),
+        );
+
+        await expect(
+            checkpointStore.beginOperation([new Uint8Array(31)]),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        await expect(
+            checkpointStore.beginOperation([
+                new Uint8Array(32).fill(0x51),
+                new Uint8Array(32).fill(0x51),
+            ]),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        await expect(
+            checkpointStore.beginOperation(
+                proofAttemptIdentifiers(
+                    checkpointLimits.maximumStreamAttemptCount + 1,
+                ),
+            ),
+        ).rejects.toMatchObject({ code: 'ResourceLimit' });
     });
 
     it('publishes deterministic checkpoint state without random cursors', async () => {
@@ -774,9 +958,10 @@ describe('Authenticated checkpoint store', () => {
             .filter(
                 (key) =>
                     key.includes('/objects/') &&
-                    (adapter.rawRead(key)?.byteLength ?? 0) > 1_000,
+                    (adapter.rawRead(key)?.byteLength ?? 0) >
+                        foundationProfile.streamChunkByteLength,
             );
-        expect(obsoleteChunkObjectKeys).toHaveLength(2);
+        expect(obsoleteChunkObjectKeys).toHaveLength(1);
 
         const replacementState = stateBytesFor(19);
         const replacementBoundary = deterministicBoundaryFor({
@@ -926,10 +1111,14 @@ describe('Authenticated checkpoint store', () => {
             },
             subtle: globalThis.crypto.subtle,
         } as Crypto;
+        const repeatingIdentifierStore = openStore({
+            cryptoProvider: repeatingCryptoProvider,
+        });
+        await repeatingIdentifierStore.beginOperation(
+            proofAttemptIdentifiers(1),
+        );
         await expect(
-            openStore({
-                cryptoProvider: repeatingCryptoProvider,
-            }).beginOperation(proofAttemptIdentifiers(1)),
+            repeatingIdentifierStore.beginOperation(proofAttemptIdentifiers(1)),
         ).rejects.toMatchObject({ code: 'EntropyFailure' });
         expect(randomnessInvocationCount).toBe(2);
 

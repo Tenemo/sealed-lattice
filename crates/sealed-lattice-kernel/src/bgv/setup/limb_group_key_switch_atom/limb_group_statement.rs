@@ -53,6 +53,7 @@ pub(crate) struct LimbGroupContext<const LIMB_COUNT: usize> {
     cofactors: Vec<[u64; LIMB_COUNT]>,
     cofactor_inverses: Vec<u64>,
     gadget_idempotents_centered: Vec<[u64; LIMB_COUNT]>,
+    #[cfg(test)]
     group_modulus_inverse: [u64; LIMB_COUNT],
 }
 
@@ -120,6 +121,7 @@ impl<const LIMB_COUNT: usize> LimbGroupContext<LIMB_COUNT> {
             })
             .collect::<Vec<_>>();
 
+        #[cfg(test)]
         let group_modulus_inverse =
             parameters.inverse(&parameters.raw_value_to_element(&group_modulus));
 
@@ -130,6 +132,7 @@ impl<const LIMB_COUNT: usize> LimbGroupContext<LIMB_COUNT> {
             cofactors,
             cofactor_inverses,
             gadget_idempotents_centered,
+            #[cfg(test)]
             group_modulus_inverse,
         })
     }
@@ -206,6 +209,7 @@ impl<const LIMB_COUNT: usize> LimbGroupContext<LIMB_COUNT> {
     }
 
     /// The precomputed field inverse of the limb-group modulus `Q`.
+    #[cfg(test)]
     pub(crate) fn group_modulus_inverse(&self) -> &[u64; LIMB_COUNT] {
         &self.group_modulus_inverse
     }
@@ -464,6 +468,7 @@ fn diagonal_term<const LIMB_COUNT: usize>(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn validate_signed_support(
     values: &[i64],
     ring_degree: usize,
@@ -991,7 +996,7 @@ mod tests {
     fn kernel_galois_keygen_material_satisfies_the_limb_group_atom() {
         use crate::bgv::evaluator::engine::DevelopmentBgvKey;
         use crate::bgv::evaluator::key_switch::generate_galois_key;
-        use crate::bgv::parameters::{POLYNOMIAL_DEGREE, SPECIAL_PRIME};
+        use crate::bgv::parameters::{POLYNOMIAL_DEGREE, SPECIAL_PRIMES};
 
         let parameters = sixteen_limb_group_field_parameters();
         let level = 1;
@@ -1052,7 +1057,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
             let mut special_prime_polynomial = vec![0_u64; POLYNOMIAL_DEGREE];
-            special_prime_polynomial[0] = SPECIAL_PRIME % group_primes[digit_index];
+            special_prime_polynomial[0] = SPECIAL_PRIMES[0] % group_primes[digit_index];
 
             let report = verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
                 group: &group,

@@ -95,13 +95,13 @@ pub(crate) fn rotate(
 ) -> CanonicalResult<Ciphertext> {
     if ciphertext.component_count() != 2 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "rotation requires a two-component ciphertext",
         ));
     }
     if galois_key.level < ciphertext.level {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "rotation key level is below the ciphertext level",
         ));
     }

@@ -3,20 +3,14 @@ export {
     validatePollSpec,
 } from './lifecycle/poll-spec.js';
 export type { FoundationManifestIngress } from './lifecycle/poll-spec.js';
-export {
-    openUntrustedStorageTransactionStore,
-    UntrustedStorageTransactionError,
-    UntrustedStorageTransactionStore,
-} from './runtime/untrusted-storage-transaction-store.js';
-export { createRuntimeRecordAuthenticatedRepairProtection } from './runtime/authenticated-runtime-record.js';
+export { UntrustedStorageTransactionError } from './runtime/untrusted-storage-transaction-store.js';
 export { openCanonicalBoardRuntime } from './runtime/canonical-board-runtime.js';
 export {
     BrowserFoundationAuthorityError,
     openBrowserFoundationAuthority,
-} from './runtime/browser-foundation-authority.js';
+} from './runtime/browser-foundation-authority-combined.js';
 export type {
     BrowserFoundationActionRandomness,
-    BrowserFoundationActionRandomnessDescription,
     BrowserFoundationActiveCapability,
     BrowserFoundationAuthority,
     BrowserFoundationAuthorityErrorCode,
@@ -25,49 +19,37 @@ export type {
     BrowserFoundationAuthorityState,
     BrowserFoundationCheckpoint,
     BrowserFoundationCheckpointDescription,
-    BrowserFoundationPersistentProofAttemptInput,
+    BrowserFoundationDurableStateBinding,
     BrowserFoundationRandomnessReservationInput,
     BrowserFoundationStateReservation,
     BrowserFoundationStateReservationInput,
     BrowserFoundationTargetReleaseAttemptInput,
     BrowserFoundationWitnessRole,
     BrowserFoundationWitnessRoleDescription,
-    BrowserFoundationWitnessRoleInput,
-} from './runtime/browser-foundation-authority.js';
-export {
-    NamespaceFreshnessError,
-    openNamespaceFreshnessSubjectRuntime,
-    openNamespaceFreshnessWitnessService,
-} from './runtime/namespace-freshness-runtime.js';
+} from './runtime/browser-foundation-authority-combined.js';
 export type {
-    NamespaceFreshnessAcceptedCheckpointJournal,
-    NamespaceFreshnessActiveCapability,
-    NamespaceFreshnessCertificateTransport,
-    NamespaceFreshnessCheckpointDescription,
-    NamespaceFreshnessClosedWitnessSigner,
-    NamespaceFreshnessContext,
-    NamespaceFreshnessErrorCode,
-    NamespaceFreshnessLocalAuthority,
-    NamespaceFreshnessLocalHead,
-    NamespaceFreshnessPreparedCheckpoint,
-    NamespaceFreshnessRetirementReason,
-    NamespaceFreshnessSubjectRuntime,
-    NamespaceFreshnessSubjectState,
-    NamespaceFreshnessVerifiedCertificate,
-    NamespaceFreshnessVerifier,
-    NamespaceFreshnessWitnessCompareAndLockResult,
-    NamespaceFreshnessWitnessCoordinate,
-    NamespaceFreshnessWitnessService,
-    NamespaceFreshnessWitnessServiceBinding,
-    NamespaceFreshnessWitnessServiceState,
-    NamespaceFreshnessWitnessStore,
-    NamespaceFreshnessWitnessStoreSnapshot,
-    UntrustedNamespaceFreshnessCertificate,
-    VerifiedNamespaceFreshnessCertificate,
-    VerifiedNamespaceFreshnessCheckpoint,
-} from './runtime/namespace-freshness-runtime.js';
+    BrowserFoundationActionRandomnessHandle,
+    BrowserFoundationDurableStateBindingHandle,
+    BrowserFoundationInitializationInput,
+    BrowserFoundationNormalWitnessRoleHandle,
+    BrowserFoundationOperationOwner,
+    BrowserRecoveredFoundationInitialization,
+    BrowserRecoveredFoundationInitializationBatch,
+    TransferableBrowserFoundationOperationOwner,
+} from './runtime/browser-foundation-operation-owner.js';
+export {
+    installBrowserActionStorageCustodyWorkerHost,
+    openBrowserFoundationOperationOwnerWorker,
+} from './runtime/browser-action-storage-custody-worker-channel.js';
+export type {
+    BrowserActionStorageCustodyWorkerConfiguration,
+    BrowserActionStorageCustodyWorkerHostConfiguration,
+    BrowserFoundationOperationOwnerWorkerRootOpening,
+    OpenedBrowserFoundationOperationOwnerWorker,
+} from './runtime/browser-action-storage-custody-worker-channel.js';
 export type {
     UntrustedStorageAdapter,
+    UntrustedStorageAuthenticatedHeadSnapshot,
     UntrustedStorageAuthenticatedRepairProtection,
     UntrustedStorageAtomicMutation,
     UntrustedStorageAuthenticationInput,
@@ -83,9 +65,15 @@ export type {
     UntrustedStorageWriteLease,
 } from './runtime/untrusted-storage-transaction-store.js';
 export type {
+    TransferableWebLockOwnedStorageTransactionStore,
+    WebLockOwnedStorageConfiguration,
+    WebLockOwnedStorageTransactionStore,
+} from './runtime/web-lock-owned-untrusted-storage-transaction-store.js';
+export type {
     CanonicalBoardRuntime,
     CanonicalBoardRuntimeInput,
     CanonicalBoardRuntimeState,
+    TransferableCanonicalBoardRuntime,
     VerifiedCanonicalBoardSnapshot,
 } from './runtime/canonical-board-runtime.js';
 export {
@@ -98,33 +86,15 @@ export type {
     BrowserLocalAuthenticatedMailboxStorage,
     BrowserLocalAuthenticatedMailboxStorageConfiguration,
 } from './runtime/authenticated-mailbox-storage.js';
-export {
-    DurableStateWitnessServiceError,
-    openDurableStateWitnessService,
-} from './runtime/durable-state-witness-service.js';
+export { DurableStateWitnessServiceError } from './runtime/durable-state-witness-service.js';
 export type {
     DurableStateWitnessService,
     DurableStateWitnessServiceErrorCode,
     DurableStateWitnessServiceLimits,
     RuntimeStorageAuthorityContext,
+    TransferableDurableStateWitnessService,
 } from './runtime/durable-state-witness-service.js';
-export {
-    openProofApplicationLedger,
-    ProofApplicationLedgerError,
-} from './runtime/proof-application-ledger.js';
-export type {
-    ProofApplicationLedger,
-    ProofApplicationLedgerErrorCode,
-    ProofApplicationLedgerLimits,
-    ProofApplicationLedgerSnapshot,
-    ProofApplicationReservation,
-    ProofApplicationReservationCapability,
-    ProofFamilyApplicationCeiling,
-} from './runtime/proof-application-ledger.js';
-export {
-    AuthenticatedCheckpointStoreError,
-    openAuthenticatedCheckpointStore,
-} from './runtime/authenticated-checkpoint-store.js';
+export { AuthenticatedCheckpointStoreError } from './runtime/authenticated-checkpoint-store.js';
 export { openBrowserLocalActionCryptographicProvider } from './runtime/browser-local-action-cryptographic-provider.js';
 export type {
     BrowserLocalActionCryptographicProvider,
@@ -141,6 +111,7 @@ export type {
     CheckpointRandomCursorKernel,
     ExpectedCheckpointBoundary,
     ResumedCheckpoint,
+    TransferableAuthenticatedCheckpointStore,
 } from './runtime/authenticated-checkpoint-store.js';
 export { deriveCollectiveBgvSetupRosterHash } from './roster/index.js';
 export type { CollectiveBgvSetupRosterEntryInput } from './roster/index.js';
@@ -156,10 +127,8 @@ export {
     publicKeyShareCoefficientVectorHashDomain,
 } from './setup/public-key-share-records.js';
 export {
-    createBinaryChunkedEvaluationKeyShareMaterialTransport,
     createGaloisKeyShareBatches,
     createRelinearizationKeyShareRounds,
-    createTrusteeEvaluationKeyProofs,
 } from './setup/evaluation-key-proof-records.js';
 export { copyCanonicalStreamDescriptor } from './setup/canonical-stream-descriptor.js';
 export { createSetupPackageVerificationInput } from './setup/setup-package-assembly.js';
@@ -168,10 +137,6 @@ export {
     createVssShareAcceptanceSet,
     createVssShareComplaintRecord,
 } from './setup/vss-share-verification-records.js';
-export type {
-    EvaluationKeyShareComponentMaterialStream,
-    TransportedEvaluationKeyShareProofMaterialSet,
-} from './setup/evaluation-key-proof-records.js';
 export type {
     PublicKeyShareContributionInput,
     PublicKeyShareMaterialContributionInput,

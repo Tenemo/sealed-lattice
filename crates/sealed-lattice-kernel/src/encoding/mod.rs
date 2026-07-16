@@ -3,12 +3,15 @@ use serde_json::{Value, json};
 use std::io::{self, Write};
 
 mod command;
+mod command_fields;
 mod foundation_command;
 mod json_ingress;
 mod mailbox_command;
 mod private_randomness_command;
 
 const MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH: usize = 256 * 1024 * 1024;
+const COMMAND_ERROR_LENGTH_FALLBACK: &[u8] = br#"{"error":{"code":"MalformedLength","message":"command error response exceeds the accepted byte length"},"success":false}"#;
+const COMMAND_ERROR_SERIALIZATION_FALLBACK: &[u8] = br#"{"error":{"code":"InvalidProtocolObject","message":"command error response serialization failed"},"success":false}"#;
 
 #[cfg(test)]
 use command::run_transcript_core_command_inner;
@@ -20,7 +23,6 @@ pub enum CanonicalErrorCode {
     FixtureMismatch,
     InvalidChunkSize,
     InvalidEnum,
-    InvalidFixture,
     InvalidProtocolObject,
     InvalidHex,
     InvalidUtf8,
@@ -41,7 +43,6 @@ impl CanonicalErrorCode {
             Self::FixtureMismatch => "FixtureMismatch",
             Self::InvalidChunkSize => "InvalidChunkSize",
             Self::InvalidEnum => "InvalidEnum",
-            Self::InvalidFixture => "InvalidFixture",
             Self::InvalidProtocolObject => "InvalidProtocolObject",
             Self::InvalidHex => "InvalidHex",
             Self::InvalidUtf8 => "InvalidUtf8",
@@ -69,13 +70,6 @@ impl CanonicalError {
             code,
             message: message.into(),
         }
-    }
-
-    pub fn to_json_value(&self) -> Value {
-        json!({
-            "code": self.code.as_str(),
-            "message": self.message,
-        })
     }
 }
 
@@ -296,15 +290,25 @@ pub fn encode_success(value: Value) -> Vec<u8> {
 }
 
 pub fn encode_error(error: CanonicalError) -> Vec<u8> {
+    encode_error_with_limit(error, MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH)
+}
+
+fn encode_error_with_limit(error: CanonicalError, maximum_byte_length: usize) -> Vec<u8> {
+    let CanonicalError { code, message } = error;
     let response = json!({
         "success": false,
-        "error": error.to_json_value(),
+        "error": {
+            "code": code.as_str(),
+            "message": message,
+        },
     });
-    encode_json_response_with_limit(
-        &response,
-        MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH,
-    )
-    .expect("serializing a bounded command error response should not fail")
+    match encode_json_response_with_limit(&response, maximum_byte_length) {
+        Ok(encoded) => encoded,
+        Err(encoding_error) => match encoding_error.code {
+            CanonicalErrorCode::MalformedLength => COMMAND_ERROR_LENGTH_FALLBACK.to_vec(),
+            _ => COMMAND_ERROR_SERIALIZATION_FALLBACK.to_vec(),
+        },
+    }
 }
 
 pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
@@ -326,7 +330,7 @@ pub(crate) fn run_accepted_setup_command(input: &[u8], session_handle: u32) -> V
 #[cfg(test)]
 mod tests {
     use super::{
-        CanonicalErrorCode, CanonicalReader, append_varuint, encode_error,
+        CanonicalErrorCode, CanonicalReader, append_varuint, encode_error, encode_error_with_limit,
         encode_json_response_with_limit, encode_varuint,
     };
 
@@ -379,13 +383,34 @@ mod tests {
     #[test]
     fn command_errors_are_json_encoded() {
         let encoded = encode_error(super::CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "bad command",
         ));
         let response = String::from_utf8(encoded).expect("error should be UTF-8 JSON");
 
         assert!(response.contains("\"success\":false"));
-        assert!(response.contains("\"InvalidFixture\""));
+        assert!(response.contains("\"InvalidProtocolObject\""));
+    }
+
+    #[test]
+    fn oversized_command_errors_use_the_deterministic_length_fallback() {
+        let encoded = encode_error_with_limit(
+            super::CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "x".repeat(super::COMMAND_ERROR_LENGTH_FALLBACK.len() * 2),
+            ),
+            super::COMMAND_ERROR_LENGTH_FALLBACK.len(),
+        );
+
+        assert_eq!(encoded, super::COMMAND_ERROR_LENGTH_FALLBACK);
+        let response: serde_json::Value =
+            serde_json::from_slice(&encoded).expect("fallback is valid JSON");
+        assert_eq!(response["success"], false);
+        assert_eq!(response["error"]["code"], "MalformedLength");
+        assert_eq!(
+            response["error"]["message"],
+            "command error response exceeds the accepted byte length"
+        );
     }
 
     #[test]

@@ -172,6 +172,25 @@ impl ProofEvaluationDomain {
         Ok(evaluations)
     }
 
+    /// Converts one owned coefficient buffer into its evaluation vector in
+    /// place. The caller does not retain a second whole-domain coefficient
+    /// vector while the transform is resident.
+    pub(crate) fn evaluate_extension_polynomial_in_place(
+        self,
+        coefficients: &mut Vec<ProofChallengeExtensionElement>,
+    ) -> Result<(), ProofPolynomialError> {
+        if coefficients.len() > self.size {
+            return Err(ProofPolynomialError::DegreeBoundExceeded);
+        }
+        coefficients.resize(self.size, ProofChallengeExtensionElement::ZERO);
+        let mut offset_power = ProofBaseFieldElement::ONE;
+        for coefficient in coefficients.iter_mut() {
+            *coefficient = coefficient.multiply_base(offset_power);
+            offset_power = offset_power.multiply(self.coset_offset);
+        }
+        radix_two_extension_transform(coefficients, self.generator, false)
+    }
+
     pub(crate) fn interpolate_extension_polynomial(
         self,
         evaluations: &[ProofChallengeExtensionElement],
@@ -189,6 +208,25 @@ impl ProofEvaluationDomain {
         }
         trim_trailing_extension_zeroes(&mut coefficients);
         Ok(coefficients)
+    }
+
+    /// Converts one owned evaluation vector into coefficients in place.
+    pub(crate) fn interpolate_extension_polynomial_in_place(
+        self,
+        evaluations: &mut Vec<ProofChallengeExtensionElement>,
+    ) -> Result<(), ProofPolynomialError> {
+        if evaluations.len() != self.size {
+            return Err(ProofPolynomialError::InputLengthMismatch);
+        }
+        radix_two_extension_transform(evaluations, self.generator, true)?;
+        let offset_inverse = self.coset_offset.inverse()?;
+        let mut offset_inverse_power = ProofBaseFieldElement::ONE;
+        for coefficient in evaluations.iter_mut() {
+            *coefficient = coefficient.multiply_base(offset_inverse_power);
+            offset_inverse_power = offset_inverse_power.multiply(offset_inverse);
+        }
+        trim_trailing_extension_zeroes(evaluations);
+        Ok(())
     }
 }
 
@@ -230,6 +268,30 @@ pub(crate) fn divide_extension_polynomial_by_linear(
     Ok((quotient, running))
 }
 
+/// Divides an owned extension polynomial by `X - point` without allocating a
+/// second coefficient vector. On success the input contains the quotient and
+/// the returned value is the remainder.
+pub(crate) fn divide_extension_polynomial_by_linear_in_place(
+    coefficients: &mut Vec<ProofChallengeExtensionElement>,
+    point: ProofChallengeExtensionElement,
+) -> Result<ProofChallengeExtensionElement, ProofPolynomialError> {
+    let Some(mut running) = coefficients.last().copied() else {
+        return Err(ProofPolynomialError::InputLengthMismatch);
+    };
+    if coefficients.len() == 1 {
+        coefficients.clear();
+        return Ok(running);
+    }
+    for coefficient_index in (1..coefficients.len()).rev() {
+        let lower_coefficient = coefficients[coefficient_index - 1];
+        coefficients[coefficient_index - 1] = running;
+        running = lower_coefficient.add(running.multiply(point));
+    }
+    coefficients.truncate(coefficients.len() - 1);
+    trim_trailing_extension_zeroes(coefficients);
+    Ok(running)
+}
+
 pub(crate) fn fold_extension_evaluations(
     evaluations: &[ProofChallengeExtensionElement],
     domain: ProofEvaluationDomain,
@@ -257,6 +319,34 @@ pub(crate) fn fold_extension_evaluations(
         )?);
     }
     Ok(folded)
+}
+
+/// Folds an owned FRI layer into its lower half in place. The unread positive
+/// and negative inputs are never overwritten before they are consumed.
+pub(crate) fn fold_extension_evaluations_in_place(
+    evaluations: &mut Vec<ProofChallengeExtensionElement>,
+    domain: ProofEvaluationDomain,
+    challenge: ProofChallengeExtensionElement,
+) -> Result<(), ProofPolynomialError> {
+    if evaluations.len() != domain.size || evaluations.len() < 2 {
+        return Err(ProofPolynomialError::InputLengthMismatch);
+    }
+    let half_size = evaluations.len() / 2;
+    let inverse_two = ProofBaseFieldElement::from_canonical(2)?.inverse()?;
+    for position in 0..half_size {
+        let positive = evaluations[position];
+        let negative = evaluations[position + half_size];
+        let point = domain.point(position)?;
+        evaluations[position] = fold_extension_pair_with_inverse_two(
+            positive,
+            negative,
+            point,
+            challenge,
+            inverse_two,
+        )?;
+    }
+    evaluations.truncate(half_size);
+    Ok(())
 }
 
 /// Verifies or constructs one exact radix-two FRI fold from evaluations at
@@ -480,6 +570,43 @@ mod tests {
             },
         );
         assert_eq!(recovered, coefficients);
+    }
+
+    #[test]
+    fn in_place_linear_division_matches_allocating_division_without_growing_storage() {
+        let point = extension([4, 1, 0, 0, 0]);
+        let cases = [
+            vec![extension([7, 0, 0, 0, 0])],
+            vec![
+                ProofChallengeExtensionElement::ZERO,
+                ProofChallengeExtensionElement::ZERO,
+                ProofChallengeExtensionElement::ZERO,
+            ],
+            vec![
+                extension([9, 2, 1, 0, 0]),
+                extension([3, 0, 5, 0, 0]),
+                extension([7, 1, 0, 2, 0]),
+                extension([1, 0, 0, 0, 1]),
+            ],
+        ];
+        for coefficients in cases {
+            let (expected_quotient, expected_remainder) =
+                divide_extension_polynomial_by_linear(&coefficients, point)
+                    .expect("the allocating reference division succeeds");
+            let mut in_place = coefficients;
+            let original_capacity = in_place.capacity();
+            let remainder = divide_extension_polynomial_by_linear_in_place(&mut in_place, point)
+                .expect("the in-place division succeeds");
+            assert_eq!(in_place, expected_quotient);
+            assert_eq!(remainder, expected_remainder);
+            assert_eq!(in_place.capacity(), original_capacity);
+        }
+
+        let mut empty = Vec::new();
+        assert_eq!(
+            divide_extension_polynomial_by_linear_in_place(&mut empty, point),
+            Err(ProofPolynomialError::InputLengthMismatch),
+        );
     }
 
     #[test]

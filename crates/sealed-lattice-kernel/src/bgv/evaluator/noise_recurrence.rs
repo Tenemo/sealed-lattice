@@ -12,15 +12,17 @@ use num_traits::{One, Signed, Zero};
 
 use crate::{
     bgv::{
+        key_switch_topology::{
+            KEY_SWITCH_DATA_PRIMES_PER_BLOCK, key_switch_special_basis_modulus_product,
+        },
         modular_arithmetic::{inverse_mod, mul_mod},
-        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME},
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
 use super::{
     circuit::broadcast_constant_coefficients,
-    key_switch::KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
     top_k::{
         CANONICAL_TARGET_CIPHERTEXT_LEVEL, DIRECT_COMPARISON_OUTPUT_LEVEL,
         RANK_LOOKUP_BABY_STEP_COUNT, SELECTED_EVALUATOR_WORKING_LEVEL, comparison_polynomials,
@@ -34,7 +36,6 @@ use super::{
 const CENTERED_PLAINTEXT_BOUND: u64 = PLAINTEXT_MODULUS / 2;
 const FRESH_ERROR_COEFFICIENT_BOUND: u64 = 2;
 const FRESH_RANDOMIZER_COEFFICIENT_BOUND: u64 = 1;
-pub(crate) const SINGLE_BALLOT_EVALUATOR_WORKING_LEVEL: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SymbolicCiphertextBound {
@@ -276,7 +277,6 @@ impl SymbolicCiphertextBound {
                 self.level,
                 self.collective_secret_coefficient_bound,
                 KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
-                SPECIAL_PRIME,
             )?;
 
         self.derived(
@@ -354,10 +354,6 @@ impl SymbolicCiphertextBound {
         self.key_switch()
     }
 
-    pub(crate) fn final_decryption_margin_is_positive(&self) -> bool {
-        self.final_decryption_margin().is_positive()
-    }
-
     pub(crate) fn final_decryption_margin(&self) -> BigInt {
         BigInt::from(active_modulus(self.level))
             - BigInt::from(BigUint::from(2_u8) * raw_decryption_bound(self))
@@ -428,11 +424,9 @@ fn hybrid_key_switch_error_bound(
     level: usize,
     collective_secret_coefficient_bound: u64,
     data_primes_per_block: usize,
-    special_basis_modulus: u64,
 ) -> CanonicalResult<BigUint> {
     if level >= DATA_PRIMES.len()
         || data_primes_per_block == 0
-        || data_primes_per_block > level + 1
         || collective_secret_coefficient_bound == 0
     {
         return Err(invalid_recurrence(
@@ -462,7 +456,8 @@ fn hybrid_key_switch_error_bound(
         * &ring_degree
         * maximum_block_modulus
         * collective_rkg_error_bound;
-    let twice_special_basis_modulus = BigUint::from(2_u8) * BigUint::from(special_basis_modulus);
+    let twice_special_basis_modulus =
+        BigUint::from(2_u8) * key_switch_special_basis_modulus_product();
     let decomposed_error =
         divide_with_ceiling(&decomposed_error_numerator, &twice_special_basis_modulus);
     let component_b_correction = BigUint::one();
@@ -545,7 +540,7 @@ fn absolute_i128(value: i128) -> BigUint {
 }
 
 fn invalid_recurrence(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -575,9 +570,8 @@ impl DirectBallotTargetNoiseBound {
 }
 
 /// Evaluate the exact production control flow symbolically for every selected
-/// top-count value. The maximum ballot count owns the suite bound; smaller
-/// ballot counts are evaluated separately by tests because they select a
-/// different working level at one ballot.
+/// top-count value. Every ballot count uses the one working level frozen by the
+/// evaluator program.
 pub(crate) fn direct_ballot_target_noise_bounds(
     participant_count: u64,
     ballot_count: usize,
@@ -585,18 +579,13 @@ pub(crate) fn direct_ballot_target_noise_bounds(
     minimum_score: u64,
     maximum_score: u64,
 ) -> CanonicalResult<Vec<DirectBallotTargetNoiseBound>> {
-    let working_level = if ballot_count == 1 {
-        SINGLE_BALLOT_EVALUATOR_WORKING_LEVEL
-    } else {
-        SELECTED_EVALUATOR_WORKING_LEVEL
-    };
     direct_ballot_target_noise_bounds_at_working_level(
         participant_count,
         ballot_count,
         option_count,
         minimum_score,
         maximum_score,
-        working_level,
+        SELECTED_EVALUATOR_WORKING_LEVEL,
     )
 }
 

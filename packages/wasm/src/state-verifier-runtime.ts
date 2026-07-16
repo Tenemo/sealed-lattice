@@ -5,6 +5,7 @@ import type {
 } from '@sealed-lattice/types';
 import { foundationProfile, stateCapabilityKinds } from '@sealed-lattice/types';
 
+import { byteArraysEqual } from './byte-array.js';
 import {
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
@@ -103,6 +104,13 @@ type StateVerifierKernelContext = Readonly<{
         canonicalReservationIntentCarrierLength: number,
         statusPointer: number,
     ): number;
+    producerCommand(
+        command: number,
+        inputPointer: number,
+        inputLength: number,
+        statusPointer: number,
+        outputLengthPointer: number,
+    ): number;
     verifyReservation(
         sessionHandle: number,
         capabilityPointer: number,
@@ -137,9 +145,18 @@ const stateVerifierCapabilityByteLength = 32;
 const stateDurableBindingByteLength = 601;
 const stateIdentityByteLength = 64;
 const stateHashByteLength = 64;
+const mlDsa65SignatureByteLength = 3_309;
 const wasm32WordByteLength = 4;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
 const fixedConfigurationByteLength = 2 + 3 * stateHashByteLength + 4;
+const stateProducerCommands = Object.freeze({
+    certifyReservation: 6,
+    constructReservationIntent: 2,
+    constructWitnessVoteCarrier: 5,
+    deriveWitnessVoteSignatureMessage: 4,
+    prepareSetupActionRandomnessIntent: 1,
+    verifyReservationIntentForWitness: 3,
+});
 
 export { stateCapabilityKinds };
 export type { StateCapabilityKind };
@@ -200,6 +217,20 @@ export type UntrustedStateWitnessVoteCarrier = Readonly<{
 
 export type VerifiedStateReservation = Readonly<{
     readonly [verifiedStateReservationBrand]: true;
+}>;
+
+export type StateObjectSignatureOperation = Readonly<{
+    signStateObjectMessage(signatureMessageHash: Uint8Array): Uint8Array;
+}>;
+
+export type ProducedStateReservationIntent = Readonly<{
+    canonicalReservationIntentCarrier: Uint8Array;
+    verifiedIntent: VerifiedStateReservationIntent;
+}>;
+
+export type ProducedStateReservation = Readonly<{
+    canonicalStateCertificate: Uint8Array;
+    verifiedReservation: VerifiedStateReservation;
 }>;
 
 export type VerifiedStateOutput = Readonly<{
@@ -289,6 +320,10 @@ type StateVerifierSessionState = 'active' | 'cancelled';
  */
 export type StateVerifierSession = Readonly<{
     cancel(): void;
+    certifyReservationIntentFromUntrustedVoteCarriers(input: {
+        untrustedVoteCarriers: readonly UntrustedStateWitnessVoteCarrier[];
+        verifiedIntent: VerifiedStateReservationIntent;
+    }): VerificationResult<ProducedStateReservation>;
     certifyIntent(input: {
         canonicalStateCertificate: Uint8Array;
         verifiedIntent: VerifiedStateIntent;
@@ -325,7 +360,24 @@ export type StateVerifierSession = Readonly<{
     verifyReservationIntent(
         input: StateReservationIntentVerification,
     ): VerificationResult<VerifiedStateReservationIntent>;
+    verifySetupActionRandomnessIntentForWitness(input: {
+        canonicalReservationIntentCarrier: Uint8Array;
+        subjectParticipantIdentity: Uint8Array;
+    }): VerificationResult<VerifiedStateReservationIntent>;
 }>;
+
+type StateVerifierWorkerProducerSession = StateVerifierSession &
+    Readonly<{
+        constructVerifiedStateWitnessVoteCarrier(input: {
+            signatureOperation: StateObjectSignatureOperation;
+            verifiedIntent: VerifiedStateReservationIntent;
+            witnessParticipantIdentity: Uint8Array;
+        }): VerificationResult<Uint8Array>;
+        produceSetupActionRandomnessReservationIntent(input: {
+            actionRandomnessHandle: number;
+            signatureOperation: StateObjectSignatureOperation;
+        }): VerificationResult<ProducedStateReservationIntent>;
+    }>;
 
 class StateVerifierInternalError extends Error {
     public readonly failureCause: unknown;
@@ -487,18 +539,6 @@ const isStateWitnessVoteKind = (value: number): value is StateWitnessVoteKind =>
 const bytesAreZero = (bytes: Uint8Array): boolean =>
     bytes.every((byte) => byte === 0);
 
-const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
-    if (left.byteLength !== right.byteLength) {
-        return false;
-    }
-    for (let byteIndex = 0; byteIndex < left.byteLength; byteIndex += 1) {
-        if (left[byteIndex] !== right[byteIndex]) {
-            return false;
-        }
-    }
-    return true;
-};
-
 const expectedWitnessVoteSequence = (voteKind: StateWitnessVoteKind): bigint =>
     voteKind === stateWitnessVoteKinds.reservation ? 1n : 2n;
 
@@ -584,14 +624,17 @@ const decodeDurableBinding = (
     if (
         (voteKind === stateWitnessVoteKinds.reservation &&
             (reservationIntentObjectHash === undefined ||
-                !bytesEqual(reservationIntentObjectHash, intentObjectHash) ||
+                !byteArraysEqual(
+                    reservationIntentObjectHash,
+                    intentObjectHash,
+                ) ||
                 outputIntentObjectHash !== undefined ||
                 exactOutputHash !== undefined ||
                 encodedExactOutputByteLength !== 0n)) ||
         (voteKind === stateWitnessVoteKinds.output &&
             (reservationIntentObjectHash === undefined ||
                 outputIntentObjectHash === undefined ||
-                !bytesEqual(outputIntentObjectHash, intentObjectHash) ||
+                !byteArraysEqual(outputIntentObjectHash, intentObjectHash) ||
                 exactOutputHash === undefined))
     ) {
         throw new StateVerifierInternalError(
@@ -711,6 +754,89 @@ const frameUntrustedStateWitnessVoteCarriers = (
         carrier.fill(0);
     }
     return framed;
+};
+
+const concatenateBytes = (...parts: readonly Uint8Array[]): Uint8Array => {
+    const byteLength = parts.reduce(
+        (total, part) => total + part.byteLength,
+        0,
+    );
+    if (
+        byteLength === 0 ||
+        byteLength > foundationProfile.maximumCopiedBufferByteLength ||
+        byteLength > maximumWasm32UnsignedInteger
+    ) {
+        throw new StateVerifierRefusalError('outsideSupportedProfile');
+    }
+    const output = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const part of parts) {
+        output.set(part, offset);
+        offset += part.byteLength;
+    }
+    return output;
+};
+
+const encodeUnsigned32 = (value: number): Uint8Array => {
+    if (!Number.isInteger(value) || value <= 0 || value > 0xffff_ffff) {
+        throw new StateVerifierRefusalError('wrongTypeOrLength');
+    }
+    const bytes = new Uint8Array(wasm32WordByteLength);
+    new DataView(bytes.buffer).setUint32(0, value, true);
+    return bytes;
+};
+
+const lengthPrefixed = (bytes: Uint8Array): Uint8Array =>
+    concatenateBytes(encodeUnsigned32(bytes.byteLength), bytes);
+
+const decodeHandleAndBytes = (
+    output: Uint8Array,
+    label: string,
+): Readonly<{ bytes: Uint8Array; handle: number }> => {
+    if (output.byteLength < 2 * wasm32WordByteLength) {
+        throw new StateVerifierInternalError(
+            `The WASM state producer returned a truncated ${label}.`,
+        );
+    }
+    const view = new DataView(
+        output.buffer,
+        output.byteOffset,
+        output.byteLength,
+    );
+    const handle = view.getUint32(0, true);
+    const byteLength = view.getUint32(wasm32WordByteLength, true);
+    if (
+        handle === 0 ||
+        byteLength === 0 ||
+        output.byteLength !== 2 * wasm32WordByteLength + byteLength
+    ) {
+        throw new StateVerifierInternalError(
+            `The WASM state producer returned malformed ${label} metadata.`,
+        );
+    }
+    return Object.freeze({
+        bytes: output.slice(2 * wasm32WordByteLength),
+        handle,
+    });
+};
+
+const decodeLeadingHandle = (output: Uint8Array, label: string): number => {
+    if (output.byteLength < wasm32WordByteLength) {
+        throw new StateVerifierInternalError(
+            `The WASM state producer returned truncated ${label} metadata.`,
+        );
+    }
+    const handle = new DataView(
+        output.buffer,
+        output.byteOffset,
+        output.byteLength,
+    ).getUint32(0, true);
+    if (handle === 0) {
+        throw new StateVerifierInternalError(
+            `The WASM state producer returned no ${label} handle.`,
+        );
+    }
+    return handle;
 };
 
 const encodeConfiguration = (input: StateVerifierSessionInput): Uint8Array => {
@@ -1254,6 +1380,369 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         );
     }
 
+    public verifySetupActionRandomnessIntentForWitness(input: {
+        canonicalReservationIntentCarrier: Uint8Array;
+        subjectParticipantIdentity: Uint8Array;
+    }): VerificationResult<VerifiedStateReservationIntent> {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input)
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        const subjectRefusal = requireCopiedBytes(
+            input.subjectParticipantIdentity,
+            stateIdentityByteLength,
+        );
+        const carrierRefusal = requireCopiedBytes(
+            input.canonicalReservationIntentCarrier,
+        );
+        if (subjectRefusal !== undefined || carrierRefusal !== undefined) {
+            return refused(subjectRefusal ?? carrierRefusal!);
+        }
+        let output: Uint8Array | undefined;
+        try {
+            output = this.#runStateProducerCommand(
+                stateProducerCommands.verifyReservationIntentForWitness,
+                this.#stateProducerInput(
+                    input.subjectParticipantIdentity,
+                    lengthPrefixed(input.canonicalReservationIntentCarrier),
+                ),
+                'verify a setup action-randomness intent for witnessing',
+            );
+            if (output.byteLength !== wasm32WordByteLength) {
+                throw new StateVerifierInternalError(
+                    'The WASM state producer returned a malformed verified-intent handle.',
+                );
+            }
+            const handle = new DataView(
+                output.buffer,
+                output.byteOffset,
+                output.byteLength,
+            ).getUint32(0, true);
+            if (handle === 0) {
+                throw new StateVerifierInternalError(
+                    'The WASM state producer returned no verified-intent handle.',
+                );
+            }
+            try {
+                return valid(
+                    this.#issueVerifiedObject<VerifiedStateReservationIntent>(
+                        handle,
+                        'reservation-intent',
+                        stateCapabilityKinds.setupActionRandomnessRoot,
+                    ),
+                );
+            } catch (registrationFailure) {
+                return this.#releaseUnregisteredKernelHandle(
+                    handle,
+                    registrationFailure,
+                );
+            }
+        } catch (error) {
+            if (error instanceof StateVerifierRefusalError) {
+                return refused(error.refusalReason);
+            }
+            throw error;
+        } finally {
+            output?.fill(0);
+        }
+    }
+
+    public produceSetupActionRandomnessReservationIntent(input: {
+        actionRandomnessHandle: number;
+        signatureOperation: StateObjectSignatureOperation;
+    }): VerificationResult<ProducedStateReservationIntent> {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input) ||
+            typeof input.signatureOperation !== 'object' ||
+            input.signatureOperation === null ||
+            typeof input.signatureOperation.signStateObjectMessage !==
+                'function'
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        let candidateHandle = 0;
+        let constructedIntentHandle = 0;
+        let prepareOutput: Uint8Array | undefined;
+        let signature: Uint8Array | undefined;
+        let constructOutput: Uint8Array | undefined;
+        try {
+            prepareOutput = this.#runStateProducerCommand(
+                stateProducerCommands.prepareSetupActionRandomnessIntent,
+                this.#stateProducerInput(
+                    encodeUnsigned32(input.actionRandomnessHandle),
+                ),
+                'prepare a setup action-randomness reservation intent',
+            );
+            if (
+                prepareOutput.byteLength !==
+                wasm32WordByteLength + stateHashByteLength
+            ) {
+                throw new StateVerifierInternalError(
+                    'The WASM state producer returned malformed reservation-intent preparation.',
+                );
+            }
+            candidateHandle = new DataView(
+                prepareOutput.buffer,
+                prepareOutput.byteOffset,
+                prepareOutput.byteLength,
+            ).getUint32(0, true);
+            if (candidateHandle === 0) {
+                throw new StateVerifierInternalError(
+                    'The WASM state producer returned no reservation-intent candidate handle.',
+                );
+            }
+            const signatureMessage = prepareOutput.slice(wasm32WordByteLength);
+            try {
+                const operationResult =
+                    input.signatureOperation.signStateObjectMessage(
+                        signatureMessage,
+                    );
+                const signatureRefusal = requireCopiedBytes(
+                    operationResult,
+                    mlDsa65SignatureByteLength,
+                );
+                if (signatureRefusal !== undefined) {
+                    throw new StateVerifierRefusalError(signatureRefusal);
+                }
+                signature = Uint8Array.from(operationResult);
+            } finally {
+                signatureMessage.fill(0);
+            }
+            constructOutput = this.#runStateProducerCommand(
+                stateProducerCommands.constructReservationIntent,
+                this.#stateProducerInput(
+                    encodeUnsigned32(candidateHandle),
+                    signature,
+                ),
+                'construct and verify a setup action-randomness reservation intent',
+            );
+            candidateHandle = 0;
+            constructedIntentHandle = decodeLeadingHandle(
+                constructOutput,
+                'reservation-intent',
+            );
+            const decoded = decodeHandleAndBytes(
+                constructOutput,
+                'reservation-intent carrier',
+            );
+            if (decoded.handle !== constructedIntentHandle) {
+                throw new StateVerifierInternalError(
+                    'The WASM state producer returned inconsistent reservation-intent metadata.',
+                );
+            }
+            const verifiedIntent =
+                this.#issueVerifiedObject<VerifiedStateReservationIntent>(
+                    constructedIntentHandle,
+                    'reservation-intent',
+                    stateCapabilityKinds.setupActionRandomnessRoot,
+                );
+            constructedIntentHandle = 0;
+            return valid(
+                Object.freeze({
+                    canonicalReservationIntentCarrier: decoded.bytes.slice(),
+                    verifiedIntent,
+                }),
+            );
+        } catch (error) {
+            if (constructedIntentHandle !== 0) {
+                this.#releaseUnregisteredKernelHandle(
+                    constructedIntentHandle,
+                    error,
+                );
+            }
+            if (error instanceof StateVerifierRefusalError) {
+                return refused(error.refusalReason);
+            }
+            throw error;
+        } finally {
+            if (candidateHandle !== 0) {
+                this.#releaseKernelHandle(candidateHandle);
+            }
+            prepareOutput?.fill(0);
+            signature?.fill(0);
+            constructOutput?.fill(0);
+        }
+    }
+
+    public constructVerifiedStateWitnessVoteCarrier(input: {
+        signatureOperation: StateObjectSignatureOperation;
+        verifiedIntent: VerifiedStateReservationIntent;
+        witnessParticipantIdentity: Uint8Array;
+    }): VerificationResult<Uint8Array> {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input) ||
+            typeof input.signatureOperation !== 'object' ||
+            input.signatureOperation === null ||
+            typeof input.signatureOperation.signStateObjectMessage !==
+                'function'
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        const resolved = resolveVerifiedObject(input.verifiedIntent, this, [
+            'reservation-intent',
+        ]);
+        if ('refusalReason' in resolved) {
+            return refused(resolved.refusalReason);
+        }
+        if (
+            resolved.record.capabilityKind !==
+            stateCapabilityKinds.setupActionRandomnessRoot
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        const witnessRefusal = requireCopiedBytes(
+            input.witnessParticipantIdentity,
+            stateIdentityByteLength,
+        );
+        if (witnessRefusal !== undefined) {
+            return refused(witnessRefusal);
+        }
+        let message: Uint8Array | undefined;
+        let operationSuffix: Uint8Array | undefined;
+        let signature: Uint8Array | undefined;
+        let carrier: Uint8Array | undefined;
+        try {
+            operationSuffix = concatenateBytes(
+                encodeUnsigned32(resolved.record.handle),
+                input.witnessParticipantIdentity,
+            );
+            message = this.#runStateProducerCommand(
+                stateProducerCommands.deriveWitnessVoteSignatureMessage,
+                this.#stateProducerInput(operationSuffix),
+                'derive a state witness-vote signature message',
+            );
+            if (message.byteLength !== stateHashByteLength) {
+                throw new StateVerifierInternalError(
+                    'The WASM state producer returned a malformed witness-vote signature message.',
+                );
+            }
+            const operationResult =
+                input.signatureOperation.signStateObjectMessage(message);
+            const signatureRefusal = requireCopiedBytes(
+                operationResult,
+                mlDsa65SignatureByteLength,
+            );
+            if (signatureRefusal !== undefined) {
+                return refused(signatureRefusal);
+            }
+            signature = Uint8Array.from(operationResult);
+            carrier = this.#runStateProducerCommand(
+                stateProducerCommands.constructWitnessVoteCarrier,
+                this.#stateProducerInput(operationSuffix, signature),
+                'construct and verify a state witness-vote carrier',
+            );
+            if (carrier.byteLength === 0) {
+                throw new StateVerifierInternalError(
+                    'The WASM state producer returned an empty witness-vote carrier.',
+                );
+            }
+            return valid(carrier.slice());
+        } catch (error) {
+            if (error instanceof StateVerifierRefusalError) {
+                return refused(error.refusalReason);
+            }
+            throw error;
+        } finally {
+            message?.fill(0);
+            operationSuffix?.fill(0);
+            signature?.fill(0);
+            carrier?.fill(0);
+        }
+    }
+
+    public certifyReservationIntentFromUntrustedVoteCarriers(input: {
+        untrustedVoteCarriers: readonly UntrustedStateWitnessVoteCarrier[];
+        verifiedIntent: VerifiedStateReservationIntent;
+    }): VerificationResult<ProducedStateReservation> {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input)
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        const resolved = resolveVerifiedObject(input.verifiedIntent, this, [
+            'reservation-intent',
+        ]);
+        if ('refusalReason' in resolved) {
+            return refused(resolved.refusalReason);
+        }
+        if (
+            resolved.record.capabilityKind !==
+            stateCapabilityKinds.setupActionRandomnessRoot
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        let framedCarriers: Uint8Array | undefined;
+        let output: Uint8Array | undefined;
+        let reservationHandle = 0;
+        try {
+            framedCarriers = frameUntrustedStateWitnessVoteCarriers(
+                input.untrustedVoteCarriers,
+            );
+            output = this.#runStateProducerCommand(
+                stateProducerCommands.certifyReservation,
+                this.#stateProducerInput(
+                    encodeUnsigned32(resolved.record.handle),
+                    framedCarriers,
+                ),
+                'certify a setup action-randomness reservation',
+            );
+            reservationHandle = decodeLeadingHandle(output, 'reservation');
+            const decoded = decodeHandleAndBytes(output, 'state certificate');
+            if (decoded.handle !== reservationHandle) {
+                throw new StateVerifierInternalError(
+                    'The WASM state producer returned inconsistent reservation metadata.',
+                );
+            }
+            resolved.record.active = false;
+            this.#verifiedObjectRecords.delete(resolved.record);
+            const verifiedReservation =
+                this.#issueVerifiedObject<VerifiedStateReservation>(
+                    reservationHandle,
+                    'reservation',
+                    resolved.record.capabilityKind,
+                );
+            reservationHandle = 0;
+            return valid(
+                Object.freeze({
+                    canonicalStateCertificate: decoded.bytes.slice(),
+                    verifiedReservation,
+                }),
+            );
+        } catch (error) {
+            if (reservationHandle !== 0) {
+                this.#releaseUnregisteredKernelHandle(reservationHandle, error);
+            }
+            if (error instanceof StateVerifierRefusalError) {
+                return refused(error.refusalReason);
+            }
+            throw error;
+        } finally {
+            framedCarriers?.fill(0);
+            output?.fill(0);
+        }
+    }
+
     public certifyIntent(input: {
         canonicalStateCertificate: Uint8Array;
         verifiedIntent: VerifiedStateIntent;
@@ -1710,6 +2199,197 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         );
     }
 
+    #stateProducerSessionBinding(): Uint8Array {
+        if (this.#state !== 'active' || this.#capabilityPointer === 0) {
+            throw new StateVerifierRefusalError('consumedState');
+        }
+        const capabilityEnd =
+            this.#capabilityPointer + stateVerifierCapabilityByteLength;
+        if (
+            capabilityEnd < this.#capabilityPointer ||
+            capabilityEnd > this.#context.memory.buffer.byteLength
+        ) {
+            throw new StateVerifierInternalError(
+                'The retained state-verifier capability is outside WASM memory.',
+            );
+        }
+        const capability = new Uint8Array(
+            this.#context.memory.buffer,
+            this.#capabilityPointer,
+            stateVerifierCapabilityByteLength,
+        ).slice();
+        try {
+            return concatenateBytes(encodeUnsigned32(this.#handle), capability);
+        } finally {
+            capability.fill(0);
+        }
+    }
+
+    #stateProducerInput(...parts: readonly Uint8Array[]): Uint8Array {
+        const binding = this.#stateProducerSessionBinding();
+        try {
+            return concatenateBytes(binding, ...parts);
+        } finally {
+            binding.fill(0);
+        }
+    }
+
+    #runStateProducerCommand(
+        command: number,
+        input: Uint8Array,
+        operationName: string,
+    ): Uint8Array {
+        return this.#context.runExclusive(
+            `state producer: ${operationName}`,
+            () => {
+                let inputPointer = 0;
+                let metadataPointer = 0;
+                let outputPointer = 0;
+                let outputByteLength = 0;
+                try {
+                    const inputRefusal = requireCopiedBytes(input);
+                    if (inputRefusal !== undefined) {
+                        throw new StateVerifierRefusalError(inputRefusal);
+                    }
+                    inputPointer = allocateAndCopy(this.#context, input);
+                    metadataPointer = allocateZeroed(
+                        this.#context,
+                        2 * wasm32WordByteLength,
+                    );
+                    outputPointer = this.#context.producerCommand(
+                        command,
+                        inputPointer,
+                        input.byteLength,
+                        metadataPointer,
+                        metadataPointer + wasm32WordByteLength,
+                    );
+                    const metadata = new DataView(
+                        this.#context.memory.buffer,
+                        metadataPointer,
+                        2 * wasm32WordByteLength,
+                    );
+                    const status = metadata.getUint32(0, true);
+                    outputByteLength = metadata.getUint32(
+                        wasm32WordByteLength,
+                        true,
+                    );
+                    const refusalReason = decodeStatus(status);
+                    if (refusalReason !== undefined) {
+                        if (outputPointer !== 0 || outputByteLength !== 0) {
+                            throw new StateVerifierInternalError(
+                                'The WASM state producer returned output with a refusal.',
+                            );
+                        }
+                        throw new StateVerifierRefusalError(refusalReason);
+                    }
+                    if (
+                        outputByteLength >
+                            foundationProfile.maximumCopiedBufferByteLength ||
+                        (outputByteLength === 0) !== (outputPointer === 0) ||
+                        outputPointer >
+                            this.#context.memory.buffer.byteLength -
+                                outputByteLength
+                    ) {
+                        throw new StateVerifierInternalError(
+                            'The WASM state producer returned invalid output metadata.',
+                        );
+                    }
+                    return outputByteLength === 0
+                        ? new Uint8Array(0)
+                        : new Uint8Array(
+                              this.#context.memory.buffer,
+                              outputPointer,
+                              outputByteLength,
+                          ).slice();
+                } catch (error) {
+                    if (
+                        error instanceof StateVerifierRefusalError ||
+                        error instanceof StateVerifierInternalError
+                    ) {
+                        throw error;
+                    }
+                    throw new StateVerifierInternalError(
+                        `The WASM kernel failed to ${operationName}.`,
+                        error,
+                    );
+                } finally {
+                    input.fill(0);
+                    if (
+                        outputPointer !== 0 &&
+                        outputByteLength > 0 &&
+                        outputPointer <=
+                            this.#context.memory.buffer.byteLength -
+                                outputByteLength
+                    ) {
+                        zeroMemory(
+                            this.#context,
+                            outputPointer,
+                            outputByteLength,
+                        );
+                        this.#context.deallocate(
+                            outputPointer,
+                            outputByteLength,
+                        );
+                    }
+                    if (metadataPointer !== 0) {
+                        zeroMemory(
+                            this.#context,
+                            metadataPointer,
+                            2 * wasm32WordByteLength,
+                        );
+                        this.#context.deallocate(
+                            metadataPointer,
+                            2 * wasm32WordByteLength,
+                        );
+                    }
+                    if (inputPointer !== 0) {
+                        zeroMemory(
+                            this.#context,
+                            inputPointer,
+                            input.byteLength,
+                        );
+                        this.#context.deallocate(
+                            inputPointer,
+                            input.byteLength,
+                        );
+                    }
+                }
+            },
+        );
+    }
+
+    #releaseKernelHandle(handle: number): void {
+        const status = this.#context.runExclusive(
+            'state producer handle release',
+            () =>
+                this.#context.release(
+                    this.#handle,
+                    this.#capabilityPointer,
+                    stateVerifierCapabilityByteLength,
+                    handle,
+                ),
+        );
+        const refusalReason = decodeStatus(status);
+        if (refusalReason !== undefined) {
+            throw new StateVerifierRefusalError(refusalReason);
+        }
+    }
+
+    #releaseUnregisteredKernelHandle(
+        handle: number,
+        operationFailure: unknown,
+    ): never {
+        try {
+            this.#releaseKernelHandle(handle);
+        } catch (cleanupFailure) {
+            throw new StateVerifierInternalError(
+                'The state producer operation and unregistered-handle cleanup both failed.',
+                Object.freeze({ cleanupFailure, operationFailure }),
+            );
+        }
+        throw operationFailure;
+    }
+
     #runHandleVerification<Value>(
         operationName: string,
         inputs: readonly Uint8Array[],
@@ -1793,6 +2473,39 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         return value as Value;
     }
 }
+
+const requireWorkerProducerSession = (
+    session: StateVerifierSession,
+): StateVerifierWorkerProducerSession => {
+    if (!(session instanceof StateVerifierSessionImplementation)) {
+        throw new TypeError(
+            'The state-verifier session was not issued by this WASM runtime.',
+        );
+    }
+    return session;
+};
+
+/** Package-internal bridge used only by the worker-owned storage kernel. */
+export const produceSetupActionRandomnessReservationIntentFromRetainedKernelHandle =
+    (input: {
+        actionRandomnessHandle: number;
+        session: StateVerifierSession;
+        signatureOperation: StateObjectSignatureOperation;
+    }): VerificationResult<ProducedStateReservationIntent> =>
+        requireWorkerProducerSession(
+            input.session,
+        ).produceSetupActionRandomnessReservationIntent(input);
+
+/** Package-internal bridge used only by a participant's custody worker. */
+export const constructVerifiedStateWitnessVoteCarrierForWorker = (input: {
+    session: StateVerifierSession;
+    signatureOperation: StateObjectSignatureOperation;
+    verifiedIntent: VerifiedStateReservationIntent;
+    witnessParticipantIdentity: Uint8Array;
+}): VerificationResult<Uint8Array> =>
+    requireWorkerProducerSession(
+        input.session,
+    ).constructVerifiedStateWitnessVoteCarrier(input);
 
 export const openStateVerifierSession = (input: {
     readonly configuration: StateVerifierSessionInput;

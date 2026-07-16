@@ -11,17 +11,26 @@
 
 use crate::bgv::proof_suite::canonical_merkle_leaf_hash;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
-    SetupBatchedMerkleOpening, SetupMerkleContext, SetupMerkleDigest, SetupMerkleTree,
-    consistent_setup_merkle_leaves, sorted_unique_setup_merkle_indices,
-    verify_merkle_batch_with_context,
+    SetupBatchedMerkleOpening, SetupMerkleContext, SetupMerkleDigest,
+    consistent_setup_merkle_leaves, verify_merkle_batch_with_context,
 };
+#[cfg(test)]
+use crate::bgv::setup::trustee_evaluation_key_proof::{
+    SetupMerkleTree, sorted_unique_setup_merkle_indices,
+};
+#[cfg(test)]
 use crate::encoding::CanonicalResult;
+#[cfg(test)]
 use crate::hashing::StreamingHash512;
 
+#[cfg(test)]
 const LEAF_DOMAIN: &str = "sealed-lattice/proof/merkle/leaf/v1";
 
-const APPLICATION_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1216;
-const TREE_ORDINAL: u16 = 0x7000;
+const APPLICATION_STATEMENT_SCHEMA_IDENTIFIER: u16 = crate::foundation::ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER;
+// The trustee evaluation-key proof reserves 0x6000..=0x7fff for residual
+// low-degree trees across all RNS limbs and folds.
+const TREE_ORDINAL: u16 = 0x8000;
+#[cfg(test)]
 const STREAMING_WORD_BATCH_SIZE: usize = 16;
 
 const fn merkle_context() -> SetupMerkleContext {
@@ -59,12 +68,14 @@ pub(super) fn leaf_hash(index: usize, salt: &[u8], row_words: &[u64]) -> MerkleD
 // never materializes all column codewords at once. The row byte length (every
 // column's words at this position) is declared up front; the caller must absorb
 // exactly that many word bytes before finalizing.
+#[cfg(test)]
 pub(super) struct StreamingLeafHasher {
     inner: StreamingHash512,
     absorbed_row_byte_length: usize,
     expected_row_byte_length: usize,
 }
 
+#[cfg(test)]
 impl StreamingLeafHasher {
     pub(super) fn new(index: usize, salt: &[u8], row_byte_length: u64) -> Self {
         let expected_row_byte_length =
@@ -113,8 +124,10 @@ impl StreamingLeafHasher {
     }
 }
 
+#[cfg(test)]
 pub(super) struct MerkleTree(SetupMerkleTree);
 
+#[cfg(test)]
 impl MerkleTree {
     pub(super) fn from_leaf_hashes(leaf_hashes: Vec<MerkleDigest>) -> CanonicalResult<Self> {
         SetupMerkleTree::from_leaf_hashes(merkle_context(), leaf_hashes).map(Self)
@@ -131,6 +144,7 @@ impl MerkleTree {
 
 pub(super) type BatchedMerkleOpening = SetupBatchedMerkleOpening;
 
+#[cfg(test)]
 pub(super) fn sorted_unique_indices(indices: impl IntoIterator<Item = usize>) -> Vec<usize> {
     sorted_unique_setup_merkle_indices(indices)
 }

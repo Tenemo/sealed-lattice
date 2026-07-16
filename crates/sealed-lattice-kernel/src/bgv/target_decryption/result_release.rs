@@ -280,7 +280,7 @@ fn verify_target_share_release_entry(
         .filter(|candidate| candidate.roster_position == trustee_roster_position)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "target result release share proof roster position is not part of the setup roster",
             )
         })?;

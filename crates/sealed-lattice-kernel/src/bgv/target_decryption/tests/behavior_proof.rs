@@ -349,7 +349,7 @@ fn target_result_release_does_not_consume_another_proof_family() {
             .contains("different proof family")
     );
 
-    let retained_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+    let retained_material = crate::bgv::setup::take_authenticated_canonical_proof_material_bytes(
         "public-key-share",
         &public_key_share_proof_bytes_hash,
     )

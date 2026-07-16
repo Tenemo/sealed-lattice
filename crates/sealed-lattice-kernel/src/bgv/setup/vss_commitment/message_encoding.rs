@@ -1,23 +1,5 @@
 use super::*;
 
-pub(in crate::bgv::setup) fn vss_public_message_digit_weight(
-    digit_index: usize,
-    modulus: u64,
-) -> CanonicalResult<u64> {
-    if digit_index >= VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "VSS message digit index is outside the selected profile",
-        ));
-    }
-    let mut weight = 1_u128;
-    for _ in 0..digit_index {
-        weight = (weight * u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE)) % u128::from(modulus);
-    }
-
-    Ok(weight as u64)
-}
-
 pub(in crate::bgv::setup) fn vss_public_message_digits(
     coefficient: u64,
 ) -> CanonicalResult<[u64; VSS_PUBLIC_MESSAGE_DIGIT_COUNT]> {
@@ -31,7 +13,7 @@ pub(in crate::bgv::setup) fn vss_public_message_digits(
         })?;
     if u128::from(coefficient) >= maximum_coefficient {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "VSS message coefficient exceeds the full-message coordinate range",
         ));
     }
@@ -44,7 +26,7 @@ pub(in crate::bgv::setup) fn vss_public_message_digits(
     }
     if remaining != 0 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "VSS message coefficient did not fit the selected digit range",
         ));
     }
@@ -83,56 +65,12 @@ pub(in crate::bgv::setup) fn vss_public_message_digit_only_encoding_layout()
     }
 }
 
-pub(in crate::bgv::setup) fn vss_public_message_digit_bound(
-    message_bound_exclusive: u64,
-    digit_index: usize,
-) -> CanonicalResult<u64> {
-    if message_bound_exclusive == 0 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "VSS message coefficient bound must be positive",
-        ));
-    }
-    let maximum_coefficient = u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE)
-        .checked_pow(VSS_PUBLIC_MESSAGE_DIGIT_COUNT as u32)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS message digit range overflowed",
-            )
-        })?;
-    if u128::from(message_bound_exclusive) > maximum_coefficient {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "VSS message coefficient bound exceeds the two-digit message range",
-        ));
-    }
-
-    match digit_index {
-        0 => Ok(message_bound_exclusive.min(VSS_PUBLIC_MESSAGE_DIGIT_BASE)),
-        1 => {
-            let high_digit_bound = u128::from(message_bound_exclusive)
-                .div_ceil(u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE));
-            u64::try_from(high_digit_bound).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "VSS high digit bound overflowed",
-                )
-            })
-        }
-        _ => Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "VSS message digit index is outside the selected profile",
-        )),
-    }
-}
-
 pub(in crate::bgv::setup) fn vss_public_message_encoding_layout(
     message_bound_exclusive: u64,
 ) -> CanonicalResult<VssPublicMessageEncodingLayout> {
     if message_bound_exclusive == 0 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "VSS message coefficient bound must be positive",
         ));
     }
@@ -146,7 +84,7 @@ pub(in crate::bgv::setup) fn vss_public_message_encoding_layout(
         })?;
     if u128::from(message_bound_exclusive) > maximum_coefficient {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "VSS message coefficient bound exceeds the two-digit message range",
         ));
     }
@@ -194,24 +132,10 @@ pub(in crate::bgv::setup) fn vss_public_share_linkage_packed_message_encoding_la
     }
 }
 
-/// Selects the cross-limb layout for one message. Exactly one proof limb owns
-/// the range decoder; every other limb reuses only the canonical digit columns.
-pub(in crate::bgv::setup) fn vss_public_cross_limb_message_encoding_layout(
-    message_bound_exclusive: u64,
-    proof_limb_index: usize,
-    decoder_limb_index: usize,
-) -> CanonicalResult<VssPublicMessageEncodingLayout> {
-    if proof_limb_index == decoder_limb_index {
-        vss_public_message_encoding_layout(message_bound_exclusive)
-    } else {
-        Ok(vss_public_message_digit_only_encoding_layout())
-    }
-}
-
 pub(super) fn vss_public_trit_count_for_bound(bound_exclusive: u128) -> CanonicalResult<usize> {
     if bound_exclusive == 0 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "VSS trit bound must be positive",
         ));
     }
@@ -233,38 +157,4 @@ pub(super) fn vss_public_trit_count_for_bound(bound_exclusive: u128) -> Canonica
     }
 
     Ok(trit_count)
-}
-
-pub(in crate::bgv::setup) fn vss_public_message_digit_trits_for_count(
-    digit: u64,
-    trit_count: usize,
-) -> CanonicalResult<Vec<u64>> {
-    let digit_bound = (0..trit_count).try_fold(1_u64, |bound, _| {
-        bound.checked_mul(3).ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS message trit bound overflowed",
-            )
-        })
-    })?;
-    if digit >= digit_bound {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "VSS message digit exceeds the statement-bound trit range",
-        ));
-    }
-    let mut remaining = digit;
-    let mut trits = vec![0_u64; trit_count];
-    for trit in &mut trits {
-        *trit = remaining % 3;
-        remaining /= 3;
-    }
-    if remaining != 0 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "VSS message digit did not fit the selected trit count",
-        ));
-    }
-
-    Ok(trits)
 }

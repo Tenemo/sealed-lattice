@@ -32,7 +32,7 @@ pub(super) fn decode_public_key_share_material_bindings(
             .get(&expected_roster_position)
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "public-key share material must reference an accepted share record",
                 )
             })?;
@@ -47,7 +47,7 @@ pub(super) fn decode_public_key_share_material_bindings(
             .and_then(Value::as_array)
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "accepted public-key share hashes are required",
                 )
             })?;
@@ -100,7 +100,7 @@ pub(in super::super) fn verify_public_key_share_material_set(
 ) -> CanonicalResult<BTreeMap<u64, PublicKeyShareMaterialBinding>> {
     if !material_set.is_object() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "publicKeyShareMaterial must be a root-bound object",
         ));
     }
@@ -108,7 +108,7 @@ pub(in super::super) fn verify_public_key_share_material_set(
         != Some(PUBLIC_KEY_SHARE_MATERIAL_SET_OBJECT_TYPE)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "publicKeyShareMaterial.objectType must be PublicKeyShareMaterialSet",
         ));
     }
@@ -135,7 +135,7 @@ pub(in super::super) fn verify_public_key_share_material_set(
     let expected_root = derive_canonical_object_hash(&root_input)?;
     if material_set_root != expected_root {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "publicKeyShareMaterialSetRoot does not match the canonical public-key share material set",
         ));
     }

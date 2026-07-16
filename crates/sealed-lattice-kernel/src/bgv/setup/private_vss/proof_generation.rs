@@ -20,7 +20,7 @@ fn validate_exact_randomness_hex(
     }
 
     Err(CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
+        CanonicalErrorCode::InvalidProtocolObject,
         format!("{field_name} must be {expected_byte_length} bytes of lowercase hex"),
     ))
 }
@@ -116,7 +116,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     if recipient_roster_position >= roster.participant_count {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "recipientRosterPosition is outside the setup roster",
         ));
     }
@@ -130,7 +130,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     .map_err(private_vss_refusal_to_error)?;
     let rns_prime = DATA_PRIMES.get(rns_limb_index).copied().ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "rnsLimbIndex is outside Q_share",
         )
     })?;
@@ -148,7 +148,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         || share_values.iter().any(|value| *value >= rns_prime)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "shareValues must be a non-empty canonical Q_share residue vector within the supported ring degree",
         ));
     }
@@ -162,7 +162,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             .cloned()
         else {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "source trustee commitment record must include the requested proof limb",
             ));
         };
@@ -170,13 +170,13 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             coefficient_commitments.get(&(rns_limb_index, shamir_coefficient_index))
         else {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "sourceTrusteeCoefficientCommitmentMaterialRecords must include the requested proof limb",
             ));
         };
         if material_binding.commitment_root != commitment_root {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "coefficient commitment material root must match the source trustee commitment record",
             ));
         }
@@ -245,7 +245,21 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         witness: &witness,
         proof_randomness_seed_hex: &bound_proof_randomness_seed_hex,
     };
-    let statement_hash = private_vss_share_succinct_statement_hash(generation_input)?;
+    let statement_hash = private_vss_share_succinct_statement_hash(
+        &PrivateVssShareSuccinctProofVerificationInput {
+            setup_context: generation_input.setup_context,
+            public_matrix_seed_hash: generation_input.public_matrix_seed_hash,
+            private_envelope_aad_hash: generation_input.private_envelope_aad_hash,
+            source_trustee_roster_position: generation_input.source_trustee_roster_position,
+            recipient_roster_position: generation_input.recipient_roster_position,
+            source_trustee_commitment_root: generation_input.source_trustee_commitment_root,
+            rns_limb_index: generation_input.rns_limb_index,
+            coefficient_commitment_roots: generation_input.coefficient_commitment_roots,
+            share_values: generation_input.share_values,
+            coefficient_commitments: generation_input.coefficient_commitments,
+            proof_bytes_hash: "",
+        },
+    )?;
     let proof_bytes_hash = private_vss_share_succinct_proof_bytes_hash_for_tests(generation_input)?;
 
     Ok((
@@ -304,7 +318,7 @@ fn u64_matrix_field(
             row.as_array()
                 .ok_or_else(|| {
                     CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
+                        CanonicalErrorCode::InvalidProtocolObject,
                         format!("{object_path}.{row_index} must be an array"),
                     )
                 })?
@@ -313,7 +327,7 @@ fn u64_matrix_field(
                 .map(|(column_index, item)| {
                     item.as_u64().ok_or_else(|| {
                         CanonicalError::new(
-                            CanonicalErrorCode::InvalidFixture,
+                            CanonicalErrorCode::InvalidProtocolObject,
                             format!(
                                 "{object_path}.{row_index}.{column_index} must be an unsigned integer"
                             ),
@@ -340,7 +354,7 @@ fn i128_matrix4_field(
         .map(|(outer_index, matrix_value)| {
             let matrices = matrix_value.as_array().ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     format!("{object_path}.{outer_index} must be an array"),
                 )
             })?;
@@ -350,7 +364,7 @@ fn i128_matrix4_field(
                 .map(|(matrix_index, rows_value)| {
                     let rows = rows_value.as_array().ok_or_else(|| {
                         CanonicalError::new(
-                            CanonicalErrorCode::InvalidFixture,
+                            CanonicalErrorCode::InvalidProtocolObject,
                             format!("{object_path}.{outer_index}.{matrix_index} must be an array"),
                         )
                     })?;
@@ -360,7 +374,7 @@ fn i128_matrix4_field(
                         .map(|(row_index, coefficients_value)| {
                             let coefficients = coefficients_value.as_array().ok_or_else(|| {
                                 CanonicalError::new(
-                                    CanonicalErrorCode::InvalidFixture,
+                                    CanonicalErrorCode::InvalidProtocolObject,
                                     format!(
                                         "{object_path}.{outer_index}.{matrix_index}.{row_index} must be an array"
                                     ),
@@ -372,7 +386,7 @@ fn i128_matrix4_field(
                                 .map(|(coefficient_index, item)| {
                                     decimal_i128_value(item).ok_or_else(|| {
                                         CanonicalError::new(
-                                            CanonicalErrorCode::InvalidFixture,
+                                            CanonicalErrorCode::InvalidProtocolObject,
                                             format!(
                                                 "{object_path}.{outer_index}.{matrix_index}.{row_index}.{coefficient_index} must be a signed integer or decimal string"
                                             ),
@@ -398,7 +412,7 @@ fn derive_private_vss_carry_witnesses(
 ) -> CanonicalResult<Vec<i128>> {
     if coefficient_messages_by_shamir_index.len() != decryption_threshold {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "coefficientMessagesByShamirIndex must contain every setup Shamir coefficient",
         ));
     }
@@ -406,14 +420,14 @@ fn derive_private_vss_carry_witnesses(
         messages.len() != ring_degree || messages.iter().any(|value| *value >= rns_prime)
     }) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "coefficientMessagesByShamirIndex entries must be canonical Q_share residues with length ringDegree",
         ));
     }
     let trustee_point = canonical_trustee_point(
         usize::try_from(recipient_roster_position).map_err(|_| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "recipientRosterPosition does not fit usize",
             )
         })?,
@@ -428,7 +442,7 @@ fn derive_private_vss_carry_witnesses(
             .checked_mul(trustee_point_wide)
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "private VSS trustee point power overflowed during proof generation",
                 )
             })?;
@@ -444,27 +458,27 @@ fn derive_private_vss_carry_witnesses(
                     .checked_mul(*trustee_power)
                     .ok_or_else(|| {
                         CanonicalError::new(
-                            CanonicalErrorCode::InvalidFixture,
+                            CanonicalErrorCode::InvalidProtocolObject,
                             "private VSS unreduced Shamir term overflowed during proof generation",
                         )
                     })?;
                 accumulated_value.checked_add(term).ok_or_else(|| {
                     CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
+                        CanonicalErrorCode::InvalidProtocolObject,
                         "private VSS unreduced Shamir evaluation overflowed during proof generation",
                     )
                 })
             })?;
         let reduced_value = u64::try_from(unreduced_value % modulus_wide).map_err(|_| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "private VSS reduced share value does not fit u64",
             )
         })?;
         // The carry is fully determined by the coefficient messages and the prime (not an independent input); this check rejects messages that do not reduce to the published share.
         if share_values.get(coefficient_position) != Some(&reduced_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!(
                     "shareValues do not match the private coefficient witness at coefficient {coefficient_position}"
                 ),
@@ -473,7 +487,7 @@ fn derive_private_vss_carry_witnesses(
         let carry = unreduced_value / modulus_wide;
         carry_witnesses.push(i128::try_from(carry).map_err(|_| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "private VSS carry witness does not fit i128",
             )
         })?);

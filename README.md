@@ -15,13 +15,21 @@ The protocol is designed around a public transcript and participant-side verific
 5. A deterministic evaluator computes the requested bounded result over ciphertexts, with a replay record that clients can check.
 6. A quorum of trustees produces target-bound decryption shares. Clients verify and combine them to reveal only the approved result.
 
-Whenever freshness or one-shot state must be witnessed, the witnesses are other identities from the same anchored participant roster, acting through their own mobile-browser clients. Witnessing is not a separate actor class or deployment: the ceremony never requires an external witness operator or trusted witness service.
+Quorum certificates are reserved for shared protocol decisions such as accepted
+state, finality, and authorization of the one target release. Their witnesses
+are other identities from the same anchored participant roster, acting through
+their own mobile-browser clients. The ceremony never requires an external
+witness operator or trusted witness service. Ordinary local browser writes are
+not roster-certified.
 
 Participant action state is intentionally bound to the current phone and
 browser profile. There is no backup, export, import, migration, replacement
 device, or reactivation flow. Losing that state removes the participant from
 the current action; the protocol continues only when the remaining participants
 still satisfy the applicable setup, finality, and decryption thresholds.
+If they do not, the vote may be manually restarted with a fresh action context
+and fresh setup and secret material. The old action is not repaired or resumed
+under newly generated local state.
 
 Every operation required to complete a vote must run in the participant's
 supported mobile browser. A desktop, native helper, server, remote prover, or
@@ -31,24 +39,21 @@ Transcript and mailbox services only relay bytes. Correctness and acceptance mus
 
 ## Prototype status
 
-The public package currently exposes poll-specification validation and hashing,
-setup-roster hashing, private-VSS share verification, and development
-setup-package verification. Internal Rust and WebAssembly code exercises
-canonical protocol objects, browser-local authenticated storage, collective BGV
-setup and VSS components, and verification substrate for state, finality, and
-namespace freshness.
+| Area                           | Implemented now                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Remaining boundary                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public configuration           | The public package validates pre-protocol poll input and creates or verifies canonical manifests, action definitions, and board policies. The poll display identifier and top-count input do not enter manifest identity.                                                                                                                                                                                                                                                                             | The application must still provide and externally confirm the action, board policy, roster, ceremony identifier, and action identifier.                                                                                                                                                                                                                                                                                                                   |
+| Canonical ceremony             | Rust and WebAssembly canonically decode and recompute manifests, rosters, action definitions, board policies, suite records, artifact references, suite identifiers, ceremony contexts, and action contexts. The fixed structural candidate binds all six artifact references, the ordered proof-family plan references, and the root-compatibility graph. Its exact evaluator setup upload accounting is 1,390,411,776 bytes, below the 2,147,483,648-byte browser profile ceiling.                  | Structural suite verification does not select a deployable suite or grant proof authority. Exact accounting finds that all twelve exact proof families exceed the 5,242,880-byte per-proof ceiling; the largest is 149,419,382 bytes. The complete action requires 9,150,628,410 proof bytes against the 1,500,000,000-byte action ceiling. Selection therefore refuses and mints no suite capability until the affected family relations are redesigned. |
+| Browser-local foundation       | Internal production code provides canonical-board ingestion, roster-bound key custody, root-protected local records, action randomness and cursors, authenticated checkpoints, state reservations, and fixed-roster state-witness roles. Missing or unauthenticated retained state retires the participant instead of recreating state. Focused tests cover the combined authority and fresh-to-recovered operation through real workers, WebAssembly, Web Locks, and IndexedDB in a desktop browser. | Local atomicity and authentication protect honest clients against corruption, interrupted writes, and concurrent same-origin use; they do not prove that an internally consistent storage snapshot is the newest one or authorize a result release. The remaining path must bind participant-verified finality to exactly one target release and pass the supported-phone profile.                                                                        |
+| Bounded common-proof machinery | The Rust kernel contains the typed transcript, bounded hostile-input decoder, pollable prover and verifier state machines, canonical proof streaming, external-memory planning and replay, cancellation, authenticated continuation bindings, and hard resident-memory accounting. The WebAssembly package has bounded binary worker framing and authenticated external-memory request replay.                                                                                                        | No current production proof family can open the worker operation: selected-suite authority is unavailable, verifier statements still require family-owned derivation from accepted board objects, and generation still requires a family-owned private-witness capability. A decoded proof binding never grants verification authority.                                                                                                                   |
+| Complete vote path             | Setup, ballot, aggregation, evaluator, finality, and target-release components remain available for development and focused internal testing.                                                                                                                                                                                                                                                                                                                                                         | They do not yet form one accepted participant workflow, quorum-finalized authorization of exactly one target release, supported-phone profile, or production proof-system assurance. Ballot, evaluator, and target-release operations are not public package APIs.                                                                                                                                                                                        |
 
 Internal storage code can atomically repair abandoned same-browser writes and
 replay authenticated byte-identical outputs. Those mechanisms do not recover
-deleted participant state or make it portable.
-
-Ballot creation and proof, encrypted aggregation, evaluator replay, and target
-decryption remain internal, test-oriented development surfaces. They are not
-accepted participant capabilities or public package APIs. The repository does
-not yet compose a complete participant workflow, persistent non-forking release
-path across the participant quorum, supported-phone profile, or production
-proof-system assurance. See
-[SECURITY.md](SECURITY.md) for the authoritative limitations and evidence
+deleted participant state, make it portable, or detect restoration of an older
+internally consistent snapshot. A participant that acts from such a snapshot
+is handled as a faulty participant at the quorum layer; adding certificates to
+every local mutation would not constrain an attacker who controls that device.
+See [SECURITY.md](SECURITY.md) for the authoritative limitations and evidence
 boundaries.
 
 ## Installation
