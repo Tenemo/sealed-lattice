@@ -81,9 +81,4 @@ struct DirectEncryptedBallot {
 }
 
 #[cfg(test)]
-struct DirectBallotAggregationResult {
-    aggregate_ciphertext: Ciphertext,
-}
-
-#[cfg(test)]
 mod tests;

@@ -33,22 +33,20 @@ pub(super) fn verify_collective_public_key_material(
         )));
     };
     if !aggregate_object.is_object() {
-        return Ok(Some(public_key_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
             "collectivePublicKeyNotObject",
             "collectivePublicKey must be an object",
-            "setupPackage.collectivePublicKey",
-        )?));
+        )));
     }
     if aggregate_object.get("objectType").and_then(Value::as_str)
         != Some(COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE)
     {
-        return Ok(Some(public_key_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "collectivePublicKeyTypeMismatch",
             "collectivePublicKey.objectType must be CollectivePublicKey",
-            "setupPackage.collectivePublicKey.objectType",
-        )?));
+        )));
     }
     let roster = super::accepted_roster_from_package(setup_package)?;
     if let Err(error) = verify_collective_public_key_coefficients(
@@ -57,12 +55,11 @@ pub(super) fn verify_collective_public_key_material(
         ring_degree,
         roster.participant_count,
     ) {
-        return Ok(Some(public_key_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
             "collectivePublicKeyVerificationFailed",
             error.message,
-            "setupPackage.collectivePublicKey",
-        )?));
+        )));
     }
     Ok(None)
 }

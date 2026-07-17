@@ -305,7 +305,8 @@ impl CanonicalBoardVerifier {
         canonical_decode_limits: CanonicalDecodeLimits,
     ) -> Result<Self, CanonicalBoardError> {
         limits.validate()?;
-        let canonical_roster = Roster::decode(&roster.encode()?, &canonical_decode_limits)?;
+        roster.validate()?;
+        let canonical_roster = roster.clone();
         canonical_roster.require_selected_profile_size()?;
         let roster_hash = canonical_roster.roster_hash()?;
         let mut roster_positions = HashMap::with_capacity(canonical_roster.entries.len());

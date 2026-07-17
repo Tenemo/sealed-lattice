@@ -50,12 +50,11 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
             Some(proof_set) if proof_set.as_object().is_some_and(serde_json::Map::is_empty) => {
                 Ok(None)
             }
-            Some(_) => Ok(Some(evaluation_key_material_refusal(
+            Some(_) => Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::MissingPrerequisite,
                 "trusteeEvaluationKeyProofsWithoutShareRecords",
                 "trusteeEvaluationKeyProofs requires the relinearization rounds and Galois batches it proves",
-                "setupPackage.trusteeEvaluationKeyProofs",
-            )?)),
+            ))),
         };
     }
     let Some(proof_set) = proof_set else {
@@ -65,12 +64,11 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
         )));
     };
     if !proof_set.is_object() {
-        return Ok(Some(evaluation_key_material_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
             "trusteeEvaluationKeyProofsNotObject",
             "trusteeEvaluationKeyProofs must be a root-bound object",
-            "setupPackage.trusteeEvaluationKeyProofs",
-        )?));
+        )));
     }
     if let Err(error) = verify_trustee_evaluation_key_proof_set(
         setup_package,
@@ -78,12 +76,11 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
         verified_same_secret_bridge,
         proof_binding_session,
     ) {
-        return Ok(Some(evaluation_key_material_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::InvalidProof,
             "trusteeEvaluationKeyProofVerificationFailed",
             error.message,
-            "setupPackage.trusteeEvaluationKeyProofs",
-        )?));
+        )));
     }
 
     Ok(None)

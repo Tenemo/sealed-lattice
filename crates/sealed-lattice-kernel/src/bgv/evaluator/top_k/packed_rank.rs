@@ -29,7 +29,7 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
     // wins; its complement (mask minus the indicator) is the strict-less
     // indicator for the higher index, realizing the tie policy.
     let (_, greater_or_equal_polynomial) = comparison_polynomials(score_domain_max)?;
-    let shift_constant = broadcast_constant(score_domain_max);
+    let shift_constant = broadcast_constant_coefficients(score_domain_max);
     let mut comparison_input_sum = None;
     let mut pair_windows = Vec::with_capacity(option_count - 1);
     // Pack pair windows contiguously: the forward pass rotates each shift-s

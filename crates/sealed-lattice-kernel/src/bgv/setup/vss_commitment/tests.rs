@@ -1,76 +1,15 @@
 use serde_json::json;
 
 use super::{
-    VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT, VSS_PUBLIC_MESSAGE_DIGIT_BASE,
     VssPublicAggregateThresholdCommitmentSetContext, VssPublicCoefficientCommitmentSetContext,
     VssPublicRecipientShareCommitmentSetContext,
     verify_vss_public_aggregate_threshold_commitment_set,
     verify_vss_public_coefficient_commitment_set, verify_vss_public_recipient_share_commitment_set,
-    verify_vss_share_linkage_bindings_request, vss_public_message_encoding_layout,
-    vss_public_share_linkage_packed_message_encoding_layout,
+    verify_vss_share_linkage_bindings_request,
 };
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::hashing::derive_canonical_object_hash;
-
-#[test]
-fn message_encoding_layout_uses_digit_bounds_for_trit_columns() -> CanonicalResult<()> {
-    let small_layout = vss_public_message_encoding_layout(33)?;
-    assert_eq!(small_layout.digit_trit_count(0)?, 4);
-    assert_eq!(small_layout.digit_trit_count(1)?, 0);
-    assert_eq!(small_layout.encoding_column_count(), 6);
-
-    let full_low_digit_layout = vss_public_message_encoding_layout(
-        VSS_PUBLIC_MESSAGE_DIGIT_BASE
-            .checked_mul(2)
-            .and_then(|value| value.checked_add(1))
-            .expect("test bound fits u64"),
-    )?;
-    assert_eq!(
-        full_low_digit_layout.digit_trit_count(0)?,
-        VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT
-    );
-    assert_eq!(full_low_digit_layout.digit_trit_count(1)?, 1);
-
-    Ok(())
-}
-
-#[test]
-fn threshold_aggregate_layout_uses_digit_only_source_messages() -> CanonicalResult<()> {
-    let message_bound = 33;
-    let source_message_count = 2;
-    let first_aggregate_source_layout = vss_public_share_linkage_packed_message_encoding_layout(
-        true,
-        0,
-        source_message_count,
-        message_bound,
-    )?;
-    let second_aggregate_source_layout = vss_public_share_linkage_packed_message_encoding_layout(
-        true,
-        1,
-        source_message_count,
-        message_bound,
-    )?;
-    let aggregate_recipient_layout = vss_public_share_linkage_packed_message_encoding_layout(
-        true,
-        source_message_count,
-        source_message_count,
-        message_bound,
-    )?;
-    let ordinary_source_layout = vss_public_share_linkage_packed_message_encoding_layout(
-        false,
-        0,
-        source_message_count,
-        message_bound,
-    )?;
-
-    assert_eq!(first_aggregate_source_layout.total_trit_count(), 0);
-    assert_eq!(second_aggregate_source_layout.total_trit_count(), 0);
-    assert_eq!(aggregate_recipient_layout.total_trit_count(), 4);
-    assert_eq!(ordinary_source_layout.total_trit_count(), 4);
-
-    Ok(())
-}
 
 #[test]
 fn coefficient_commitment_set_derives_its_canonical_root() -> CanonicalResult<()> {
@@ -664,13 +603,6 @@ fn recipient_share_commitment_record(
 }
 
 fn aggregate_threshold_commitment_set() -> CanonicalResult<serde_json::Value> {
-    let recipient_set = recipient_share_commitment_set()?;
-    aggregate_threshold_commitment_set_from_recipient_set(&recipient_set)
-}
-
-pub(in crate::bgv::setup) fn aggregate_threshold_commitment_set_from_recipient_set(
-    _recipient_set: &serde_json::Value,
-) -> CanonicalResult<serde_json::Value> {
     let mut recipient_records = Vec::new();
     for recipient_roster_position in 0..test_participant_count() {
         for rns_limb_index in 0..test_rns_limb_count() {

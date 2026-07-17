@@ -37,7 +37,7 @@ pub(super) fn vss_coefficient_commitment_components(
                     shamir_coefficient_index,
                     ring_degree,
                 );
-                let commitment = compute_setup_commitment_for_tests(
+                let commitment = compute_setup_commitment_for_degree(
                     public_matrix_seed_hash,
                     rns_limb_index,
                     shamir_coefficient_index,

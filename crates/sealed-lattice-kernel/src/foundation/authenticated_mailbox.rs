@@ -377,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_mailbox_schemas_round_trip_without_fixed_metadata() {
+    fn mailbox_schemas_round_trip_without_redundant_metadata() {
         let key_schedule = key_schedule_input();
         let key_schedule_bytes = key_schedule.encode().expect("key schedule encodes");
         assert_eq!(

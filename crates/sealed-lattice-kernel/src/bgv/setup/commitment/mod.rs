@@ -60,13 +60,11 @@ pub(super) use serialization::*;
 
 pub(crate) use computation::compute_setup_commitment_from_typed_opening;
 #[cfg(test)]
-pub(super) use computation::{
-    compute_setup_big_signed_lifted_commitment, compute_setup_commitment_for_tests,
-    compute_setup_commitment_from_typed_opening_for_degree,
-};
+use computation::compute_setup_signed_lifted_commitment_for_degree;
 #[cfg(test)]
-use computation::{
-    compute_setup_commitment_for_degree, compute_setup_signed_lifted_commitment_for_degree,
+pub(super) use computation::{
+    compute_setup_big_signed_lifted_commitment, compute_setup_commitment_for_degree,
+    compute_setup_commitment_from_typed_opening_for_degree,
 };
 pub(crate) use lattice_anchor::parse_lattice_anchor_commitment_canonical_bytes;
 #[cfg(test)]

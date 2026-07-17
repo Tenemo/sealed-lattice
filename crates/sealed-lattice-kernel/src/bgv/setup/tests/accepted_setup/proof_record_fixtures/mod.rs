@@ -55,6 +55,5 @@ mod evaluation_key_share_component_material;
 mod vss_public_material;
 
 pub(super) use vss_public_material::{
-    FinalizedCollectiveSetupPackageFixture, finalize_collective_setup_package,
-    vss_public_coefficient_commitment_record,
+    finalize_collective_setup_package, vss_public_coefficient_commitment_record,
 };

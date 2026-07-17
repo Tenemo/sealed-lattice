@@ -55,20 +55,12 @@ impl VssResponseKind {
         }
     }
 
-    fn record_path(self) -> &'static str {
-        match self {
-            Self::Complaint => "setupPackage.vssComplaints.complaintRecords",
-            Self::Acceptance => "setupPackage.vssShareAcceptances.acceptanceRecords",
-        }
-    }
-
     fn refusal(
         self,
         refusal_reason: crate::foundation::RefusalReason,
         complaint_refusal_code: &'static str,
         acceptance_refusal_code: &'static str,
         message: impl Into<String>,
-        field_name: Option<&str>,
     ) -> Refusal {
         Refusal::new(
             refusal_reason,
@@ -77,10 +69,6 @@ impl VssResponseKind {
                 Self::Acceptance => acceptance_refusal_code,
             },
             message,
-            match field_name {
-                Some(field_name) => format!("{}.{field_name}", self.record_path()),
-                None => self.record_path().to_string(),
-            },
         )
     }
 
@@ -89,17 +77,8 @@ impl VssResponseKind {
         refusal_reason: crate::foundation::RefusalReason,
         reason_code: &'static str,
         message: impl Into<String>,
-        field_name: Option<&str>,
     ) -> Refusal {
-        Refusal::new(
-            refusal_reason,
-            reason_code,
-            message,
-            match field_name {
-                Some(field_name) => format!("{}.{field_name}", self.record_path()),
-                None => self.record_path().to_string(),
-            },
-        )
+        Refusal::new(refusal_reason, reason_code, message)
     }
 
     fn root_mismatch_reason_code(self) -> &'static str {
@@ -141,7 +120,6 @@ pub(super) fn verify_vss_response_record_binding(
                 "VSS response objectType must be {}",
                 kind.expected_object_type()
             ),
-            Some("objectType"),
         )));
     }
     let source_trustee_roster_position_value = record.get("sourceTrusteeRosterPosition");
@@ -157,7 +135,6 @@ pub(super) fn verify_vss_response_record_binding(
             "vssComplaintSourceTrusteePositionMissing",
             "vssShareAcceptanceSourceTrusteePositionMissing",
             "VSS response must bind sourceTrusteeRosterPosition",
-            Some("sourceTrusteeRosterPosition"),
         )));
     };
     let Some(source_trustee_identity) = verification_context
@@ -169,7 +146,6 @@ pub(super) fn verify_vss_response_record_binding(
             "vssComplaintSourceTrusteeMismatch",
             "vssShareAcceptanceSourceTrusteeMismatch",
             "VSS response source trustee position must identify a setup-intent trustee",
-            Some("sourceTrusteeRosterPosition"),
         )));
     };
 
@@ -185,7 +161,6 @@ pub(super) fn verify_vss_response_record_binding(
             "vssComplaintRecipientPositionMissing",
             "vssShareAcceptanceRecipientPositionMissing",
             "VSS response must bind recipientRosterPosition",
-            Some("recipientRosterPosition"),
         )));
     };
     let Some(recipient_identity) = verification_context
@@ -197,7 +172,6 @@ pub(super) fn verify_vss_response_record_binding(
             "vssComplaintRecipientMismatch",
             "vssShareAcceptanceRecipientMismatch",
             "VSS response recipient position must identify a setup-intent trustee",
-            Some("recipientRosterPosition"),
         )));
     };
     if !seen_pairs.insert((source_trustee_roster_position, recipient_roster_position)) {
@@ -206,7 +180,6 @@ pub(super) fn verify_vss_response_record_binding(
             "vssComplaintDuplicate",
             "vssShareAcceptanceDuplicate",
             "VSS response records must use distinct source-recipient pairs",
-            None,
         )));
     }
 
@@ -229,7 +202,6 @@ pub(super) fn verify_vss_response_record_binding(
             "vssComplaintPrivateEnvelopeBindingMissing",
             "vssShareAcceptancePrivateEnvelopeBindingMissing",
             "VSS response must match a private envelope commitment for its source-recipient pair",
-            Some("recipientRosterPosition"),
         )));
     };
     if private_envelope_binding.source_trustee_identity.as_str() != source_trustee_identity.as_str()
@@ -239,7 +211,6 @@ pub(super) fn verify_vss_response_record_binding(
             "vssComplaintPrivateEnvelopeSourceTrusteeMismatch",
             "vssShareAcceptancePrivateEnvelopeSourceTrusteeMismatch",
             "VSS response source trustee position must match the private envelope commitment",
-            Some("sourceTrusteeRosterPosition"),
         )));
     }
     if private_envelope_binding.recipient_identity.as_str() != recipient_identity.as_str() {
@@ -248,7 +219,6 @@ pub(super) fn verify_vss_response_record_binding(
             "vssComplaintPrivateEnvelopeRecipientMismatch",
             "vssShareAcceptancePrivateEnvelopeRecipientMismatch",
             "VSS response recipient position must match the private envelope commitment",
-            Some("recipientRosterPosition"),
         )));
     }
     if private_envelope_binding.source_trustee_commitment_root
@@ -259,7 +229,6 @@ pub(super) fn verify_vss_response_record_binding(
             "vssComplaintPrivateEnvelopeSourceTrusteeCommitmentRootMismatch",
             "vssShareAcceptancePrivateEnvelopeSourceTrusteeCommitmentRootMismatch",
             "VSS response source commitment root must match the private envelope commitment",
-            Some("sourceTrusteeRosterPosition"),
         )));
     }
 
@@ -291,7 +260,6 @@ pub(super) fn verify_vss_response_record(
             crate::foundation::RefusalReason::MissingPrerequisite,
             kind.signature_missing_reason_code(),
             "VSS response must include the signed ML-DSA envelope",
-            Some("signatureEnvelope"),
         )));
     };
     if !signature_envelope.is_object() {
@@ -299,7 +267,6 @@ pub(super) fn verify_vss_response_record(
             crate::foundation::RefusalReason::InvalidSignature,
             "InvalidSignature",
             "VSS response signatureEnvelope must be an object",
-            Some("signatureEnvelope"),
         )));
     }
     let Some(signed_root) = signature_envelope
@@ -310,7 +277,6 @@ pub(super) fn verify_vss_response_record(
             crate::foundation::RefusalReason::InvalidSignature,
             "InvalidSignedRoot",
             "VSS response signatureEnvelope must include a signedRoot object",
-            Some("signatureEnvelope.signedRoot"),
         )));
     };
     let Some(record_root) = signed_root.get("objectRoot").and_then(Value::as_str) else {
@@ -318,7 +284,6 @@ pub(super) fn verify_vss_response_record(
             crate::foundation::RefusalReason::InvalidSignature,
             "InvalidSignedRoot",
             "VSS response signedRoot must bind objectRoot",
-            Some("signatureEnvelope.signedRoot.objectRoot"),
         )));
     };
     validate_hash_string(
@@ -334,7 +299,6 @@ pub(super) fn verify_vss_response_record(
             "vssComplaintSigningKeyRegistrationMissing",
             "vssShareAcceptanceSigningKeyRegistrationMissing",
             "VSS response recipient is missing from setupIntent registrations",
-            Some("recipientRosterPosition"),
         )));
     };
     let payload = vss_response_payload_value(verification_context, &verified_record, kind)?;
@@ -344,7 +308,6 @@ pub(super) fn verify_vss_response_record(
             crate::foundation::RefusalReason::WrongHashOrRoot,
             kind.root_mismatch_reason_code(),
             "VSS response signed object root does not match its canonical payload",
-            Some("signatureEnvelope.signedRoot.objectRoot"),
         )));
     }
 
@@ -361,7 +324,6 @@ pub(super) fn verify_vss_response_record(
             protocol_signature_refusal_reason(failure.reason_code),
             failure.reason_code,
             failure.message,
-            Some("signatureEnvelope"),
         ))),
     }
 }

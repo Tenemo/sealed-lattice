@@ -84,7 +84,7 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
         .iter()
         .enumerate()
         .map(|(shamir_coefficient_index, opening_randomness)| {
-            compute_setup_commitment_for_tests(
+            compute_setup_commitment_for_degree(
                 public_matrix_seed_hash,
                 0,
                 shamir_coefficient_index as u64,
@@ -189,7 +189,7 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
                     .iter()
                     .map(|value| u128::from(*value))
                     .collect::<Vec<_>>();
-                compute_setup_commitment_for_tests(
+                compute_setup_commitment_for_degree(
                     public_matrix_seed_hash,
                     0,
                     shamir_coefficient_index as u64,
@@ -306,7 +306,7 @@ fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_openi
         .iter()
         .enumerate()
         .map(|(shamir_coefficient_index, opening_randomness)| {
-            compute_setup_commitment_for_tests(
+            compute_setup_commitment_for_degree(
                 public_matrix_seed_hash,
                 0,
                 shamir_coefficient_index as u64,
@@ -520,7 +520,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 .iter()
                 .map(|coefficient| u128::from(*coefficient))
                 .collect::<Vec<_>>();
-            let commitment = compute_setup_commitment_for_tests(
+            let commitment = compute_setup_commitment_for_degree(
                 &public_matrix_seed_hash,
                 rns_limb_index,
                 shamir_coefficient_index,

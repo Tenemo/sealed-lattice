@@ -18,10 +18,10 @@ fn direct_ballot_aggregation_matches_plaintext_oracle_for_multiple_ballots() {
     let second_ballot =
         encrypt_direct_ballot(&evaluator_key, second_input).expect("second encrypted ballot");
 
-    let aggregation_result = verify_direct_ballot_aggregation(&[first_ballot, second_ballot])
-        .expect("aggregation report");
+    let aggregate_ciphertext = aggregate_direct_encrypted_ballots(&[first_ballot, second_ballot])
+        .expect("aggregate ciphertext");
     let aggregate_slots = evaluator_key
-        .decrypt_to_slots(&aggregation_result.aggregate_ciphertext)
+        .decrypt_to_slots(&aggregate_ciphertext)
         .expect("test-only aggregate decryption");
 
     assert_eq!(&aggregate_slots[..OPTION_COUNT], expected_scores.as_slice());

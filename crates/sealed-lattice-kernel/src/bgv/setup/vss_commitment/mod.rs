@@ -9,40 +9,7 @@ pub(in crate::bgv::setup) const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str 
 #[cfg(test)]
 pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_COUNT: usize = 2;
 #[cfg(test)]
-pub(crate) const VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT: usize = 17;
-#[cfg(test)]
 pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_BASE: u64 = 129_140_163;
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::bgv::setup) struct VssPublicMessageEncodingLayout {
-    low_digit_trit_count: usize,
-    high_digit_trit_count: usize,
-}
-
-#[cfg(test)]
-impl VssPublicMessageEncodingLayout {
-    pub(in crate::bgv::setup) fn digit_trit_count(
-        self,
-        digit_index: usize,
-    ) -> CanonicalResult<usize> {
-        match digit_index {
-            0 => Ok(self.low_digit_trit_count),
-            1 => Ok(self.high_digit_trit_count),
-            _ => Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "VSS message digit index is outside the selected profile",
-            )),
-        }
-    }
-
-    pub(in crate::bgv::setup) fn total_trit_count(self) -> usize {
-        self.low_digit_trit_count + self.high_digit_trit_count
-    }
-
-    pub(in crate::bgv::setup) fn encoding_column_count(self) -> usize {
-        VSS_PUBLIC_MESSAGE_DIGIT_COUNT + self.total_trit_count()
-    }
-}
 
 pub(crate) struct VssPublicCoefficientCommitmentSetContext<'a> {
     pub(crate) setup_context_hash: &'a str,
@@ -264,10 +231,6 @@ pub(crate) use committed_material::{
 
 #[cfg(test)]
 pub(crate) use message_encoding::vss_public_canonical_message_digit_columns;
-#[cfg(test)]
-pub(in crate::bgv::setup) use message_encoding::{
-    vss_public_message_encoding_layout, vss_public_share_linkage_packed_message_encoding_layout,
-};
 #[cfg(test)]
 pub(crate) use record_verification::validate_standalone_vss_committed_material_commitment;
 pub(crate) use share_linkage::verify_vss_share_linkage_bindings_request;

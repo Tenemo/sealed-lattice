@@ -236,10 +236,8 @@ fn release_verified_target_shares(
         &interpolation_points,
         &target_order_partials_by_share,
     )?;
-    let target_id_by_option =
-        packed_target_option_values(&target_id_slots, target_ciphertexts.top_count)?;
-    let target_order_by_option =
-        packed_target_option_values(&target_order_slots, target_ciphertexts.top_count)?;
+    let target_id_by_option = packed_target_option_values(&target_id_slots)?;
+    let target_order_by_option = packed_target_option_values(&target_order_slots)?;
     let share_evidence = verified_shares
         .into_iter()
         .map(|share| share.evidence)
@@ -384,7 +382,7 @@ pub(super) fn release_target_role_slots(
     decode_plaintext_coefficients_to_logical_slots(&coefficients)
 }
 
-fn lagrange_weights_at_zero(
+pub(super) fn lagrange_weights_at_zero(
     interpolation_points: &[u64],
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
@@ -412,16 +410,7 @@ fn lagrange_weights_at_zero(
         .collect()
 }
 
-pub(super) fn packed_target_option_values(
-    slots: &[u64],
-    top_count: usize,
-) -> CanonicalResult<Vec<u64>> {
-    if top_count == 0 || top_count > MAXIMUM_OPTION_COUNT {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "target result topCount is outside the supported option count",
-        ));
-    }
+pub(super) fn packed_target_option_values(slots: &[u64]) -> CanonicalResult<Vec<u64>> {
     if slots.len() != POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,

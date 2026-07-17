@@ -6,7 +6,10 @@ use super::CanonicalDecodeLimits;
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::schemas::SchemaResult;
 #[cfg(test)]
-use super::schemas::{read_item, read_list_header, read_u16, read_u32, read_u64, require_header};
+use super::schemas::{read_item, read_u16, read_u32, read_u64, require_header};
+#[cfg(test)]
+use super::suite::{read_unsigned16_list, read_unsigned64_list};
+use super::suite::{unsigned16_list, unsigned64_list};
 use super::{
     CanonicalItem, CanonicalItemType, CanonicalTuple, FoundationSchemaError, RefusalReason,
 };
@@ -437,62 +440,6 @@ fn require_header_with_version(
     Ok(())
 }
 
-fn unsigned16_list(values: &[u16]) -> SchemaResult<CanonicalItem> {
-    let items = values
-        .iter()
-        .copied()
-        .map(CanonicalItem::unsigned16)
-        .collect::<Vec<_>>();
-    Ok(CanonicalItem::homogeneous_list(
-        CanonicalItemType::Unsigned16,
-        &items,
-    )?)
-}
-
-fn unsigned64_list(values: &[u64]) -> SchemaResult<CanonicalItem> {
-    let items = values
-        .iter()
-        .copied()
-        .map(CanonicalItem::unsigned64)
-        .collect::<Vec<_>>();
-    Ok(CanonicalItem::homogeneous_list(
-        CanonicalItemType::Unsigned64,
-        &items,
-    )?)
-}
-
-#[cfg(test)]
-fn read_unsigned16_list(item: &CanonicalItem) -> SchemaResult<Vec<u16>> {
-    let (count, bytes) = read_list_header(item, CanonicalItemType::Unsigned16)?;
-    if bytes.len() != count.checked_mul(2).ok_or_else(malformed_list)? {
-        return Err(malformed_list());
-    }
-    bytes
-        .chunks_exact(2)
-        .map(|bytes| {
-            Ok(u16::from_le_bytes(
-                bytes.try_into().map_err(|_| malformed_list())?,
-            ))
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn read_unsigned64_list(item: &CanonicalItem) -> SchemaResult<Vec<u64>> {
-    let (count, bytes) = read_list_header(item, CanonicalItemType::Unsigned64)?;
-    if bytes.len() != count.checked_mul(8).ok_or_else(malformed_list)? {
-        return Err(malformed_list());
-    }
-    bytes
-        .chunks_exact(8)
-        .map(|bytes| {
-            Ok(u64::from_le_bytes(
-                bytes.try_into().map_err(|_| malformed_list())?,
-            ))
-        })
-        .collect()
-}
-
 fn invalid_selected_artifact() -> FoundationSchemaError {
     FoundationSchemaError::new(
         RefusalReason::UnsupportedVersionOrSuite,
@@ -505,14 +452,6 @@ fn malformed_nested_artifact() -> FoundationSchemaError {
     FoundationSchemaError::new(
         RefusalReason::MalformedEncoding,
         "nested suite artifact contains trailing bytes",
-    )
-}
-
-#[cfg(test)]
-fn malformed_list() -> FoundationSchemaError {
-    FoundationSchemaError::new(
-        RefusalReason::MalformedEncoding,
-        "suite artifact list length is malformed",
     )
 }
 

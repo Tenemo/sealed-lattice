@@ -12,7 +12,7 @@
 use crate::bgv::proof_suite::canonical_merkle_leaf_hash;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     SetupBatchedMerkleOpening, SetupMerkleContext, SetupMerkleDigest,
-    consistent_setup_merkle_leaves, verify_merkle_batch_with_context,
+    consistent_setup_merkle_leaves, verify_merkle_batch as verify_setup_merkle_batch,
 };
 #[cfg(test)]
 use crate::bgv::setup::trustee_evaluation_key_proof::{
@@ -161,7 +161,7 @@ pub(super) fn verify_merkle_batch(
     sorted_unique_leaves: &[(usize, MerkleDigest)],
     opening: &BatchedMerkleOpening,
 ) -> bool {
-    verify_merkle_batch_with_context(merkle_context(), root, depth, sorted_unique_leaves, opening)
+    verify_setup_merkle_batch(merkle_context(), root, depth, sorted_unique_leaves, opening)
 }
 
 #[cfg(test)]

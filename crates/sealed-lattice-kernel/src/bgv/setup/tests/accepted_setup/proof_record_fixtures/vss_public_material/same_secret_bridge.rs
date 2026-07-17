@@ -1,9 +1,5 @@
 use super::*;
 
-struct SameSecretBridgeProofMaterialReference {
-    proof_bytes_hash: String,
-}
-
 pub(in super::super::super) fn same_secret_bridge_statement_set_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
@@ -52,37 +48,28 @@ pub(super) fn same_secret_bridge_statement_record(
 
 pub(in super::super::super) fn same_secret_bridge_proof_material_set_object(
     package: &serde_json::Value,
-) -> VssProofMaterialSetFixture {
+) -> serde_json::Value {
     let statement_set = &package["sameSecretBridgeStatementSet"];
-    let proof_material_references = statement_set["statementRecords"]
+    let proof_bytes_hashes = statement_set["statementRecords"]
         .as_array()
         .expect("same-secret bridge statement records")
         .iter()
         .enumerate()
         .map(|(trustee_roster_position, statement_record)| {
-            same_secret_bridge_proof_material_reference(
-                package,
-                statement_record,
-                trustee_roster_position,
-            )
+            same_secret_bridge_proof_bytes_hash(package, statement_record, trustee_roster_position)
         })
         .collect::<Vec<_>>();
-    VssProofMaterialSetFixture {
-        value: serde_json::json!({
-            "objectType": "VssSameSecretBridgeProofMaterialSet",
-            "proofBytesHashes": proof_material_references
-                .iter()
-                .map(|reference| reference.proof_bytes_hash.clone())
-                .collect::<Vec<_>>(),
-        }),
-    }
+    serde_json::json!({
+        "objectType": "VssSameSecretBridgeProofMaterialSet",
+        "proofBytesHashes": proof_bytes_hashes,
+    })
 }
 
-fn same_secret_bridge_proof_material_reference(
+fn same_secret_bridge_proof_bytes_hash(
     package: &serde_json::Value,
     statement_record: &serde_json::Value,
     trustee_roster_position: usize,
-) -> SameSecretBridgeProofMaterialReference {
+) -> String {
     let proof_verification_request =
         crate::bgv::setup::same_secret_bridge_proof_verification_request_from_public_records(
             &package["sameSecretBridgeStatementSet"],
@@ -92,19 +79,17 @@ fn same_secret_bridge_proof_material_reference(
             trustee_roster_position,
         )
         .expect("same-secret bridge proof verification request");
-    let proof_bytes_hash = invalid_common_proof_fixture_hash(
+    invalid_common_proof_fixture_hash(
         SAME_SECRET_BRIDGE_PROOF_FAMILY,
         SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
         &proof_verification_request,
-    );
-
-    SameSecretBridgeProofMaterialReference { proof_bytes_hash }
+    )
 }
 
 #[test]
 fn vss_public_material_preserves_structure_and_requires_common_proofs() {
     let finalized_fixture = structural_vss_public_material_fixture();
-    let package = finalized_fixture.package;
+    let package = finalized_fixture;
     let trustee_identities = (0..participant_count_from_package(&package))
         .map(|roster_position| format!("trustee-{roster_position}"))
         .collect::<Vec<_>>();

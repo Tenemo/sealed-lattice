@@ -3,7 +3,7 @@ use crate::bgv::{
     evaluator::engine::encode_slots_to_coefficients,
     evaluator::records::target_layout_hash,
     evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
-    modular_arithmetic::{add_mod, inverse_mod, sub_mod},
+    modular_arithmetic::{add_mod, sub_mod},
     setup::accepted_setup_target_decryption_setup_parameters_hash,
 };
 use crate::foundation::{
@@ -638,7 +638,7 @@ fn change_first_partial_decryption_coefficient(target_decryption_share: &mut Val
             .as_str()
             .expect("partial decryption hex"),
         POLYNOMIAL_DEGREE,
-        "target partial-decryption coefficient vector byte length does not match the selected BGV profile",
+        "target partial-decryption coefficient vector byte length does not match the selected ring degree",
     )
     .expect("partial decryption coefficients");
     coefficients[0] = add_mod_fast(coefficients[0], 1, DATA_PRIMES[0]);
@@ -704,34 +704,6 @@ fn local_target_share_witness_for_fixture(
             "aggregateOpeningCredentials": aggregate_opening_credentials,
         },
     })
-}
-
-fn lagrange_weights_at_zero(
-    interpolation_points: &[u64],
-    modulus: u64,
-) -> CanonicalResult<Vec<u64>> {
-    interpolation_points
-        .iter()
-        .enumerate()
-        .map(|(participant_index, selected_point)| {
-            let selected_point = *selected_point % modulus;
-            let mut numerator = 1_u64;
-            let mut denominator = 1_u64;
-            for (other_participant_index, other_point) in interpolation_points.iter().enumerate() {
-                if other_participant_index == participant_index {
-                    continue;
-                }
-                let other_point = *other_point % modulus;
-                numerator = mul_mod(numerator, sub_mod(0, other_point, modulus)?, modulus)?;
-                denominator = mul_mod(
-                    denominator,
-                    sub_mod(selected_point, other_point, modulus)?,
-                    modulus,
-                )?;
-            }
-            mul_mod(numerator, inverse_mod(denominator, modulus)?, modulus)
-        })
-        .collect()
 }
 
 fn limbwise_difference(

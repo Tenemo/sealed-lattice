@@ -5,7 +5,7 @@ use crate::hashing::derive_canonical_object_hash;
 #[test]
 fn production_setup_profile_refuses_a_reduced_ring_before_proof_verification() {
     let fixture = minimal_collective_setup_package_fixture();
-    let result = verify_collective_bgv_setup_package(&fixture.package, &serde_json::json!({}))
+    let result = verify_collective_bgv_setup_package(&fixture, &serde_json::json!({}))
         .expect("production-profile accepted-setup verification response");
 
     assert_eq!(result["isValid"], false, "unexpected result: {result}");
@@ -19,9 +19,9 @@ fn production_setup_profile_refuses_a_reduced_ring_before_proof_verification() {
 #[ignore = "ten-participant accepted-setup common-proof boundary evidence; run via its dedicated guarded lane"]
 fn ten_participant_vss_structural_collective_setup_package_refuses_without_common_proof_authority()
 {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "ten_participant_vss_structural_collective_setup_package_refuses_without_common_proof_authority",
-    );
+    let _accepted_setup_test_timing = accepted_setup_test_timing(stringify!(
+        ten_participant_vss_structural_collective_setup_package_refuses_without_common_proof_authority
+    ));
     let fixture = ten_participant_structural_vss_collective_setup_fixture();
     assert_eq!(
         fixture.package["setupContext"]["participantCount"],
@@ -149,7 +149,7 @@ fn install_signed_vss_complaint(package: &mut serde_json::Value) {
 #[test]
 fn valid_vss_complaint_aborts_accepted_setup() {
     let _accepted_setup_test_timing =
-        accepted_setup_test_timing("valid_vss_complaint_aborts_accepted_setup");
+        accepted_setup_test_timing(stringify!(valid_vss_complaint_aborts_accepted_setup));
     assert_minimal_collective_setup_package_refused(
         "valid signed VSS complaint",
         install_signed_vss_complaint,
@@ -159,9 +159,9 @@ fn valid_vss_complaint_aborts_accepted_setup() {
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments",
-    );
+    let _accepted_setup_test_timing = accepted_setup_test_timing(stringify!(
+        collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments
+    ));
     type PrivateVssEnvelopeMutation = fn(&mut serde_json::Value);
     let mutation_cases: &[(&str, PrivateVssEnvelopeMutation, &str)] = &[
         (
@@ -190,9 +190,9 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
 
 #[test]
 fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_malformed_vss_share_acceptance_records",
-    );
+    let _accepted_setup_test_timing = accepted_setup_test_timing(stringify!(
+        collective_setup_verifier_refuses_malformed_vss_share_acceptance_records
+    ));
     type AcceptanceMutation = fn(&mut serde_json::Value);
     let mutation_cases: &[(&str, AcceptanceMutation, &str)] = &[
         (

@@ -4,7 +4,7 @@ mod common;
 mod shares;
 mod succinct_proofs;
 
-pub(super) use common::{PublicKeyCommonBinding, public_key_refusal};
+pub(super) use common::PublicKeyCommonBinding;
 pub(super) use shares::verify_public_key_shares;
 pub(in crate::bgv::setup) use shares::{
     derive_public_key_share_root, derive_public_key_share_set_root,

@@ -48,19 +48,11 @@ impl PrivateProofRandomness {
         parameters: &ProofFieldParameters<LIMB_COUNT>,
     ) -> [u64; LIMB_COUNT] {
         debug_assert!(LIMB_COUNT > 1);
-        let mut base_raw = [0_u64; LIMB_COUNT];
-        base_raw[1] = 1;
-        let base = parameters.raw_value_to_element(&base_raw);
-        let mut element = parameters.zero();
-        for _ in 0..FIELD_ELEMENT_WORD_COUNT {
+        parameters.wide_words_to_element((0..FIELD_ELEMENT_WORD_COUNT).map(|_| {
             let mut word_bytes = [0_u8; 8];
             self.read(&mut word_bytes);
-            element = parameters.add(
-                &parameters.multiply(&element, &base),
-                &parameters.unsigned_word_to_element(u64::from_le_bytes(word_bytes)),
-            );
-        }
-        element
+            u64::from_le_bytes(word_bytes)
+        }))
     }
 
     pub(super) fn next_salt(&mut self) -> [u8; PROOF_SALT_BYTE_LENGTH] {

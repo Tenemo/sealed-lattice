@@ -1,5 +1,6 @@
 import { foundationProfile, type RefusalReason } from '@sealed-lattice/types';
 
+import { isArrayBuffer } from './byte-array.js';
 import { pumpCanonicalStreamChunks } from './canonical-stream-chunk-pump.js';
 import type { TranscriptCoreKernelContextOwner } from './transcript-core-bridge/kernel-types.js';
 import { WasmMemoryBoundary } from './wasm-memory-boundary.js';
@@ -347,9 +348,6 @@ const isCanonicalStreamDomain = (
     value: number,
 ): value is CanonicalStreamDomain =>
     Number.isSafeInteger(value) && canonicalStreamDomainCodes.has(value);
-
-const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
-    Object.prototype.toString.call(value) === '[object ArrayBuffer]';
 
 const assertSafeNonNegativeInteger = (value: number, label: string): void => {
     if (!Number.isSafeInteger(value) || value < 0) {

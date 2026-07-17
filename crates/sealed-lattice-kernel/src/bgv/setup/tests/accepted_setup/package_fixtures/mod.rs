@@ -1,12 +1,9 @@
-use super::proof_record_fixtures::{
-    FinalizedCollectiveSetupPackageFixture, finalize_collective_setup_package,
-};
+use super::proof_record_fixtures::finalize_collective_setup_package;
 use super::*;
 
 use crate::hashing::derive_canonical_object_hash;
 
-static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<FinalizedCollectiveSetupPackageFixture> =
-    OnceLock::new();
+static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
 static COLLECTIVE_SETUP_INTENT_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
 static STRUCTURAL_VSS_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<CollectiveSetupVerificationFixture> =
     OnceLock::new();
@@ -17,10 +14,6 @@ struct VssMaterialPackageComponents {
     vss_coefficient_commitments: serde_json::Value,
     vss_coefficient_commitment_material: serde_json::Value,
     vss_public_coefficient_commitments: serde_json::Value,
-}
-
-struct CollectiveSetupPackageFixture {
-    package: serde_json::Value,
 }
 
 #[derive(Clone)]
@@ -90,12 +83,11 @@ const PARAMETER_PROFILE_PARTICIPANT_COUNT: u64 =
 const MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u64 =
     crate::foundation::MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT as u64;
 
-pub(super) fn minimal_collective_setup_package_fixture() -> FinalizedCollectiveSetupPackageFixture {
+pub(super) fn minimal_collective_setup_package_fixture() -> serde_json::Value {
     cached_minimal_collective_setup_package_fixture().clone()
 }
 
-fn cached_minimal_collective_setup_package_fixture()
--> &'static FinalizedCollectiveSetupPackageFixture {
+fn cached_minimal_collective_setup_package_fixture() -> &'static serde_json::Value {
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE.get_or_init(|| {
         super::proof_record_fixtures::finalize_collective_setup_package(
             minimal_collective_setup_package_for_participant_count(
@@ -129,14 +121,6 @@ pub(super) fn minimal_collective_setup_package_for_participant_count(
     build_collective_setup_package_fixture(DEVELOPMENT_RING_DEGREE, participant_count)
 }
 
-fn build_collective_setup_package_fixture(
-    vss_material_ring_degree: usize,
-    participant_count: u64,
-) -> serde_json::Value {
-    build_collective_setup_package_fixture_parts(vss_material_ring_degree, participant_count)
-        .package
-}
-
 // The collective setup context shared by the package fixtures. Every fixture
 // builds the same foundation context shape, so this keeps one definition of
 // it instead of repeating the json! block at each construction site.
@@ -158,10 +142,10 @@ fn collective_setup_context_fixture(
     })
 }
 
-fn build_collective_setup_package_fixture_parts(
+fn build_collective_setup_package_fixture(
     vss_material_ring_degree: usize,
     participant_count: u64,
-) -> CollectiveSetupPackageFixture {
+) -> serde_json::Value {
     let ceremony_id = "ceremony-main";
     let manifest_hash = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "ElectionManifestHash",
@@ -281,13 +265,13 @@ fn build_collective_setup_package_fixture_parts(
         "galoisKeyShareBatches": [],
         "trusteeEvaluationKeyProofs": {},
     });
-    CollectiveSetupPackageFixture { package }
+    package
 }
 
 pub(super) fn structural_vss_collective_setup_fixture() -> CollectiveSetupVerificationFixture {
     STRUCTURAL_VSS_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(|| CollectiveSetupVerificationFixture {
-            package: minimal_collective_setup_package_fixture().package,
+            package: minimal_collective_setup_package_fixture(),
         })
         .clone()
 }
@@ -303,8 +287,7 @@ pub(super) fn ten_participant_structural_vss_collective_setup_fixture()
             minimal_collective_setup_package_for_participant_count(
                 PARAMETER_PROFILE_PARTICIPANT_COUNT,
             ),
-        )
-        .package,
+        ),
     }
 }
 

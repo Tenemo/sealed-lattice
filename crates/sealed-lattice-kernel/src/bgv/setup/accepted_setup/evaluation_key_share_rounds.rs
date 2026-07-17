@@ -21,12 +21,11 @@ pub(super) fn verify_relinearization_key_share_rounds(
         )));
     };
     if !rounds.is_object() {
-        return Ok(Some(evaluation_key_material_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
             "relinearizationKeyShareRoundsNotObject",
             "relinearizationKeyShareRounds must be an object",
-            "setupPackage.relinearizationKeyShareRounds",
-        )?));
+        )));
     }
     if rounds.as_object().is_some_and(serde_json::Map::is_empty) {
         return Ok(Some(setup_refusals(
@@ -37,12 +36,11 @@ pub(super) fn verify_relinearization_key_share_rounds(
     if rounds.get("objectType").and_then(Value::as_str)
         != Some(RELINEARIZATION_KEY_SHARE_ROUNDS_OBJECT_TYPE)
     {
-        return Ok(Some(evaluation_key_material_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "relinearizationKeyShareRoundsTypeMismatch",
             "relinearizationKeyShareRounds.objectType must be RelinearizationKeyShareRounds",
-            "setupPackage.relinearizationKeyShareRounds.objectType",
-        )?));
+        )));
     }
     let roster = super::accepted_roster_from_package(setup_package)?;
     let expected_levels = scheduled_relinearization_levels()?;
@@ -53,33 +51,30 @@ pub(super) fn verify_relinearization_key_share_rounds(
     if round_one_roots.len() != expected_record_count
         || round_two_roots.len() != expected_record_count
     {
-        return Ok(Some(evaluation_key_material_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "relinearizationKeyShareRoundCountMismatch",
             "relinearization round-one and round-two records must contain one record per trustee and scheduled level",
-            "setupPackage.relinearizationKeyShareRounds",
-        )?));
+        )));
     }
 
     for root in round_one_roots {
         if let Err(error) = verify_evaluation_key_component_material_root(root) {
-            return Ok(Some(evaluation_key_material_refusal(
+            return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::MalformedEncoding,
                 "evaluationKeyMaterialVerificationFailed",
                 error.message,
-                "setupPackage.relinearizationKeyShareRounds.roundOneKeySwitchComponentMaterialRoots",
-            )?));
+            )));
         }
     }
 
     for root in round_two_roots {
         if let Err(error) = verify_evaluation_key_component_material_root(root) {
-            return Ok(Some(evaluation_key_material_refusal(
+            return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::MalformedEncoding,
                 "evaluationKeyMaterialVerificationFailed",
                 error.message,
-                "setupPackage.relinearizationKeyShareRounds.roundTwoKeySwitchComponentMaterialRoots",
-            )?));
+            )));
         }
     }
     for trustee_roster_position in 0..roster.participant_count {
@@ -100,12 +95,11 @@ pub(super) fn verify_galois_key_share_batches(
         )));
     };
     let Some(batches) = batches.as_array() else {
-        return Ok(Some(evaluation_key_material_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
             "galoisKeyShareBatchesNotArray",
             "galoisKeyShareBatches must be an array of trustee batches",
-            "setupPackage.galoisKeyShareBatches",
-        )?));
+        )));
     };
     if batches.is_empty() {
         return Ok(Some(setup_refusals(
@@ -114,12 +108,11 @@ pub(super) fn verify_galois_key_share_batches(
         )));
     }
     if batches.len() != roster.participant_count as usize {
-        return Ok(Some(evaluation_key_material_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "galoisKeyShareBatchCountMismatch",
             "galoisKeyShareBatches must contain one batch per trustee",
-            "setupPackage.galoisKeyShareBatches",
-        )?));
+        )));
     }
     let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
     let expected_schedule = expected_required_galois_key_schedule()?;
@@ -134,12 +127,11 @@ pub(super) fn verify_galois_key_share_batches(
             })?,
         )?;
         if let Err(error) = verify_galois_key_share_batch(batch, &expected_schedule) {
-            return Ok(Some(evaluation_key_material_refusal(
+            return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::MalformedEncoding,
                 "evaluationKeyMaterialVerificationFailed",
                 error.message,
-                "setupPackage.galoisKeyShareBatches",
-            )?));
+            )));
         }
     }
 

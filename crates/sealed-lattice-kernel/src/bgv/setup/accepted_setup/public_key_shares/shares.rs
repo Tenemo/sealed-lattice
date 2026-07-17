@@ -1,5 +1,3 @@
-use super::common::*;
-
 use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
@@ -14,21 +12,19 @@ pub(in super::super) fn verify_public_key_shares(
         )));
     };
     if !share_set.is_object() {
-        return Ok(Some(public_key_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
             "publicKeySharesNotObject",
             "publicKeyShares must be a root-bound object, not an array or scalar",
-            "setupPackage.publicKeyShares",
-        )?));
+        )));
     }
     if share_set.get("objectType").and_then(Value::as_str) != Some(PUBLIC_KEY_SHARE_SET_OBJECT_TYPE)
     {
-        return Ok(Some(public_key_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "publicKeyShareSetTypeMismatch",
             "publicKeyShares.objectType must be PublicKeyShareSet",
-            "setupPackage.publicKeyShares.objectType",
-        )?));
+        )));
     }
 
     let roster = super::accepted_roster_from_package(setup_package)?;
@@ -40,12 +36,11 @@ pub(in super::super) fn verify_public_key_shares(
         )));
     };
     if share_records.len() != roster.participant_count as usize {
-        return Ok(Some(public_key_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "publicKeyShareCountMismatch",
             "publicKeyShares.shareRecords must contain one share per trustee",
-            "setupPackage.publicKeyShares.shareRecords",
-        )?));
+        )));
     }
     for (expected_roster_position, share_record) in share_records.iter().enumerate() {
         if let Some(response) = verify_public_key_share_record(
@@ -66,29 +61,26 @@ fn verify_public_key_share_record(
     expected_trustees: &BTreeMap<u64, String>,
 ) -> CanonicalResult<Option<Refusals>> {
     if !share_record.is_object() {
-        return Ok(Some(public_key_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
             "publicKeyShareNotObject",
             "public-key share records must be objects",
-            "setupPackage.publicKeyShares.shareRecords",
-        )?));
+        )));
     }
     if share_record.get("objectType").and_then(Value::as_str) != Some(PUBLIC_KEY_SHARE_OBJECT_TYPE)
     {
-        return Ok(Some(public_key_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "publicKeyShareTypeMismatch",
             "public-key share objectType must be PublicKeyShare",
-            "setupPackage.publicKeyShares.shareRecords.objectType",
-        )?));
+        )));
     }
     if !expected_trustees.contains_key(&expected_roster_position) {
-        return Ok(Some(public_key_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongContext,
             "publicKeyShareTrusteeMismatch",
             "public-key share position must identify an accepted setup trustee",
-            "setupPackage.publicKeyShares.shareRecords",
-        )?));
+        )));
     }
     let share_coefficient_hashes = share_record
         .get("shareCoefficientVectorHashesByLimb")
@@ -166,9 +158,6 @@ fn verify_public_key_share_limb_hashes(
 ) -> CanonicalResult<Option<Refusals>> {
     const LIMB_HASHES_PATH: &str =
         "publicKeyShares.shareRecords.shareCoefficientVectorHashesByLimb";
-    const LIMB_HASHES_OBJECT_PATH: &str =
-        "setupPackage.publicKeyShares.shareRecords.shareCoefficientVectorHashesByLimb";
-
     let Some(limb_hashes) = limb_hashes else {
         return Ok(Some(setup_refusals(
             vec![LIMB_HASHES_PATH.to_string()],
@@ -176,12 +165,11 @@ fn verify_public_key_share_limb_hashes(
         )));
     };
     if limb_hashes.len() != DATA_PRIMES.len() {
-        return Ok(Some(public_key_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "publicKeyShareCoefficientLimbCountMismatch",
             "public-key share must bind one coefficient hash for every Q_share limb",
-            LIMB_HASHES_OBJECT_PATH,
-        )?));
+        )));
     }
 
     for limb_hash in limb_hashes {

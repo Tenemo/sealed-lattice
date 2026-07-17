@@ -2,10 +2,7 @@ use super::evaluation_domain::negacyclic_transpose_product;
 use super::extension_field::{
     CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
 };
-use crate::bgv::evaluator::{
-    key_switch::{KEY_SWITCH_SAMPLE_DOMAIN, PLAINTEXT_MODULUS_I64},
-    prg::DeterministicSampler,
-};
+use crate::bgv::evaluator::{key_switch::KEY_SWITCH_SAMPLE_DOMAIN, prg::DeterministicSampler};
 mod column_layout;
 mod constraint_kernels;
 mod family_shape_and_validation;

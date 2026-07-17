@@ -183,8 +183,7 @@ impl ProofChallengeExtensionElement {
             }
         }
 
-        // Y^5 = 3. Descending reduction is required because a coefficient
-        // above degree nine in a future profile could itself reduce again.
+        // Y^5 = 3. Reduce high-degree coefficients in descending order.
         for degree in (PROOF_CHALLENGE_EXTENSION_DEGREE..unreduced.len()).rev() {
             let coefficient = unreduced[degree];
             unreduced[degree - PROOF_CHALLENGE_EXTENSION_DEGREE] = unreduced

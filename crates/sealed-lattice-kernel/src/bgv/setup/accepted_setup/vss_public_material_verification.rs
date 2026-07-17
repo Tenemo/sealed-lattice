@@ -32,17 +32,14 @@ pub(super) fn verify_vss_public_material(
         .map(|field_name| format!("setupPackage.{field_name}"))
         .collect::<Vec<_>>();
     if !missing_fields.is_empty() {
-        return Ok(VssPublicMaterialVerification::Refused(
-            vss_public_material_refusal(
-                crate::foundation::RefusalReason::MissingPrerequisite,
-                "vssPublicMaterialIncomplete",
-                format!(
-                    "VSS public material is required; missing {}",
-                    missing_fields.join(", ")
-                ),
-                "setupPackage",
-            )?,
-        ));
+        return Ok(VssPublicMaterialVerification::Refused(single_refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
+            "vssPublicMaterialIncomplete",
+            format!(
+                "VSS public material is required; missing {}",
+                missing_fields.join(", ")
+            ),
+        )));
     }
 
     match verify_vss_public_material_binding(
@@ -51,14 +48,11 @@ pub(super) fn verify_vss_public_material(
         proof_binding_session,
     ) {
         Ok(ring_degree) => Ok(VssPublicMaterialVerification::Verified { ring_degree }),
-        Err(error) => Ok(VssPublicMaterialVerification::Refused(
-            vss_public_material_refusal(
-                crate::foundation::RefusalReason::MalformedEncoding,
-                "vssPublicMaterialMalformed",
-                format!("VSS public material is malformed: {}", error.message),
-                "setupPackage",
-            )?,
-        )),
+        Err(error) => Ok(VssPublicMaterialVerification::Refused(single_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
+            "vssPublicMaterialMalformed",
+            format!("VSS public material is malformed: {}", error.message),
+        ))),
     }
 }
 
@@ -139,23 +133,6 @@ fn verify_vss_public_material_binding(
 
 fn public_material_error(message: &'static str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
-}
-
-fn vss_public_material_refusal(
-    refusal_reason: crate::foundation::RefusalReason,
-    reason_code: &'static str,
-    message: impl Into<String>,
-    object_path: impl Into<String>,
-) -> CanonicalResult<Refusals> {
-    Ok(setup_refusals(
-        Vec::new(),
-        vec![Refusal::new(
-            refusal_reason,
-            reason_code,
-            message,
-            object_path,
-        )],
-    ))
 }
 
 #[cfg(test)]

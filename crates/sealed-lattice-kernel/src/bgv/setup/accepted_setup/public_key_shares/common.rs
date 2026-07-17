@@ -18,20 +18,3 @@ pub(in super::super) fn public_key_common_binding(
         public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
     })
 }
-
-pub(in super::super) fn public_key_refusal(
-    refusal_reason: crate::foundation::RefusalReason,
-    reason_code: &'static str,
-    message: impl Into<String>,
-    object_path: impl Into<String>,
-) -> CanonicalResult<Refusals> {
-    Ok(setup_refusals(
-        Vec::new(),
-        vec![Refusal::new(
-            refusal_reason,
-            reason_code,
-            message,
-            object_path,
-        )],
-    ))
-}

@@ -3,7 +3,7 @@ use super::matrix::*;
 use super::validation::*;
 use super::*;
 
-pub(super) fn compute_setup_commitment_for_degree(
+pub(in super::super) fn compute_setup_commitment_for_degree(
     public_matrix_seed_hash: &str,
     source_rns_limb_index: usize,
     shamir_coefficient_index: u64,
@@ -254,25 +254,6 @@ pub(in crate::bgv::setup) fn compute_setup_commitment_from_typed_opening_for_deg
     ring_degree: usize,
 ) -> CanonicalResult<SetupCommitmentValue> {
     validate_fresh_randomness_by_commitment_limb(randomness_by_commitment_limb, ring_degree)?;
-    compute_setup_commitment_for_degree(
-        public_matrix_seed_hash,
-        source_rns_limb_index,
-        shamir_coefficient_index,
-        message_coefficients,
-        randomness_by_commitment_limb,
-        ring_degree,
-    )
-}
-
-#[cfg(test)]
-pub(in super::super) fn compute_setup_commitment_for_tests(
-    public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
-    shamir_coefficient_index: u64,
-    message_coefficients: &[u128],
-    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
-    ring_degree: usize,
-) -> CanonicalResult<SetupCommitmentValue> {
     compute_setup_commitment_for_degree(
         public_matrix_seed_hash,
         source_rns_limb_index,

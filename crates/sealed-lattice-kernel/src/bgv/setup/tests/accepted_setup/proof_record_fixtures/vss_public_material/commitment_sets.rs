@@ -168,7 +168,7 @@ pub(super) fn vss_public_recipient_share_commitment_record(
         .expect("setup context hash");
     let rns_prime = DATA_PRIMES[rns_limb_index];
     let threshold_degree = vss_fixture_threshold_degree(package);
-    let (share_coefficients, _carry_witnesses) = vss_public_recipient_share_values_and_carries(
+    let share_coefficients = vss_public_recipient_share_values(
         source_trustee_roster_position,
         recipient_roster_position,
         rns_limb_index,
@@ -206,7 +206,7 @@ pub(super) fn vss_public_recipient_share_commitment_record(
 
 pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_object(
     package: &serde_json::Value,
-) -> VssProofMaterialSetFixture {
+) -> serde_json::Value {
     let participant_count = participant_count_from_package(package);
     let recipient_coordinates = (0..participant_count)
         .flat_map(|recipient_roster_position| {
@@ -219,17 +219,16 @@ pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_obj
             package,
             &recipient_coordinates,
         );
-    let aggregate_threshold_proofs = super::aggregate_threshold::vss_aggregate_threshold_proofs(
-        package,
-        &aggregate_set,
-        &recipient_coordinates,
-    );
+    let aggregate_threshold_proof_bytes_hashes =
+        super::aggregate_threshold::vss_aggregate_threshold_proof_bytes_hashes(
+            package,
+            &aggregate_set,
+            &recipient_coordinates,
+        );
     aggregate_set["aggregateThresholdProofBytesHashes"] =
-        serde_json::json!(aggregate_threshold_proofs.proof_bytes_hashes);
+        serde_json::json!(aggregate_threshold_proof_bytes_hashes);
 
-    VssProofMaterialSetFixture {
-        value: aggregate_set,
-    }
+    aggregate_set
 }
 
 pub(super) fn vss_public_aggregate_threshold_commitment_set_without_proofs_for_coordinates(
@@ -277,7 +276,7 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
     // this record.
     let mut aggregate_message = vec![0_u64; ring_degree];
     for source_trustee_roster_position in 0..participant_count {
-        let (share_values, _carries) = vss_public_recipient_share_values_and_carries(
+        let share_values = vss_public_recipient_share_values(
             source_trustee_roster_position,
             recipient_roster_position,
             rns_limb_index,

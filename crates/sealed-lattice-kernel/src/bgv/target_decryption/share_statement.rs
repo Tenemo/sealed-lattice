@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(test)]
 pub(super) fn derive_target_decryption_share_proof_statement(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -46,7 +45,6 @@ pub(super) fn derive_target_decryption_share_proof_statement_from_verified_local
     )
 }
 
-#[cfg(test)]
 pub(super) fn verify_target_decryption_share_proof_statement_binding(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,

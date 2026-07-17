@@ -14,20 +14,19 @@ use super::merkle_commitment::{
 };
 use super::prover::{
     LimbProof, SuccinctEvaluationKeyProof, barycentric_weights, build_limb_public_vectors,
-    draw_limb_challenges, global_claim_id, sample_deep_identity_points,
-    trace_vanishing_at_extension,
+    draw_limb_challenges, sample_deep_identity_points, trace_vanishing_at_extension,
 };
 use super::relation::{
     ExtensionColumnDomain, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT,
     QUOTIENT_COLUMN_ROW_CHECK_HIGH, QUOTIENT_COLUMN_ROW_CHECK_LOW,
     QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, QUOTIENT_COLUMN_SUMCHECK_VANISHING,
     SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, batched_row_check_value,
-    batched_sumcheck_value, masked_claim_bounds_for_global_claim,
-    masked_claim_lift_residue_count_for_moduli,
+    batched_sumcheck_value, masked_claim_bounds, masked_claim_lift_residue_count_for_moduli,
 };
 use super::{
-    COMMITMENT_BOUND_FACTOR, DEEP_EVALUATION_POINT_COUNT, LOW_DEGREE_QUERY_COUNT,
-    MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE, MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    COMMITMENT_BOUND_FACTOR, CONSISTENCY_COEFFICIENT_BITS, CONSISTENCY_REPETITIONS,
+    DEEP_EVALUATION_POINT_COUNT, LOW_DEGREE_QUERY_COUNT, MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE,
+    MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
     SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE, invalid_succinct_setup_proof,
 };
 use crate::bgv::modular_arithmetic::{inverse_mod, mul_mod_fast};
@@ -191,16 +190,6 @@ fn verify_limb(
         }
         let weights = barycentric_weights(&plan, &tower, point)?;
         let point_publics = SumcheckPublicEvaluations {
-            secret_factor: publics
-                .secret_factor
-                .iter()
-                .map(|vector| extension_halves_at_point(&tower, &weights, vector, trace_size))
-                .collect(),
-            u_power: publics
-                .u_powers
-                .iter()
-                .map(|vector| extension_halves_at_point(&tower, &weights, vector, trace_size))
-                .collect(),
             consistency: consistency_vectors
                 .iter()
                 .map(|vector| base_halves_at_point(&tower, &weights, vector, trace_size))
@@ -210,8 +199,8 @@ fn verify_limb(
                 .iter()
                 .map(|vector| extension_halves_at_point(&tower, &weights, vector, trace_size))
                 .collect(),
-            linkage: publics
-                .linkage_vectors
+            private_vss_relation: publics
+                .private_vss_relation_vectors
                 .iter()
                 .map(|vector| extension_halves_at_point(&tower, &weights, vector, trace_size))
                 .collect(),
@@ -220,7 +209,6 @@ fn verify_limb(
             &extension_domain,
             phase_one_values,
             &point_publics,
-            &publics.error_weights,
             &challenges.consistency_alpha,
             &layout,
         );
@@ -483,7 +471,6 @@ fn verify_cross_limb_consistency(
         std::collections::BTreeMap::new();
     for (proof_position, limb_index) in proof_limb_indices.iter().enumerate() {
         let modulus = DATA_PRIMES[*limb_index];
-        let layout = LimbColumnLayout::new(statement, *limb_index)?;
         for (local_claim, claim) in proof.limb_proofs[proof_position]
             .masked_consistency_claims
             .iter()
@@ -494,21 +481,17 @@ fn verify_cross_limb_consistency(
                     "masked consistency claim is not a reduced limb residue",
                 ));
             }
-            let global_id = global_claim_id(statement, &layout, local_claim);
             residues_by_global_id
-                .entry(global_id)
+                .entry(local_claim as u64)
                 .or_default()
                 .push((modulus, *claim));
         }
     }
-    for (global_claim_id, residues) in &residues_by_global_id {
-        // The lift window is recomputed per claim: the product of the first
-        // lift_count limb moduli must exceed twice the claim's accepted range,
-        // so wider digit claims take a three-field lift while narrow
-        // base claims keep the two-field lift. The range guard below enforces
-        // uniqueness rather than assuming it.
-        let (lower_bound, upper_bound) =
-            masked_claim_bounds_for_global_claim(statement, *global_claim_id)?;
+    let (lower_bound, upper_bound) = masked_claim_bounds(statement)?;
+    for residues in residues_by_global_id.values() {
+        // The product of the selected limb moduli must exceed twice the
+        // accepted range. The range guard below enforces uniqueness rather
+        // than assuming it.
         let lift_count = masked_claim_lift_residue_count_for_moduli(
             residues.iter().map(|(modulus, _)| *modulus),
             &lower_bound,
@@ -586,12 +569,11 @@ pub(crate) fn verify_evaluation_key_share(
     for limb_proof in &proof.limb_proofs {
         transcript.absorb("witness-tree-root", &limb_proof.witness_tree_root);
     }
-    let family_shape = statement.family_shape();
-    let consistency_vectors = (0..family_shape.consistency_repetitions())
+    let consistency_vectors = (0..CONSISTENCY_REPETITIONS)
         .map(|_| {
             transcript.challenge_bounded_integers(
                 "consistency-vector",
-                family_shape.consistency_coefficient_bits(),
+                CONSISTENCY_COEFFICIENT_BITS,
                 proof_trace_ring_degree,
             )
         })

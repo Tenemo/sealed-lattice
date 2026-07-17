@@ -293,6 +293,10 @@ impl Roster {
         Ok(Self { entries })
     }
 
+    pub(crate) fn validate(&self) -> SchemaResult<()> {
+        validate_roster_entries(&self.entries)
+    }
+
     pub(crate) fn require_selected_profile_size(&self) -> SchemaResult<()> {
         if self.entries.len() != usize::from(FOUNDATION_PROFILE.participant_count) {
             return Err(FoundationSchemaError::new(
@@ -304,7 +308,7 @@ impl Roster {
     }
 
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
-        validate_roster_entries(&self.entries)?;
+        self.validate()?;
         let entries = self
             .entries
             .iter()

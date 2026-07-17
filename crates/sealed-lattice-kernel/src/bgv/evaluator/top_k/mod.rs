@@ -21,11 +21,11 @@ use crate::bgv::{
         circuit::{
             EvaluatorContext, broadcast_constant_coefficients,
             evaluate_polynomial_with_fixed_baby_step_count, modulus_switch_to, normalize_scaling,
+            sum_aligned_ciphertexts,
         },
         engine::{
-            Ciphertext, add_plaintext_coefficients, ciphertext_add, ciphertext_negate,
-            ciphertext_sub, encode_slots_to_coefficients, plaintext_mul, scalar_mul,
-            signed_residue,
+            Ciphertext, add_plaintext_coefficients, ciphertext_negate, ciphertext_sub,
+            encode_slots_to_coefficients, plaintext_mul, scalar_mul, signed_residue,
         },
     },
     modular_arithmetic::{add_mod, integer_square_root_ceil, inverse_mod, mul_mod, sub_mod},

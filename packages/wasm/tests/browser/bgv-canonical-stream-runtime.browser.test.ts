@@ -3,145 +3,29 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { bgvCanonicalStreamFamilies } from '#packages/wasm/src/bgv-canonical-stream-runtime';
 import { canonicalStreamDomains } from '#packages/wasm/src/canonical-stream-runtime';
+import {
+    runCanonicalStreamBrowserWorker,
+    terminateCanonicalStreamBrowserWorkers,
+} from '#packages/wasm/tests/support/canonical-stream-browser-worker-runner';
 
-type PullMessage = Readonly<{
-    chunkIndex: number;
-    expectedByteLength: number;
-    messageKind: 'pull';
-    phase: 'read' | 'write';
-    requestIdentifier: number;
-}>;
-
-type ResultMessage = Readonly<{
-    consumedByteLength?: number;
-    failureKind?: 'cancelled' | 'internal' | 'refused' | 'resource';
-    messageKind: 'completed' | 'failed';
-    refusalReason?: string;
-    requestIdentifier: number;
-}>;
-
-const workers = new Set<Worker>();
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const isPullMessage = (value: unknown): value is PullMessage =>
-    isRecord(value) &&
-    value.messageKind === 'pull' &&
-    (value.phase === 'read' || value.phase === 'write') &&
-    Number.isSafeInteger(value.chunkIndex) &&
-    Number.isSafeInteger(value.expectedByteLength);
-
-const isResultMessage = (value: unknown): value is ResultMessage =>
-    isRecord(value) &&
-    (value.messageKind === 'completed' || value.messageKind === 'failed');
-
-const chunk = (chunkIndex: number, byteLength: number): ArrayBuffer => {
-    return Uint8Array.from(
-        { length: byteLength },
-        (_, byteIndex) => (53 + chunkIndex * 17 + byteIndex * 131) & 0xff,
-    ).buffer;
-};
-
-const run = (): Promise<{
-    maximumOutstandingPullCount: number;
-    pullOrder: readonly string[];
-    result: ResultMessage;
-}> => {
-    const worker = new Worker(
-        new URL(
-            '../support/canonical-stream-browser-worker.ts',
-            import.meta.url,
-        ),
-        { type: 'module' },
-    );
-    workers.add(worker);
-    const requestIdentifier = 7;
-    const pullOrder: string[] = [];
-    let outstandingPullCount = 0;
-    let maximumOutstandingPullCount = 0;
-
-    return new Promise<{
-        maximumOutstandingPullCount: number;
-        pullOrder: readonly string[];
-        result: ResultMessage;
-    }>((resolve, reject) => {
-        worker.addEventListener(
-            'error',
-            (event) =>
-                reject(
-                    event.error instanceof Error
-                        ? event.error
-                        : new Error('The BGV stream worker failed.'),
-                ),
-            { once: true },
-        );
-        worker.addEventListener('message', (event) => {
-            const message = event.data as unknown;
-            if (isPullMessage(message)) {
-                outstandingPullCount += 1;
-                maximumOutstandingPullCount = Math.max(
-                    maximumOutstandingPullCount,
-                    outstandingPullCount,
-                );
-                pullOrder.push(`${message.phase}:${message.chunkIndex}`);
-                if (message.expectedByteLength === 0) {
-                    worker.postMessage({
-                        chunkIndex: message.chunkIndex,
-                        messageKind: 'end',
-                        phase: message.phase,
-                        requestIdentifier,
-                    });
-                } else {
-                    const bytes = chunk(
-                        message.chunkIndex,
-                        message.expectedByteLength,
-                    );
-                    worker.postMessage(
-                        {
-                            buffer: bytes,
-                            chunkIndex: message.chunkIndex,
-                            messageKind: 'chunk',
-                            phase: message.phase,
-                            requestIdentifier,
-                        },
-                        [bytes],
-                    );
-                    expect(bytes.byteLength).toBe(0);
-                }
-                outstandingPullCount -= 1;
-                return;
-            }
-            if (!isResultMessage(message)) {
-                reject(new Error('The BGV stream worker returned bad data.'));
-                return;
-            }
-            resolve({
-                maximumOutstandingPullCount,
-                pullOrder,
-                result: message,
-            });
-        });
-        worker.postMessage({
+const run = () =>
+    runCanonicalStreamBrowserWorker({
+        byteSeed: 53,
+        chunkIndexMultiplier: 17,
+        operationName: 'The BGV stream',
+        requestIdentifier: 7,
+        startMessage: {
             bgvFamily: bgvCanonicalStreamFamilies.publicKeyShare,
             cancelAfterFirstChunk: false,
             command: 'startBgv',
             materialRoot: '71'.repeat(64),
-            requestIdentifier,
             streamDomain: canonicalStreamDomains.publicKeyShareProof,
             totalByteLength: foundationProfile.streamChunkByteLength + 31,
-        });
-    }).finally(() => {
-        worker.terminate();
-        workers.delete(worker);
+        },
     });
-};
 
 afterEach(() => {
-    for (const worker of workers) {
-        worker.terminate();
-    }
-    workers.clear();
+    terminateCanonicalStreamBrowserWorkers();
 });
 
 describe('BGV canonical stream boundary in a browser worker', () => {

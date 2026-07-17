@@ -61,32 +61,26 @@ pub(super) fn verify_same_secret_bridge_statement_set(
         .map(|field_name| format!("setupPackage.{field_name}"))
         .collect::<Vec<_>>();
     if !missing_fields.is_empty() {
-        return Ok(SameSecretBridgeVerification::Refused(
-            same_secret_bridge_refusal(
-                crate::foundation::RefusalReason::MissingPrerequisite,
-                "sameSecretBridgeEvidenceIncomplete",
-                format!(
-                    "same-secret bridge material is required; missing {}",
-                    missing_fields.join(", ")
-                ),
-                "setupPackage",
-            )?,
-        ));
+        return Ok(SameSecretBridgeVerification::Refused(single_refusal(
+            crate::foundation::RefusalReason::MissingPrerequisite,
+            "sameSecretBridgeEvidenceIncomplete",
+            format!(
+                "same-secret bridge material is required; missing {}",
+                missing_fields.join(", ")
+            ),
+        )));
     }
 
     match verified_same_secret_bridge_material_from_package(setup_package, proof_binding_session) {
         Ok(verified_material) => Ok(SameSecretBridgeVerification::Verified(verified_material)),
-        Err(error) => Ok(SameSecretBridgeVerification::Refused(
-            same_secret_bridge_refusal(
-                crate::foundation::RefusalReason::MalformedEncoding,
-                "sameSecretBridgeMalformed",
-                format!(
-                    "same-secret bridge material is malformed: {}",
-                    error.message
-                ),
-                "setupPackage",
-            )?,
-        )),
+        Err(error) => Ok(SameSecretBridgeVerification::Refused(single_refusal(
+            crate::foundation::RefusalReason::MalformedEncoding,
+            "sameSecretBridgeMalformed",
+            format!(
+                "same-secret bridge material is malformed: {}",
+                error.message
+            ),
+        ))),
     }
 }
 
@@ -273,23 +267,6 @@ fn same_secret_bridge_verification_request(
 
 fn same_secret_bridge_error(message: &'static str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
-}
-
-fn same_secret_bridge_refusal(
-    refusal_reason: crate::foundation::RefusalReason,
-    reason_code: &'static str,
-    message: impl Into<String>,
-    object_path: impl Into<String>,
-) -> CanonicalResult<Refusals> {
-    Ok(setup_refusals(
-        Vec::new(),
-        vec![Refusal::new(
-            refusal_reason,
-            reason_code,
-            message,
-            object_path,
-        )],
-    ))
 }
 
 #[cfg(test)]

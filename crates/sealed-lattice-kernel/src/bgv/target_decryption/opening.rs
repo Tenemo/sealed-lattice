@@ -26,7 +26,6 @@ pub(super) struct AggregateOpeningRootsInput<'a> {
 }
 
 pub(super) struct AggregateOpeningComputation {
-    #[cfg(test)]
     pub(super) commitment: Value,
     pub(super) commitment_root: String,
     pub(super) opening_root: String,
@@ -99,7 +98,6 @@ pub(super) fn compute_aggregate_opening(
         })?;
 
     Ok(AggregateOpeningComputation {
-        #[cfg(test)]
         commitment: computation.commitment,
         commitment_root: computation.commitment_root,
         opening_root: computation.opening_root,

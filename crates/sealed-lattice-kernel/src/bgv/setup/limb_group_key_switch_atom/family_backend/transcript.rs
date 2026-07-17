@@ -110,20 +110,7 @@ impl Transcript {
                 "the key-switch atom proof field requires at least two limbs",
             ));
         }
-        let words = self.squeeze_words(label, CHALLENGE_WORDS)?;
-        let base = {
-            let mut raw = [0_u64; LIMB_COUNT];
-            raw[1] = 1;
-            parameters.raw_value_to_element(&raw)
-        };
-        let mut accumulator = parameters.zero();
-        for word in words {
-            accumulator = parameters.add(
-                &parameters.multiply(&accumulator, &base),
-                &parameters.unsigned_word_to_element(word),
-            );
-        }
-        Ok(accumulator)
+        Ok(parameters.wide_words_to_element(self.squeeze_words(label, CHALLENGE_WORDS)?))
     }
 
     pub(super) fn challenge_field_elements<const LIMB_COUNT: usize>(

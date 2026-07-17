@@ -122,65 +122,11 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
         domain.value_mul(&domain.value_mul(value, &value_minus_one), &value_minus_two)
     };
 
-    if layout.private_vss_active() {
-        for randomness_position in 0..layout.private_vss_randomness_columns {
-            for half in 0..TRACE_SPLIT {
-                let randomness = column_values
-                    [layout.physical_private_vss_randomness(randomness_position, half)];
-                absorb(&ternary_constraint(&randomness), &mut accumulated);
-            }
-        }
-        for mask_column in 0..layout.mask_column_count {
-            for half in 0..TRACE_SPLIT {
-                let mask = column_values[layout.physical_mask(mask_column, half)];
-                absorb(&mask_digit_constraint(&mask), &mut accumulated);
-            }
-        }
-        return accumulated;
-    }
-
-    for half in 0..TRACE_SPLIT {
-        let secret = column_values[layout.physical_secret(half)];
-        absorb(&ternary_constraint(&secret), &mut accumulated);
-    }
-    for error_position in 0..layout.total_error_columns {
+    for randomness_position in 0..layout.private_vss_randomness_columns {
         for half in 0..TRACE_SPLIT {
-            let error = column_values[layout.physical_error(error_position, half)];
-            let error_square = column_values[layout.physical_error_square(error_position, half)];
-            let range_polynomial = domain.value_mul(
-                &domain.value_sub_base(&error_square, 1),
-                &domain.value_sub_base(&error_square, 4),
-            );
-            absorb(
-                &domain.value_mul(&error, &range_polynomial),
-                &mut accumulated,
-            );
-        }
-    }
-    for error_position in 0..layout.total_error_columns {
-        for half in 0..TRACE_SPLIT {
-            let error = column_values[layout.physical_error(error_position, half)];
-            let error_square = column_values[layout.physical_error_square(error_position, half)];
-            absorb(
-                &domain.value_sub(&error_square, &domain.value_mul(&error, &error)),
-                &mut accumulated,
-            );
-        }
-    }
-    if layout.linkage_active() {
-        for half in 0..TRACE_SPLIT {
-            let indicator = column_values[layout.physical_negative_indicator(half)];
-            absorb(
-                &domain.value_sub(&domain.value_mul(&indicator, &indicator), &indicator),
-                &mut accumulated,
-            );
-        }
-        for randomness_position in 0..layout.linkage_randomness_columns {
-            for half in 0..TRACE_SPLIT {
-                let randomness =
-                    column_values[layout.physical_linkage_randomness(randomness_position, half)];
-                absorb(&ternary_constraint(&randomness), &mut accumulated);
-            }
+            let randomness =
+                column_values[layout.physical_private_vss_randomness(randomness_position, half)];
+            absorb(&ternary_constraint(&randomness), &mut accumulated);
         }
     }
     for mask_column in 0..layout.mask_column_count {
@@ -193,132 +139,41 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
 }
 
 pub(crate) struct SumcheckPublicEvaluations<ColumnValue> {
-    pub(crate) secret_factor: Vec<[ChallengeExtensionElement; 2]>,
-    pub(crate) u_power: Vec<[ChallengeExtensionElement; 2]>,
     pub(crate) consistency: Vec<[ColumnValue; 2]>,
     pub(crate) mask_selector: Vec<[ChallengeExtensionElement; 2]>,
-    pub(crate) linkage: Vec<[ChallengeExtensionElement; 2]>,
-}
-
-pub(crate) struct SumcheckErrorWeights {
-    pub(crate) weights: Vec<Vec<ChallengeExtensionElement>>,
+    pub(crate) private_vss_relation: Vec<[ChallengeExtensionElement; 2]>,
 }
 
 pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
     domain: &Domain,
     column_values: &[Domain::Value],
     publics: &SumcheckPublicEvaluations<Domain::Value>,
-    error_weights: &SumcheckErrorWeights,
     consistency_alpha: &[ChallengeExtensionElement],
     layout: &LimbColumnLayout,
 ) -> ChallengeExtensionElement {
     let tower = *domain.tower();
-    let plaintext_modulus = (PLAINTEXT_MODULUS_I64 as u64) % tower.modulus;
     let mut accumulated = ChallengeExtensionTower::zero();
-    if layout.private_vss_active() {
-        let mut claim_alpha_index = 0_usize;
-        for consistency_vector in 0..layout.consistency_vector_count() {
-            for repetition in 0..layout.consistency_repetitions {
-                let alpha_value = &consistency_alpha[claim_alpha_index];
-                claim_alpha_index += 1;
-                for half in 0..TRACE_SPLIT {
-                    debug_assert_eq!(consistency_vector, 0);
-                    let witness_value = column_values[layout.physical_private_vss_carry(half)];
-                    let product =
-                        domain.value_mul(&publics.consistency[repetition][half], &witness_value);
-                    accumulated =
-                        tower.add(&accumulated, &domain.challenge_times(alpha_value, &product));
-                }
-            }
-        }
-        absorb_mask_columns(domain, column_values, publics, layout, &mut accumulated);
-        debug_assert_eq!(publics.linkage.len(), layout.private_vss_logical_columns());
-        for (column_index, relation_values) in publics.linkage.iter().enumerate() {
-            for (half, relation_value) in relation_values.iter().enumerate().take(TRACE_SPLIT) {
-                let column_value =
-                    private_vss_column_value::<Domain>(column_values, layout, column_index, half);
-                accumulated = tower.add(
-                    &accumulated,
-                    &domain.challenge_times(relation_value, &column_value),
-                );
-            }
-        }
-        return accumulated;
-    }
-
-    for (repetition, (secret_factor, u_power)) in publics
-        .secret_factor
-        .iter()
-        .zip(publics.u_power.iter())
-        .enumerate()
-    {
+    debug_assert_eq!(consistency_alpha.len(), layout.claim_count());
+    for (repetition, alpha_value) in consistency_alpha.iter().enumerate() {
         for half in 0..TRACE_SPLIT {
-            let secret = column_values[layout.physical_secret(half)];
-            accumulated = tower.add(
-                &accumulated,
-                &domain.challenge_times(&secret_factor[half], &secret),
-            );
-            let mut weighted_error = ChallengeExtensionTower::zero();
-            for error_position in 0..layout.total_error_columns {
-                weighted_error = tower.add(
-                    &weighted_error,
-                    &domain.challenge_times(
-                        &error_weights.weights[repetition][error_position],
-                        &column_values[layout.physical_error(error_position, half)],
-                    ),
-                );
-            }
-            accumulated = tower.sub(
-                &accumulated,
-                &tower.scale_base(
-                    &tower.mul(&u_power[half], &weighted_error),
-                    plaintext_modulus,
-                ),
-            );
-        }
-    }
-    let mut claim_alpha_index = 0_usize;
-    for consistency_vector in 0..layout.consistency_vector_count() {
-        for repetition in 0..layout.consistency_repetitions {
-            let alpha_value = &consistency_alpha[claim_alpha_index];
-            claim_alpha_index += 1;
-            for half in 0..TRACE_SPLIT {
-                let witness_value = if consistency_vector == 0 {
-                    column_values[layout.physical_secret(half)]
-                } else if consistency_vector <= layout.total_error_columns {
-                    column_values[layout.physical_error(consistency_vector - 1, half)]
-                } else if consistency_vector == layout.total_error_columns + 1 {
-                    column_values[layout.physical_negative_indicator(half)]
-                } else {
-                    column_values[layout.physical_linkage_randomness(
-                        consistency_vector - layout.total_error_columns - 2,
-                        half,
-                    )]
-                };
-                let product =
-                    domain.value_mul(&publics.consistency[repetition][half], &witness_value);
-                accumulated =
-                    tower.add(&accumulated, &domain.challenge_times(alpha_value, &product));
-            }
+            let witness_value = column_values[layout.physical_private_vss_carry(half)];
+            let product = domain.value_mul(&publics.consistency[repetition][half], &witness_value);
+            accumulated = tower.add(&accumulated, &domain.challenge_times(alpha_value, &product));
         }
     }
     absorb_mask_columns(domain, column_values, publics, layout, &mut accumulated);
-    if layout.linkage_active() {
-        debug_assert_eq!(publics.linkage.len(), 2 + layout.linkage_randomness_columns);
-        for (linkage_position, linkage_values) in publics.linkage.iter().enumerate() {
-            for half in 0..TRACE_SPLIT {
-                let column_value = if linkage_position == 0 {
-                    column_values[layout.physical_secret(half)]
-                } else if linkage_position == 1 {
-                    column_values[layout.physical_negative_indicator(half)]
-                } else {
-                    column_values[layout.physical_linkage_randomness(linkage_position - 2, half)]
-                };
-                accumulated = tower.add(
-                    &accumulated,
-                    &domain.challenge_times(&linkage_values[half], &column_value),
-                );
-            }
+    debug_assert_eq!(
+        publics.private_vss_relation.len(),
+        layout.private_vss_logical_columns()
+    );
+    for (column_index, relation_values) in publics.private_vss_relation.iter().enumerate() {
+        for (half, relation_value) in relation_values.iter().enumerate().take(TRACE_SPLIT) {
+            let column_value =
+                private_vss_column_value::<Domain>(column_values, layout, column_index, half);
+            accumulated = tower.add(
+                &accumulated,
+                &domain.challenge_times(relation_value, &column_value),
+            );
         }
     }
     accumulated

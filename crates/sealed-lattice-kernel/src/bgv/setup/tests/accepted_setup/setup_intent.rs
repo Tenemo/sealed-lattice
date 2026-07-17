@@ -23,9 +23,9 @@ fn foundation_setup_parameters_hash_is_byte_stable() {
 
 #[test]
 fn collective_setup_parameters_expose_operative_foundation_parameters() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_parameters_expose_operative_foundation_parameters",
-    );
+    let _accepted_setup_test_timing = accepted_setup_test_timing(stringify!(
+        collective_setup_parameters_expose_operative_foundation_parameters
+    ));
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
 
     assert_eq!(

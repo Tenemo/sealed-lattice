@@ -13,21 +13,19 @@ pub(super) fn verify_common_randomness(
         )));
     };
     if !common_randomness.is_object() {
-        return Ok(Some(common_randomness_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
             "commonRandomnessNotObject",
             "commonRandomness must be a JSON object",
-            "setupPackage.commonRandomness",
-        )?));
+        )));
     }
     if common_randomness.get("objectType").and_then(Value::as_str) != Some("SetupCommonRandomness")
     {
-        return Ok(Some(common_randomness_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "commonRandomnessObjectTypeMismatch",
             "commonRandomness.objectType must be SetupCommonRandomness",
-            "setupPackage.commonRandomness.objectType",
-        )?));
+        )));
     }
 
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
@@ -57,20 +55,18 @@ pub(super) fn verify_common_randomness(
         )));
     };
     if commit_records.len() != roster.participant_count as usize {
-        return Ok(Some(common_randomness_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "commonRandomnessCommitCountMismatch",
             "commonRandomness.commitRecords must contain one commit per participant",
-            "setupPackage.commonRandomness.commitRecords",
-        )?));
+        )));
     }
     if reveal_records.len() != roster.participant_count as usize {
-        return Ok(Some(common_randomness_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "commonRandomnessRevealCountMismatch",
             "commonRandomness.revealRecords must contain one reveal per participant",
-            "setupPackage.commonRandomness.revealRecords",
-        )?));
+        )));
     }
 
     let mut commit_reveal_hashes_by_position = BTreeMap::<u64, String>::new();
@@ -84,12 +80,11 @@ pub(super) fn verify_common_randomness(
             .insert(roster_position, reveal_hash)
             .is_some()
         {
-            return Ok(Some(common_randomness_refusal(
+            return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::Equivocation,
                 "commonRandomnessCommitDuplicate",
                 "commonRandomness.commitRecords contains duplicate roster positions",
-                "setupPackage.commonRandomness.commitRecords",
-            )?));
+            )));
         }
     }
 
@@ -102,40 +97,36 @@ pub(super) fn verify_common_randomness(
         )?;
         let Some(committed_reveal_hash) = commit_reveal_hashes_by_position.get(&roster_position)
         else {
-            return Ok(Some(common_randomness_refusal(
+            return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::MissingPrerequisite,
                 "commonRandomnessRevealWithoutCommit",
                 "commonRandomness.revealRecords contains a reveal without a matching commit",
-                "setupPackage.commonRandomness.revealRecords",
-            )?));
+            )));
         };
         if committed_reveal_hash != &reveal_hash {
-            return Ok(Some(common_randomness_refusal(
+            return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::WrongHashOrRoot,
                 "commonRandomnessRevealHashMismatch",
                 "common-randomness reveal hash does not match the participant commit",
-                "setupPackage.commonRandomness.revealRecords",
-            )?));
+            )));
         }
         if ordered_reveal_hashes
             .insert(roster_position, reveal_hash)
             .is_some()
         {
-            return Ok(Some(common_randomness_refusal(
+            return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::Equivocation,
                 "commonRandomnessRevealDuplicate",
                 "commonRandomness.revealRecords contains duplicate roster positions",
-                "setupPackage.commonRandomness.revealRecords",
-            )?));
+            )));
         }
     }
     if ordered_reveal_hashes.len() != roster.participant_count as usize {
-        return Ok(Some(common_randomness_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongHashOrRoot,
             "commonRandomnessRevealCoverageMismatch",
             "commonRandomness.revealRecords must cover the full foundation roster",
-            "setupPackage.commonRandomness.revealRecords",
-        )?));
+        )));
     }
 
     // Commitments bind each reveal before opening. Folding the roster-ordered
@@ -155,12 +146,11 @@ pub(super) fn verify_common_randomness(
         .and_then(Value::as_str)
         != Some(expected_public_matrix_seed_hash.as_str())
     {
-        return Ok(Some(common_randomness_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongHashOrRoot,
             "commonRandomnessPublicMatrixSeedMismatch",
             "commonRandomness.publicMatrixSeedHash does not match the ordered reveal set",
-            "setupPackage.commonRandomness.publicMatrixSeedHash",
-        )?));
+        )));
     }
     Ok(None)
 }
@@ -376,21 +366,4 @@ fn validate_common_randomness_reveal_hex(reveal_hex: &str) -> CanonicalResult<()
     }
 
     Ok(())
-}
-
-fn common_randomness_refusal(
-    refusal_reason: crate::foundation::RefusalReason,
-    reason_code: &'static str,
-    message: impl Into<String>,
-    object_path: impl Into<String>,
-) -> CanonicalResult<Refusals> {
-    Ok(setup_refusals(
-        Vec::new(),
-        vec![Refusal::new(
-            refusal_reason,
-            reason_code,
-            message,
-            object_path,
-        )],
-    ))
 }

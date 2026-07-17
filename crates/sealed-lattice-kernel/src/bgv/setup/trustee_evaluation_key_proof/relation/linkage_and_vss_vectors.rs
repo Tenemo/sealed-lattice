@@ -1,7 +1,10 @@
 use super::super::extension_field::{
     CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
 };
-use super::super::{CLAIM_MASK_RADIX, LINCHECK_REPETITIONS, invalid_succinct_setup_proof};
+use super::super::{
+    CLAIM_MASK_DIGIT_COUNT, CLAIM_MASK_RADIX, CONSISTENCY_COEFFICIENT_BITS, LINCHECK_REPETITIONS,
+    invalid_succinct_setup_proof,
+};
 use super::key_relation_algebra::negacyclic_transpose_product_extension;
 use super::statement_types::{
     PrivateVssShareStatement, SameSecretLinkageStatement, TrusteeEvaluationKeyStatement,
@@ -326,13 +329,6 @@ pub(crate) fn build_private_vss_public_vectors(
     Ok((relation_claim, vectors))
 }
 
-pub(crate) fn claim_mask_digit_count_for_global_claim(
-    statement: &TrusteeEvaluationKeyStatement,
-    _global_claim_id: u64,
-) -> usize {
-    statement.family_shape().claim_mask_digit_count()
-}
-
 pub(crate) fn claim_mask_bound_for_digit_count(mask_digit_count: usize) -> CanonicalResult<BigInt> {
     let exponent = u32::try_from(mask_digit_count)
         .map_err(|_| invalid_succinct_setup_proof("claim mask digit count overflowed"))?;
@@ -340,13 +336,11 @@ pub(crate) fn claim_mask_bound_for_digit_count(mask_digit_count: usize) -> Canon
     Ok(BigInt::from(CLAIM_MASK_RADIX).pow(exponent))
 }
 
-pub(crate) fn masked_claim_bounds_for_global_claim(
+pub(crate) fn masked_claim_bounds(
     statement: &TrusteeEvaluationKeyStatement,
-    global_claim_id: u64,
 ) -> CanonicalResult<(BigInt, BigInt)> {
-    let family_shape = statement.family_shape();
     let ring_degree = statement.ring_degree;
-    let coefficient_bound = (1_i128 << family_shape.consistency_coefficient_bits()) - 1;
+    let coefficient_bound = (1_i128 << CONSISTENCY_COEFFICIENT_BITS) - 1;
     let witness_bound = match statement.private_vss_share() {
         Some(private_vss_share) => {
             let carry_bound = private_vss_share_lifted_carry_bound(
@@ -361,8 +355,7 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
         .checked_mul(coefficient_bound)
         .and_then(|bound| bound.checked_mul(ring_degree as i128))
         .ok_or_else(|| invalid_succinct_setup_proof("masked claim bound overflowed"))?;
-    let mask_digit_count = claim_mask_digit_count_for_global_claim(statement, global_claim_id);
-    let mask_bound = claim_mask_bound_for_digit_count(mask_digit_count)?;
+    let mask_bound = claim_mask_bound_for_digit_count(CLAIM_MASK_DIGIT_COUNT)?;
     let clear_bound = BigInt::from(clear_bound);
 
     Ok((-&clear_bound, mask_bound + clear_bound))

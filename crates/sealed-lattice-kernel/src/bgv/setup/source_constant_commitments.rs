@@ -9,15 +9,12 @@ pub(in crate::bgv::setup) struct CanonicalSourceConstantCommitments {
     pub(in crate::bgv::setup) commitments: Vec<SetupCommitmentValue>,
 }
 
-#[cfg(test)]
-pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_material(
-    vss_coefficient_commitments: &Value,
-    vss_coefficient_commitment_material: &Value,
+fn accepted_source_constant_commitment_roots<'a>(
+    vss_coefficient_commitments: &'a Value,
     trustee_identity: &str,
     trustee_roster_position: u64,
     public_matrix_seed_hash: &str,
-    ring_degree: usize,
-) -> CanonicalResult<CanonicalSourceConstantCommitments> {
+) -> CanonicalResult<&'a [Value]> {
     let source_trustee_records = vss_coefficient_commitments
         .get("sourceTrusteeRecords")
         .and_then(Value::as_array)
@@ -55,15 +52,33 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_mate
             "VSS commitment set does not match the accepted source context",
         ));
     }
-    let public_commitment_roots = source_trustee_record
+    source_trustee_record
         .get("coefficientCommitmentRoots")
         .and_then(Value::as_array)
+        .map(Vec::as_slice)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidProtocolObject,
                 "source trustee coefficient commitments were required for the source linkage",
             )
-        })?;
+        })
+}
+
+#[cfg(test)]
+pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_vss_material(
+    vss_coefficient_commitments: &Value,
+    vss_coefficient_commitment_material: &Value,
+    trustee_identity: &str,
+    trustee_roster_position: u64,
+    public_matrix_seed_hash: &str,
+    ring_degree: usize,
+) -> CanonicalResult<CanonicalSourceConstantCommitments> {
+    let public_commitment_roots = accepted_source_constant_commitment_roots(
+        vss_coefficient_commitments,
+        trustee_identity,
+        trustee_roster_position,
+        public_matrix_seed_hash,
+    )?;
     let coefficient_commitments = vss_coefficient_commitment_material
         .get("coefficientCommitments")
         .and_then(Value::as_array)
@@ -153,52 +168,12 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_s
     public_matrix_seed_hash: &str,
     ring_degree: usize,
 ) -> CanonicalResult<CanonicalSourceConstantCommitments> {
-    let source_trustee_records = vss_coefficient_commitments
-        .get("sourceTrusteeRecords")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "VSS source trustee commitment records were required for the source linkage",
-            )
-        })?;
-    let source_trustee_index = usize::try_from(trustee_roster_position).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "source trustee roster position does not fit usize",
-        )
-    })?;
-    let source_trustee_record = source_trustee_records
-        .get(source_trustee_index)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "accepted VSS commitments are missing the source trustee record",
-            )
-        })?;
-    if vss_coefficient_commitments
-        .get("publicMatrixSeedHash")
-        .and_then(Value::as_str)
-        != Some(public_matrix_seed_hash)
-        || source_trustee_record
-            .get("sourceTrusteeIdentity")
-            .and_then(Value::as_str)
-            != Some(trustee_identity)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "VSS commitment set does not match the accepted source context",
-        ));
-    }
-    let public_commitment_roots = source_trustee_record
-        .get("coefficientCommitmentRoots")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "source trustee coefficient commitments were required for the source linkage",
-            )
-        })?;
+    let public_commitment_roots = accepted_source_constant_commitment_roots(
+        vss_coefficient_commitments,
+        trustee_identity,
+        trustee_roster_position,
+        public_matrix_seed_hash,
+    )?;
     let source_commitment_records = bridge_statement_record
         .get("sourceConstantCoefficientCommitments")
         .and_then(Value::as_array)

@@ -888,8 +888,8 @@ impl StateVerifier {
         roster: &Roster,
         canonical_decode_limits: CanonicalDecodeLimits,
     ) -> StateResult<Self> {
-        let canonical_roster =
-            Roster::new(roster.entries.clone()).map_err(StateError::from_schema)?;
+        roster.validate().map_err(StateError::from_schema)?;
+        let canonical_roster = roster.clone();
         canonical_roster
             .require_selected_profile_size()
             .map_err(StateError::from_schema)?;

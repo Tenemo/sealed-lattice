@@ -303,7 +303,7 @@ fn storage_transaction_requires_exact_replay_before_state_advances() {
         )],
     )
     .expect("the one-object test plan is valid");
-    let mut executor = ProofExternalMemoryExecutor::new(plan).expect("executor starts");
+    let mut executor = ProofExternalMemoryExecutor::new(plan);
     let mut runtime = CommonProofStorageTransactionRuntime::default();
     assert_eq!(
         executor.begin_object(runtime.storage(), object),

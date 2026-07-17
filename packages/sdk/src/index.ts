@@ -137,11 +137,8 @@ export type SetupPackageVerification = VerificationResult<void>;
 export const deriveCollectiveBgvSetupRosterHash =
     deriveCollectiveBgvSetupRosterHashInternal;
 
-export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
-export function validatePollSpec(input: unknown): PollSpecValidation;
-export function validatePollSpec(input: unknown): PollSpecValidation {
-    return validatePollSpecInternal(input);
-}
+export const validatePollSpec = (input: unknown): PollSpecValidation =>
+    validatePollSpecInternal(input);
 
 const loadFoundationCeremonyRuntime = async () =>
     openFoundationCeremonyRuntime(await loadFreshTranscriptCoreKernel());

@@ -161,7 +161,6 @@ describe('canonical board runtime', () => {
         const carriers = [
             {
                 canonicalCarrier: Uint8Array.of(9, 8, 7),
-                relayArrivalIndex: 999,
             },
         ];
 

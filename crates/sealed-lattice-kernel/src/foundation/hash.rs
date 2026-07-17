@@ -105,7 +105,6 @@ pub(crate) enum StreamingFoundationHashError {
     InvalidDomain,
     ItemCountOverflow,
     ItemLengthOverflow,
-    TupleLengthOverflow,
     PayloadOverrun,
     PayloadIncomplete,
 }
@@ -142,19 +141,6 @@ impl StreamingFoundationTupleHash512 {
             .ok_or(StreamingFoundationHashError::ItemLengthOverflow)?;
         let streamed_item_byte_length_u32 = u32::try_from(streamed_item_byte_length)
             .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
-
-        let tuple_byte_length = prefix_items
-            .iter()
-            .try_fold(8_usize, |length, item| {
-                length
-                    .checked_add(6)
-                    .and_then(|value| value.checked_add(item.canonical_bytes().len()))
-                    .ok_or(StreamingFoundationHashError::TupleLengthOverflow)
-            })?
-            .checked_add(6 + domain_item.canonical_bytes().len())
-            .and_then(|length| length.checked_add(6 + streamed_item_byte_length))
-            .ok_or(StreamingFoundationHashError::TupleLengthOverflow)?;
-        let _ = tuple_byte_length;
 
         let mut hasher = Shake256::default();
         hasher.update(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());

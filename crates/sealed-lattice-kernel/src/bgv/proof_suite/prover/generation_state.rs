@@ -641,8 +641,7 @@ impl CommonProofGenerationStateMachine {
             })?,
         )
         .map_err(CommonProofGenerationInitializationError::Prover)?;
-        let executor = ProofExternalMemoryExecutor::new(storage_plan.external_memory_plan)
-            .map_err(CommonProofGenerationInitializationError::StoragePlan)?;
+        let executor = ProofExternalMemoryExecutor::new(storage_plan.external_memory_plan);
         let mut tree_roots = vec![[0_u8; HASH_BYTE_LENGTH]; catalog.entries().len()];
         let mut root_present = vec![false; catalog.entries().len()];
         for (tree_index, relation_tree) in relation_trees.iter().enumerate() {

@@ -3,29 +3,22 @@ use super::same_secret_bridge::*;
 use super::share_linkage::*;
 use super::*;
 
-#[derive(Clone)]
-pub(in super::super::super) struct FinalizedCollectiveSetupPackageFixture {
-    pub(in super::super::super) package: serde_json::Value,
-}
-
 pub(in super::super::super) fn finalize_collective_setup_package(
     mut package: serde_json::Value,
-) -> FinalizedCollectiveSetupPackageFixture {
+) -> serde_json::Value {
     let participant_count = participant_count_from_package(&package);
     package["vssPublicCoefficientCommitmentSet"] =
         vss_public_coefficient_commitment_set_object(&package, 128);
     package["vssPublicRecipientShareCommitmentSet"] =
         vss_public_recipient_share_commitment_set_object(&package);
-    let aggregate_threshold_commitment_set =
+    package["vssPublicAggregateThresholdCommitmentSet"] =
         vss_public_aggregate_threshold_commitment_set_object(&package);
-    package["vssPublicAggregateThresholdCommitmentSet"] = aggregate_threshold_commitment_set.value;
     package["vssShareLinkageStatement"] = vss_share_linkage_statement_object(&package);
-    let share_linkage_proof_material_set = vss_share_linkage_proof_material_set_object(&package);
-    package["vssShareLinkageProofMaterialSet"] = share_linkage_proof_material_set.value;
+    package["vssShareLinkageProofMaterialSet"] =
+        vss_share_linkage_proof_material_set_object(&package);
     package["sameSecretBridgeStatementSet"] = same_secret_bridge_statement_set_object(&package);
-    let same_secret_bridge_proof_material_set =
+    package["sameSecretBridgeProofMaterialSet"] =
         same_secret_bridge_proof_material_set_object(&package);
-    package["sameSecretBridgeProofMaterialSet"] = same_secret_bridge_proof_material_set.value;
 
     let ceremony_id = package["setupContext"]["ceremonyId"]
         .as_str()
@@ -68,15 +61,7 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         .expect("collective setup package")
         .remove("vssCoefficientCommitmentMaterial");
 
-    FinalizedCollectiveSetupPackageFixture { package }
-}
-
-// The reference finalized fixture carries the canonical public VSS structure
-// with deliberately invalid common-proof references and no verifier-approved
-// proof bindings. It exercises structural reconstruction up to the proof
-// authority boundary, which must remain fail-closed.
-fn minimal_finalized_collective_setup_fixture() -> CollectiveSetupVerificationFixture {
-    structural_vss_collective_setup_fixture()
+    package
 }
 
 // Finalization retains the canonical BDLOP roots and bridge-carried commitment
@@ -86,7 +71,7 @@ fn minimal_finalized_collective_setup_fixture() -> CollectiveSetupVerificationFi
 // objects can matter.
 #[test]
 fn finalized_structural_material_reaches_but_cannot_bypass_common_proof_authority() {
-    let fixture = minimal_finalized_collective_setup_fixture();
+    let fixture = structural_vss_collective_setup_fixture();
     let package = &fixture.package;
     assert_eq!(
         vss_commitment_ring_degree_from_fixture_package(package),

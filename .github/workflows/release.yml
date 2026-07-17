@@ -25,7 +25,7 @@ jobs:
     validate-source:
         name: validate source
         runs-on: ubuntu-24.04
-        timeout-minutes: 10
+        timeout-minutes: 360
         permissions:
             actions: read
             contents: read
@@ -39,30 +39,16 @@ jobs:
                     exit 1
                   fi
 
-            - name: Require successful CI for the exact source
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
+                  ref: ${{ github.sha }}
+            - uses: ./.github/actions/bootstrap-pnpm
+
+            - name: Wait for successful CI for the exact source
               env:
                   GH_TOKEN: ${{ github.token }}
-              run: |
-                  mapfile -t SUCCESSFUL_CI_RUN_IDS < <(
-                    gh run list \
-                      --repo "${GITHUB_REPOSITORY}" \
-                      --workflow ci.yml \
-                      --commit "${GITHUB_SHA}" \
-                      --status success \
-                      --limit 20 \
-                      --json databaseId \
-                      --jq '.[].databaseId'
-                  )
-
-                  for CI_RUN_ID in "${SUCCESSFUL_CI_RUN_IDS[@]}"; do
-                    if [[ "$(gh run view "${CI_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --json jobs --jq '[.jobs[] | select(.name == "verify" and .conclusion == "success")] | length')" -gt 0 ]]; then
-                      echo "Exact source ${GITHUB_SHA} passed CI in run ${CI_RUN_ID}."
-                      exit 0
-                    fi
-                  done
-
-                  echo "No successful ci / verify job exists for exact source ${GITHUB_SHA}." >&2
-                  exit 1
+              run: pnpm exec tsx ./tools/ci/release-gates.ts await-ci
 
     prepare-release:
         name: prepare release

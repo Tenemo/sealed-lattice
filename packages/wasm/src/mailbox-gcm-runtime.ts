@@ -1,5 +1,6 @@
 import { foundationProfile } from '@sealed-lattice/types';
 
+import { isArrayBuffer, isUint8Array } from './byte-array.js';
 import {
     CanonicalStreamCleanupError,
     canonicalStreamKernelContext,
@@ -81,13 +82,6 @@ type ActiveMailboxGcmLease = {
     state: MailboxGcmLeaseState;
     totalByteLength: number;
 };
-
-const isUint8Array = (value: unknown): value is Uint8Array =>
-    ArrayBuffer.isView(value) &&
-    Object.prototype.toString.call(value) === '[object Uint8Array]';
-
-const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
-    Object.prototype.toString.call(value) === '[object ArrayBuffer]';
 
 const requireExactBytes = (
     value: Uint8Array,

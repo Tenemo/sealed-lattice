@@ -359,14 +359,6 @@ impl SymbolicCiphertextBound {
             - BigInt::from(BigUint::from(2_u8) * raw_decryption_bound(self))
     }
 
-    pub(crate) fn raw_decryption_bound(&self) -> BigUint {
-        raw_decryption_bound(self)
-    }
-
-    pub(crate) fn active_modulus(&self) -> BigUint {
-        active_modulus(self.level)
-    }
-
     fn scaling_inverse(&self) -> CanonicalResult<u64> {
         inverse_mod(self.decrypt_scaling, PLAINTEXT_MODULUS)
     }

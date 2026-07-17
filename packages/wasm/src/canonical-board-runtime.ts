@@ -1,6 +1,7 @@
 import type { RefusalReason, VerificationResult } from '@sealed-lattice/types';
 import { foundationProfile } from '@sealed-lattice/types';
 
+import { isUint8Array } from './byte-array.js';
 import { decodeWasmRefusalStatus } from './transcript-core-bridge/kernel-errors.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 
@@ -231,17 +232,6 @@ const refused = <Value>(
 
 const valid = <Value>(value: Value): VerificationResult<Value> =>
     Object.freeze({ isValid: true, value });
-
-const isUint8Array = (value: unknown): value is Uint8Array => {
-    try {
-        return (
-            ArrayBuffer.isView(value) &&
-            Object.prototype.toString.call(value) === '[object Uint8Array]'
-        );
-    } catch {
-        return false;
-    }
-};
 
 const isFoundationObjectType = (value: number): value is FoundationObjectType =>
     Object.values(foundationObjectTypes).some(

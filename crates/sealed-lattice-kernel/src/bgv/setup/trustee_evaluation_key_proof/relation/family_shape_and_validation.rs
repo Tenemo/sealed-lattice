@@ -1,13 +1,10 @@
-use super::super::{
-    CLAIM_MASK_DIGIT_COUNT, CONSISTENCY_COEFFICIENT_BITS, CONSISTENCY_REPETITIONS,
-    MINIMUM_TRACE_SIZE, TRACE_SPLIT, invalid_succinct_setup_proof,
-};
+use super::super::{MINIMUM_TRACE_SIZE, TRACE_SPLIT, invalid_succinct_setup_proof};
 use super::linkage_and_vss_vectors::{
-    masked_claim_bounds_for_global_claim, masked_claim_lift_residue_count_for_moduli,
+    masked_claim_bounds, masked_claim_lift_residue_count_for_moduli,
 };
 use super::statement_types::{
-    EvaluationKeyShareKind, PrivateVssShareStatement, SetupProofStatement,
-    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+    PrivateVssShareStatement, SetupProofStatement, SuccinctSetupProofContext,
+    TrusteeEvaluationKeyStatement,
 };
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::{
@@ -28,15 +25,6 @@ pub(crate) enum SuccinctSetupProofFamilyShape {
 }
 
 impl SuccinctSetupProofFamilyShape {
-    pub(crate) fn from_key_kinds(kinds: &[EvaluationKeyShareKind]) -> CanonicalResult<Self> {
-        if kinds.is_empty() {
-            return Err(invalid_succinct_setup_proof(
-                "key-bearing setup proof statement requires at least one key descriptor",
-            ));
-        }
-        Ok(Self::TrusteeEvaluationKey)
-    }
-
     pub(crate) const fn setup_proof_family(self) -> SetupProofFamily {
         match self {
             Self::PrivateVssShare => SetupProofFamily::PrivateVssShare,
@@ -50,18 +38,6 @@ impl SuccinctSetupProofFamilyShape {
 
     pub(crate) fn binding_labels(self) -> &'static [&'static str] {
         self.setup_proof_family().binding_labels()
-    }
-
-    pub(crate) fn claim_mask_digit_count(self) -> usize {
-        CLAIM_MASK_DIGIT_COUNT
-    }
-
-    pub(crate) fn consistency_repetitions(self) -> usize {
-        CONSISTENCY_REPETITIONS
-    }
-
-    pub(crate) fn consistency_coefficient_bits(self) -> u32 {
-        CONSISTENCY_COEFFICIENT_BITS
     }
 }
 
@@ -237,15 +213,6 @@ impl TrusteeEvaluationKeyStatement {
             ));
         }
         let shape = self.family_shape();
-        if !self.keys().is_empty()
-            && SuccinctSetupProofFamilyShape::from_key_kinds(
-                &self.keys().iter().map(|key| key.kind).collect::<Vec<_>>(),
-            )? != shape
-        {
-            return Err(invalid_succinct_setup_proof(
-                "key descriptors do not match the selected setup proof family",
-            ));
-        }
         self.context.validate_for_statement(shape)?;
         if !self.ring_degree.is_power_of_two()
             || self.ring_degree < TRACE_SPLIT * MINIMUM_TRACE_SIZE
@@ -310,7 +277,7 @@ fn validate_masked_claim_lift_window(
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<()> {
     let proof_limb_indices = statement.proof_limb_indices();
-    let (lower_bound, upper_bound) = masked_claim_bounds_for_global_claim(statement, 0)?;
+    let (lower_bound, upper_bound) = masked_claim_bounds(statement)?;
     let required_residue_count = masked_claim_lift_residue_count_for_moduli(
         proof_limb_indices
             .iter()

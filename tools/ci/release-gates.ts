@@ -9,6 +9,7 @@ import {
     resolvePackageManagerRunnerForPackageManager,
     type PackageManagerRunner,
 } from './package-manager-runner.js';
+import { waitForSuccessfulExactSourceCi } from './release-ci-gate.js';
 import {
     requireUnpublishedNpmVersion,
     requireUnusedReleaseTag,
@@ -361,6 +362,25 @@ const runTargetsCommand = async (runLog: ActiveLocalRunLog): Promise<void> => {
     });
 };
 
+const runAwaitCiCommand = async (runLog: ActiveLocalRunLog): Promise<void> => {
+    const executor = createReleaseCommandExecutor(runLog);
+    const result = await waitForSuccessfulExactSourceCi({
+        executor: (invocation) =>
+            executor({
+                arguments: invocation.arguments,
+                command: 'gh',
+                description: invocation.description,
+                logFileSlug: invocation.logFileSlug,
+                workingDirectoryPath: repositoryRoot,
+            }),
+        repository: readRequiredEnvironment('GITHUB_REPOSITORY'),
+        sourceRevision: readRequiredEnvironment('GITHUB_SHA'),
+    });
+    console.log(
+        `Exact source ${readRequiredEnvironment('GITHUB_SHA')} passed CI in run ${String(result.runIdentifier)} (${result.url}).`,
+    );
+};
+
 const runNpmDispositionCommand = async (
     runLog: ActiveLocalRunLog,
 ): Promise<void> => {
@@ -421,6 +441,9 @@ const main = async (): Promise<void> => {
                 eventType: 'release-gate-started',
             });
             switch (command) {
+                case 'await-ci':
+                    await runAwaitCiCommand(runLog);
+                    break;
                 case 'targets':
                     await runTargetsCommand(runLog);
                     break;
@@ -438,7 +461,7 @@ const main = async (): Promise<void> => {
                     break;
                 default:
                     throw new Error(
-                        'Usage: release-gates.ts targets|metadata|npm-disposition|github-release-disposition|checked-out-tag.',
+                        'Usage: release-gates.ts await-ci|targets|metadata|npm-disposition|github-release-disposition|checked-out-tag.',
                     );
             }
             runLog.writeEvent({

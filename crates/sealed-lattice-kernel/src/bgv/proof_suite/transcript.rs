@@ -850,7 +850,6 @@ impl CommonProofTranscriptSchedule {
     /// excludes Merkle authentication, whose cost is derived from the checked
     /// tree catalog and opening geometry.
     pub(crate) fn maximum_transcript_hash_query_count(&self) -> Result<u64, TranscriptError> {
-        self.validate()?;
         let mut counter = TranscriptHashQueryCounter::new();
 
         for _ in &self.ordered_base_tree_ordinals {
@@ -1035,7 +1034,6 @@ impl CommonProofTranscript {
         canonical_proof_object_header_bytes: &[u8],
         schedule: CommonProofTranscriptSchedule,
     ) -> Result<Self, TranscriptError> {
-        schedule.validate()?;
         let mut result = Self {
             transcript: CanonicalProofTranscript::try_new(
                 protocol_version,

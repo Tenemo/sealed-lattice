@@ -4,7 +4,7 @@ import {
     foundationProfile,
 } from '@sealed-lattice/types';
 
-import { byteArraysEqual } from '../byte-array.js';
+import { byteArraysEqual, isUint8Array } from '../byte-array.js';
 import {
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
@@ -196,10 +196,6 @@ const refused = <Value>(
 
 const valid = <Value>(value: Value): VerificationResult<Value> =>
     Object.freeze({ isValid: true, value });
-
-const isUint8Array = (value: unknown): value is Uint8Array =>
-    ArrayBuffer.isView(value) &&
-    Object.prototype.toString.call(value) === '[object Uint8Array]';
 
 const isStateCapabilityKind = (value: unknown): value is StateCapabilityKind =>
     value === stateCapabilityKinds.finalitySignature ||

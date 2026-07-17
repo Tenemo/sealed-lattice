@@ -29,9 +29,12 @@ pub(crate) fn top_k_indicator_and_order_value(
     }
     let normalized_rank = normalize_scaling(&modulus_switch_to(rank, context.working_level())?)?;
     if top_count == option_count {
-        let selected_every_slot =
-            add_plaintext_coefficients(&scalar_mul(&normalized_rank, 0)?, &broadcast_constant(1))?;
-        let rank_plus_one = add_plaintext_coefficients(&normalized_rank, &broadcast_constant(1))?;
+        let selected_every_slot = add_plaintext_coefficients(
+            &scalar_mul(&normalized_rank, 0)?,
+            &broadcast_constant_coefficients(1),
+        )?;
+        let rank_plus_one =
+            add_plaintext_coefficients(&normalized_rank, &broadcast_constant_coefficients(1))?;
 
         return Ok((selected_every_slot, rank_plus_one));
     }

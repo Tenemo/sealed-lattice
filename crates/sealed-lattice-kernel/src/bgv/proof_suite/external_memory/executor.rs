@@ -80,21 +80,20 @@ pub(crate) struct ProofExternalMemoryExecutor {
 }
 
 impl ProofExternalMemoryExecutor {
-    pub(crate) fn new(plan: ProofExternalMemoryPlan) -> Result<Self, ProofExternalMemoryError> {
-        plan.validate()?;
+    pub(crate) fn new(plan: ProofExternalMemoryPlan) -> Self {
         let states = plan
             .objects
             .iter()
             .map(|object| (object.object, ProofExternalMemoryObjectState::Issued))
             .collect();
-        Ok(Self {
+        Self {
             plan,
             current_step: 0,
             states,
             current_stored_byte_length: 0,
             usage: ProofExternalMemoryUsage::default(),
             terminal: false,
-        })
+        }
     }
 
     pub(crate) const fn current_step(&self) -> u32 {

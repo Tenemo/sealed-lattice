@@ -38,11 +38,6 @@ pub(super) fn build_limb_witness_commitment(
     proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<LimbWitnessCommitment> {
     let layout = LimbColumnLayout::new(statement, limb_index)?;
-    if !layout.private_vss_active() {
-        return Err(invalid_succinct_setup_proof(
-            "the shared per-limb witness engine is reserved for private VSS proofs",
-        ));
-    }
     let plan = EvaluationDomainPlan::new(modulus, layout.trace_size)?;
     let trace_size = layout.trace_size;
     let mut masked_coefficients = Vec::with_capacity(layout.phase_one_physical_count());
@@ -88,7 +83,7 @@ pub(super) fn build_limb_witness_commitment(
             append_logical_vector(&signed_residue_vector(column, modulus));
         }
     }
-    for logical_vector in mask_digit_columns(statement, &layout, proof_randomness_seed_hex) {
+    for logical_vector in mask_digit_columns(&layout, proof_randomness_seed_hex) {
         append_logical_vector(&logical_vector);
     }
     debug_assert_eq!(masked_coefficients.len(), layout.phase_one_physical_count());

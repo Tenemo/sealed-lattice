@@ -49,7 +49,7 @@ pub(crate) fn pack_direct_score_slots(
     let duplicated_scores =
         rotate_with_compact_inverse_generator_basis(context, &selected_scores, option_count)?;
 
-    sum_aligned(&[selected_scores, duplicated_scores])
+    sum_aligned_ciphertexts(&[selected_scores, duplicated_scores])
 }
 
 pub(crate) fn packed_score_slot_selector(logical_indices: &[usize]) -> CanonicalResult<Vec<u64>> {

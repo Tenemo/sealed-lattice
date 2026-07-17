@@ -21,7 +21,7 @@ pub(in crate::bgv::setup) use fiat_shamir_transcript::HashChainTranscriptCore;
 pub(in crate::bgv::setup) use merkle_commitment::{
     BatchedMerkleOpening as SetupBatchedMerkleOpening, MerkleContext as SetupMerkleContext,
     MerkleDigest as SetupMerkleDigest, consistent_sorted_leaves as consistent_setup_merkle_leaves,
-    verify_merkle_batch_with_context,
+    verify_merkle_batch,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use merkle_commitment::{

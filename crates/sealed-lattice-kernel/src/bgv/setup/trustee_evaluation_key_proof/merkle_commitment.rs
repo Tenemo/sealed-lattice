@@ -327,17 +327,7 @@ impl MerkleTree {
 // leaf set (as returned by `consistent_sorted_leaves`). Returns true only when
 // the recomputed root matches and every supplied node was consumed, so neither a
 // short nor a padded node list is accepted.
-pub(super) fn verify_merkle_batch(
-    context: MerkleContext,
-    root: &MerkleDigest,
-    depth: usize,
-    sorted_unique_leaves: &[(usize, MerkleDigest)],
-    opening: &BatchedMerkleOpening,
-) -> bool {
-    verify_merkle_batch_with_context(context, root, depth, sorted_unique_leaves, opening)
-}
-
-pub(in crate::bgv::setup) fn verify_merkle_batch_with_context(
+pub(in crate::bgv::setup) fn verify_merkle_batch(
     context: MerkleContext,
     root: &MerkleDigest,
     depth: usize,

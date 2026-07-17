@@ -1,18 +1,14 @@
 use super::*;
 
-struct VssAggregateThresholdProofMaterialReference {
-    proof_bytes_hash: String,
-}
-
 // The aggregate set still carries one proof reference per recipient and target
 // limb. The fixture binds each reference to the exact reconstructed statement,
 // but deliberately supplies no accepted proof while the common-proof adapter is
 // unavailable.
-pub(in super::super) fn vss_aggregate_threshold_proofs(
+pub(in super::super) fn vss_aggregate_threshold_proof_bytes_hashes(
     package: &serde_json::Value,
     aggregate_set: &serde_json::Value,
     recipient_coordinates: &[(u64, usize)],
-) -> VssProofRecordSetFixture {
+) -> Vec<String> {
     let participant_count = participant_count_from_package(package);
     let recipient_records = aggregate_set["recipientRecords"]
         .as_array()
@@ -22,12 +18,12 @@ pub(in super::super) fn vss_aggregate_threshold_proofs(
         recipient_coordinates.len(),
         "aggregate recipient records and canonical coordinates",
     );
-    let proof_material_references = recipient_records
+    let proof_bytes_hashes = recipient_records
         .iter()
         .zip(recipient_coordinates.iter().copied())
         .map(
             |(aggregate_record, (recipient_roster_position, rns_limb_index))| {
-                vss_aggregate_threshold_proof_record(
+                vss_aggregate_threshold_proof_bytes_hash(
                     package,
                     aggregate_record,
                     participant_count,
@@ -37,21 +33,16 @@ pub(in super::super) fn vss_aggregate_threshold_proofs(
             },
         )
         .collect::<Vec<_>>();
-    VssProofRecordSetFixture {
-        proof_bytes_hashes: proof_material_references
-            .iter()
-            .map(|reference| reference.proof_bytes_hash.clone())
-            .collect(),
-    }
+    proof_bytes_hashes
 }
 
-fn vss_aggregate_threshold_proof_record(
+fn vss_aggregate_threshold_proof_bytes_hash(
     package: &serde_json::Value,
     aggregate_record: &serde_json::Value,
     participant_count: u64,
     recipient_roster_position: u64,
     rns_limb_index: usize,
-) -> VssAggregateThresholdProofMaterialReference {
+) -> String {
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -86,11 +77,9 @@ fn vss_aggregate_threshold_proof_record(
             },
         )
         .expect("canonical VSS aggregate threshold statement");
-    let proof_bytes_hash = invalid_common_proof_fixture_hash(
+    invalid_common_proof_fixture_hash(
         VSS_SHARE_LINKAGE_PROOF_FAMILY,
         VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
         &vss_aggregate,
-    );
-
-    VssAggregateThresholdProofMaterialReference { proof_bytes_hash }
+    )
 }

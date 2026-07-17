@@ -17,12 +17,13 @@ use super::super::relation::{
     batched_row_check_value, batched_sumcheck_value,
 };
 use super::super::{
-    COMMITMENT_BOUND_FACTOR, DEEP_EVALUATION_POINT_COUNT, LOW_DEGREE_QUERY_COUNT,
-    MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE, MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    COMMITMENT_BOUND_FACTOR, CONSISTENCY_COEFFICIENT_BITS, CONSISTENCY_REPETITIONS,
+    DEEP_EVALUATION_POINT_COUNT, LOW_DEGREE_QUERY_COUNT, MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE,
+    MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
     SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE, bigint_residue, invalid_succinct_setup_proof,
 };
 use super::challenges::{build_limb_public_vectors, draw_limb_challenges};
-use super::claim_masking::{global_claim_id, global_claim_integers};
+use super::claim_masking::global_claim_integers;
 use super::polynomial::{
     divide_by_trace_vanishing, extend_logical_vector, extend_logical_vector_extension,
     extension_powers, sample_deep_identity_points, trim_trailing_zeros,
@@ -99,8 +100,7 @@ fn prove_limb(
     // every limb publishes the same integer reduced into its field.
     let mut masked_claims = Vec::with_capacity(layout.claim_count());
     for local_claim in 0..layout.claim_count() {
-        let global_id = global_claim_id(statement, layout, local_claim);
-        let claim_integer = &global_claim_integers[global_id as usize];
+        let claim_integer = &global_claim_integers[local_claim];
         masked_claims.push(bigint_residue(claim_integer, modulus)?);
     }
 
@@ -115,16 +115,6 @@ fn prove_limb(
 
     // Extension evaluations of every public sumcheck vector.
     let tower = ChallengeExtensionTower::for_modulus(modulus)?;
-    let secret_factor_extensions = publics
-        .secret_factor
-        .iter()
-        .map(|vector| extend_logical_vector_extension(plan, vector))
-        .collect::<Vec<_>>();
-    let u_extensions = publics
-        .u_powers
-        .iter()
-        .map(|vector| extend_logical_vector_extension(plan, vector))
-        .collect::<Vec<_>>();
     let consistency_extensions = consistency_vectors
         .iter()
         .map(|vector| extend_logical_vector(plan, vector))
@@ -134,8 +124,8 @@ fn prove_limb(
         .iter()
         .map(|vector| extend_logical_vector_extension(plan, vector))
         .collect::<Vec<_>>();
-    let linkage_extensions = publics
-        .linkage_vectors
+    let private_vss_relation_extensions = publics
+        .private_vss_relation_vectors
         .iter()
         .map(|vector| extend_logical_vector_extension(plan, vector))
         .collect::<Vec<_>>();
@@ -156,14 +146,6 @@ fn prove_limb(
             layout,
         ));
         let point_publics = SumcheckPublicEvaluations {
-            secret_factor: secret_factor_extensions
-                .iter()
-                .map(|halves| [halves[0][position], halves[1][position]])
-                .collect(),
-            u_power: u_extensions
-                .iter()
-                .map(|halves| [halves[0][position], halves[1][position]])
-                .collect(),
             consistency: consistency_extensions
                 .iter()
                 .map(|halves| [halves[0][position], halves[1][position]])
@@ -172,7 +154,7 @@ fn prove_limb(
                 .iter()
                 .map(|halves| [halves[0][position], halves[1][position]])
                 .collect(),
-            linkage: linkage_extensions
+            private_vss_relation: private_vss_relation_extensions
                 .iter()
                 .map(|halves| [halves[0][position], halves[1][position]])
                 .collect(),
@@ -181,7 +163,6 @@ fn prove_limb(
             &base_domain,
             &row,
             &point_publics,
-            &publics.error_weights,
             &challenges.consistency_alpha,
             layout,
         ));
@@ -582,7 +563,7 @@ pub(crate) fn prove_evaluation_key_share(
         statement,
         witness,
         proof_randomness_seed_hex,
-        configured_limb_batch_size(statement.proof_limb_count()),
+        configured_limb_batch_size(statement.limb_count()),
     )
 }
 
@@ -606,39 +587,28 @@ fn prove_evaluation_key_share_with_limb_batch_size(
 
     let mut witness_tree_roots = Vec::with_capacity(proof_limb_indices.len());
     for limb_index_batch in proof_limb_indices.chunks(limb_batch_size) {
+        let build_witness_tree_root = |limb_index: &usize| {
+            let modulus = DATA_PRIMES[*limb_index];
+            trustee_proof_progress(format!("commitment-start limb={limb_index}"));
+            let commitment = build_limb_witness_commitment(
+                statement,
+                witness,
+                *limb_index,
+                modulus,
+                proof_randomness_seed_hex,
+            )?;
+            trustee_proof_progress(format!("commitment-finish limb={limb_index}"));
+            Ok(commitment.salted.tree.root())
+        };
         #[cfg(not(target_arch = "wasm32"))]
         let batch_roots = limb_index_batch
             .par_iter()
-            .map(|limb_index| {
-                let modulus = DATA_PRIMES[*limb_index];
-                trustee_proof_progress(format!("commitment-start limb={limb_index}"));
-                let commitment = build_limb_witness_commitment(
-                    statement,
-                    witness,
-                    *limb_index,
-                    modulus,
-                    proof_randomness_seed_hex,
-                )?;
-                trustee_proof_progress(format!("commitment-finish limb={limb_index}"));
-                Ok(commitment.salted.tree.root())
-            })
+            .map(build_witness_tree_root)
             .collect::<CanonicalResult<Vec<_>>>()?;
         #[cfg(target_arch = "wasm32")]
         let batch_roots = limb_index_batch
             .iter()
-            .map(|limb_index| {
-                let modulus = DATA_PRIMES[*limb_index];
-                trustee_proof_progress(format!("commitment-start limb={limb_index}"));
-                let commitment = build_limb_witness_commitment(
-                    statement,
-                    witness,
-                    *limb_index,
-                    modulus,
-                    proof_randomness_seed_hex,
-                )?;
-                trustee_proof_progress(format!("commitment-finish limb={limb_index}"));
-                Ok(commitment.salted.tree.root())
-            })
+            .map(build_witness_tree_root)
             .collect::<CanonicalResult<Vec<_>>>()?;
 
         witness_tree_roots.extend(batch_roots);
@@ -647,95 +617,63 @@ fn prove_evaluation_key_share_with_limb_batch_size(
     for witness_tree_root in &witness_tree_roots {
         transcript.absorb("witness-tree-root", witness_tree_root);
     }
-    let family_shape = statement.family_shape();
     let consistency_vector_length = statement.ring_degree;
-    let consistency_vectors = (0..family_shape.consistency_repetitions())
+    let consistency_vectors = (0..CONSISTENCY_REPETITIONS)
         .map(|_| {
             transcript.challenge_bounded_integers(
                 "consistency-vector",
-                family_shape.consistency_coefficient_bits(),
+                CONSISTENCY_COEFFICIENT_BITS,
                 consistency_vector_length,
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let claim_integers = global_claim_integers(
-        statement,
-        witness,
-        &consistency_vectors,
-        proof_randomness_seed_hex,
-    );
+    let claim_integers =
+        global_claim_integers(witness, &consistency_vectors, proof_randomness_seed_hex);
 
     let mut limb_proofs = Vec::with_capacity(proof_limb_indices.len());
     for (batch_index, limb_index_batch) in proof_limb_indices.chunks(limb_batch_size).enumerate() {
         let batch_start = batch_index * limb_batch_size;
+        let prove_limb_at_position = |(batch_offset, limb_index): (usize, &usize)| {
+            let proof_position = batch_start + batch_offset;
+            let modulus = DATA_PRIMES[*limb_index];
+            trustee_proof_progress(format!("prove-start limb={limb_index}"));
+            let commitment = build_limb_witness_commitment(
+                statement,
+                witness,
+                *limb_index,
+                modulus,
+                proof_randomness_seed_hex,
+            )?;
+            if commitment.salted.tree.root() != witness_tree_roots[proof_position] {
+                return Err(invalid_succinct_setup_proof(
+                    "regenerated witness-tree root changed before limb proving",
+                ));
+            }
+            prove_limb(
+                statement,
+                *limb_index,
+                &commitment,
+                &consistency_vectors,
+                &claim_integers,
+                proof_randomness_seed_hex,
+                &transcript,
+            )
+            .inspect(|_| {
+                trustee_proof_progress(format!("prove-finish limb={limb_index}"));
+            })
+        };
 
         #[cfg(not(target_arch = "wasm32"))]
         let proof_batch = limb_index_batch
             .par_iter()
             .enumerate()
-            .map(|(batch_offset, limb_index)| {
-                let proof_position = batch_start + batch_offset;
-                let modulus = DATA_PRIMES[*limb_index];
-                trustee_proof_progress(format!("prove-start limb={limb_index}"));
-                let commitment = build_limb_witness_commitment(
-                    statement,
-                    witness,
-                    *limb_index,
-                    modulus,
-                    proof_randomness_seed_hex,
-                )?;
-                if commitment.salted.tree.root() != witness_tree_roots[proof_position] {
-                    return Err(invalid_succinct_setup_proof(
-                        "regenerated witness-tree root changed before limb proving",
-                    ));
-                }
-                prove_limb(
-                    statement,
-                    *limb_index,
-                    &commitment,
-                    &consistency_vectors,
-                    &claim_integers,
-                    proof_randomness_seed_hex,
-                    &transcript,
-                )
-                .inspect(|_| {
-                    trustee_proof_progress(format!("prove-finish limb={limb_index}"));
-                })
-            })
+            .map(prove_limb_at_position)
             .collect::<CanonicalResult<Vec<_>>>()?;
         #[cfg(target_arch = "wasm32")]
         let proof_batch = limb_index_batch
             .iter()
             .enumerate()
-            .map(|(batch_offset, limb_index)| {
-                let proof_position = batch_start + batch_offset;
-                let modulus = DATA_PRIMES[*limb_index];
-                trustee_proof_progress(format!("prove-start limb={limb_index}"));
-                let commitment = build_limb_witness_commitment(
-                    statement,
-                    witness,
-                    *limb_index,
-                    modulus,
-                    proof_randomness_seed_hex,
-                )?;
-                if commitment.salted.tree.root() != witness_tree_roots[proof_position] {
-                    return Err(invalid_succinct_setup_proof(
-                        "regenerated witness-tree root changed before limb proving",
-                    ));
-                }
-                prove_limb(
-                    statement,
-                    *limb_index,
-                    &commitment,
-                    &consistency_vectors,
-                    &claim_integers,
-                    proof_randomness_seed_hex,
-                    &transcript,
-                )
-                .inspect(|_| {
-                    trustee_proof_progress(format!("prove-finish limb={limb_index}"));
-                })
-            })
+            .map(prove_limb_at_position)
             .collect::<CanonicalResult<Vec<_>>>()?;
 
         limb_proofs.extend(proof_batch);

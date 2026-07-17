@@ -33,12 +33,11 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
     };
     let Some(proof_set) = proof_set else {
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
-            public_key_refusal(
+            single_refusal(
                 crate::foundation::RefusalReason::MissingPrerequisite,
                 "publicKeyShareSuccinctProofsMissing",
                 "publicKeyShareSuccinctProofs must accompany accepted public-key share material",
-                "setupPackage.publicKeyShareSuccinctProofs",
-            )?,
+            ),
         ));
     };
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
@@ -72,57 +71,52 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         Ok(bindings) => bindings,
         Err(error) => {
             return Ok(PublicKeyShareSuccinctProofVerification::Refused(
-                public_key_refusal(
+                single_refusal(
                     crate::foundation::RefusalReason::MalformedEncoding,
                     "publicKeyShareMaterialVerificationFailed",
                     error.message,
-                    "setupPackage.publicKeyShareMaterial",
-                )?,
+                ),
             ));
         }
     };
     if !proof_set.is_object() {
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
-            public_key_refusal(
+            single_refusal(
                 crate::foundation::RefusalReason::MalformedEncoding,
                 "publicKeyShareSuccinctProofSetNotObject",
                 "publicKeyShareSuccinctProofs must be a root-bound object",
-                "setupPackage.publicKeyShareSuccinctProofs",
-            )?,
+            ),
         ));
     }
     if proof_set.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE)
     {
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
-            public_key_refusal(
+            single_refusal(
                 crate::foundation::RefusalReason::WrongTypeOrLength,
                 "publicKeyShareSuccinctProofSetTypeMismatch",
                 "publicKeyShareSuccinctProofs.objectType must be PublicKeyShareSuccinctProofSet",
-                "setupPackage.publicKeyShareSuccinctProofs.objectType",
-            )?,
+            ),
         ));
     }
     let roster = super::accepted_roster_from_package(setup_package)?;
     let Some(proof_bytes_hashes) = proof_set.get("proofBytesHashes").and_then(Value::as_array)
     else {
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
-            public_key_refusal(
+            single_refusal(
                 crate::foundation::RefusalReason::MissingPrerequisite,
                 "publicKeyShareSuccinctProofHashesMissing",
                 "publicKeyShareSuccinctProofs.proofBytesHashes must be present on the accepted proof set",
-                "setupPackage.publicKeyShareSuccinctProofs.proofBytesHashes",
-            )?,
+            ),
         ));
     };
     if proof_bytes_hashes.len() != roster.participant_count as usize {
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
-            public_key_refusal(
+            single_refusal(
                 crate::foundation::RefusalReason::WrongTypeOrLength,
                 "publicKeyShareSuccinctProofCountMismatch",
                 "publicKeyShareSuccinctProofs.proofBytesHashes must contain one proof per trustee",
-                "setupPackage.publicKeyShareSuccinctProofs.proofBytesHashes",
-            )?,
+            ),
         ));
     }
     let verification_context = PublicKeyShareSuccinctProofVerificationContext {
@@ -150,12 +144,11 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
             Ok(()) => {}
             Err(error) => {
                 return Ok(PublicKeyShareSuccinctProofVerification::Refused(
-                    public_key_refusal(
+                    single_refusal(
                         crate::foundation::RefusalReason::InvalidProof,
                         "publicKeyShareSuccinctProofVerificationFailed",
                         error.message,
-                        "setupPackage.publicKeyShareSuccinctProofs.proofBytesHashes",
-                    )?,
+                    ),
                 ));
             }
         }

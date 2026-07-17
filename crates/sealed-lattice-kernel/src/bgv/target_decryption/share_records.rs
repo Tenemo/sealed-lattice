@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(test)]
 pub(super) fn read_partial_decryption_share(
     share: &Value,
     setup_binding: &SetupBinding,
@@ -37,7 +36,6 @@ pub(super) fn read_partial_decryption_share(
     Ok(())
 }
 
-#[cfg(test)]
 pub(super) fn compare_share_record_fields(
     share: &Value,
     target_accepted: &TargetAcceptedBinding,
@@ -112,7 +110,7 @@ pub(super) fn read_partial_limb_set(
             let coefficients = coefficient_vector_from_le_hex(
                 string_at_path(record, &["partialDecryptionLeHex"])?,
                 POLYNOMIAL_DEGREE,
-                "target partial-decryption coefficient vector byte length does not match the selected BGV profile",
+                "target partial-decryption coefficient vector byte length does not match the selected ring degree",
             )?;
             let modulus = DATA_PRIMES[limb_index];
             if coefficients.iter().any(|coefficient| *coefficient >= modulus) {

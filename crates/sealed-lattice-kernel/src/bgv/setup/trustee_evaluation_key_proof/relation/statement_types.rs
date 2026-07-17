@@ -1,9 +1,7 @@
 use super::super::invalid_succinct_setup_proof;
 use super::family_shape_and_validation::validate_context_token;
 use crate::bgv::parameters::DATA_PRIMES;
-use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue,
-};
+use crate::bgv::setup::commitment::{SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SetupCommitmentValue};
 use crate::encoding::CanonicalResult;
 use crate::foundation::ProofApplicationSlotCeilings;
 
@@ -242,10 +240,6 @@ impl EvaluationKeyShareDescriptor {
         self.level + 1
     }
 
-    fn limb_width(&self) -> usize {
-        self.level + 1
-    }
-
     pub(crate) fn validate_shape(&self, ring_degree: usize) -> CanonicalResult<()> {
         validate_context_token("keySwitchDomain", &self.key_switch_domain)?;
         validate_context_token("keySwitchSeedHex", &self.key_switch_seed_hex)?;
@@ -256,7 +250,7 @@ impl EvaluationKeyShareDescriptor {
         }
         if self.component_b_by_digit.len() != self.digit_count()
             || self.component_b_by_digit.iter().any(|by_limb| {
-                by_limb.len() != self.limb_width()
+                by_limb.len() != self.digit_count()
                     || by_limb
                         .iter()
                         .any(|component| component.len() != ring_degree)
@@ -349,37 +343,5 @@ impl TrusteeEvaluationKeyStatement {
             .into_iter()
             .map(|limb_index| DATA_PRIMES[limb_index])
             .collect()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn proof_limb_count(&self) -> usize {
-        self.limb_count()
-    }
-
-    pub(crate) fn active_key_indices(&self, limb_index: usize) -> Vec<usize> {
-        self.keys()
-            .iter()
-            .enumerate()
-            .filter(|(_, key)| key.level >= limb_index)
-            .map(|(key_index, _)| key_index)
-            .collect()
-    }
-
-    pub(crate) fn linkage_randomness_count(&self, limb_index: usize) -> usize {
-        if limb_index >= SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
-            return 0;
-        }
-        self.same_secret_linkage()
-            .map(|linkage| linkage.commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-            .unwrap_or(0)
-    }
-
-    pub(crate) fn private_vss_randomness_count(&self, limb_index: usize) -> usize {
-        match self.private_vss_share() {
-            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                statement.coefficient_commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH
-            }
-            _ => 0,
-        }
     }
 }

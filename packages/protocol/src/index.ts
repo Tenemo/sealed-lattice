@@ -113,8 +113,8 @@ export type {
     ResumedCheckpoint,
     TransferableAuthenticatedCheckpointStore,
 } from './runtime/authenticated-checkpoint-store.js';
-export { deriveCollectiveBgvSetupRosterHash } from './roster/index.js';
-export type { CollectiveBgvSetupRosterEntryInput } from './roster/index.js';
+export { deriveCollectiveBgvSetupRosterHash } from './roster/hashes.js';
+export type { CollectiveBgvSetupRosterEntryInput } from './roster/hashes.js';
 export type {
     CanonicalProofMaterialChunkPull,
     SetupProofMaterialStream,

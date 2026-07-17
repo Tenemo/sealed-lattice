@@ -9,7 +9,7 @@ use super::{
 };
 use super::{
     commitment::{
-        SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_tests,
+        SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_degree,
         parse_setup_commitment_full_value, setup_commitment_full_value, setup_commitment_root,
     },
     private_vss_share_proof::{

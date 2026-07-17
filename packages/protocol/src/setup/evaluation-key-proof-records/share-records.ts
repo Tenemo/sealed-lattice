@@ -123,6 +123,37 @@ const contributionMap = <
     return byKey;
 };
 
+const scheduledRelinearizationMaterialRoots = (
+    contributions: ReadonlyMap<
+        string,
+        Readonly<{ readonly keySwitchComponentMaterialRoot: ProtocolHash }>
+    >,
+    fieldName: 'roundOneContributions' | 'roundTwoContributions',
+    trusteeReferences: readonly EvaluationKeyTrusteeReference[],
+    levels: readonly number[],
+): ProtocolHash[] => {
+    const materialRoots: ProtocolHash[] = [];
+    levels.forEach((level) => {
+        trusteeReferences.forEach((trusteeReference) => {
+            const contribution = contributions.get(
+                contributionKey(level, trusteeReference.trusteeRosterPosition),
+            );
+            if (contribution === undefined) {
+                throw new Error(
+                    `${fieldName} is missing a scheduled trustee and level.`,
+                );
+            }
+            assertProtocolHash(
+                contribution.keySwitchComponentMaterialRoot,
+                `${fieldName}.keySwitchComponentMaterialRoot`,
+            );
+            materialRoots.push(contribution.keySwitchComponentMaterialRoot);
+        });
+    });
+
+    return materialRoots;
+};
+
 export const createRelinearizationKeyShareRounds = (
     input: RelinearizationKeyShareRoundsInput,
 ): RelinearizationKeyShareRounds => {
@@ -138,51 +169,20 @@ export const createRelinearizationKeyShareRounds = (
     const levels = input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
         (entry) => entry.level,
     );
-    const roundOneKeySwitchComponentMaterialRoots: ProtocolHash[] = [];
-    levels.forEach((level) => {
-        trusteeReferences.forEach((trusteeReference) => {
-            const key = contributionKey(
-                level,
-                trusteeReference.trusteeRosterPosition,
-            );
-            const contribution = roundOneContributions.get(key);
-            if (contribution === undefined) {
-                throw new Error(
-                    'roundOneContributions is missing a scheduled trustee and level.',
-                );
-            }
-            assertProtocolHash(
-                contribution.keySwitchComponentMaterialRoot,
-                'roundOneContributions.keySwitchComponentMaterialRoot',
-            );
-            roundOneKeySwitchComponentMaterialRoots.push(
-                contribution.keySwitchComponentMaterialRoot,
-            );
-        });
-    });
-
-    const roundTwoKeySwitchComponentMaterialRoots: ProtocolHash[] = [];
-    levels.forEach((level) => {
-        trusteeReferences.forEach((trusteeReference) => {
-            const key = contributionKey(
-                level,
-                trusteeReference.trusteeRosterPosition,
-            );
-            const contribution = roundTwoContributions.get(key);
-            if (contribution === undefined) {
-                throw new Error(
-                    'roundTwoContributions is missing a scheduled trustee and level.',
-                );
-            }
-            assertProtocolHash(
-                contribution.keySwitchComponentMaterialRoot,
-                'roundTwoContributions.keySwitchComponentMaterialRoot',
-            );
-            roundTwoKeySwitchComponentMaterialRoots.push(
-                contribution.keySwitchComponentMaterialRoot,
-            );
-        });
-    });
+    const roundOneKeySwitchComponentMaterialRoots =
+        scheduledRelinearizationMaterialRoots(
+            roundOneContributions,
+            'roundOneContributions',
+            trusteeReferences,
+            levels,
+        );
+    const roundTwoKeySwitchComponentMaterialRoots =
+        scheduledRelinearizationMaterialRoots(
+            roundTwoContributions,
+            'roundTwoContributions',
+            trusteeReferences,
+            levels,
+        );
     const expectedContributionCount = levels.length * trusteeReferences.length;
     if (
         roundOneContributions.size !== expectedContributionCount ||

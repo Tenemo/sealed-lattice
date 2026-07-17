@@ -811,7 +811,7 @@ fn derive_artifact_hash(
     hasher.finalize().map_err(|_| artifact_hash_error())
 }
 
-fn unsigned16_list(values: &[u16]) -> SchemaResult<CanonicalItem> {
+pub(super) fn unsigned16_list(values: &[u16]) -> SchemaResult<CanonicalItem> {
     let items = values
         .iter()
         .copied()
@@ -823,7 +823,7 @@ fn unsigned16_list(values: &[u16]) -> SchemaResult<CanonicalItem> {
     )?)
 }
 
-fn unsigned64_list(values: &[u64]) -> SchemaResult<CanonicalItem> {
+pub(super) fn unsigned64_list(values: &[u64]) -> SchemaResult<CanonicalItem> {
     let items = values
         .iter()
         .copied()
@@ -835,7 +835,7 @@ fn unsigned64_list(values: &[u64]) -> SchemaResult<CanonicalItem> {
     )?)
 }
 
-fn read_unsigned16_list(item: &CanonicalItem) -> SchemaResult<Vec<u16>> {
+pub(super) fn read_unsigned16_list(item: &CanonicalItem) -> SchemaResult<Vec<u16>> {
     let (count, bytes) = read_list_header(item, CanonicalItemType::Unsigned16)?;
     let expected_byte_length = count.checked_mul(2).ok_or_else(list_length_error)?;
     if bytes.len() != expected_byte_length {
@@ -850,7 +850,7 @@ fn read_unsigned16_list(item: &CanonicalItem) -> SchemaResult<Vec<u16>> {
         .collect()
 }
 
-fn read_unsigned64_list(item: &CanonicalItem) -> SchemaResult<Vec<u64>> {
+pub(super) fn read_unsigned64_list(item: &CanonicalItem) -> SchemaResult<Vec<u64>> {
     let (count, bytes) = read_list_header(item, CanonicalItemType::Unsigned64)?;
     let expected_byte_length = count.checked_mul(8).ok_or_else(list_length_error)?;
     if bytes.len() != expected_byte_length {

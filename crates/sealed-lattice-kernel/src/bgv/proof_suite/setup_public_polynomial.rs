@@ -214,7 +214,6 @@ impl SetupPublicPolynomialContext {
     }
 
     pub(crate) fn canonical_bytes(&self) -> Result<Vec<u8>, SetupPublicPolynomialError> {
-        self.validate()?;
         let owner_participant_identity = self
             .owner_participant_identity
             .map(CanonicalItem::participant_identity);
@@ -290,7 +289,6 @@ impl SetupPublicPolynomialTree {
         evaluation_domain_size: usize,
         canonical_commitment_bytes: &[u8],
     ) -> Result<Self, SetupPublicPolynomialError> {
-        context.validate()?;
         let commitment =
             parse_lattice_anchor_commitment_canonical_bytes(canonical_commitment_bytes)
                 .map_err(|_| SetupPublicPolynomialError::InvalidLatticeAnchor)?;
@@ -330,7 +328,6 @@ impl SetupPublicPolynomialTree {
     fn construct_from_canonical_coefficients(
         input: SetupPublicPolynomialTreeInput<'_>,
     ) -> Result<Self, SetupPublicPolynomialError> {
-        input.context.validate()?;
         if input.evaluation_domain_size < 2
             || !input.evaluation_domain_size.is_power_of_two()
             || input.source_polynomial_degree_bound_exclusive == 0

@@ -13,7 +13,6 @@ mod salted_tree;
 mod witness;
 
 pub(super) use challenges::*;
-pub(super) use claim_masking::*;
 pub(super) use polynomial::*;
 #[cfg(test)]
 pub(crate) use prove::prove_evaluation_key_share;

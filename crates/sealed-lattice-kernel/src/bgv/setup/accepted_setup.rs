@@ -1,5 +1,4 @@
 mod common_randomness;
-mod evaluation_key_material_transport;
 mod evaluation_key_proof_checks;
 mod evaluation_key_share_rounds;
 mod evaluator_key_schedule;
@@ -13,7 +12,6 @@ mod vss_complaints_and_acceptances;
 mod vss_public_material_verification;
 
 use self::common_randomness::verify_common_randomness;
-use self::evaluation_key_material_transport::evaluation_key_material_refusal;
 use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
 pub(in crate::bgv::setup) use self::evaluation_key_share_rounds::{
     evaluation_key_proof_common_binding, expected_galois_key_switch_seed,
@@ -42,7 +40,7 @@ use self::public_key_share_material::{
     verify_public_key_share_material_set,
 };
 use self::public_key_shares::{
-    PublicKeyCommonBinding, PublicKeyShareSuccinctProofVerification, public_key_refusal,
+    PublicKeyCommonBinding, PublicKeyShareSuccinctProofVerification,
     verify_public_key_share_succinct_proofs, verify_public_key_shares,
 };
 pub(in crate::bgv::setup) use self::public_key_shares::{
@@ -216,7 +214,6 @@ pub(super) struct Refusal {
     refusal_reason: crate::foundation::RefusalReason,
     reason_code: &'static str,
     message: String,
-    object_path: String,
 }
 
 impl Refusal {
@@ -224,13 +221,11 @@ impl Refusal {
         refusal_reason: crate::foundation::RefusalReason,
         reason_code: &'static str,
         message: impl Into<String>,
-        object_path: impl Into<String>,
     ) -> Self {
         Self {
             refusal_reason,
             reason_code,
             message: message.into(),
-            object_path: object_path.into(),
         }
     }
 }
@@ -246,6 +241,17 @@ fn protocol_signature_refusal_reason(reason_code: &str) -> crate::foundation::Re
 }
 
 pub(super) type Refusals = Vec<Refusal>;
+
+pub(super) fn single_refusal(
+    refusal_reason: crate::foundation::RefusalReason,
+    reason_code: &'static str,
+    message: impl Into<String>,
+) -> Refusals {
+    setup_refusals(
+        Vec::new(),
+        vec![Refusal::new(refusal_reason, reason_code, message)],
+    )
+}
 
 enum SetupPackageVerification {
     Verified,
@@ -394,7 +400,6 @@ fn verify_collective_bgv_setup_package_in_owned_session(
                 crate::foundation::RefusalReason::MalformedEncoding,
                 "setupPackageNotObject",
                 "setupPackage must be a JSON object",
-                "setupPackage".to_string(),
             )],
         );
         crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
@@ -438,16 +443,12 @@ fn verify_collective_setup_package(
     let Some(object_type) = setup_package.get("objectType").and_then(Value::as_str) else {
         return Ok(outside_accepted_parameters(
             "setupPackage.objectType is required",
-            "setupPackage.objectType",
         ));
     };
     if object_type != SETUP_PACKAGE_OBJECT_TYPE {
-        return Ok(outside_accepted_parameters(
-            format!(
-                "setupPackage.objectType must be {SETUP_PACKAGE_OBJECT_TYPE}, not {object_type}"
-            ),
-            "setupPackage.objectType",
-        ));
+        return Ok(outside_accepted_parameters(format!(
+            "setupPackage.objectType must be {SETUP_PACKAGE_OBJECT_TYPE}, not {object_type}"
+        )));
     }
     if let Some(refusals) = verify_context(setup_package, request)? {
         return Ok(SetupPackageVerification::Refused(refusals));
@@ -554,7 +555,6 @@ fn verify_declared_vss_ring_degree(
                 crate::foundation::RefusalReason::MalformedEncoding,
                 "vssShareLinkageStatementNotObject",
                 "vssShareLinkageStatement must be an object",
-                "setupPackage.vssShareLinkageStatement",
             )],
         ));
     }
@@ -565,7 +565,6 @@ fn verify_declared_vss_ring_degree(
                 crate::foundation::RefusalReason::MissingPrerequisite,
                 "vssShareLinkageRingDegreeMissing",
                 "vssShareLinkageStatement.ringDegree is required",
-                "setupPackage.vssShareLinkageStatement.ringDegree",
             )],
         ));
     };
@@ -579,7 +578,6 @@ fn verify_declared_vss_ring_degree(
                 crate::foundation::RefusalReason::WrongTypeOrLength,
                 "vssShareLinkageRingDegreeTypeMismatch",
                 "vssShareLinkageStatement.ringDegree must be an unsigned integer that fits usize",
-                "setupPackage.vssShareLinkageStatement.ringDegree",
             )],
         ));
     };
@@ -590,7 +588,6 @@ fn verify_declared_vss_ring_degree(
                 crate::foundation::RefusalReason::OutsideSupportedProfile,
                 "outsideCollectiveBgvSetupParameters",
                 "the declared setup ring degree is outside the selected verification profile",
-                "setupPackage.vssShareLinkageStatement.ringDegree",
             )],
         ));
     }
@@ -620,7 +617,6 @@ fn verify_expected_setup_package_hash(
                 crate::foundation::RefusalReason::WrongHashOrRoot,
                 "expectedSetupPackageHashMismatch",
                 "setup package hash does not match expectedSetupPackageHash",
-                "expectedSetupPackageHash".to_string(),
             )],
         )));
     }
@@ -646,17 +642,13 @@ fn accepted_setup_verification_response() -> Value {
     verification_response(Vec::new())
 }
 
-fn outside_accepted_parameters(
-    message: impl Into<String>,
-    object_path: impl Into<String>,
-) -> SetupPackageVerification {
+fn outside_accepted_parameters(message: impl Into<String>) -> SetupPackageVerification {
     SetupPackageVerification::Refused(setup_refusals(
         Vec::new(),
         vec![Refusal::new(
             crate::foundation::RefusalReason::OutsideSupportedProfile,
             "outsideCollectiveBgvSetupParameters",
             message,
-            object_path.into(),
         )],
     ))
 }
@@ -665,12 +657,11 @@ pub(super) fn setup_refusals(
     missing_objects: Vec<String>,
     mut refused_objects: Vec<Refusal>,
 ) -> Refusals {
-    refused_objects.extend(missing_objects.into_iter().map(|missing_object| {
+    refused_objects.extend(missing_objects.into_iter().map(|_| {
         Refusal::new(
             crate::foundation::RefusalReason::MissingPrerequisite,
             "setupObjectMissing",
             "A required setup object is missing.",
-            format!("setupPackage.{missing_object}"),
         )
     }));
     refused_objects

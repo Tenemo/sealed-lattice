@@ -183,6 +183,22 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
         self.raw_value_to_element(&raw)
     }
 
+    pub(crate) fn wide_words_to_element(
+        &self,
+        words: impl IntoIterator<Item = u64>,
+    ) -> [u64; LIMB_COUNT] {
+        debug_assert!(LIMB_COUNT > 1);
+        let mut radix_raw = [0_u64; LIMB_COUNT];
+        radix_raw[1] = 1;
+        let radix = self.raw_value_to_element(&radix_raw);
+        words.into_iter().fold(self.zero(), |accumulator, word| {
+            self.add(
+                &self.multiply(&accumulator, &radix),
+                &self.unsigned_word_to_element(word),
+            )
+        })
+    }
+
     /// Maps a signed word to its centered residue: negative values become
     /// p - |value|.
     #[cfg(test)]

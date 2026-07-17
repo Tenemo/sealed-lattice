@@ -8,6 +8,9 @@ const workflowDirectoryUrl = new URL(
     import.meta.url,
 );
 const ciWorkflowPath = fileURLToPath(new URL('ci.yml', workflowDirectoryUrl));
+const releaseWorkflowPath = fileURLToPath(
+    new URL('release.yml', workflowDirectoryUrl),
+);
 const tenParticipantEvidenceWorkflowPath = fileURLToPath(
     new URL(
         'ten-participant-accepted-setup-evidence.yml',
@@ -51,6 +54,24 @@ describe('CI workflow policy', () => {
         );
         expect(tenParticipantEvidenceWorkflow).toContain(
             'cancel-in-progress: false',
+        );
+    });
+
+    it('waits for exact-source CI before releasing without repeating the CI graph', async () => {
+        const releaseWorkflow = await readFile(releaseWorkflowPath, 'utf8');
+
+        expect(releaseWorkflow).toMatch(
+            /^ {4}validate-source:\r?\n(?:.|\r?\n)*?^ {8}timeout-minutes: 360$/mu,
+        );
+        expect(releaseWorkflow).toContain(
+            '- name: Wait for successful CI for the exact source',
+        );
+        expect(releaseWorkflow).toContain(
+            'run: pnpm exec tsx ./tools/ci/release-gates.ts await-ci',
+        );
+        expect(releaseWorkflow).not.toContain('pnpm run check');
+        expect(releaseWorkflow).not.toContain(
+            'pnpm run test:rust:kernel:accepted-setup',
         );
     });
 });

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn structural_vss_bindings_do_not_bypass_the_common_proof_gate() {
     let finalized_fixture = structural_vss_public_material_fixture();
-    let package = finalized_fixture.package;
+    let package = finalized_fixture;
     let participant_count = usize::try_from(participant_count_from_package(&package))
         .expect("participant count fits usize");
     let trustee_identities = (0..participant_count)

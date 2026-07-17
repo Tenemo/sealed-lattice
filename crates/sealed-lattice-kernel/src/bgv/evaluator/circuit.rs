@@ -391,7 +391,7 @@ fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
         return evaluate_polynomial_by_power_table(context, input, &[0]);
     }
 
-    sum_ciphertexts_at_common_level(&terms)
+    sum_aligned_ciphertexts(&terms)
 }
 
 // Defer the terminal modulus switch so the comparison output keeps one extra
@@ -464,7 +464,7 @@ fn linear_combination_from_powers(
     Ok(result)
 }
 
-fn sum_ciphertexts_at_common_level(ciphertexts: &[Ciphertext]) -> CanonicalResult<Ciphertext> {
+pub(crate) fn sum_aligned_ciphertexts(ciphertexts: &[Ciphertext]) -> CanonicalResult<Ciphertext> {
     if ciphertexts.is_empty() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,

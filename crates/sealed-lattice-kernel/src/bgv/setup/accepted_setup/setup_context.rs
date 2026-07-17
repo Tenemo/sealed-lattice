@@ -9,7 +9,6 @@ fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal
             crate::foundation::RefusalReason::MissingPrerequisite,
             "setupContextTokenMissing",
             format!("setupContext.{field_name} must be a non-empty setup context token"),
-            format!("setupPackage.setupContext.{field_name}"),
         ));
     }
     if value.len() > MAX_SETUP_CONTEXT_TOKEN_BYTES {
@@ -19,7 +18,6 @@ fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal
             format!(
                 "setupContext.{field_name} must be at most {MAX_SETUP_CONTEXT_TOKEN_BYTES} bytes"
             ),
-            format!("setupPackage.setupContext.{field_name}"),
         ));
     }
     if !value.bytes().all(|byte| {
@@ -32,7 +30,6 @@ fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal
             format!(
                 "setupContext.{field_name} contains a character outside the setup context token alphabet"
             ),
-            format!("setupPackage.setupContext.{field_name}"),
         ));
     }
 
@@ -56,7 +53,6 @@ pub(super) fn verify_context(
                 crate::foundation::RefusalReason::MalformedEncoding,
                 "setupContextNotObject",
                 "setupContext must be a JSON object",
-                "setupPackage.setupContext".to_string(),
             )],
         )));
     }
@@ -82,7 +78,6 @@ pub(super) fn verify_context(
                     crate::foundation::RefusalReason::MalformedEncoding,
                     "setupContextHashMalformed",
                     format!("setupContext.{field_name} must be a protocol hash"),
-                    format!("setupPackage.setupContext.{field_name}"),
                 )],
             )));
         };
@@ -96,7 +91,6 @@ pub(super) fn verify_context(
                     crate::foundation::RefusalReason::MalformedEncoding,
                     "setupContextTokenMalformed",
                     format!("setupContext.{field_name} must be a setup context token"),
-                    format!("setupPackage.setupContext.{field_name}"),
                 )],
             )));
         };
@@ -121,7 +115,6 @@ pub(super) fn verify_context(
                 crate::foundation::RefusalReason::OutsideSupportedProfile,
                 "participantCountOutsideConfigurableRange",
                 "setupContext.participantCount must be an integer from 3 through 20",
-                "setupPackage.setupContext.participantCount".to_string(),
             )],
         )));
     }
@@ -142,7 +135,6 @@ pub(super) fn verify_context(
                 crate::foundation::RefusalReason::WrongHashOrRoot,
                 "setupParametersHashMismatch",
                 "setupContext.setupParametersHash does not match the roster-derived collective BGV setup parameters",
-                "setupPackage.setupContext.setupParametersHash".to_string(),
             )],
         )));
     }

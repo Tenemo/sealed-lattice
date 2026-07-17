@@ -8,19 +8,17 @@ pub(in super::super) fn verify_vss_complaints(
         return Ok(None);
     };
     if !complaint_set.is_object() {
-        return Ok(Some(vss_complaint_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
             "vssComplaintsNotObject",
             "vssComplaints must be an object, not an array or scalar",
-            "setupPackage.vssComplaints",
         )));
     }
     if complaint_set.get("objectType").and_then(Value::as_str) != Some("VssComplaintSet") {
-        return Ok(Some(vss_complaint_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "vssComplaintSetTypeMismatch",
             "vssComplaints.objectType must be VssComplaintSet",
-            "setupPackage.vssComplaints.objectType",
         )));
     }
 
@@ -30,19 +28,17 @@ pub(in super::super) fn verify_vss_complaints(
         .get("complaintRecords")
         .and_then(Value::as_array)
     else {
-        return Ok(Some(vss_complaint_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MissingPrerequisite,
             "vssComplaintRecordsMissing",
             "vssComplaints.complaintRecords must contain at least one signed VSS complaint",
-            "setupPackage.vssComplaints.complaintRecords",
         )));
     };
     if complaint_records.is_empty() {
-        return Ok(Some(vss_complaint_refusal(
+        return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
             "vssComplaintRecordsEmpty",
             "vssComplaints must be omitted unless it contains at least one signed VSS complaint",
-            "setupPackage.vssComplaints.complaintRecords",
         )));
     }
 
@@ -65,24 +61,6 @@ pub(in super::super) fn verify_vss_complaints(
             crate::foundation::RefusalReason::InvalidArithmeticRelation,
             "vssComplaintAcceptedAbort",
             "a valid VSS complaint aborts the foundation-roster setup ceremony",
-            "setupPackage.vssComplaints",
         )],
     )))
-}
-
-fn vss_complaint_refusal(
-    refusal_reason: crate::foundation::RefusalReason,
-    reason_code: &'static str,
-    message: impl Into<String>,
-    object_path: impl Into<String>,
-) -> Refusals {
-    setup_refusals(
-        Vec::new(),
-        vec![Refusal::new(
-            refusal_reason,
-            reason_code,
-            message,
-            object_path,
-        )],
-    )
 }

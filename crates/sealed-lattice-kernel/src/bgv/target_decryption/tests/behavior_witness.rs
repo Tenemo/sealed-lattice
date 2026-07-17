@@ -259,13 +259,11 @@ fn target_decryption_quorum_release_recovers_target_slots() {
     expected_target_orders[0] = 1;
     expected_target_orders[2] = 2;
     assert_eq!(
-        packed_target_option_values(&target_id_slots, target_ciphertext_pair.top_count)
-            .expect("target-id options"),
+        packed_target_option_values(&target_id_slots).expect("target-id options"),
         expected_target_ids
     );
     assert_eq!(
-        packed_target_option_values(&target_order_slots, target_ciphertext_pair.top_count)
-            .expect("target-order options"),
+        packed_target_option_values(&target_order_slots).expect("target-order options"),
         expected_target_orders
     );
 
@@ -286,8 +284,7 @@ fn target_decryption_quorum_release_recovers_target_slots() {
     )
     .expect("tampered target-id release");
     assert_ne!(
-        packed_target_option_values(&tampered_target_id_slots, target_ciphertext_pair.top_count)
-            .expect("tampered target-id options"),
+        packed_target_option_values(&tampered_target_id_slots).expect("tampered target-id options"),
         expected_target_ids
     );
 }

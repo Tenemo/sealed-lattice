@@ -69,7 +69,6 @@ pub(super) fn generate_target_decryption_share_from_secret_share(
     }))
 }
 
-#[cfg(test)]
 pub(super) fn derive_threshold_secret_share_by_limb(
     evaluator_key: &DevelopmentBgvKey,
     setup_context_hash: &str,
@@ -119,7 +118,6 @@ pub(super) fn derive_threshold_secret_share_by_limb(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[cfg(test)]
 pub(super) fn derive_threshold_secret_share_limb(
     secret: &[i64],
     setup_context_hash: &str,

@@ -1,8 +1,8 @@
 use super::*;
 
-pub(super) fn verify_direct_ballot_aggregation(
+pub(super) fn aggregate_direct_encrypted_ballots(
     encrypted_ballots: &[DirectEncryptedBallot],
-) -> CanonicalResult<DirectBallotAggregationResult> {
+) -> CanonicalResult<Ciphertext> {
     let mut aggregate_ciphertext = encrypted_ballots
         .first()
         .map(|ballot| ballot.ciphertext.clone())
@@ -16,7 +16,5 @@ pub(super) fn verify_direct_ballot_aggregation(
         aggregate_ciphertext = ciphertext_add(&aggregate_ciphertext, &encrypted_ballot.ciphertext)?;
     }
 
-    Ok(DirectBallotAggregationResult {
-        aggregate_ciphertext,
-    })
+    Ok(aggregate_ciphertext)
 }

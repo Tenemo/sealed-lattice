@@ -1523,8 +1523,7 @@ mod tests {
             object_plans,
         )
         .expect("the complete external plan is valid");
-        let mut executor = ProofExternalMemoryExecutor::new(external_plan)
-            .expect("the external executor initializes");
+        let mut executor = ProofExternalMemoryExecutor::new(external_plan);
         let mut storage = TestStorage::default();
         executor
             .begin_object(&mut storage, source.object())

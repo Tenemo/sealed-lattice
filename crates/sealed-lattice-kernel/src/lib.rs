@@ -45,66 +45,6 @@ use foundation::{
 use encoding::run_accepted_setup_command;
 pub use encoding::run_transcript_core_command;
 
-#[doc(hidden)]
-pub fn evaluator_candidate_search_probe(axis: &str) -> String {
-    use num_traits::Signed;
-
-    let input = bgv::evaluator::candidate_evidence::EvaluatorCandidateInput::implemented()
-        .expect("implemented evaluator input derives");
-    let (minimum_ballot_count, maximum_ballot_count) = match axis {
-        "single" => (1, 1),
-        "multi" => (2, input.maximum_ballot_count),
-        _ => panic!("probe axis must be single or multi"),
-    };
-    let mut lines = Vec::new();
-    for working_level in input.target_ciphertext_level..input.data_primes.len() {
-        let mut minimum_margin = None;
-        let mut failure = None;
-        for ballot_count in minimum_ballot_count..=maximum_ballot_count {
-            let bounds = match bgv::evaluator::noise_recurrence::direct_ballot_target_noise_bounds_at_working_level(
-                    input.participant_count,
-                    ballot_count,
-                    input.option_count,
-                    input.minimum_score,
-                    input.maximum_score,
-                    working_level,
-                ) {
-                Ok(bounds) => bounds,
-                Err(error) => {
-                    failure = Some(format!("error:{}:{}", error.code.as_str(), error.message));
-                    break;
-                }
-            };
-            for bound in bounds {
-                for margin in [
-                    bound.target_identifier.minimum_decryption_margin,
-                    bound.target_order.minimum_decryption_margin,
-                ] {
-                    minimum_margin = Some(match minimum_margin {
-                        Some(current_margin) if current_margin <= margin => current_margin,
-                        _ => margin,
-                    });
-                }
-            }
-        }
-        if let Some(failure) = failure {
-            lines.push(format!("level={working_level};{failure}"));
-            continue;
-        }
-        let margin = minimum_margin.expect("target rows are nonempty");
-        let positive = margin.is_positive();
-        lines.push(format!(
-            "level={working_level};margin-sign:{};margin-bits:{}",
-            if positive { "positive" } else { "nonpositive" },
-            margin.magnitude().bits()
-        ));
-        if positive {
-            break;
-        }
-    }
-    lines.join("\n")
-}
-
 fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
     Box::into_raw(bytes.into_boxed_slice()) as *mut u8
 }

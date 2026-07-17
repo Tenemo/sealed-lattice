@@ -1,12 +1,10 @@
 #[cfg(test)]
 use super::super::evaluation_domain::EvaluationDomainPlan;
-use super::super::relation::{LimbColumnLayout, TrusteeEvaluationKeyStatement};
+use super::super::relation::LimbColumnLayout;
 #[cfg(test)]
-use super::super::relation::{
-    TrusteeEvaluationKeyWitness, claim_mask_digit_count_for_global_claim,
-};
+use super::super::relation::TrusteeEvaluationKeyWitness;
 #[cfg(test)]
-use super::super::{CLAIM_MASK_RADIX, column_mask_degree};
+use super::super::{CLAIM_MASK_DIGIT_COUNT, CLAIM_MASK_RADIX, column_mask_degree};
 #[cfg(test)]
 use super::CLAIM_MASK_DOMAIN;
 #[cfg(test)]
@@ -36,18 +34,8 @@ pub(in super::super) fn claim_mask_digits(
         .collect()
 }
 
-pub(in super::super) fn global_claim_id(
-    _statement: &TrusteeEvaluationKeyStatement,
-    layout: &LimbColumnLayout,
-    local_claim_index: usize,
-) -> u64 {
-    debug_assert!(layout.private_vss_active());
-    local_claim_index as u64
-}
-
 #[cfg(test)]
 pub(super) fn mask_digit_columns(
-    statement: &TrusteeEvaluationKeyStatement,
     layout: &LimbColumnLayout,
     proof_randomness_seed_hex: &str,
 ) -> Vec<Vec<u64>> {
@@ -55,7 +43,7 @@ pub(super) fn mask_digit_columns(
     for local_claim in 0..layout.claim_count() {
         let digits = claim_mask_digits(
             proof_randomness_seed_hex,
-            global_claim_id(statement, layout, local_claim),
+            local_claim as u64,
             layout.claim_mask_digit_count(local_claim),
         );
         for (digit_index, digit) in digits.iter().enumerate() {
@@ -101,12 +89,10 @@ pub(super) fn masked_half_coefficients_with_mask_degree(
 
 #[cfg(test)]
 pub(super) fn global_claim_integers(
-    statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
     consistency_vectors: &[Vec<u64>],
     proof_randomness_seed_hex: &str,
 ) -> Vec<BigInt> {
-    debug_assert!(statement.private_vss_share().is_some());
     // The carry is the only integer witness shared by all commitment fields.
     // Independent commitment-limb opening tapes are proved against their
     // ternary supports under purposes eleven and twelve and bound to their own
@@ -129,11 +115,8 @@ pub(super) fn global_claim_integers(
                     i128::from(*coefficient) * i128::from(*combination)
                 })
                 .sum::<i128>();
-            let digits = claim_mask_digits(
-                proof_randomness_seed_hex,
-                global_id,
-                claim_mask_digit_count_for_global_claim(statement, global_id),
-            );
+            let digits =
+                claim_mask_digits(proof_randomness_seed_hex, global_id, CLAIM_MASK_DIGIT_COUNT);
             let mut mask_integer = BigInt::from(0_u8);
             let mut digit_weight = BigInt::from(1_u8);
             for digit in digits {

@@ -4,6 +4,7 @@ import {
     beginAcceptedSetupCanonicalStream,
     requireAcceptedSetupSessionKernelOwner,
 } from './accepted-setup-session-runtime.js';
+import { isArrayBuffer, isUint8Array } from './byte-array.js';
 import { pumpCanonicalStreamChunks } from './canonical-stream-chunk-pump.js';
 import {
     canonicalStreamDomains,
@@ -133,13 +134,6 @@ const familyDomain = new Map<BgvCanonicalStreamFamily, CanonicalStreamDomain>([
         canonicalStreamDomains.publicKeyShareMaterial,
     ],
 ]);
-
-const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
-    Object.prototype.toString.call(value) === '[object ArrayBuffer]';
-
-const isUint8Array = (value: unknown): value is Uint8Array =>
-    ArrayBuffer.isView(value) &&
-    Object.prototype.toString.call(value) === '[object Uint8Array]';
 
 const materialRootBytes = (materialRoot: string): Uint8Array => {
     if (!/^[0-9a-f]{128}$/u.test(materialRoot)) {

@@ -298,7 +298,6 @@ impl CommittedMaterialTree {
     pub(crate) fn construct(
         input: CommittedMaterialTreeInput<'_>,
     ) -> Result<Self, CommittedMaterialError> {
-        input.profile.validate()?;
         if input.message_digit_columns.len() != MATERIAL_DIGIT_COLUMN_COUNT
             || input.message_digit_columns.iter().any(|column| {
                 column.len() != input.profile.trace_domain_size.checked_mul(2).unwrap_or(0)

@@ -5,10 +5,9 @@ mod setup_intent;
 mod vss_material;
 
 use self::package_fixtures::{
-    CollectiveSetupVerificationFixture, accepted_vss_coefficient_message_fixture,
-    accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
-    collective_setup_intent_package, minimal_collective_setup_package_fixture,
-    structural_vss_collective_setup_fixture,
+    accepted_vss_coefficient_message_fixture, accepted_vss_randomness_fixture,
+    accepted_vss_secret_coefficient_fixture, collective_setup_intent_package,
+    minimal_collective_setup_package_fixture, structural_vss_collective_setup_fixture,
     ten_participant_structural_vss_collective_setup_fixture,
 };
 use self::record_rebinding::{

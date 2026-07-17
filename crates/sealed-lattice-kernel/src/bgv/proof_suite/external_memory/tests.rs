@@ -206,7 +206,7 @@ fn single_object_write_plan(
 fn executor_enforces_chunked_writes_random_reads_and_exact_last_use() {
     let first = ProofExternalMemoryObject::new(0);
     let second = ProofExternalMemoryObject::new(1);
-    let mut executor = ProofExternalMemoryExecutor::new(plan()).expect("valid plan starts");
+    let mut executor = ProofExternalMemoryExecutor::new(plan());
     let mut storage = TestStorage::default();
 
     executor
@@ -267,8 +267,7 @@ fn executor_enforces_chunked_writes_random_reads_and_exact_last_use() {
 #[test]
 fn executor_accepts_only_full_intermediate_chunks_and_the_exact_declared_tail() {
     let object = ProofExternalMemoryObject::new(0);
-    let mut executor = ProofExternalMemoryExecutor::new(single_object_write_plan(4, 10))
-        .expect("the exact-chunk executor starts");
+    let mut executor = ProofExternalMemoryExecutor::new(single_object_write_plan(4, 10));
     let mut storage = TestStorage::default();
     executor
         .begin_object(&mut storage, object)
@@ -299,8 +298,7 @@ fn executor_accepts_only_full_intermediate_chunks_and_the_exact_declared_tail() 
 #[test]
 fn executor_rejects_zero_short_and_oversized_appends_without_advancing() {
     let object = ProofExternalMemoryObject::new(0);
-    let mut executor = ProofExternalMemoryExecutor::new(single_object_write_plan(4, 6))
-        .expect("the hostile-shape executor starts");
+    let mut executor = ProofExternalMemoryExecutor::new(single_object_write_plan(4, 6));
     let mut storage = TestStorage::default();
     executor
         .begin_object(&mut storage, object)
@@ -357,8 +355,7 @@ fn executor_rejects_zero_short_and_oversized_appends_without_advancing() {
 #[test]
 fn executor_accepts_a_short_object_as_one_exact_chunk() {
     let object = ProofExternalMemoryObject::new(0);
-    let mut executor = ProofExternalMemoryExecutor::new(single_object_write_plan(4, 3))
-        .expect("the one-chunk executor starts");
+    let mut executor = ProofExternalMemoryExecutor::new(single_object_write_plan(4, 3));
     let mut storage = TestStorage::default();
     executor
         .begin_object(&mut storage, object)
@@ -403,7 +400,7 @@ fn plan_and_executor_reject_overrun_incomplete_seal_and_late_use() {
     );
 
     let first = ProofExternalMemoryObject::new(0);
-    let mut executor = ProofExternalMemoryExecutor::new(plan()).expect("valid plan starts");
+    let mut executor = ProofExternalMemoryExecutor::new(plan());
     let mut storage = TestStorage::default();
     executor
         .begin_object(&mut storage, first)
@@ -565,7 +562,7 @@ fn browser_scratch_plan_accepts_exact_safety_bounds_and_refuses_one_over() {
 #[test]
 fn browser_transaction_yield_and_exact_replay_change_state_only_after_replay() {
     let first = ProofExternalMemoryObject::new(0);
-    let mut executor = ProofExternalMemoryExecutor::new(plan()).expect("valid plan starts");
+    let mut executor = ProofExternalMemoryExecutor::new(plan());
     let mut recorder = ProofExternalMemoryTransactionRecorder::new();
 
     assert_eq!(
@@ -878,7 +875,7 @@ impl ProofCancellation for RequestedCancellation {
 #[test]
 fn cancellation_transactionally_removes_secret_scratch() {
     let first = ProofExternalMemoryObject::new(0);
-    let mut executor = ProofExternalMemoryExecutor::new(plan()).expect("valid plan starts");
+    let mut executor = ProofExternalMemoryExecutor::new(plan());
     let mut storage = TestStorage::default();
     executor
         .begin_object(&mut storage, first)

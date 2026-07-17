@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(test)]
 pub(super) fn verify_target_decryption_relation_from_local_witness(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,

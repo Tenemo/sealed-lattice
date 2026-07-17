@@ -26,28 +26,23 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
 
 pub(in super::super::super) fn vss_share_linkage_proof_material_set_object(
     package: &serde_json::Value,
-) -> VssProofMaterialSetFixture {
+) -> serde_json::Value {
     let participant_count = participant_count_from_package(package);
     let proof_record_fixtures = (0..participant_count)
         .flat_map(|source_trustee_roster_position| {
             vss_share_linkage_proof_records(package, source_trustee_roster_position)
         })
         .collect::<Vec<_>>();
-    VssProofMaterialSetFixture {
-        value: serde_json::json!({
-            "objectType": "VssShareLinkageProofMaterialSet",
-            "proofRecords": proof_record_fixtures
-                .iter()
-                .map(|fixture| fixture.record.clone())
-                .collect::<Vec<_>>(),
-        }),
-    }
+    serde_json::json!({
+        "objectType": "VssShareLinkageProofMaterialSet",
+        "proofRecords": proof_record_fixtures,
+    })
 }
 
 pub(super) fn vss_share_linkage_proof_records(
     package: &serde_json::Value,
     source_trustee_roster_position: u64,
-) -> Vec<VssProofRecordFixture> {
+) -> Vec<serde_json::Value> {
     let item_records = vss_share_linkage_item_records(package, source_trustee_roster_position);
     let participant_count: usize = participant_count_from_package(package)
         .try_into()
@@ -74,7 +69,7 @@ pub(super) fn vss_share_linkage_proof_record(
     source_trustee_roster_position: u64,
     proof_record_index: usize,
     item_records: &[serde_json::Value],
-) -> VssProofRecordFixture {
+) -> serde_json::Value {
     let verification_input = serde_json::json!({
         "statement": package["vssShareLinkageStatement"],
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -86,15 +81,11 @@ pub(super) fn vss_share_linkage_proof_record(
         VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
         &verification_input,
     );
-    let proof_record = serde_json::json!({
+    serde_json::json!({
         "objectType": "VssShareLinkageProofRecord",
         "coverage": item_records,
         "proofBytesHash": proof_bytes_hash,
-    });
-
-    VssProofRecordFixture {
-        record: proof_record,
-    }
+    })
 }
 
 pub(super) fn vss_share_linkage_item_records(
@@ -127,14 +118,14 @@ pub(super) fn vss_share_linkage_item_record(
     })
 }
 
-pub(super) fn vss_public_recipient_share_values_and_carries(
+pub(super) fn vss_public_recipient_share_values(
     source_trustee_roster_position: u64,
     recipient_roster_position: u64,
     rns_limb_index: usize,
     threshold_degree: u64,
     rns_prime: u64,
     ring_degree: usize,
-) -> (Vec<u64>, Vec<i64>) {
+) -> Vec<u64> {
     let recipient_trustee_point = crate::bgv::setup::sharing::canonical_trustee_point(
         recipient_roster_position as usize,
         rns_prime,
@@ -160,7 +151,6 @@ pub(super) fn vss_public_recipient_share_values_and_carries(
             .expect("recipient trustee point power");
     }
     let mut share_coefficients = Vec::with_capacity(ring_degree);
-    let mut carry_witnesses = Vec::with_capacity(ring_degree);
     for coefficient_position in 0..ring_degree {
         let lifted_share = coefficient_messages
             .iter()
@@ -169,11 +159,7 @@ pub(super) fn vss_public_recipient_share_values_and_carries(
                 sum + u128::from(messages[coefficient_position]) * *point_power
             });
         share_coefficients.push((lifted_share % u128::from(rns_prime)) as u64);
-        carry_witnesses.push(
-            i64::try_from(lifted_share / u128::from(rns_prime))
-                .expect("recipient share carry fits i64"),
-        );
     }
 
-    (share_coefficients, carry_witnesses)
+    share_coefficients
 }

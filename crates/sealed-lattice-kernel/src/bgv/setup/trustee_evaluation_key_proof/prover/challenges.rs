@@ -1,8 +1,7 @@
 use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
 use super::super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::super::relation::{
-    LimbColumnLayout, SumcheckErrorWeights, TrusteeEvaluationKeyStatement,
-    build_private_vss_public_vectors,
+    LimbColumnLayout, TrusteeEvaluationKeyStatement, build_private_vss_public_vectors,
 };
 use super::super::{CLAIM_MASK_RADIX, LINCHECK_REPETITIONS, invalid_succinct_setup_proof};
 use super::polynomial::extension_powers;
@@ -10,17 +9,14 @@ use crate::bgv::modular_arithmetic::pow_mod;
 use crate::encoding::CanonicalResult;
 
 pub(in super::super) struct LimbPublicVectors {
-    pub(in super::super) secret_factor: Vec<Vec<ChallengeExtensionElement>>,
-    pub(in super::super) u_powers: Vec<Vec<ChallengeExtensionElement>>,
     pub(in super::super) mask_selectors: Vec<Vec<ChallengeExtensionElement>>,
-    pub(in super::super) linkage_vectors: Vec<Vec<ChallengeExtensionElement>>,
-    pub(in super::super) error_weights: SumcheckErrorWeights,
+    pub(in super::super) private_vss_relation_vectors: Vec<Vec<ChallengeExtensionElement>>,
     pub(in super::super) lincheck_claim: ChallengeExtensionElement,
 }
 
 pub(in super::super) struct LimbChallenges {
     pub(in super::super) lincheck_challenges: Vec<ChallengeExtensionElement>,
-    pub(in super::super) linkage_alpha: Vec<ChallengeExtensionElement>,
+    pub(in super::super) private_vss_relation_alpha: Vec<ChallengeExtensionElement>,
     pub(in super::super) consistency_alpha: Vec<ChallengeExtensionElement>,
     pub(in super::super) beta: Vec<ChallengeExtensionElement>,
 }
@@ -41,17 +37,12 @@ pub(in super::super) fn draw_limb_challenges(
     layout: &LimbColumnLayout,
     modulus: u64,
 ) -> CanonicalResult<LimbChallenges> {
-    if !layout.private_vss_active() {
-        return Err(invalid_succinct_setup_proof(
-            "the shared per-limb engine is reserved for private VSS proofs",
-        ));
-    }
     let mut lincheck_challenges = Vec::with_capacity(LINCHECK_REPETITIONS);
     for _ in 0..LINCHECK_REPETITIONS {
         lincheck_challenges
             .push(transcript.challenge_nonzero_extension_element("lincheck-u", modulus)?);
     }
-    let linkage_alpha = transcript.challenge_extension_elements(
+    let private_vss_relation_alpha = transcript.challenge_extension_elements(
         "private-vss-relation-alpha",
         modulus,
         layout.private_vss_relation_count() * LINCHECK_REPETITIONS,
@@ -68,7 +59,7 @@ pub(in super::super) fn draw_limb_challenges(
     )?;
     Ok(LimbChallenges {
         lincheck_challenges,
-        linkage_alpha,
+        private_vss_relation_alpha,
         consistency_alpha,
         beta,
     })
@@ -112,18 +103,13 @@ pub(in super::super) fn build_limb_public_vectors(
         limb_index,
         &tower,
         &u_powers,
-        &challenges.linkage_alpha,
+        &challenges.private_vss_relation_alpha,
     )?;
     combined_claim = tower.add(&combined_claim, &private_vss_claim);
 
     Ok(LimbPublicVectors {
-        secret_factor: Vec::new(),
-        u_powers,
         mask_selectors,
-        linkage_vectors: relation_vectors,
-        error_weights: SumcheckErrorWeights {
-            weights: vec![Vec::new(); LINCHECK_REPETITIONS],
-        },
+        private_vss_relation_vectors: relation_vectors,
         lincheck_claim: combined_claim,
     })
 }

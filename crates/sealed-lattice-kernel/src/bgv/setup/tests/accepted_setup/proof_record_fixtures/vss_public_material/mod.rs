@@ -6,18 +6,6 @@ use crate::hashing::{derive_canonical_object_hash, hash512_hex};
 
 const VSS_MATERIAL_SEED_DOMAIN: &str = "sealed-lattice/accepted-setup/vss-material-seed";
 
-struct VssProofRecordFixture {
-    record: serde_json::Value,
-}
-
-struct VssProofRecordSetFixture {
-    proof_bytes_hashes: Vec<String>,
-}
-
-struct VssProofMaterialSetFixture {
-    value: serde_json::Value,
-}
-
 pub(super) fn vss_fixture_threshold_degree(package: &serde_json::Value) -> u64 {
     decryption_threshold_for_participant_count(participant_count_from_package(package))
 }
@@ -87,7 +75,7 @@ const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 // using it here would fail while constructing unrelated private-share
 // acceptances. This fixture starts with the canonical source material needed
 // by the bridge, then lets the ordinary finalizer attach the public views.
-fn structural_vss_public_material_fixture() -> FinalizedCollectiveSetupPackageFixture {
+fn structural_vss_public_material_fixture() -> serde_json::Value {
     const PARTICIPANT_COUNT: u64 = 3;
     const RING_DEGREE: usize = 128;
 
@@ -190,7 +178,7 @@ fn structural_same_secret_source_commitments(
                     shamir_coefficient_index,
                     ring_degree,
                 );
-                let commitment = compute_setup_commitment_for_tests(
+                let commitment = compute_setup_commitment_for_degree(
                     public_matrix_seed_hash,
                     rns_limb_index,
                     shamir_coefficient_index,
@@ -242,6 +230,4 @@ mod transport;
 
 pub(in super::super) use commitment_sets::vss_public_coefficient_commitment_record;
 
-pub(in super::super) use finalized_package::{
-    FinalizedCollectiveSetupPackageFixture, finalize_collective_setup_package,
-};
+pub(in super::super) use finalized_package::finalize_collective_setup_package;
