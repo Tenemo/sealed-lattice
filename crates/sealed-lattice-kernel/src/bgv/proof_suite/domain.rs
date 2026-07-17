@@ -133,6 +133,7 @@ mod tests {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct ProofRandomnessAssignmentVector {
+        family_name: String,
         family_schema_identifier: u16,
         first_purpose: u16,
         last_purpose: u16,
@@ -205,7 +206,23 @@ mod tests {
         );
         assert_eq!(vector.ranges.len(), PROOF_RANDOMNESS_ASSIGNMENTS.len());
 
-        for (assignment, expected) in PROOF_RANDOMNESS_ASSIGNMENTS.into_iter().zip(vector.ranges) {
+        let expected_family_names = [
+            "sameSecret",
+            "publicKeyShare",
+            "relinearizationRoundOne",
+            "relinearizationRoundTwo",
+            "galoisKeyShare",
+            "ballotValidity",
+            "targetShareProof",
+            "vssShareLinkage",
+            "aggregateThresholdShare",
+        ];
+        for ((assignment, expected), expected_family_name) in PROOF_RANDOMNESS_ASSIGNMENTS
+            .into_iter()
+            .zip(vector.ranges)
+            .zip(expected_family_names)
+        {
+            assert_eq!(expected.family_name, expected_family_name);
             assert_eq!(
                 assignment.family_schema_identifier,
                 expected.family_schema_identifier

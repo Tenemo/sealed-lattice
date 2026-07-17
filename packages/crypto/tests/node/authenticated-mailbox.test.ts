@@ -5,6 +5,7 @@ import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import {
     foundationProfile,
+    recipientPrivateVssShareMailboxPayloadType,
     type ProtocolHash,
     type SetupMailboxSlot,
 } from '@sealed-lattice/types';
@@ -963,7 +964,7 @@ const associatedData: SetupMailboxSlot = Object.freeze({
     sourceParticipantId: configuredSourceRoster.sourceParticipantId,
     recipientParticipantId: '66'.repeat(64),
     producerSequence: '7',
-    payloadType: 2 as const,
+    payloadType: recipientPrivateVssShareMailboxPayloadType,
     statementHash: '77'.repeat(64),
     orderedMaterialRoots: ['88'.repeat(64)],
 });

@@ -24,8 +24,10 @@ const SETUP_SOURCE_FAMILY: u16 = 0x1201;
 const SETUP_MAILBOX_FAMILY: u16 = 0x0200;
 const VSS_EXPANSION_FAMILY: u16 = 0x2120;
 const TARGET_FLOODING_FAMILY: u16 = 0x1630;
-const ORDINARY_BALLOT_PROOF_FAMILY: u16 = 0x1302;
-const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: u16 = 0x1621;
+const ORDINARY_BALLOT_PROOF_FAMILY: u16 =
+    ProofFamilyIdentifiers::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER;
+const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: u16 =
+    ProofFamilyIdentifiers::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER;
 
 const ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/private-randomness/action-key-hierarchy/v1";
@@ -43,16 +45,20 @@ const SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_HASH_DOMAIN: &str =
     "sealed-lattice/setup/structured-commitment-opening-context/v2";
 
 const RESET_SAFE_PROOF_FAMILIES: [u16; 8] = [
-    0x2110,
-    0x2111,
-    0x1211,
-    0x1212,
-    0x1214,
-    0x1216,
-    0x1217,
+    ProofFamilyIdentifiers::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilyIdentifiers::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilyIdentifiers::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilyIdentifiers::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilyIdentifiers::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilyIdentifiers::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilyIdentifiers::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
     TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
 ];
-const PUBLIC_ONLY_PROOF_FAMILIES: [u16; 3] = [0x1213, 0x1215, 0x1218];
+const PUBLIC_ONLY_PROOF_FAMILIES: [u16; 3] = [
+    ProofFamilyIdentifiers::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilyIdentifiers::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilyIdentifiers::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+];
 
 mod domain;
 mod material;
@@ -81,3 +87,4 @@ fn schema_error(
 #[cfg(test)]
 #[path = "private_randomness/tests.rs"]
 mod tests;
+use super::proof_application::ProofApplicationSlotCeilings as ProofFamilyIdentifiers;

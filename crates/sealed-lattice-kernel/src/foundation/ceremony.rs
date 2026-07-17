@@ -11,7 +11,7 @@ use super::suite::SuiteRecord;
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
     FoundationSchemaError, Hash512, RefusalReason, Roster, StabilizedDisplayText,
-    hash_foundation_tuple_512,
+    StreamingFoundationTupleHash512, hash_foundation_tuple_512,
 };
 
 pub const MANIFEST_SCHEMA_IDENTIFIER: u16 = 0x0110;
@@ -200,10 +200,17 @@ impl Manifest {
     }
 
     pub fn manifest_hash(&self) -> SchemaResult<Hash512> {
-        Ok(hash_foundation_tuple_512(
+        let canonical_manifest_bytes = self.encode()?;
+        let mut hasher = StreamingFoundationTupleHash512::new_variable_bytes(
             MANIFEST_HASH_DOMAIN,
-            &[CanonicalItem::variable_bytes(self.encode()?)?],
-        )?)
+            &[],
+            canonical_manifest_bytes.len(),
+        )
+        .map_err(|_| manifest_hash_error())?;
+        hasher
+            .absorb(&canonical_manifest_bytes)
+            .map_err(|_| manifest_hash_error())?;
+        hasher.finalize().map_err(|_| manifest_hash_error())
     }
 }
 
@@ -479,6 +486,13 @@ fn require_copied_buffer_bound(tuple: &CanonicalTuple, message: &'static str) ->
     Ok(())
 }
 
+fn manifest_hash_error() -> FoundationSchemaError {
+    FoundationSchemaError::new(
+        RefusalReason::OutsideSupportedProfile,
+        "manifest cannot be framed within the supported hash profile",
+    )
+}
+
 fn validate_external_identifier(identifier: &str) -> SchemaResult<()> {
     if identifier.len() > FOUNDATION_PROFILE.maximum_identifier_byte_length {
         return Err(FoundationSchemaError::new(
@@ -502,9 +516,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::foundation::{
-        ArtifactKind, ArtifactReference, RosterEntry, SuiteByteLimits, SuiteCountLimits,
-    };
+    use crate::foundation::{ArtifactKind, ArtifactReference, RosterEntry, SuiteCountLimits};
 
     fn display_text(value: &str) -> StabilizedDisplayText {
         StabilizedDisplayText::from_ingress_utf8(value.as_bytes())
@@ -552,9 +564,6 @@ mod tests {
     fn sample_suite() -> SuiteRecord {
         let count_limits = SuiteCountLimits::new(3, 10, 64, 128, 20, 100)
             .expect("test suite count limits are valid");
-        let byte_limits =
-            SuiteByteLimits::new(3_000, 20_000, 5_000, 25_000, 50_000, 10_000, 100_000)
-                .expect("test suite byte limits are valid");
         let artifacts = ArtifactKind::ALL
             .into_iter()
             .map(|artifact_kind| {
@@ -570,7 +579,7 @@ mod tests {
                 .expect("test artifact reference is valid")
             })
             .collect();
-        SuiteRecord::new(count_limits, byte_limits, artifacts).expect("test suite is valid")
+        SuiteRecord::new(count_limits, artifacts).expect("test suite is valid")
     }
 
     #[test]
@@ -588,6 +597,48 @@ mod tests {
         assert_eq!(
             decoded.manifest_hash().expect("decoded hash derives"),
             manifest.manifest_hash().expect("manifest hash derives")
+        );
+    }
+
+    #[test]
+    fn manifest_hash_accepts_the_exact_copied_buffer_boundary() {
+        let options = sample_manifest().options;
+        let one_byte_title_manifest =
+            Manifest::new(display_text("A"), options.clone()).expect("test manifest is valid");
+        let title_independent_byte_length = one_byte_title_manifest
+            .encode()
+            .expect("one-byte-title manifest encodes")
+            .len()
+            - 1;
+        let maximum_title_byte_length = FOUNDATION_PROFILE
+            .maximum_copied_buffer_byte_length
+            .checked_sub(title_independent_byte_length)
+            .expect("manifest framing fits the copied-buffer profile");
+
+        let exact_boundary_manifest = Manifest::new(
+            display_text(&"A".repeat(maximum_title_byte_length)),
+            options.clone(),
+        )
+        .expect("exact-boundary manifest is valid");
+        assert_eq!(
+            exact_boundary_manifest
+                .encode()
+                .expect("exact-boundary manifest encodes")
+                .len(),
+            FOUNDATION_PROFILE.maximum_copied_buffer_byte_length,
+        );
+        exact_boundary_manifest
+            .manifest_hash()
+            .expect("exact-boundary manifest hash derives");
+
+        assert_eq!(
+            Manifest::new(
+                display_text(&"A".repeat(maximum_title_byte_length + 1)),
+                options,
+            )
+            .expect_err("one byte beyond the copied-buffer boundary must refuse")
+            .refusal_reason,
+            RefusalReason::OutsideSupportedProfile,
         );
     }
 

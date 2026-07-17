@@ -93,7 +93,7 @@ const expectMalformedResponse = (bytes: Uint8Array): void => {
 };
 
 describe('Structured-commitment worker response', () => {
-    it('confines the framing allowance to the structured-commitment output command', () => {
+    it('uses the exact structured-commitment output bound only for its command', () => {
         expect(
             actionRandomnessCommandOutputByteLimit(
                 actionRandomnessCommandIdentifiers.computeStructuredCommitment,
@@ -102,7 +102,7 @@ describe('Structured-commitment worker response', () => {
         expect(structuredCommitmentWorkerResponseProductionByteLength).toBe(
             1_572_908,
         );
-        expect(maximumClosedWorkerCommandByteLength).toBe(1_572_864);
+        expect(maximumClosedWorkerCommandByteLength).toBe(8_388_608);
         Object.values(actionRandomnessCommandIdentifiers)
             .filter(
                 (command) =>

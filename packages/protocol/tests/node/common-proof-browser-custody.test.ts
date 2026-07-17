@@ -1210,7 +1210,7 @@ describe('Common-proof browser custody', () => {
         expect(ownedStorageRecordKeys(checkpointAdapter)).toEqual([]);
     });
 
-    it('enforces canonical output chunk segmentation and the five-chunk ceiling', async () => {
+    it('enforces canonical output chunk segmentation and the absolute chunk-count safety bound', async () => {
         const overlongFixture = await openFixture();
         await expect(
             overlongFixture.custody.outputStore.commitChunk(
@@ -1222,22 +1222,20 @@ describe('Common-proof browser custody', () => {
         const boundaryFixture = await openFixture({
             commonProofEnvironmentIdentifier: new Uint8Array(32).fill(0xde),
         });
-        for (let chunkIndex = 0; chunkIndex < 5; chunkIndex += 1) {
-            await boundaryFixture.custody.outputStore.commitChunk(
-                chunkIndex,
-                new Uint8Array(1_048_576).fill(chunkIndex + 1),
-            );
-        }
+        await boundaryFixture.custody.outputStore.commitChunk(
+            0,
+            new Uint8Array(1_048_576).fill(1),
+        );
         await expect(
             boundaryFixture.custody.outputStore.commitChunk(
-                5,
+                256,
                 Uint8Array.of(1),
             ),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
         boundaryFixture.custody.sealCanonicalOutput();
         expect(
             boundaryFixture.custody.authenticatedOutput().declaredByteLength,
-        ).toBe(5_242_880);
+        ).toBe(1_048_576);
     });
 
     it('uses typed custody failures for malformed environment inputs', async () => {

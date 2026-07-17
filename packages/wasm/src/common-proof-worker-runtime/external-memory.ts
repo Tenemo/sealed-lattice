@@ -15,6 +15,18 @@ export const maximumEncodedRequestByteLength =
 const schemaVersion = 1;
 const requestMessageKind = 1;
 const responseMessageKind = 2;
+const externalMemoryOperationCodes = Object.freeze({
+    create: 1,
+    append: 2,
+    seal: 3,
+    read: 4,
+    delete: 5,
+} as const);
+const externalMemoryProtectionCodes = Object.freeze({
+    none: 0,
+    publicIntegrity: 1,
+    secretAuthenticatedEncryption: 2,
+} as const);
 const requestDigestDomain =
     'sealed-lattice/common-proof/external-memory-request/v1';
 const readDigestDomain = 'sealed-lattice/common-proof/external-memory-read/v1';
@@ -260,11 +272,14 @@ const decodeOperation = (
     const position = reader.unsigned64();
     const payloadByteLength = reader.unsigned64();
     switch (operationKind) {
-        case 1: {
+        case externalMemoryOperationCodes.create: {
             if (
                 position !== 0n ||
                 payloadByteLength === 0n ||
-                (protectionCode !== 1 && protectionCode !== 2)
+                (protectionCode !==
+                    externalMemoryProtectionCodes.publicIntegrity &&
+                    protectionCode !==
+                        externalMemoryProtectionCodes.secretAuthenticatedEncryption)
             ) {
                 throw new CommonProofWorkerRuntimeError(
                     'MalformedRequest',
@@ -277,14 +292,15 @@ const decodeOperation = (
                 operationIndex,
                 operationKind: 'create',
                 protection:
-                    protectionCode === 1
+                    protectionCode ===
+                    externalMemoryProtectionCodes.publicIntegrity
                         ? 'public-integrity'
                         : 'secret-authenticated-encryption',
             });
         }
-        case 2: {
+        case externalMemoryOperationCodes.append: {
             if (
-                protectionCode !== 0 ||
+                protectionCode !== externalMemoryProtectionCodes.none ||
                 payloadByteLength === 0n ||
                 payloadByteLength > maximumWorkerPayloadByteLength
             ) {
@@ -301,9 +317,9 @@ const decodeOperation = (
                 operationKind: 'append',
             });
         }
-        case 3: {
+        case externalMemoryOperationCodes.seal: {
             if (
-                protectionCode !== 0 ||
+                protectionCode !== externalMemoryProtectionCodes.none ||
                 position !== 0n ||
                 payloadByteLength !== 0n
             ) {
@@ -318,9 +334,9 @@ const decodeOperation = (
                 operationKind: 'seal',
             });
         }
-        case 4: {
+        case externalMemoryOperationCodes.read: {
             if (
-                protectionCode !== 0 ||
+                protectionCode !== externalMemoryProtectionCodes.none ||
                 payloadByteLength === 0n ||
                 payloadByteLength > maximumWorkerPayloadByteLength
             ) {
@@ -337,9 +353,9 @@ const decodeOperation = (
                 operationKind: 'read',
             });
         }
-        case 5: {
+        case externalMemoryOperationCodes.delete: {
             if (
-                protectionCode !== 0 ||
+                protectionCode !== externalMemoryProtectionCodes.none ||
                 position !== 0n ||
                 payloadByteLength !== 0n
             ) {
@@ -372,7 +388,7 @@ export const decodeCommonProofExternalMemoryRequest = (
     ) {
         throw new CommonProofWorkerRuntimeError(
             'MalformedRequest',
-            'The common-proof storage request length is outside the fixed worker profile.',
+            'The common-proof storage request length exceeds the absolute worker safety bound.',
         );
     }
     const exactViewSnapshot = encodedRequest.slice();
@@ -408,7 +424,7 @@ export const decodeCommonProofExternalMemoryRequest = (
     ) {
         throw new CommonProofWorkerRuntimeError(
             'ResourceLimit',
-            'The common-proof storage request exceeds the fixed worker profile.',
+            'The common-proof storage request exceeds the absolute worker safety bound.',
         );
     }
     const minimumOperationByteLength =

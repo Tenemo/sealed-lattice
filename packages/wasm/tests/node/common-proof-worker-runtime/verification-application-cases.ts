@@ -423,8 +423,9 @@ describe('common-proof verification and application runtime', () => {
         expect(cancellationCount).toBe(1);
     });
 
-    it('accepts the exact selected proof stream ceiling and refuses one byte beyond it before opening the kernel', async () => {
-        const maximumProofByteLength = 5_242_880;
+    it('accepts a proof above the phone planning target and refuses the absolute safety-bound overrun before opening the kernel', async () => {
+        const abovePlanningTargetProofByteLength = 5_242_881;
+        const maximumProofSafetyByteLength = 268_435_456;
         let absorbedByteLength = 0;
         let beginCount = 0;
         let discardedCapabilityCount = 0;
@@ -455,7 +456,9 @@ describe('common-proof verification and application runtime', () => {
                     operationHandle,
                 ) => {
                     expect(operationHandle).toBe(74);
-                    expect(absorbedByteLength).toBe(maximumProofByteLength);
+                    expect(absorbedByteLength).toBe(
+                        abovePlanningTargetProofByteLength,
+                    );
                     return 0;
                 },
                 sealed_lattice_common_proof_verification_poll: (
@@ -500,8 +503,8 @@ describe('common-proof verification and application runtime', () => {
             }),
             160,
         );
-        const exactCeilingStore: AuthenticatedCommonProofInputStore = {
-            declaredByteLength: maximumProofByteLength,
+        const abovePlanningTargetStore: AuthenticatedCommonProofInputStore = {
+            declaredByteLength: abovePlanningTargetProofByteLength,
             readCommittedChunk: (chunkIndex, exactByteLength) =>
                 Promise.resolve(
                     new Uint8Array(exactByteLength).fill(chunkIndex + 1),
@@ -511,7 +514,7 @@ describe('common-proof verification and application runtime', () => {
         const capability = await runPreparedCommonProofVerificationWorker(
             runtime,
             64,
-            exactCeilingStore,
+            abovePlanningTargetStore,
             { yieldControl: () => Promise.resolve() },
         );
         expect(beginCount).toBe(1);
@@ -520,11 +523,9 @@ describe('common-proof verification and application runtime', () => {
 
         await expect(
             runPreparedCommonProofVerificationWorker(runtime, 65, {
-                declaredByteLength: maximumProofByteLength + 1,
+                declaredByteLength: maximumProofSafetyByteLength + 1,
                 readCommittedChunk: () =>
-                    Promise.reject(
-                        new Error('Out-of-profile input must not be read.'),
-                    ),
+                    Promise.reject(new Error('Unsafe input must not be read.')),
             }),
         ).rejects.toMatchObject({ code: 'ResourceLimit' });
         expect(beginCount).toBe(1);

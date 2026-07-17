@@ -5,6 +5,7 @@ use super::{
 };
 
 pub const PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER: u16 = 0x0102;
+pub const PROOF_OBJECT_HEADER_SCHEMA_VERSION: u16 = 1;
 pub const PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER: u16 = 0x010a;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
@@ -63,7 +64,7 @@ impl ProofObjectHeader {
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
         Ok(CanonicalTuple::new(
             PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
+            PROOF_OBJECT_HEADER_SCHEMA_VERSION,
             vec![CanonicalItem::variable_bytes(
                 &self.canonical_application_statement_bytes,
             )?],

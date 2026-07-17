@@ -415,7 +415,7 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
         super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
         PROOF_UNIQUE_QUERY_COUNT,
     )
-    .expect("the application reservation fits the worker ceiling");
+    .expect("the application reservation fits the worker safety bound");
     let binding = CommonProofVerificationBinding::new(
         [0x11; 64],
         [0x32; 64],

@@ -60,10 +60,11 @@ pub(super) fn verify_target_decryption_share_proof_material(
         ));
     }
     // Keep the one-shot bytes owned by this verification call. The common
-    // proof-suite verifier will consume this source once schema 0x1621 lands.
+    // proof-suite verifier will consume this source once the target-share
+    // proof relation lands.
     let _proof_material_bytes = input.proof_material_attempt.proof_bytes;
     Err(CanonicalError::new(
         CanonicalErrorCode::InvalidProtocolObject,
-        "target-decryption share verification requires schema 0x1621 to be verified by the common proof suite",
+        "target-decryption share verification requires the target-share relation to be verified by the common proof suite",
     ))
 }

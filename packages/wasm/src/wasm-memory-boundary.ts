@@ -31,14 +31,14 @@ export class WasmMemoryBoundary {
         this.#createResourceError = options.createResourceError;
         this.#label = options.label;
         this.#observeMemoryByteLength = options.observeMemoryByteLength;
-        this.assertWithinProfile();
+        this.assertWithinSafetyBound();
     }
 
     public allocate(byteLength: number): number {
         this.validateAllocationByteLength(byteLength);
 
         const pointer = this.#context.allocate(byteLength) >>> 0;
-        this.assertWithinProfile();
+        this.assertWithinSafetyBound();
         if (
             pointer === 0 ||
             pointer + byteLength > this.#context.memory.buffer.byteLength
@@ -58,10 +58,10 @@ export class WasmMemoryBoundary {
             byteLength > foundationProfile.maximumCopiedBufferByteLength
         ) {
             throw this.#createResourceError(
-                `The ${this.#label} allocation exceeds the WASM memory profile.`,
+                `The ${this.#label} allocation exceeds the WASM copy safety bound.`,
             );
         }
-        this.assertWithinProfile();
+        this.assertWithinSafetyBound();
     }
 
     public allocateZeroedWords(wordCount: number): number {
@@ -123,13 +123,13 @@ export class WasmMemoryBoundary {
         this.#context.deallocate(pointer, byteLength);
     }
 
-    public assertWithinProfile(): void {
+    public assertWithinSafetyBound(): void {
         if (
             this.#context.memory.buffer.byteLength >
             foundationProfile.maximumWasmMemoryByteLength
         ) {
             throw this.#createResourceError(
-                `The ${this.#label} WASM memory exceeds the supported profile.`,
+                `The ${this.#label} WASM memory exceeds the absolute safety bound.`,
             );
         }
     }

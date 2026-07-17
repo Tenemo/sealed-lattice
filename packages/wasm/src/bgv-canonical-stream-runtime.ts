@@ -266,7 +266,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 foundationProfile.maximumWasmMemoryByteLength - totalByteLength
             ) {
                 throw new CanonicalStreamResourceError(
-                    'Retaining the BGV canonical material would exceed the remaining WASM memory profile.',
+                    'Retaining the BGV canonical material would exceed the absolute WASM memory safety bound.',
                 );
             }
             const lease: ActiveLease = {

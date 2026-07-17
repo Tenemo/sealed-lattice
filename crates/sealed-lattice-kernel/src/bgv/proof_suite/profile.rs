@@ -15,7 +15,8 @@ use crate::{
         setup::SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
     },
     foundation::{
-        CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
+        CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
+        FOUNDATION_PROFILE, ProofApplicationSlotCeilings as ProofFamilies,
     },
 };
 
@@ -44,7 +45,18 @@ const SCHEMA_VERSION: u16 = 1;
 const PROOF_PROFILE_SET_VERSION: u16 = 2;
 
 pub(crate) const FIRST_PROFILE_APPLICATION_FAMILIES: [u16; 12] = [
-    0x1211, 0x1212, 0x1213, 0x1214, 0x1215, 0x1216, 0x1217, 0x1218, 0x1302, 0x1621, 0x2110, 0x2111,
+    ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+    ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
 ];
 
 pub(crate) const PROOF_EVALUATION_BLOWUP_FACTOR: u32 = 8;
@@ -332,8 +344,10 @@ pub(crate) enum EvaluatorKeyShareSourceKind {
 impl EvaluatorKeyShareSourceKind {
     const fn application_statement_schema_identifier(self) -> u16 {
         match self {
-            Self::Relinearization => 0x1216,
-            Self::Galois => 0x1217,
+            Self::Relinearization => {
+                ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+            }
+            Self::Galois => ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
         }
     }
 }
@@ -504,11 +518,25 @@ impl RelationRootEndpoint {
 
         let roster_expected = matches!(
             family,
-            0x2110 | 0x2111 | 0x1211 | 0x1212 | 0x1214 | 0x1216 | 0x1217 | 0x1302 | 0x1621
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER
         );
-        let schedule_expected = matches!(family, 0x1214..=0x1218);
-        let top_count_expected = family == 0x1218;
-        let producer_sequence_expected = family == 0x1302;
+        let schedule_expected = matches!(
+            family,
+            ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+                ..=ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+        );
+        let top_count_expected =
+            family == ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+        let producer_sequence_expected =
+            family == ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER;
         if self.roster_position.is_some() != roster_expected
             || self.schedule_position.is_some() != schedule_expected
             || self.top_count.is_some() != top_count_expected
@@ -1067,19 +1095,37 @@ fn derive_root_compatibility_edges(
     // recipients by presenting a different edge list.
     let vss_output_template = ordered_bound_root_slots(
         relation_plans,
-        RelationRootApplicationCoordinates::new(0x2110, Some(0), None, None, None),
+        RelationRootApplicationCoordinates::new(
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+            Some(0),
+            None,
+            None,
+            None,
+        ),
         RelationRootConstructionKind::CommittedMaterial,
         BoundTreeRootUse::Output,
     )?;
     let aggregate_input_template = ordered_bound_root_slots(
         relation_plans,
-        RelationRootApplicationCoordinates::new(0x2111, Some(0), None, None, None),
+        RelationRootApplicationCoordinates::new(
+            ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            Some(0),
+            None,
+            None,
+            None,
+        ),
         RelationRootConstructionKind::CommittedMaterial,
         BoundTreeRootUse::Input,
     )?;
     let aggregate_output_template = ordered_bound_root_slots(
         relation_plans,
-        RelationRootApplicationCoordinates::new(0x2111, Some(0), None, None, None),
+        RelationRootApplicationCoordinates::new(
+            ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            Some(0),
+            None,
+            None,
+            None,
+        ),
         RelationRootConstructionKind::CommittedMaterial,
         BoundTreeRootUse::Output,
     )?;
@@ -1103,7 +1149,7 @@ fn derive_root_compatibility_edges(
         let dealer_outputs = ordered_bound_root_slots(
             relation_plans,
             RelationRootApplicationCoordinates::new(
-                0x2110,
+                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
                 Some(dealer_position),
                 None,
                 None,
@@ -1117,7 +1163,7 @@ fn derive_root_compatibility_edges(
         let same_secret_inputs = ordered_bound_root_slots(
             relation_plans,
             RelationRootApplicationCoordinates::new(
-                0x1211,
+                ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
                 Some(dealer_position),
                 None,
                 None,
@@ -1142,7 +1188,7 @@ fn derive_root_compatibility_edges(
             let recipient_inputs = ordered_bound_root_slots(
                 relation_plans,
                 RelationRootApplicationCoordinates::new(
-                    0x2111,
+                    ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
                     Some(recipient_position),
                     None,
                     None,
@@ -1176,7 +1222,7 @@ fn derive_root_compatibility_edges(
         let aggregate_outputs = ordered_bound_root_slots(
             relation_plans,
             RelationRootApplicationCoordinates::new(
-                0x2111,
+                ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
                 Some(recipient_position),
                 None,
                 None,
@@ -1188,7 +1234,7 @@ fn derive_root_compatibility_edges(
         let target_inputs = ordered_bound_root_slots(
             relation_plans,
             RelationRootApplicationCoordinates::new(
-                0x1621,
+                ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
                 Some(recipient_position),
                 None,
                 None,
@@ -1212,14 +1258,14 @@ fn derive_root_compatibility_edges(
         }
     }
 
-    // Same-secret anchors are produced by 0x1211 and consumed by the
-    // public-key-share relation in the same roster slot.  Both sides are
+    // Same-secret anchors are consumed by the public-key-share relation in
+    // the same roster slot. Both sides are
     // ordered by the checked commitment-modulus catalog.
     for roster_position in 0..topology.roster_size {
         let anchor_outputs = ordered_bound_root_slots(
             relation_plans,
             RelationRootApplicationCoordinates::new(
-                0x1211,
+                ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
                 Some(roster_position),
                 None,
                 None,
@@ -1231,7 +1277,7 @@ fn derive_root_compatibility_edges(
         let public_key_anchor_inputs = ordered_bound_root_slots(
             relation_plans,
             RelationRootApplicationCoordinates::new(
-                0x1212,
+                ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
                 Some(roster_position),
                 None,
                 None,
@@ -1258,9 +1304,23 @@ fn derive_root_compatibility_edges(
         let trustee_anchor_outputs = anchor_outputs
             .get(..SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
             .ok_or(ProofProfileError::InvalidRootTopology)?;
-        for (trustee_family, preceding_input_root_count, first_anchor_source_ordinal) in
-            [(0x1214, 0_usize, 2_u32), (0x1216, 4, 5), (0x1217, 0, 1)]
-        {
+        for (trustee_family, preceding_input_root_count, first_anchor_source_ordinal) in [
+            (
+                ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+                0_usize,
+                2_u32,
+            ),
+            (
+                ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+                4,
+                5,
+            ),
+            (
+                ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                0,
+                1,
+            ),
+        ] {
             let trustee_plan = relation_plan_artifact(relation_plans, trustee_family)?;
             for variant in trustee_plan.compiled_plan().variants() {
                 let schedule_position = variant
@@ -1311,13 +1371,25 @@ fn derive_root_compatibility_edges(
 
     let collective_public_key_inputs = ordered_bound_root_slots(
         relation_plans,
-        RelationRootApplicationCoordinates::new(0x1213, None, None, None, None),
+        RelationRootApplicationCoordinates::new(
+            ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+            None,
+            None,
+            None,
+        ),
         RelationRootConstructionKind::SetupPolynomial,
         BoundTreeRootUse::Input,
     )?;
     let collective_public_key_outputs = ordered_bound_root_slots(
         relation_plans,
-        RelationRootApplicationCoordinates::new(0x1213, None, None, None, None),
+        RelationRootApplicationCoordinates::new(
+            ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+            None,
+            None,
+            None,
+        ),
         RelationRootConstructionKind::SetupPolynomial,
         BoundTreeRootUse::Output,
     )?;
@@ -1327,7 +1399,7 @@ fn derive_root_compatibility_edges(
         let public_key_outputs = ordered_bound_root_slots(
             relation_plans,
             RelationRootApplicationCoordinates::new(
-                0x1212,
+                ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
                 Some(roster_position),
                 None,
                 None,
@@ -1542,7 +1614,10 @@ fn derive_rkg_aggregate_edges(
     edges: &mut Vec<RelationRootCompatibilityEdge>,
     assigned_consumers: &mut BTreeSet<RelationRootEndpoint>,
 ) -> Result<(), ProofProfileError> {
-    let aggregate_plan = relation_plan_artifact(relation_plans, 0x1215)?;
+    let aggregate_plan = relation_plan_artifact(
+        relation_plans,
+        ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    )?;
     let roster_size = usize::from(topology.roster_size);
     for variant in aggregate_plan.compiled_plan().variants() {
         let schedule_position = variant
@@ -1554,7 +1629,7 @@ fn derive_rkg_aggregate_edges(
         let aggregate_inputs = ordered_bound_root_slots(
             relation_plans,
             RelationRootApplicationCoordinates::new(
-                0x1215,
+                ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
                 None,
                 Some(schedule_position),
                 None,
@@ -1566,7 +1641,7 @@ fn derive_rkg_aggregate_edges(
         let aggregate_outputs = ordered_bound_root_slots(
             relation_plans,
             RelationRootApplicationCoordinates::new(
-                0x1215,
+                ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
                 None,
                 Some(schedule_position),
                 None,
@@ -1581,7 +1656,7 @@ fn derive_rkg_aggregate_edges(
             let trustee_outputs = ordered_bound_root_slots(
                 relation_plans,
                 RelationRootApplicationCoordinates::new(
-                    0x1214,
+                    ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
                     Some(roster_position),
                     Some(schedule_position),
                     None,
@@ -1607,7 +1682,7 @@ fn derive_rkg_aggregate_edges(
             let round_two_inputs = ordered_bound_root_slots(
                 relation_plans,
                 RelationRootApplicationCoordinates::new(
-                    0x1216,
+                    ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
                     Some(roster_position),
                     Some(schedule_position),
                     None,
@@ -1656,7 +1731,7 @@ fn derive_evaluator_aggregate_edges(
             let evaluator_inputs = ordered_bound_root_slots(
                 relation_plans,
                 RelationRootApplicationCoordinates::new(
-                    0x1218,
+                    ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
                     None,
                     Some(entry_ordinal),
                     Some(top_count),
@@ -1668,7 +1743,7 @@ fn derive_evaluator_aggregate_edges(
             let evaluator_outputs = ordered_bound_root_slots(
                 relation_plans,
                 RelationRootApplicationCoordinates::new(
-                    0x1218,
+                    ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
                     None,
                     Some(entry_ordinal),
                     Some(top_count),
@@ -1721,22 +1796,31 @@ fn all_bound_root_slots(
             let top_count = variant.top_count();
             let roster_positions = if matches!(
                 family,
-                0x2110 | 0x2111 | 0x1211 | 0x1212 | 0x1214 | 0x1216 | 0x1217 | 0x1302 | 0x1621
+                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER
             ) {
                 (0..topology.roster_size).map(Some).collect::<Vec<_>>()
             } else {
                 vec![None]
             };
-            let producer_sequences = if family == 0x1302 {
-                topology
-                    .ordered_ballot_producer_sequences
-                    .iter()
-                    .copied()
-                    .map(Some)
-                    .collect::<Vec<_>>()
-            } else {
-                vec![None]
-            };
+            let producer_sequences =
+                if family == ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER {
+                    topology
+                        .ordered_ballot_producer_sequences
+                        .iter()
+                        .copied()
+                        .map(Some)
+                        .collect::<Vec<_>>()
+                } else {
+                    vec![None]
+                };
             for roster_position in roster_positions.iter().copied() {
                 for producer_sequence in producer_sequences.iter().copied() {
                     for construction_kind in [
@@ -1766,13 +1850,35 @@ fn all_bound_root_slots(
 fn allowed_root_transition(producer_family: u16, consumer_family: u16) -> bool {
     matches!(
         (producer_family, consumer_family),
-        (0x2110, 0x2111 | 0x1211)
-            | (0x2111, 0x1621)
-            | (0x1211, 0x1212 | 0x1214 | 0x1216 | 0x1217)
-            | (0x1212, 0x1213)
-            | (0x1214, 0x1215 | 0x1216)
-            | (0x1215, 0x1216 | 0x1217)
-            | (0x1216 | 0x1217, 0x1218)
+        (
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        ) | (
+            ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
     )
 }
 
@@ -1785,17 +1891,39 @@ fn root_scopes_are_compatible(
         consumer.application_statement_schema_identifier,
     );
     let roster_matches = match families {
-        (0x2110, 0x2111) | (0x1212, 0x1213) | (0x1214, 0x1215) | (0x1216 | 0x1217, 0x1218) => true,
+        (
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        | (
+            ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        | (
+            ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        | (
+            ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        ) => true,
         _ => producer
             .roster_position
             .zip(consumer.roster_position)
             .is_none_or(|(left, right)| left == right),
     };
-    let schedule_matches = matches!(families, (0x1216 | 0x1217, 0x1218))
-        || producer
-            .schedule_position
-            .zip(consumer.schedule_position)
-            .is_none_or(|(left, right)| left == right);
+    let schedule_matches = matches!(
+        families,
+        (
+            ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+    ) || producer
+        .schedule_position
+        .zip(consumer.schedule_position)
+        .is_none_or(|(left, right)| left == right);
     roster_matches && schedule_matches
 }
 
@@ -1960,27 +2088,86 @@ mod tests {
 
     #[test]
     fn root_endpoint_presence_is_derived_from_the_family() {
-        assert!(RelationRootEndpoint::new(0x1216, Some(0), Some(3), None, None, 4).is_ok());
+        assert!(
+            RelationRootEndpoint::new(
+                ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+                Some(0),
+                Some(3),
+                None,
+                None,
+                4,
+            )
+            .is_ok()
+        );
         assert_eq!(
-            RelationRootEndpoint::new(0x1216, Some(0), None, None, None, 4),
+            RelationRootEndpoint::new(
+                ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+                Some(0),
+                None,
+                None,
+                None,
+                4,
+            ),
             Err(ProofProfileError::InvalidRootEndpoint),
         );
-        assert!(RelationRootEndpoint::new(0x1218, None, Some(0), Some(20), None, 0).is_ok());
+        assert!(
+            RelationRootEndpoint::new(
+                ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+                Some(0),
+                Some(20),
+                None,
+                0,
+            )
+            .is_ok()
+        );
         assert_eq!(
-            RelationRootEndpoint::new(0x1218, None, Some(0), Some(21), None, 0),
+            RelationRootEndpoint::new(
+                ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+                Some(0),
+                Some(21),
+                None,
+                0,
+            ),
             Err(ProofProfileError::InvalidRootEndpoint),
         );
         assert_eq!(
-            RelationRootEndpoint::new(0x1218, None, None, Some(20), None, 0),
+            RelationRootEndpoint::new(
+                ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+                None,
+                Some(20),
+                None,
+                0,
+            ),
             Err(ProofProfileError::InvalidRootEndpoint),
         );
-        assert!(RelationRootEndpoint::new(0x1302, Some(9), None, None, Some(2), 1).is_ok());
+        assert!(
+            RelationRootEndpoint::new(
+                ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+                Some(9),
+                None,
+                None,
+                Some(2),
+                1,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn anchor_edge_rejects_an_input_as_its_producer() {
-        let producer = synthetic_anchor_root(0x1211, 3, BoundTreeRootUse::Input);
-        let consumer = synthetic_anchor_root(0x1212, 4, BoundTreeRootUse::Input);
+        let producer = synthetic_anchor_root(
+            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            3,
+            BoundTreeRootUse::Input,
+        );
+        let consumer = synthetic_anchor_root(
+            ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            4,
+            BoundTreeRootUse::Input,
+        );
         let mut edges = Vec::new();
         let mut assigned_consumers = BTreeSet::new();
 
@@ -2000,9 +2187,21 @@ mod tests {
 
     #[test]
     fn anchor_edge_rejects_a_second_producer_for_one_consumer() {
-        let first_producer = synthetic_anchor_root(0x1211, 3, BoundTreeRootUse::Output);
-        let second_producer = synthetic_anchor_root(0x1211, 5, BoundTreeRootUse::Output);
-        let consumer = synthetic_anchor_root(0x1212, 4, BoundTreeRootUse::Input);
+        let first_producer = synthetic_anchor_root(
+            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            3,
+            BoundTreeRootUse::Output,
+        );
+        let second_producer = synthetic_anchor_root(
+            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            5,
+            BoundTreeRootUse::Output,
+        );
+        let consumer = synthetic_anchor_root(
+            ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            4,
+            BoundTreeRootUse::Input,
+        );
         let mut edges = Vec::new();
         let mut assigned_consumers = BTreeSet::new();
 

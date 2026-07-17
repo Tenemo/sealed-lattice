@@ -5,7 +5,7 @@ import {
     resolveVerifiedTranscriptObjectKernelAuthorization,
     type VerifiedTranscriptObject,
 } from './canonical-board-runtime.js';
-import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
+import { decodeWasmRefusalStatus } from './transcript-core-bridge/kernel-errors.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 
 const finalityVerifierConfigurationVersion = 1;
@@ -178,16 +178,11 @@ const isUint8Array = (value: unknown): value is Uint8Array => {
 };
 
 const decodeStatus = (status: number): RefusalReason | undefined => {
-    if (status === 0) {
-        return undefined;
-    }
-    const refusalReason = refusalReasonByCode.get(status);
-    if (refusalReason === undefined) {
-        throw new FinalityVerifierInternalError(
-            'The WASM finality verifier returned an unknown status code.',
-        );
-    }
-    return refusalReason;
+    return decodeWasmRefusalStatus(
+        status,
+        FinalityVerifierInternalError,
+        'The WASM finality verifier returned an unknown status code.',
+    );
 };
 
 const requireWasm32Handle = (value: unknown, label: string): void => {

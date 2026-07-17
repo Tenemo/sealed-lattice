@@ -773,7 +773,8 @@ describe('Authenticated checkpoint store', () => {
                 encryptionKey,
                 limits: {
                     ...checkpointLimits,
-                    maximumCheckpointStateByteLength: 2_147_483_649,
+                    maximumCheckpointStateByteLength:
+                        foundationProfile.maximumCanonicalStreamByteLength + 1,
                 },
                 store,
             }),

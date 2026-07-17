@@ -7,12 +7,12 @@ use std::{
 use super::schemas::EvaluatorReplayPayload;
 use super::{
     CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem,
-    CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType,
-    FoundationSchemaError, Hash512, ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster,
-    SignedCarrier, StateCapabilityKind, StateError, StateOutputIntentPayload,
-    StateReservationIntentPayload, StateWitnessVoteKind, StateWitnessVotePayload,
-    StorageRootCommitmentPayload, StreamDescriptor, VerificationResult, derive_state_key,
-    derive_state_witness_vote_sequence,
+    CanonicalItemType, CanonicalTuple, FINALITY_SIGNATURE_PAYLOAD_SCHEMA_IDENTIFIER,
+    FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError, Hash512, ObjectEnvelope,
+    ParticipantIdentity, RefusalReason, Roster, SignedCarrier, StateCapabilityKind, StateError,
+    StateOutputIntentPayload, StateReservationIntentPayload, StateWitnessVoteKind,
+    StateWitnessVotePayload, StorageRootCommitmentPayload, StreamDescriptor, VerificationResult,
+    derive_state_key, derive_state_witness_vote_sequence,
 };
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
@@ -26,11 +26,10 @@ const BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1301;
 const BALLOT_CANDIDATE_LIST_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1400;
 const BALLOT_CANDIDATE_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x1401;
 const AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1404;
-const FINALITY_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1601;
 const TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1620;
 pub(crate) const MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT: u32 = 4_096;
 
-/// Resource and suite limits supplied by the already verified suite capability.
+/// Suite-owned multiplicity limits and independent runtime safety bounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanonicalBoardLimits {
     pub maximum_ballot_attempts_per_participant: u64,
@@ -397,7 +396,7 @@ impl CanonicalBoardVerifier {
         if framed_byte_length > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
             return Err(CanonicalBoardError::new(
                 RefusalReason::OutsideSupportedProfile,
-                "canonical-board carrier bytes exceed the copied-buffer profile",
+                "canonical-board carrier bytes exceed the copied-buffer safety bound",
             ));
         }
 
@@ -481,7 +480,7 @@ impl CanonicalBoardVerifier {
         {
             return Err(CanonicalBoardError::new(
                 RefusalReason::OutsideSupportedProfile,
-                "canonical-board retained carrier bytes exceed the suite limit",
+                "canonical-board retained carrier bytes exceed the runtime safety bound",
             ));
         }
 
@@ -1293,7 +1292,7 @@ fn decode_typed_payload(
             })
         }
         FoundationObjectType::FinalitySignature => {
-            require_payload_header(&tuple, FINALITY_PAYLOAD_SCHEMA_IDENTIFIER, 1)?;
+            require_payload_header(&tuple, FINALITY_SIGNATURE_PAYLOAD_SCHEMA_IDENTIFIER, 1)?;
             read_hash(&tuple.items[0])?;
             Ok(TypedPayload::Finality)
         }

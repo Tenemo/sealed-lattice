@@ -1,10 +1,11 @@
 import { hexToBytes } from '@noble/hashes/utils.js';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
-import type {
-    ProtocolHash,
-    RefusalReason,
-    SetupMailboxSlot,
+import {
+    recipientPrivateVssShareMailboxPayloadType,
+    type ProtocolHash,
+    type RefusalReason,
+    type SetupMailboxSlot,
 } from '@sealed-lattice/types';
 
 import { webCryptoRandomBytes } from './web-crypto.js';
@@ -312,7 +313,7 @@ const copySetupMailboxSlot = (value: SetupMailboxSlot): SetupMailboxSlot => {
     }
     const payloadType = (value as Readonly<{ payloadType?: unknown }>)
         .payloadType;
-    if (payloadType !== 2) {
+    if (payloadType !== recipientPrivateVssShareMailboxPayloadType) {
         throw new BrowserLocalKeyProviderError(
             'MalformedRandomness',
             'The setup-mailbox payload type must be recipient-private VSS.',

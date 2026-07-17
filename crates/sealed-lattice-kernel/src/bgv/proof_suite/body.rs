@@ -6,24 +6,24 @@ use std::{
 use crate::foundation::{CanonicalItem, CanonicalItemType, hash_foundation_tuple_512};
 
 use super::{
+    committed_material::COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
     decoder::{BoundedProofDecoder, ProofByteSource, ProofDecodeError},
     field::ProofChallengeExtensionElement,
     merkle::{
-        ProofAuthenticationNode, ProofLeafVisibility, ProofMerkleError, ProofMerkleTreeContext,
-        ProofOraclePhasePairLeaf, ProofTreeRole, ProofTreeValue, verify_authentication_frontier,
+        PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER,
+        PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER, ProofAuthenticationNode,
+        ProofLeafVisibility, ProofMerkleError, ProofMerkleTreeContext, ProofOraclePhasePairLeaf,
+        ProofTreeRole, ProofTreeValue, verify_authentication_frontier,
     },
+    setup_public_polynomial::SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
     transcript::{
         CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber, CommonProofTranscriptSchedule,
         TranscriptError,
     },
 };
 
-const PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER: u16 = 0x0107;
-const PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER: u16 = 0x0108;
-const PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER: u16 = 0x0106;
-const PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER: u16 = 0x0104;
-const COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER: u16 = 0x2102;
-const SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER: u16 = 0x121c;
+pub(super) const PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER: u16 = 0x0107;
+pub(super) const PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER: u16 = 0x0108;
 const SCHEMA_VERSION: u16 = 1;
 const SECRET_LEAF_SALT_BYTE_LENGTH: usize = 48;
 const COMMITTED_MATERIAL_ROW_WIDTH: u32 = 4;

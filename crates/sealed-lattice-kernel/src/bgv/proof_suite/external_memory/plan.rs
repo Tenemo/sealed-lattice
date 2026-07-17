@@ -89,8 +89,8 @@ impl ProofExternalMemoryObjectPlan {
     }
 }
 
-/// Hard resource ceilings for one generated storage/liveness plan.  These are
-/// runtime controls, not proof fields and not verifier inputs.
+/// Absolute safety bounds for one generated storage/liveness plan. These are
+/// runtime controls, not proof fields, phone targets, or verifier inputs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ProofExternalMemoryPlan {
     pub(super) step_count: u32,

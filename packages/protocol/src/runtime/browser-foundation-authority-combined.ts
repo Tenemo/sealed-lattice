@@ -438,7 +438,7 @@ const copyBytes = (
     ) {
         throw new BrowserFoundationAuthorityError(
             'InvalidInput',
-            `${label} is not a byte array within the browser foundation profile.`,
+            `${label} is not a byte array within the browser foundation safety bound.`,
         );
     }
     return value.slice();

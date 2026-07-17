@@ -15,7 +15,11 @@ use super::{CanonicalItem, hash_foundation_tuple_512 as hash512};
 
 const CHUNK_DIGEST_DOMAIN: &str = "sealed-lattice/transport/chunk/v1";
 const FULL_OBJECT_DIGEST_DOMAIN: &str = "sealed-lattice/transport/full-object/v1";
-pub const MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH: u64 = 2_147_483_648;
+const CANONICAL_RAW_BYTES_LENGTH_PREFIX_BYTE_LENGTH: u32 = 4;
+/// Largest payload whose four-byte length prefix and bytes fit a canonical u32 item length.
+/// Phone feasibility is measured separately from this absolute transport safety bound.
+pub const MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH: u64 =
+    u32::MAX as u64 - CANONICAL_RAW_BYTES_LENGTH_PREFIX_BYTE_LENGTH as u64;
 
 /// The verifier-owned stream domains accepted by the foundation profile.
 ///
@@ -673,7 +677,7 @@ fn full_object_hasher(
     let object_byte_length =
         u32::try_from(total_byte_length).map_err(|_| RefusalReason::OutsideSupportedProfile)?;
     let raw_item_byte_length = object_byte_length
-        .checked_add(4)
+        .checked_add(CANONICAL_RAW_BYTES_LENGTH_PREFIX_BYTE_LENGTH)
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
     let mut hasher = Shake256::default();
     hasher.update(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
@@ -1110,7 +1114,14 @@ mod tests {
         assert!(
             CanonicalStreamWriter::new(
                 CanonicalStreamDomain::EvaluatorKeyStore,
-                u64::from(u32::MAX),
+                MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
+            )
+            .is_ok()
+        );
+        assert!(
+            CanonicalStreamWriter::new(
+                CanonicalStreamDomain::EvaluatorKeyStore,
+                MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH + 1,
             )
             .is_err()
         );

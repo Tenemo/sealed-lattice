@@ -1,23 +1,21 @@
 //! Exact allowlist checks for the selected fixed suite.
 
 use crate::bgv::{
-    key_switch_topology::{
-        KEY_SWITCH_DATA_PRIMES_PER_BLOCK, KEY_SWITCH_SPECIAL_PRIMES, KeySwitchDecompositionTopology,
-    },
+    key_switch_topology::{KEY_SWITCH_DATA_PRIMES_PER_BLOCK, KEY_SWITCH_SPECIAL_PRIMES},
     parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
-    proof_suite::{
-        MAXIMUM_COMMON_PROOF_BYTE_LENGTH, SelectedEvaluatorEntryKind,
-        selected_evaluator_entry_positions,
-    },
 };
 
 #[cfg(test)]
-use crate::bgv::evaluator::program::selected_evaluator_program_set;
+use crate::bgv::{
+    evaluator::program::selected_evaluator_program_set,
+    key_switch_topology::KeySwitchDecompositionTopology,
+    proof_suite::{SelectedEvaluatorEntryKind, selected_evaluator_entry_positions},
+};
 
 use super::schemas::SchemaResult;
 use super::{
     ArtifactKind, ArtifactReference, FOUNDATION_PROFILE, FoundationSchemaError, Hash512,
-    RefusalReason, SuiteByteLimits, SuiteCountLimits, SuiteRecord,
+    RefusalReason, SuiteCountLimits, SuiteRecord,
 };
 
 #[cfg(test)]
@@ -33,15 +31,12 @@ pub(crate) const SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u3
 pub(crate) const SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 128;
 pub(crate) const SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION: u32 = 20;
 pub(crate) const SELECTED_MAXIMUM_PROOF_OBJECTS_PER_ACTION: u32 = 269;
-pub(crate) const MOBILE_CEREMONY_UPLOAD_BYTE_CEILING: u64 = 2_147_483_648;
-pub(crate) const SELECTED_MAXIMUM_EXACT_FAMILY_PROOF_BYTE_LENGTH: u64 = 149_419_382;
-pub(crate) const SELECTED_EXACT_FAMILY_PROOF_BYTES_PER_ACTION: u64 = 9_150_628_410;
 
 const SELECTED_CANDIDATE_SUITE_IDENTIFIER: Hash512 = Hash512::from_bytes([
-    0x02, 0x23, 0xd2, 0x39, 0xfe, 0x4c, 0xf0, 0xb6, 0xa2, 0xc0, 0x9a, 0xc6, 0xa7, 0x6a, 0x6b, 0x92,
-    0x3a, 0x37, 0xc5, 0xf9, 0x8e, 0x74, 0x05, 0x05, 0x89, 0xf2, 0x55, 0x9e, 0xef, 0x7a, 0x90, 0xf2,
-    0x41, 0x77, 0x0f, 0xa7, 0xda, 0x54, 0x5d, 0x5b, 0x83, 0x4a, 0x9b, 0x3e, 0x73, 0x66, 0xf1, 0x75,
-    0x11, 0xaa, 0x02, 0x8c, 0x66, 0xf8, 0x91, 0x48, 0xeb, 0x7d, 0x18, 0x2c, 0xa9, 0x1d, 0x2d, 0xd0,
+    0xaf, 0xda, 0x52, 0x0b, 0xe6, 0xd3, 0x0c, 0x78, 0x60, 0x7a, 0xc5, 0x6a, 0x5e, 0xf5, 0x10, 0x15,
+    0x0f, 0x89, 0x5a, 0x97, 0x34, 0x25, 0xa5, 0x10, 0x8e, 0xd1, 0xee, 0x10, 0x80, 0x00, 0xd2, 0x3c,
+    0x78, 0xbf, 0xe8, 0xbb, 0x65, 0xb6, 0x3f, 0xe7, 0x69, 0x61, 0x9a, 0x43, 0xf2, 0x60, 0x9f, 0x1c,
+    0x2a, 0xf9, 0xf6, 0x5f, 0x22, 0x5f, 0x99, 0x5e, 0x5b, 0x8e, 0x31, 0x1b, 0x7e, 0xaf, 0xbb, 0xaf,
 ]);
 
 const SELECTED_ARTIFACT_REFERENCE_INPUTS: [(ArtifactKind, u64, [u8; 64]); 6] = [
@@ -113,10 +108,9 @@ const SELECTED_ARTIFACT_REFERENCE_INPUTS: [(ArtifactKind, u64, [u8; 64]); 6] = [
     ),
 ];
 
-/// Reserved non-serializable authority shape for a future admissible fixed
-/// suite. The current structural candidate cannot construct this value because
-/// its exact-family proof accounting exceeds the fixed browser ceilings.
-/// Callers cannot supply an identifier or artifact reference as a substitute.
+/// Non-serializable authority for the exact selected cryptographic suite.
+/// Callers cannot supply an identifier, feasibility measurement, or artifact
+/// reference as a substitute for canonical suite selection.
 pub(crate) struct SelectedSuiteCapability {
     suite_identifier: [u8; 64],
 }
@@ -154,6 +148,7 @@ pub(crate) fn select_suite_record(record: &SuiteRecord) -> SchemaResult<Selected
     })
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SelectedEvaluatorResourceAccounting {
     component_material_wire_byte_length: u64,
@@ -168,68 +163,50 @@ pub(crate) struct SelectedEvaluatorResourceAccounting {
     complete_runtime_material_for_ceremony: u64,
 }
 
+#[cfg(test)]
 impl SelectedEvaluatorResourceAccounting {
-    #[cfg(test)]
     pub(crate) const fn component_material_wire_byte_length(self) -> u64 {
         self.component_material_wire_byte_length
     }
 
-    #[cfg(test)]
     pub(crate) const fn component_material_resident_byte_length(self) -> u64 {
         self.component_material_resident_byte_length
     }
 
-    #[cfg(test)]
     pub(crate) const fn source_component_count_per_participant(self) -> u64 {
         self.source_component_count_per_participant
     }
 
-    #[cfg(test)]
     pub(crate) const fn aggregate_component_count(self) -> u64 {
         self.aggregate_component_count
     }
 
-    #[cfg(test)]
     pub(crate) const fn final_evaluator_key_store_wire_byte_length(self) -> u64 {
         self.final_evaluator_key_store_wire_byte_length
     }
 
-    #[cfg(test)]
     pub(crate) const fn final_evaluator_key_store_byte_length(self) -> u64 {
         self.final_evaluator_key_store_byte_length
     }
 
-    #[cfg(test)]
     pub(crate) const fn setup_upload_lower_bound_per_participant(self) -> u64 {
         self.setup_upload_lower_bound_per_participant
     }
 
-    #[cfg(test)]
     pub(crate) const fn ceremony_setup_upload_lower_bound(self) -> u64 {
         self.ceremony_setup_upload_lower_bound
     }
 
-    #[cfg(test)]
     pub(crate) const fn complete_runtime_material_per_participant(self) -> u64 {
         self.complete_runtime_material_per_participant
     }
 
-    #[cfg(test)]
     pub(crate) const fn complete_runtime_material_for_ceremony(self) -> u64 {
         self.complete_runtime_material_for_ceremony
     }
-
-    fn require_mobile_ceremony_upload_limit(self) -> SchemaResult<()> {
-        if self.ceremony_setup_upload_lower_bound > MOBILE_CEREMONY_UPLOAD_BYTE_CEILING {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "selected evaluator setup material exceeds the fixed ceremony upload ceiling",
-            ));
-        }
-        Ok(())
-    }
 }
 
+#[cfg(test)]
 pub(crate) fn selected_evaluator_resource_accounting()
 -> SchemaResult<SelectedEvaluatorResourceAccounting> {
     let positions = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
@@ -325,39 +302,19 @@ pub(crate) fn selected_evaluator_resource_accounting()
 
 pub(crate) fn require_selected_suite_record(record: &SuiteRecord) -> SchemaResult<()> {
     let expected_count_limits = selected_count_limits()?;
-    let expected_byte_limits = selected_byte_limits()?;
     if record.roster_size() != FOUNDATION_PROFILE.participant_count
         || record.byzantine_bound() != FOUNDATION_PROFILE.active_fault_bound
         || record.reconstruction_threshold() != FOUNDATION_PROFILE.reconstruction_threshold
         || record.finality_quorum() != FOUNDATION_PROFILE.finality_quorum
         || record.count_limits() != expected_count_limits
-        || record.byte_limits() != expected_byte_limits
         || record.artifacts() != selected_artifact_references()?.as_slice()
         || record.suite_id()? != SELECTED_CANDIDATE_SUITE_IDENTIFIER
     {
         return Err(invalid_selected_suite(
-            "suite record is not the exact selected roster, count, byte, and artifact profile",
+            "suite record is not the exact selected roster, count, and artifact profile",
         ));
     }
-
-    selected_evaluator_resource_accounting()?.require_mobile_ceremony_upload_limit()?;
-
-    // The structural candidate is reproducible, but its exact-family plans do
-    // not fit the fixed proof-object or per-action browser ceilings. Keep the
-    // authority boundary fail-closed until those relations are redesigned.
-    if SELECTED_MAXIMUM_EXACT_FAMILY_PROOF_BYTE_LENGTH > MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64
-        || SELECTED_EXACT_FAMILY_PROOF_BYTES_PER_ACTION
-            > expected_byte_limits.maximum_proof_bytes_per_action()
-    {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "selected exact-family proof accounting exceeds the fixed browser proof ceilings",
-        ));
-    }
-    Err(FoundationSchemaError::new(
-        RefusalReason::OutsideSupportedProfile,
-        "selected exact-family proof relations are not admitted by the fixed browser profile",
-    ))
+    Ok(())
 }
 
 pub(crate) fn selected_artifact_references() -> SchemaResult<Vec<ArtifactReference>> {
@@ -381,18 +338,6 @@ fn selected_count_limits() -> SchemaResult<SuiteCountLimits> {
         SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
         SELECTED_MAXIMUM_PROOF_OBJECTS_PER_ACTION,
-    )
-}
-
-fn selected_byte_limits() -> SchemaResult<SuiteByteLimits> {
-    SuiteByteLimits::new(
-        44_040_192,
-        293_601_280,
-        1_500_000_000,
-        1_500_000_000,
-        2_000_000_000,
-        1_600_000_000,
-        MOBILE_CEREMONY_UPLOAD_BYTE_CEILING,
     )
 }
 
@@ -447,6 +392,7 @@ fn invalid_selected_suite(message: &'static str) -> FoundationSchemaError {
     FoundationSchemaError::new(RefusalReason::UnsupportedVersionOrSuite, message)
 }
 
+#[cfg(test)]
 fn resource_count_overflow() -> FoundationSchemaError {
     FoundationSchemaError::new(
         RefusalReason::OutsideSupportedProfile,
@@ -462,7 +408,6 @@ mod tests {
     fn selected_candidate_suite_record() -> SuiteRecord {
         SuiteRecord::new(
             selected_count_limits().expect("selected count limits derive"),
-            selected_byte_limits().expect("selected byte limits derive"),
             selected_artifact_references().expect("selected artifact references derive"),
         )
         .expect("selected structural candidate is canonical")
@@ -490,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_evaluator_accounting_fits_the_mobile_ceremony_upload_ceiling() {
+    fn selected_evaluator_accounting_reports_exact_wire_and_resident_measurements() {
         let accounting = selected_evaluator_resource_accounting().expect("resource accounting");
         assert_eq!(accounting.component_material_wire_byte_length(), 6_684_672);
         assert_eq!(
@@ -523,9 +468,6 @@ mod tests {
             accounting.complete_runtime_material_for_ceremony(),
             1_853_882_368
         );
-        accounting
-            .require_mobile_ceremony_upload_limit()
-            .expect("setup upload fits the fixed ceiling");
     }
 
     #[test]
@@ -598,7 +540,6 @@ mod tests {
         );
         let candidate = SuiteRecord::new(
             selected_count_limits().expect("selected count limits derive"),
-            selected_byte_limits().expect("selected byte limits derive"),
             artifacts,
         )
         .expect("candidate suite record");
@@ -608,33 +549,21 @@ mod tests {
         );
         assert_eq!(
             candidate.encode().expect("candidate suite encodes").len(),
-            1_688
+            1_590
         );
     }
 
     #[test]
-    fn exact_structural_candidate_remains_below_the_operative_authority_boundary() {
+    fn exact_selected_suite_mints_authority_independently_of_phone_measurements() {
         let candidate = selected_candidate_suite_record();
+        require_selected_suite_record(&candidate).expect("selected suite is admitted");
+        let capability = select_suite_record(&candidate).expect("selected suite mints authority");
         assert_eq!(
-            require_selected_suite_record(&candidate)
-                .expect_err("oversized exact-family plans cannot become operative")
-                .refusal_reason,
-            RefusalReason::OutsideSupportedProfile
-        );
-        assert_eq!(
-            select_suite_record(&candidate)
-                .err()
-                .expect("oversized exact-family plans cannot mint authority")
-                .refusal_reason,
-            RefusalReason::OutsideSupportedProfile
-        );
-        assert!(
-            SELECTED_MAXIMUM_EXACT_FAMILY_PROOF_BYTE_LENGTH
-                > MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64
-        );
-        assert!(
-            SELECTED_EXACT_FAMILY_PROOF_BYTES_PER_ACTION
-                > candidate.byte_limits().maximum_proof_bytes_per_action()
+            capability.suite_identifier(),
+            candidate
+                .suite_id()
+                .expect("selected suite identifier derives")
+                .into_bytes()
         );
     }
 
@@ -655,11 +584,6 @@ mod tests {
         tuple.items[4] = CanonicalItem::unsigned16(roster_parameters.finality_quorum);
         tuple.items[15] = CanonicalItem::unsigned16(roster_parameters.participant_count);
         tuple.items[18] = CanonicalItem::unsigned32(6);
-        let ballot_package_byte_ceiling = selected_byte_limits()
-            .expect("selected byte limits derive")
-            .maximum_candidate_bytes_per_participant()
-            / u64::from(SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT);
-        tuple.items[21] = CanonicalItem::unsigned64(6 * ballot_package_byte_ceiling);
         let candidate = SuiteRecord::decode(
             &tuple.encode().expect("candidate suite encodes"),
             &CanonicalDecodeLimits::default(),
@@ -700,7 +624,6 @@ mod tests {
         .expect("positive mutated length is structural");
         let wrong_length = SuiteRecord::new(
             selected_count_limits().expect("selected count limits derive"),
-            selected_byte_limits().expect("selected byte limits derive"),
             wrong_length_artifacts,
         )
         .expect("mutated reference remains a structural suite");
@@ -722,7 +645,6 @@ mod tests {
         .expect("mutated hash reference is structural");
         let wrong_hash = SuiteRecord::new(
             selected_count_limits().expect("selected count limits derive"),
-            selected_byte_limits().expect("selected byte limits derive"),
             wrong_hash_artifacts,
         )
         .expect("mutated reference remains a structural suite");
@@ -738,7 +660,6 @@ mod tests {
         assert_eq!(
             SuiteRecord::new(
                 selected_count_limits().expect("selected count limits derive"),
-                selected_byte_limits().expect("selected byte limits derive"),
                 reordered_artifacts,
             )
             .expect_err("artifact order drift must refuse")
@@ -750,12 +671,8 @@ mod tests {
     #[test]
     fn invalid_selected_profile_prevents_authority_minting() {
         let counts = selected_count_limits().expect("selected counts");
-        let suite = SuiteRecord::new(
-            counts,
-            selected_byte_limits().expect("selected byte limits derive"),
-            structural_artifact_references(),
-        )
-        .expect("structural suite");
+        let suite =
+            SuiteRecord::new(counts, structural_artifact_references()).expect("structural suite");
         assert_eq!(
             require_selected_suite_record(&suite)
                 .expect_err("an invalid proof profile cannot cross the operative boundary")

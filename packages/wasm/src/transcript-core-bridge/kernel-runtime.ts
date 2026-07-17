@@ -498,7 +498,7 @@ const assertKernelMemoryWithinProfile = (
     if (memory.buffer.byteLength > maximumByteLength) {
         throw commandBoundaryError(
             'MalformedLength',
-            'The transcript-core kernel exceeded the accepted linear-memory profile.',
+            'The transcript-core kernel exceeded the absolute linear-memory safety bound.',
         );
     }
 };
@@ -691,7 +691,7 @@ const copyIntoKernelMemory = (
     if (requiredByteLength > maximumTranscriptCoreKernelMemoryByteLength) {
         throw commandBoundaryError(
             'MalformedLength',
-            'The transcript-core command allocation exceeds the accepted linear-memory profile.',
+            'The transcript-core command allocation exceeds the absolute linear-memory safety bound.',
         );
     }
     if (requiredByteLength > memory.buffer.byteLength) {

@@ -1422,7 +1422,8 @@ pub(crate) enum CommonProofGenerationInitializationError {
     StoragePlan(ProofExternalMemoryError),
 }
 
-pub(crate) const MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH: u64 = 402_653_184;
+/// Absolute WASM-memory safety bound, distinct from phone qualification targets.
+pub(crate) const MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH: u64 = 671_088_640;
 const COMMON_PROOF_EXECUTOR_RESIDENT_RESERVE_BYTE_LENGTH: u64 = 33_554_432;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

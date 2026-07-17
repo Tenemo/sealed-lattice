@@ -106,7 +106,7 @@ pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
     maximum_score: 10,
     maximum_identifier_byte_length: 128,
     stream_chunk_byte_length: 1_048_576,
-    maximum_copied_buffer_byte_length: 1_572_864,
+    maximum_copied_buffer_byte_length: 8_388_608,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

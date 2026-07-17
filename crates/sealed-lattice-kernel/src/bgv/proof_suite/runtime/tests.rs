@@ -4,6 +4,15 @@ use crate::bgv::proof_suite::{
     ProofExternalMemoryObject, ProofExternalMemoryObjectPlan, ProofExternalMemoryPlan,
     ProofExternalMemoryTransactionOperation,
 };
+
+#[test]
+fn checkpoint_state_format_identifier_does_not_reuse_the_proof_application_slot_schema() {
+    assert_ne!(
+        COMMON_PROOF_CHECKPOINT_STATE_FORMAT_IDENTIFIER,
+        crate::foundation::PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER,
+    );
+}
+
 fn limits() -> CommonProofRuntimeLimits {
     CommonProofRuntimeLimits::new(
         MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
@@ -378,8 +387,8 @@ fn storage_transaction_cancellation_invalidates_an_inflight_request() {
 }
 
 #[test]
-fn runtime_limits_bind_the_fixed_external_memory_chunk_profile_and_reject_overruns() {
-    assert_eq!(MAXIMUM_COMMON_PROOF_BYTE_LENGTH, 5_242_880);
+fn runtime_limits_bind_absolute_safety_bounds_and_reject_overruns() {
+    assert_eq!(MAXIMUM_COMMON_PROOF_BYTE_LENGTH, 268_435_456);
     assert_eq!(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, 1_048_576);
     assert_eq!(
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
@@ -390,7 +399,7 @@ fn runtime_limits_bind_the_fixed_external_memory_chunk_profile_and_reject_overru
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
         MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
     )
-    .expect("the exact fixed worker ceilings are accepted");
+    .expect("the exact worker safety bounds are accepted");
     assert_eq!(
         exact_limits.proof_byte_length(),
         MAXIMUM_COMMON_PROOF_BYTE_LENGTH

@@ -103,8 +103,13 @@ const foundationStorageTransactionLimits = Object.freeze({
         commonProofStorageCapacityProfile.maximumLeaseByteLength,
     maximumLeaseCountPerTransaction:
         commonProofStorageCapacityProfile.maximumLeaseCountPerTransaction,
-    maximumOwnedRecordCount: 40_000,
-    maximumStoredValueByteLength: 320_000_000,
+    maximumOwnedRecordCount:
+        commonProofStorageCapacityProfile.maximumAdditionalOwnedRecordCount +
+        256,
+    maximumStoredValueByteLength:
+        commonProofStorageCapacityProfile.maximumAdditionalStoredValueByteLength +
+        commonProofStorageCapacityProfile.maximumAdditionalAuthenticatedRepairHeadPlaintextByteLength +
+        1_048_576,
     maximumTransactionByteLength:
         commonProofStorageCapacityProfile.maximumTransactionByteLength,
     maximumTransactionLifetimeMilliseconds: 10_000,
@@ -741,7 +746,7 @@ export const openSameRealmCommonProofApplicationHost = async (input?: {
                     ...commonProofInput,
                     capacityReservation,
                     limits: {
-                        maximumExternalMemoryByteLength: 268_435_456n,
+                        maximumExternalMemoryByteLength: 1_073_741_824n,
                         maximumExternalMemoryObjectCount: 4_096,
                         maximumExternalMemoryRecordCount: 17_749,
                         transactionLifetimeMilliseconds: 10_000,

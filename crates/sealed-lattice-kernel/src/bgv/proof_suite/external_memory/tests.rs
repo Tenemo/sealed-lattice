@@ -450,14 +450,14 @@ fn plan_validation_work_is_bounded_by_object_count_not_step_count() {
 }
 
 #[test]
-fn browser_scratch_plan_accepts_exact_object_and_byte_ceilings_and_refuses_one_over() {
+fn browser_scratch_plan_accepts_exact_safety_bounds_and_refuses_one_over() {
     assert_eq!(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT, 4_096);
     assert_eq!(
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
-        268_435_456
+        1_073_741_824
     );
     let exact_object_count = u32::try_from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT)
-        .expect("the fixed object ceiling fits u32");
+        .expect("the object-count safety bound fits u32");
     let exact_object_plan = (0..exact_object_count)
         .map(|object_ordinal| {
             ProofExternalMemoryObjectPlan::new(
@@ -481,7 +481,7 @@ fn browser_scratch_plan_accepts_exact_object_and_byte_ceilings_and_refuses_one_o
         1,
         exact_object_plan,
     )
-    .expect("the exact browser object ceiling is accepted");
+    .expect("the exact browser object safety bound is accepted");
 
     let one_over_object_count = exact_object_count + 1;
     let one_over_object_plan = (0..one_over_object_count)
@@ -555,7 +555,7 @@ fn browser_scratch_plan_accepts_exact_object_and_byte_ceilings_and_refuses_one_o
         )
     };
     plan_at_byte_ceiling(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH)
-        .expect("the exact browser scratch-byte ceiling is accepted");
+        .expect("the exact browser scratch-byte safety bound is accepted");
     assert_eq!(
         plan_at_byte_ceiling(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH + 1),
         Err(ProofExternalMemoryError::ResourceLimitExceeded),
@@ -816,7 +816,7 @@ fn worker_response_decoder_binds_sequence_operation_object_range_and_digest() {
 }
 
 #[test]
-fn browser_transaction_boundary_enforces_both_resource_ceilings_and_redacts_payloads() {
+fn browser_transaction_boundary_enforces_both_safety_bounds_and_redacts_payloads() {
     let object = ProofExternalMemoryObject::new(7);
     let mut recorder = ProofExternalMemoryTransactionRecorder::new();
     recorder

@@ -464,12 +464,11 @@ fn derive_configuration(
     }
 
     let count_limits = suite.count_limits();
-    let byte_limits = suite.byte_limits();
     let limits = CanonicalBoardLimits {
         maximum_ballot_attempts_per_participant: u64::from(
             count_limits.maximum_ballot_attempts_per_participant(),
         ),
-        maximum_retained_canonical_carrier_byte_length: byte_limits.maximum_public_corpus_bytes(),
+        maximum_retained_canonical_carrier_byte_length: super::MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
         maximum_unordered_carriers_per_batch: MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT,
         maximum_retained_transcript_objects: MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT,
     };

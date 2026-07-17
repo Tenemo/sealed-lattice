@@ -16,6 +16,15 @@ use super::{
     EXTERNAL_MEMORY_RESPONSE_MESSAGE_KIND, HASH_BYTE_LENGTH,
 };
 
+const EXTERNAL_MEMORY_NO_PROTECTION_CODE: u16 = 0;
+const EXTERNAL_MEMORY_PUBLIC_INTEGRITY_PROTECTION_CODE: u16 = 1;
+const EXTERNAL_MEMORY_SECRET_AUTHENTICATED_ENCRYPTION_PROTECTION_CODE: u16 = 2;
+const EXTERNAL_MEMORY_CREATE_OPERATION_CODE: u16 = 1;
+const EXTERNAL_MEMORY_APPEND_OPERATION_CODE: u16 = 2;
+const EXTERNAL_MEMORY_SEAL_OPERATION_CODE: u16 = 3;
+const EXTERNAL_MEMORY_READ_OPERATION_CODE: u16 = 4;
+const EXTERNAL_MEMORY_DELETE_OPERATION_CODE: u16 = 5;
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ProofExternalMemoryTransactionRequest {
     runtime_binding_hash: [u8; HASH_BYTE_LENGTH],
@@ -304,7 +313,7 @@ impl ProofExternalMemoryTransactionRequest {
                         protection,
                         exact_byte_length,
                     } => (
-                        1_u16,
+                        EXTERNAL_MEMORY_CREATE_OPERATION_CODE,
                         external_memory_protection_code(*protection),
                         *object,
                         0_u64,
@@ -316,8 +325,8 @@ impl ProofExternalMemoryTransactionRequest {
                         expected_offset,
                         bytes,
                     } => (
-                        2_u16,
-                        0_u16,
+                        EXTERNAL_MEMORY_APPEND_OPERATION_CODE,
+                        EXTERNAL_MEMORY_NO_PROTECTION_CODE,
                         *object,
                         *expected_offset,
                         u64::try_from(bytes.len()).map_err(|_| {
@@ -325,24 +334,34 @@ impl ProofExternalMemoryTransactionRequest {
                         })?,
                         bytes.as_slice(),
                     ),
-                    ProofExternalMemoryTransactionOperation::Seal { object } => {
-                        (3_u16, 0_u16, *object, 0_u64, 0_u64, &[][..])
-                    }
+                    ProofExternalMemoryTransactionOperation::Seal { object } => (
+                        EXTERNAL_MEMORY_SEAL_OPERATION_CODE,
+                        EXTERNAL_MEMORY_NO_PROTECTION_CODE,
+                        *object,
+                        0_u64,
+                        0_u64,
+                        &[][..],
+                    ),
                     ProofExternalMemoryTransactionOperation::Read {
                         object,
                         offset,
                         byte_length,
                     } => (
-                        4_u16,
-                        0_u16,
+                        EXTERNAL_MEMORY_READ_OPERATION_CODE,
+                        EXTERNAL_MEMORY_NO_PROTECTION_CODE,
                         *object,
                         *offset,
                         u64::from(*byte_length),
                         &[][..],
                     ),
-                    ProofExternalMemoryTransactionOperation::Delete { object } => {
-                        (5_u16, 0_u16, *object, 0_u64, 0_u64, &[][..])
-                    }
+                    ProofExternalMemoryTransactionOperation::Delete { object } => (
+                        EXTERNAL_MEMORY_DELETE_OPERATION_CODE,
+                        EXTERNAL_MEMORY_NO_PROTECTION_CODE,
+                        *object,
+                        0_u64,
+                        0_u64,
+                        &[][..],
+                    ),
                 };
             encoded.extend_from_slice(&operation_kind.to_le_bytes());
             encoded.extend_from_slice(&protection.to_le_bytes());
@@ -395,8 +414,12 @@ pub(crate) enum ProofExternalMemoryTransactionAdapterError {
 
 fn external_memory_protection_code(protection: ProofExternalMemoryProtection) -> u16 {
     match protection {
-        ProofExternalMemoryProtection::PublicIntegrity => 1,
-        ProofExternalMemoryProtection::SecretAuthenticatedEncryption => 2,
+        ProofExternalMemoryProtection::PublicIntegrity => {
+            EXTERNAL_MEMORY_PUBLIC_INTEGRITY_PROTECTION_CODE
+        }
+        ProofExternalMemoryProtection::SecretAuthenticatedEncryption => {
+            EXTERNAL_MEMORY_SECRET_AUTHENTICATED_ENCRYPTION_PROTECTION_CODE
+        }
     }
 }
 

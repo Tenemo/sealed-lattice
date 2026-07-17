@@ -9,6 +9,8 @@ import type {
 import {
     foundationProfile,
     isProtocolHash,
+    recipientPrivateVssShareMailboxPayloadType,
+    type MailboxPayloadType,
     type ProtocolHash,
 } from '@sealed-lattice/types';
 
@@ -99,7 +101,7 @@ export type BrowserLocalAuthenticatedMailboxStorageConfiguration = Readonly<{
 type StoredProducerSlot = Readonly<{
     actionContextHash: ProtocolHash;
     ceremonyContextHash: ProtocolHash;
-    payloadType: 2;
+    payloadType: MailboxPayloadType;
     producerSequence: string;
     recipientParticipantId: string;
     rosterHash: ProtocolHash;
@@ -349,7 +351,7 @@ const validateStreamShape = (
     ) {
         throw new AuthenticatedMailboxStorageError(
             'ResourceLimit',
-            'Mailbox stream byte length is outside the configured profile.',
+            'Mailbox stream byte length exceeds the configured runtime safety bound.',
         );
     }
     const expectedChunkCount = Math.ceil(
@@ -435,7 +437,7 @@ const decodeProducerSlot = (value: unknown): StoredProducerSlot => {
             'Stored mailbox producer slot has a noncanonical shape.',
         );
     }
-    if (value.payloadType !== 2) {
+    if (value.payloadType !== recipientPrivateVssShareMailboxPayloadType) {
         throw new AuthenticatedMailboxStorageError(
             'AuthenticationFailed',
             'Stored mailbox payload type is unsupported.',

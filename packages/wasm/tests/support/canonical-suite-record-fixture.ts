@@ -119,7 +119,7 @@ export const createCanonicalSuiteRecordFixture = (
 
     return canonicalTuple(
         0x0118,
-        unsigned16Item(1),
+        unsigned16Item(2),
         unsigned16Item(10),
         unsigned16Item(3),
         unsigned16Item(4),
@@ -150,13 +150,6 @@ export const createCanonicalSuiteRecordFixture = (
         unsigned32Item(128),
         unsigned32Item(20),
         unsigned32Item(100),
-        unsigned64Item(3_000n),
-        unsigned64Item(20_000n),
-        unsigned64Item(5_000n),
-        unsigned64Item(25_000n),
-        unsigned64Item(50_000n),
-        unsigned64Item(10_000n),
-        unsigned64Item(100_000n),
         homogeneousListItem(0x09, distributions),
         homogeneousListItem(
             0x09,

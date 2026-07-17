@@ -36,14 +36,15 @@ const verificationPollPrefixAccepted = 2;
 const verificationPollQueryHeaderAccepted = 3;
 const verificationPollQueryTreeAccepted = 4;
 const verificationPollComplete = 5;
-export const maximumCommonProofByteLength = 5_242_880;
+export const maximumCommonProofByteLength = 268_435_456;
 export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
 const maximumGenerationCheckpointCursorCount = 4_096;
 const maximumGenerationCheckpointCursorByteLength = 1_048_576;
 const maximumGenerationCheckpointCursorTotalByteLength = 1_048_576;
-export const maximumCommonProofOutputChunkCount =
-    maximumCommonProofByteLength / canonicalCommonProofChunkByteLength;
+export const maximumCommonProofOutputChunkCount = Math.ceil(
+    maximumCommonProofByteLength / canonicalCommonProofChunkByteLength,
+);
 
 export type ClosedWorkerCommonProofGenerationFamilyAdapterDescription =
     Readonly<{
@@ -61,12 +62,8 @@ type CommonProofGenerationKernelPoll =
     | Readonly<{
           checkpointReady: boolean;
           kind: 'progress';
-          stage: number;
       }>
-    | Readonly<{
-          kind: 'resume-complete';
-          stage: number;
-      }>
+    | Readonly<{ kind: 'resume-complete' }>
     | Readonly<{
           encodedRequestByteLength: number;
           kind: 'storage-request-ready';
@@ -319,7 +316,7 @@ export class CommonProofFamilyAdapterKernelBoundary {
                     byteLength > maximumGenerationCheckpointStateByteLength
                 ) {
                     throw kernelFailure(
-                        'The common-proof kernel exposed an out-of-profile checkpoint state length.',
+                        'The common-proof kernel exposed a checkpoint state beyond the absolute safety bound.',
                     );
                 }
                 return byteLength;
@@ -649,7 +646,7 @@ export class CommonProofGenerationKernelBoundary {
                 maximumGenerationCheckpointStateByteLength
         ) {
             throw kernelFailure(
-                'The common-proof kernel exposed an out-of-profile checkpoint state length.',
+                'The common-proof kernel exposed a checkpoint state beyond the absolute safety bound.',
             );
         }
         const [safeBoundaryOrdinal, stateByteLength, cursorCount] =
@@ -690,7 +687,7 @@ export class CommonProofGenerationKernelBoundary {
             cursorCount > maximumGenerationCheckpointCursorCount
         ) {
             throw kernelFailure(
-                'The common-proof kernel exposed an out-of-profile checkpoint description.',
+                'The common-proof kernel exposed a checkpoint description beyond the absolute safety bound.',
             );
         }
         const canonicalStateBytes = this.#copyKernelBytes(
@@ -722,7 +719,7 @@ export class CommonProofGenerationKernelBoundary {
                 ) {
                     cursorBytes.fill(0);
                     throw kernelFailure(
-                        'The common-proof kernel exposed checkpoint cursors whose aggregate length exceeds the fixed worker profile.',
+                        'The common-proof kernel exposed checkpoint cursors whose aggregate length exceeds the absolute worker safety bound.',
                     );
                 }
                 cursorTotalByteLength += cursorBytes.byteLength;
@@ -795,7 +792,7 @@ export class CommonProofGenerationKernelBoundary {
             encodedRequestByteLength > maximumEncodedRequestByteLength
         ) {
             throw resourceFailure(
-                'The common-proof kernel requested an out-of-profile storage message.',
+                'The common-proof kernel requested a storage message beyond the absolute safety bound.',
             );
         }
         return this.#copyKernelBytes(
@@ -836,7 +833,7 @@ export class CommonProofGenerationKernelBoundary {
             BigInt(chunkByteLength) > maximumWorkerPayloadByteLength
         ) {
             throw resourceFailure(
-                'The common-proof kernel exposed an out-of-profile output chunk.',
+                'The common-proof kernel exposed an output chunk beyond the absolute safety bound.',
             );
         }
         return this.#copyKernelBytes(
@@ -1019,7 +1016,7 @@ export class CommonProofGenerationKernelBoundary {
             cursorByteLength > maximumGenerationCheckpointCursorByteLength
         ) {
             throw kernelFailure(
-                'The common-proof kernel exposed an out-of-profile checkpoint cursor.',
+                'The common-proof kernel exposed a checkpoint cursor beyond the absolute safety bound.',
             );
         }
         return this.#copyKernelBytes(
@@ -1103,7 +1100,6 @@ export class CommonProofGenerationKernelBoundary {
                 return Object.freeze({
                     checkpointReady: secondaryValue === 1,
                     kind: 'progress',
-                    stage: primaryValue,
                 });
             case generationPollResumeComplete:
                 if (
@@ -1113,7 +1109,6 @@ export class CommonProofGenerationKernelBoundary {
                 ) {
                     return Object.freeze({
                         kind: 'resume-complete',
-                        stage: primaryValue,
                     });
                 }
                 break;
@@ -1741,7 +1736,7 @@ export class CommonProofVerificationKernelBoundary {
             bytes.byteLength > canonicalCommonProofChunkByteLength
         ) {
             throw resourceFailure(
-                `The common-proof ${label} length is outside the fixed worker profile.`,
+                `The common-proof ${label} length exceeds the absolute worker safety bound.`,
             );
         }
         this.#context.runExclusive(`common-proof ${label}`, () => {

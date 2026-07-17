@@ -3,6 +3,7 @@ import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import {
     foundationProfile,
+    recipientPrivateVssShareMailboxPayloadType,
     type SetupMailboxSlot,
 } from '@sealed-lattice/types';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -118,7 +119,7 @@ describe('Browser-local action cryptographic provider', () => {
             actionContextHash: bytesToHex(stateVector.actionContextHash),
             ceremonyContextHash: bytesToHex(stateVector.ceremonyContextHash),
             orderedMaterialRoots: Object.freeze(['77'.repeat(64)]),
-            payloadType: 2,
+            payloadType: recipientPrivateVssShareMailboxPayloadType,
             producerSequence: '7',
             recipientParticipantId: bytesToHex(
                 stateVector.witnessParticipantIdentity,

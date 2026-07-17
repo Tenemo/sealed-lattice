@@ -650,7 +650,7 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
         maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
         maximum_prefetched_query_byte_length: MAXIMUM_PROOF_BYTE_LENGTH as u64,
     })
-    .expect("the compact fixture fits the browser resident-memory ceiling");
+    .expect("the compact fixture fits the resident-memory safety bound");
     let resident_memory_plan = state.resident_memory_plan();
     assert_eq!(resident_memory_plan.phases().len(), 10);
     assert_eq!(

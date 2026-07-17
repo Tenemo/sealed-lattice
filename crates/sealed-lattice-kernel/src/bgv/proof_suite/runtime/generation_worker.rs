@@ -4,8 +4,8 @@ use super::{
     AuthenticatedCheckpointContinuationSource, BTreeMap, BoundedCommonProofByteSinkError,
     CHECKPOINT_CUMULATIVE_HASH_DOMAIN, CHECKPOINT_CURSOR_LIST_HASH_DOMAIN,
     CHECKPOINT_EVENT_HASH_DOMAIN, CHECKPOINT_GENESIS_HASH_DOMAIN,
-    COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, COMMON_PROOF_CHECKPOINT_STATE_MAGIC,
-    COMMON_PROOF_CHECKPOINT_STATE_SCHEMA_IDENTIFIER, COMMON_PROOF_CHECKPOINT_STATE_VERSION,
+    COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, COMMON_PROOF_CHECKPOINT_STATE_FORMAT_IDENTIFIER,
+    COMMON_PROOF_CHECKPOINT_STATE_MAGIC, COMMON_PROOF_CHECKPOINT_STATE_VERSION,
     CheckpointableCommonProofPrivateCoinSource, CommonProofBoundOpeningProvider,
     CommonProofEncodingError, CommonProofGenerationCheckpointBoundary, CommonProofGenerationError,
     CommonProofGenerationInitializationError, CommonProofGenerationPoll,
@@ -590,7 +590,7 @@ impl CommonProofGenerationCheckpointState {
         append_checkpoint_state_bytes(
             &mut output,
             &mut cursor,
-            &COMMON_PROOF_CHECKPOINT_STATE_SCHEMA_IDENTIFIER.to_le_bytes(),
+            &COMMON_PROOF_CHECKPOINT_STATE_FORMAT_IDENTIFIER.to_le_bytes(),
         );
         append_checkpoint_state_bytes(&mut output, &mut cursor, &self.stable_attempt_binding_hash);
         append_checkpoint_state_bytes(
@@ -625,11 +625,11 @@ impl CommonProofGenerationCheckpointState {
         let mut cursor = 0_usize;
         let magic = read_checkpoint_state_array::<8>(bytes, &mut cursor)?;
         let version = u16::from_le_bytes(read_checkpoint_state_array(bytes, &mut cursor)?);
-        let schema_identifier =
+        let format_identifier =
             u16::from_le_bytes(read_checkpoint_state_array(bytes, &mut cursor)?);
         if magic != COMMON_PROOF_CHECKPOINT_STATE_MAGIC
             || version != COMMON_PROOF_CHECKPOINT_STATE_VERSION
-            || schema_identifier != COMMON_PROOF_CHECKPOINT_STATE_SCHEMA_IDENTIFIER
+            || format_identifier != COMMON_PROOF_CHECKPOINT_STATE_FORMAT_IDENTIFIER
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }

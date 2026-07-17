@@ -1,6 +1,7 @@
 //! Deterministic construction of the fixed proof-profile artifact.
 
 use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, SPECIAL_PRIMES};
+use crate::foundation::ProofApplicationSlotCeilings;
 
 #[cfg(test)]
 use crate::{
@@ -283,7 +284,11 @@ fn selected_relation_plans(
             .map_err(ProofProfileError::from)
         })
         .collect::<Result<Vec<_>, ProofProfileError>>()?;
-    let galois_key_shares = merge_checked_relation_plan_variants(0x1217, galois_plans, context)?;
+    let galois_key_shares = merge_checked_relation_plan_variants(
+        ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        galois_plans,
+        context,
+    )?;
 
     let evaluator_variants = selected_evaluator_aggregate_variants(
         &evaluator_candidate,
@@ -620,7 +625,11 @@ mod tests {
                 .expect("selected relation family")
                 .compiled_plan()
         };
-        let evaluator_variant_count = relation_plan(0x1218).variants().len();
+        let evaluator_variant_count = relation_plan(
+            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .variants()
+        .len();
         let key_positions = selected_evaluator_program_set()
             .and_then(|program| program.key_positions())
             .expect("selected evaluator key positions");
@@ -637,10 +646,26 @@ mod tests {
         let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
         let sharing_limb_count = DATA_PRIMES.len();
         let commitment_anchor_count = SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
-        let round_one_variant_count = relation_plan(0x1214).variants().len();
-        let round_one_aggregate_variant_count = relation_plan(0x1215).variants().len();
-        let round_two_variant_count = relation_plan(0x1216).variants().len();
-        let galois_variant_count = relation_plan(0x1217).variants().len();
+        let round_one_variant_count = relation_plan(
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .variants()
+        .len();
+        let round_one_aggregate_variant_count = relation_plan(
+            ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .variants()
+        .len();
+        let round_two_variant_count = relation_plan(
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .variants()
+        .len();
+        let galois_variant_count = relation_plan(
+            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .variants()
+        .len();
         let expected_root_edge_count = participant_count * sharing_limb_count
             + participant_count * participant_count * sharing_limb_count
             + participant_count * 2

@@ -3,7 +3,8 @@ use core::fmt;
 use super::super::schemas::{SchemaResult, read_fixed_bytes, read_hash, read_u16, require_header};
 use super::super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
-    Hash512, RefusalReason, hash_foundation_tuple_512 as hash512,
+    Hash512, ProofApplicationSlotCeilings as ProofFamilyIdentifiers, RefusalReason,
+    hash_foundation_tuple_512 as hash512,
 };
 use super::domain::AttemptClass;
 use super::validation::{
@@ -114,12 +115,23 @@ impl ProofApplicationSlot {
         }
 
         let expected_presence = match self.application_statement_schema_identifier {
-            0x2110 | 0x2111 | 0x1211 | 0x1212 | TARGET_DECRYPTION_SHARE_PROOF_FAMILY => {
-                (true, false, false)
+            ProofFamilyIdentifiers::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilyIdentifiers::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilyIdentifiers::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilyIdentifiers::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            | TARGET_DECRYPTION_SHARE_PROOF_FAMILY => (true, false, false),
+            ProofFamilyIdentifiers::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilyIdentifiers::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilyIdentifiers::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                (true, true, false)
             }
-            0x1214 | 0x1216 | 0x1217 => (true, true, false),
-            0x1213 | 0x1218 => (false, false, false),
-            0x1215 => (false, true, false),
+            ProofFamilyIdentifiers::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilyIdentifiers::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+                (false, false, false)
+            }
+            ProofFamilyIdentifiers::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+                (false, true, false)
+            }
             ORDINARY_BALLOT_PROOF_FAMILY => (true, false, true),
             _ => {
                 return Err(schema_error(

@@ -38,7 +38,7 @@ impl MailboxGcmAuthentication {
         associated_data: &[u8],
         expected_ciphertext_byte_length: u64,
     ) -> SchemaResult<(Self, Aes256Counter)> {
-        require_supported_length(expected_ciphertext_byte_length)?;
+        require_safe_length(expected_ciphertext_byte_length)?;
 
         let cipher = Aes256::new_from_slice(key).map_err(|_| {
             schema_error(
@@ -393,11 +393,11 @@ impl MailboxGcmDecryptor {
     }
 }
 
-fn require_supported_length(byte_length: u64) -> SchemaResult<()> {
+fn require_safe_length(byte_length: u64) -> SchemaResult<()> {
     if byte_length == 0 || byte_length > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH {
         return Err(schema_error(
             RefusalReason::OutsideSupportedProfile,
-            "mailbox ciphertext length is outside the canonical stream profile",
+            "mailbox ciphertext length exceeds the canonical stream safety bound",
         ));
     }
     byte_length.checked_mul(8).ok_or_else(|| {

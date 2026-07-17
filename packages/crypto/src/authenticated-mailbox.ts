@@ -483,7 +483,7 @@ const parseMailboxByteLength = (
             parsed > foundationProfile.maximumCanonicalStreamByteLength
                 ? 'outsideSupportedProfile'
                 : refusalReason,
-            `${label} is outside the supported mailbox stream profile.`,
+            `${label} exceeds the absolute mailbox stream safety bound.`,
         );
     }
 

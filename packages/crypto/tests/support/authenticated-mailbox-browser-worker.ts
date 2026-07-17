@@ -1,6 +1,7 @@
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import {
     foundationProfile,
+    recipientPrivateVssShareMailboxPayloadType,
     type ProtocolHash,
     type SetupMailboxSlot,
 } from '@sealed-lattice/types';
@@ -472,7 +473,7 @@ const run = async (message: StartMessage): Promise<void> => {
         sourceParticipantId,
         recipientParticipantId,
         producerSequence: '7',
-        payloadType: 2,
+        payloadType: recipientPrivateVssShareMailboxPayloadType,
         statementHash: '44'.repeat(64),
         orderedMaterialRoots: Object.freeze(['55'.repeat(64), '66'.repeat(64)]),
     });

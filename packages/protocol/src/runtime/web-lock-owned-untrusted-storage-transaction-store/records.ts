@@ -36,7 +36,9 @@ import type {
     UntrustedStorageTransactionStore,
 } from '../untrusted-storage-transaction-store.js';
 
-export const commonProofScratchByteLength = 268_435_456n;
+// Absolute storage safety bound. Phone qualification targets are measured
+// separately and do not participate in proof or suite validity.
+export const commonProofScratchByteLength = 1_073_741_824n;
 export const commonProofLiveObjectCount = 4_096;
 const commonProofDataChunkByteLength = 49_152n;
 const commonProofSecretRecordOverheadByteLength = 968n;

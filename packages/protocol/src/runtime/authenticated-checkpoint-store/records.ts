@@ -13,6 +13,11 @@ import {
     readRuntimeRecord,
     type RuntimeStorageAuthorityContext,
 } from '../authenticated-runtime-record.js';
+import {
+    canonicalItemTypes,
+    canonicalTupleSchemaIdentifier,
+    canonicalTupleVersion,
+} from '../canonical-tuple-constants.js';
 import type {
     UntrustedStorageTransaction,
     UntrustedStorageTransactionStore,
@@ -21,8 +26,6 @@ import type {
 const checkpointManifestSchemaIdentifier = 0x1805;
 const checkpointRandomCursorSchemaIdentifier = 0x1804;
 const streamDescriptorSchemaIdentifier = 0x1800;
-const canonicalTupleSchemaIdentifier = 0x0001;
-const canonicalSchemaVersion = 1;
 const hashByteLength = 64;
 export const identifierByteLength = 32;
 export const checkpointRecordVersion = 1;
@@ -270,7 +273,7 @@ const encodeCanonicalTuple = (
 ): Uint8Array =>
     concatenateBytes([
         unsigned16LittleEndian(schemaIdentifier),
-        unsigned16LittleEndian(canonicalSchemaVersion),
+        unsigned16LittleEndian(canonicalTupleVersion),
         unsigned32LittleEndian(items.length),
         ...items.flatMap((item) => [
             unsigned16LittleEndian(item.itemType),
@@ -288,7 +291,7 @@ const homogeneousListCanonicalItem = (
     elementType: number,
     elementPayloads: readonly Uint8Array[],
 ): CanonicalItem => ({
-    itemType: 0x0e,
+    itemType: canonicalItemTypes.homogeneousList,
     payload: concatenateBytes([
         unsigned16LittleEndian(elementType),
         unsigned32LittleEndian(elementPayloads.length),
@@ -463,7 +466,7 @@ const requireCursorTuple = (bytes: Uint8Array): Uint8Array => {
             bytes.buffer,
             bytes.byteOffset,
             bytes.byteLength,
-        ).getUint16(2, true) !== canonicalSchemaVersion
+        ).getUint16(2, true) !== canonicalTupleVersion
     ) {
         throw new AuthenticatedRuntimeRecordError(
             'AuthenticationFailed',
@@ -494,28 +497,49 @@ export const encodeCheckpointManifest = (input: {
     }
     return encodeCanonicalTuple(checkpointManifestSchemaIdentifier, [
         fixedCanonicalItem(
-            0x06,
+            canonicalItemTypes.hash512,
             input.authorityContext.runtimeBuildManifestHash,
         ),
-        fixedCanonicalItem(0x06, input.authorityContext.suiteIdentifier),
-        fixedCanonicalItem(0x06, input.authorityContext.ceremonyContextHash),
-        fixedCanonicalItem(0x06, input.authorityContext.actionContextHash),
         fixedCanonicalItem(
-            0x07,
+            canonicalItemTypes.hash512,
+            input.authorityContext.suiteIdentifier,
+        ),
+        fixedCanonicalItem(
+            canonicalItemTypes.hash512,
+            input.authorityContext.ceremonyContextHash,
+        ),
+        fixedCanonicalItem(
+            canonicalItemTypes.hash512,
+            input.authorityContext.actionContextHash,
+        ),
+        fixedCanonicalItem(
+            canonicalItemTypes.participantIdentity,
             input.authorityContext.ownerParticipantIdentity,
         ),
-        fixedCanonicalItem(0x01, input.checkpointLineageIdentifier),
         fixedCanonicalItem(
-            0x03,
+            canonicalItemTypes.rawBytes,
+            input.checkpointLineageIdentifier,
+        ),
+        fixedCanonicalItem(
+            canonicalItemTypes.unsigned16,
             unsigned16LittleEndian(input.boundary.operationKind),
         ),
         fixedCanonicalItem(
-            0x04,
+            canonicalItemTypes.unsigned32,
             unsigned32LittleEndian(input.boundary.safeBoundaryOrdinal),
         ),
-        homogeneousListCanonicalItem(0x06, input.boundary.orderedSourceDigests),
-        homogeneousListCanonicalItem(0x09, encodedCursors),
-        fixedCanonicalItem(0x09, input.stateStreamDescriptorBytes),
+        homogeneousListCanonicalItem(
+            canonicalItemTypes.hash512,
+            input.boundary.orderedSourceDigests,
+        ),
+        homogeneousListCanonicalItem(
+            canonicalItemTypes.nestedTuple,
+            encodedCursors,
+        ),
+        fixedCanonicalItem(
+            canonicalItemTypes.nestedTuple,
+            input.stateStreamDescriptorBytes,
+        ),
     ]);
 };
 
@@ -526,7 +550,17 @@ const parseCheckpointManifestReferences = (
     stateStreamDescriptorBytes: Uint8Array;
 }> => {
     const expectedItemTypes = [
-        0x06, 0x06, 0x06, 0x06, 0x07, 0x01, 0x03, 0x04, 0x0e, 0x0e, 0x09,
+        canonicalItemTypes.hash512,
+        canonicalItemTypes.hash512,
+        canonicalItemTypes.hash512,
+        canonicalItemTypes.hash512,
+        canonicalItemTypes.participantIdentity,
+        canonicalItemTypes.rawBytes,
+        canonicalItemTypes.unsigned16,
+        canonicalItemTypes.unsigned32,
+        canonicalItemTypes.homogeneousList,
+        canonicalItemTypes.homogeneousList,
+        canonicalItemTypes.nestedTuple,
     ] as const;
     const fixedItemByteLengths = [
         hashByteLength,
@@ -568,7 +602,7 @@ const parseCheckpointManifestReferences = (
     };
     if (
         readUnsigned16() !== checkpointManifestSchemaIdentifier ||
-        readUnsigned16() !== canonicalSchemaVersion ||
+        readUnsigned16() !== canonicalTupleVersion ||
         readUnsigned32() !== expectedItemTypes.length
     ) {
         throw new AuthenticatedRuntimeRecordError(
@@ -670,9 +704,9 @@ export const parseStreamDescriptor = (
     };
     if (
         readUnsigned16() !== streamDescriptorSchemaIdentifier ||
-        readUnsigned16() !== canonicalSchemaVersion ||
+        readUnsigned16() !== canonicalTupleVersion ||
         readUnsigned32() !== 3 ||
-        readUnsigned16() !== 0x05 ||
+        readUnsigned16() !== canonicalItemTypes.unsigned64 ||
         readUnsigned32() !== 8
     ) {
         throw new AuthenticatedRuntimeRecordError(
@@ -699,7 +733,7 @@ export const parseStreamDescriptor = (
         );
     }
     const totalByteLength = Number(totalByteLengthBigInt);
-    if (readUnsigned16() !== 0x0e) {
+    if (readUnsigned16() !== canonicalItemTypes.homogeneousList) {
         throw new AuthenticatedRuntimeRecordError(
             'AuthenticationFailed',
             'State stream descriptor chunk list has the wrong item type.',
@@ -707,7 +741,7 @@ export const parseStreamDescriptor = (
     }
     const chunkListByteLength = readUnsigned32();
     const chunkListStart = offset;
-    if (readUnsigned16() !== 0x06) {
+    if (readUnsigned16() !== canonicalItemTypes.hash512) {
         throw new AuthenticatedRuntimeRecordError(
             'AuthenticationFailed',
             'State stream descriptor chunk list has the wrong element type.',
@@ -736,7 +770,10 @@ export const parseStreamDescriptor = (
             'State stream descriptor has malformed chunk framing.',
         );
     }
-    if (readUnsigned16() !== 0x06 || readUnsigned32() !== hashByteLength) {
+    if (
+        readUnsigned16() !== canonicalItemTypes.hash512 ||
+        readUnsigned32() !== hashByteLength
+    ) {
         throw new AuthenticatedRuntimeRecordError(
             'AuthenticationFailed',
             'State stream descriptor full-object digest has the wrong item framing.',
@@ -771,7 +808,7 @@ const updateAsciiItem = (
     value: string,
 ): void => {
     const bytes = textEncoder.encode(value);
-    updateUnsigned16(hash, 0x02);
+    updateUnsigned16(hash, canonicalItemTypes.ascii);
     updateUnsigned32(hash, bytes.byteLength + 4);
     updateUnsigned32(hash, bytes.byteLength);
     hash.update(bytes);
@@ -785,17 +822,17 @@ export const deriveChunkDigest = (input: {
     const hash = shake256.create({ dkLen: hashByteLength });
     try {
         updateUnsigned16(hash, canonicalTupleSchemaIdentifier);
-        updateUnsigned16(hash, canonicalSchemaVersion);
+        updateUnsigned16(hash, canonicalTupleVersion);
         updateUnsigned32(hash, 5);
         updateAsciiItem(hash, chunkDigestDomain);
         updateAsciiItem(hash, input.stateStreamDomain);
-        updateUnsigned16(hash, 0x04);
+        updateUnsigned16(hash, canonicalItemTypes.unsigned32);
         updateUnsigned32(hash, 4);
         updateUnsigned32(hash, input.chunkIndex);
-        updateUnsigned16(hash, 0x04);
+        updateUnsigned16(hash, canonicalItemTypes.unsigned32);
         updateUnsigned32(hash, 4);
         updateUnsigned32(hash, input.chunkBytes.byteLength);
-        updateUnsigned16(hash, 0x01);
+        updateUnsigned16(hash, canonicalItemTypes.rawBytes);
         updateUnsigned32(hash, input.chunkBytes.byteLength + 4);
         updateUnsigned32(hash, input.chunkBytes.byteLength);
         hash.update(input.chunkBytes);
@@ -811,14 +848,14 @@ export const createFullObjectDigestHasher = (input: {
 }): ReturnType<typeof shake256.create> => {
     const hash = shake256.create({ dkLen: hashByteLength });
     updateUnsigned16(hash, canonicalTupleSchemaIdentifier);
-    updateUnsigned16(hash, canonicalSchemaVersion);
+    updateUnsigned16(hash, canonicalTupleVersion);
     updateUnsigned32(hash, 4);
     updateAsciiItem(hash, fullObjectDigestDomain);
     updateAsciiItem(hash, input.stateStreamDomain);
-    updateUnsigned16(hash, 0x05);
+    updateUnsigned16(hash, canonicalItemTypes.unsigned64);
     updateUnsigned32(hash, 8);
     hash.update(unsigned64LittleEndian(BigInt(input.totalByteLength)));
-    updateUnsigned16(hash, 0x01);
+    updateUnsigned16(hash, canonicalItemTypes.rawBytes);
     updateUnsigned32(hash, input.totalByteLength + 4);
     updateUnsigned32(hash, input.totalByteLength);
     return hash;
@@ -892,11 +929,17 @@ export const describeAuthenticatedCheckpointStateStream = (input: {
         try {
             return encodeCanonicalTuple(streamDescriptorSchemaIdentifier, [
                 fixedCanonicalItem(
-                    0x05,
+                    canonicalItemTypes.unsigned64,
                     unsigned64LittleEndian(BigInt(input.stateBytes.byteLength)),
                 ),
-                homogeneousListCanonicalItem(0x06, orderedChunkDigests),
-                fixedCanonicalItem(0x06, fullObjectDigest),
+                homogeneousListCanonicalItem(
+                    canonicalItemTypes.hash512,
+                    orderedChunkDigests,
+                ),
+                fixedCanonicalItem(
+                    canonicalItemTypes.hash512,
+                    fullObjectDigest,
+                ),
             ]);
         } finally {
             fullObjectDigest.fill(0);

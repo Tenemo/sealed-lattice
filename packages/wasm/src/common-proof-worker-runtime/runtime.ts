@@ -1261,7 +1261,7 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                                 committedOutputByteLength
                     ) {
                         throw kernelFailure(
-                            'The common-proof kernel exposed output beyond the fixed proof-stream profile.',
+                            'The common-proof kernel exposed output beyond the absolute proof-stream safety bound.',
                         );
                     }
                     const chunkBytes = kernel.copyOutputChunk(
@@ -1424,7 +1424,7 @@ const verificationChunkCount = (declaredByteLength: number): number => {
         declaredByteLength > maximumCommonProofByteLength
     ) {
         throw resourceFailure(
-            'The committed common-proof byte length is outside the fixed worker profile.',
+            'The committed common-proof byte length exceeds the absolute worker safety bound.',
         );
     }
     return Math.ceil(declaredByteLength / canonicalCommonProofChunkByteLength);

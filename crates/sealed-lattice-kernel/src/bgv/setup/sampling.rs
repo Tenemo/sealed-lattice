@@ -110,7 +110,7 @@ pub(super) fn sample_public_setup_residues(
 fn public_sampler_size_error() -> CanonicalError {
     CanonicalError::new(
         CanonicalErrorCode::InvalidProtocolObject,
-        "public setup sampler byte-length arithmetic exceeds the supported profile",
+        "public setup sampler byte-length arithmetic exceeds the representation safety bound",
     )
 }
 

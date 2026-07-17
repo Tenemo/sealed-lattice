@@ -394,8 +394,10 @@ describe('Canonical stream real-WASM runtime', () => {
             totalByteLength: foundationProfile.maximumCanonicalStreamByteLength,
         });
         expect(exactMaximum.chunkCount).toBe(
-            foundationProfile.maximumCanonicalStreamByteLength /
-                foundationProfile.streamChunkByteLength,
+            Math.ceil(
+                foundationProfile.maximumCanonicalStreamByteLength /
+                    foundationProfile.streamChunkByteLength,
+            ),
         );
         exactMaximum.cancel();
         expect(() =>

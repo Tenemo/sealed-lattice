@@ -109,7 +109,7 @@ const createCanonicalSuiteRecordBytes = (
 
     return canonicalTuple(
         0x0118,
-        unsigned16Item(1),
+        unsigned16Item(2),
         unsigned16Item(10),
         unsigned16Item(3),
         unsigned16Item(4),
@@ -134,13 +134,6 @@ const createCanonicalSuiteRecordBytes = (
         unsigned32Item(128),
         unsigned32Item(20),
         unsigned32Item(100),
-        unsigned64Item(3_000n),
-        unsigned64Item(20_000n),
-        unsigned64Item(5_000n),
-        unsigned64Item(25_000n),
-        unsigned64Item(50_000n),
-        unsigned64Item(10_000n),
-        unsigned64Item(100_000n),
         homogeneousListItem(0x09, distributions),
         homogeneousListItem(0x09, artifacts),
     );
@@ -171,7 +164,7 @@ const differentHash = (hash: ProtocolHash): ProtocolHash =>
     `${hash[0] === '0' ? '1' : '0'}${hash.slice(1)}`;
 
 describe('foundation ceremony Rust/WASM boundary', () => {
-    it('keeps schema-valid suite bytes below the operative common-proof capability boundary', async () => {
+    it('keeps raw common-proof authority internal and refuses an unselected suite', async () => {
         const commandRuntime =
             await instantiateTranscriptCoreKernelCommandRuntime(
                 pathToFileURL(
@@ -348,7 +341,7 @@ describe('foundation ceremony Rust/WASM boundary', () => {
         ).toThrow();
     });
 
-    it('encodes action and board policy bytes under the fixed profile', async () => {
+    it('encodes action and board policy bytes under the runtime safety bounds', async () => {
         const runtime = openFoundationCeremonyRuntime(
             await loadFreshTranscriptCoreKernel(),
         );

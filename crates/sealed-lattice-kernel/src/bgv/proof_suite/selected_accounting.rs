@@ -113,7 +113,10 @@ impl SelectedProofByteAccounting {
     pub(crate) fn ballot_proof_byte_length(&self) -> Option<u64> {
         self.variant_ceilings
             .iter()
-            .find(|ceiling| ceiling.application_statement_schema_identifier == 0x1302)
+            .find(|ceiling| {
+                ceiling.application_statement_schema_identifier
+                    == ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
+            })
             .map(|ceiling| ceiling.proof_byte_length)
     }
 }
@@ -236,7 +239,12 @@ pub(crate) fn selected_proof_byte_accounting(
 
         let top_count = stream_positions.top_count();
         let mut action_byte_length = 0_u64;
-        for family in [0x2110, 0x2111, 0x1211, 0x1212] {
+        for family in [
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        ] {
             action_byte_length = checked_add_scaled_ceiling(
                 action_byte_length,
                 find_variant_ceiling(&variant_ceilings, family, None, None)?,
@@ -245,7 +253,12 @@ pub(crate) fn selected_proof_byte_accounting(
         }
         action_byte_length = checked_add_scaled_ceiling(
             action_byte_length,
-            find_variant_ceiling(&variant_ceilings, 0x1213, None, None)?,
+            find_variant_ceiling(
+                &variant_ceilings,
+                ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+                None,
+            )?,
             1,
         )?;
         let evaluator_entry_count = relinearization_count
@@ -256,7 +269,7 @@ pub(crate) fn selected_proof_byte_accounting(
                 action_byte_length,
                 find_variant_ceiling(
                     &variant_ceilings,
-                    0x1218,
+                    ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
                     Some(entry_ordinal),
                     Some(top_count),
                 )?,
@@ -279,9 +292,18 @@ pub(crate) fn selected_proof_byte_accounting(
         {
             let schedule_position = schedule_position?;
             for (family, multiplicity) in [
-                (0x1214, u64::from(FOUNDATION_PROFILE.participant_count)),
-                (0x1215, 1),
-                (0x1216, u64::from(FOUNDATION_PROFILE.participant_count)),
+                (
+                    ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+                    u64::from(FOUNDATION_PROFILE.participant_count),
+                ),
+                (
+                    ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                    1,
+                ),
+                (
+                    ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+                    u64::from(FOUNDATION_PROFILE.participant_count),
+                ),
             ] {
                 action_byte_length = checked_add_scaled_ceiling(
                     action_byte_length,
@@ -307,18 +329,33 @@ pub(crate) fn selected_proof_byte_accounting(
         {
             action_byte_length = checked_add_scaled_ceiling(
                 action_byte_length,
-                find_variant_ceiling(&variant_ceilings, 0x1217, Some(schedule_position?), None)?,
+                find_variant_ceiling(
+                    &variant_ceilings,
+                    ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                    Some(schedule_position?),
+                    None,
+                )?,
                 u64::from(FOUNDATION_PROFILE.participant_count),
             )?;
         }
         action_byte_length = checked_add_scaled_ceiling(
             action_byte_length,
-            find_variant_ceiling(&variant_ceilings, 0x1302, None, None)?,
+            find_variant_ceiling(
+                &variant_ceilings,
+                ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+                None,
+            )?,
             u64::from(maximum_candidate_packages_per_action),
         )?;
         action_byte_length = checked_add_scaled_ceiling(
             action_byte_length,
-            find_variant_ceiling(&variant_ceilings, 0x1621, None, None)?,
+            find_variant_ceiling(
+                &variant_ceilings,
+                ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+                None,
+            )?,
             u64::from(FOUNDATION_PROFILE.participant_count),
         )?;
         action_proof_byte_lengths.push(action_byte_length);
@@ -340,7 +377,7 @@ struct SelectedEvaluatorAggregateStructuralAccounting {
     proof_byte_length: usize,
 }
 
-/// Derives the exact selected `0x1218` proof ceiling directly from its fixed
+/// Derives the exact selected evaluator-key aggregate proof ceiling from its fixed
 /// aggregate topology and the canonical proof codec. This deliberately avoids
 /// compiling the much larger secret-bearing relation catalog: the public
 /// aggregate alone is already a decisive, independently checkable cap gate.
@@ -723,8 +760,8 @@ mod tests {
     }
 
     #[test]
-    fn selected_proof_byte_ceiling_rejects_one_byte_over_before_accounting() {
-        assert_eq!(MAXIMUM_COMMON_PROOF_BYTE_LENGTH, 5_242_880);
+    fn absolute_proof_byte_safety_bound_rejects_one_byte_over_before_accounting() {
+        assert_eq!(MAXIMUM_COMMON_PROOF_BYTE_LENGTH, 268_435_456);
         assert_eq!(
             require_selected_proof_byte_length(MAXIMUM_COMMON_PROOF_BYTE_LENGTH),
             Ok(MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64)
@@ -796,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_evaluator_aggregate_entry_exceeds_the_hard_per_proof_cap() {
+    fn selected_evaluator_aggregate_entry_fits_the_absolute_proof_safety_bound() {
         let accounting = selected_evaluator_aggregate_structural_accounting()
             .expect("selected evaluator aggregate structure derives");
         assert_eq!(accounting.bound_tree_count, 11);
@@ -807,13 +844,13 @@ mod tests {
         assert_eq!(accounting.proof_byte_length, 8_108_476);
         assert_eq!(
             require_selected_proof_byte_length(accounting.proof_byte_length),
-            Err(SelectedProofAccountingError::ProofByteLengthExceeded)
+            Ok(accounting.proof_byte_length as u64)
         );
     }
 
     #[test]
     #[ignore = "long-running exact-family accounting; run via the guarded measurements runner"]
-    fn selected_exact_family_and_action_proof_accounting_reports_browser_ceiling_mismatch() {
+    fn selected_exact_family_and_action_proof_accounting_reports_phone_target_variance() {
         let accounting =
             selected_proof_byte_accounting(3, 20).expect("selected proof accounting derives");
         let mut family_maxima = std::collections::BTreeMap::<u16, u64>::new();
@@ -860,12 +897,18 @@ mod tests {
                 (0x2111, 116_451_886),
             ])
         );
+        const PHONE_PROOF_BYTE_LENGTH_PLANNING_TARGET: u64 = 5_242_880;
         assert_eq!(
             family_maxima
                 .values()
-                .filter(|byte_length| { **byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64 })
+                .filter(|byte_length| { **byte_length > PHONE_PROOF_BYTE_LENGTH_PLANNING_TARGET })
                 .count(),
             12
+        );
+        assert!(
+            family_maxima
+                .values()
+                .all(|byte_length| { *byte_length <= MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64 })
         );
         assert_eq!(
             (
@@ -884,7 +927,7 @@ mod tests {
         assert_eq!(accounting.ballot_proof_byte_length(), Some(12_388_018));
         assert!(
             accounting.maximum_variant_proof_byte_length()
-                > MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64
+                > PHONE_PROOF_BYTE_LENGTH_PLANNING_TARGET
         );
         assert!(accounting.maximum_proof_byte_length() > 1_500_000_000);
     }

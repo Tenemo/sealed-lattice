@@ -16,6 +16,9 @@ use crate::foundation::{
 };
 use crate::hashing::StreamingHash512;
 
+use super::body::{
+    PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER,
+};
 use super::external_memory;
 use super::external_memory::{
     ProofExternalMemory, ProofExternalMemoryError, ProofExternalMemoryExecutor,
@@ -27,6 +30,9 @@ use super::external_polynomial::{
     ExternalStockhamTransformDirection, ExternalStockhamTransformError,
     ExternalStockhamTransformPlan, ExternalStockhamTransformProgress,
     map_external_polynomial_plan_error, read_external_polynomial_value,
+};
+use super::merkle::{
+    PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER, PROOF_MERKLE_NODE_SCHEMA_IDENTIFIER,
 };
 use super::relation_plan::{
     BoundTreeConstructionKind, ProofPrivacyMode, RelationColumnDescriptor, RelationColumnOrigin,
@@ -56,12 +62,8 @@ use super::{
     fold_extension_evaluations_in_place,
 };
 
-const PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER: u16 = 0x0107;
-const PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER: u16 = 0x0108;
-const PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER: u16 = 0x0106;
 const SCHEMA_VERSION: u16 = 1;
 const PROOF_SECRET_LEAF_SALT_BYTE_LENGTH: usize = 48;
-const PROOF_MERKLE_NODE_SCHEMA_IDENTIFIER: u16 = 0x0105;
 const PROOF_MERKLE_NODE_HASH_DOMAIN: &str = "sealed-lattice/proof/merkle/node/v1";
 const HASH_BYTE_LENGTH: usize = 64;
 const AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH: usize = 102;

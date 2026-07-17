@@ -6,9 +6,9 @@ import { structuredCommitmentWorkerResponseProductionByteLength } from './struct
 export const maximumClosedWorkerCommandByteLength =
     foundationProfile.maximumCopiedBufferByteLength;
 
-// The fixed commitment response carries the maximum copied residue payload plus
-// 44 bytes of closed-worker framing. No other command may exceed the ordinary
-// command ceiling, and command inputs never receive this output-only allowance.
+// The structured-commitment command has one fixed production response shape.
+// Bind that output to its exact byte length; all other commands retain the
+// ordinary copied-buffer ceiling.
 export const actionRandomnessCommandOutputByteLimit = (
     command: number,
 ): number =>

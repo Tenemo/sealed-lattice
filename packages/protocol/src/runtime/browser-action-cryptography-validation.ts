@@ -1,5 +1,6 @@
 import {
     BrowserActionStorageCustodyError,
+    foundationProfile,
     refusalReasonCodes,
     stateCapabilityKinds,
     type BrowserActionProofAttemptBinding,
@@ -17,7 +18,8 @@ import {
 
 const foundationHashByteLength = 64;
 const attemptIdentifierByteLength = 32;
-const maximumCanonicalMaterialByteLength = 1_572_864;
+const maximumCanonicalMaterialByteLength =
+    foundationProfile.maximumCopiedBufferByteLength;
 const opaqueWorkerIdentifierPattern = /^[0-9a-f]{64}$/u;
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> => {

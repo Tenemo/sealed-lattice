@@ -31,7 +31,9 @@ pub(crate) fn setup_commitment_worker_response_bytes(
     response
         .try_reserve_exact(response_byte_length)
         .map_err(|_| {
-            response_length_error("setup commitment response allocation exceeded the fixed profile")
+            response_length_error(
+                "setup commitment response allocation exceeded the absolute safety bound",
+            )
         })?;
     response.extend_from_slice(&SETUP_COMMITMENT_WORKER_RESPONSE_FORMAT_IDENTIFIER.to_le_bytes());
     response.extend_from_slice(&SETUP_COMMITMENT_WORKER_RESPONSE_VERSION.to_le_bytes());

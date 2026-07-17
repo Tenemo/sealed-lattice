@@ -1179,7 +1179,7 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
         super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
         PROOF_UNIQUE_QUERY_COUNT,
     )
-    .expect("the fixture application fits the worker ceiling");
+    .expect("the fixture application fits the worker safety bound");
     let verification_binding = CommonProofVerificationBinding::new(
         [0x11; 64],
         [0x32; 64],

@@ -1,6 +1,8 @@
+#[cfg(test)]
 use std::ops::Range;
 
 use num_bigint::BigUint;
+#[cfg(test)]
 use num_traits::One;
 
 use crate::{
@@ -38,15 +40,15 @@ pub(crate) fn canonical_residue_byte_length(modulus: u64) -> CanonicalResult<usi
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct KeySwitchDecompositionTopology {
-    #[cfg(test)]
     level: usize,
-    #[cfg(test)]
     data_primes_per_block: usize,
     data_block_ranges: Vec<Range<usize>>,
     extended_moduli: Vec<u64>,
 }
 
+#[cfg(test)]
 impl KeySwitchDecompositionTopology {
     pub(crate) fn for_level(level: usize) -> CanonicalResult<Self> {
         Self::for_level_with_data_primes_per_block(level, KEY_SWITCH_DATA_PRIMES_PER_BLOCK)
@@ -100,26 +102,21 @@ impl KeySwitchDecompositionTopology {
         extended_moduli.extend(KEY_SWITCH_SPECIAL_PRIMES);
 
         Ok(Self {
-            #[cfg(test)]
             level,
-            #[cfg(test)]
             data_primes_per_block,
             data_block_ranges,
             extended_moduli,
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn level(&self) -> usize {
         self.level
     }
 
-    #[cfg(test)]
     pub(crate) fn data_prime_count(&self) -> usize {
         self.level + 1
     }
 
-    #[cfg(test)]
     pub(crate) fn data_primes_per_block(&self) -> usize {
         self.data_primes_per_block
     }
@@ -128,7 +125,6 @@ impl KeySwitchDecompositionTopology {
         self.data_block_ranges.len()
     }
 
-    #[cfg(test)]
     pub(crate) fn data_block_range(&self, block_index: usize) -> CanonicalResult<Range<usize>> {
         self.data_block_ranges
             .get(block_index)
@@ -141,12 +137,10 @@ impl KeySwitchDecompositionTopology {
             })
     }
 
-    #[cfg(test)]
     pub(crate) fn active_data_moduli(&self) -> &[u64] {
         &self.extended_moduli[..self.data_prime_count()]
     }
 
-    #[cfg(test)]
     pub(crate) fn extended_moduli(&self) -> &[u64] {
         &self.extended_moduli
     }
@@ -155,7 +149,6 @@ impl KeySwitchDecompositionTopology {
         self.extended_moduli.len()
     }
 
-    #[cfg(test)]
     pub(crate) fn special_limb_count(&self) -> usize {
         KEY_SWITCH_SPECIAL_PRIMES.len()
     }
@@ -192,7 +185,6 @@ impl KeySwitchDecompositionTopology {
         checked_component_byte_length(self.data_block_count(), ring_degree, bytes_per_coefficient)
     }
 
-    #[cfg(test)]
     pub(crate) fn projection_indices_for_level(
         &self,
         projected_level: usize,
@@ -211,6 +203,7 @@ impl KeySwitchDecompositionTopology {
     }
 }
 
+#[cfg(test)]
 fn checked_component_byte_length(
     data_block_count: usize,
     ring_degree: usize,
@@ -227,6 +220,7 @@ fn checked_component_byte_length(
         .ok_or_else(component_byte_length_overflow)
 }
 
+#[cfg(test)]
 fn component_byte_length_overflow() -> CanonicalError {
     CanonicalError::new(
         CanonicalErrorCode::InvalidProtocolObject,

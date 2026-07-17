@@ -15,6 +15,101 @@ import {
 } from './wire-fixtures.js';
 
 describe('common-proof external-memory runtime', () => {
+    it('decodes every assigned Rust operation and protection code', () => {
+        const runtimeBindingHash = runtimeBinding(0x30);
+        const assignedOperations = [
+            {
+                expectedOperationKind: 'create',
+                expectedProtection: 'public-integrity',
+                operation: {
+                    kind: 1,
+                    objectOrdinal: 1,
+                    payloadByteLength: 8n,
+                    position: 0n,
+                    protection: 1,
+                },
+            },
+            {
+                expectedOperationKind: 'create',
+                expectedProtection: 'secret-authenticated-encryption',
+                operation: {
+                    kind: 1,
+                    objectOrdinal: 2,
+                    payloadByteLength: 8n,
+                    position: 0n,
+                    protection: 2,
+                },
+            },
+            {
+                expectedOperationKind: 'append',
+                operation: {
+                    kind: 2,
+                    objectOrdinal: 3,
+                    payload: Uint8Array.from([1, 2, 3, 4]),
+                    payloadByteLength: 4n,
+                    position: 0n,
+                    protection: 0,
+                },
+            },
+            {
+                expectedOperationKind: 'seal',
+                operation: {
+                    kind: 3,
+                    objectOrdinal: 4,
+                    payloadByteLength: 0n,
+                    position: 0n,
+                    protection: 0,
+                },
+            },
+            {
+                expectedOperationKind: 'read',
+                operation: {
+                    kind: 4,
+                    objectOrdinal: 5,
+                    payloadByteLength: 4n,
+                    position: 6n,
+                    protection: 0,
+                },
+            },
+            {
+                expectedOperationKind: 'delete',
+                operation: {
+                    kind: 5,
+                    objectOrdinal: 6,
+                    payloadByteLength: 0n,
+                    position: 0n,
+                    protection: 0,
+                },
+            },
+        ] as const;
+
+        for (const [
+            operationIndex,
+            assignedOperation,
+        ] of assignedOperations.entries()) {
+            const request = encodeRequest({
+                maximumPayloadByteLength: 8n,
+                operations: [assignedOperation.operation],
+                requestSequence: BigInt(operationIndex + 1),
+                runtimeBindingHash,
+            });
+            const decodedOperation =
+                decodeCommonProofExternalMemoryRequest(request).operations[0];
+            expect(decodedOperation?.operationKind).toBe(
+                assignedOperation.expectedOperationKind,
+            );
+            const decodedProtection =
+                decodedOperation?.operationKind === 'create'
+                    ? decodedOperation.protection
+                    : undefined;
+            const expectedProtection =
+                'expectedProtection' in assignedOperation
+                    ? assignedOperation.expectedProtection
+                    : undefined;
+            expect(decodedProtection).toBe(expectedProtection);
+        }
+    });
+
     it('decodes exact single-operation Rust storage transactions', () => {
         const binding = runtimeBinding(0x31);
         const appendBytes = Uint8Array.from([9, 8, 7, 6]);

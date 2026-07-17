@@ -49,6 +49,7 @@ const artifactPaths = Object.freeze(
 const textEncoder = new TextEncoder();
 
 type PrivateRandomnessPurposeRangeVector = Readonly<{
+    familyName: string;
     familySchemaIdentifier: number;
     firstPurpose: number;
     lastPurpose: number;
@@ -250,7 +251,8 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
     );
     const suiteRecordBytes = canonicalTuple(
         0x0118,
-        ...Array.from({ length: 28 }, () => unsigned16Item(1)),
+        unsigned16Item(2),
+        ...Array.from({ length: 20 }, () => unsigned16Item(1)),
         nestedTupleListItem(artifactReferences),
     );
     const suiteIdentifier = deriveHash(
@@ -493,7 +495,26 @@ const runFixture = async (input: {
 describe('runtime build preflight', () => {
     it('matches the shared proof-family randomness purpose ranges', async () => {
         const vector = await readPrivateRandomnessPurposeRangesVector();
-        expect(proofRandomnessPurposeRanges).toEqual(vector.ranges);
+        expect(vector.ranges.map((range) => range.familyName)).toEqual([
+            'sameSecret',
+            'publicKeyShare',
+            'relinearizationRoundOne',
+            'relinearizationRoundTwo',
+            'galoisKeyShare',
+            'ballotValidity',
+            'targetShareProof',
+            'vssShareLinkage',
+            'aggregateThresholdShare',
+        ]);
+        expect(proofRandomnessPurposeRanges).toEqual(
+            vector.ranges.map(
+                ({ familySchemaIdentifier, firstPurpose, lastPurpose }) => ({
+                    familySchemaIdentifier,
+                    firstPurpose,
+                    lastPurpose,
+                }),
+            ),
+        );
 
         for (const range of vector.ranges) {
             for (const purpose of [
@@ -684,8 +705,8 @@ describe('runtime build preflight', () => {
 
     it('checks small-record, executable, and artifact ceilings before allocation', async () => {
         expect(runtimeBuildCanonicalLimits).toMatchObject({
-            maximumCopiedExecutableAssetByteLength: 1_572_864,
-            maximumEvaluatorProgramSetArtifactByteLength: 20_270_968,
+            maximumCopiedExecutableAssetByteLength: 8_388_608,
+            maximumEvaluatorProgramSetArtifactByteLength: 67_108_864,
             maximumFoundationVariableValueByteLength: 8 * 1024 * 1024 - 4,
             maximumRuntimeBuildManifestByteLength: 65_536,
         });
@@ -702,11 +723,11 @@ describe('runtime build preflight', () => {
         ).rejects.toThrow('outside its accepted bound');
 
         const oversizedExecutableFixture = createFixture({
-            executableReferenceByteLength: 1_572_865,
+            executableReferenceByteLength: 8_388_609,
         });
         await expect(
             runFixture({ fixture: oversizedExecutableFixture }),
-        ).rejects.toThrow('copied-buffer ceiling');
+        ).rejects.toThrow('copied-buffer safety bound');
 
         const oversizedArtifactFixture = createFixture({
             artifactReferenceByteLength: 8 * 1024 * 1024 - 3,
@@ -714,27 +735,30 @@ describe('runtime build preflight', () => {
         const workerHarness = createWorkerHarness();
         await expect(
             runFixture({ fixture: oversizedArtifactFixture, workerHarness }),
-        ).rejects.toThrow('outside its accepted profile');
+        ).rejects.toThrow('outside its accepted kind or safety bounds');
         expect(workerHarness.observations.terminated).toBe(1);
     });
 
-    it('admits the selected evaluator artifact length and rejects the next byte', () => {
-        const selectedEvaluatorProgramSetByteLength =
+    it('admits the selected evaluator artifact with slack and rejects one byte beyond the safety bound', () => {
+        const evaluatorProgramSetSafetyByteLength =
             runtimeBuildCanonicalLimits.maximumEvaluatorProgramSetArtifactByteLength;
+        expect(() =>
+            createSuiteArtifactHashAccumulator(5, 20_270_968n),
+        ).not.toThrow();
         expect(() =>
             createSuiteArtifactHashAccumulator(
                 5,
-                BigInt(selectedEvaluatorProgramSetByteLength),
+                BigInt(evaluatorProgramSetSafetyByteLength),
             ),
         ).not.toThrow();
         expect(() =>
             createSuiteArtifactHashAccumulator(
                 5,
-                BigInt(selectedEvaluatorProgramSetByteLength + 1),
+                BigInt(evaluatorProgramSetSafetyByteLength + 1),
             ),
-        ).toThrow('canonical byte ceiling');
+        ).toThrow('canonical safety bound');
         const selectedEvaluatorFixture = createFixture({
-            artifactReferenceByteLength: selectedEvaluatorProgramSetByteLength,
+            artifactReferenceByteLength: 20_270_968,
             artifactReferenceKind: 5,
         });
 
@@ -744,12 +768,12 @@ describe('runtime build preflight', () => {
         );
         expect(references[4]).toMatchObject({
             artifactKind: 5,
-            byteLength: BigInt(selectedEvaluatorProgramSetByteLength),
+            byteLength: 20_270_968n,
         });
 
         const oversizedEvaluatorFixture = createFixture({
             artifactReferenceByteLength:
-                selectedEvaluatorProgramSetByteLength + 1,
+                evaluatorProgramSetSafetyByteLength + 1,
             artifactReferenceKind: 5,
         });
         expect(() =>
@@ -757,11 +781,11 @@ describe('runtime build preflight', () => {
                 oversizedEvaluatorFixture.routes.get(suiteRecordPath) ??
                     new Uint8Array(0),
             ),
-        ).toThrow('outside its accepted profile');
+        ).toThrow('outside its accepted kind or safety bounds');
     });
 
     it('uses the evaluator artifact bound for streamed response admission', async () => {
-        const selectedEvaluatorProgramSetByteLength =
+        const evaluatorProgramSetSafetyByteLength =
             runtimeBuildCanonicalLimits.maximumEvaluatorProgramSetArtifactByteLength;
         const evaluatorArtifactPath = artifactPaths[4];
         if (evaluatorArtifactPath === undefined) {
@@ -775,7 +799,7 @@ describe('runtime build preflight', () => {
                     evaluatorArtifactPath,
                     {
                         contentLength: String(
-                            selectedEvaluatorProgramSetByteLength,
+                            evaluatorProgramSetSafetyByteLength,
                         ),
                     },
                 ],
@@ -792,7 +816,7 @@ describe('runtime build preflight', () => {
                     evaluatorArtifactPath,
                     {
                         contentLength: String(
-                            selectedEvaluatorProgramSetByteLength + 1,
+                            evaluatorProgramSetSafetyByteLength + 1,
                         ),
                     },
                 ],

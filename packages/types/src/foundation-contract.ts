@@ -32,7 +32,10 @@ export type VerificationResult<VerifiedValue> =
       };
 
 /** Canonical payload assignments for the shared authenticated mailbox. */
-export type MailboxPayloadType = 2;
+export const recipientPrivateVssShareMailboxPayloadType = 0x0002;
+
+export type MailboxPayloadType =
+    typeof recipientPrivateVssShareMailboxPayloadType;
 
 /** Canonical public inputs that bind one authenticated-mailbox key schedule. */
 export type MailboxKeyScheduleInput = Readonly<{
@@ -156,7 +159,7 @@ const prototypeRosterParameters = deriveFoundationRosterParameters(
     prototypeParticipantCount,
 );
 
-/** Fixed public parameters of the selected ten-participant prototype profile. */
+/** Fixed public parameters and absolute runtime safety bounds for the selected prototype. */
 export const foundationProfile = Object.freeze({
     protocolName: 'sealed-lattice',
     protocolVersion: 1,
@@ -166,9 +169,10 @@ export const foundationProfile = Object.freeze({
     maximumScore: 10,
     maximumIdentifierByteLength: 128,
     streamChunkByteLength: 1_048_576,
-    maximumCanonicalStreamByteLength: 2_147_483_648,
-    maximumCopiedBufferByteLength: 1_572_864,
-    maximumWasmMemoryByteLength: 402_653_184,
+    // A canonical raw-byte item uses four of its u32-framed bytes for the payload length.
+    maximumCanonicalStreamByteLength: 4_294_967_291,
+    maximumCopiedBufferByteLength: 8_388_608,
+    maximumWasmMemoryByteLength: 671_088_640,
 } as const);
 
 /** Fixed capability-kind assignments for non-forking state authorization. */

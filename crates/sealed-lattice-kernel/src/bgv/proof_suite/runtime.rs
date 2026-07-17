@@ -67,19 +67,23 @@ const DURABLE_AUTHORIZATION_RECORD_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/durable-authorization-record/v1";
 const COMMON_PROOF_CHECKPOINT_STATE_MAGIC: [u8; 8] = *b"SLCPCK01";
 const COMMON_PROOF_CHECKPOINT_STATE_VERSION: u16 = 1;
-pub(crate) const COMMON_PROOF_CHECKPOINT_STATE_SCHEMA_IDENTIFIER: u16 = 0x0109;
+// Checkpoint state is a build-bound custom binary format, not a canonical
+// tuple schema. Its distinct identifier avoids ambiguity with the canonical
+// proof-application-slot schema while the authenticated checkpoint manifest
+// binds resumption to the exact runtime build.
+pub(crate) const COMMON_PROOF_CHECKPOINT_STATE_FORMAT_IDENTIFIER: u16 = 0x010b;
 pub(crate) const COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH: usize = 400;
 
-/// Maximum canonical bytes in one streamed proof artifact under the selected
-/// browser profile. This limits the worker's authenticated stream, not its
-/// resident WASM memory, and is not a proof field or verifier claim.
-pub(crate) const MAXIMUM_COMMON_PROOF_BYTE_LENGTH: usize = 5_242_880;
+/// Absolute anti-exhaustion bound for one canonical streamed proof artifact.
+/// Exact proof-family geometry remains cryptographically binding, while phone
+/// qualification targets are measured separately and never affect validity.
+pub(crate) const MAXIMUM_COMMON_PROOF_BYTE_LENGTH: usize = 268_435_456;
 
 /// A common-proof runtime never retains more than one canonical transport
 /// chunk awaiting acknowledgement.
 pub(crate) const MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH: usize = 1_048_576;
 
-/// Fixed capacity of one external-memory record under the browser profile.
+/// Fixed format capacity of one external-memory record.
 /// Every non-final object append has this exact byte length and the final
 /// append has the smaller remaining object extent. This is independent of the
 /// larger canonical proof transport chunk because IndexedDB custody accounts
@@ -163,7 +167,7 @@ pub(crate) enum CommonProofRuntimeError {
 
 /// Runtime parameters applied before any large proof allocation or browser
 /// storage request. The declared proof and prefetched-query byte lengths may
-/// reduce their fixed resource ceilings. The external-memory record length
+/// reduce their absolute safety bounds. The external-memory record length
 /// must equal its fixed format parameter, as must the foundation proof
 /// transport chunk checked by [`CommonProofRuntimeLimits::new`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

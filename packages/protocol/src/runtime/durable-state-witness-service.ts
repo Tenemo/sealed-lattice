@@ -25,6 +25,11 @@ import {
     type RuntimeStorageAuthorityContext,
 } from './authenticated-runtime-record.js';
 import {
+    canonicalItemTypes,
+    canonicalTupleSchemaIdentifier,
+    canonicalTupleVersion,
+} from './canonical-tuple-constants.js';
+import {
     commonProofApplicationHandoffLogicalRecordKey,
     commonProofApplicationHandoffMarkerRecordByteLength,
     type CommonProofApplicationHandoff,
@@ -671,7 +676,7 @@ const updateAsciiCanonicalItem = (
     value: string,
 ): void => {
     const bytes = textEncoder.encode(value);
-    updateUnsigned16(hash, 0x02);
+    updateUnsigned16(hash, canonicalItemTypes.ascii);
     updateUnsigned32(hash, bytes.byteLength + 4);
     updateUnsigned32(hash, bytes.byteLength);
     hash.update(bytes);
@@ -683,17 +688,17 @@ const deriveStateExactOutputHash = (
 ): Uint8Array => {
     const hash = shake256.create({ dkLen: hashByteLength });
     try {
-        updateUnsigned16(hash, 0x0001);
-        updateUnsigned16(hash, 1);
+        updateUnsigned16(hash, canonicalTupleSchemaIdentifier);
+        updateUnsigned16(hash, canonicalTupleVersion);
         updateUnsigned32(hash, 4);
         updateAsciiCanonicalItem(hash, stateExactOutputHashDomain);
-        updateUnsigned16(hash, 0x03);
+        updateUnsigned16(hash, canonicalItemTypes.unsigned16);
         updateUnsigned32(hash, 2);
         updateUnsigned16(hash, capabilityKind);
-        updateUnsigned16(hash, 0x05);
+        updateUnsigned16(hash, canonicalItemTypes.unsigned64);
         updateUnsigned32(hash, 8);
         updateUnsigned64(hash, BigInt(exactOutputBytes.byteLength));
-        updateUnsigned16(hash, 0x01);
+        updateUnsigned16(hash, canonicalItemTypes.rawBytes);
         updateUnsigned32(hash, exactOutputBytes.byteLength + 4);
         updateUnsigned32(hash, exactOutputBytes.byteLength);
         hash.update(exactOutputBytes);

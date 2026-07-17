@@ -1,3 +1,4 @@
+import { foundationProfile } from '@sealed-lattice/types';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import type {
@@ -521,7 +522,12 @@ describe('canonical setup material streaming in the public package', () => {
     });
 
     it('rejects an oversized descriptor before copying or loading a kernel', async () => {
-        const oversizedDescriptor = new Uint8Array(131_177);
+        const maximumDescriptorByteLength = canonicalStreamDescriptorFixture(
+            foundationProfile.maximumCanonicalStreamByteLength,
+        ).byteLength;
+        const oversizedDescriptor = new Uint8Array(
+            maximumDescriptorByteLength + 1,
+        );
         const callerSlice = vi.fn(() => new Uint8Array());
         Object.defineProperty(oversizedDescriptor, 'slice', {
             value: callerSlice,

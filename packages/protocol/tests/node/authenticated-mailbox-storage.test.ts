@@ -1,4 +1,9 @@
-import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
+import type { AuthenticatedMailboxProducerSlot } from '@sealed-lattice/crypto';
+import {
+    foundationProfile,
+    recipientPrivateVssShareMailboxPayloadType,
+    type ProtocolHash,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -32,10 +37,10 @@ const hashHex = (byte: number): ProtocolHash =>
 const producerSlot = (input: {
     direction: 'inbound' | 'outbound';
     producerSequence?: string;
-}) => ({
+}): AuthenticatedMailboxProducerSlot => ({
     actionContextHash: hashHex(0x33),
     ceremonyContextHash: hashHex(0x22),
-    payloadType: 2 as const,
+    payloadType: recipientPrivateVssShareMailboxPayloadType,
     producerSequence: input.producerSequence ?? '7',
     recipientParticipantId:
         input.direction === 'inbound' ? hashHex(0x44) : hashHex(0x77),

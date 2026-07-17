@@ -8,6 +8,7 @@
 
 use crate::foundation::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
+    PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER, PROOF_OBJECT_HEADER_SCHEMA_VERSION,
     ProofApplicationSlotCeilings, hash_foundation_tuple_512,
 };
 use crate::hashing::hash_framed_parts_512;
@@ -38,8 +39,6 @@ use super::{
     selected_relation_plan_check_context,
 };
 
-const PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER: u16 = 0x0102;
-const PROOF_OBJECT_HEADER_SCHEMA_VERSION: u16 = 1;
 const PROOF_HEADER_HASH_DOMAIN: &str = "sealed-lattice/proof/header/v1";
 const SELECTED_PROOF_FIELD_INDEX: u16 = 0;
 const VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN: &str =

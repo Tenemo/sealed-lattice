@@ -5,9 +5,10 @@ import type { TranscriptCoreKernelContextOwner } from './transcript-core-bridge/
 import { WasmMemoryBoundary } from './wasm-memory-boundary.js';
 import { WasmStatusBoundary } from './wasm-status-boundary.js';
 
-const maximumCanonicalStreamChunkCount =
+const maximumCanonicalStreamChunkCount = Math.ceil(
     foundationProfile.maximumCanonicalStreamByteLength /
-    foundationProfile.streamChunkByteLength;
+        foundationProfile.streamChunkByteLength,
+);
 const canonicalStreamDescriptorFixedByteLength = 104;
 const maximumCanonicalStreamDescriptorByteLength =
     canonicalStreamDescriptorFixedByteLength +
@@ -71,7 +72,7 @@ export class CanonicalStreamResourceError extends Error {
     public readonly refusalReason = 'outsideSupportedProfile' as const;
 
     public constructor(
-        message = 'The canonical stream exceeds the supported runtime profile.',
+        message = 'The canonical stream exceeds an absolute runtime safety bound.',
     ) {
         super(message);
         this.name = 'CanonicalStreamResourceError';

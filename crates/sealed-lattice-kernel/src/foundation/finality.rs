@@ -835,7 +835,7 @@ fn require_canonical_signed_carrier(
     if bytes.is_empty() || bytes.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
         return Err(schema_error(
             RefusalReason::OutsideSupportedProfile,
-            "finality transport carrier length is outside the supported profile",
+            "finality transport carrier length exceeds the absolute runtime safety bound",
         ));
     }
     let carrier = SignedCarrier::decode(bytes, limits)?;

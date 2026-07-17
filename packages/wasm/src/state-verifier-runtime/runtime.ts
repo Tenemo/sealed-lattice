@@ -13,7 +13,7 @@ import {
     type CanonicalStreamDomain,
     type CanonicalStreamVerifierLease,
 } from '../canonical-stream-runtime.js';
-import { refusalReasonByCode } from '../transcript-core-bridge/kernel-errors.js';
+import { decodeWasmRefusalStatus } from '../transcript-core-bridge/kernel-errors.js';
 import type { TranscriptCoreKernel } from '../transcript-core-bridge/kernel-types.js';
 
 import {
@@ -349,16 +349,11 @@ const decodeDurableBinding = (
 };
 
 const decodeStatus = (status: number): RefusalReason | undefined => {
-    if (status === 0) {
-        return undefined;
-    }
-    const refusalReason = refusalReasonByCode.get(status);
-    if (refusalReason === undefined) {
-        throw new StateVerifierInternalError(
-            'The WASM state verifier returned an unknown status code.',
-        );
-    }
-    return refusalReason;
+    return decodeWasmRefusalStatus(
+        status,
+        StateVerifierInternalError,
+        'The WASM state verifier returned an unknown status code.',
+    );
 };
 
 const requireCopiedBytes = (

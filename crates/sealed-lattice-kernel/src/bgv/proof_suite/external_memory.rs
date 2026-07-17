@@ -30,10 +30,11 @@ const EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH: usize = 32;
 const EXTERNAL_MEMORY_READ_RESULT_HEADER_BYTE_LENGTH: usize = 88;
 const HASH_BYTE_LENGTH: usize = 64;
 
-/// Fixed browser scratch ceilings. The worker-side custody layer enforces the
-/// corresponding object and encrypted-record limits before touching IndexedDB.
+/// Absolute browser scratch safety bounds. The worker-side custody layer
+/// enforces the corresponding object and encrypted-record bounds before
+/// touching IndexedDB; phone qualification targets are measured separately.
 pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT: usize = 4_096;
-pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH: u64 = 268_435_456;
+pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH: u64 = 1_073_741_824;
 
 mod executor;
 mod plan;

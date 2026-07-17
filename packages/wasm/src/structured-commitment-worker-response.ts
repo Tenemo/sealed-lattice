@@ -1,7 +1,4 @@
-import {
-    BrowserActionStorageCustodyError,
-    foundationProfile,
-} from '@sealed-lattice/types';
+import { BrowserActionStorageCustodyError } from '@sealed-lattice/types';
 
 export type BgvSetupCommitmentOpeningComputation = Readonly<{
     commitment: Readonly<{
@@ -21,13 +18,25 @@ export const structuredCommitmentWorkerResponseHeaderByteLength = 32;
 export const structuredCommitmentWorkerResponseLimbHeaderByteLength = 4;
 export const structuredCommitmentModulusIndices = Object.freeze([0, 1, 2]);
 export const structuredCommitmentRowCount = 2;
-export const structuredCommitmentWorkerResponseProductionByteLength =
-    foundationProfile.maximumCopiedBufferByteLength +
+const productionStructuredCommitmentRingDegree = 32_768;
+const unsigned64ByteLength = 8;
+
+const structuredCommitmentWorkerResponseByteLength = (
+    ringDegree: number,
+): number =>
     structuredCommitmentWorkerResponseHeaderByteLength +
     structuredCommitmentModulusIndices.length *
-        structuredCommitmentWorkerResponseLimbHeaderByteLength;
+        structuredCommitmentWorkerResponseLimbHeaderByteLength +
+    structuredCommitmentModulusIndices.length *
+        structuredCommitmentRowCount *
+        ringDegree *
+        unsigned64ByteLength;
 
-const unsigned64ByteLength = 8;
+export const structuredCommitmentWorkerResponseProductionByteLength =
+    structuredCommitmentWorkerResponseByteLength(
+        productionStructuredCommitmentRingDegree,
+    );
+
 const maximumSafeIntegerBigInt = BigInt(Number.MAX_SAFE_INTEGER);
 
 export const decodeStructuredCommitmentWorkerResponse = (input: {
@@ -81,13 +90,7 @@ export const decodeStructuredCommitmentWorkerResponse = (input: {
         },
     );
     const expectedByteLength =
-        structuredCommitmentWorkerResponseHeaderByteLength +
-        structuredCommitmentModulusIndices.length *
-            structuredCommitmentWorkerResponseLimbHeaderByteLength +
-        structuredCommitmentModulusIndices.length *
-            structuredCommitmentRowCount *
-            expectedRingDegree *
-            unsigned64ByteLength;
+        structuredCommitmentWorkerResponseByteLength(expectedRingDegree);
     if (
         !Number.isSafeInteger(expectedByteLength) ||
         bytes.byteLength !== expectedByteLength

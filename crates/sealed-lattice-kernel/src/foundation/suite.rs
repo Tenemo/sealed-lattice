@@ -25,7 +25,7 @@ pub const ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER: u16 = 0x0117;
 pub const SUITE_RECORD_SCHEMA_IDENTIFIER: u16 = 0x0118;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
-const SUITE_RECORD_VERSION: u16 = 1;
+const SUITE_RECORD_VERSION: u16 = 2;
 const KEY_SWITCH_METHOD: u16 = 1;
 const KEY_SWITCH_BASIS_CONVERTER: u16 = 1;
 const SUITE_HASH_DOMAIN: &str = "sealed-lattice/foundation/suite/v1";
@@ -468,91 +468,10 @@ impl SuiteCountLimits {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SuiteByteLimits {
-    maximum_candidate_bytes_per_participant: u64,
-    maximum_candidate_bytes_per_action: u64,
-    maximum_setup_bytes_per_participant: u64,
-    maximum_proof_bytes_per_action: u64,
-    maximum_public_corpus_bytes: u64,
-    maximum_participant_upload_bytes: u64,
-    maximum_ceremony_upload_bytes: u64,
-}
-
-impl SuiteByteLimits {
-    pub(crate) fn new(
-        maximum_candidate_bytes_per_participant: u64,
-        maximum_candidate_bytes_per_action: u64,
-        maximum_setup_bytes_per_participant: u64,
-        maximum_proof_bytes_per_action: u64,
-        maximum_public_corpus_bytes: u64,
-        maximum_participant_upload_bytes: u64,
-        maximum_ceremony_upload_bytes: u64,
-    ) -> SchemaResult<Self> {
-        let limits = Self {
-            maximum_candidate_bytes_per_participant,
-            maximum_candidate_bytes_per_action,
-            maximum_setup_bytes_per_participant,
-            maximum_proof_bytes_per_action,
-            maximum_public_corpus_bytes,
-            maximum_participant_upload_bytes,
-            maximum_ceremony_upload_bytes,
-        };
-        limits.validate_positive()?;
-        Ok(limits)
-    }
-
-    fn validate_positive(self) -> SchemaResult<()> {
-        if self.maximum_candidate_bytes_per_participant == 0
-            || self.maximum_candidate_bytes_per_action == 0
-            || self.maximum_setup_bytes_per_participant == 0
-            || self.maximum_proof_bytes_per_action == 0
-            || self.maximum_public_corpus_bytes == 0
-            || self.maximum_participant_upload_bytes == 0
-            || self.maximum_ceremony_upload_bytes == 0
-        {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "suite byte maxima must be positive",
-            ));
-        }
-        Ok(())
-    }
-
-    pub const fn maximum_candidate_bytes_per_participant(self) -> u64 {
-        self.maximum_candidate_bytes_per_participant
-    }
-
-    pub const fn maximum_candidate_bytes_per_action(self) -> u64 {
-        self.maximum_candidate_bytes_per_action
-    }
-
-    pub const fn maximum_setup_bytes_per_participant(self) -> u64 {
-        self.maximum_setup_bytes_per_participant
-    }
-
-    pub const fn maximum_proof_bytes_per_action(self) -> u64 {
-        self.maximum_proof_bytes_per_action
-    }
-
-    pub const fn maximum_public_corpus_bytes(self) -> u64 {
-        self.maximum_public_corpus_bytes
-    }
-
-    pub const fn maximum_participant_upload_bytes(self) -> u64 {
-        self.maximum_participant_upload_bytes
-    }
-
-    pub const fn maximum_ceremony_upload_bytes(self) -> u64 {
-        self.maximum_ceremony_upload_bytes
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuiteRecord {
     roster_parameters: FoundationRosterParameters,
     count_limits: SuiteCountLimits,
-    byte_limits: SuiteByteLimits,
     artifacts: Vec<ArtifactReference>,
 }
 
@@ -560,25 +479,22 @@ impl SuiteRecord {
     #[cfg(test)]
     pub(crate) fn new(
         count_limits: SuiteCountLimits,
-        byte_limits: SuiteByteLimits,
         artifacts: Vec<ArtifactReference>,
     ) -> SchemaResult<Self> {
         let roster_parameters =
             derive_foundation_roster_parameters(FOUNDATION_PROFILE.participant_count)
                 .ok_or_else(unsupported_roster_size)?;
-        Self::new_for_roster(roster_parameters, count_limits, byte_limits, artifacts)
+        Self::new_for_roster(roster_parameters, count_limits, artifacts)
     }
 
     fn new_for_roster(
         roster_parameters: FoundationRosterParameters,
         count_limits: SuiteCountLimits,
-        byte_limits: SuiteByteLimits,
         artifacts: Vec<ArtifactReference>,
     ) -> SchemaResult<Self> {
         let record = Self {
             roster_parameters,
             count_limits,
-            byte_limits,
             artifacts,
         };
         record.validate()?;
@@ -646,10 +562,6 @@ impl SuiteRecord {
         self.count_limits
     }
 
-    pub const fn byte_limits(&self) -> SuiteByteLimits {
-        self.byte_limits
-    }
-
     pub const fn distributions(&self) -> &'static [DistributionRecord] {
         &FIXED_DISTRIBUTIONS
     }
@@ -669,7 +581,7 @@ impl SuiteRecord {
     pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         let mut budget = CanonicalDecodeBudget::new(limits);
         let tuple = CanonicalTuple::decode_with_budget(bytes, limits, &mut budget)?;
-        require_header(&tuple, SUITE_RECORD_SCHEMA_IDENTIFIER, 29)?;
+        require_header(&tuple, SUITE_RECORD_SCHEMA_IDENTIFIER, 22)?;
         let roster_parameters = validate_suite_items(&tuple)?;
 
         let count_limits = SuiteCountLimits::new_for_roster(
@@ -681,17 +593,8 @@ impl SuiteRecord {
             read_u32(&tuple.items[19])?,
             roster_parameters.participant_count,
         )?;
-        let byte_limits = SuiteByteLimits::new(
-            read_u64(&tuple.items[20])?,
-            read_u64(&tuple.items[21])?,
-            read_u64(&tuple.items[22])?,
-            read_u64(&tuple.items[23])?,
-            read_u64(&tuple.items[24])?,
-            read_u64(&tuple.items[25])?,
-            read_u64(&tuple.items[26])?,
-        )?;
         let distributions =
-            read_nested_tuple_list_with_budget(&tuple.items[27], limits, &mut budget)?
+            read_nested_tuple_list_with_budget(&tuple.items[20], limits, &mut budget)?
                 .iter()
                 .map(DistributionRecord::from_tuple)
                 .collect::<SchemaResult<Vec<_>>>()?;
@@ -701,11 +604,11 @@ impl SuiteRecord {
                 "distribution catalog does not match the supported suite",
             ));
         }
-        let artifacts = read_nested_tuple_list_with_budget(&tuple.items[28], limits, &mut budget)?
+        let artifacts = read_nested_tuple_list_with_budget(&tuple.items[21], limits, &mut budget)?
             .iter()
             .map(ArtifactReference::from_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
-        Self::new_for_roster(roster_parameters, count_limits, byte_limits, artifacts)
+        Self::new_for_roster(roster_parameters, count_limits, artifacts)
     }
 
     pub fn suite_id(&self) -> SchemaResult<Hash512> {
@@ -724,10 +627,8 @@ impl SuiteRecord {
         }
         self.count_limits
             .validate_for_roster(self.roster_parameters.participant_count)?;
-        self.byte_limits.validate_positive()?;
         validate_fixed_algebra()?;
-        validate_artifacts(&self.artifacts)?;
-        validate_cross_field_limits(self.count_limits, self.byte_limits)
+        validate_artifacts(&self.artifacts)
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
@@ -780,13 +681,6 @@ impl SuiteRecord {
                 ),
                 CanonicalItem::unsigned32(self.count_limits.maximum_candidate_packages_per_action),
                 CanonicalItem::unsigned32(self.count_limits.maximum_proof_objects_per_action),
-                CanonicalItem::unsigned64(self.byte_limits.maximum_candidate_bytes_per_participant),
-                CanonicalItem::unsigned64(self.byte_limits.maximum_candidate_bytes_per_action),
-                CanonicalItem::unsigned64(self.byte_limits.maximum_setup_bytes_per_participant),
-                CanonicalItem::unsigned64(self.byte_limits.maximum_proof_bytes_per_action),
-                CanonicalItem::unsigned64(self.byte_limits.maximum_public_corpus_bytes),
-                CanonicalItem::unsigned64(self.byte_limits.maximum_participant_upload_bytes),
-                CanonicalItem::unsigned64(self.byte_limits.maximum_ceremony_upload_bytes),
                 CanonicalItem::homogeneous_list(
                     CanonicalItemType::NestedTuple,
                     &distribution_items,
@@ -889,48 +783,6 @@ fn validate_artifacts(artifacts: &[ArtifactReference]) -> SchemaResult<()> {
                 "suite artifact references must be complete and canonically ordered",
             ));
         }
-    }
-    Ok(())
-}
-
-fn validate_cross_field_limits(
-    count_limits: SuiteCountLimits,
-    byte_limits: SuiteByteLimits,
-) -> SchemaResult<()> {
-    let ballot_package_byte_ceiling = byte_limits.maximum_candidate_bytes_per_participant
-        / u64::from(count_limits.maximum_ballot_attempts_per_participant);
-    if ballot_package_byte_ceiling == 0
-        || u64::from(count_limits.maximum_ballot_attempts_per_participant)
-            .checked_mul(ballot_package_byte_ceiling)
-            .ok_or_else(cap_overflow)?
-            != byte_limits.maximum_candidate_bytes_per_participant
-        || u64::from(count_limits.maximum_candidate_packages_per_action)
-            .checked_mul(ballot_package_byte_ceiling)
-            .ok_or_else(cap_overflow)?
-            != byte_limits.maximum_candidate_bytes_per_action
-    {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "candidate byte maxima do not encode one consistent package ceiling",
-        ));
-    }
-    if byte_limits.maximum_candidate_bytes_per_participant
-        > byte_limits.maximum_participant_upload_bytes
-        || byte_limits.maximum_setup_bytes_per_participant
-            > byte_limits.maximum_participant_upload_bytes
-        || byte_limits.maximum_candidate_bytes_per_participant
-            > byte_limits.maximum_candidate_bytes_per_action
-        || byte_limits.maximum_candidate_bytes_per_action > byte_limits.maximum_public_corpus_bytes
-        || byte_limits.maximum_proof_bytes_per_action > byte_limits.maximum_public_corpus_bytes
-        || byte_limits.maximum_candidate_bytes_per_action
-            > byte_limits.maximum_ceremony_upload_bytes
-        || byte_limits.maximum_proof_bytes_per_action > byte_limits.maximum_ceremony_upload_bytes
-        || byte_limits.maximum_participant_upload_bytes > byte_limits.maximum_ceremony_upload_bytes
-    {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "suite byte maxima are inconsistent with their containing resource caps",
-        ));
     }
     Ok(())
 }
@@ -1082,11 +934,6 @@ mod tests {
         SuiteCountLimits::new(3, 10, 64, 128, 20, 100).expect("test count limits are valid")
     }
 
-    fn sample_byte_limits() -> SuiteByteLimits {
-        SuiteByteLimits::new(3_000, 20_000, 5_000, 25_000, 50_000, 10_000, 100_000)
-            .expect("test byte limits are valid")
-    }
-
     fn sample_artifact_reference(artifact_kind: ArtifactKind) -> ArtifactReference {
         let artifact_tuple = CanonicalTuple::new(
             artifact_kind.artifact_schema_identifier(),
@@ -1110,22 +957,17 @@ mod tests {
     }
 
     fn sample_suite() -> SuiteRecord {
-        SuiteRecord::new(
-            sample_count_limits(),
-            sample_byte_limits(),
-            sample_artifacts(),
-        )
-        .expect("test suite is valid")
+        SuiteRecord::new(sample_count_limits(), sample_artifacts()).expect("test suite is valid")
     }
 
     #[test]
-    fn suite_round_trip_preserves_the_exact_twenty_nine_item_record_and_identifier() {
+    fn suite_round_trip_preserves_the_exact_twenty_two_item_record_and_identifier() {
         let suite = sample_suite();
         let encoded = suite.encode().expect("suite encodes");
         let tuple = CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
             .expect("suite tuple decodes");
         assert_eq!(tuple.schema_identifier, SUITE_RECORD_SCHEMA_IDENTIFIER);
-        assert_eq!(tuple.items.len(), 29);
+        assert_eq!(tuple.items.len(), 22);
 
         let decoded = SuiteRecord::decode(&encoded, &CanonicalDecodeLimits::default())
             .expect("suite decodes");
@@ -1155,8 +997,6 @@ mod tests {
         tuple.items[4] = CanonicalItem::unsigned16(roster_parameters.finality_quorum);
         tuple.items[15] = CanonicalItem::unsigned16(roster_parameters.participant_count);
         tuple.items[18] = CanonicalItem::unsigned32(6);
-        tuple.items[21] = CanonicalItem::unsigned64(6_000);
-
         let encoded = tuple.encode().expect("candidate suite encodes");
         let decoded = SuiteRecord::decode(&encoded, &CanonicalDecodeLimits::default())
             .expect("candidate suite is structural");
@@ -1219,7 +1059,7 @@ mod tests {
             .canonical_tuple()
             .expect("suite tuple derives");
         let mut distribution_tuples = read_nested_tuple_list_with_budget(
-            &wrong_distributions.items[27],
+            &wrong_distributions.items[20],
             &CanonicalDecodeLimits::default(),
             &mut CanonicalDecodeBudget::new(&CanonicalDecodeLimits::default()),
         )
@@ -1229,7 +1069,7 @@ mod tests {
             .iter()
             .map(|tuple| CanonicalItem::nested_tuple(tuple).expect("nested tuple encodes"))
             .collect::<Vec<_>>();
-        wrong_distributions.items[27] =
+        wrong_distributions.items[20] =
             CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &nested_distributions)
                 .expect("distribution list encodes");
         let wrong_distribution_bytes = wrong_distributions.encode().expect("mutated suite encodes");
@@ -1246,7 +1086,7 @@ mod tests {
         let mut missing = sample_artifacts();
         missing.pop();
         assert_eq!(
-            SuiteRecord::new(sample_count_limits(), sample_byte_limits(), missing)
+            SuiteRecord::new(sample_count_limits(), missing)
                 .expect_err("missing artifact must refuse")
                 .refusal_reason,
             RefusalReason::UnsupportedVersionOrSuite
@@ -1255,7 +1095,7 @@ mod tests {
         let mut reordered = sample_artifacts();
         reordered.swap(2, 3);
         assert_eq!(
-            SuiteRecord::new(sample_count_limits(), sample_byte_limits(), reordered)
+            SuiteRecord::new(sample_count_limits(), reordered)
                 .expect_err("reordered artifacts must refuse")
                 .refusal_reason,
             RefusalReason::UnsupportedVersionOrSuite
@@ -1352,7 +1192,7 @@ mod tests {
     }
 
     #[test]
-    fn resource_caps_refuse_zero_inconsistent_and_unreachable_boundaries() {
+    fn protocol_count_limits_refuse_zero_inconsistent_and_unreachable_boundaries() {
         assert_eq!(
             SuiteCountLimits::new(0, 10, 64, 128, 10, 100)
                 .expect_err("zero attempt maximum must refuse")
@@ -1371,41 +1211,13 @@ mod tests {
                 .refusal_reason,
             RefusalReason::OutsideSupportedProfile
         );
-
-        let inconsistent_candidate_bytes =
-            SuiteByteLimits::new(3_001, 20_000, 5_000, 25_000, 50_000, 10_000, 100_000)
-                .expect("positive byte limits construct");
-        assert_eq!(
-            SuiteRecord::new(
-                sample_count_limits(),
-                inconsistent_candidate_bytes,
-                sample_artifacts()
-            )
-            .expect_err("inconsistent package byte ceiling must refuse")
-            .refusal_reason,
-            RefusalReason::OutsideSupportedProfile
-        );
-
-        let unreachable_upload =
-            SuiteByteLimits::new(3_000, 20_000, 11_000, 25_000, 50_000, 10_000, 100_000)
-                .expect("positive byte limits construct");
-        assert_eq!(
-            SuiteRecord::new(
-                sample_count_limits(),
-                unreachable_upload,
-                sample_artifacts()
-            )
-            .expect_err("setup above participant upload must refuse")
-            .refusal_reason,
-            RefusalReason::OutsideSupportedProfile
-        );
     }
 
     #[test]
     fn suite_decode_honors_caller_limits_before_nested_allocation() {
         let encoded = sample_suite().encode().expect("suite encodes");
         let limits = CanonicalDecodeLimits {
-            maximum_item_count: 28,
+            maximum_item_count: 21,
             ..CanonicalDecodeLimits::default()
         };
         assert_eq!(

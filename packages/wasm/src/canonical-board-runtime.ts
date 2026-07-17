@@ -1,7 +1,7 @@
 import type { RefusalReason, VerificationResult } from '@sealed-lattice/types';
 import { foundationProfile } from '@sealed-lattice/types';
 
-import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
+import { decodeWasmRefusalStatus } from './transcript-core-bridge/kernel-errors.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 
 const boardVerifierCapabilityByteLength = 32;
@@ -249,16 +249,11 @@ const isFoundationObjectType = (value: number): value is FoundationObjectType =>
     );
 
 const decodeStatus = (status: number): RefusalReason | undefined => {
-    if (status === 0) {
-        return undefined;
-    }
-    const refusalReason = refusalReasonByCode.get(status);
-    if (refusalReason === undefined) {
-        throw new CanonicalBoardInternalError(
-            'The WASM canonical-board verifier returned an unknown status code.',
-        );
-    }
-    return refusalReason;
+    return decodeWasmRefusalStatus(
+        status,
+        CanonicalBoardInternalError,
+        'The WASM canonical-board verifier returned an unknown status code.',
+    );
 };
 
 const requireCopiedBytes = (

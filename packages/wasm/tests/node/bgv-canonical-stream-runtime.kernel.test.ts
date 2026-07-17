@@ -262,14 +262,15 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
                     pullCount += 1;
                     return Promise.resolve(undefined);
                 },
-                totalByteLength: 2_147_483_649,
+                totalByteLength:
+                    foundationProfile.maximumCanonicalStreamByteLength + 1,
             }),
         ).rejects.toThrowError(CanonicalStreamResourceError);
         expect(pullCount).toBe(0);
         expect(emissionCount).toBe(0);
     });
 
-    it('refuses retained material that cannot fit the remaining WASM profile before pulling bytes', async () => {
+    it('refuses retained material that cannot fit the remaining WASM safety bound before pulling bytes', async () => {
         const runtime = openBgvCanonicalStreamRuntime({ kernel });
         const descriptorBytes = canonicalStreamDescriptorFixture(
             foundationProfile.maximumWasmMemoryByteLength,

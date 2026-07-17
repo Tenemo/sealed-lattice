@@ -3637,7 +3637,7 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
         if (status === localStorageRootStatuses.outsideSupportedProfile) {
             throw new BrowserActionStorageCustodyError(
                 'Unavailable',
-                'The local storage-root material exceeds the supported runtime profile.',
+                'The local storage-root material exceeds the absolute runtime safety bound.',
             );
         }
         if (

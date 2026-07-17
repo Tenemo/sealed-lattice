@@ -1227,6 +1227,7 @@ describe('common-proof generation runtime', () => {
     });
 
     it('discards transferred family authority when adoption fails before description', () => {
+        const firstUnsafeWasmMemoryByteLength = 671_088_641;
         let adapterDescriptionCount = 0;
         let adapterDiscardCount = 0;
         const runtime = createMockKernelRuntime((_memory) => ({
@@ -1248,16 +1249,16 @@ describe('common-proof generation runtime', () => {
                 return 0;
             },
         }));
-        const outOfProfileContext = {
+        const unsafeMemoryContext = {
             ...runtime,
             memory: {
-                buffer: { byteLength: 402_653_185 },
+                buffer: { byteLength: firstUnsafeWasmMemoryByteLength },
             } as WebAssembly.Memory,
         } as TranscriptCoreKernelCommandRuntime;
 
         expect(() =>
             openClosedWorkerCommonProofGenerationFamilyAdapter(
-                outOfProfileContext,
+                unsafeMemoryContext,
                 75,
             ),
         ).toThrowError(expect.objectContaining({ code: 'ResourceLimit' }));

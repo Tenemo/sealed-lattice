@@ -11,7 +11,7 @@ pub(crate) mod parameters;
 #[expect(
     dead_code,
     unused_imports,
-    reason = "the generic browser proof worker and later exact-family adapters remain compiled while fixed suite selection refuses the exact-family browser resource mismatch"
+    reason = "the generic browser proof worker and exact-family adapters remain internal while family-owned statement and witness capability connections are incomplete"
 )]
 pub(crate) mod proof_suite;
 #[cfg_attr(

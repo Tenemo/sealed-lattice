@@ -28,7 +28,8 @@ use super::{
     ActionRandomnessRoot, CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512,
     LOCAL_RECORD_NONCE_BYTE_LENGTH, LocalStorageBinding, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH,
     ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH, OrdinaryProofCoinInput, ParticipantIdentity,
-    PersistentProofCoinInput, PrivateRandomnessDomain, ProofApplicationSlot, RefusalReason, Roster,
+    PersistentProofCoinInput, PrivateRandomnessDomain, ProofApplicationSlot,
+    ProofApplicationSlotCeilings as ProofFamilyIdentifiers, RefusalReason, Roster,
     SetupStructuredCommitmentOpeningContext, StateCapabilityKind,
 };
 
@@ -211,7 +212,9 @@ pub(crate) fn resolve_prepared_action_proof_attempt_source(
             verified_reservation_binding,
             persistent_proof_reservation_kind(statement_schema_identifier)?,
         )?;
-        let attempt_identifier = if statement_schema_identifier == 0x1621 {
+        let attempt_identifier = if statement_schema_identifier
+            == ProofFamilyIdentifiers::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER
+        {
             randomness
                 .target_release_attempt_identifier(application_slot)
                 .map_err(schema_status)?
@@ -1328,10 +1331,18 @@ fn persistent_proof_reservation_kind(
     statement_schema_identifier: u16,
 ) -> RuntimeResult<StateCapabilityKind> {
     match statement_schema_identifier {
-        0x2110 | 0x2111 | 0x1211 | 0x1212 | 0x1214 | 0x1216 | 0x1217 => {
+        ProofFamilyIdentifiers::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofFamilyIdentifiers::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofFamilyIdentifiers::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofFamilyIdentifiers::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofFamilyIdentifiers::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofFamilyIdentifiers::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofFamilyIdentifiers::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
             Ok(StateCapabilityKind::SetupActionRandomnessRoot)
         }
-        0x1621 => Ok(StateCapabilityKind::TargetRelease),
+        ProofFamilyIdentifiers::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
+            Ok(StateCapabilityKind::TargetRelease)
+        }
         _ => Err(RefusalReason::WrongTypeOrLength.canonical_code() as u32),
     }
 }

@@ -155,8 +155,8 @@ pub(crate) use private_randomness_runtime::{
 };
 pub use proof_application::{
     PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
-    ProofApplicationBinding, ProofApplicationSlotCeilings, ProofFamilyApplicationCeiling,
-    ProofObjectHeader,
+    PROOF_OBJECT_HEADER_SCHEMA_VERSION, ProofApplicationBinding, ProofApplicationSlotCeilings,
+    ProofFamilyApplicationCeiling, ProofObjectHeader,
 };
 pub use refusal::{RefusalReason, VerificationResult};
 #[cfg(test)]
@@ -193,8 +193,7 @@ pub(crate) use state_runtime::{
 pub use suite::{
     ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER, ArtifactKind, ArtifactReference,
     DISTRIBUTION_RECORD_SCHEMA_IDENTIFIER, DistributionKind, DistributionPurpose,
-    DistributionRecord, SUITE_RECORD_SCHEMA_IDENTIFIER, SuiteByteLimits, SuiteCountLimits,
-    SuiteRecord,
+    DistributionRecord, SUITE_RECORD_SCHEMA_IDENTIFIER, SuiteCountLimits, SuiteRecord,
 };
 #[cfg(test)]
 pub(crate) use suite_artifacts::{

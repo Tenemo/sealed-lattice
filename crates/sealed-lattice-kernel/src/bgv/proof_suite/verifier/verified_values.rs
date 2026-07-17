@@ -129,7 +129,7 @@ impl VerifiedStatementOwnedTree {
 }
 
 /// Verifier-owned linkage for the unproved A component of one evaluator key.
-/// Runtime B remains the only component in the 0x1218 aggregation relation.
+/// Runtime B remains the only component in the evaluator-key aggregate relation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct VerifiedEvaluatorAuxiliaryRoot {
     position: SelectedEvaluatorEntryPosition,
