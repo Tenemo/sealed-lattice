@@ -6,39 +6,50 @@ use std::{
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
+use super::runtime_input::RuntimeInputReader as InputReader;
 use super::{
-    CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, ParticipantIdentity, PreservedStateIntent,
-    RefusalReason, Roster, StateCapabilityKind, StateDurableBinding,
-    StateRecoveryIntentVerificationInput, StateRecoveryVerificationInput,
-    StateReservationIntentVerificationInput, StateReservationVerificationInput, StateVerifier,
-    VerifiedStateOutput, VerifiedStateOutputIntent, VerifiedStateRecovery,
-    VerifiedStateRecoveryIntent, VerifiedStateReservation, VerifiedStateReservationIntent,
+    CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, ML_DSA_65_SIGNATURE_BYTE_LENGTH,
+    ParticipantIdentity, PreparedStateReservationIntent, RefusalReason, Roster,
+    StateCapabilityKind, StateDurableBinding, StateReservationIntentVerificationInput,
+    StateReservationVerificationInput, StateVerifier, VerifiedStateOutput,
+    VerifiedStateOutputIntent, VerifiedStateReservation, VerifiedStateReservationIntent,
     canonical_stream::VerifiedCanonicalStreamSummary,
     finish_canonical_stream_verifier_with_summary,
+    resolve_setup_action_randomness_reservation_source,
 };
 
 pub(crate) const STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH: usize = 32;
 const STATE_VERIFIER_IDENTITY_BYTE_LENGTH: usize = 64;
 const STATE_VERIFIER_HASH_BYTE_LENGTH: usize = Hash512::BYTE_LENGTH;
-pub(crate) const STATE_DURABLE_BINDING_BYTE_LENGTH: usize = 674;
+pub(crate) const STATE_DURABLE_BINDING_BYTE_LENGTH: usize = 601;
 
 const STATE_VERIFIER_CONFIGURATION_VERSION: u16 = 1;
-const FIXED_CONFIGURATION_BYTE_LENGTH: usize = 2 + 3 * Hash512::BYTE_LENGTH + 2 + 4;
+const FIXED_CONFIGURATION_BYTE_LENGTH: usize = 2 + 3 * Hash512::BYTE_LENGTH + 4;
 const MAXIMUM_RETAINED_VERIFIED_STATE_OBJECT_COUNT: usize = 512;
+const STATE_PRODUCER_COMMAND_PREPARE_SETUP_ACTION_RANDOMNESS_INTENT: u32 = 1;
+const STATE_PRODUCER_COMMAND_CONSTRUCT_RESERVATION_INTENT: u32 = 2;
+const STATE_PRODUCER_COMMAND_VERIFY_RESERVATION_INTENT_FOR_WITNESS: u32 = 3;
+const STATE_PRODUCER_COMMAND_DERIVE_WITNESS_VOTE_SIGNATURE_MESSAGE: u32 = 4;
+const STATE_PRODUCER_COMMAND_CONSTRUCT_WITNESS_VOTE_CARRIER: u32 = 5;
+const STATE_PRODUCER_COMMAND_CERTIFY_RESERVATION: u32 = 6;
+
+#[derive(Clone, Copy)]
+pub(crate) struct VerifiedStateReservationRuntimeBinding {
+    pub(crate) authorization_hash: Hash512,
+    pub(crate) durable_binding: StateDurableBinding,
+}
 
 enum RuntimeVerifiedStateObject {
+    ReservationIntentCandidate(PreparedStateReservationIntent),
     ReservationIntent(VerifiedStateReservationIntent),
     OutputIntent(VerifiedStateOutputIntent),
-    RecoveryIntent(VerifiedStateRecoveryIntent),
     Reservation(VerifiedStateReservation),
     Output(VerifiedStateOutput),
-    Recovery(VerifiedStateRecovery),
 }
 
 enum CertifiedRuntimeStateObject {
     Reservation(VerifiedStateReservation),
     Output(VerifiedStateOutput),
-    Recovery(VerifiedStateRecovery),
 }
 
 struct StateVerifierRuntimeSession {
@@ -56,17 +67,6 @@ impl StateVerifierRuntimeSession {
         Ok(())
     }
 
-    fn predecessor_recovery(&self, handle: u32) -> RuntimeResult<Option<&VerifiedStateRecovery>> {
-        if handle == 0 {
-            return Ok(None);
-        }
-        match self.verified_objects.get(&handle) {
-            Some(RuntimeVerifiedStateObject::Recovery(recovery)) => Ok(Some(recovery)),
-            Some(_) => Err(refusal_status(RefusalReason::WrongTypeOrLength)),
-            None => Err(refusal_status(RefusalReason::ConsumedState)),
-        }
-    }
-
     fn reservation(&self, handle: u32) -> RuntimeResult<&VerifiedStateReservation> {
         match self.verified_objects.get(&handle) {
             Some(RuntimeVerifiedStateObject::Reservation(reservation)) => Ok(reservation),
@@ -75,43 +75,40 @@ impl StateVerifierRuntimeSession {
         }
     }
 
-    fn durable_binding(&self, handle: u32) -> RuntimeResult<StateDurableBinding> {
+    fn reservation_intent_candidate(
+        &self,
+        handle: u32,
+    ) -> RuntimeResult<&PreparedStateReservationIntent> {
         match self.verified_objects.get(&handle) {
-            Some(RuntimeVerifiedStateObject::ReservationIntent(intent)) => {
-                Ok(intent.durable_binding())
+            Some(RuntimeVerifiedStateObject::ReservationIntentCandidate(candidate)) => {
+                Ok(candidate)
             }
-            Some(RuntimeVerifiedStateObject::OutputIntent(intent)) => Ok(intent.durable_binding()),
-            Some(RuntimeVerifiedStateObject::RecoveryIntent(intent)) => {
-                Ok(intent.durable_binding())
-            }
-            Some(RuntimeVerifiedStateObject::Reservation(reservation)) => {
-                Ok(reservation.durable_binding())
-            }
-            Some(RuntimeVerifiedStateObject::Output(output)) => Ok(output.durable_binding()),
-            Some(RuntimeVerifiedStateObject::Recovery(recovery)) => Ok(recovery.durable_binding()),
+            Some(_) => Err(refusal_status(RefusalReason::WrongTypeOrLength)),
             None => Err(refusal_status(RefusalReason::ConsumedState)),
         }
     }
 
-    fn preserved_intent(&self, handle: u32) -> RuntimeResult<Option<PreservedStateIntent<'_>>> {
-        if handle == 0 {
-            return Ok(None);
-        }
+    fn reservation_intent(&self, handle: u32) -> RuntimeResult<&VerifiedStateReservationIntent> {
         match self.verified_objects.get(&handle) {
-            Some(RuntimeVerifiedStateObject::Reservation(reservation)) => {
-                Ok(Some(PreservedStateIntent::Reservation(reservation)))
-            }
-            Some(RuntimeVerifiedStateObject::Output(output)) => {
-                Ok(Some(PreservedStateIntent::Output(output)))
-            }
-            Some(RuntimeVerifiedStateObject::Recovery(_)) => {
+            Some(RuntimeVerifiedStateObject::ReservationIntent(intent)) => Ok(intent),
+            Some(_) => Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+            None => Err(refusal_status(RefusalReason::ConsumedState)),
+        }
+    }
+
+    fn durable_binding(&self, handle: u32) -> RuntimeResult<StateDurableBinding> {
+        match self.verified_objects.get(&handle) {
+            Some(RuntimeVerifiedStateObject::ReservationIntentCandidate(_)) => {
                 Err(refusal_status(RefusalReason::WrongTypeOrLength))
             }
-            Some(
-                RuntimeVerifiedStateObject::ReservationIntent(_)
-                | RuntimeVerifiedStateObject::OutputIntent(_)
-                | RuntimeVerifiedStateObject::RecoveryIntent(_),
-            ) => Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+            Some(RuntimeVerifiedStateObject::ReservationIntent(intent)) => {
+                Ok(intent.durable_binding())
+            }
+            Some(RuntimeVerifiedStateObject::OutputIntent(intent)) => Ok(intent.durable_binding()),
+            Some(RuntimeVerifiedStateObject::Reservation(reservation)) => {
+                Ok(reservation.durable_binding())
+            }
+            Some(RuntimeVerifiedStateObject::Output(output)) => Ok(output.durable_binding()),
             None => Err(refusal_status(RefusalReason::ConsumedState)),
         }
     }
@@ -151,7 +148,6 @@ impl StateVerifierRuntimeRegistry {
             configuration.ceremony_context_hash,
             configuration.action_context_hash,
             &configuration.roster,
-            configuration.maximum_recovery_transitions_per_state_key,
             CanonicalDecodeLimits::default(),
         )
         .map_err(|error| refusal_status(error.refusal_reason))?;
@@ -165,6 +161,185 @@ impl StateVerifierRuntimeRegistry {
         Ok(handle)
     }
 
+    fn prepare_setup_action_randomness_reservation_intent(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        action_randomness_handle: u32,
+    ) -> RuntimeResult<(u32, Hash512)> {
+        let (prepared_intent, signature_message) = {
+            let session = self.require_active_session(session_handle, capability)?;
+            session.require_object_capacity()?;
+            let source = resolve_setup_action_randomness_reservation_source(
+                action_randomness_handle,
+                session
+                    .verifier
+                    .roster_hash()
+                    .map_err(|error| refusal_status(error.refusal_reason))?,
+            )?;
+            let prepared_intent = session
+                .verifier
+                .prepare_setup_action_randomness_reservation_intent(
+                    source.derivation_input(),
+                    source.authorization_hash(),
+                )
+                .into_result()
+                .map_err(refusal_status)?;
+            let signature_message = session
+                .verifier
+                .reservation_intent_signature_message(&prepared_intent)
+                .into_result()
+                .map_err(refusal_status)?;
+            (prepared_intent, signature_message)
+        };
+        let candidate_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
+        self.require_active_session_mut(session_handle, capability)?
+            .verified_objects
+            .insert(
+                candidate_handle,
+                RuntimeVerifiedStateObject::ReservationIntentCandidate(prepared_intent),
+            );
+        Ok((candidate_handle, signature_message))
+    }
+
+    fn construct_reservation_intent(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        candidate_handle: u32,
+        signature: [u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+    ) -> RuntimeResult<(u32, Vec<u8>)> {
+        let produced = {
+            let session = self.require_active_session(session_handle, capability)?;
+            let candidate = session
+                .reservation_intent_candidate(candidate_handle)?
+                .clone();
+            session
+                .verifier
+                .construct_and_verify_reservation_intent_carrier(&candidate, signature)
+                .into_result()
+                .map_err(refusal_status)?
+        };
+        let (canonical_carrier, verified_intent) = produced.into_parts();
+        let verified_intent_handle =
+            take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
+        let session = self.require_active_session_mut(session_handle, capability)?;
+        if session.verified_objects.remove(&candidate_handle).is_none() {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
+        session.verified_objects.insert(
+            verified_intent_handle,
+            RuntimeVerifiedStateObject::ReservationIntent(verified_intent),
+        );
+        Ok((verified_intent_handle, canonical_carrier))
+    }
+
+    fn verify_reservation_intent_for_witness(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        subject_participant_id: ParticipantIdentity,
+        canonical_reservation_intent_carrier: &[u8],
+    ) -> RuntimeResult<u32> {
+        require_verification_input(canonical_reservation_intent_carrier, false)?;
+        let verified_intent = {
+            let session = self.require_active_session(session_handle, capability)?;
+            session.require_object_capacity()?;
+            session
+                .verifier
+                .verify_setup_action_randomness_intent_for_witness(
+                    subject_participant_id,
+                    canonical_reservation_intent_carrier,
+                )
+                .into_result()
+                .map_err(refusal_status)?
+        };
+        let verified_intent_handle =
+            take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
+        self.require_active_session_mut(session_handle, capability)?
+            .verified_objects
+            .insert(
+                verified_intent_handle,
+                RuntimeVerifiedStateObject::ReservationIntent(verified_intent),
+            );
+        Ok(verified_intent_handle)
+    }
+
+    fn derive_witness_vote_signature_message(
+        &self,
+        session_handle: u32,
+        capability: &[u8],
+        verified_intent_handle: u32,
+        witness_participant_id: ParticipantIdentity,
+    ) -> RuntimeResult<Hash512> {
+        let session = self.require_active_session(session_handle, capability)?;
+        session
+            .verifier
+            .derive_state_witness_vote_signature_message(
+                session.reservation_intent(verified_intent_handle)?,
+                witness_participant_id,
+            )
+            .into_result()
+            .map_err(refusal_status)
+    }
+
+    fn construct_witness_vote_carrier(
+        &self,
+        session_handle: u32,
+        capability: &[u8],
+        verified_intent_handle: u32,
+        witness_participant_id: ParticipantIdentity,
+        signature: [u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+    ) -> RuntimeResult<Vec<u8>> {
+        let session = self.require_active_session(session_handle, capability)?;
+        session
+            .verifier
+            .construct_and_verify_state_witness_vote_carrier(
+                session.reservation_intent(verified_intent_handle)?,
+                witness_participant_id,
+                signature,
+            )
+            .into_result()
+            .map_err(refusal_status)
+    }
+
+    fn certify_reservation_and_encode_certificate(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        verified_intent_handle: u32,
+        canonical_vote_carriers: &[Vec<u8>],
+    ) -> RuntimeResult<(u32, Vec<u8>)> {
+        let produced = {
+            let session = self.require_active_session(session_handle, capability)?;
+            session.require_object_capacity()?;
+            session
+                .verifier
+                .certify_reservation_intent_and_encode_certificate(
+                    session.reservation_intent(verified_intent_handle)?,
+                    canonical_vote_carriers,
+                )
+                .into_result()
+                .map_err(refusal_status)?
+        };
+        let (canonical_certificate, verified_reservation) = produced.into_parts();
+        let verified_reservation_handle =
+            take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
+        let session = self.require_active_session_mut(session_handle, capability)?;
+        if session
+            .verified_objects
+            .remove(&verified_intent_handle)
+            .is_none()
+        {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
+        session.verified_objects.insert(
+            verified_reservation_handle,
+            RuntimeVerifiedStateObject::Reservation(verified_reservation),
+        );
+        Ok((verified_reservation_handle, canonical_certificate))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn verify_reservation(
         &mut self,
@@ -172,7 +347,6 @@ impl StateVerifierRuntimeRegistry {
         capability: &[u8],
         subject_participant_id: ParticipantIdentity,
         capability_kind: StateCapabilityKind,
-        predecessor_recovery_handle: u32,
         expected_authorization_hash: Hash512,
         canonical_reservation_intent_carrier: &[u8],
         canonical_state_certificate: &[u8],
@@ -182,13 +356,11 @@ impl StateVerifierRuntimeRegistry {
         let verified_reservation = {
             let session = self.require_active_session(session_handle, capability)?;
             session.require_object_capacity()?;
-            let predecessor_recovery = session.predecessor_recovery(predecessor_recovery_handle)?;
             session
                 .verifier
                 .verify_reservation(StateReservationVerificationInput {
                     subject_participant_id,
                     capability_kind,
-                    verified_predecessor_recovery: predecessor_recovery,
                     expected_authorization_hash,
                     canonical_reservation_intent_carrier,
                     canonical_state_certificate,
@@ -213,7 +385,6 @@ impl StateVerifierRuntimeRegistry {
         capability: &[u8],
         subject_participant_id: ParticipantIdentity,
         capability_kind: StateCapabilityKind,
-        predecessor_recovery_handle: u32,
         expected_authorization_hash: Hash512,
         canonical_reservation_intent_carrier: &[u8],
     ) -> RuntimeResult<u32> {
@@ -221,13 +392,11 @@ impl StateVerifierRuntimeRegistry {
         let verified_intent = {
             let session = self.require_active_session(session_handle, capability)?;
             session.require_object_capacity()?;
-            let predecessor_recovery = session.predecessor_recovery(predecessor_recovery_handle)?;
             session
                 .verifier
                 .verify_reservation_intent(StateReservationIntentVerificationInput {
                     subject_participant_id,
                     capability_kind,
-                    verified_predecessor_recovery: predecessor_recovery,
                     expected_authorization_hash,
                     canonical_reservation_intent_carrier,
                 })
@@ -242,22 +411,6 @@ impl StateVerifierRuntimeRegistry {
                 RuntimeVerifiedStateObject::ReservationIntent(verified_intent),
             );
         Ok(object_handle)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn preflight_output(
-        &self,
-        session_handle: u32,
-        capability: &[u8],
-        verified_reservation_handle: u32,
-    ) -> RuntimeResult<()> {
-        let session = self.require_active_session(session_handle, capability)?;
-        session.require_object_capacity()?;
-        let reservation = session.reservation(verified_reservation_handle)?;
-        if !reservation.capability_kind().supports_exact_output() {
-            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
-        }
-        Ok(())
     }
 
     fn verify_output(
@@ -330,86 +483,6 @@ impl StateVerifierRuntimeRegistry {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn verify_recovery(
-        &mut self,
-        session_handle: u32,
-        capability: &[u8],
-        subject_participant_id: ParticipantIdentity,
-        capability_kind: StateCapabilityKind,
-        predecessor_recovery_handle: u32,
-        preserved_intent_handle: u32,
-        canonical_recovery_transition_carrier: &[u8],
-        canonical_state_certificate: &[u8],
-    ) -> RuntimeResult<u32> {
-        require_verification_input(canonical_recovery_transition_carrier, false)?;
-        require_verification_input(canonical_state_certificate, false)?;
-        let verified_recovery = {
-            let session = self.require_active_session(session_handle, capability)?;
-            session.require_object_capacity()?;
-            let predecessor_recovery = session.predecessor_recovery(predecessor_recovery_handle)?;
-            let preserved_state_intent = session.preserved_intent(preserved_intent_handle)?;
-            session
-                .verifier
-                .verify_recovery(StateRecoveryVerificationInput {
-                    subject_participant_id,
-                    capability_kind,
-                    verified_predecessor_recovery: predecessor_recovery,
-                    preserved_state_intent,
-                    canonical_recovery_transition_carrier,
-                    canonical_state_certificate,
-                })
-                .into_result()
-                .map_err(refusal_status)?
-        };
-        let object_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
-        self.require_active_session_mut(session_handle, capability)?
-            .verified_objects
-            .insert(
-                object_handle,
-                RuntimeVerifiedStateObject::Recovery(verified_recovery),
-            );
-        Ok(object_handle)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn verify_recovery_intent(
-        &mut self,
-        session_handle: u32,
-        capability: &[u8],
-        subject_participant_id: ParticipantIdentity,
-        capability_kind: StateCapabilityKind,
-        predecessor_recovery_handle: u32,
-        preserved_intent_handle: u32,
-        canonical_recovery_transition_carrier: &[u8],
-    ) -> RuntimeResult<u32> {
-        require_verification_input(canonical_recovery_transition_carrier, false)?;
-        let verified_intent = {
-            let session = self.require_active_session(session_handle, capability)?;
-            session.require_object_capacity()?;
-            let predecessor_recovery = session.predecessor_recovery(predecessor_recovery_handle)?;
-            let preserved_state_intent = session.preserved_intent(preserved_intent_handle)?;
-            session
-                .verifier
-                .verify_recovery_intent(StateRecoveryIntentVerificationInput {
-                    subject_participant_id,
-                    capability_kind,
-                    verified_predecessor_recovery: predecessor_recovery,
-                    preserved_state_intent,
-                    canonical_recovery_transition_carrier,
-                })
-                .into_result()
-                .map_err(refusal_status)?
-        };
-        let object_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
-        self.require_active_session_mut(session_handle, capability)?
-            .verified_objects
-            .insert(
-                object_handle,
-                RuntimeVerifiedStateObject::RecoveryIntent(verified_intent),
-            );
-        Ok(object_handle)
-    }
-
     fn certify_intent(
         &mut self,
         session_handle: u32,
@@ -434,12 +507,6 @@ impl StateVerifierRuntimeRegistry {
                     .into_result()
                     .map(CertifiedRuntimeStateObject::Output)
                     .map_err(refusal_status)?,
-                Some(RuntimeVerifiedStateObject::RecoveryIntent(intent)) => session
-                    .verifier
-                    .certify_recovery_intent(intent, canonical_state_certificate)
-                    .into_result()
-                    .map(CertifiedRuntimeStateObject::Recovery)
-                    .map_err(refusal_status)?,
                 Some(_) => return Err(refusal_status(RefusalReason::WrongTypeOrLength)),
                 None => return Err(refusal_status(RefusalReason::ConsumedState)),
             }
@@ -450,9 +517,6 @@ impl StateVerifierRuntimeRegistry {
                 RuntimeVerifiedStateObject::Reservation(value)
             }
             CertifiedRuntimeStateObject::Output(value) => RuntimeVerifiedStateObject::Output(value),
-            CertifiedRuntimeStateObject::Recovery(value) => {
-                RuntimeVerifiedStateObject::Recovery(value)
-            }
         };
         self.require_active_session_mut(session_handle, capability)?
             .verified_objects
@@ -489,15 +553,6 @@ impl StateVerifierRuntimeRegistry {
                     .into_result()
                     .map(CertifiedRuntimeStateObject::Output)
                     .map_err(refusal_status)?,
-                Some(RuntimeVerifiedStateObject::RecoveryIntent(intent)) => session
-                    .verifier
-                    .certify_recovery_intent_from_unordered_vote_carriers(
-                        intent,
-                        canonical_vote_carriers,
-                    )
-                    .into_result()
-                    .map(CertifiedRuntimeStateObject::Recovery)
-                    .map_err(refusal_status)?,
                 Some(_) => return Err(refusal_status(RefusalReason::WrongTypeOrLength)),
                 None => return Err(refusal_status(RefusalReason::ConsumedState)),
             }
@@ -508,9 +563,6 @@ impl StateVerifierRuntimeRegistry {
                 RuntimeVerifiedStateObject::Reservation(value)
             }
             CertifiedRuntimeStateObject::Output(value) => RuntimeVerifiedStateObject::Output(value),
-            CertifiedRuntimeStateObject::Recovery(value) => {
-                RuntimeVerifiedStateObject::Recovery(value)
-            }
         };
         self.require_active_session_mut(session_handle, capability)?
             .verified_objects
@@ -526,6 +578,25 @@ impl StateVerifierRuntimeRegistry {
     ) -> RuntimeResult<Vec<u8>> {
         let session = self.require_active_session(session_handle, capability)?;
         encode_durable_binding(session.durable_binding(verified_object_handle)?)
+    }
+
+    fn reservation_binding(
+        &self,
+        session_handle: u32,
+        capability: &[u8],
+        verified_reservation_handle: u32,
+    ) -> RuntimeResult<VerifiedStateReservationRuntimeBinding> {
+        let session = self.require_active_session(session_handle, capability)?;
+        match session.verified_objects.get(&verified_reservation_handle) {
+            Some(RuntimeVerifiedStateObject::Reservation(reservation)) => {
+                Ok(VerifiedStateReservationRuntimeBinding {
+                    authorization_hash: reservation.authorization_hash(),
+                    durable_binding: reservation.durable_binding(),
+                })
+            }
+            Some(_) => Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+            None => Err(refusal_status(RefusalReason::ConsumedState)),
+        }
     }
 
     fn release_verified_object(
@@ -588,54 +659,7 @@ struct StateVerifierRuntimeConfiguration {
     suite_id: Hash512,
     ceremony_context_hash: Hash512,
     action_context_hash: Hash512,
-    maximum_recovery_transitions_per_state_key: u16,
     roster: Roster,
-}
-
-struct InputReader<'input> {
-    bytes: &'input [u8],
-    offset: usize,
-}
-
-impl<'input> InputReader<'input> {
-    const fn new(bytes: &'input [u8]) -> Self {
-        Self { bytes, offset: 0 }
-    }
-
-    fn read_array<const BYTE_LENGTH: usize>(&mut self) -> RuntimeResult<[u8; BYTE_LENGTH]> {
-        self.read_bytes(BYTE_LENGTH)?
-            .try_into()
-            .map_err(|_| refusal_status(RefusalReason::MalformedEncoding))
-    }
-
-    fn read_u16(&mut self) -> RuntimeResult<u16> {
-        Ok(u16::from_le_bytes(self.read_array()?))
-    }
-
-    fn read_u32(&mut self) -> RuntimeResult<u32> {
-        Ok(u32::from_le_bytes(self.read_array()?))
-    }
-
-    fn read_bytes(&mut self, byte_length: usize) -> RuntimeResult<&'input [u8]> {
-        let end = self
-            .offset
-            .checked_add(byte_length)
-            .ok_or_else(|| refusal_status(RefusalReason::MalformedEncoding))?;
-        let bytes = self
-            .bytes
-            .get(self.offset..end)
-            .ok_or_else(|| refusal_status(RefusalReason::MalformedEncoding))?;
-        self.offset = end;
-        Ok(bytes)
-    }
-
-    fn finish(self) -> RuntimeResult<()> {
-        if self.offset == self.bytes.len() {
-            Ok(())
-        } else {
-            Err(refusal_status(RefusalReason::MalformedEncoding))
-        }
-    }
 }
 
 type RuntimeResult<Value> = Result<Value, u32>;
@@ -661,6 +685,124 @@ fn with_runtime_registry<ResultValue>(
     operation(&mut registry)
 }
 
+pub(crate) fn run_state_producer_command(command: u32, input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    if input.is_empty() || input.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
+        return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
+    }
+    let mut reader = InputReader::new(input);
+    let (session_handle, capability) = read_state_session_binding(&mut reader)?;
+    let output = match command {
+        STATE_PRODUCER_COMMAND_PREPARE_SETUP_ACTION_RANDOMNESS_INTENT => {
+            let action_randomness_handle = reader.read_u32()?;
+            reader.finish()?;
+            let (candidate_handle, signature_message) = with_runtime_registry(|registry| {
+                registry.prepare_setup_action_randomness_reservation_intent(
+                    session_handle,
+                    &capability,
+                    action_randomness_handle,
+                )
+            })?;
+            let mut output = Vec::with_capacity(size_of::<u32>() + Hash512::BYTE_LENGTH);
+            output.extend_from_slice(&candidate_handle.to_le_bytes());
+            output.extend_from_slice(signature_message.as_bytes());
+            output
+        }
+        STATE_PRODUCER_COMMAND_CONSTRUCT_RESERVATION_INTENT => {
+            let candidate_handle = reader.read_u32()?;
+            let signature = reader.read_array::<ML_DSA_65_SIGNATURE_BYTE_LENGTH>()?;
+            reader.finish()?;
+            let (verified_intent_handle, canonical_carrier) = with_runtime_registry(|registry| {
+                registry.construct_reservation_intent(
+                    session_handle,
+                    &capability,
+                    candidate_handle,
+                    signature,
+                )
+            })?;
+            encode_handle_and_bytes(verified_intent_handle, &canonical_carrier)?
+        }
+        STATE_PRODUCER_COMMAND_VERIFY_RESERVATION_INTENT_FOR_WITNESS => {
+            let subject_participant_id = ParticipantIdentity::from_bytes(reader.read_array()?);
+            let canonical_carrier = reader.read_length_prefixed_bytes()?;
+            reader.finish()?;
+            let verified_intent_handle = with_runtime_registry(|registry| {
+                registry.verify_reservation_intent_for_witness(
+                    session_handle,
+                    &capability,
+                    subject_participant_id,
+                    canonical_carrier,
+                )
+            })?;
+            verified_intent_handle.to_le_bytes().to_vec()
+        }
+        STATE_PRODUCER_COMMAND_DERIVE_WITNESS_VOTE_SIGNATURE_MESSAGE => {
+            let verified_intent_handle = reader.read_u32()?;
+            let witness_participant_id = ParticipantIdentity::from_bytes(reader.read_array()?);
+            reader.finish()?;
+            with_runtime_registry(|registry| {
+                registry.derive_witness_vote_signature_message(
+                    session_handle,
+                    &capability,
+                    verified_intent_handle,
+                    witness_participant_id,
+                )
+            })?
+            .as_bytes()
+            .to_vec()
+        }
+        STATE_PRODUCER_COMMAND_CONSTRUCT_WITNESS_VOTE_CARRIER => {
+            let verified_intent_handle = reader.read_u32()?;
+            let witness_participant_id = ParticipantIdentity::from_bytes(reader.read_array()?);
+            let signature = reader.read_array::<ML_DSA_65_SIGNATURE_BYTE_LENGTH>()?;
+            reader.finish()?;
+            with_runtime_registry(|registry| {
+                registry.construct_witness_vote_carrier(
+                    session_handle,
+                    &capability,
+                    verified_intent_handle,
+                    witness_participant_id,
+                    signature,
+                )
+            })?
+        }
+        STATE_PRODUCER_COMMAND_CERTIFY_RESERVATION => {
+            let verified_intent_handle = reader.read_u32()?;
+            let canonical_vote_carriers = decode_unordered_vote_carriers(reader.read_remaining())?;
+            let (verified_reservation_handle, canonical_certificate) =
+                with_runtime_registry(|registry| {
+                    registry.certify_reservation_and_encode_certificate(
+                        session_handle,
+                        &capability,
+                        verified_intent_handle,
+                        &canonical_vote_carriers,
+                    )
+                })?;
+            encode_handle_and_bytes(verified_reservation_handle, &canonical_certificate)?
+        }
+        _ => return Err(refusal_status(RefusalReason::UnsupportedVersionOrSuite)),
+    };
+    if output.len() > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
+        return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
+    }
+    Ok(output)
+}
+
+fn read_state_session_binding(
+    reader: &mut InputReader<'_>,
+) -> RuntimeResult<(u32, [u8; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH])> {
+    Ok((reader.read_u32()?, reader.read_array()?))
+}
+
+fn encode_handle_and_bytes(handle: u32, bytes: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let byte_length = u32::try_from(bytes.len())
+        .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+    let mut output = Vec::with_capacity(2 * size_of::<u32>() + bytes.len());
+    output.extend_from_slice(&handle.to_le_bytes());
+    output.extend_from_slice(&byte_length.to_le_bytes());
+    output.extend_from_slice(bytes);
+    Ok(output)
+}
+
 pub(crate) fn begin_state_verifier_session(
     configuration_bytes: &[u8],
     capability: [u8; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
@@ -674,7 +816,6 @@ pub(crate) fn verify_state_reservation(
     capability: &[u8],
     subject_participant_id: &[u8],
     capability_kind_code: u32,
-    predecessor_recovery_handle: u32,
     expected_authorization_hash: &[u8],
     canonical_reservation_intent_carrier: &[u8],
     canonical_state_certificate: &[u8],
@@ -688,7 +829,6 @@ pub(crate) fn verify_state_reservation(
             capability,
             subject_participant_id,
             capability_kind,
-            predecessor_recovery_handle,
             expected_authorization_hash,
             canonical_reservation_intent_carrier,
             canonical_state_certificate,
@@ -702,7 +842,6 @@ pub(crate) fn verify_state_reservation_intent(
     capability: &[u8],
     subject_participant_id: &[u8],
     capability_kind_code: u32,
-    predecessor_recovery_handle: u32,
     expected_authorization_hash: &[u8],
     canonical_reservation_intent_carrier: &[u8],
 ) -> RuntimeResult<u32> {
@@ -715,7 +854,6 @@ pub(crate) fn verify_state_reservation_intent(
             capability,
             subject_participant_id,
             capability_kind,
-            predecessor_recovery_handle,
             expected_authorization_hash,
             canonical_reservation_intent_carrier,
         )
@@ -731,11 +869,9 @@ pub(crate) fn finish_state_output_verification(
     canonical_output_intent_carrier: &[u8],
     canonical_state_certificate: &[u8],
 ) -> RuntimeResult<u32> {
-    require_verification_input(canonical_output_intent_carrier, false)?;
-    require_verification_input(canonical_state_certificate, false)?;
-    with_runtime_registry(|registry| {
-        registry.preflight_output(session_handle, capability, verified_reservation_handle)
-    })?;
+    // An atomic finish attempt owns the stream's terminal transition. Consume
+    // it before any state-side refusal so JavaScript can never release the
+    // stream authority while the kernel still retains the active session.
     let verified_stream = finish_canonical_stream_verifier_with_summary(stream_handle)?;
     with_runtime_registry(|registry| {
         registry.verify_output(
@@ -757,10 +893,8 @@ pub(crate) fn finish_state_output_intent_verification(
     verified_reservation_handle: u32,
     canonical_output_intent_carrier: &[u8],
 ) -> RuntimeResult<u32> {
-    require_verification_input(canonical_output_intent_carrier, false)?;
-    with_runtime_registry(|registry| {
-        registry.preflight_output(session_handle, capability, verified_reservation_handle)
-    })?;
+    // Keep the stream and state lease terminal boundaries identical to
+    // `finish_state_output_verification` above.
     let verified_stream = finish_canonical_stream_verifier_with_summary(stream_handle)?;
     with_runtime_registry(|registry| {
         registry.verify_output_intent(
@@ -774,57 +908,6 @@ pub(crate) fn finish_state_output_intent_verification(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_state_recovery(
-    session_handle: u32,
-    capability: &[u8],
-    subject_participant_id: &[u8],
-    capability_kind_code: u32,
-    predecessor_recovery_handle: u32,
-    preserved_intent_handle: u32,
-    canonical_recovery_transition_carrier: &[u8],
-    canonical_state_certificate: &[u8],
-) -> RuntimeResult<u32> {
-    let subject_participant_id = decode_participant_identity(subject_participant_id)?;
-    let capability_kind = decode_capability_kind(capability_kind_code)?;
-    with_runtime_registry(|registry| {
-        registry.verify_recovery(
-            session_handle,
-            capability,
-            subject_participant_id,
-            capability_kind,
-            predecessor_recovery_handle,
-            preserved_intent_handle,
-            canonical_recovery_transition_carrier,
-            canonical_state_certificate,
-        )
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_state_recovery_intent(
-    session_handle: u32,
-    capability: &[u8],
-    subject_participant_id: &[u8],
-    capability_kind_code: u32,
-    predecessor_recovery_handle: u32,
-    preserved_intent_handle: u32,
-    canonical_recovery_transition_carrier: &[u8],
-) -> RuntimeResult<u32> {
-    let subject_participant_id = decode_participant_identity(subject_participant_id)?;
-    let capability_kind = decode_capability_kind(capability_kind_code)?;
-    with_runtime_registry(|registry| {
-        registry.verify_recovery_intent(
-            session_handle,
-            capability,
-            subject_participant_id,
-            capability_kind,
-            predecessor_recovery_handle,
-            preserved_intent_handle,
-            canonical_recovery_transition_carrier,
-        )
-    })
-}
-
 pub(crate) fn certify_verified_state_intent(
     session_handle: u32,
     capability: &[u8],
@@ -868,6 +951,16 @@ pub(crate) fn describe_verified_state_object(
     })
 }
 
+pub(crate) fn verified_state_reservation_binding(
+    session_handle: u32,
+    capability: &[u8],
+    verified_reservation_handle: u32,
+) -> RuntimeResult<VerifiedStateReservationRuntimeBinding> {
+    with_runtime_registry(|registry| {
+        registry.reservation_binding(session_handle, capability, verified_reservation_handle)
+    })
+}
+
 pub(crate) fn release_verified_state_object(
     session_handle: u32,
     capability: &[u8],
@@ -900,7 +993,6 @@ fn decode_configuration(
     let suite_id = Hash512::from_bytes(reader.read_array()?);
     let ceremony_context_hash = Hash512::from_bytes(reader.read_array()?);
     let action_context_hash = Hash512::from_bytes(reader.read_array()?);
-    let maximum_recovery_transitions_per_state_key = reader.read_u16()?;
     let roster_byte_length = usize::try_from(reader.read_u32()?)
         .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
     if roster_byte_length == 0 {
@@ -914,16 +1006,13 @@ fn decode_configuration(
         suite_id,
         ceremony_context_hash,
         action_context_hash,
-        maximum_recovery_transitions_per_state_key,
         roster,
     })
 }
 
 fn encode_durable_binding(binding: StateDurableBinding) -> RuntimeResult<Vec<u8>> {
     const DURABLE_BINDING_VERSION: u16 = 1;
-    let witness_vote_sequence = binding
-        .witness_vote_sequence()
-        .map_err(|error| refusal_status(error.refusal_reason))?;
+    let witness_vote_sequence = binding.witness_vote_sequence();
     let mut output = Vec::with_capacity(STATE_DURABLE_BINDING_BYTE_LENGTH);
     output.extend_from_slice(&DURABLE_BINDING_VERSION.to_le_bytes());
     output.extend_from_slice(&binding.vote_kind().canonical_code().to_le_bytes());
@@ -934,9 +1023,7 @@ fn encode_durable_binding(binding: StateDurableBinding) -> RuntimeResult<Vec<u8>
     output.extend_from_slice(binding.subject_participant_id().as_bytes());
     output.extend_from_slice(binding.state_key().as_bytes());
     output.extend_from_slice(binding.intent_object_hash().as_bytes());
-    output.extend_from_slice(&binding.subject_epoch().to_le_bytes());
     output.extend_from_slice(&witness_vote_sequence.to_le_bytes());
-    encode_optional_hash(&mut output, binding.predecessor_transition_hash());
     encode_optional_hash(&mut output, binding.reservation_intent_object_hash());
     encode_optional_hash(&mut output, binding.output_intent_object_hash());
     encode_optional_hash(&mut output, binding.exact_output_hash());
@@ -1057,11 +1144,139 @@ mod tests {
     };
     use fips204::{
         ml_dsa_65,
-        traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes},
+        traits::{KeyGen as SignatureKeyGen, SerDes as SignatureSerDes, Signer},
     };
 
     use super::*;
-    use crate::foundation::{FOUNDATION_PROFILE, RosterEntry};
+    use crate::foundation::{
+        FOUNDATION_PROFILE, RosterEntry, StateCertificate, run_action_randomness_command,
+    };
+
+    const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
+
+    struct StateProducerRuntimeFixture {
+        capability: [u8; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
+        configuration: Vec<u8>,
+        participant_identities: Vec<ParticipantIdentity>,
+        signing_keys: Vec<ml_dsa_65::PrivateKey>,
+    }
+
+    impl StateProducerRuntimeFixture {
+        fn new() -> Self {
+            let mut roster_entries =
+                Vec::with_capacity(usize::from(FOUNDATION_PROFILE.participant_count));
+            let mut signing_keys =
+                Vec::with_capacity(usize::from(FOUNDATION_PROFILE.participant_count));
+            for roster_position in 0..FOUNDATION_PROFILE.participant_count {
+                let mut signing_seed = [0_u8; 32];
+                signing_seed[0] =
+                    u8::try_from(roster_position + 1).expect("test roster position fits u8");
+                signing_seed[31] =
+                    u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                        .expect("test reverse roster position fits u8");
+                let (verification_key, signing_key) =
+                    ml_dsa_65::KG::keygen_from_seed(&signing_seed);
+                let mut mailbox_seed = [0x41_u8; 32];
+                mailbox_seed[0] =
+                    u8::try_from(roster_position + 1).expect("test roster position fits u8");
+                let mut mailbox_fallback_seed = [0x92_u8; 32];
+                mailbox_fallback_seed[31] =
+                    u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                        .expect("test reverse roster position fits u8");
+                let (mailbox_key, _) =
+                    ml_kem_768::KG::keygen_from_seed(mailbox_seed, mailbox_fallback_seed);
+                roster_entries.push(RosterEntry {
+                    roster_position,
+                    signing_verification_key: verification_key.into_bytes(),
+                    mailbox_encapsulation_key: mailbox_key.into_bytes(),
+                });
+                signing_keys.push(signing_key);
+            }
+            let roster = Roster::new(roster_entries).expect("test roster is valid");
+            let participant_identities = roster
+                .entries
+                .iter()
+                .map(|entry| {
+                    entry
+                        .participant_identity()
+                        .expect("participant identity derives")
+                })
+                .collect();
+            let roster_bytes = roster.encode().expect("test roster encodes");
+            let mut configuration = Vec::new();
+            configuration.extend_from_slice(&STATE_VERIFIER_CONFIGURATION_VERSION.to_le_bytes());
+            configuration.extend_from_slice(&[0x11; Hash512::BYTE_LENGTH]);
+            configuration.extend_from_slice(&[0x22; Hash512::BYTE_LENGTH]);
+            configuration.extend_from_slice(&[0x33; Hash512::BYTE_LENGTH]);
+            configuration.extend_from_slice(
+                &u32::try_from(roster_bytes.len())
+                    .expect("test roster length fits u32")
+                    .to_le_bytes(),
+            );
+            configuration.extend_from_slice(&roster_bytes);
+            Self {
+                capability: [0xa5; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
+                configuration,
+                participant_identities,
+                signing_keys,
+            }
+        }
+
+        fn session_input(&self, session_handle: u32) -> Vec<u8> {
+            let mut input = Vec::with_capacity(size_of::<u32>() + self.capability.len());
+            input.extend_from_slice(&session_handle.to_le_bytes());
+            input.extend_from_slice(&self.capability);
+            input
+        }
+
+        fn action_randomness_open_input(&self) -> Vec<u8> {
+            let mut input = vec![0x5a; 64];
+            input.extend_from_slice(&[0x11; Hash512::BYTE_LENGTH]);
+            input.extend_from_slice(&[0x22; Hash512::BYTE_LENGTH]);
+            input.extend_from_slice(&[0x33; Hash512::BYTE_LENGTH]);
+            input.extend_from_slice(self.participant_identities[0].as_bytes());
+            input
+        }
+    }
+
+    fn read_runtime_handle(bytes: &[u8]) -> u32 {
+        u32::from_le_bytes(bytes[..size_of::<u32>()].try_into().expect("handle bytes"))
+    }
+
+    fn frame_vote_carriers(carriers: &[Vec<u8>]) -> Vec<u8> {
+        let mut framed = Vec::new();
+        framed.extend_from_slice(
+            &u32::try_from(carriers.len())
+                .expect("test carrier count fits u32")
+                .to_le_bytes(),
+        );
+        for carrier in carriers {
+            framed.extend_from_slice(
+                &u32::try_from(carrier.len())
+                    .expect("test carrier length fits u32")
+                    .to_le_bytes(),
+            );
+            framed.extend_from_slice(carrier);
+        }
+        framed
+    }
+
+    struct StateProducerRuntimeCleanup {
+        action_randomness_handle: Option<u32>,
+        capability: [u8; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
+        session_handle: Option<u32>,
+    }
+
+    impl Drop for StateProducerRuntimeCleanup {
+        fn drop(&mut self) {
+            if let Some(session_handle) = self.session_handle.take() {
+                let _ = cancel_state_verifier_session(session_handle, &self.capability);
+            }
+            if let Some(action_randomness_handle) = self.action_randomness_handle.take() {
+                let _ = run_action_randomness_command(2, &action_randomness_handle.to_le_bytes());
+            }
+        }
+    }
 
     fn configuration_bytes() -> Vec<u8> {
         let roster_entries = (0..FOUNDATION_PROFILE.participant_count)
@@ -1098,7 +1313,6 @@ mod tests {
         configuration.extend_from_slice(&[0x11; Hash512::BYTE_LENGTH]);
         configuration.extend_from_slice(&[0x22; Hash512::BYTE_LENGTH]);
         configuration.extend_from_slice(&[0x33; Hash512::BYTE_LENGTH]);
-        configuration.extend_from_slice(&8_u16.to_le_bytes());
         configuration.extend_from_slice(
             &u32::try_from(roster_bytes.len())
                 .expect("test roster length fits u32")
@@ -1106,6 +1320,177 @@ mod tests {
         );
         configuration.extend_from_slice(&roster_bytes);
         configuration
+    }
+
+    #[test]
+    fn state_producer_transitions_once_through_signed_intent_distinct_witnesses_and_certificate() {
+        let fixture = StateProducerRuntimeFixture::new();
+        let session_handle =
+            begin_state_verifier_session(&fixture.configuration, fixture.capability)
+                .expect("state verifier session begins");
+        let action_randomness_output =
+            run_action_randomness_command(1, &fixture.action_randomness_open_input())
+                .expect("action randomness opens");
+        let action_randomness_handle = read_runtime_handle(&action_randomness_output);
+        let mut cleanup = StateProducerRuntimeCleanup {
+            action_randomness_handle: Some(action_randomness_handle),
+            capability: fixture.capability,
+            session_handle: Some(session_handle),
+        };
+
+        let mut prepare_input = fixture.session_input(session_handle);
+        prepare_input.extend_from_slice(&action_randomness_handle.to_le_bytes());
+        let prepared = run_state_producer_command(
+            STATE_PRODUCER_COMMAND_PREPARE_SETUP_ACTION_RANDOMNESS_INTENT,
+            &prepare_input,
+        )
+        .expect("reservation intent prepares from retained action randomness");
+        assert_eq!(prepared.len(), size_of::<u32>() + Hash512::BYTE_LENGTH);
+        let candidate_handle = read_runtime_handle(&prepared);
+        let signature_message = &prepared[size_of::<u32>()..];
+
+        let mut invalid_construct_input = fixture.session_input(session_handle);
+        invalid_construct_input.extend_from_slice(&candidate_handle.to_le_bytes());
+        invalid_construct_input.extend_from_slice(&[0_u8; ML_DSA_65_SIGNATURE_BYTE_LENGTH]);
+        assert_eq!(
+            run_state_producer_command(
+                STATE_PRODUCER_COMMAND_CONSTRUCT_RESERVATION_INTENT,
+                &invalid_construct_input,
+            ),
+            Err(refusal_status(RefusalReason::InvalidSignature))
+        );
+
+        let subject_signature = fixture.signing_keys[0]
+            .try_sign_with_seed(&[0x51; 32], signature_message, OBJECT_SIGNATURE_CONTEXT)
+            .expect("subject signs the exact kernel message");
+        let mut construct_input = fixture.session_input(session_handle);
+        construct_input.extend_from_slice(&candidate_handle.to_le_bytes());
+        construct_input.extend_from_slice(&subject_signature);
+        let constructed = run_state_producer_command(
+            STATE_PRODUCER_COMMAND_CONSTRUCT_RESERVATION_INTENT,
+            &construct_input,
+        )
+        .expect("signed reservation intent self-verifies");
+        let verified_intent_handle = read_runtime_handle(&constructed);
+        let carrier_byte_length = u32::from_le_bytes(
+            constructed[size_of::<u32>()..2 * size_of::<u32>()]
+                .try_into()
+                .expect("carrier byte length"),
+        ) as usize;
+        let canonical_intent_carrier = &constructed[2 * size_of::<u32>()..];
+        assert_eq!(canonical_intent_carrier.len(), carrier_byte_length);
+        assert_eq!(
+            run_state_producer_command(
+                STATE_PRODUCER_COMMAND_CONSTRUCT_RESERVATION_INTENT,
+                &construct_input,
+            ),
+            Err(refusal_status(RefusalReason::ConsumedState))
+        );
+
+        let mut subject_vote_input = fixture.session_input(session_handle);
+        subject_vote_input.extend_from_slice(&verified_intent_handle.to_le_bytes());
+        subject_vote_input.extend_from_slice(fixture.participant_identities[0].as_bytes());
+        assert_eq!(
+            run_state_producer_command(
+                STATE_PRODUCER_COMMAND_DERIVE_WITNESS_VOTE_SIGNATURE_MESSAGE,
+                &subject_vote_input,
+            ),
+            Err(refusal_status(RefusalReason::WrongContext))
+        );
+
+        let mut vote_carriers = Vec::new();
+        for roster_position in 1..=usize::from(FOUNDATION_PROFILE.state_witness_quorum) {
+            let witness_participant_id = fixture.participant_identities[roster_position];
+            let mut vote_message_input = fixture.session_input(session_handle);
+            vote_message_input.extend_from_slice(&verified_intent_handle.to_le_bytes());
+            vote_message_input.extend_from_slice(witness_participant_id.as_bytes());
+            let vote_message = run_state_producer_command(
+                STATE_PRODUCER_COMMAND_DERIVE_WITNESS_VOTE_SIGNATURE_MESSAGE,
+                &vote_message_input,
+            )
+            .expect("witness vote message derives");
+            let signature = fixture.signing_keys[roster_position]
+                .try_sign_with_seed(
+                    &[u8::try_from(0x60 + roster_position).expect("hedge byte fits"); 32],
+                    &vote_message,
+                    OBJECT_SIGNATURE_CONTEXT,
+                )
+                .expect("witness signs exact kernel message");
+            let mut vote_carrier_input = vote_message_input;
+            vote_carrier_input.extend_from_slice(&signature);
+            vote_carriers.push(
+                run_state_producer_command(
+                    STATE_PRODUCER_COMMAND_CONSTRUCT_WITNESS_VOTE_CARRIER,
+                    &vote_carrier_input,
+                )
+                .expect("witness vote carrier self-verifies"),
+            );
+        }
+
+        let duplicate_only =
+            vec![vote_carriers[0].clone(); usize::from(FOUNDATION_PROFILE.state_witness_quorum)];
+        let mut insufficient_certificate_input = fixture.session_input(session_handle);
+        insufficient_certificate_input.extend_from_slice(&verified_intent_handle.to_le_bytes());
+        insufficient_certificate_input.extend_from_slice(&frame_vote_carriers(&duplicate_only));
+        assert_eq!(
+            run_state_producer_command(
+                STATE_PRODUCER_COMMAND_CERTIFY_RESERVATION,
+                &insufficient_certificate_input,
+            ),
+            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
+        );
+
+        let mut adversarially_ordered_votes = vote_carriers.clone();
+        adversarially_ordered_votes.reverse();
+        adversarially_ordered_votes.push(vote_carriers[0].clone());
+        let mut certify_input = fixture.session_input(session_handle);
+        certify_input.extend_from_slice(&verified_intent_handle.to_le_bytes());
+        certify_input.extend_from_slice(&frame_vote_carriers(&adversarially_ordered_votes));
+        let certified =
+            run_state_producer_command(STATE_PRODUCER_COMMAND_CERTIFY_RESERVATION, &certify_input)
+                .expect("distinct fixed-roster quorum certifies the reservation");
+        let verified_reservation_handle = read_runtime_handle(&certified);
+        let certificate_byte_length = u32::from_le_bytes(
+            certified[size_of::<u32>()..2 * size_of::<u32>()]
+                .try_into()
+                .expect("certificate byte length"),
+        ) as usize;
+        let canonical_certificate = &certified[2 * size_of::<u32>()..];
+        assert_eq!(canonical_certificate.len(), certificate_byte_length);
+        let decoded_certificate =
+            StateCertificate::decode(canonical_certificate, &CanonicalDecodeLimits::default())
+                .expect("produced certificate is canonical");
+        assert_eq!(
+            decoded_certificate
+                .canonical_signed_state_witness_vote_carriers()
+                .len(),
+            usize::from(FOUNDATION_PROFILE.state_witness_quorum)
+        );
+        assert_eq!(
+            run_state_producer_command(STATE_PRODUCER_COMMAND_CERTIFY_RESERVATION, &certify_input),
+            Err(refusal_status(RefusalReason::ConsumedState))
+        );
+        assert!(
+            verified_state_reservation_binding(
+                session_handle,
+                &fixture.capability,
+                verified_reservation_handle,
+            )
+            .is_ok()
+        );
+
+        release_verified_state_object(
+            session_handle,
+            &fixture.capability,
+            verified_reservation_handle,
+        )
+        .expect("reservation releases");
+        cancel_state_verifier_session(session_handle, &fixture.capability)
+            .expect("state verifier cancels");
+        cleanup.session_handle = None;
+        run_action_randomness_command(2, &action_randomness_handle.to_le_bytes())
+            .expect("action randomness closes");
+        cleanup.action_randomness_handle = None;
     }
 
     #[test]

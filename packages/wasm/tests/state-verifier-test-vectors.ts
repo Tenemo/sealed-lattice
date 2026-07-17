@@ -16,9 +16,9 @@ import {
     concatenateBytes,
     createCanonicalTestRosterBytes,
     emptyHomogeneousListItem,
-    emptyOptionalItem,
     foundationHash512,
     hashItem,
+    participantIdentityItem,
     presentOptionalItem,
     unsigned16Item,
     unsigned16LittleEndian,
@@ -31,9 +31,7 @@ import {
 const stateReservationObjectType = 0x0051;
 const stateOutputIntentObjectType = 0x0052;
 const stateWitnessVoteObjectType = 0x0053;
-const stateRecoveryTransitionObjectType = 0x0054;
 const targetReleaseCapabilityKind = 3;
-const finalitySignatureCapabilityKind = 2;
 
 type SignedCarrierVector = Readonly<{
     canonicalCarrierBytes: Uint8Array;
@@ -60,16 +58,46 @@ export type StateVerifierTestVector = Readonly<{
     exactOutputBytes: Uint8Array;
     invalidExtraOutputCertificate: Uint8Array;
     output: CertifiedStateIntentTestVector;
-    recoveryFirst: CertifiedStateIntentTestVector;
-    recoveryPreservingOutput: CertifiedStateIntentTestVector;
-    recoverySecond: CertifiedStateIntentTestVector;
     reservation: CertifiedStateIntentTestVector;
     reservationVoteCarriers: readonly Uint8Array[];
     reservationOnly: readonly ReservationOnlyStateIntentTestVector[];
+    rosterHash: Uint8Array;
     subjectParticipantIdentity: Uint8Array;
     suiteIdentifier: Uint8Array;
     witnessParticipantIdentity: Uint8Array;
 }>;
+
+export const deriveSetupActionRandomnessAuthorization = (
+    input: Pick<
+        StateVerifierTestVector,
+        | 'actionContextHash'
+        | 'canonicalRosterBytes'
+        | 'ceremonyContextHash'
+        | 'subjectParticipantIdentity'
+        | 'suiteIdentifier'
+    >,
+    actionRandomnessCommitment: Uint8Array,
+): Uint8Array => {
+    if (actionRandomnessCommitment.byteLength !== 64) {
+        throw new TypeError(
+            'The action-randomness commitment must contain exactly 64 bytes.',
+        );
+    }
+    const rosterHash = foundationHash512(
+        'sealed-lattice/foundation/roster/v1',
+        variableBytesItem(input.canonicalRosterBytes),
+    );
+
+    return foundationHash512(
+        'sealed-lattice/setup/state/action-randomness/v1',
+        hashItem(input.suiteIdentifier),
+        hashItem(input.ceremonyContextHash),
+        hashItem(input.actionContextHash),
+        hashItem(rosterHash),
+        participantIdentityItem(input.subjectParticipantIdentity),
+        hashItem(actionRandomnessCommitment),
+    );
+};
 
 const stateCertificate = (
     canonicalVoteCarriers: readonly Uint8Array[],
@@ -97,7 +125,29 @@ const stateExactOutputHash = (
         variableBytesItem(exactOutputBytes),
     );
 
-export const createStateVerifierTestVector = (): StateVerifierTestVector => {
+export const createStateVerifierTestVector = (
+    input: {
+        actionContextHash?: Uint8Array;
+        ceremonyContextHash?: Uint8Array;
+        setupActionRandomnessAuthorizationHash?: Uint8Array;
+        suiteIdentifier?: Uint8Array;
+    } = {},
+): StateVerifierTestVector => {
+    for (const [fieldName, value] of [
+        ['actionContextHash', input.actionContextHash],
+        ['ceremonyContextHash', input.ceremonyContextHash],
+        [
+            'setupActionRandomnessAuthorizationHash',
+            input.setupActionRandomnessAuthorizationHash,
+        ],
+        ['suiteIdentifier', input.suiteIdentifier],
+    ] as const) {
+        if (value !== undefined && value.byteLength !== 64) {
+            throw new TypeError(
+                `The ${fieldName} value must contain exactly 64 bytes.`,
+            );
+        }
+    }
     const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
         foundationProfile.participantCount,
     );
@@ -105,9 +155,12 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
         foundationProfile.participantCount,
     );
     try {
-        const suiteIdentifier = new Uint8Array(64).fill(0x11);
-        const ceremonyContextHash = new Uint8Array(64).fill(0x22);
-        const actionContextHash = new Uint8Array(64).fill(0x33);
+        const suiteIdentifier =
+            input.suiteIdentifier?.slice() ?? new Uint8Array(64).fill(0x11);
+        const ceremonyContextHash =
+            input.ceremonyContextHash?.slice() ?? new Uint8Array(64).fill(0x22);
+        const actionContextHash =
+            input.actionContextHash?.slice() ?? new Uint8Array(64).fill(0x33);
         const canonicalRosterBytes = createCanonicalTestRosterBytes(
             signingKeyPairs.map(({ publicKey }, rosterPosition) => ({
                 signingVerificationKey: publicKey,
@@ -126,13 +179,11 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             ),
         );
 
-        const signedCarrier = (input: {
+        const signedCarrier = (carrierInput: {
             objectType: number;
             payloadBytes: Uint8Array;
-            predecessorTransitionHash?: Uint8Array;
             producerRosterPosition: number;
             producerSequence: bigint;
-            recoveryEpoch: bigint;
             signaturePurpose: string;
         }): SignedCarrierVector => {
             const canonicalEnvelopeBytes = canonicalTuple(
@@ -140,23 +191,16 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
                 asciiItem('sealed-lattice'),
                 unsigned16Item(1),
                 hashItem(suiteIdentifier),
-                unsigned16Item(input.objectType),
+                unsigned16Item(carrierInput.objectType),
                 hashItem(ceremonyContextHash),
                 hashItem(actionContextHash),
-                unsigned64Item(input.recoveryEpoch),
-                input.predecessorTransitionHash === undefined
-                    ? emptyOptionalItem(0x06)
-                    : presentOptionalItem(
-                          0x06,
-                          input.predecessorTransitionHash,
-                      ),
                 presentOptionalItem(
                     0x07,
-                    participantIdentities[input.producerRosterPosition],
+                    participantIdentities[carrierInput.producerRosterPosition],
                 ),
-                unsigned64Item(input.producerSequence),
+                unsigned64Item(carrierInput.producerSequence),
                 emptyHomogeneousListItem(0x06),
-                variableBytesItem(input.payloadBytes),
+                variableBytesItem(carrierInput.payloadBytes),
             );
             const objectHash = foundationHash512(
                 'sealed-lattice/foundation/object/v1',
@@ -166,11 +210,11 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
                 'sealed-lattice/foundation/signature-message/v1',
                 hashItem(objectHash),
                 hashItem(rosterHash),
-                asciiItem(input.signaturePurpose),
+                asciiItem(carrierInput.signaturePurpose),
             );
             const signature = signCanonicalCarrierFixtureMessage(
                 signatureMessage,
-                signingKeyPairs[input.producerRosterPosition].secretKey,
+                signingKeyPairs[carrierInput.producerRosterPosition].secretKey,
             );
             return {
                 canonicalCarrierBytes: canonicalTuple(
@@ -198,7 +242,6 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
                         ),
                         producerRosterPosition,
                         producerSequence,
-                        recoveryEpoch: 0n,
                         signaturePurpose: 'state-witness-vote',
                     }).canonicalCarrierBytes,
             );
@@ -221,7 +264,6 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             ),
             producerRosterPosition: 0,
             producerSequence: 0n,
-            recoveryEpoch: 0n,
             signaturePurpose: 'state-reservation-intent',
         });
         const reservation: CertifiedStateIntentTestVector = {
@@ -243,7 +285,6 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
                     ),
                     producerRosterPosition,
                     producerSequence: 1n,
-                    recoveryEpoch: 0n,
                     signaturePurpose: 'state-witness-vote',
                 }).canonicalCarrierBytes,
         );
@@ -258,7 +299,6 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             ),
             producerRosterPosition: 0,
             producerSequence: 0n,
-            recoveryEpoch: 0n,
             signaturePurpose: 'state-reservation-intent',
         });
         const conflictingReservation: CertifiedStateIntentTestVector = {
@@ -273,21 +313,23 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
         };
         const reservationOnly = [
             stateCapabilityKinds.setupActionRandomnessRoot,
-            stateCapabilityKinds.setupPublicSeedBranch,
-            stateCapabilityKinds.setupDealerSetBranch,
-            stateCapabilityKinds.setupRkgRoundOneBranch,
             stateCapabilityKinds.setupTerminalPackage,
         ].map((capabilityKind): ReservationOnlyStateIntentTestVector => {
+            const reservationAuthorizationHash =
+                capabilityKind ===
+                    stateCapabilityKinds.setupActionRandomnessRoot &&
+                input.setupActionRandomnessAuthorizationHash !== undefined
+                    ? input.setupActionRandomnessAuthorizationHash
+                    : authorizationHash;
             const carrier = signedCarrier({
                 objectType: stateReservationObjectType,
                 payloadBytes: canonicalTuple(
                     0x1610,
                     unsigned16Item(capabilityKind),
-                    hashItem(authorizationHash),
+                    hashItem(reservationAuthorizationHash),
                 ),
                 producerRosterPosition: 0,
                 producerSequence: 0n,
-                recoveryEpoch: 0n,
                 signaturePurpose: 'state-reservation-intent',
             });
             return {
@@ -328,7 +370,6 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             ),
             producerRosterPosition: 0,
             producerSequence: 0n,
-            recoveryEpoch: 0n,
             signaturePurpose: 'state-output-intent',
         });
         const output: CertifiedStateIntentTestVector = {
@@ -347,74 +388,6 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             true,
         );
 
-        const recoveryPreservingOutputCarrier = signedCarrier({
-            objectType: stateRecoveryTransitionObjectType,
-            payloadBytes: canonicalTuple(
-                0x1614,
-                unsigned16Item(targetReleaseCapabilityKind),
-                presentOptionalItem(0x06, outputCarrier.objectHash),
-            ),
-            producerRosterPosition: 0,
-            producerSequence: 1n,
-            recoveryEpoch: 0n,
-            signaturePurpose: 'state-recovery-transition',
-        });
-        const recoveryPreservingOutput: CertifiedStateIntentTestVector = {
-            canonicalIntentCarrier:
-                recoveryPreservingOutputCarrier.canonicalCarrierBytes,
-            canonicalStateCertificate: certificateFor(
-                recoveryPreservingOutputCarrier.objectHash,
-                3n,
-                [1, 2, 3, 4, 5, 6, 7],
-            ),
-            objectHash: recoveryPreservingOutputCarrier.objectHash,
-        };
-
-        const recoveryFirstCarrier = signedCarrier({
-            objectType: stateRecoveryTransitionObjectType,
-            payloadBytes: canonicalTuple(
-                0x1614,
-                unsigned16Item(finalitySignatureCapabilityKind),
-                emptyOptionalItem(0x06),
-            ),
-            producerRosterPosition: 0,
-            producerSequence: 1n,
-            recoveryEpoch: 0n,
-            signaturePurpose: 'state-recovery-transition',
-        });
-        const recoveryFirst: CertifiedStateIntentTestVector = {
-            canonicalIntentCarrier: recoveryFirstCarrier.canonicalCarrierBytes,
-            canonicalStateCertificate: certificateFor(
-                recoveryFirstCarrier.objectHash,
-                3n,
-                [1, 2, 3, 4, 5, 6, 7],
-            ),
-            objectHash: recoveryFirstCarrier.objectHash,
-        };
-
-        const recoverySecondCarrier = signedCarrier({
-            objectType: stateRecoveryTransitionObjectType,
-            payloadBytes: canonicalTuple(
-                0x1614,
-                unsigned16Item(finalitySignatureCapabilityKind),
-                emptyOptionalItem(0x06),
-            ),
-            predecessorTransitionHash: recoveryFirstCarrier.objectHash,
-            producerRosterPosition: 0,
-            producerSequence: 2n,
-            recoveryEpoch: 1n,
-            signaturePurpose: 'state-recovery-transition',
-        });
-        const recoverySecond: CertifiedStateIntentTestVector = {
-            canonicalIntentCarrier: recoverySecondCarrier.canonicalCarrierBytes,
-            canonicalStateCertificate: certificateFor(
-                recoverySecondCarrier.objectHash,
-                6n,
-                [1, 2, 3, 4, 5, 6, 7],
-            ),
-            objectHash: recoverySecondCarrier.objectHash,
-        };
-
         return {
             actionContextHash,
             authorizationHash,
@@ -424,12 +397,10 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             exactOutputBytes,
             invalidExtraOutputCertificate,
             output,
-            recoveryFirst,
-            recoveryPreservingOutput,
-            recoverySecond,
             reservation,
             reservationVoteCarriers,
             reservationOnly,
+            rosterHash,
             subjectParticipantIdentity: participantIdentities[0],
             suiteIdentifier,
             witnessParticipantIdentity: participantIdentities[1],

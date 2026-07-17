@@ -1,16 +1,13 @@
 {
-  "eventCount": 5305,
   "fixture": {
     "proofRelation": "threshold-aggregate-share-linkage",
     "ringDegree": 128,
     "sourceRnsLimbIndex": 0,
     "summandCount": 3
   },
-  "formatVersion": 1,
   "proofFamily": "trustee-evaluation-key",
   "transcripts": [
     {
-      "eventCount": 325,
       "segments": [
         {"byteLength": 28, "eventCount": 1, "label": "trustee-evaluation-key-share", "operation": "initialize", "squeezeCounterStart": null},
         {"byteLength": 64, "eventCount": 1, "label": "statement", "operation": "absorb", "squeezeCounterStart": null},
@@ -21,7 +18,6 @@
       "transcriptPath": "trustee-evaluation-key-share"
     },
     {
-      "eventCount": 1660,
       "segments": [
         {"byteLength": 4, "eventCount": 1, "label": "fork", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": 8, "eventCount": 1, "label": "fork-index", "operation": "absorb", "squeezeCounterStart": null},
@@ -46,7 +42,6 @@
       "transcriptPath": "trustee-evaluation-key-share/limb[0]"
     },
     {
-      "eventCount": 1660,
       "segments": [
         {"byteLength": 4, "eventCount": 1, "label": "fork", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": 8, "eventCount": 1, "label": "fork-index", "operation": "absorb", "squeezeCounterStart": null},
@@ -71,7 +66,6 @@
       "transcriptPath": "trustee-evaluation-key-share/limb[1]"
     },
     {
-      "eventCount": 1660,
       "segments": [
         {"byteLength": 4, "eventCount": 1, "label": "fork", "operation": "absorb", "squeezeCounterStart": null},
         {"byteLength": 8, "eventCount": 1, "label": "fork-index", "operation": "absorb", "squeezeCounterStart": null},

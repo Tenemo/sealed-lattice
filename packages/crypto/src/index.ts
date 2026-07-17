@@ -8,9 +8,11 @@ export type {
     CanonicalJsonByteSourcePullInput,
 } from './canonical-json.js';
 export { deriveCanonicalObjectHash } from './hashes.js';
+export { encodeCanonicalProtocolSignatureMessage } from './protocol-signature-message.js';
 export {
     BrowserLocalKeyProviderError,
     openBrowserLocalExternalKeyProvider,
+    signResetSafeSetupObject,
 } from './browser-local-key-provider.js';
 export type {
     BrowserLocalExternalKeyProvider,
@@ -19,6 +21,11 @@ export type {
     BrowserLocalMailboxCapability,
     BrowserLocalSigningCapability,
 } from './browser-local-key-provider.js';
+export {
+    copyAuthenticatedMailboxFrozenRosterParticipantIdentities,
+    openAuthenticatedMailboxFrozenRoster,
+} from './authenticated-mailbox-frozen-roster.js';
+export type { AuthenticatedMailboxFrozenRoster } from './authenticated-mailbox-frozen-roster.js';
 export {
     AuthenticatedMailboxCleanupError,
     openAuthenticatedMailbox,
@@ -31,16 +38,18 @@ export type {
     AuthenticatedMailboxKernel,
     AuthenticatedMailboxOpenInput,
     AuthenticatedMailboxOutboundCache,
+    AuthenticatedMailboxPlaintextSinkBoundary,
+    AuthenticatedMailboxPlaintextSinkLease,
     AuthenticatedMailboxProducerSlot,
     AuthenticatedMailboxSealInput,
     AuthenticatedMailboxStagingBoundary,
     AuthenticatedMailboxStreamBoundary,
     MailboxAssociatedData,
-    MailboxAssociatedDataExpectation,
     MailboxCiphertextDescriptor,
     MailboxKeyScheduleInput,
     MailboxPayloadType,
     OpenedAuthenticatedMailbox,
+    SetupMailboxSlot,
     SignedMailboxEnvelope,
     UnsignedMailboxEnvelope,
 } from './authenticated-mailbox.js';

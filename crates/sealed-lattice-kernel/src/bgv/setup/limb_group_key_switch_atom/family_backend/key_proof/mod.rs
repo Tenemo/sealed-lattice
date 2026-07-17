@@ -24,15 +24,24 @@ use super::super::negacyclic_transform::NegacyclicDomain;
 use super::super::proof_field::ProofFieldParameters;
 use super::atom_reduction::{AtomPublicInputs, AtomSource, reduce_atom};
 use super::carry_range_lookup;
-use super::column_commitment::{
-    ColumnOpening, StreamedColumnCommitmentBuilder, verify_column_opening,
-};
-use super::domain::{CyclicDomain, coset_evaluate_coefficients, coset_offset};
+#[cfg(test)]
+use super::column_commitment::StreamedColumnCommitmentBuilder;
+use super::column_commitment::{ColumnOpening, verify_column_opening};
+#[cfg(test)]
+use super::domain::coset_evaluate_coefficients;
+use super::domain::{CyclicDomain, CyclicDomainGeometry, coset_offset};
+#[cfg(test)]
+use super::domain::{coset_evaluate_coefficients_in_place, coset_evaluate_coefficients_into};
 use super::low_degree::{
-    FriParameters, FriProof, fri_answer, fri_commit, fri_verify_queries, fri_verify_structure,
+    FINAL_LAYER_MAX_SIZE, FriParameters, FriProof, fri_verify_queries, fri_verify_structure,
 };
-use super::merkle::{MerkleDigest, sorted_unique_indices};
+#[cfg(test)]
+use super::low_degree::{fri_answer, fri_commit};
+use super::merkle::MerkleDigest;
+#[cfg(test)]
+use super::merkle::sorted_unique_indices;
 use super::polynomial;
+#[cfg(test)]
 use super::private_randomness::PrivateProofRandomness;
 use super::transcript::Transcript;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
@@ -47,13 +56,54 @@ pub(super) const ZERO_STATEMENT_BINDING: [u8; 64] = [0_u8; 64];
 
 pub(super) struct KeyFriProofParameters {
     pub(crate) query_count: usize,
+    #[cfg(test)]
     pub(crate) mask_degree: usize,
+}
+
+pub(super) struct KeyFriProofDecodingShape {
+    pub(super) fri_layer_count: usize,
+    pub(super) fri_final_coefficient_count: usize,
+    pub(super) query_count: usize,
+    pub(super) base_column_count: usize,
+    pub(super) material_column_count: usize,
+    pub(super) auxiliary_column_count: usize,
+    pub(super) quotient_column_count: usize,
+    pub(super) table_terminal_count: usize,
+}
+
+pub(super) fn key_fri_proof_decoding_shape(
+    ring_degree: usize,
+    digit_count: usize,
+    linkage_present: bool,
+    query_count: usize,
+) -> CanonicalResult<KeyFriProofDecodingShape> {
+    let layout = layout(ring_degree)?;
+    let linkage_layout = linkage_present
+        .then(|| linkage::linkage_layout(ring_degree))
+        .transpose()?;
+    let mut fri_final_coefficient_count = layout.coset_size;
+    let mut fri_layer_count = 0;
+    while fri_final_coefficient_count > FINAL_LAYER_MAX_SIZE {
+        fri_final_coefficient_count /= 2;
+        fri_layer_count += 1;
+    }
+    Ok(KeyFriProofDecodingShape {
+        fri_layer_count,
+        fri_final_coefficient_count,
+        query_count,
+        base_column_count: base_column_count(ring_degree, digit_count, linkage_layout.as_ref()),
+        material_column_count: material_column_count(digit_count),
+        auxiliary_column_count: aux_column_count(ring_degree, digit_count, linkage_layout.as_ref()),
+        quotient_column_count: QUOTIENT_COLUMN_COUNT,
+        table_terminal_count: carry_range_lookup::table_count(ring_degree),
+    })
 }
 
 // Public data for one digit: the recombined sample and component, and the
 // digit's gadget idempotent. The group modulus and plaintext modulus are shared.
 pub(super) struct DigitPublic<const LIMB_COUNT: usize> {
     pub(crate) recombined_sample: Vec<[u64; LIMB_COUNT]>,
+    #[cfg(test)]
     pub(crate) recombined_component_b: Vec<[u64; LIMB_COUNT]>,
     pub(crate) gadget_idempotent: [u64; LIMB_COUNT],
 }
@@ -65,6 +115,7 @@ pub(super) struct KeyPublic<const LIMB_COUNT: usize> {
 }
 
 // Per-digit witness: the error and carry vectors (the secret is shared).
+#[cfg(test)]
 pub(super) struct DigitWitness {
     pub(crate) error: Vec<i64>,
     pub(crate) carry: Vec<i64>,
@@ -261,19 +312,26 @@ fn layout(ring_degree: usize) -> CanonicalResult<Layout> {
     })
 }
 
+#[cfg(test)]
 mod columns;
 mod constraints;
 mod linkage;
+#[cfg(test)]
 mod prove;
 mod verify;
 
-pub(super) use linkage::{LinkageStatement, LinkageWitness};
-pub(super) use prove::prove_key_fri;
+pub(super) use linkage::LinkageStatement;
 #[cfg(test)]
-pub(super) use prove::{prove_key_fri_with_component_b, prove_round_one_key_fri};
-pub(super) use verify::verify_key_fri;
+pub(super) use linkage::LinkageWitness;
 #[cfg(test)]
-pub(super) use verify::verify_round_one_key_fri;
+pub(super) use prove::prove_key_fri_with_negacyclic_domain;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(super) use prove::{begin_key_prover_phase_timing, finish_key_prover_phase_timing};
+#[cfg(test)]
+pub(super) use prove::{prove_key_fri, prove_key_fri_with_component_b, prove_round_one_key_fri};
+pub(super) use verify::verify_key_fri_with_negacyclic_domain;
+#[cfg(test)]
+pub(super) use verify::{verify_key_fri, verify_round_one_key_fri};
 
 #[cfg(test)]
 mod tests;

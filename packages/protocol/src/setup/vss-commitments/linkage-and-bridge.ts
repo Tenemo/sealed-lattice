@@ -1,6 +1,5 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import type { SetupProofMaterialStream } from '../setup-proof-material-transport.js';
 import type { SetupCommitmentValue } from '../vss-coefficient-commitments.js';
 
 export type VssShareLinkageStatement = {
@@ -25,14 +24,6 @@ export type VssShareLinkageProofMaterialSet = Readonly<{
     readonly proofRecords: readonly VssShareLinkageProofRecord[];
 }>;
 
-export type VssShareLinkageProofMaterialBuild<
-    ProofMaterialSet extends VssShareLinkageProofMaterialSet =
-        VssShareLinkageProofMaterialSet,
-> = Readonly<{
-    readonly proofMaterialSet: ProofMaterialSet;
-    readonly proofMaterialStreams: readonly SetupProofMaterialStream[];
-}>;
-
 type VssSameSecretBridgeStatement = {
     readonly objectType: 'VssSameSecretBridgeStatement';
     readonly sourceConstantCoefficientCommitments: readonly SetupCommitmentValue[];
@@ -50,11 +41,3 @@ export type VssSameSecretBridgeProofMaterialSet = {
     readonly objectType: 'VssSameSecretBridgeProofMaterialSet';
     readonly proofBytesHashes: readonly ProtocolHash[];
 };
-
-export type VssSameSecretBridgeProofMaterialBuild<
-    ProofMaterialSet extends VssSameSecretBridgeProofMaterialSet =
-        VssSameSecretBridgeProofMaterialSet,
-> = Readonly<{
-    readonly proofMaterialSet: ProofMaterialSet;
-    readonly proofMaterialStreams: readonly SetupProofMaterialStream[];
-}>;

@@ -1,4 +1,3 @@
-use super::readers::*;
 use super::*;
 
 fn committed_material_context_hash(
@@ -75,6 +74,7 @@ pub(crate) fn vss_public_coefficient_commitment_set_root(
     }))
 }
 
+#[cfg(test)]
 pub(crate) fn vss_public_source_recipient_share_record_root(
     source_record: &Value,
     source_trustee_identity: &str,
@@ -134,7 +134,6 @@ pub(super) struct VssPublicSourceCoefficientRecordInput<'a> {
     pub(super) source_trustee_roster_position: usize,
     pub(super) expected_coefficient_count: usize,
     pub(super) threshold_degree: usize,
-    pub(super) ring_degree: usize,
 }
 
 pub(super) fn verify_vss_public_source_coefficient_record(
@@ -164,7 +163,6 @@ pub(super) fn verify_vss_public_source_coefficient_record(
                 source_trustee_roster_position: input.source_trustee_roster_position,
                 shamir_coefficient_index: coefficient_record_index % input.threshold_degree,
                 expected_rns_limb_index: coefficient_record_index / input.threshold_degree,
-                ring_degree: input.ring_degree,
             },
         )?);
     }
@@ -183,16 +181,11 @@ pub(super) struct VssPublicCoefficientRecordInput<'a> {
     source_trustee_roster_position: usize,
     shamir_coefficient_index: usize,
     expected_rns_limb_index: usize,
-    ring_degree: usize,
 }
 
 pub(super) struct VssCommittedMaterialRecordCommitmentInput<'a> {
     commitment: &'a Value,
-    expected_commitment_role: &'a str,
     expected_commitment_context_hash: &'a str,
-    expected_rns_limb_index: usize,
-    expected_rns_prime: u64,
-    expected_ring_degree: usize,
     field_name: &'a str,
 }
 
@@ -205,66 +198,18 @@ pub(crate) fn validate_standalone_vss_committed_material_commitment(
         "VssCommittedMaterialCommitment",
         &format!("{field_name} objectType"),
     )?;
-    validate_vss_public_commitment_role(string_at_path(commitment, &["commitmentRole"])?)?;
-    let commitment_role = string_at_path(commitment, &["commitmentRole"])?;
     let commitment_context_hash = hash_at_path(commitment, &["commitmentContextHash"])?;
-    let rns_limb_index = usize_at_path(commitment, &["rnsLimbIndex"])?;
-    let rns_prime =
-        read_positive_u64_at_path(commitment, &["rnsPrime"], &format!("{field_name} rnsPrime"))?;
-    let ring_degree = read_positive_usize_at_path(
-        commitment,
-        &["ringDegree"],
-        &format!("{field_name} ringDegree"),
-    )?;
-    let commitment_fields = array_at_path(commitment, &["commitmentFields"])?;
-    if commitment_fields.len() != VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() {
+    let material_root_hex = string_at_path(commitment, &["materialRootHex"])?;
+    if !is_lowercase_protocol_hash(material_root_hex) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            format!("{field_name} commitmentFields must cover the commitment modulus limbs"),
+            CanonicalErrorCode::InvalidProtocolObject,
+            format!("{field_name} materialRootHex must be a 64-byte lowercase hex digest"),
         ));
     }
-    let mut verified_commitment_fields = Vec::with_capacity(commitment_fields.len());
-    for (field_position, commitment_field) in commitment_fields.iter().enumerate() {
-        let expected_commitment_modulus_index =
-            VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES[field_position];
-        compare_required_u64(
-            unsigned_at_path(commitment_field, &["commitmentModulusIndex"])?,
-            expected_commitment_modulus_index as u64,
-            &format!("{field_name} commitmentFields.{field_position}.commitmentModulusIndex"),
-        )?;
-        compare_required_u64(
-            unsigned_at_path(commitment_field, &["modulus"])?,
-            DATA_PRIMES[expected_commitment_modulus_index],
-            &format!("{field_name} commitmentFields.{field_position}.modulus"),
-        )?;
-        // The material root is the fixed-width H_512 Merkle digest in
-        // lowercase hex. Binding is checked by the canonical-root comparison in
-        // the caller and by the succinct proof's material openings; here it is
-        // only a well-formedness check.
-        let material_root_hex = string_at_path(commitment_field, &["materialRootHex"])?;
-        if !is_lowercase_protocol_hash(material_root_hex) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "{field_name} commitmentFields.{field_position}.materialRootHex must be a 64-byte lowercase hex digest"
-                ),
-            ));
-        }
-        verified_commitment_fields.push(json!({
-            "commitmentModulusIndex": expected_commitment_modulus_index,
-            "modulus": DATA_PRIMES[expected_commitment_modulus_index],
-            "materialRootHex": material_root_hex,
-        }));
-    }
-
     Ok(json!({
         "objectType": "VssCommittedMaterialCommitment",
-        "commitmentRole": commitment_role,
         "commitmentContextHash": commitment_context_hash,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-        "ringDegree": ring_degree,
-        "commitmentFields": verified_commitment_fields,
+        "materialRootHex": material_root_hex,
     }))
 }
 
@@ -274,29 +219,9 @@ pub(super) fn verify_vss_committed_material_record_commitment(
     let commitment =
         validate_standalone_vss_committed_material_commitment(input.commitment, input.field_name)?;
     compare_required_string(
-        string_at_path(&commitment, &["commitmentRole"])?,
-        input.expected_commitment_role,
-        &format!("{} commitmentRole", input.field_name),
-    )?;
-    compare_required_string(
         hash_at_path(&commitment, &["commitmentContextHash"])?,
         input.expected_commitment_context_hash,
         &format!("{} commitmentContextHash", input.field_name),
-    )?;
-    compare_required_u64(
-        unsigned_at_path(&commitment, &["rnsLimbIndex"])?,
-        input.expected_rns_limb_index as u64,
-        &format!("{} rnsLimbIndex", input.field_name),
-    )?;
-    compare_required_u64(
-        unsigned_at_path(&commitment, &["rnsPrime"])?,
-        input.expected_rns_prime,
-        &format!("{} rnsPrime", input.field_name),
-    )?;
-    compare_required_u64(
-        unsigned_at_path(&commitment, &["ringDegree"])?,
-        input.expected_ring_degree as u64,
-        &format!("{} ringDegree", input.field_name),
     )?;
     Ok(commitment)
 }
@@ -328,11 +253,7 @@ pub(super) fn verify_vss_public_coefficient_record(
     let commitment = verify_vss_committed_material_record_commitment(
         VssCommittedMaterialRecordCommitmentInput {
             commitment: input.coefficient_record,
-            expected_commitment_role: "coefficient",
             expected_commitment_context_hash: &expected_commitment_context_hash,
-            expected_rns_limb_index: input.expected_rns_limb_index,
-            expected_rns_prime: rns_prime,
-            expected_ring_degree: input.ring_degree,
             field_name: "VSS coefficient commitment commitment",
         },
     )?;
@@ -351,7 +272,6 @@ pub(super) struct VssPublicSourceRecipientShareRecordInput<'a> {
     pub(super) source_trustee_roster_position: usize,
     pub(super) expected_recipient_share_count: usize,
     pub(super) rns_limb_count: usize,
-    pub(super) ring_degree: usize,
 }
 
 pub(super) fn verify_vss_public_source_recipient_share_record(
@@ -387,7 +307,6 @@ pub(super) fn verify_vss_public_source_recipient_share_record(
                 expected_recipient_roster_position: recipient_share_record_index
                     / input.rns_limb_count,
                 expected_rns_limb_index: recipient_share_record_index % input.rns_limb_count,
-                ring_degree: input.ring_degree,
             },
         )?);
     }
@@ -407,7 +326,6 @@ pub(super) struct VssPublicRecipientShareRecordInput<'a> {
     source_trustee_roster_position: usize,
     expected_recipient_roster_position: usize,
     expected_rns_limb_index: usize,
-    ring_degree: usize,
 }
 
 pub(super) fn verify_vss_public_recipient_share_record(
@@ -438,11 +356,7 @@ pub(super) fn verify_vss_public_recipient_share_record(
     let commitment = verify_vss_committed_material_record_commitment(
         VssCommittedMaterialRecordCommitmentInput {
             commitment: input.recipient_share_record,
-            expected_commitment_role: "recipient-share",
             expected_commitment_context_hash: &expected_commitment_context_hash,
-            expected_rns_limb_index: input.expected_rns_limb_index,
-            expected_rns_prime: rns_prime,
-            expected_ring_degree: input.ring_degree,
             field_name: "VSS recipient-share commitment commitment",
         },
     )?;
@@ -460,7 +374,6 @@ pub(super) struct VssPublicAggregateThresholdRecordInput<'a> {
     pub(super) expected_recipient_roster_position: usize,
     pub(super) recipient_identity: &'a str,
     pub(super) expected_rns_limb_index: usize,
-    pub(super) ring_degree: usize,
 }
 
 pub(super) fn verify_vss_public_aggregate_threshold_record(
@@ -495,11 +408,7 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
     let commitment = verify_vss_committed_material_record_commitment(
         VssCommittedMaterialRecordCommitmentInput {
             commitment: value_at_path(input.recipient_record, &["commitment"])?,
-            expected_commitment_role: "aggregate-threshold-share",
             expected_commitment_context_hash: &expected_commitment_context_hash,
-            expected_rns_limb_index: input.expected_rns_limb_index,
-            expected_rns_prime: rns_prime,
-            expected_ring_degree: input.ring_degree,
             field_name: "VSS aggregate threshold commitment commitment",
         },
     )?;

@@ -1,5 +1,5 @@
 use super::*;
-use crate::bgv::encoding::LOGICAL_SLOT_GENERATOR;
+use crate::bgv::parameters::LOGICAL_SLOT_GENERATOR;
 use std::sync::OnceLock;
 
 static GALOIS_ELEMENT_POSITIONS: OnceLock<Vec<Option<(bool, usize)>>> = OnceLock::new();
@@ -19,7 +19,7 @@ pub(crate) fn galois_power(exponent: usize) -> CanonicalResult<usize> {
 pub(crate) fn logical_slot_galois_element(logical_slot_index: usize) -> CanonicalResult<usize> {
     if logical_slot_index >= POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "logical slot index is outside the selected ring",
         ));
     }
@@ -52,7 +52,7 @@ pub(crate) fn inverse_galois_element(galois_element: usize) -> CanonicalResult<u
     }
     if previous_remainder != 1 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "Galois element is not invertible modulo the ring order",
         ));
     }
@@ -69,13 +69,13 @@ pub(crate) fn generator_exponent_or_conjugated(
     // merge slots.
     if galois_element.is_multiple_of(2) || galois_element >= 2 * POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "Galois element must be an odd element modulo the ring order",
         ));
     }
     galois_element_positions()[galois_element].ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "Galois element is outside the selected compact generator basis",
         )
     })
@@ -139,7 +139,7 @@ pub(crate) fn packed_rank_shift_basis_exponents(
 ) -> CanonicalResult<Vec<usize>> {
     if option_count < 2 || option_count * 2 > POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "packed rank compact rotation basis requires 2 <= option count and a valid slot window",
         ));
     }
@@ -167,7 +167,7 @@ pub(crate) fn direct_score_packing_basis_galois_elements(
     });
     if exact_rotations.as_slice() != [composed_rotation] {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "direct score-packing rotation does not match the canonical logical-slot basis",
         ));
     }
@@ -197,8 +197,6 @@ pub(crate) fn rotate_with_compact_positive_generator_basis(
     context: &EvaluatorContext,
     ciphertext: &Ciphertext,
     galois_element: usize,
-    level: usize,
-    seed_hex: &str,
 ) -> CanonicalResult<Ciphertext> {
     if galois_element == 1 {
         return Ok(ciphertext.clone());
@@ -207,20 +205,10 @@ pub(crate) fn rotate_with_compact_positive_generator_basis(
     let (requires_conjugation, exponent) = generator_exponent_or_conjugated(galois_element)?;
     let mut rotated = ciphertext.clone();
     if requires_conjugation {
-        rotated = context.rotate_ciphertext(
-            &rotated,
-            ring_order - 1,
-            level,
-            &format!("{seed_hex}-conjugation"),
-        )?;
+        rotated = context.rotate_ciphertext(&rotated, ring_order - 1)?;
     }
     for basis_rotation in generator_power_basis_for_exponent(exponent)? {
-        rotated = context.rotate_ciphertext(
-            &rotated,
-            basis_rotation,
-            level,
-            &format!("{seed_hex}-generator-basis-{basis_rotation}"),
-        )?;
+        rotated = context.rotate_ciphertext(&rotated, basis_rotation)?;
     }
 
     Ok(rotated)
@@ -230,17 +218,10 @@ pub(crate) fn rotate_with_compact_inverse_generator_basis(
     context: &EvaluatorContext,
     ciphertext: &Ciphertext,
     shift: usize,
-    level: usize,
-    seed_hex: &str,
 ) -> CanonicalResult<Ciphertext> {
     let mut rotated = ciphertext.clone();
     for basis_rotation in generator_inverse_power_basis_for_exponent(shift)? {
-        rotated = context.rotate_ciphertext(
-            &rotated,
-            basis_rotation,
-            level,
-            &format!("{seed_hex}-inverse-generator-basis-{basis_rotation}"),
-        )?;
+        rotated = context.rotate_ciphertext(&rotated, basis_rotation)?;
     }
 
     Ok(rotated)
@@ -251,7 +232,6 @@ pub(crate) fn rotate_with_compact_inverse_generator_basis(
 // the aggregate there before packing), and packed-rank-return rotations at
 // the comparison output level. Lower-level consumers use the same keys
 // through truncation.
-#[cfg(test)]
 pub(crate) fn selected_evaluator_rotation_key_schedule(
     option_count: usize,
 ) -> CanonicalResult<Vec<(usize, usize)>> {
@@ -259,7 +239,7 @@ pub(crate) fn selected_evaluator_rotation_key_schedule(
         || DIRECT_COMPARISON_OUTPUT_LEVEL > SELECTED_EVALUATOR_WORKING_LEVEL
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "selected evaluator rotation schedule levels must fit the data basis",
         ));
     }

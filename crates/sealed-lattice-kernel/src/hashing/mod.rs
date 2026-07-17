@@ -211,7 +211,7 @@ fn compare_utf16(left: &str, right: &str) -> Ordering {
 fn canonical_json_string(value: &str) -> CanonicalResult<&str> {
     if !value.is_ascii() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "canonical JSON hash strings must contain only ASCII characters; use the foundation display-text codec for Unicode",
         ));
     }
@@ -222,7 +222,7 @@ fn canonical_json_string(value: &str) -> CanonicalResult<&str> {
 fn serialize_json_string(value: &str) -> CanonicalResult<String> {
     serde_json::to_string(value).map_err(|error| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("canonical JSON string serialization failed: {error}"),
         )
     })
@@ -234,7 +234,7 @@ fn serialize_json_number(value: &serde_json::Number) -> CanonicalResult<String> 
     if let Some(unsigned_value) = value.as_u64() {
         if unsigned_value > MAX_SAFE_INTEGER {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "canonical JSON integers must be JavaScript-safe",
             ));
         }
@@ -244,7 +244,7 @@ fn serialize_json_number(value: &serde_json::Number) -> CanonicalResult<String> 
     if let Some(signed_value) = value.as_i64() {
         if signed_value.unsigned_abs() > MAX_SAFE_INTEGER {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "canonical JSON integers must be JavaScript-safe",
             ));
         }
@@ -253,7 +253,7 @@ fn serialize_json_number(value: &serde_json::Number) -> CanonicalResult<String> 
     }
 
     Err(CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
+        CanonicalErrorCode::InvalidProtocolObject,
         "canonical JSON values must not contain fractional numbers",
     ))
 }
@@ -514,7 +514,7 @@ fn derive_canonical_object_hash_with_omitted_field_paths(
         .is_some_and(|object_type| !object_type.is_empty());
     if !has_object_type {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "canonical object hash requires a non-empty objectType discriminator",
         ));
     }
@@ -561,7 +561,7 @@ pub(crate) fn derive_canonical_object_hash_omitting_field_paths(
         )
     }) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "canonical object hash cannot omit the root objectType discriminator",
         ));
     }
@@ -588,7 +588,7 @@ mod tests {
         )
         .expect_err("the shared object-hash domain requires a bound object type");
 
-        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
         assert_eq!(
             error.message,
             "canonical object hash cannot omit the root objectType discriminator"
@@ -680,7 +680,7 @@ mod tests {
         ] {
             let error = super::derive_canonical_object_hash(&value)
                 .expect_err("non-ASCII canonical JSON must be rejected");
-            assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+            assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
             assert!(error.message.contains("only ASCII characters"));
         }
     }

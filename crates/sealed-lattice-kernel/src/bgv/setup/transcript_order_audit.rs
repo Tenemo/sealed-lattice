@@ -30,8 +30,9 @@ pub(in crate::bgv::setup) struct TranscriptOrderAuditSegment {
 pub(in crate::bgv::setup) struct TranscriptOrderAuditTrace {
     pub transcript_family: String,
     pub transcript_path: String,
-    pub event_count: u64,
     pub segments: Vec<TranscriptOrderAuditSegment>,
+    #[serde(skip)]
+    next_event_index: u64,
 }
 
 type SharedAuditEvents = Arc<Mutex<Vec<TranscriptOrderAuditEvent>>>;
@@ -164,15 +165,15 @@ pub(in crate::bgv::setup) fn run_length_encode_transcript_order_audit(
             traces.push(TranscriptOrderAuditTrace {
                 transcript_family: event.transcript_family.clone(),
                 transcript_path: event.transcript_path.clone(),
-                event_count: 0,
                 segments: Vec::new(),
+                next_event_index: 0,
             });
         }
         let trace = traces
             .last_mut()
             .expect("a transcript-order trace must exist after insertion");
         assert_eq!(
-            event.event_index, trace.event_count,
+            event.event_index, trace.next_event_index,
             "transcript-order events must be contiguous within each transcript path"
         );
         let can_extend_last_segment = trace.segments.last().is_some_and(|segment| {
@@ -202,7 +203,7 @@ pub(in crate::bgv::setup) fn run_length_encode_transcript_order_audit(
                 squeeze_counter_start: event.squeeze_counter,
             });
         }
-        trace.event_count += 1;
+        trace.next_event_index += 1;
     }
     traces
 }

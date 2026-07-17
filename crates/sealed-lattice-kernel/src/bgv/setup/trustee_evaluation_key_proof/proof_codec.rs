@@ -3,9 +3,7 @@ use super::low_degree_proof::{LowDegreeProof, LowDegreeQueryOpening, LowDegreeSi
 use super::merkle_commitment::{
     BatchedMerkleOpening, LEAF_SALT_BYTES, MERKLE_DIGEST_BYTES, MerkleDigest,
 };
-use super::prover::{
-    LimbProof, MaterialTreeQueryOpening, PhaseQueryOpening, SuccinctEvaluationKeyProof,
-};
+use super::prover::{LimbProof, PhaseQueryOpening, SuccinctEvaluationKeyProof};
 use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TrusteeEvaluationKeyStatement};
 use super::*;
 use crate::bgv::{
@@ -41,6 +39,7 @@ const fn field_residue_bit_width() -> usize {
 }
 pub(in crate::bgv::setup) const FIELD_RESIDUE_BIT_WIDTH: usize = field_residue_bit_width();
 
+#[cfg(test)]
 pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyProof) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(PROOF_MAGIC);
@@ -66,17 +65,6 @@ pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyP
         }
         write_batched_opening(&mut bytes, &limb_proof.witness_batch_opening);
         write_batched_opening(&mut bytes, &limb_proof.quotient_batch_opening);
-        for tree_openings in &limb_proof.material_query_openings {
-            for opening in tree_openings {
-                for slot in 0..2 {
-                    write_field_residue_slice(&mut bytes, &opening.rows[slot]);
-                }
-                bytes.extend_from_slice(&opening.pair_salt);
-            }
-        }
-        for batch_opening in &limb_proof.material_batch_openings {
-            write_batched_opening(&mut bytes, batch_opening);
-        }
     }
 
     bytes
@@ -128,9 +116,6 @@ pub(crate) fn decode_trustee_evaluation_key_proof_from_source(
         let total_columns = layout
             .phase_one_physical_count()
             .checked_add(PHASE_TWO_COLUMN_COUNT)
-            .and_then(|column_count| {
-                column_count.checked_add(layout.vss_committed_material_physical_count())
-            })
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
@@ -189,29 +174,6 @@ pub(crate) fn decode_trustee_evaluation_key_proof_from_source(
         let quotient_batch_node_bound = LOW_DEGREE_QUERY_COUNT * phase_tree_depth;
         let witness_batch_opening = read_batched_opening(&mut decoder, witness_batch_node_bound)?;
         let quotient_batch_opening = read_batched_opening(&mut decoder, quotient_batch_node_bound)?;
-        let material_tree_count = layout.vss_committed_material_bound_message_count();
-        let material_columns_per_tree =
-            crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT * TRACE_SPLIT;
-        let mut material_query_openings = Vec::with_capacity(material_tree_count);
-        for _ in 0..material_tree_count {
-            let mut tree_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
-            for _ in 0..LOW_DEGREE_QUERY_COUNT {
-                let mut rows = [Vec::new(), Vec::new()];
-                for row in &mut rows {
-                    *row = read_base_field_vec(&mut decoder, material_columns_per_tree, modulus)?;
-                }
-                let pair_salt = read_bytes(&mut decoder, LEAF_SALT_BYTES)?;
-                tree_openings.push(MaterialTreeQueryOpening { rows, pair_salt });
-            }
-            material_query_openings.push(tree_openings);
-        }
-        let mut material_batch_openings = Vec::with_capacity(material_tree_count);
-        for _ in 0..material_tree_count {
-            material_batch_openings.push(read_batched_opening(
-                &mut decoder,
-                LOW_DEGREE_QUERY_COUNT * phase_tree_depth,
-            )?);
-        }
         limb_proofs.push(LimbProof {
             witness_tree_root,
             quotient_tree_root,
@@ -222,8 +184,6 @@ pub(crate) fn decode_trustee_evaluation_key_proof_from_source(
             query_openings,
             witness_batch_opening,
             quotient_batch_opening,
-            material_query_openings,
-            material_batch_openings,
         });
     }
     decoder.finish().map_err(proof_decode_error)?;
@@ -231,6 +191,7 @@ pub(crate) fn decode_trustee_evaluation_key_proof_from_source(
     Ok(SuccinctEvaluationKeyProof { limb_proofs })
 }
 
+#[cfg(test)]
 fn encode_low_degree_proof(bytes: &mut Vec<u8>, low_degree: &LowDegreeProof) {
     bytes.extend_from_slice(&(low_degree.folded_layer_roots.len() as u64).to_le_bytes());
     write_hash_slice(bytes, &low_degree.folded_layer_roots);
@@ -243,6 +204,7 @@ fn encode_low_degree_proof(bytes: &mut Vec<u8>, low_degree: &LowDegreeProof) {
     }
 }
 
+#[cfg(test)]
 fn write_low_degree_sibling_table(
     bytes: &mut Vec<u8>,
     low_degree: &LowDegreeProof,
@@ -304,6 +266,7 @@ fn low_degree_sibling_reference_byte_count(table_count: usize) -> usize {
         .div_ceil(8)
 }
 
+#[cfg(test)]
 fn write_low_degree_sibling_references(bytes: &mut Vec<u8>, references: &[u8], table_count: usize) {
     let bit_width = low_degree_sibling_reference_bit_width(table_count);
     let byte_count = low_degree_sibling_reference_byte_count(table_count);
@@ -521,6 +484,7 @@ fn field_residue_slice_byte_count(count: usize) -> Option<usize> {
 // The bit width is compile-time derived from the data primes; decode-side
 // residue and padding checks make the packed encoding canonical for transcript
 // binding.
+#[cfg(test)]
 fn write_field_residue_slice(bytes: &mut Vec<u8>, values: &[u64]) {
     let byte_count = field_residue_slice_byte_count(values.len())
         .expect("field residue slice bit count must fit usize");
@@ -537,6 +501,7 @@ fn write_field_residue_slice(bytes: &mut Vec<u8>, values: &[u64]) {
     }
 }
 
+#[cfg(test)]
 fn write_fixed_width_bits(bytes: &mut [u8], bit_cursor: &mut usize, value: u64, bit_width: usize) {
     let mut written_bits = 0_usize;
     while written_bits < bit_width {
@@ -552,6 +517,7 @@ fn write_fixed_width_bits(bytes: &mut [u8], bit_cursor: &mut usize, value: u64, 
     }
 }
 
+#[cfg(test)]
 fn write_extension_slice(bytes: &mut Vec<u8>, values: &[ChallengeExtensionElement]) {
     let residue_count = values
         .len()
@@ -574,12 +540,14 @@ fn write_extension_slice(bytes: &mut Vec<u8>, values: &[ChallengeExtensionElemen
     }
 }
 
+#[cfg(test)]
 fn write_hash_slice(bytes: &mut Vec<u8>, hashes: &[MerkleDigest]) {
     for hash in hashes {
         bytes.extend_from_slice(hash);
     }
 }
 
+#[cfg(test)]
 fn write_batched_opening(bytes: &mut Vec<u8>, opening: &BatchedMerkleOpening) {
     bytes.extend_from_slice(&(opening.authentication_nodes.len() as u64).to_le_bytes());
     write_hash_slice(bytes, &opening.authentication_nodes);
@@ -678,6 +646,9 @@ fn proof_decode_error(error: ProofDecodeError) -> CanonicalError {
         ProofDecodeError::IntegerOverflow => "trustee evaluation-key proof integer overflowed",
         ProofDecodeError::NonCanonicalPackedPadding => {
             "trustee evaluation-key proof contains noncanonical packed padding"
+        }
+        ProofDecodeError::NonCanonicalFieldElement => {
+            "trustee evaluation-key proof contains a noncanonical field element"
         }
         ProofDecodeError::InvalidBitWidth => {
             "trustee evaluation-key proof uses an invalid packed value width"

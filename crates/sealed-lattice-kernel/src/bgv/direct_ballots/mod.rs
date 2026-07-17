@@ -11,8 +11,7 @@ use aggregation::*;
 use encryption::*;
 #[cfg(test)]
 pub(crate) use evaluator_replay::{
-    DirectBallotPackedBatchedPairEvaluatorInput, direct_ballot_comparison_domain_max,
-    direct_ballot_evaluator_working_level, direct_ballot_plaintext_target_slots,
+    DirectBallotPackedBatchedPairEvaluatorInput, direct_ballot_plaintext_target_slots,
     run_direct_ballot_packed_batched_pair_evaluator_for_top_counts,
 };
 #[cfg(test)]
@@ -43,7 +42,7 @@ use crate::{
         engine::{Ciphertext, DevelopmentBgvKey, ciphertext_object_root},
         records::target_layout_hash,
         top_k::{
-            SELECTED_EVALUATOR_WORKING_LEVEL,
+            EncryptedSparseTarget, SELECTED_EVALUATOR_WORKING_LEVEL,
             evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
             pack_direct_score_slots, project_packed_sparse_target_from_rank_evaluation,
         },

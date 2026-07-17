@@ -88,7 +88,6 @@ pub(in super::super) fn evaluation_key_share_fixture_material(
         &key_switch_domain,
         key_switch_seed_hex,
         level,
-        ring_degree,
         &component_b_by_digit,
     );
 
@@ -115,7 +114,6 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
         usize::try_from(level).expect("component material level fits usize"),
         &fixture_material.component_vector_root,
         derived_binding,
-        ring_degree,
     )
     .expect("evaluation-key component material reference root");
     let material_bytes = encode_evaluation_key_share_component_material(
@@ -279,10 +277,11 @@ pub(in super::super) fn evaluation_key_error_coefficients_for_fixture(
 ) -> Vec<i64> {
     // The fixture secret and base error alias with periods three and five, so
     // their combined material repeats every fifteen roster positions. Using a
-    // different position multiplier from position ten onward separates those
-    // aliases across the supported range while keeping errors in {-2..2}.
-    const FOUNDATION_ROSTER_SIZE: u64 = 10;
-    let position_multiplier = if trustee_roster_position < FOUNDATION_ROSTER_SIZE {
+    // different position multiplier outside the selected prototype roster
+    // separates those aliases across the configurable range while keeping
+    // errors in {-2..2}.
+    const PROTOTYPE_ROSTER_SIZE: u64 = crate::foundation::PROTOTYPE_PARTICIPANT_COUNT as u64;
+    let position_multiplier = if trustee_roster_position < PROTOTYPE_ROSTER_SIZE {
         5
     } else {
         1
@@ -317,7 +316,6 @@ fn evaluation_key_component_vector_root(
     key_switch_domain: &str,
     key_switch_seed_hex: &str,
     level: usize,
-    ring_degree: usize,
     component_b_by_digit: &[Vec<Vec<u64>>],
 ) -> String {
     let component_vectors_little_endian_hex_by_digit_and_limb = component_b_by_digit
@@ -333,7 +331,6 @@ fn evaluation_key_component_vector_root(
         key_switch_domain,
         key_switch_seed_hex,
         level,
-        ring_degree,
         &component_vectors_little_endian_hex_by_digit_and_limb,
     )
     .expect("evaluation-key component vector root")
@@ -427,6 +424,19 @@ pub(in super::super) fn automorphism_i128_for_evaluation_key_fixture(
     }
 
     output
+}
+
+fn signed_i64_residue_for_fixture(value: i64, modulus: u64) -> u64 {
+    if value >= 0 {
+        u64::try_from(value).expect("non-negative value") % modulus
+    } else {
+        let magnitude = value.unsigned_abs() % modulus;
+        if magnitude == 0 {
+            0
+        } else {
+            modulus - magnitude
+        }
+    }
 }
 
 // Signed i128 coefficient reduced into the canonical non-negative residue mod
@@ -606,7 +616,7 @@ mod tests {
         .expect("the authoritative ring degree must determine the exact sidecar length");
         assert_eq!(
             wrong_ring_degree_error.code,
-            CanonicalErrorCode::InvalidFixture
+            CanonicalErrorCode::InvalidProtocolObject
         );
 
         let wrong_key_switch_seed_hex = repeated_test_seed(0xb2);
@@ -653,7 +663,7 @@ mod tests {
             .unwrap_or_else(|| panic!("substituted {substituted_field} must be rejected"));
             assert_eq!(
                 error.code,
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "substituted {substituted_field} must fail the authenticated material binding"
             );
         }

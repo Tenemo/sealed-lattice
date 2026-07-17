@@ -1,9 +1,11 @@
 use super::*;
 
+use crate::bgv::proof_suite::ProofByteSource;
 use crate::foundation::FOUNDATION_PROFILE;
 use std::sync::Arc;
 
 enum CanonicalProofMaterialBacking {
+    #[cfg(test)]
     Contiguous(Vec<u8>),
     StreamChunks(Vec<Vec<u8>>),
 }
@@ -17,39 +19,8 @@ pub(crate) struct CanonicalProofMaterialBytes {
     total_byte_length: usize,
 }
 
-pub(crate) trait ProofByteSource {
-    fn byte_length(&self) -> usize;
-    fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool;
-}
-
-impl ProofByteSource for [u8] {
-    fn byte_length(&self) -> usize {
-        self.len()
-    }
-
-    fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool {
-        let Some(end) = offset.checked_add(destination.len()) else {
-            return false;
-        };
-        let Some(source) = self.get(offset..end) else {
-            return false;
-        };
-        destination.copy_from_slice(source);
-        true
-    }
-}
-
-impl ProofByteSource for Vec<u8> {
-    fn byte_length(&self) -> usize {
-        self.len()
-    }
-
-    fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool {
-        self.as_slice().copy_bytes(offset, destination)
-    }
-}
-
 impl CanonicalProofMaterialBytes {
+    #[cfg(test)]
     pub(crate) fn from_contiguous(bytes: Vec<u8>) -> CanonicalResult<Self> {
         if bytes.is_empty() {
             return Err(setup_proof_error(
@@ -104,6 +75,7 @@ impl CanonicalProofMaterialBytes {
 
     pub(crate) fn chunk(&self, chunk_index: usize) -> Option<&[u8]> {
         match &self.backing {
+            #[cfg(test)]
             CanonicalProofMaterialBacking::Contiguous(bytes) => bytes
                 .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
                 .nth(chunk_index),
@@ -154,20 +126,6 @@ impl CanonicalProofMaterialBytes {
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn into_contiguous(self) -> Vec<u8> {
-        match self.backing {
-            CanonicalProofMaterialBacking::Contiguous(bytes) => bytes,
-            CanonicalProofMaterialBacking::StreamChunks(chunks) => {
-                let mut bytes = Vec::with_capacity(self.total_byte_length);
-                for chunk in chunks {
-                    bytes.extend_from_slice(&chunk);
-                }
-                bytes
-            }
-        }
-    }
-
     pub(crate) fn hash512_hex(&self, domain: &str) -> CanonicalResult<String> {
         crate::hashing::hash512_hex_streamed_part(domain, self.len(), self.chunks())
     }
@@ -186,7 +144,7 @@ impl ProofByteSource for CanonicalProofMaterialBytes {
 pub(crate) type BgvProofMaterialBytes = Arc<CanonicalProofMaterialBytes>;
 pub(in crate::bgv::setup) type SetupProofMaterialBytes = BgvProofMaterialBytes;
 
-pub(in crate::bgv::setup) fn take_verified_setup_proof_material_bytes(
+pub(in crate::bgv::setup) fn take_authenticated_setup_proof_material_bytes(
     proof_family: &str,
     expected_proof_bytes_hash: &str,
     proof_material_path: &str,
@@ -205,7 +163,7 @@ pub(in crate::bgv::setup) fn take_verified_setup_proof_material_bytes(
             proof_family,
             expected_proof_bytes_hash,
         ),
-        None => crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        None => crate::bgv::setup::take_authenticated_canonical_proof_material_bytes(
             proof_family,
             expected_proof_bytes_hash,
         ),
@@ -222,7 +180,4 @@ pub(in crate::bgv::setup) fn take_verified_setup_proof_material_bytes(
 mod verification;
 
 #[cfg(test)]
-pub(crate) use verification::{
-    authenticate_setup_proof_material_stream_for_test,
-    authenticate_setup_proof_material_stream_in_session_for_test,
-};
+pub(crate) use verification::authenticate_setup_proof_material_stream_for_test;

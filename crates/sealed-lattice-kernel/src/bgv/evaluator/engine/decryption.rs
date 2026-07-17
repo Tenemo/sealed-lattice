@@ -23,7 +23,7 @@ pub(crate) fn decryption_accumulator_to_coefficients(
         }
         if limb.iter().any(|coefficient| *coefficient >= *modulus) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("BGV decryption accumulator limb {limb_index} has non-canonical residues"),
             ));
         }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::evaluator::circuit::modulus_switch_to;
 use crate::bgv::evaluator::engine::ciphertext_add;
 
 // A genuine ten-ballot aggregate at the full score-difference domain must
@@ -54,19 +55,15 @@ fn heavy_rust_kernel_foundation_profile_domain_multiballot_rank_evaluation_decry
             ciphertext_add(&aggregate_ciphertext, &ballot_ciphertext).expect("aggregate sum");
     }
 
-    let packed_scores = pack_direct_score_slots(
-        &context,
-        &aggregate_ciphertext,
-        option_count,
-        "foundation-profile-domain-pack",
-    )
-    .expect("packed scores");
+    let working_aggregate = modulus_switch_to(&aggregate_ciphertext, context.working_level())
+        .expect("working aggregate");
+    let packed_scores =
+        pack_direct_score_slots(&context, &working_aggregate, option_count).expect("packed scores");
     let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
         &context,
         &packed_scores,
         option_count,
         score_domain_max,
-        "foundation-profile-domain-rank",
     )
     .expect("rank evaluation");
     let decrypted_slots = context
@@ -119,19 +116,15 @@ fn heavy_rust_kernel_packed_rank_and_sparse_target_projection_decrypt_expected_v
         .key()
         .encrypt_slots(&score_values, "sparse-target-scores")
         .expect("score ciphertext");
-    let packed_scores = pack_direct_score_slots(
-        &context,
-        &encrypted_scores,
-        score_values.len(),
-        "sparse-target-pack",
-    )
-    .expect("packed scores");
+    let working_scores = modulus_switch_to(&encrypted_scores, context.working_level())
+        .expect("working-level scores");
+    let packed_scores = pack_direct_score_slots(&context, &working_scores, score_values.len())
+        .expect("packed scores");
     let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
         &context,
         &packed_scores,
         score_values.len(),
         score_domain_max,
-        "sparse-target-rank",
     )
     .expect("rank evaluation");
     let sparse_target = project_packed_sparse_target_from_rank_evaluation(

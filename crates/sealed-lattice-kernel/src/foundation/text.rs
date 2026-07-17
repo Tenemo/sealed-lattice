@@ -17,6 +17,7 @@ const _: () = assert!(
 pub enum DisplayTextError {
     InvalidUtf8,
     Noncharacter { code_point: u32 },
+    PrivateUseCodePoint { code_point: u32 },
     UnassignedCodePoint { code_point: u32 },
     NotStabilizedNfc,
 }
@@ -37,6 +38,10 @@ impl fmt::Display for DisplayTextError {
                     "display text contains noncharacter U+{code_point:04X}"
                 )
             }
+            Self::PrivateUseCodePoint { code_point } => write!(
+                formatter,
+                "display text contains private-use code point U+{code_point:04X}"
+            ),
             Self::UnassignedCodePoint { code_point } => write!(
                 formatter,
                 "display text contains Unicode 17 unassigned code point U+{code_point:04X}"
@@ -104,9 +109,10 @@ fn validate_assigned_scalar_values(value: &str) -> Result<(), DisplayTextError> 
         if is_noncharacter(code_point) {
             return Err(DisplayTextError::Noncharacter { code_point });
         }
-        if !unicode_normalization::char::is_public_assigned(character)
-            && !is_private_use(code_point)
-        {
+        if is_private_use(code_point) {
+            return Err(DisplayTextError::PrivateUseCodePoint { code_point });
+        }
+        if !unicode_normalization::char::is_public_assigned(character) {
             return Err(DisplayTextError::UnassignedCodePoint { code_point });
         }
     }
@@ -177,11 +183,19 @@ mod tests {
     }
 
     #[test]
-    fn assigned_private_use_code_points_are_not_misclassified_as_unassigned() {
-        let display_text = StabilizedDisplayText::from_ingress_utf8("label-\u{e000}".as_bytes())
-            .expect("private-use characters are assigned Unicode scalar values");
-
-        assert_eq!(display_text.as_str(), "label-\u{e000}");
+    fn private_use_code_points_are_rejected_across_all_three_ranges() {
+        for code_point in [0xe000, 0xf0000, 0x100000] {
+            let character = char::from_u32(code_point).expect("test code point is a scalar value");
+            let text = format!("label-{character}");
+            assert_eq!(
+                StabilizedDisplayText::from_ingress_utf8(text.as_bytes()),
+                Err(DisplayTextError::PrivateUseCodePoint { code_point })
+            );
+            assert_eq!(
+                StabilizedDisplayText::from_canonical_utf8(text.as_bytes()),
+                Err(DisplayTextError::PrivateUseCodePoint { code_point })
+            );
+        }
     }
 
     #[test]

@@ -81,16 +81,15 @@ pub(super) fn verify_private_envelope_header(
         )));
     }
 
-    let recipient_identity = match string_field(
+    if let Err(refusal) = string_field(
         private_envelope,
         "recipientIdentity",
         "privateEnvelope.recipientIdentity",
         PrivateVssRefusalCode::missing("privateEnvelopeRecipientMissing"),
         "privateEnvelope.recipientIdentity is required",
     ) {
-        Ok(recipient_identity) => recipient_identity.to_string(),
-        Err(refusal) => return Ok(Err(refusal)),
-    };
+        return Ok(Err(refusal));
+    }
     let recipient_roster_position = match u64_field(
         private_envelope,
         "recipientRosterPosition",
@@ -128,7 +127,6 @@ pub(super) fn verify_private_envelope_header(
     Ok(Ok(PrivateEnvelopeBinding {
         private_envelope_hash,
         private_envelope_aad_hash,
-        recipient_identity,
         recipient_roster_position,
     }))
 }
@@ -228,21 +226,11 @@ fn verify_private_envelope_limb(
         Ok(rns_limb_index) => rns_limb_index,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let rns_prime = match u64_field(
-        limb_opening,
-        "rnsPrime",
-        "privateEnvelope.rnsShareOpenings.rnsPrime",
-        PrivateVssRefusalCode::missing("privateVssRnsPrimeMissing"),
-        "private VSS limb opening must bind rnsPrime",
-    ) {
-        Ok(rns_prime) => rns_prime,
-        Err(refusal) => return Ok(Err(refusal)),
-    };
-    if DATA_PRIMES.get(rns_limb_index) != Some(&rns_prime) {
+    if DATA_PRIMES.get(rns_limb_index).is_none() {
         return Ok(Err(PrivateVssRefusal::new(
-            PrivateVssRefusalCode::wrong_type("privateVssRnsPrimeMismatch"),
-            "private VSS limb opening rnsPrime must match Q_share at rnsLimbIndex",
-            "privateEnvelope.rnsShareOpenings.rnsPrime",
+            PrivateVssRefusalCode::wrong_type("privateVssRnsLimbIndexInvalid"),
+            "private VSS limb opening rnsLimbIndex must select Q_share",
+            "privateEnvelope.rnsShareOpenings.rnsLimbIndex",
         )));
     }
 
@@ -319,14 +307,10 @@ fn verify_private_envelope_limb(
             setup_context,
             public_matrix_seed_hash,
             private_envelope_aad_hash: &envelope_binding.private_envelope_aad_hash,
-            source_trustee_identity: &source_trustee_binding.source_trustee_identity,
             source_trustee_roster_position: source_trustee_binding.source_trustee_roster_position,
-            recipient_identity: &envelope_binding.recipient_identity,
             recipient_roster_position: envelope_binding.recipient_roster_position,
             source_trustee_commitment_root: &source_trustee_binding.source_trustee_commitment_root,
             rns_limb_index,
-            rns_prime,
-            ring_degree,
             coefficient_commitment_roots: &coefficient_commitment_roots,
             share_values: &share_values,
             coefficient_commitments: &coefficient_commitment_values,

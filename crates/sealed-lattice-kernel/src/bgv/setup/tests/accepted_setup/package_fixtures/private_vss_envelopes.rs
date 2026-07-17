@@ -46,7 +46,7 @@ pub(in super::super) fn vss_share_acceptances_object(
     setup_parameters_hash: &str,
     setup_epoch: &str,
     private_vss_envelope_commitments: &serde_json::Value,
-    vss_coefficient_commitments: &serde_json::Value,
+    vss_public_coefficient_commitments: &serde_json::Value,
     participant_count: u64,
 ) -> serde_json::Value {
     let envelope_references = private_vss_envelope_commitments["envelopeReferences"]
@@ -62,7 +62,7 @@ pub(in super::super) fn vss_share_acceptances_object(
             "participantCount": participant_count,
         }))
         .expect("setup context hash");
-    let public_matrix_seed_hash = vss_coefficient_commitments["publicMatrixSeedHash"]
+    let public_matrix_seed_hash = vss_public_coefficient_commitments["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
     let trustee_identities = (0..participant_count)
@@ -70,7 +70,7 @@ pub(in super::super) fn vss_share_acceptances_object(
         .collect::<Vec<_>>();
     let vss_coefficient_commitment_root =
         crate::bgv::setup::vss_commitment::vss_public_coefficient_commitment_set_root(
-            vss_coefficient_commitments,
+            vss_public_coefficient_commitments,
             &trustee_identities,
         )
         .expect("VSS coefficient commitment root");
@@ -90,7 +90,7 @@ pub(in super::super) fn vss_share_acceptances_object(
             let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
             let source_trustee_commitment_root =
                 crate::bgv::setup::vss_commitment::vss_public_source_coefficient_record_root(
-                &vss_coefficient_commitments["sourceTrusteeRecords"]
+                &vss_public_coefficient_commitments["sourceTrusteeRecords"]
                     [source_trustee_roster_position as usize],
                 &source_trustee_identity,
             )
@@ -117,8 +117,6 @@ pub(in super::super) fn vss_share_acceptances_object(
                     "sourceTrusteeCommitmentRoot": source_trustee_commitment_root.as_str(),
                     "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root.as_str(),
                     "privateEnvelopeHash": private_envelope_hash,
-                    "recoveryEpoch": 0,
-                    "deviceEpoch": 0,
                 });
                 let acceptance_root =
                     derive_canonical_object_hash(&acceptance_payload).expect("acceptance root");

@@ -13,19 +13,8 @@ mod vss_complaints_and_acceptances;
 mod vss_public_material_verification;
 
 use self::common_randomness::verify_common_randomness;
-use self::same_secret_bridge_verification::{
-    SameSecretBridgeVerification, verify_same_secret_bridge_statement_set,
-};
-// Re-exported for terminal proof fixtures, which build public-key-share and
-// trustee evaluation-key statements against the verified same-secret bridge
-// material that the accepted-setup verifier reconstructs.
 use self::evaluation_key_material_transport::evaluation_key_material_refusal;
 use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
-    TrusteeEvaluationKeyStatementInputs, trustee_evaluation_key_proof_verification_binding_hash,
-    trustee_evaluation_key_statement_from_package,
-};
 pub(in crate::bgv::setup) use self::evaluation_key_share_rounds::{
     evaluation_key_proof_common_binding, expected_galois_key_switch_seed,
     expected_relinearization_key_switch_seed, scheduled_relinearization_levels,
@@ -40,8 +29,6 @@ use self::private_vss_envelopes::{
     PrivateVssEnvelopeBindingMap, private_vss_envelope_bindings_from_package,
     private_vss_envelope_commitment_root, verify_private_vss_envelope_commitments,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
 pub(in crate::bgv::setup) use self::public_key_share_material::{
     CanonicalPublicKeyShareMaterialStream, VerifiedCanonicalPublicKeyShareMaterialHandle,
     VerifiedCanonicalPublicKeyShareMaterialStoreEntry,
@@ -54,8 +41,6 @@ use self::public_key_share_material::{
     PublicKeyShareMaterialBinding, verify_collective_public_key_material,
     verify_public_key_share_material_set,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::public_key_shares::public_key_share_succinct_proof_verification_binding_hash;
 use self::public_key_shares::{
     PublicKeyCommonBinding, PublicKeyShareSuccinctProofVerification, public_key_refusal,
     verify_public_key_share_succinct_proofs, verify_public_key_shares,
@@ -63,8 +48,9 @@ use self::public_key_shares::{
 pub(in crate::bgv::setup) use self::public_key_shares::{
     derive_public_key_share_root, derive_public_key_share_set_root,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::same_secret_bridge_verification::verified_same_secret_bridge_material_from_package;
+use self::same_secret_bridge_verification::{
+    SameSecretBridgeVerification, verify_same_secret_bridge_statement_set,
+};
 use self::setup_context::verify_context;
 #[cfg(test)]
 pub(crate) use self::setup_intent::accepted_setup_participant_roster_from_package;
@@ -100,6 +86,9 @@ use crate::bgv::evaluator::top_k::{
     SELECTED_EVALUATOR_WORKING_LEVEL, direct_score_packing_basis_galois_elements,
     packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
 };
+use crate::foundation::{
+    FOUNDATION_PROFILE, FoundationRosterParameters, derive_foundation_roster_parameters,
+};
 use crate::hashing::{
     CanonicalJsonPathSegment, derive_canonical_object_hash,
     derive_canonical_object_hash_omitting_field_paths,
@@ -122,43 +111,71 @@ use super::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY;
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitmentSet";
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitment";
 const ENCRYPTED_PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "EncryptedPrivateVssShareEnvelope";
-const FOUNDATION_ROSTER_PARTICIPANT_COUNT: u64 = 10;
-// Roster range accepted by the parameterized verifier. Quorums and the
-// decryption threshold are derived canonically from the participant count.
-pub(super) const MINIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 3;
-pub(super) const MAXIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 20;
-
 /// Validated roster parameters for a collective BGV setup. The decryption
-/// threshold is a pure function of `participant_count`, so the setup-parameters
-/// hash is a roster family with one distinct binding per supported roster size.
+/// threshold is derived from `participant_count`, so the setup-parameters hash
+/// is a roster family with one distinct binding per configurable roster size.
 #[derive(Clone, Copy)]
 pub(super) struct AcceptedRosterParameters {
     pub(super) participant_count: u64,
     pub(super) decryption_threshold: u64,
 }
 
-/// q_dec = floor(n / 3) + 1. Setup, ballot release, and finality use the full
-/// roster (= n).
-pub(super) const fn decryption_threshold_for_participant_count(participant_count: u64) -> u64 {
-    participant_count / 3 + 1
+fn configurable_foundation_roster_parameters(
+    participant_count: u64,
+) -> Option<FoundationRosterParameters> {
+    u16::try_from(participant_count)
+        .ok()
+        .and_then(derive_foundation_roster_parameters)
 }
 
-pub(super) const fn participant_count_is_supported(participant_count: u64) -> bool {
-    participant_count >= MINIMUM_SUPPORTED_PARTICIPANT_COUNT
-        && participant_count <= MAXIMUM_SUPPORTED_PARTICIPANT_COUNT
+/// q_dec = floor(n / 3) + 1 for a configurable roster size.
+#[cfg(test)]
+pub(in crate::bgv) fn decryption_threshold_for_participant_count(participant_count: u64) -> u64 {
+    u64::from(
+        configurable_foundation_roster_parameters(participant_count)
+            .expect("the caller must supply a configurable participant count")
+            .reconstruction_threshold,
+    )
+}
+
+pub(in crate::bgv) fn decryption_threshold_for_roster_length(
+    participant_count: usize,
+) -> CanonicalResult<usize> {
+    let participant_count = u64::try_from(participant_count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "the setup participant count does not fit u64",
+        )
+    })?;
+    let roster = configurable_foundation_roster_parameters(participant_count).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "the setup participant count is outside the configurable range",
+        )
+    })?;
+    Ok(usize::from(roster.reconstruction_threshold))
+}
+
+pub(super) fn participant_count_is_configurable(participant_count: u64) -> bool {
+    configurable_foundation_roster_parameters(participant_count).is_some()
 }
 
 pub(super) fn roster_parameters_from_participant_count(
     participant_count: u64,
 ) -> AcceptedRosterParameters {
+    let roster = configurable_foundation_roster_parameters(participant_count)
+        .expect("the caller must validate the configurable participant count");
     AcceptedRosterParameters {
         participant_count,
-        decryption_threshold: decryption_threshold_for_participant_count(participant_count),
+        decryption_threshold: u64::from(roster.reconstruction_threshold),
     }
 }
 
 pub(super) fn foundation_roster_parameters() -> AcceptedRosterParameters {
-    roster_parameters_from_participant_count(FOUNDATION_ROSTER_PARTICIPANT_COUNT)
+    AcceptedRosterParameters {
+        participant_count: u64::from(FOUNDATION_PROFILE.participant_count),
+        decryption_threshold: u64::from(FOUNDATION_PROFILE.reconstruction_threshold),
+    }
 }
 
 /// Roster parameters for the roster size declared in a setup context.
@@ -174,10 +191,10 @@ pub(super) fn accepted_roster_from_setup_context(
                 "setupContext.participantCount is required and must be an unsigned integer",
             )
         })?;
-    if !participant_count_is_supported(participant_count) {
+    if !participant_count_is_configurable(participant_count) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
-            "setupContext.participantCount is outside the supported roster range",
+            "setupContext.participantCount is outside the configurable roster range",
         ));
     }
     Ok(roster_parameters_from_participant_count(participant_count))
@@ -251,19 +268,24 @@ pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
     Ok(json!({
         "setupParametersHash": setup_parameters_hash_for_roster(roster)?,
         "participantCount": roster.participant_count,
+        "reconstructionThreshold": roster.decryption_threshold,
         "qShare": q_share_description_value(),
         "evaluatorKeySchedule": evaluator_key_schedule_value()?,
         "boundedDomainEvaluator": bounded_domain_evaluator_value_for_roster(roster)?,
     }))
 }
 
-// The setup parameters for a reduced roster size, used by test fixtures that
-// exercise the accepted-setup path at a smaller participant count than the fixed
-// foundation roster. The parameters hash is derived from the roster, so the
-// reduced-roster setup context binds the hash the verifier recomputes.
+// The setup parameters for a configurable roster size. Derivation does not
+// select that size for prototype support or evidence.
 pub(crate) fn describe_collective_bgv_setup_parameters_for_participant_count(
     participant_count: u64,
 ) -> CanonicalResult<Value> {
+    if !participant_count_is_configurable(participant_count) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "participantCount must be an integer from 3 through 20",
+        ));
+    }
     describe_collective_bgv_setup_parameters_for_roster(&roster_parameters_from_participant_count(
         participant_count,
     ))
@@ -275,7 +297,7 @@ pub(crate) fn verify_collective_bgv_setup_package_in_session_from_request(
 ) -> CanonicalResult<Value> {
     let setup_package = request.get("setupPackage").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupPackage is required",
         )
     })?;

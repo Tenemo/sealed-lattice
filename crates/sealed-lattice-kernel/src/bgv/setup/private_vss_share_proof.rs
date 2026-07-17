@@ -1,7 +1,8 @@
 use serde_json::Value;
 
 #[cfg(test)]
-use crate::hashing::{hash512_hex, to_hex};
+use crate::hashing::hash512_hex;
+use crate::hashing::to_hex;
 
 use crate::{
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
@@ -11,7 +12,7 @@ use crate::{
 use super::{
     accepted_setup::setup_context_hash,
     commitment::{SetupCommitmentValue, setup_commitment_root},
-    setup_proof::{SetupProofMaterialBytes, take_verified_setup_proof_material_bytes},
+    setup_proof::{SetupProofMaterialBytes, take_authenticated_setup_proof_material_bytes},
     trustee_evaluation_key_proof::{
         PRIVATE_VSS_SHARE_PROOF_FAMILY, PrivateVssShareStatement, SetupProofStatement,
         SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
@@ -22,7 +23,7 @@ use super::{
 
 #[cfg(test)]
 use super::{
-    commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+    commitment::{SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH},
     setup_proof::SetupProofFamily,
     sharing::canonical_trustee_point,
     trustee_evaluation_key_proof::{
@@ -35,14 +36,10 @@ pub(super) struct PrivateVssShareSuccinctProofVerificationInput<'a> {
     pub(super) setup_context: &'a Value,
     pub(super) public_matrix_seed_hash: &'a str,
     pub(super) private_envelope_aad_hash: &'a str,
-    pub(super) source_trustee_identity: &'a str,
     pub(super) source_trustee_roster_position: u64,
-    pub(super) recipient_identity: &'a str,
     pub(super) recipient_roster_position: u64,
     pub(super) source_trustee_commitment_root: &'a str,
     pub(super) rns_limb_index: usize,
-    pub(super) rns_prime: u64,
-    pub(super) ring_degree: usize,
     pub(super) coefficient_commitment_roots: &'a [String],
     pub(super) share_values: &'a [u64],
     pub(super) coefficient_commitments: &'a [SetupCommitmentValue],
@@ -52,7 +49,7 @@ pub(super) struct PrivateVssShareSuccinctProofVerificationInput<'a> {
 #[cfg(test)]
 pub(super) struct PrivateVssShareSuccinctProofWitness {
     pub(super) coefficient_messages_by_shamir_index: Vec<Vec<u64>>,
-    pub(super) opening_randomness_by_shamir_index: Vec<Vec<Vec<i128>>>,
+    pub(super) opening_randomness_by_shamir_index_and_commitment_limb: Vec<Vec<Vec<Vec<i128>>>>,
     pub(super) carry_witnesses: Vec<i128>,
 }
 
@@ -62,14 +59,10 @@ pub(super) struct PrivateVssShareSuccinctProofGenerationInput<'a> {
     pub(super) setup_context: &'a Value,
     pub(super) public_matrix_seed_hash: &'a str,
     pub(super) private_envelope_aad_hash: &'a str,
-    pub(super) source_trustee_identity: &'a str,
     pub(super) source_trustee_roster_position: u64,
-    pub(super) recipient_identity: &'a str,
     pub(super) recipient_roster_position: u64,
     pub(super) source_trustee_commitment_root: &'a str,
     pub(super) rns_limb_index: usize,
-    pub(super) rns_prime: u64,
-    pub(super) ring_degree: usize,
     pub(super) coefficient_commitment_roots: &'a [String],
     pub(super) share_values: &'a [u64],
     pub(super) coefficient_commitments: &'a [SetupCommitmentValue],
@@ -102,24 +95,18 @@ pub(super) fn verify_private_vss_share_succinct_relation_proof(
 fn validate_private_vss_share_statement_material(
     input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
 ) -> CanonicalResult<()> {
-    if DATA_PRIMES.get(input.rns_limb_index) != Some(&input.rns_prime) {
+    let Some(&rns_prime) = DATA_PRIMES.get(input.rns_limb_index) else {
         return Err(invalid_private_vss_share_proof(
-            "private VSS share proof RNS limb does not match Q_share",
+            "private VSS share proof RNS limb is outside Q_share",
         ));
-    }
-    if input.ring_degree == 0
-        || input.ring_degree > POLYNOMIAL_DEGREE
-        || input.share_values.len() != input.ring_degree
-    {
+    };
+    let ring_degree = input.share_values.len();
+    if ring_degree == 0 || ring_degree > POLYNOMIAL_DEGREE {
         return Err(invalid_private_vss_share_proof(
             "private VSS share proof ring degree is outside the selected parameters",
         ));
     }
-    if input
-        .share_values
-        .iter()
-        .any(|value| *value >= input.rns_prime)
-    {
+    if input.share_values.iter().any(|value| *value >= rns_prime) {
         return Err(invalid_private_vss_share_proof(
             "private VSS share values must be canonical Q_share residues",
         ));
@@ -144,7 +131,7 @@ fn validate_private_vss_share_statement_material(
     {
         if commitment.source_rns_limb_index != input.rns_limb_index
             || commitment.shamir_coefficient_index != coefficient_index as u64
-            || commitment.ring_degree != input.ring_degree
+            || commitment.ring_degree != ring_degree
             || setup_commitment_root(commitment)? != *commitment_root
         {
             return Err(invalid_private_vss_share_proof(
@@ -159,7 +146,7 @@ fn validate_private_vss_share_statement_material(
 fn private_vss_share_succinct_proof_bytes_from_hash(
     input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    take_verified_setup_proof_material_bytes(
+    take_authenticated_setup_proof_material_bytes(
         PRIVATE_VSS_SHARE_PROOF_FAMILY,
         input.proof_bytes_hash,
         "privateVssShareProofBytesHash",
@@ -172,19 +159,16 @@ fn private_vss_share_succinct_statement(
 ) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
     let context = SuccinctSetupProofContext {
         setup_context_hash: setup_context_hash(input.setup_context)?,
-        trustee_identity: input.source_trustee_identity.to_string(),
         trustee_roster_position: input.source_trustee_roster_position,
         binding_roots: Vec::new(),
     };
     let statement = TrusteeEvaluationKeyStatement {
         context,
-        ring_degree: input.ring_degree,
+        ring_degree: input.share_values.len(),
         proof: SetupProofStatement::PrivateVssShare(PrivateVssShareStatement {
             public_matrix_seed_hash: input.public_matrix_seed_hash.to_string(),
             private_envelope_aad_hash: input.private_envelope_aad_hash.to_string(),
-            source_trustee_identity: input.source_trustee_identity.to_string(),
             source_trustee_roster_position: input.source_trustee_roster_position,
-            recipient_identity: input.recipient_identity.to_string(),
             recipient_roster_position: input.recipient_roster_position,
             source_trustee_commitment_root: input.source_trustee_commitment_root.to_string(),
             source_rns_limb_index: input.rns_limb_index,
@@ -196,6 +180,15 @@ fn private_vss_share_succinct_statement(
     statement.validate_shape()?;
 
     Ok(statement)
+}
+
+pub(super) fn private_vss_share_succinct_statement_hash(
+    input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
+) -> CanonicalResult<String> {
+    validate_private_vss_share_statement_material(input)?;
+    Ok(to_hex(
+        &private_vss_share_succinct_statement(input)?.statement_hash(),
+    ))
 }
 
 #[cfg(test)]
@@ -241,7 +234,7 @@ fn validate_hash(hash: &str, field_name: &str) -> CanonicalResult<()> {
 }
 
 fn invalid_private_vss_share_proof(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 #[cfg(test)]
@@ -262,14 +255,10 @@ pub(super) fn private_vss_share_succinct_proof_bytes_hash_for_tests(
         setup_context: input.setup_context,
         public_matrix_seed_hash: input.public_matrix_seed_hash,
         private_envelope_aad_hash: input.private_envelope_aad_hash,
-        source_trustee_identity: input.source_trustee_identity,
         source_trustee_roster_position: input.source_trustee_roster_position,
-        recipient_identity: input.recipient_identity,
         recipient_roster_position: input.recipient_roster_position,
         source_trustee_commitment_root: input.source_trustee_commitment_root,
         rns_limb_index: input.rns_limb_index,
-        rns_prime: input.rns_prime,
-        ring_degree: input.ring_degree,
         coefficient_commitment_roots: input.coefficient_commitment_roots,
         share_values: input.share_values,
         coefficient_commitments: input.coefficient_commitments,
@@ -297,28 +286,33 @@ pub(super) fn private_vss_share_succinct_proof_bytes_hash_for_tests(
                     .collect()
             })
             .collect::<CanonicalResult<Vec<Vec<i64>>>>()?,
-        opening_randomness_by_shamir_index: input
+        opening_randomness_by_shamir_index_and_commitment_limb: input
             .witness
-            .opening_randomness_by_shamir_index
+            .opening_randomness_by_shamir_index_and_commitment_limb
             .iter()
-            .map(|columns| {
-                columns
+            .map(|randomness_by_commitment_limb| {
+                randomness_by_commitment_limb
                     .iter()
-                    .map(|column| {
-                        column
+                    .map(|randomness_by_column| {
+                        randomness_by_column
                             .iter()
-                            .map(|value| {
-                                i64::try_from(*value).map_err(|_| {
-                                    invalid_private_vss_share_proof(
-                                        "private VSS opening randomness does not fit i64",
-                                    )
-                                })
+                            .map(|column| {
+                                column
+                                    .iter()
+                                    .map(|value| {
+                                        i64::try_from(*value).map_err(|_| {
+                                            invalid_private_vss_share_proof(
+                                                "private VSS opening randomness does not fit i64",
+                                            )
+                                        })
+                                    })
+                                    .collect()
                             })
                             .collect()
                     })
                     .collect()
             })
-            .collect::<CanonicalResult<Vec<Vec<Vec<i64>>>>>()?,
+            .collect::<CanonicalResult<Vec<Vec<Vec<Vec<i64>>>>>>()?,
         carry_witnesses: input
             .witness
             .carry_witnesses
@@ -342,41 +336,23 @@ pub(super) fn private_vss_share_succinct_proof_bytes_hash_for_tests(
 }
 
 #[cfg(test)]
-pub(super) fn private_vss_share_succinct_statement_hash(
-    input: PrivateVssShareSuccinctProofGenerationInput<'_>,
-) -> CanonicalResult<String> {
-    let verification_input = PrivateVssShareSuccinctProofVerificationInput {
-        setup_context: input.setup_context,
-        public_matrix_seed_hash: input.public_matrix_seed_hash,
-        private_envelope_aad_hash: input.private_envelope_aad_hash,
-        source_trustee_identity: input.source_trustee_identity,
-        source_trustee_roster_position: input.source_trustee_roster_position,
-        recipient_identity: input.recipient_identity,
-        recipient_roster_position: input.recipient_roster_position,
-        source_trustee_commitment_root: input.source_trustee_commitment_root,
-        rns_limb_index: input.rns_limb_index,
-        rns_prime: input.rns_prime,
-        ring_degree: input.ring_degree,
-        coefficient_commitment_roots: input.coefficient_commitment_roots,
-        share_values: input.share_values,
-        coefficient_commitments: input.coefficient_commitments,
-        proof_bytes_hash: "",
-    };
-    validate_private_vss_share_statement_material(&verification_input)?;
-    Ok(to_hex(
-        &private_vss_share_succinct_statement(&verification_input)?.statement_hash(),
-    ))
-}
-
-#[cfg(test)]
 fn validate_private_vss_share_witness(
     input: &PrivateVssShareSuccinctProofGenerationInput<'_>,
 ) -> CanonicalResult<()> {
+    let Some(&rns_prime) = DATA_PRIMES.get(input.rns_limb_index) else {
+        return Err(invalid_private_vss_share_proof(
+            "private VSS share proof RNS limb is outside Q_share",
+        ));
+    };
+    let ring_degree = input.share_values.len();
     if input.witness.coefficient_messages_by_shamir_index.len()
         != input.coefficient_commitments.len()
-        || input.witness.opening_randomness_by_shamir_index.len()
+        || input
+            .witness
+            .opening_randomness_by_shamir_index_and_commitment_limb
+            .len()
             != input.coefficient_commitments.len()
-        || input.witness.carry_witnesses.len() != input.ring_degree
+        || input.witness.carry_witnesses.len() != ring_degree
     {
         return Err(invalid_private_vss_share_proof(
             "private VSS proof witness shape does not match statement material",
@@ -386,17 +362,25 @@ fn validate_private_vss_share_witness(
         .witness
         .coefficient_messages_by_shamir_index
         .iter()
-        .zip(input.witness.opening_randomness_by_shamir_index.iter())
+        .zip(
+            input
+                .witness
+                .opening_randomness_by_shamir_index_and_commitment_limb
+                .iter(),
+        )
         .enumerate()
     {
-        if coefficient_messages.len() != input.ring_degree
+        if coefficient_messages.len() != ring_degree
             || coefficient_messages
                 .iter()
-                .any(|coefficient| *coefficient >= input.rns_prime)
-            || opening_randomness.len() != SETUP_COMMITMENT_RANDOMNESS_WIDTH
-            || opening_randomness
-                .iter()
-                .any(|column| column.len() != input.ring_degree)
+                .any(|coefficient| *coefficient >= rns_prime)
+            || opening_randomness.len() != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+            || opening_randomness.iter().any(|randomness_by_column| {
+                randomness_by_column.len() != SETUP_COMMITMENT_RANDOMNESS_WIDTH
+                    || randomness_by_column
+                        .iter()
+                        .any(|column| column.len() != ring_degree)
+            })
         {
             return Err(invalid_private_vss_share_proof(format!(
                 "private VSS proof witness for Shamir coefficient {coefficient_index} has the wrong shape"
@@ -404,7 +388,7 @@ fn validate_private_vss_share_witness(
         }
     }
     verify_private_vss_share_witness_relation(
-        input.rns_prime,
+        rns_prime,
         input.recipient_roster_position,
         input.share_values,
         &input.witness.coefficient_messages_by_shamir_index,

@@ -4,9 +4,8 @@ use aes_gcm_siv::{
     Aes256GcmSiv, Nonce, Tag,
     aead::{AeadInPlace, KeyInit},
 };
-use subtle::ConstantTimeEq;
 use tiny_keccak::{Hasher, Kmac};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use super::schemas::{
     SchemaResult, read_fixed_bytes, read_hash, read_item, read_u16, read_u64, read_variable_item,
@@ -20,58 +19,52 @@ use super::{
 
 pub const DEVICE_WRAPPING_ASSOCIATED_DATA_SCHEMA_IDENTIFIER: u16 = 0x0300;
 pub const LOCAL_RECORD_ASSOCIATED_DATA_SCHEMA_IDENTIFIER: u16 = 0x0301;
-pub const STORAGE_ROOT_RECOVERY_VALUE_SCHEMA_IDENTIFIER: u16 = 0x0302;
 pub const STORAGE_ROOT_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x0303;
 pub const LOCAL_RECORD_KEY_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0304;
 pub const DEVICE_WRAPPED_STORAGE_ROOT_SCHEMA_IDENTIFIER: u16 = 0x0305;
 pub const LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER: u16 = 0x0306;
-pub const LOCAL_RECORD_AUTHENTICATOR_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0307;
 pub const ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0308;
+pub const AUTHENTICATED_REPAIR_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x0309;
 
 pub const ACTION_STORAGE_ROOT_BYTE_LENGTH: usize = 48;
 pub const DEVICE_WRAPPED_STORAGE_ROOT_NONCE_BYTE_LENGTH: usize = 12;
 pub const DEVICE_WRAPPED_STORAGE_ROOT_TAG_BYTE_LENGTH: usize = 16;
 pub const LOCAL_RECORD_NONCE_BYTE_LENGTH: usize = 12;
 pub const LOCAL_RECORD_TAG_BYTE_LENGTH: usize = 16;
-pub const LOCAL_RECORD_AUTHENTICATOR_BYTE_LENGTH: usize = 32;
 pub const MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH: usize =
     FOUNDATION_PROFILE.stream_chunk_byte_length;
 
 const FOUNDATION_PROTOCOL_VERSION: u16 = 1;
-const ACTION_STORAGE_KEY_MATERIAL_BYTE_LENGTH: usize = 192;
+const FOUNDATION_HASH_BYTE_LENGTH: usize = 64;
+const ACTION_STORAGE_KEY_MATERIAL_BYTE_LENGTH: usize = 128;
 const STORAGE_ROOT_COMMITMENT_PREIMAGE_BYTE_LENGTH: usize = 64;
 const STORAGE_RECORD_KEY_DERIVATION_KEY_BYTE_LENGTH: usize = 64;
-const STORAGE_RECORD_AUTHENTICATOR_KEY_BYTE_LENGTH: usize = 64;
 const LOCAL_RECORD_KEY_BYTE_LENGTH: usize = 32;
+const AUTHENTICATED_REPAIR_KEY_BYTE_LENGTH: usize = 32;
 const DEVICE_WRAPPED_STORAGE_ROOT_PLAINTEXT_BYTE_LENGTH: u64 = 48;
-const RECOVERY_CHECKSUM_BYTE_LENGTH: usize = 16;
 const ACTION_STORAGE_DERIVATION_INPUT_MAXIMUM_BYTE_LENGTH: usize = 400;
 const STORAGE_ROOT_COMMITMENT_PAYLOAD_MAXIMUM_BYTE_LENGTH: usize = 78;
-const RECOVERY_VALUE_CANONICAL_BYTE_LENGTH: usize = 442;
-const RECOVERY_VALUE_BASE32_CHARACTER_LENGTH: usize = 708;
 const DEVICE_WRAPPING_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH: usize = 380;
 const DEVICE_WRAPPED_STORAGE_ROOT_MAXIMUM_BYTE_LENGTH: usize = 492;
 const LOCAL_RECORD_KEY_INPUT_MAXIMUM_BYTE_LENGTH: usize = 700;
 const LOCAL_RECORD_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH: usize = 900;
-const LOCAL_RECORD_AUTHENTICATOR_INPUT_MAXIMUM_BYTE_LENGTH: usize =
-    MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH
-        + LOCAL_RECORD_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH
-        + 128;
 const LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH: usize = MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH
     + LOCAL_RECORD_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH
-    + 128;
+    + 68;
 
 const ACTION_STORAGE_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/local-storage/key-hierarchy/v1";
 const LOCAL_RECORD_KEY_CUSTOMIZATION: &[u8] = b"sealed-lattice/local-record-key/v1";
-const LOCAL_RECORD_AUTHENTICATOR_CUSTOMIZATION: &[u8] =
-    b"sealed-lattice/local-record-authenticator/v1";
+const AUTHENTICATED_REPAIR_KEY_CUSTOMIZATION: &[u8] = b"sealed-lattice/authenticated-repair-key/v1";
+const AUTHENTICATED_REPAIR_IDENTITY_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/authenticated-repair-identity/v1";
+const AUTHENTICATED_REPAIR_DIGEST_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/authenticated-repair-digest/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum LocalRecordType {
     ActionRandomness = 1,
-    PublicCoinPrivateMaterial = 2,
     SourceVssMaterial = 3,
     AggregateThresholdShare = 4,
     ProofAttempt = 5,
@@ -81,6 +74,7 @@ pub enum LocalRecordType {
     WitnessState = 9,
     CheckpointManifest = 10,
     CheckpointChunk = 11,
+    CommonProofExternalMemory = 12,
 }
 
 impl LocalRecordType {
@@ -91,7 +85,6 @@ impl LocalRecordType {
     pub const fn from_canonical_code(code: u16) -> Option<Self> {
         match code {
             1 => Some(Self::ActionRandomness),
-            2 => Some(Self::PublicCoinPrivateMaterial),
             3 => Some(Self::SourceVssMaterial),
             4 => Some(Self::AggregateThresholdShare),
             5 => Some(Self::ProofAttempt),
@@ -101,7 +94,45 @@ impl LocalRecordType {
             9 => Some(Self::WitnessState),
             10 => Some(Self::CheckpointManifest),
             11 => Some(Self::CheckpointChunk),
+            12 => Some(Self::CommonProofExternalMemory),
             _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum CommonProofExternalMemoryRecordKind {
+    ObjectHeader = 1,
+    DataChunk = 2,
+    SealMarker = 3,
+}
+
+impl CommonProofExternalMemoryRecordKind {
+    pub const fn canonical_code(self) -> u16 {
+        self as u16
+    }
+
+    pub const fn from_canonical_code(code: u16) -> Option<Self> {
+        match code {
+            1 => Some(Self::ObjectHeader),
+            2 => Some(Self::DataChunk),
+            3 => Some(Self::SealMarker),
+            _ => None,
+        }
+    }
+
+    fn validate_coordinates(self, chunk_ordinal: u32, byte_offset: u64) -> SchemaResult<()> {
+        match self {
+            Self::ObjectHeader if chunk_ordinal != 0 || byte_offset != 0 => Err(schema_error(
+                RefusalReason::WrongContext,
+                "a common-proof external-memory object header must use chunk ordinal and byte offset zero",
+            )),
+            Self::DataChunk | Self::SealMarker if chunk_ordinal == 0 => Err(schema_error(
+                RefusalReason::WrongContext,
+                "a common-proof external-memory data or seal record must use a nonzero chunk ordinal",
+            )),
+            _ => Ok(()),
         }
     }
 }
@@ -109,7 +140,6 @@ impl LocalRecordType {
 #[derive(Debug, Clone, Copy)]
 pub enum LocalRecordIdentifierInput<'input> {
     ActionRandomness,
-    PublicCoinPrivateMaterial,
     SourceVssMaterial {
         material_context_hash: Hash512,
     },
@@ -146,6 +176,15 @@ pub enum LocalRecordIdentifierInput<'input> {
         chunk_index: u32,
         chunk_digest: Hash512,
     },
+    CommonProofExternalMemory {
+        common_proof_environment_identifier: [u8; 32],
+        common_proof_runtime_binding_hash: Hash512,
+        proof_attempt_lineage_identifier: [u8; 32],
+        record_kind: CommonProofExternalMemoryRecordKind,
+        object_ordinal: u32,
+        chunk_ordinal: u32,
+        byte_offset: u64,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -153,7 +192,6 @@ pub struct LocalRecordSealInput<'input> {
     pub action_randomness_commitment: Hash512,
     pub identifier_input: LocalRecordIdentifierInput<'input>,
     pub record_version: u64,
-    pub creation_recovery_epoch: u64,
     pub predecessor_record_hash: Option<Hash512>,
     pub nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
     pub plaintext: &'input [u8],
@@ -165,7 +203,6 @@ pub(crate) struct LocalRecordSealWithIdentifierInput<'input> {
     pub record_type: LocalRecordType,
     pub record_identifier: Hash512,
     pub record_version: u64,
-    pub creation_recovery_epoch: u64,
     pub predecessor_record_hash: Option<Hash512>,
     pub nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
     pub plaintext: &'input [u8],
@@ -175,7 +212,6 @@ impl LocalRecordIdentifierInput<'_> {
     pub const fn record_type(self) -> LocalRecordType {
         match self {
             Self::ActionRandomness => LocalRecordType::ActionRandomness,
-            Self::PublicCoinPrivateMaterial => LocalRecordType::PublicCoinPrivateMaterial,
             Self::SourceVssMaterial { .. } => LocalRecordType::SourceVssMaterial,
             Self::AggregateThresholdShare { .. } => LocalRecordType::AggregateThresholdShare,
             Self::ProofAttempt { .. } => LocalRecordType::ProofAttempt,
@@ -185,6 +221,7 @@ impl LocalRecordIdentifierInput<'_> {
             Self::WitnessState { .. } => LocalRecordType::WitnessState,
             Self::CheckpointManifest { .. } => LocalRecordType::CheckpointManifest,
             Self::CheckpointChunk { .. } => LocalRecordType::CheckpointChunk,
+            Self::CommonProofExternalMemory { .. } => LocalRecordType::CommonProofExternalMemory,
         }
     }
 }
@@ -293,10 +330,6 @@ pub fn derive_local_record_identifier(
     let (domain, items) = match identifier_input {
         LocalRecordIdentifierInput::ActionRandomness => (
             "sealed-lattice/local-record-id/action-randomness/v1",
-            Vec::from(binding_items),
-        ),
-        LocalRecordIdentifierInput::PublicCoinPrivateMaterial => (
-            "sealed-lattice/local-record-id/public-coin/v1",
             Vec::from(binding_items),
         ),
         LocalRecordIdentifierInput::SourceVssMaterial {
@@ -413,6 +446,35 @@ pub fn derive_local_record_identifier(
                 CanonicalItem::hash512(chunk_digest.into_bytes()),
             ],
         ),
+        LocalRecordIdentifierInput::CommonProofExternalMemory {
+            common_proof_environment_identifier,
+            common_proof_runtime_binding_hash,
+            proof_attempt_lineage_identifier,
+            record_kind,
+            object_ordinal,
+            chunk_ordinal,
+            byte_offset,
+        } => {
+            record_kind.validate_coordinates(chunk_ordinal, byte_offset)?;
+            let mut items = Vec::from(binding_items);
+            items.push(CanonicalItem::fixed_bytes(
+                common_proof_environment_identifier,
+            )?);
+            items.push(CanonicalItem::hash512(
+                common_proof_runtime_binding_hash.into_bytes(),
+            ));
+            items.push(CanonicalItem::fixed_bytes(
+                proof_attempt_lineage_identifier,
+            )?);
+            items.push(CanonicalItem::unsigned16(record_kind.canonical_code()));
+            items.push(CanonicalItem::unsigned32(object_ordinal));
+            items.push(CanonicalItem::unsigned32(chunk_ordinal));
+            items.push(CanonicalItem::unsigned64(byte_offset));
+            (
+                "sealed-lattice/local-record-id/common-proof-external-memory/v1",
+                items,
+            )
+        }
     };
     Ok(hash512(domain, &items)?)
 }
@@ -423,7 +485,6 @@ pub struct ActionStorageRoot {
     storage_root_commitment: Hash512,
     storage_record_key_derivation_key:
         Zeroizing<[u8; STORAGE_RECORD_KEY_DERIVATION_KEY_BYTE_LENGTH]>,
-    storage_record_authenticator_key: Zeroizing<[u8; STORAGE_RECORD_AUTHENTICATOR_KEY_BYTE_LENGTH]>,
 }
 
 impl ActionStorageRoot {
@@ -437,7 +498,6 @@ impl ActionStorageRoot {
             root,
             storage_root_commitment: derived.storage_root_commitment,
             storage_record_key_derivation_key: derived.storage_record_key_derivation_key,
-            storage_record_authenticator_key: derived.storage_record_authenticator_key,
         })
     }
 
@@ -461,8 +521,163 @@ impl ActionStorageRoot {
         DeviceWrappingAssociatedData::new(self.binding, self.storage_root_commitment)
     }
 
-    pub fn recovery_value(&self) -> SchemaResult<LocalStorageRecoveryValue> {
-        LocalStorageRecoveryValue::new(self.binding, *self.root)
+    pub(crate) fn authenticated_repair_identity(
+        &self,
+        runtime_build_manifest_hash: Hash512,
+        namespace: &[u8],
+    ) -> SchemaResult<Hash512> {
+        let context = self.authenticated_repair_context(runtime_build_manifest_hash, namespace)?;
+        Ok(Hash512::from_bytes(kmac256(
+            self.storage_record_key_derivation_key.as_ref(),
+            &context,
+            AUTHENTICATED_REPAIR_IDENTITY_CUSTOMIZATION,
+        )))
+    }
+
+    pub(crate) fn seal_authenticated_repair_head(
+        &self,
+        runtime_build_manifest_hash: Hash512,
+        namespace: &[u8],
+        nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+        plaintext: &[u8],
+    ) -> SchemaResult<Vec<u8>> {
+        validate_local_record_plaintext_length(plaintext.len())?;
+        let context = self.authenticated_repair_context(runtime_build_manifest_hash, namespace)?;
+        let repair_key = self.authenticated_repair_key(&context);
+        let cipher = Aes256GcmSiv::new_from_slice(repair_key.as_ref()).map_err(|_| {
+            schema_error(
+                RefusalReason::UnsupportedVersionOrSuite,
+                "AES-256-GCM-SIV rejected the authenticated-repair key length",
+            )
+        })?;
+        let mut ciphertext = Zeroizing::new(plaintext.to_vec());
+        let tag = cipher
+            .encrypt_in_place_detached(Nonce::from_slice(&nonce), &context, ciphertext.as_mut())
+            .map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "AES-256-GCM-SIV refused the bounded authenticated-repair head",
+                )
+            })?;
+        let mut envelope = Vec::with_capacity(
+            LOCAL_RECORD_NONCE_BYTE_LENGTH + plaintext.len() + LOCAL_RECORD_TAG_BYTE_LENGTH,
+        );
+        envelope.extend_from_slice(&nonce);
+        envelope.extend_from_slice(ciphertext.as_ref());
+        envelope.extend_from_slice(tag.as_slice());
+        Ok(envelope)
+    }
+
+    pub(crate) fn open_authenticated_repair_head(
+        &self,
+        runtime_build_manifest_hash: Hash512,
+        namespace: &[u8],
+        envelope: &[u8],
+    ) -> VerificationResult<Zeroizing<Vec<u8>>> {
+        let fixed_overhead = LOCAL_RECORD_NONCE_BYTE_LENGTH + LOCAL_RECORD_TAG_BYTE_LENGTH;
+        if envelope.len() < fixed_overhead
+            || envelope.len() > MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH + fixed_overhead
+        {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        }
+        let context =
+            match self.authenticated_repair_context(runtime_build_manifest_hash, namespace) {
+                Ok(context) => context,
+                Err(error) => return VerificationResult::refused(error.refusal_reason),
+            };
+        let repair_key = self.authenticated_repair_key(&context);
+        let cipher = match Aes256GcmSiv::new_from_slice(repair_key.as_ref()) {
+            Ok(cipher) => cipher,
+            Err(_) => {
+                return VerificationResult::refused(RefusalReason::UnsupportedVersionOrSuite);
+            }
+        };
+        let (nonce, ciphertext_and_tag) = envelope.split_at(LOCAL_RECORD_NONCE_BYTE_LENGTH);
+        let ciphertext_byte_length = ciphertext_and_tag.len() - LOCAL_RECORD_TAG_BYTE_LENGTH;
+        let (ciphertext, tag) = ciphertext_and_tag.split_at(ciphertext_byte_length);
+        let mut plaintext = Zeroizing::new(ciphertext.to_vec());
+        if cipher
+            .decrypt_in_place_detached(
+                Nonce::from_slice(nonce),
+                &context,
+                plaintext.as_mut(),
+                Tag::from_slice(tag),
+            )
+            .is_err()
+        {
+            return VerificationResult::refused(RefusalReason::WrongHashOrRoot);
+        }
+        VerificationResult::valid(plaintext)
+    }
+
+    pub(crate) fn derive_authenticated_repair_head_digest(
+        &self,
+        runtime_build_manifest_hash: Hash512,
+        namespace: &[u8],
+        sealed_head_bytes: &[u8],
+    ) -> SchemaResult<Hash512> {
+        let context = self.authenticated_repair_context(runtime_build_manifest_hash, namespace)?;
+        let repair_key = self.authenticated_repair_key(&context);
+        let mut digest = [0u8; FOUNDATION_HASH_BYTE_LENGTH];
+        let mut kmac = Kmac::v256(
+            repair_key.as_ref(),
+            AUTHENTICATED_REPAIR_DIGEST_CUSTOMIZATION,
+        );
+        kmac.update(
+            &(u64::try_from(context.len()).map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the authenticated-repair context length does not fit u64",
+                )
+            })?)
+            .to_le_bytes(),
+        );
+        kmac.update(&context);
+        kmac.update(
+            &(u64::try_from(sealed_head_bytes.len()).map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "the authenticated-repair head length does not fit u64",
+                )
+            })?)
+            .to_le_bytes(),
+        );
+        kmac.update(sealed_head_bytes);
+        kmac.finalize(&mut digest);
+        Ok(Hash512::from_bytes(digest))
+    }
+
+    fn authenticated_repair_context(
+        &self,
+        runtime_build_manifest_hash: Hash512,
+        namespace: &[u8],
+    ) -> SchemaResult<Vec<u8>> {
+        Ok(CanonicalTuple::new(
+            AUTHENTICATED_REPAIR_CONTEXT_SCHEMA_IDENTIFIER,
+            FOUNDATION_PROTOCOL_VERSION,
+            vec![
+                CanonicalItem::unsigned16(FOUNDATION_PROTOCOL_VERSION),
+                CanonicalItem::hash512(self.binding.suite_id.into_bytes()),
+                CanonicalItem::hash512(self.binding.ceremony_context_hash.into_bytes()),
+                CanonicalItem::hash512(self.binding.action_context_hash.into_bytes()),
+                CanonicalItem::participant_identity(self.binding.participant_id.into_bytes()),
+                CanonicalItem::hash512(self.storage_root_commitment.into_bytes()),
+                CanonicalItem::hash512(runtime_build_manifest_hash.into_bytes()),
+                CanonicalItem::variable_bytes(namespace)?,
+            ],
+        )
+        .encode()?)
+    }
+
+    fn authenticated_repair_key(
+        &self,
+        canonical_context: &[u8],
+    ) -> Zeroizing<[u8; AUTHENTICATED_REPAIR_KEY_BYTE_LENGTH]> {
+        Zeroizing::new(kmac256(
+            self.storage_record_key_derivation_key.as_ref(),
+            canonical_context,
+            AUTHENTICATED_REPAIR_KEY_CUSTOMIZATION,
+        ))
     }
 
     pub fn seal_local_record(
@@ -476,7 +691,6 @@ impl ActionStorageRoot {
             record_type: input.identifier_input.record_type(),
             record_identifier,
             record_version: input.record_version,
-            creation_recovery_epoch: input.creation_recovery_epoch,
             predecessor_record_hash: input.predecessor_record_hash,
             nonce: input.nonce,
             plaintext: input.plaintext,
@@ -494,7 +708,6 @@ impl ActionStorageRoot {
             input.record_type,
             input.record_identifier,
             input.record_version,
-            input.creation_recovery_epoch,
             input.predecessor_record_hash,
             u64::try_from(input.plaintext.len()).map_err(|_| {
                 schema_error(
@@ -526,19 +739,7 @@ impl ActionStorageRoot {
             })?;
         let mut tag_bytes = [0u8; LOCAL_RECORD_TAG_BYTE_LENGTH];
         tag_bytes.copy_from_slice(tag.as_slice());
-        let record_authenticator = self.derive_record_authenticator(
-            &canonical_associated_data,
-            &input.nonce,
-            &ciphertext,
-            &tag_bytes,
-        )?;
-        LocalRecordEnvelope::new(
-            associated_data,
-            input.nonce,
-            ciphertext.to_vec(),
-            tag_bytes,
-            record_authenticator,
-        )
+        LocalRecordEnvelope::new(associated_data, input.nonce, ciphertext.to_vec(), tag_bytes)
     }
 
     pub fn open_local_record(
@@ -546,7 +747,6 @@ impl ActionStorageRoot {
         action_randomness_commitment: Hash512,
         identifier_input: LocalRecordIdentifierInput<'_>,
         record_version: u64,
-        creation_recovery_epoch: u64,
         predecessor_record_hash: Option<Hash512>,
         envelope: &LocalRecordEnvelope,
     ) -> VerificationResult<Zeroizing<Vec<u8>>> {
@@ -560,7 +760,6 @@ impl ActionStorageRoot {
             identifier_input.record_type(),
             expected_identifier,
             record_version,
-            creation_recovery_epoch,
             predecessor_record_hash,
             envelope,
         )
@@ -573,7 +772,6 @@ impl ActionStorageRoot {
         record_type: LocalRecordType,
         expected_identifier: Hash512,
         record_version: u64,
-        creation_recovery_epoch: u64,
         predecessor_record_hash: Option<Hash512>,
         envelope: &LocalRecordEnvelope,
     ) -> VerificationResult<Zeroizing<Vec<u8>>> {
@@ -583,7 +781,6 @@ impl ActionStorageRoot {
             record_type,
             expected_identifier,
             record_version,
-            creation_recovery_epoch,
             predecessor_record_hash,
             envelope.associated_data.plaintext_byte_length,
         ) {
@@ -597,22 +794,6 @@ impl ActionStorageRoot {
             Ok(bytes) => bytes,
             Err(error) => return VerificationResult::refused(error.refusal_reason),
         };
-        let expected_authenticator = match self.derive_record_authenticator(
-            &canonical_associated_data,
-            &envelope.nonce,
-            &envelope.ciphertext,
-            &envelope.tag,
-        ) {
-            Ok(authenticator) => authenticator,
-            Err(error) => return VerificationResult::refused(error.refusal_reason),
-        };
-        if !bool::from(
-            expected_authenticator
-                .as_slice()
-                .ct_eq(&envelope.record_authenticator),
-        ) {
-            return VerificationResult::refused(RefusalReason::WrongHashOrRoot);
-        }
         let record_key = match self.derive_record_key(&envelope.associated_data) {
             Ok(key) => key,
             Err(error) => return VerificationResult::refused(error.refusal_reason),
@@ -649,26 +830,6 @@ impl ActionStorageRoot {
             LOCAL_RECORD_KEY_CUSTOMIZATION,
         )))
     }
-
-    fn derive_record_authenticator(
-        &self,
-        canonical_associated_data: &[u8],
-        nonce: &[u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
-        ciphertext: &[u8],
-        tag: &[u8; LOCAL_RECORD_TAG_BYTE_LENGTH],
-    ) -> SchemaResult<[u8; LOCAL_RECORD_AUTHENTICATOR_BYTE_LENGTH]> {
-        let authenticator_input = LocalRecordAuthenticatorInput::new(
-            canonical_associated_data,
-            *nonce,
-            ciphertext,
-            *tag,
-        )?;
-        Ok(kmac256(
-            self.storage_record_authenticator_key.as_ref(),
-            &authenticator_input.encode()?,
-            LOCAL_RECORD_AUTHENTICATOR_CUSTOMIZATION,
-        ))
-    }
 }
 
 impl fmt::Debug for ActionStorageRoot {
@@ -679,7 +840,6 @@ impl fmt::Debug for ActionStorageRoot {
             .field("root", &"[REDACTED]")
             .field("storage_root_commitment", &self.storage_root_commitment)
             .field("storage_record_key_derivation_key", &"[REDACTED]")
-            .field("storage_record_authenticator_key", &"[REDACTED]")
             .finish()
     }
 }
@@ -787,7 +947,6 @@ pub struct LocalRecordAssociatedData {
     record_type: LocalRecordType,
     record_identifier: Hash512,
     record_version: u64,
-    creation_recovery_epoch: u64,
     predecessor_record_hash: Option<Hash512>,
     plaintext_byte_length: u64,
 }
@@ -800,7 +959,6 @@ impl LocalRecordAssociatedData {
         record_type: LocalRecordType,
         record_identifier: Hash512,
         record_version: u64,
-        creation_recovery_epoch: u64,
         predecessor_record_hash: Option<Hash512>,
         plaintext_byte_length: u64,
     ) -> SchemaResult<Self> {
@@ -824,7 +982,6 @@ impl LocalRecordAssociatedData {
             record_type,
             record_identifier,
             record_version,
-            creation_recovery_epoch,
             predecessor_record_hash,
             plaintext_byte_length,
         })
@@ -848,10 +1005,6 @@ impl LocalRecordAssociatedData {
 
     pub const fn record_version(self) -> u64 {
         self.record_version
-    }
-
-    pub const fn creation_recovery_epoch(self) -> u64 {
-        self.creation_recovery_epoch
     }
 
     pub const fn predecessor_record_hash(self) -> Option<Hash512> {
@@ -879,7 +1032,6 @@ impl LocalRecordAssociatedData {
                 CanonicalItem::unsigned16(self.record_type.canonical_code()),
                 CanonicalItem::hash512(self.record_identifier.into_bytes()),
                 CanonicalItem::unsigned64(self.record_version),
-                CanonicalItem::unsigned64(self.creation_recovery_epoch),
                 CanonicalItem::optional(CanonicalItemType::Hash512, predecessor_item.as_ref())?,
                 CanonicalItem::unsigned64(self.plaintext_byte_length),
             ],
@@ -891,10 +1043,10 @@ impl LocalRecordAssociatedData {
         let bounded_limits = bounded_canonical_decode_limits(
             limits,
             LOCAL_RECORD_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH,
-            12,
+            11,
         );
         let tuple = CanonicalTuple::decode(bytes, &bounded_limits)?;
-        require_header(&tuple, LOCAL_RECORD_ASSOCIATED_DATA_SCHEMA_IDENTIFIER, 12)?;
+        require_header(&tuple, LOCAL_RECORD_ASSOCIATED_DATA_SCHEMA_IDENTIFIER, 11)?;
         require_protocol_version(read_u16(&tuple.items[0])?)?;
         Self::new(
             LocalStorageBinding::new(
@@ -907,91 +1059,10 @@ impl LocalRecordAssociatedData {
             read_local_record_type(&tuple.items[6])?,
             read_hash(&tuple.items[7])?,
             read_u64(&tuple.items[8])?,
-            read_u64(&tuple.items[9])?,
-            read_optional_hash(&tuple.items[10])?,
-            read_u64(&tuple.items[11])?,
+            read_optional_hash(&tuple.items[9])?,
+            read_u64(&tuple.items[10])?,
         )
     }
-}
-
-struct LocalRecordAuthenticatorInput<'input> {
-    canonical_associated_data: &'input [u8],
-    nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
-    ciphertext: &'input [u8],
-    tag: [u8; LOCAL_RECORD_TAG_BYTE_LENGTH],
-}
-
-impl<'input> LocalRecordAuthenticatorInput<'input> {
-    fn new(
-        canonical_associated_data: &'input [u8],
-        nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
-        ciphertext: &'input [u8],
-        tag: [u8; LOCAL_RECORD_TAG_BYTE_LENGTH],
-    ) -> SchemaResult<Self> {
-        if canonical_associated_data.len() > LOCAL_RECORD_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH {
-            return Err(schema_error(
-                RefusalReason::OutsideSupportedProfile,
-                "the local-record associated data exceeds its bound",
-            ));
-        }
-        validate_local_record_plaintext_length(ciphertext.len())?;
-        Ok(Self {
-            canonical_associated_data,
-            nonce,
-            ciphertext,
-            tag,
-        })
-    }
-
-    fn encode(&self) -> SchemaResult<Vec<u8>> {
-        Ok(CanonicalTuple::new(
-            LOCAL_RECORD_AUTHENTICATOR_INPUT_SCHEMA_IDENTIFIER,
-            FOUNDATION_PROTOCOL_VERSION,
-            vec![
-                CanonicalItem::variable_bytes(self.canonical_associated_data)?,
-                CanonicalItem::fixed_bytes(self.nonce)?,
-                CanonicalItem::variable_bytes(self.ciphertext)?,
-                CanonicalItem::fixed_bytes(self.tag)?,
-            ],
-        )
-        .encode()?)
-    }
-}
-
-pub(crate) fn round_trip_local_record_authenticator_input(
-    bytes: &[u8],
-    limits: &CanonicalDecodeLimits,
-) -> SchemaResult<Vec<u8>> {
-    let bounded_limits = bounded_canonical_decode_limits(
-        limits,
-        LOCAL_RECORD_AUTHENTICATOR_INPUT_MAXIMUM_BYTE_LENGTH,
-        4,
-    );
-    let tuple = CanonicalTuple::decode(bytes, &bounded_limits)?;
-    require_header(
-        &tuple,
-        LOCAL_RECORD_AUTHENTICATOR_INPUT_SCHEMA_IDENTIFIER,
-        4,
-    )?;
-    let canonical_associated_data =
-        read_variable_item(&tuple.items[0], CanonicalItemType::RawBytes)?;
-    let associated_data = LocalRecordAssociatedData::decode(canonical_associated_data, limits)?;
-    if associated_data.encode()? != canonical_associated_data {
-        return Err(schema_error(
-            RefusalReason::MalformedEncoding,
-            "the local-record authenticator input contains non-canonical associated data",
-        ));
-    }
-    let nonce = read_fixed_bytes(&tuple.items[1])?;
-    let ciphertext = read_variable_item(&tuple.items[2], CanonicalItemType::RawBytes)?;
-    if u64::try_from(ciphertext.len()).ok() != Some(associated_data.plaintext_byte_length()) {
-        return Err(schema_error(
-            RefusalReason::WrongTypeOrLength,
-            "the local-record authenticator ciphertext length does not match its associated data",
-        ));
-    }
-    let tag = read_fixed_bytes(&tuple.items[3])?;
-    LocalRecordAuthenticatorInput::new(canonical_associated_data, nonce, ciphertext, tag)?.encode()
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -1000,7 +1071,6 @@ pub struct LocalRecordEnvelope {
     nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
     ciphertext: Vec<u8>,
     tag: [u8; LOCAL_RECORD_TAG_BYTE_LENGTH],
-    record_authenticator: [u8; LOCAL_RECORD_AUTHENTICATOR_BYTE_LENGTH],
 }
 
 impl LocalRecordEnvelope {
@@ -1009,7 +1079,6 @@ impl LocalRecordEnvelope {
         nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
         ciphertext: Vec<u8>,
         tag: [u8; LOCAL_RECORD_TAG_BYTE_LENGTH],
-        record_authenticator: [u8; LOCAL_RECORD_AUTHENTICATOR_BYTE_LENGTH],
     ) -> SchemaResult<Self> {
         validate_local_record_plaintext_length(ciphertext.len())?;
         if u64::try_from(ciphertext.len()).ok() != Some(associated_data.plaintext_byte_length) {
@@ -1023,7 +1092,6 @@ impl LocalRecordEnvelope {
             nonce,
             ciphertext,
             tag,
-            record_authenticator,
         })
     }
 
@@ -1043,10 +1111,6 @@ impl LocalRecordEnvelope {
         &self.tag
     }
 
-    pub const fn record_authenticator(&self) -> &[u8; LOCAL_RECORD_AUTHENTICATOR_BYTE_LENGTH] {
-        &self.record_authenticator
-    }
-
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
         Ok(CanonicalTuple::new(
             LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER,
@@ -1056,7 +1120,6 @@ impl LocalRecordEnvelope {
                 CanonicalItem::fixed_bytes(self.nonce)?,
                 CanonicalItem::variable_bytes(&self.ciphertext)?,
                 CanonicalItem::fixed_bytes(self.tag)?,
-                CanonicalItem::fixed_bytes(self.record_authenticator)?,
             ],
         )
         .encode()?)
@@ -1064,9 +1127,9 @@ impl LocalRecordEnvelope {
 
     pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         let bounded_limits =
-            bounded_canonical_decode_limits(limits, LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH, 5);
+            bounded_canonical_decode_limits(limits, LOCAL_RECORD_ENVELOPE_MAXIMUM_BYTE_LENGTH, 4);
         let tuple = CanonicalTuple::decode(bytes, &bounded_limits)?;
-        require_header(&tuple, LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER, 5)?;
+        require_header(&tuple, LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER, 4)?;
         let associated_data = LocalRecordAssociatedData::decode(
             read_variable_item(&tuple.items[0], CanonicalItemType::RawBytes)?,
             limits,
@@ -1076,7 +1139,6 @@ impl LocalRecordEnvelope {
             read_fixed_bytes(&tuple.items[1])?,
             read_variable_item(&tuple.items[2], CanonicalItemType::RawBytes)?.to_vec(),
             read_fixed_bytes(&tuple.items[3])?,
-            read_fixed_bytes(&tuple.items[4])?,
         )
     }
 
@@ -1093,7 +1155,6 @@ impl fmt::Debug for LocalRecordEnvelope {
             .field("nonce", &self.nonce)
             .field("ciphertext_byte_length", &self.ciphertext.len())
             .field("tag", &self.tag)
-            .field("record_authenticator", &self.record_authenticator)
             .finish()
     }
 }
@@ -1145,190 +1206,6 @@ impl StorageRootCommitmentPayload {
         let tuple = CanonicalTuple::decode(bytes, &bounded_limits)?;
         require_header(&tuple, STORAGE_ROOT_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER, 1)?;
         Ok(Self::new(read_hash(&tuple.items[0])?))
-    }
-}
-
-pub struct LocalStorageRecoveryValue {
-    binding: LocalStorageBinding,
-    storage_root_commitment: Hash512,
-    action_storage_root: Zeroizing<[u8; ACTION_STORAGE_ROOT_BYTE_LENGTH]>,
-    checksum: [u8; RECOVERY_CHECKSUM_BYTE_LENGTH],
-}
-
-impl LocalStorageRecoveryValue {
-    pub fn new(
-        binding: LocalStorageBinding,
-        action_storage_root: [u8; ACTION_STORAGE_ROOT_BYTE_LENGTH],
-    ) -> SchemaResult<Self> {
-        let action_storage_root = Zeroizing::new(action_storage_root);
-        let storage_root_commitment =
-            derive_storage_root_commitment(binding, &action_storage_root)?;
-        let checksum =
-            derive_recovery_checksum(binding, storage_root_commitment, &action_storage_root)?;
-        Ok(Self {
-            binding,
-            storage_root_commitment,
-            action_storage_root,
-            checksum,
-        })
-    }
-
-    pub const fn binding(&self) -> LocalStorageBinding {
-        self.binding
-    }
-
-    pub const fn storage_root_commitment(&self) -> Hash512 {
-        self.storage_root_commitment
-    }
-
-    pub const fn checksum(&self) -> &[u8; RECOVERY_CHECKSUM_BYTE_LENGTH] {
-        &self.checksum
-    }
-
-    pub fn encode(&self) -> SchemaResult<Vec<u8>> {
-        self.validate()?;
-        Ok(CanonicalTuple::new(
-            STORAGE_ROOT_RECOVERY_VALUE_SCHEMA_IDENTIFIER,
-            FOUNDATION_PROTOCOL_VERSION,
-            vec![
-                CanonicalItem::unsigned16(FOUNDATION_PROTOCOL_VERSION),
-                CanonicalItem::hash512(self.binding.suite_id.into_bytes()),
-                CanonicalItem::hash512(self.binding.ceremony_context_hash.into_bytes()),
-                CanonicalItem::hash512(self.binding.action_context_hash.into_bytes()),
-                CanonicalItem::participant_identity(self.binding.participant_id.into_bytes()),
-                CanonicalItem::hash512(self.storage_root_commitment.into_bytes()),
-                CanonicalItem::fixed_bytes(self.action_storage_root.as_ref())?,
-                CanonicalItem::fixed_bytes(self.checksum)?,
-            ],
-        )
-        .encode()?)
-    }
-
-    pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
-        let bounded_limits =
-            bounded_canonical_decode_limits(limits, RECOVERY_VALUE_CANONICAL_BYTE_LENGTH, 8);
-        let tuple = CanonicalTuple::decode(bytes, &bounded_limits)?;
-        require_header(&tuple, STORAGE_ROOT_RECOVERY_VALUE_SCHEMA_IDENTIFIER, 8)?;
-        require_protocol_version(read_u16(&tuple.items[0])?)?;
-        let binding = LocalStorageBinding::new(
-            read_hash(&tuple.items[1])?,
-            read_hash(&tuple.items[2])?,
-            read_hash(&tuple.items[3])?,
-            read_participant_identity(&tuple.items[4])?,
-        );
-        let value = Self {
-            binding,
-            storage_root_commitment: read_hash(&tuple.items[5])?,
-            action_storage_root: Zeroizing::new(read_fixed_bytes(&tuple.items[6])?),
-            checksum: read_fixed_bytes(&tuple.items[7])?,
-        };
-        value.validate()?;
-        Ok(value)
-    }
-
-    fn validate(&self) -> SchemaResult<()> {
-        let expected_commitment =
-            derive_storage_root_commitment(self.binding, &self.action_storage_root)?;
-        if expected_commitment != self.storage_root_commitment {
-            return Err(schema_error(
-                RefusalReason::WrongHashOrRoot,
-                "the recovery storage-root commitment does not recompute",
-            ));
-        }
-        let expected_checksum = derive_recovery_checksum(
-            self.binding,
-            self.storage_root_commitment,
-            &self.action_storage_root,
-        )?;
-        if expected_checksum != self.checksum {
-            return Err(schema_error(
-                RefusalReason::WrongHashOrRoot,
-                "the local-storage recovery checksum does not recompute",
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn to_canonical_base32(&self) -> SchemaResult<Zeroizing<String>> {
-        let bytes = Zeroizing::new(self.encode()?);
-        Ok(Zeroizing::new(encode_base32(bytes.as_ref())))
-    }
-
-    pub fn recover(
-        self,
-        expected_binding: LocalStorageBinding,
-        externally_verified_commitment: StorageRootCommitmentPayload,
-    ) -> VerificationResult<ActionStorageRoot> {
-        if let Err(error) = self.validate() {
-            return VerificationResult::refused(error.refusal_reason);
-        }
-        if self.binding != expected_binding {
-            return VerificationResult::refused(RefusalReason::WrongContext);
-        }
-        if self.storage_root_commitment != externally_verified_commitment.storage_root_commitment {
-            return VerificationResult::refused(RefusalReason::WrongHashOrRoot);
-        }
-        match ActionStorageRoot::from_verified_root(self.binding, self.action_storage_root) {
-            Ok(root) => VerificationResult::valid(root),
-            Err(error) => VerificationResult::refused(error.refusal_reason),
-        }
-    }
-}
-
-impl fmt::Debug for LocalStorageRecoveryValue {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("LocalStorageRecoveryValue")
-            .field("binding", &self.binding)
-            .field("storage_root_commitment", &self.storage_root_commitment)
-            .field("action_storage_root", &"[REDACTED]")
-            .field("checksum", &"[REDACTED]")
-            .finish()
-    }
-}
-
-pub struct CanonicalLocalStorageRecoveryIngress {
-    canonical_base32: Zeroizing<String>,
-    recovery_value: LocalStorageRecoveryValue,
-}
-
-impl CanonicalLocalStorageRecoveryIngress {
-    pub fn decode(
-        case_insensitive_base32: &str,
-        limits: &CanonicalDecodeLimits,
-    ) -> SchemaResult<Self> {
-        let mut decoded_bytes = Zeroizing::new(decode_base32(case_insensitive_base32)?);
-        if decoded_bytes.len() != RECOVERY_VALUE_CANONICAL_BYTE_LENGTH {
-            return Err(schema_error(
-                RefusalReason::WrongTypeOrLength,
-                "the local-storage recovery value has the wrong byte length",
-            ));
-        }
-        let recovery_value = LocalStorageRecoveryValue::decode(decoded_bytes.as_ref(), limits)?;
-        let canonical_base32 = Zeroizing::new(encode_base32(decoded_bytes.as_ref()));
-        decoded_bytes.zeroize();
-        Ok(Self {
-            canonical_base32,
-            recovery_value,
-        })
-    }
-
-    pub fn canonical_base32(&self) -> &str {
-        self.canonical_base32.as_str()
-    }
-
-    pub fn into_recovery_value(self) -> LocalStorageRecoveryValue {
-        self.recovery_value
-    }
-}
-
-impl fmt::Debug for CanonicalLocalStorageRecoveryIngress {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("CanonicalLocalStorageRecoveryIngress")
-            .field("canonical_base32", &"[REDACTED]")
-            .field("recovery_value", &"[REDACTED]")
-            .finish()
     }
 }
 
@@ -1507,7 +1384,6 @@ struct DerivedActionStorageKeyMaterial {
     storage_root_commitment: Hash512,
     storage_record_key_derivation_key:
         Zeroizing<[u8; STORAGE_RECORD_KEY_DERIVATION_KEY_BYTE_LENGTH]>,
-    storage_record_authenticator_key: Zeroizing<[u8; STORAGE_RECORD_AUTHENTICATOR_KEY_BYTE_LENGTH]>,
 }
 
 fn derive_action_storage_key_material(
@@ -1538,46 +1414,10 @@ fn derive_action_storage_key_material(
             ..STORAGE_ROOT_COMMITMENT_PREIMAGE_BYTE_LENGTH
                 + STORAGE_RECORD_KEY_DERIVATION_KEY_BYTE_LENGTH],
     );
-    let mut storage_record_authenticator_key =
-        Zeroizing::new([0u8; STORAGE_RECORD_AUTHENTICATOR_KEY_BYTE_LENGTH]);
-    storage_record_authenticator_key.copy_from_slice(
-        &key_material[STORAGE_ROOT_COMMITMENT_PREIMAGE_BYTE_LENGTH
-            + STORAGE_RECORD_KEY_DERIVATION_KEY_BYTE_LENGTH..],
-    );
     Ok(DerivedActionStorageKeyMaterial {
         storage_root_commitment,
         storage_record_key_derivation_key,
-        storage_record_authenticator_key,
     })
-}
-
-fn derive_storage_root_commitment(
-    binding: LocalStorageBinding,
-    action_storage_root: &[u8; ACTION_STORAGE_ROOT_BYTE_LENGTH],
-) -> SchemaResult<Hash512> {
-    Ok(derive_action_storage_key_material(binding, action_storage_root)?.storage_root_commitment)
-}
-
-fn derive_recovery_checksum(
-    binding: LocalStorageBinding,
-    storage_root_commitment: Hash512,
-    action_storage_root: &[u8; ACTION_STORAGE_ROOT_BYTE_LENGTH],
-) -> SchemaResult<[u8; RECOVERY_CHECKSUM_BYTE_LENGTH]> {
-    let digest = hash512(
-        "sealed-lattice/local-storage-recovery-checksum/v1",
-        &[
-            CanonicalItem::unsigned16(FOUNDATION_PROTOCOL_VERSION),
-            CanonicalItem::hash512(binding.suite_id.into_bytes()),
-            CanonicalItem::hash512(binding.ceremony_context_hash.into_bytes()),
-            CanonicalItem::hash512(binding.action_context_hash.into_bytes()),
-            CanonicalItem::participant_identity(binding.participant_id.into_bytes()),
-            CanonicalItem::hash512(storage_root_commitment.into_bytes()),
-            CanonicalItem::fixed_bytes(action_storage_root)?,
-        ],
-    )?;
-    let mut checksum = [0u8; RECOVERY_CHECKSUM_BYTE_LENGTH];
-    checksum.copy_from_slice(&digest.as_bytes()[..RECOVERY_CHECKSUM_BYTE_LENGTH]);
-    Ok(checksum)
 }
 
 fn require_protocol_version(version: u16) -> SchemaResult<()> {
@@ -1691,69 +1531,6 @@ fn bounded_canonical_decode_limits(
 
 fn schema_error(refusal_reason: RefusalReason, message: &'static str) -> FoundationSchemaError {
     FoundationSchemaError::new(refusal_reason, message)
-}
-
-fn encode_base32(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-    let output_length = bytes.len().saturating_mul(8).div_ceil(5);
-    let mut output = String::with_capacity(output_length);
-    let mut accumulator = 0u16;
-    let mut available_bits = 0u8;
-    for byte in bytes {
-        accumulator = (accumulator << 8) | u16::from(*byte);
-        available_bits += 8;
-        while available_bits >= 5 {
-            available_bits -= 5;
-            let index = usize::from((accumulator >> available_bits) & 0x1f);
-            output.push(char::from(ALPHABET[index]));
-        }
-        accumulator &= (1u16 << available_bits).wrapping_sub(1);
-    }
-    if available_bits != 0 {
-        let index = usize::from((accumulator << (5 - available_bits)) & 0x1f);
-        output.push(char::from(ALPHABET[index]));
-    }
-    output
-}
-
-fn decode_base32(value: &str) -> SchemaResult<Vec<u8>> {
-    if value.len() != RECOVERY_VALUE_BASE32_CHARACTER_LENGTH {
-        return Err(schema_error(
-            RefusalReason::WrongTypeOrLength,
-            "the local-storage recovery text has the wrong length",
-        ));
-    }
-    let mut output = Vec::with_capacity(RECOVERY_VALUE_CANONICAL_BYTE_LENGTH);
-    let mut accumulator = 0u16;
-    let mut available_bits = 0u8;
-    for character in value.bytes() {
-        let digit = match character {
-            b'A'..=b'Z' => character - b'A',
-            b'a'..=b'z' => character - b'a',
-            b'2'..=b'7' => character - b'2' + 26,
-            _ => {
-                return Err(schema_error(
-                    RefusalReason::MalformedEncoding,
-                    "the local-storage recovery text is not unpadded RFC 4648 base32",
-                ));
-            }
-        };
-        accumulator = (accumulator << 5) | u16::from(digit);
-        available_bits += 5;
-        if available_bits >= 8 {
-            available_bits -= 8;
-            output.push((accumulator >> available_bits) as u8);
-            accumulator &= (1u16 << available_bits).wrapping_sub(1);
-        }
-    }
-    if accumulator != 0 || !encode_base32(&output).eq_ignore_ascii_case(value) {
-        output.zeroize();
-        return Err(schema_error(
-            RefusalReason::MalformedEncoding,
-            "the local-storage recovery text has noncanonical trailing bits",
-        ));
-    }
-    Ok(output)
 }
 
 #[cfg(test)]

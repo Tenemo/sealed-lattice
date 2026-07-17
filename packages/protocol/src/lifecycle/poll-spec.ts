@@ -1,18 +1,10 @@
-import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import {
     foundationProfile,
     type PollSpec,
     type PollSpecValidation,
     type PollSpecValidationError,
-    type ProtocolHash,
-    type SmallRosterPolicy,
 } from '@sealed-lattice/types';
-
-import {
-    defaultSmallRosterPolicy,
-    maximumSupportedRosterSize,
-    minimumSupportedRosterSize,
-} from './roster-policy.js';
+import type { FoundationManifestInput } from '@sealed-lattice/wasm';
 
 const invalidDataProperty = Symbol('invalid-data-property');
 
@@ -58,63 +50,64 @@ const dataPropertyValue = (
     return 'value' in descriptor ? descriptor.value : invalidDataProperty;
 };
 
-const supportedSmallRosterPolicies = new Set<SmallRosterPolicy>([
-    'ForbidMicroRoster',
-    'AllowMicroRoster',
-]);
-
-const isSupportedSmallRosterPolicy = (
-    smallRosterPolicy: unknown,
-): smallRosterPolicy is SmallRosterPolicy =>
-    smallRosterPolicy === undefined ||
-    (typeof smallRosterPolicy === 'string' &&
-        supportedSmallRosterPolicies.has(
-            smallRosterPolicy as SmallRosterPolicy,
-        ));
-
-const normalizeRosterBound = (value: unknown, defaultValue: number): number =>
-    value === undefined
-        ? defaultValue
-        : typeof value === 'number'
-          ? value
-          : Number.NaN;
-
-const containsOnlyAsciiCharacters = (value: string): boolean => {
+const containsOnlyPrintableAsciiCharacters = (value: string): boolean => {
     for (
         let characterIndex = 0;
         characterIndex < value.length;
         characterIndex += 1
     ) {
-        if (value.charCodeAt(characterIndex) > 0x7f) {
+        const characterCode = value.charCodeAt(characterIndex);
+        if (characterCode < 0x20 || characterCode > 0x7e) {
             return false;
         }
     }
     return true;
 };
 
-export const derivePollSpecHash = (pollSpec: PollSpec): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        objectType: 'PollSpec',
-        maxRosterSize: pollSpec.maxRosterSize,
-        minRosterSize: pollSpec.minRosterSize,
-        options: pollSpec.options,
-        pollId: pollSpec.pollId,
-        question: pollSpec.question,
-        smallRosterPolicy: pollSpec.smallRosterPolicy,
-        topOptionCount: pollSpec.topOptionCount,
-    });
+const isWellFormedString = (value: string): boolean => {
+    for (
+        let codeUnitIndex = 0;
+        codeUnitIndex < value.length;
+        codeUnitIndex += 1
+    ) {
+        const codeUnit = value.charCodeAt(codeUnitIndex);
+        if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+            const followingCodeUnit = value.charCodeAt(codeUnitIndex + 1);
+            if (
+                codeUnitIndex + 1 >= value.length ||
+                followingCodeUnit < 0xdc00 ||
+                followingCodeUnit > 0xdfff
+            ) {
+                return false;
+            }
+            codeUnitIndex += 1;
+        } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+            return false;
+        }
+    }
+    return true;
+};
+
+const textEncoder = new TextEncoder();
+const canonicalOptionCount = 20;
+// This is the fixed canonical framing for the manifest tuple and its
+// deterministic option-0 through option-19 definitions. Rust remains the
+// canonical encoder and rechecks the complete serialized byte length.
+const canonicalManifestNonDisplayByteLength = 920;
 
 export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const errors: PollSpecValidationError[] = [];
     const optionLabels = new Set<string>();
     const inputRecordDescriptors = ordinaryRecordDescriptors(input);
     let remainingDisplayTextByteLength =
-        foundationProfile.maximumCopiedBufferByteLength;
+        foundationProfile.maximumCopiedBufferByteLength -
+        canonicalManifestNonDisplayByteLength;
     const consumeDisplayTextByteLength = (value: string): boolean => {
-        if (value.length > remainingDisplayTextByteLength) {
+        const byteLength = textEncoder.encode(value).byteLength;
+        if (byteLength > remainingDisplayTextByteLength) {
             return false;
         }
-        remainingDisplayTextByteLength -= value.length;
+        remainingDisplayTextByteLength -= byteLength;
 
         return true;
     };
@@ -124,18 +117,6 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const topOptionCount = dataPropertyValue(
         inputRecordDescriptors,
         'topOptionCount',
-    );
-    const smallRosterPolicy = dataPropertyValue(
-        inputRecordDescriptors,
-        'smallRosterPolicy',
-    );
-    const minRosterSize = dataPropertyValue(
-        inputRecordDescriptors,
-        'minRosterSize',
-    );
-    const maxRosterSize = dataPropertyValue(
-        inputRecordDescriptors,
-        'maxRosterSize',
     );
     const validatedOptions: string[] = [];
 
@@ -171,13 +152,13 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         });
     } else if (
         pollId.length > foundationProfile.maximumIdentifierByteLength ||
-        !containsOnlyAsciiCharacters(pollId)
+        !containsOnlyPrintableAsciiCharacters(pollId)
     ) {
         errors.push({
             code: 'UnsupportedHashCriticalText',
             field: 'pollId',
             message:
-                'pollId must contain only ASCII characters and fit the foundation identifier limit.',
+                'pollId must contain only printable ASCII characters and fit the foundation identifier limit.',
         });
     }
     if (typeof question !== 'string' || question.length === 0) {
@@ -187,33 +168,31 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             message: 'question must be a nonempty string.',
         });
     } else if (
-        question.length > foundationProfile.maximumCopiedBufferByteLength ||
-        !containsOnlyAsciiCharacters(question) ||
+        !isWellFormedString(question) ||
         !consumeDisplayTextByteLength(question)
     ) {
         errors.push({
             code: 'UnsupportedHashCriticalText',
             field: 'question',
             message:
-                'question must contain only ASCII characters and fit the bounded poll display-text budget.',
+                'question must be well-formed Unicode and fit the bounded poll display-text budget.',
         });
     }
     if (
         optionDescriptors === undefined ||
-        optionCount < 1 ||
-        optionCount > 20
+        optionCount !== canonicalOptionCount
     ) {
         errors.push({
             code: 'InvalidOptionCount',
             field: 'options',
-            message: 'options must be an array with 1 to 20 labels.',
+            message: 'options must contain exactly 20 labels.',
         });
     }
 
     for (
         let optionIndex = 0;
         optionDescriptors !== undefined &&
-        optionCount <= 20 &&
+        optionCount === canonicalOptionCount &&
         optionIndex < optionCount;
         optionIndex += 1
     ) {
@@ -230,16 +209,14 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             continue;
         }
         if (
-            optionLabel.length >
-                foundationProfile.maximumCopiedBufferByteLength ||
-            !containsOnlyAsciiCharacters(optionLabel) ||
+            !isWellFormedString(optionLabel) ||
             !consumeDisplayTextByteLength(optionLabel)
         ) {
             errors.push({
                 code: 'UnsupportedHashCriticalText',
                 field: `options[${optionIndex}]`,
                 message:
-                    'option labels must contain only ASCII characters and fit the bounded poll display-text budget.',
+                    'option labels must be well-formed Unicode and fit the bounded poll display-text budget.',
             });
             continue;
         }
@@ -267,35 +244,6 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             message: 'topOptionCount must be between 1 and options.length.',
         });
     }
-    if (!isSupportedSmallRosterPolicy(smallRosterPolicy)) {
-        errors.push({
-            code: 'UnsupportedSmallRosterPolicy',
-            field: 'smallRosterPolicy',
-            message:
-                'smallRosterPolicy must be ForbidMicroRoster or AllowMicroRoster.',
-        });
-    }
-
-    const normalizedMinRosterSize = normalizeRosterBound(minRosterSize, 10);
-    const normalizedMaxRosterSize = normalizeRosterBound(
-        maxRosterSize,
-        maximumSupportedRosterSize,
-    );
-    if (
-        !Number.isInteger(normalizedMinRosterSize) ||
-        !Number.isInteger(normalizedMaxRosterSize) ||
-        normalizedMinRosterSize < minimumSupportedRosterSize ||
-        normalizedMaxRosterSize > maximumSupportedRosterSize ||
-        normalizedMinRosterSize > normalizedMaxRosterSize
-    ) {
-        errors.push({
-            code: 'InvalidRosterBounds',
-            field: 'minRosterSize',
-            message:
-                'Roster bounds must be integer bounds in 3..20 with minRosterSize not greater than maxRosterSize.',
-        });
-    }
-
     if (errors.length > 0) {
         return {
             isValid: false,
@@ -311,12 +259,33 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             options: validatedOptions,
             topOptionCount:
                 typeof topOptionCount === 'number' ? topOptionCount : 0,
-            minRosterSize: normalizedMinRosterSize,
-            maxRosterSize: normalizedMaxRosterSize,
-            smallRosterPolicy:
-                smallRosterPolicy === undefined
-                    ? defaultSmallRosterPolicy
-                    : (smallRosterPolicy as SmallRosterPolicy),
         } satisfies PollSpec,
     };
+};
+
+export type FoundationManifestIngress = FoundationManifestInput;
+
+/** Converts validated pre-protocol input into the one canonical manifest shape. */
+export const prepareFoundationManifestIngress = (
+    pollSpec: PollSpec,
+): FoundationManifestIngress => {
+    const validation = validatePollSpec(pollSpec);
+    if (!validation.isValid) {
+        throw new TypeError(
+            'The poll input cannot produce the fixed twenty-option manifest.',
+        );
+    }
+
+    return Object.freeze({
+        displayTitle: validation.normalized.question,
+        optionDefinitions: Object.freeze(
+            validation.normalized.options.map((displayLabel, optionIndex) =>
+                Object.freeze({
+                    displayLabel,
+                    optionIdentifier: `option-${String(optionIndex)}`,
+                    optionIndex,
+                }),
+            ),
+        ),
+    });
 };

@@ -16,12 +16,13 @@ fn production_setup_profile_refuses_a_reduced_ring_before_proof_verification() {
 }
 
 #[test]
-#[ignore = "ten-participant proof-bearing accepted-setup evidence; run via its dedicated guarded lane"]
-fn ten_participant_vss_proof_bearing_collective_setup_package_passes_preterminal_accepted_setup() {
+#[ignore = "ten-participant accepted-setup common-proof boundary evidence; run via its dedicated guarded lane"]
+fn ten_participant_vss_structural_collective_setup_package_refuses_without_common_proof_authority()
+{
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "ten_participant_vss_proof_bearing_collective_setup_package_passes_preterminal_accepted_setup",
+        "ten_participant_vss_structural_collective_setup_package_refuses_without_common_proof_authority",
     );
-    let fixture = ten_participant_descriptor_backed_vss_collective_setup_fixture();
+    let fixture = ten_participant_structural_vss_collective_setup_fixture();
     assert_eq!(
         fixture.package["setupContext"]["participantCount"],
         serde_json::json!(10),
@@ -31,8 +32,14 @@ fn ten_participant_vss_proof_bearing_collective_setup_package_passes_preterminal
     let result = fixture
         .verify()
         .expect("ten-participant accepted-setup verification response");
-    assert_eq!(result["isValid"], false, "unexpected result: {result}");
-    assert_eq!(result["refusalReason"], "missingPrerequisite");
+    assert_eq!(
+        result["isValid"], false,
+        "the unavailable common-proof authority must fail closed: {result}",
+    );
+    assert_eq!(
+        result["refusalReason"], "malformedEncoding",
+        "the ten-participant structural fixture must stop at the common-proof boundary: {result}",
+    );
 }
 
 fn install_signed_vss_complaint(package: &mut serde_json::Value) {
@@ -111,8 +118,6 @@ fn install_signed_vss_complaint(package: &mut serde_json::Value) {
         "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
         "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
         "privateEnvelopeHash": private_envelope_hash,
-        "recoveryEpoch": 0,
-        "deviceEpoch": 0,
     });
     let complaint_root =
         derive_canonical_object_hash(&complaint_payload).expect("VSS complaint root");
@@ -277,180 +282,6 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
             case_label,
             *mutate,
             expected_refusal_reason,
-        );
-    }
-}
-
-fn compact_aggregate_threshold_proof_context<'a>(
-    fixture: &'a serde_json::Value,
-    trustee_identities: &'a [String],
-) -> crate::bgv::setup::VssAggregateThresholdProofContext<'a> {
-    let setup_context = &fixture["setupContext"];
-    let aggregate_threshold_commitment_set = &fixture["vssPublicAggregateThresholdCommitmentSet"];
-
-    crate::bgv::setup::VssAggregateThresholdProofContext {
-        setup_context_hash: crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
-            .expect("setup context hash"),
-        public_matrix_seed_hash: aggregate_threshold_commitment_set["publicMatrixSeedHash"]
-            .as_str()
-            .expect("public matrix seed hash"),
-        ring_degree: vss_commitment_ring_degree_from_fixture_package(fixture),
-        participant_count: proof_record_fixtures::participant_count_from_package(fixture)
-            .try_into()
-            .expect("participant count fits usize"),
-        rns_limb_count: DATA_PRIMES.len(),
-        trustee_identities,
-    }
-}
-
-fn verify_compact_aggregate_threshold_proofs(
-    fixture: &CompactAggregateThresholdProofFixture,
-    aggregate_threshold_commitment_set: &serde_json::Value,
-) -> crate::encoding::CanonicalResult<()> {
-    let proof_binding_session = crate::bgv::setup::AcceptedSetupProofBindingSession::begin_fresh()?;
-    for proof_binding_lease in &fixture.proof_binding_leases {
-        crate::bgv::setup::restore_accepted_setup_proof_binding_lease(
-            proof_binding_session.session_handle,
-            proof_binding_lease,
-        )?;
-    }
-    let package = &fixture.package;
-    let trustee_identities = (0..proof_record_fixtures::participant_count_from_package(package))
-        .map(|roster_position| format!("trustee-{roster_position}"))
-        .collect::<Vec<_>>();
-    let verification = crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
-        Some(&proof_binding_session),
-        &package["vssPublicCoefficientCommitmentSet"],
-        &package["vssPublicRecipientShareCommitmentSet"],
-        aggregate_threshold_commitment_set,
-        &compact_aggregate_threshold_proof_context(package, &trustee_identities),
-    );
-    match verification {
-        Ok(()) => crate::bgv::setup::finish_accepted_setup_proof_binding_session(
-            proof_binding_session.session_handle,
-        ),
-        Err(error) => {
-            crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
-                proof_binding_session.session_handle,
-            )?;
-            Err(error)
-        }
-    }
-}
-
-fn assert_compact_aggregate_threshold_proofs_refused(
-    fixture: &CompactAggregateThresholdProofFixture,
-    case_label: &str,
-    mutate: impl FnOnce(&mut serde_json::Value),
-    expected_error_code: CanonicalErrorCode,
-    expected_message_fragment: Option<&str>,
-) {
-    let mut aggregate_threshold_commitment_set =
-        fixture.package["vssPublicAggregateThresholdCommitmentSet"].clone();
-    mutate(&mut aggregate_threshold_commitment_set);
-    let error =
-        verify_compact_aggregate_threshold_proofs(fixture, &aggregate_threshold_commitment_set)
-            .expect_err(case_label);
-    assert_eq!(
-        error.code, expected_error_code,
-        "{case_label}: unexpected error: {error}"
-    );
-    if let Some(expected_message_fragment) = expected_message_fragment {
-        assert!(
-            error.message.contains(expected_message_fragment),
-            "{case_label}: error did not contain {expected_message_fragment:?}: {error}"
-        );
-    } else {
-        assert!(
-            !error.message.is_empty(),
-            "{case_label}: rejection must carry a diagnostic message"
-        );
-    }
-}
-
-#[test]
-fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs",
-    );
-    let fixture = compact_aggregate_threshold_proof_fixture();
-    let package = &fixture.package;
-    verify_compact_aggregate_threshold_proofs(
-        &fixture,
-        &package["vssPublicAggregateThresholdCommitmentSet"],
-    )
-    .expect("compact aggregate threshold proof fixture must verify");
-
-    type AggregateThresholdProofMutation = fn(&mut serde_json::Value);
-    type AggregateThresholdProofMutationCase = (
-        &'static str,
-        AggregateThresholdProofMutation,
-        CanonicalErrorCode,
-        Option<&'static str>,
-    );
-    let mutation_cases: &[AggregateThresholdProofMutationCase] = &[
-        (
-            "missing aggregate threshold proof",
-            |aggregate_threshold_commitment_set| {
-                aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"]
-                    .as_array_mut()
-                    .expect("aggregate threshold proofs")
-                    .pop();
-            },
-            CanonicalErrorCode::MalformedLength,
-            Some("proofs must cover every aggregate record"),
-        ),
-        (
-            "duplicate aggregate threshold proof reference",
-            |aggregate_threshold_commitment_set| {
-                let proofs =
-                    aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"]
-                        .as_array_mut()
-                        .expect("aggregate threshold proofs");
-                proofs[1] = proofs[0].clone();
-            },
-            CanonicalErrorCode::MalformedLength,
-            Some("unique proof material"),
-        ),
-        (
-            "cross-wired aggregate threshold proof references",
-            |aggregate_threshold_commitment_set| {
-                let proofs =
-                    aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"]
-                        .as_array_mut()
-                        .expect("aggregate threshold proofs");
-                proofs.swap(0, 1);
-            },
-            CanonicalErrorCode::InvalidProtocolObject,
-            None,
-        ),
-        (
-            "tampered aggregate threshold proof bytes hash",
-            |aggregate_threshold_commitment_set| {
-                aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"][0] =
-                    serde_json::json!(valid_hash('a'));
-            },
-            CanonicalErrorCode::ComponentMismatch,
-            Some("proof material root"),
-        ),
-        (
-            "aggregate threshold proof hash type mismatch",
-            |aggregate_threshold_commitment_set| {
-                aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"][0] =
-                    serde_json::json!(17);
-            },
-            CanonicalErrorCode::InvalidFixture,
-            None,
-        ),
-    ];
-
-    for (case_label, mutate, expected_error_code, expected_message_fragment) in mutation_cases {
-        assert_compact_aggregate_threshold_proofs_refused(
-            &fixture,
-            case_label,
-            *mutate,
-            expected_error_code.clone(),
-            *expected_message_fragment,
         );
     }
 }

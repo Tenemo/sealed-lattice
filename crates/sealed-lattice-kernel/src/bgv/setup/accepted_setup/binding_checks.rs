@@ -9,7 +9,7 @@ pub(super) fn array_value<'a>(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{field_name} must be an array"),
             )
         })
@@ -22,7 +22,7 @@ pub(in super::super) fn accepted_vss_coefficient_commitment_root(
         .get("vssPublicCoefficientCommitmentSet")
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "VSS public coefficient commitment set is required",
             )
         })?;
@@ -54,7 +54,7 @@ pub(super) fn value_string<'a>(value: &'a Value, field_name: &str) -> CanonicalR
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{field_name} must be a string"),
             )
         })
@@ -66,7 +66,7 @@ pub(super) fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64>
         .and_then(Value::as_u64)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("{field_name} must be a non-negative integer"),
             )
         })
@@ -84,21 +84,6 @@ pub(in super::super) fn setup_context_hash(setup_context: &Value) -> CanonicalRe
     }))
 }
 
-pub(super) fn compare_required_u64_binding(
-    actual: u64,
-    expected: u64,
-    description: &str,
-) -> CanonicalResult<()> {
-    if actual != expected {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            format!("{description} does not match its setup-context binding"),
-        ));
-    }
-
-    Ok(())
-}
-
 pub(super) fn compare_setup_context_binding(
     setup_context: &Value,
     bound_value: &Value,
@@ -111,31 +96,7 @@ pub(super) fn compare_setup_context_binding(
     )
 }
 
-pub(super) fn compare_setup_context_participant_count(
-    setup_context: &Value,
-    bound_value: &Value,
-    bound_object_description: &str,
-) -> CanonicalResult<()> {
-    compare_required_u64_binding(
-        value_u64(bound_value, "participantCount")?,
-        value_u64(setup_context, "participantCount")?,
-        &format!("{bound_object_description} participantCount"),
-    )
-}
-
-pub(super) fn compare_setup_context_threshold_degree(
-    setup_context: &Value,
-    bound_value: &Value,
-    bound_object_description: &str,
-) -> CanonicalResult<()> {
-    let participant_count = value_u64(setup_context, "participantCount")?;
-    compare_required_u64_binding(
-        value_u64(bound_value, "thresholdDegree")?,
-        decryption_threshold_for_participant_count(participant_count),
-        &format!("{bound_object_description} thresholdDegree"),
-    )
-}
-
+#[cfg(test)]
 pub(super) fn compare_complete_q_share_limb_count(
     bound_value: &Value,
     bound_object_description: &str,
@@ -157,7 +118,7 @@ pub(super) fn validate_lowercase_hex(value: &str, field_name: &str) -> Canonical
     }
 
     Err(CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
+        CanonicalErrorCode::InvalidProtocolObject,
         format!("{field_name} must be lowercase canonical hex"),
     ))
 }
@@ -173,7 +134,7 @@ pub(super) fn validate_lowercase_hex_length(
     }
 
     Err(CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
+        CanonicalErrorCode::InvalidProtocolObject,
         format!("{field_name} must be {expected_byte_length} bytes"),
     ))
 }

@@ -34,7 +34,7 @@ pub fn derive_setup_mailbox_slot_hash(
     statement_hash: Hash512,
     ordered_material_roots: &[Hash512],
 ) -> SchemaResult<Hash512> {
-    validate_mailbox_material_roots(payload_type, ordered_material_roots)?;
+    validate_mailbox_material_roots(ordered_material_roots)?;
     let material_roots = ordered_material_roots
         .iter()
         .map(|root| CanonicalItem::hash512(root.into_bytes()))
@@ -50,38 +50,25 @@ pub fn derive_setup_mailbox_slot_hash(
             CanonicalItem::participant_identity(recipient_participant_id.into_bytes()),
             CanonicalItem::unsigned64(producer_sequence),
             CanonicalItem::unsigned16(payload_type.canonical_code()),
-            CanonicalItem::unsigned16(1),
             CanonicalItem::hash512(statement_hash.into_bytes()),
             CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &material_roots)?,
         ],
     )?)
 }
 
-fn validate_mailbox_material_roots(
-    payload_type: MailboxPayloadType,
-    ordered_material_roots: &[Hash512],
-) -> SchemaResult<()> {
-    match payload_type {
-        MailboxPayloadType::PublicRandomnessRecoveryShare if !ordered_material_roots.is_empty() => {
-            Err(schema_error(
-                RefusalReason::WrongTypeOrLength,
-                "public-randomness recovery mailboxes cannot carry material roots",
-            ))
-        }
-        MailboxPayloadType::RecipientPrivateVssShare if ordered_material_roots.is_empty() => {
-            Err(schema_error(
-                RefusalReason::WrongTypeOrLength,
-                "private VSS mailboxes must bind their ordered material roots",
-            ))
-        }
-        _ => Ok(()),
+fn validate_mailbox_material_roots(ordered_material_roots: &[Hash512]) -> SchemaResult<()> {
+    if ordered_material_roots.is_empty() {
+        return Err(schema_error(
+            RefusalReason::WrongTypeOrLength,
+            "private VSS mailboxes must bind their ordered material roots",
+        ));
     }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum MailboxPayloadType {
-    PublicRandomnessRecoveryShare = 1,
     RecipientPrivateVssShare = 2,
 }
 
@@ -92,7 +79,6 @@ impl MailboxPayloadType {
 
     pub const fn from_canonical_code(code: u16) -> Option<Self> {
         match code {
-            1 => Some(Self::PublicRandomnessRecoveryShare),
             2 => Some(Self::RecipientPrivateVssShare),
             _ => None,
         }
@@ -112,7 +98,6 @@ pub struct MailboxKeyScheduleInput {
     pub payload_type: MailboxPayloadType,
     pub statement_hash: Hash512,
     pub ordered_material_roots: Vec<Hash512>,
-    pub kem_ciphertext_hash: Hash512,
 }
 
 impl MailboxKeyScheduleInput {
@@ -122,7 +107,7 @@ impl MailboxKeyScheduleInput {
     }
 
     fn validate(&self) -> SchemaResult<()> {
-        validate_mailbox_material_roots(self.payload_type, &self.ordered_material_roots)
+        validate_mailbox_material_roots(&self.ordered_material_roots)
     }
 
     fn canonical_items(&self) -> SchemaResult<Vec<CanonicalItem>> {
@@ -144,12 +129,11 @@ impl MailboxKeyScheduleInput {
             CanonicalItem::unsigned16(self.payload_type.canonical_code()),
             CanonicalItem::hash512(self.statement_hash.into_bytes()),
             CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &material_roots)?,
-            CanonicalItem::hash512(self.kem_ciphertext_hash.into_bytes()),
         ])
     }
 
     fn from_items(items: &[CanonicalItem]) -> SchemaResult<Self> {
-        if items.len() != 12 {
+        if items.len() != 11 {
             return Err(schema_error(
                 RefusalReason::WrongTypeOrLength,
                 "mailbox key-schedule input has the wrong item count",
@@ -174,7 +158,6 @@ impl MailboxKeyScheduleInput {
             payload_type,
             statement_hash: read_hash(&items[9])?,
             ordered_material_roots: read_hash_list(&items[10])?,
-            kem_ciphertext_hash: read_hash(&items[11])?,
         }
         .checked()
     }
@@ -190,12 +173,16 @@ impl MailboxKeyScheduleInput {
 
     pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode(bytes, limits)?;
-        require_header(&tuple, MAILBOX_KEY_SCHEDULE_INPUT_SCHEMA_IDENTIFIER, 12)?;
+        require_header(&tuple, MAILBOX_KEY_SCHEDULE_INPUT_SCHEMA_IDENTIFIER, 11)?;
         Self::from_items(&tuple.items)
     }
 
-    pub fn hkdf_extract_salt(&self) -> SchemaResult<[u8; MAILBOX_HKDF_EXTRACT_SALT_BYTE_LENGTH]> {
+    pub fn hkdf_extract_salt(
+        &self,
+        kem_ciphertext: &[u8; MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH],
+    ) -> SchemaResult<[u8; MAILBOX_HKDF_EXTRACT_SALT_BYTE_LENGTH]> {
         self.validate()?;
+        let kem_ciphertext_hash = derive_mailbox_kem_ciphertext_hash(kem_ciphertext)?;
         let salt_hash = hash512(
             "sealed-lattice/mailbox/hkdf-extract-salt/v1",
             &[
@@ -207,7 +194,7 @@ impl MailboxKeyScheduleInput {
                 CanonicalItem::participant_identity(self.recipient_participant_id.into_bytes()),
                 CanonicalItem::unsigned64(self.producer_sequence),
                 CanonicalItem::fixed_bytes(self.envelope_attempt_identifier)?,
-                CanonicalItem::hash512(self.kem_ciphertext_hash.into_bytes()),
+                CanonicalItem::hash512(kem_ciphertext_hash.into_bytes()),
             ],
         )?;
         let mut salt = [0_u8; MAILBOX_HKDF_EXTRACT_SALT_BYTE_LENGTH];
@@ -219,31 +206,17 @@ impl MailboxKeyScheduleInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailboxAssociatedData {
     pub key_schedule_input: MailboxKeyScheduleInput,
-    pub plaintext_byte_length: u64,
 }
 
 impl MailboxAssociatedData {
-    pub fn new(
-        key_schedule_input: MailboxKeyScheduleInput,
-        plaintext_byte_length: u64,
-    ) -> SchemaResult<Self> {
+    pub fn new(key_schedule_input: MailboxKeyScheduleInput) -> SchemaResult<Self> {
         key_schedule_input.validate()?;
-        if plaintext_byte_length == 0 {
-            return Err(schema_error(
-                RefusalReason::WrongTypeOrLength,
-                "mailbox plaintext must be nonempty",
-            ));
-        }
-        Ok(Self {
-            key_schedule_input,
-            plaintext_byte_length,
-        })
+        Ok(Self { key_schedule_input })
     }
 
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
-        let mut items = self.key_schedule_input.canonical_items()?;
-        items.push(CanonicalItem::unsigned64(self.plaintext_byte_length));
-        Self::new(self.key_schedule_input.clone(), self.plaintext_byte_length)?;
+        let items = self.key_schedule_input.canonical_items()?;
+        Self::new(self.key_schedule_input.clone())?;
         Ok(CanonicalTuple::new(
             MAILBOX_ASSOCIATED_DATA_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
@@ -263,11 +236,8 @@ impl MailboxAssociatedData {
         budget: &mut CanonicalDecodeBudget,
     ) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode_with_budget(bytes, limits, budget)?;
-        require_header(&tuple, MAILBOX_ASSOCIATED_DATA_SCHEMA_IDENTIFIER, 13)?;
-        Self::new(
-            MailboxKeyScheduleInput::from_items(&tuple.items[..12])?,
-            read_u64(&tuple.items[12])?,
-        )
+        require_header(&tuple, MAILBOX_ASSOCIATED_DATA_SCHEMA_IDENTIFIER, 11)?;
+        Self::new(MailboxKeyScheduleInput::from_items(&tuple.items)?)
     }
 }
 
@@ -300,27 +270,8 @@ impl SignedMailboxEnvelope {
     }
 
     fn validate(&self) -> SchemaResult<()> {
-        MailboxAssociatedData::new(
-            self.associated_data.key_schedule_input.clone(),
-            self.associated_data.plaintext_byte_length,
-        )?;
+        MailboxAssociatedData::new(self.associated_data.key_schedule_input.clone())?;
         self.ciphertext_descriptor.validate()?;
-        if self.ciphertext_descriptor.total_byte_length
-            != self.associated_data.plaintext_byte_length
-        {
-            return Err(schema_error(
-                RefusalReason::WrongTypeOrLength,
-                "mailbox ciphertext length does not match its associated data",
-            ));
-        }
-        if derive_mailbox_kem_ciphertext_hash(&self.kem_ciphertext)?
-            != self.associated_data.key_schedule_input.kem_ciphertext_hash
-        {
-            return Err(schema_error(
-                RefusalReason::WrongHashOrRoot,
-                "mailbox KEM ciphertext hash does not match its associated data",
-            ));
-        }
         Ok(())
     }
 
@@ -377,7 +328,7 @@ impl SignedMailboxEnvelope {
     }
 }
 
-pub fn derive_mailbox_kem_ciphertext_hash(
+fn derive_mailbox_kem_ciphertext_hash(
     kem_ciphertext: &[u8; MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH],
 ) -> SchemaResult<Hash512> {
     Ok(hash512(
@@ -409,7 +360,6 @@ mod tests {
     use super::*;
 
     fn key_schedule_input() -> MailboxKeyScheduleInput {
-        let kem_ciphertext = [0x5a; MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH];
         MailboxKeyScheduleInput {
             suite_id: Hash512::from_bytes([0x11; 64]),
             ceremony_context_hash: Hash512::from_bytes([0x22; 64]),
@@ -425,8 +375,6 @@ mod tests {
                 Hash512::from_bytes([0x91; 64]),
                 Hash512::from_bytes([0x92; 64]),
             ],
-            kem_ciphertext_hash: derive_mailbox_kem_ciphertext_hash(&kem_ciphertext)
-                .expect("KEM ciphertext hash derives"),
         }
         .checked()
         .expect("key-schedule input is valid")
@@ -435,11 +383,13 @@ mod tests {
     fn signed_envelope() -> SignedMailboxEnvelope {
         let plaintext_byte_length = 64;
         let associated_data =
-            MailboxAssociatedData::new(key_schedule_input(), plaintext_byte_length)
-                .expect("associated data is valid");
-        let descriptor =
-            StreamDescriptor::new(plaintext_byte_length, vec![Hash512::from_bytes([0xa1; 64])])
-                .expect("ciphertext descriptor is valid");
+            MailboxAssociatedData::new(key_schedule_input()).expect("associated data is valid");
+        let descriptor = StreamDescriptor::new(
+            plaintext_byte_length,
+            vec![Hash512::from_bytes([0xa1; 64])],
+            Hash512::from_bytes([0xa2; 64]),
+        )
+        .expect("ciphertext descriptor is valid");
         SignedMailboxEnvelope::new(
             associated_data,
             [0x5a; MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH],
@@ -467,11 +417,11 @@ mod tests {
                 .expect("key-schedule tuple decodes")
                 .items
                 .len(),
-            12
+            11
         );
 
         let associated_data =
-            MailboxAssociatedData::new(key_schedule, 64).expect("associated data is valid");
+            MailboxAssociatedData::new(key_schedule).expect("associated data is valid");
         let associated_data_bytes = associated_data.encode().expect("associated data encodes");
         assert_eq!(
             MailboxAssociatedData::decode(
@@ -486,7 +436,7 @@ mod tests {
                 .expect("associated-data tuple decodes")
                 .items
                 .len(),
-            13
+            11
         );
 
         let envelope = signed_envelope();
@@ -502,6 +452,25 @@ mod tests {
                 .items
                 .len(),
             5
+        );
+    }
+
+    #[test]
+    fn removed_public_randomness_mailbox_payload_code_is_unassigned() {
+        let mut tuple = CanonicalTuple::decode(
+            &key_schedule_input().encode().expect("key schedule encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect("key-schedule tuple decodes");
+        tuple.items[8] = CanonicalItem::unsigned16(1);
+        let error = MailboxKeyScheduleInput::decode(
+            &tuple.encode().expect("changed key schedule encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect_err("removed mailbox payload code refuses");
+        assert_eq!(
+            error.refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
         );
     }
 
@@ -544,23 +513,35 @@ mod tests {
     #[test]
     fn key_schedule_salt_binds_encapsulation_but_material_roots_remain_hkdf_info() {
         let input = key_schedule_input();
-        let salt = input.hkdf_extract_salt().expect("extract salt derives");
+        let kem_ciphertext = [0x5a; MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH];
+        let salt = input
+            .hkdf_extract_salt(&kem_ciphertext)
+            .expect("extract salt derives");
         assert_eq!(salt.len(), MAILBOX_HKDF_EXTRACT_SALT_BYTE_LENGTH);
 
         let mut changed_attempt = input.clone();
         changed_attempt.envelope_attempt_identifier[31] ^= 1;
         assert_ne!(
             changed_attempt
-                .hkdf_extract_salt()
+                .hkdf_extract_salt(&kem_ciphertext)
                 .expect("changed extract salt derives"),
             salt
         );
 
-        let mut reordered_roots = input;
+        let mut changed_kem_ciphertext = kem_ciphertext;
+        changed_kem_ciphertext[0] ^= 1;
+        assert_ne!(
+            input
+                .hkdf_extract_salt(&changed_kem_ciphertext)
+                .expect("changed encapsulation extract salt derives"),
+            salt
+        );
+
+        let mut reordered_roots = input.clone();
         reordered_roots.ordered_material_roots.swap(0, 1);
         assert_eq!(
             reordered_roots
-                .hkdf_extract_salt()
+                .hkdf_extract_salt(&kem_ciphertext)
                 .expect("root-independent extract salt derives"),
             salt
         );
@@ -571,45 +552,10 @@ mod tests {
     }
 
     #[test]
-    fn payload_root_and_envelope_binding_errors_refuse() {
-        let input = key_schedule_input();
-        assert!(
-            MailboxKeyScheduleInput {
-                payload_type: MailboxPayloadType::PublicRandomnessRecoveryShare,
-                ..input.clone()
-            }
-            .checked()
-            .is_err()
-        );
-
-        let mut missing_private_roots = input.clone();
+    fn missing_private_share_roots_refuse() {
+        let mut missing_private_roots = key_schedule_input();
         missing_private_roots.ordered_material_roots.clear();
         assert!(missing_private_roots.encode().is_err());
-
-        let mut wrong_kem_hash = signed_envelope();
-        wrong_kem_hash
-            .associated_data
-            .key_schedule_input
-            .kem_ciphertext_hash = Hash512::from_bytes([0xdd; 64]);
-        assert_eq!(
-            wrong_kem_hash
-                .encode()
-                .expect_err("wrong KEM hash refuses")
-                .refusal_reason,
-            RefusalReason::WrongHashOrRoot
-        );
-
-        let mut wrong_ciphertext_length = signed_envelope();
-        wrong_ciphertext_length
-            .associated_data
-            .plaintext_byte_length += 1;
-        assert_eq!(
-            wrong_ciphertext_length
-                .encode()
-                .expect_err("wrong ciphertext length refuses")
-                .refusal_reason,
-            RefusalReason::WrongTypeOrLength
-        );
     }
 
     #[test]

@@ -1,0 +1,145 @@
+use serde_json::{Map, Value};
+
+use super::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+use crate::transcript_core::decode_hex;
+
+pub(super) fn required_object<'a>(
+    value: &'a Value,
+    label: &str,
+) -> CanonicalResult<&'a Map<String, Value>> {
+    value
+        .as_object()
+        .ok_or_else(|| invalid_value(format!("{label} must be an object")))
+}
+
+pub(super) fn required_value<'a>(
+    object: &'a Map<String, Value>,
+    field_name: &str,
+) -> CanonicalResult<&'a Value> {
+    object
+        .get(field_name)
+        .ok_or_else(|| invalid_value(format!("{field_name} is required")))
+}
+
+pub(super) fn required_string<'a>(
+    object: &'a Map<String, Value>,
+    field_name: &str,
+) -> CanonicalResult<&'a str> {
+    required_value(object, field_name)?
+        .as_str()
+        .ok_or_else(|| invalid_value(format!("{field_name} must be a string")))
+}
+
+pub(super) fn required_array<'a>(
+    object: &'a Map<String, Value>,
+    field_name: &str,
+) -> CanonicalResult<&'a [Value]> {
+    required_value(object, field_name)?
+        .as_array()
+        .map(Vec::as_slice)
+        .ok_or_else(|| invalid_value(format!("{field_name} must be an array")))
+}
+
+pub(super) fn required_canonical_u64_decimal(
+    object: &Map<String, Value>,
+    field_name: &str,
+) -> CanonicalResult<u64> {
+    let value = required_string(object, field_name)?;
+    if value.is_empty()
+        || (value.len() > 1 && value.starts_with('0'))
+        || value.bytes().any(|byte| !byte.is_ascii_digit())
+    {
+        return Err(invalid_value(format!(
+            "{field_name} must be a canonical unsigned decimal string"
+        )));
+    }
+    value
+        .parse()
+        .map_err(|_| invalid_value(format!("{field_name} does not fit u64")))
+}
+
+/// Preserves the foundation command's existing `u64::from_str` syntax.
+///
+/// Unlike [`required_canonical_u64_decimal`], this accepts representations such
+/// as a leading-zero decimal. The two policies are named separately so command
+/// parsers cannot drift through copied implementations.
+pub(super) fn required_rust_parseable_u64_decimal(
+    object: &Map<String, Value>,
+    field_name: &str,
+) -> CanonicalResult<u64> {
+    required_string(object, field_name)?
+        .parse::<u64>()
+        .map_err(|_| {
+            invalid_value(format!(
+                "{field_name} must be a canonical u64 decimal string"
+            ))
+        })
+}
+
+pub(super) fn required_lowercase_hex_bytes(
+    object: &Map<String, Value>,
+    field_name: &str,
+) -> CanonicalResult<Vec<u8>> {
+    decode_hex(required_string(object, field_name)?)
+}
+
+pub(super) fn required_exact_lowercase_hex<const BYTE_LENGTH: usize>(
+    object: &Map<String, Value>,
+    field_name: &str,
+) -> CanonicalResult<[u8; BYTE_LENGTH]> {
+    decode_exact_lowercase_hex(required_string(object, field_name)?, field_name)
+}
+
+pub(super) fn decode_exact_lowercase_hex<const BYTE_LENGTH: usize>(
+    value: &str,
+    field_name: &str,
+) -> CanonicalResult<[u8; BYTE_LENGTH]> {
+    let bytes = decode_hex(value)?;
+    bytes.try_into().map_err(|_| {
+        invalid_value(format!(
+            "{field_name} must contain exactly {BYTE_LENGTH} bytes"
+        ))
+    })
+}
+
+pub(super) fn invalid_value(message: impl Into<String>) -> CanonicalError {
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn unsigned_decimal_policies_keep_their_distinct_command_syntax() {
+        let value = json!({ "number": "00" });
+        let object = value.as_object().expect("test input is an object");
+
+        assert_eq!(required_rust_parseable_u64_decimal(object, "number"), Ok(0));
+        let error = required_canonical_u64_decimal(object, "number")
+            .expect_err("canonical decimal syntax must reject a leading zero");
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+        assert_eq!(
+            error.message,
+            "number must be a canonical unsigned decimal string"
+        );
+    }
+
+    #[test]
+    fn exact_lowercase_hex_distinguishes_alphabet_and_length_failures() {
+        for (value, expected_code) in [
+            ("AA", CanonicalErrorCode::InvalidHex),
+            ("00", CanonicalErrorCode::InvalidProtocolObject),
+        ] {
+            let error = decode_exact_lowercase_hex::<2>(value, "digest")
+                .expect_err("noncanonical or wrong-length hex must refuse");
+            assert_eq!(error.code, expected_code);
+        }
+        assert_eq!(
+            decode_exact_lowercase_hex::<2>("00ff", "digest"),
+            Ok([0x00, 0xff])
+        );
+    }
+}

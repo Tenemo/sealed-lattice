@@ -18,8 +18,6 @@ import {
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
-const maximumCanonicalStreamByteLength = 2_147_483_648;
-
 const createBytes = (
     byteLength: number,
     seed = 19,
@@ -94,7 +92,6 @@ describe('Canonical stream real-WASM runtime', () => {
             targetOrderPartialDecryption: 20,
             maliciousTargetShareProof: 21,
             checkpointState: 22,
-            stateBallotCandidateListExactOutput: 23,
             stateFinalitySignatureExactOutput: 24,
             stateTargetReleaseExactOutput: 25,
             publicKeyShareMaterial: 26,
@@ -283,9 +280,12 @@ describe('Canonical stream real-WASM runtime', () => {
             streamDomain: canonicalStreamDomains.publicKeyShareProof,
         });
         tampered.absorbChunk(0, chunks[0].slice(0));
-        expect(() => tampered.absorbChunk(1, chunks[1].slice(0))).toThrowError(
+        tampered.absorbChunk(1, chunks[1].slice(0));
+        expect(() => tampered.finish()).toThrowError(
             expect.objectContaining({ refusalReason: 'wrongHashOrRoot' }),
         );
+        expect(tampered.state()).toBe('failed');
+        expect(runtime.counterSnapshot().activeSessionCount).toBe(0);
     });
 
     it('pulls without prefetch, exposes only authenticated bytes, and cleans cancellation', async () => {
@@ -391,16 +391,20 @@ describe('Canonical stream real-WASM runtime', () => {
 
         const exactMaximum = runtime.openWriter({
             streamDomain: canonicalStreamDomains.evaluatorKeyStore,
-            totalByteLength: maximumCanonicalStreamByteLength,
+            totalByteLength: foundationProfile.maximumCanonicalStreamByteLength,
         });
         expect(exactMaximum.chunkCount).toBe(
-            maximumCanonicalStreamByteLength / 1_048_576,
+            Math.ceil(
+                foundationProfile.maximumCanonicalStreamByteLength /
+                    foundationProfile.streamChunkByteLength,
+            ),
         );
         exactMaximum.cancel();
         expect(() =>
             runtime.openWriter({
                 streamDomain: canonicalStreamDomains.evaluatorKeyStore,
-                totalByteLength: maximumCanonicalStreamByteLength + 1,
+                totalByteLength:
+                    foundationProfile.maximumCanonicalStreamByteLength + 1,
             }),
         ).toThrowError(CanonicalStreamResourceError);
     });

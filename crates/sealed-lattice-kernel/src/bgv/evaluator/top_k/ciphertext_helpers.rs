@@ -8,7 +8,7 @@ pub(crate) fn broadcast_constant(value: u64) -> Vec<u64> {
 pub(crate) fn sum_aligned(ciphertexts: &[Ciphertext]) -> CanonicalResult<Ciphertext> {
     if ciphertexts.is_empty() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "cannot sum an empty ciphertext set",
         ));
     }
@@ -42,6 +42,7 @@ pub(crate) fn require_aligned_sum(
     accumulator: Option<Ciphertext>,
     empty_message: &'static str,
 ) -> CanonicalResult<Ciphertext> {
-    accumulator
-        .ok_or_else(|| CanonicalError::new(CanonicalErrorCode::InvalidFixture, empty_message))
+    accumulator.ok_or_else(|| {
+        CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, empty_message)
+    })
 }

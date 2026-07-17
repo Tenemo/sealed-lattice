@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -19,12 +22,17 @@ import {
     createSuiteArtifactHashAccumulator,
     createSuiteIdentifierAccumulator,
     decodeRuntimeBuildManifest,
+    decodeSuiteArtifactReferences,
+    proofRandomnessPurposeRanges,
     runtimeBuildBytesToHex,
+    runtimeBuildCanonicalLimits,
     type RuntimeAssetRole,
 } from '#packages/wasm/src/runtime-build-canonical';
 import {
     compileRuntimeBuildBootstrap,
+    copyRuntimeBuildAuthorityBindingDescription,
     RuntimeBuildPreflightError,
+    type RuntimeBuildAuthorityBinding,
     type RuntimeBuildByteSource,
     type RuntimeBuildCache,
     type RuntimeBuildFetchResponse,
@@ -39,6 +47,30 @@ const artifactPaths = Object.freeze(
     Array.from({ length: 6 }, (_, index) => `/artifact-${index + 1}.canonical`),
 );
 const textEncoder = new TextEncoder();
+
+type PrivateRandomnessPurposeRangeVector = Readonly<{
+    familyName: string;
+    familySchemaIdentifier: number;
+    firstPurpose: number;
+    lastPurpose: number;
+}>;
+
+type PrivateRandomnessPurposeRangesVector = Readonly<{
+    privateProofSaltPurpose: number;
+    ranges: readonly PrivateRandomnessPurposeRangeVector[];
+}>;
+
+const readPrivateRandomnessPurposeRangesVector =
+    async (): Promise<PrivateRandomnessPurposeRangesVector> =>
+        JSON.parse(
+            await readFile(
+                path.resolve(
+                    'test-vectors',
+                    'private-randomness-purpose-ranges.json',
+                ),
+                'utf8',
+            ),
+        ) as PrivateRandomnessPurposeRangesVector;
 
 const byteSource = (
     bytes: Uint8Array,
@@ -151,6 +183,7 @@ const suiteArtifactReferenceTuple = (
 
 type FixtureOverrides = Readonly<{
     artifactReferenceByteLength?: number;
+    artifactReferenceKind?: number;
     duplicateArtifactPath?: boolean;
     executableReferenceByteLength?: number;
     operationProfiles?: readonly Uint8Array[];
@@ -168,7 +201,6 @@ const operationProfileForRandomUse = (
     );
     const boundary = canonicalTuple(
         0x1807,
-        canonicalItem(0x04, unsigned32LittleEndian(0)),
         unsigned16Item(0x1610),
         nestedTupleListItem([randomUse]),
     );
@@ -211,14 +243,16 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
         suiteArtifactReferenceTuple(
             index + 1,
             bytes,
-            index === 0 && overrides.artifactReferenceByteLength !== undefined
+            index + 1 === (overrides.artifactReferenceKind ?? 1) &&
+                overrides.artifactReferenceByteLength !== undefined
                 ? overrides.artifactReferenceByteLength
                 : bytes.byteLength,
         ),
     );
     const suiteRecordBytes = canonicalTuple(
         0x0118,
-        ...Array.from({ length: 26 }, () => unsigned16Item(1)),
+        unsigned16Item(2),
+        ...Array.from({ length: 20 }, () => unsigned16Item(1)),
         nestedTupleListItem(artifactReferences),
     );
     const suiteIdentifier = deriveHash(
@@ -274,6 +308,7 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
         manifestHash,
         manifestHashHex: runtimeBuildBytesToHex(manifestHash),
         routes,
+        suiteIdentifier,
     };
 };
 
@@ -458,24 +493,41 @@ const runFixture = async (input: {
 };
 
 describe('runtime build preflight', () => {
-    it('matches the Rust proof-family randomness purpose ranges', () => {
-        const assignments = [
-            [0x1211, 1, 2],
-            [0x1212, 3, 4],
-            [0x1214, 5, 6],
-            [0x1216, 7, 8],
-            [0x1217, 9, 40],
-            [0x1302, 41, 42],
-            [0x1621, 43, 44],
-            [0x2110, 45, 46],
-            [0x2111, 47, 48],
-        ] as const;
+    it('matches the shared proof-family randomness purpose ranges', async () => {
+        const vector = await readPrivateRandomnessPurposeRangesVector();
+        expect(vector.ranges.map((range) => range.familyName)).toEqual([
+            'sameSecret',
+            'publicKeyShare',
+            'relinearizationRoundOne',
+            'relinearizationRoundTwo',
+            'galoisKeyShare',
+            'ballotValidity',
+            'targetShareProof',
+            'vssShareLinkage',
+            'aggregateThresholdShare',
+        ]);
+        expect(proofRandomnessPurposeRanges).toEqual(
+            vector.ranges.map(
+                ({ familySchemaIdentifier, firstPurpose, lastPurpose }) => ({
+                    familySchemaIdentifier,
+                    firstPurpose,
+                    lastPurpose,
+                }),
+            ),
+        );
 
-        for (const [family, firstPurpose, lastPurpose] of assignments) {
-            for (const purpose of [firstPurpose, lastPurpose, 0xfffe]) {
+        for (const range of vector.ranges) {
+            for (const purpose of [
+                range.firstPurpose,
+                range.lastPurpose,
+                vector.privateProofSaltPurpose,
+            ]) {
                 const fixture = createFixture({
                     operationProfiles: [
-                        operationProfileForRandomUse(family, purpose),
+                        operationProfileForRandomUse(
+                            range.familySchemaIdentifier,
+                            purpose,
+                        ),
                     ],
                 });
                 expect(() =>
@@ -483,10 +535,16 @@ describe('runtime build preflight', () => {
                 ).not.toThrow();
             }
 
-            for (const purpose of [firstPurpose - 1, lastPurpose + 1]) {
+            for (const purpose of [
+                range.firstPurpose - 1,
+                range.lastPurpose + 1,
+            ]) {
                 const fixture = createFixture({
                     operationProfiles: [
-                        operationProfileForRandomUse(family, purpose),
+                        operationProfileForRandomUse(
+                            range.familySchemaIdentifier,
+                            purpose,
+                        ),
                     ],
                 });
                 expect(() =>
@@ -511,10 +569,38 @@ describe('runtime build preflight', () => {
     });
 
     it('authenticates every inert fetch and cache reread before activation', async () => {
-        const { activation, fetcher, workerHarness } = await runFixture({});
+        const { activation, fetcher, fixture, workerHarness } =
+            await runFixture({});
 
         expect(activation.application).toBe('application-imported');
         expect(activation.workerChannel).toEqual({ ready: true });
+        const authorityBindingDescription =
+            copyRuntimeBuildAuthorityBindingDescription(
+                activation.runtimeBuildAuthorityBinding,
+            );
+        expect(authorityBindingDescription.runtimeBuildManifestHash).toEqual(
+            fixture.manifestHash,
+        );
+        expect(authorityBindingDescription.suiteIdentifier).toEqual(
+            fixture.suiteIdentifier,
+        );
+        authorityBindingDescription.runtimeBuildManifestHash.fill(0xff);
+        authorityBindingDescription.suiteIdentifier.fill(0xff);
+        const copiedAuthorityBindingDescription =
+            copyRuntimeBuildAuthorityBindingDescription(
+                activation.runtimeBuildAuthorityBinding,
+            );
+        expect(
+            copiedAuthorityBindingDescription.runtimeBuildManifestHash,
+        ).not.toEqual(authorityBindingDescription.runtimeBuildManifestHash);
+        expect(copiedAuthorityBindingDescription.suiteIdentifier).not.toEqual(
+            authorityBindingDescription.suiteIdentifier,
+        );
+        expect(() =>
+            copyRuntimeBuildAuthorityBindingDescription(
+                Object.freeze({}) as RuntimeBuildAuthorityBinding,
+            ),
+        ).toThrow(TypeError);
         expect(workerHarness.observations).toEqual({
             artifactKinds: [1, 2, 3, 4, 5, 6],
             finished: 1,
@@ -618,6 +704,12 @@ describe('runtime build preflight', () => {
     );
 
     it('checks small-record, executable, and artifact ceilings before allocation', async () => {
+        expect(runtimeBuildCanonicalLimits).toMatchObject({
+            maximumCopiedExecutableAssetByteLength: 8_388_608,
+            maximumEvaluatorProgramSetArtifactByteLength: 67_108_864,
+            maximumFoundationVariableValueByteLength: 8 * 1024 * 1024 - 4,
+            maximumRuntimeBuildManifestByteLength: 65_536,
+        });
         const ordinaryFixture = createFixture();
         const oversizedManifestFetcher = createFetcher(
             ordinaryFixture.routes,
@@ -631,11 +723,11 @@ describe('runtime build preflight', () => {
         ).rejects.toThrow('outside its accepted bound');
 
         const oversizedExecutableFixture = createFixture({
-            executableReferenceByteLength: 1_572_865,
+            executableReferenceByteLength: 8_388_609,
         });
         await expect(
             runFixture({ fixture: oversizedExecutableFixture }),
-        ).rejects.toThrow('copied-buffer ceiling');
+        ).rejects.toThrow('copied-buffer safety bound');
 
         const oversizedArtifactFixture = createFixture({
             artifactReferenceByteLength: 8 * 1024 * 1024 - 3,
@@ -643,7 +735,95 @@ describe('runtime build preflight', () => {
         const workerHarness = createWorkerHarness();
         await expect(
             runFixture({ fixture: oversizedArtifactFixture, workerHarness }),
-        ).rejects.toThrow('outside its accepted profile');
+        ).rejects.toThrow('outside its accepted kind or safety bounds');
         expect(workerHarness.observations.terminated).toBe(1);
+    });
+
+    it('admits the selected evaluator artifact with slack and rejects one byte beyond the safety bound', () => {
+        const evaluatorProgramSetSafetyByteLength =
+            runtimeBuildCanonicalLimits.maximumEvaluatorProgramSetArtifactByteLength;
+        expect(() =>
+            createSuiteArtifactHashAccumulator(5, 20_270_968n),
+        ).not.toThrow();
+        expect(() =>
+            createSuiteArtifactHashAccumulator(
+                5,
+                BigInt(evaluatorProgramSetSafetyByteLength),
+            ),
+        ).not.toThrow();
+        expect(() =>
+            createSuiteArtifactHashAccumulator(
+                5,
+                BigInt(evaluatorProgramSetSafetyByteLength + 1),
+            ),
+        ).toThrow('canonical safety bound');
+        const selectedEvaluatorFixture = createFixture({
+            artifactReferenceByteLength: 20_270_968,
+            artifactReferenceKind: 5,
+        });
+
+        const references = decodeSuiteArtifactReferences(
+            selectedEvaluatorFixture.routes.get(suiteRecordPath) ??
+                new Uint8Array(0),
+        );
+        expect(references[4]).toMatchObject({
+            artifactKind: 5,
+            byteLength: 20_270_968n,
+        });
+
+        const oversizedEvaluatorFixture = createFixture({
+            artifactReferenceByteLength:
+                evaluatorProgramSetSafetyByteLength + 1,
+            artifactReferenceKind: 5,
+        });
+        expect(() =>
+            decodeSuiteArtifactReferences(
+                oversizedEvaluatorFixture.routes.get(suiteRecordPath) ??
+                    new Uint8Array(0),
+            ),
+        ).toThrow('outside its accepted kind or safety bounds');
+    });
+
+    it('uses the evaluator artifact bound for streamed response admission', async () => {
+        const evaluatorProgramSetSafetyByteLength =
+            runtimeBuildCanonicalLimits.maximumEvaluatorProgramSetArtifactByteLength;
+        const evaluatorArtifactPath = artifactPaths[4];
+        if (evaluatorArtifactPath === undefined) {
+            throw new Error('The evaluator artifact test path is unavailable.');
+        }
+        const fixture = createFixture();
+        const acceptedBoundaryFetcher = createFetcher(
+            fixture.routes,
+            new Map([
+                [
+                    evaluatorArtifactPath,
+                    {
+                        contentLength: String(
+                            evaluatorProgramSetSafetyByteLength,
+                        ),
+                    },
+                ],
+            ]),
+        );
+        await expect(
+            runFixture({ fetcher: acceptedBoundaryFetcher, fixture }),
+        ).rejects.toThrow('wrong declared length');
+
+        const rejectedBoundaryFetcher = createFetcher(
+            fixture.routes,
+            new Map([
+                [
+                    evaluatorArtifactPath,
+                    {
+                        contentLength: String(
+                            evaluatorProgramSetSafetyByteLength + 1,
+                        ),
+                    },
+                ],
+            ]),
+        );
+        await expect(
+            runFixture({ fetcher: rejectedBoundaryFetcher, fixture }),
+        ).rejects.toThrow('outside its accepted bound');
     });
 });

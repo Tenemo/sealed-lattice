@@ -40,7 +40,7 @@ pub(super) struct CarryAwareVssCommitmentOpeningInput<'a> {
     pub(super) public_matrix_seed_hash: &'a str,
     pub(super) coefficient_commitments: &'a [SetupCommitmentValue],
     pub(super) coefficient_messages_by_shamir_index: &'a [Vec<u64>],
-    pub(super) coefficient_randomness_by_shamir_index: &'a [Vec<Vec<i128>>],
+    pub(super) coefficient_randomness_by_shamir_index: &'a [Vec<Vec<Vec<i128>>>],
     pub(super) recipient_roster_position: usize,
     pub(super) share_values: &'a [u64],
     pub(super) carry_witnesses: &'a [u128],
@@ -314,50 +314,70 @@ fn trustee_point_powers(
 #[cfg(test)]
 // The combined opening randomness is the same alpha^k-weighted sum as the messages, so the combined commitment opens to the evaluated share f(alpha); the noise bound grows by the sum of alpha^k.
 fn combine_vss_commitment_randomness(
-    coefficient_randomness_by_shamir_index: &[Vec<Vec<i128>>],
+    coefficient_randomness_by_shamir_index: &[Vec<Vec<Vec<i128>>>],
     scalar_powers: &[u128],
-) -> CanonicalResult<Vec<Vec<i128>>> {
+) -> CanonicalResult<Vec<Vec<Vec<i128>>>> {
     let Some(first_randomness) = coefficient_randomness_by_shamir_index.first() else {
         return Err(invalid_vss_input(
             "VSS commitment opening randomness is empty",
         ));
     };
-    let randomness_width = first_randomness.len();
+    let commitment_limb_count = first_randomness.len();
+    if commitment_limb_count == 0 {
+        return Err(invalid_vss_input(
+            "VSS commitment opening commitment-limb count is empty",
+        ));
+    }
+    let randomness_width = first_randomness
+        .first()
+        .ok_or_else(|| invalid_vss_input("VSS commitment opening limb is missing"))?
+        .len();
     if randomness_width == 0 {
         return Err(invalid_vss_input(
             "VSS commitment opening randomness width is empty",
         ));
     }
-    let ring_degree = first_randomness
+    let ring_degree = first_randomness[0]
         .first()
         .ok_or_else(|| invalid_vss_input("VSS commitment opening randomness column is missing"))?
         .len();
-    let mut combined_randomness = vec![vec![0_i128; ring_degree]; randomness_width];
+    let mut combined_randomness =
+        vec![vec![vec![0_i128; ring_degree]; randomness_width]; commitment_limb_count];
     for (coefficient_randomness, scalar) in coefficient_randomness_by_shamir_index
         .iter()
         .zip(scalar_powers.iter())
     {
-        if coefficient_randomness.len() != randomness_width {
+        if coefficient_randomness.len() != commitment_limb_count {
             return Err(invalid_vss_input(
-                "VSS commitment opening randomness width mismatch",
+                "VSS commitment opening commitment-limb count mismatch",
             ));
         }
         let scalar_i128 = i128::try_from(*scalar)
             .map_err(|_| invalid_vss_input("VSS scalar does not fit signed integer"))?;
-        for (column_index, randomness_column) in coefficient_randomness.iter().enumerate() {
-            if randomness_column.len() != ring_degree {
+        for (commitment_limb_position, randomness_by_column) in
+            coefficient_randomness.iter().enumerate()
+        {
+            if randomness_by_column.len() != randomness_width {
                 return Err(invalid_vss_input(
-                    "VSS commitment opening randomness degree mismatch",
+                    "VSS commitment opening randomness width mismatch",
                 ));
             }
-            for (coefficient_index, randomness_value) in randomness_column.iter().enumerate() {
-                let scaled_value = randomness_value
-                    .checked_mul(scalar_i128)
-                    .ok_or_else(|| invalid_vss_input("VSS randomness scalar overflow"))?;
-                combined_randomness[column_index][coefficient_index] = combined_randomness
-                    [column_index][coefficient_index]
-                    .checked_add(scaled_value)
-                    .ok_or_else(|| invalid_vss_input("VSS combined randomness overflow"))?;
+            for (column_index, randomness_column) in randomness_by_column.iter().enumerate() {
+                if randomness_column.len() != ring_degree {
+                    return Err(invalid_vss_input(
+                        "VSS commitment opening randomness degree mismatch",
+                    ));
+                }
+                for (coefficient_index, randomness_value) in randomness_column.iter().enumerate() {
+                    let scaled_value = randomness_value
+                        .checked_mul(scalar_i128)
+                        .ok_or_else(|| invalid_vss_input("VSS randomness scalar overflow"))?;
+                    combined_randomness[commitment_limb_position][column_index]
+                        [coefficient_index] = combined_randomness[commitment_limb_position]
+                        [column_index][coefficient_index]
+                        .checked_add(scaled_value)
+                        .ok_or_else(|| invalid_vss_input("VSS combined randomness overflow"))?;
+                }
             }
         }
     }
@@ -388,5 +408,5 @@ fn homomorphic_randomness_bound(
 
 #[cfg(test)]
 fn invalid_vss_input(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }

@@ -1,39 +1,36 @@
-import type { CanonicalError, ProtocolHash } from '@sealed-lattice/types';
+import type {
+    CanonicalError,
+    MailboxAssociatedData,
+    MailboxCiphertextDescriptor,
+    MailboxKeyScheduleInput,
+    ProtocolHash,
+    SetupMailboxSlot,
+    SignedMailboxEnvelope,
+    UnsignedMailboxEnvelope,
+    VerificationResult,
+} from '@sealed-lattice/types';
+
+export type {
+    MailboxAssociatedData,
+    MailboxCiphertextDescriptor,
+    MailboxKeyScheduleInput,
+    SetupMailboxSlot,
+    SignedMailboxEnvelope,
+    UnsignedMailboxEnvelope,
+} from '@sealed-lattice/types';
 
 import type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
-    BgvPublicKeyShareStatementContext,
-    BgvSameSecretBridgeTargets,
-    BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeySameSecretBridge,
-    BgvTrusteeEvaluationKeySameSecretLinkage,
-    BgvTrusteeEvaluationKeyStatementContext,
-    BgvTrusteeEvaluationKeyStatementKey,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
-    BgvSameSecretBridgeProofContext,
-    BgvSameSecretBridgeProofGeneration,
-    BgvVssCommittedMaterialCommitmentComputation,
-    BgvVssShareLinkageProofContext,
-    BgvVssShareLinkageProofGeneration,
-    BgvSetupCommitmentOpeningComputation,
 } from './kernel-types/bgv.js';
 
 export type {
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
-    BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
-    BgvSameSecretBridgeTargets,
-    BgvSameSecretBridgeProofContext,
-    BgvSameSecretBridgeProofGeneration,
-    BgvVssCommittedMaterialCommitmentComputation,
-    BgvVssShareLinkageProofContext,
-    BgvVssShareLinkageProofGeneration,
-    BgvSetupCommitmentOpeningComputation,
 } from './kernel-types/bgv.js';
 
 export type BgvCollectiveSetupVerificationInput = Readonly<{
@@ -43,82 +40,59 @@ export type BgvCollectiveSetupVerificationInput = Readonly<{
     readonly expectedRosterHash?: ProtocolHash;
 }>;
 
-export type MailboxPayloadType = 1 | 2;
+export type FoundationOptionDefinitionIngress = Readonly<{
+    readonly displayLabelUtf8Hex: string;
+    readonly optionIdentifier: string;
+    readonly optionIndex: number;
+}>;
 
-export type CanonicalFoundationValueValidation = Readonly<{
-    readonly schemaIdentifier: number;
+export type EncodedFoundationManifest = Readonly<{
     readonly canonicalBytesHex: string;
-    readonly bindingHash?: ProtocolHash;
-}>;
-
-export type CanonicalFoundationValueValidationInput =
-    | Readonly<{
-          readonly schemaIdentifier: number;
-          readonly canonicalBytesHex: string;
-      }>
-    | Readonly<{
-          readonly schemaIdentifier: number;
-          readonly canonicalByteLength: number;
-          readonly canonicalByteChunksHex: readonly string[];
-      }>;
-
-export type CeremonyContextInput = Readonly<{
-    readonly suiteId: ProtocolHash;
     readonly manifestHash: ProtocolHash;
-    readonly rosterHash: ProtocolHash;
-    readonly ceremonyIdentifier: string;
 }>;
 
-export type ActionContextInput = Readonly<{
-    readonly ceremonyContextHash: ProtocolHash;
-    readonly actionIdentifier: string;
+export type FoundationManifestVerification = VerificationResult<{
+    readonly manifestHash: ProtocolHash;
+}>;
+
+export type EncodedFoundationActionDefinition = Readonly<{
     readonly actionDefinitionHash: ProtocolHash;
+    readonly canonicalBytesHex: string;
+}>;
+
+export type FoundationActionDefinitionVerification = VerificationResult<{
+    readonly actionDefinitionHash: ProtocolHash;
+}>;
+
+export type EncodedFoundationBoardPolicy = Readonly<{
+    readonly boardPolicyHash: ProtocolHash;
+    readonly canonicalBytesHex: string;
+}>;
+
+export type FoundationBoardPolicyVerification = VerificationResult<{
     readonly boardPolicyHash: ProtocolHash;
 }>;
 
-export type MailboxKeyScheduleInput = Readonly<{
+export type FoundationSuiteRecordVerification = VerificationResult<{
     readonly suiteId: ProtocolHash;
+}>;
+
+export type FoundationCeremonyContextVerification = VerificationResult<{
     readonly ceremonyContextHash: ProtocolHash;
-    readonly actionContextHash: ProtocolHash;
+    readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly sourceParticipantId: string;
-    readonly recipientParticipantId: string;
-    readonly producerSequence: string;
-    readonly envelopeAttemptIdentifierHex: string;
-    readonly payloadType: MailboxPayloadType;
-    readonly statementHash: ProtocolHash;
-    readonly orderedMaterialRoots: readonly ProtocolHash[];
-    readonly kemCiphertextHash: ProtocolHash;
+    readonly suiteId: ProtocolHash;
 }>;
 
-export type MailboxAssociatedData = Readonly<
-    MailboxKeyScheduleInput & {
-        readonly plaintextByteLength: string;
-    }
->;
-
-export type SetupMailboxSlot = Omit<
-    MailboxKeyScheduleInput,
-    'envelopeAttemptIdentifierHex' | 'kemCiphertextHash'
->;
-
-export type MailboxCiphertextDescriptor = Readonly<{
-    readonly totalByteLength: string;
-    readonly orderedChunkDigests: readonly ProtocolHash[];
+export type FoundationActionContextVerification = VerificationResult<{
+    readonly actionContextHash: ProtocolHash;
+    readonly actionDefinitionHash: ProtocolHash;
+    readonly boardPolicyHash: ProtocolHash;
+    readonly ceremonyContextHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly submissionCutoffHash: ProtocolHash;
+    readonly suiteId: ProtocolHash;
 }>;
-
-export type UnsignedMailboxEnvelope = Readonly<{
-    readonly associatedData: MailboxAssociatedData;
-    readonly kemCiphertextHex: string;
-    readonly ciphertextDescriptor: MailboxCiphertextDescriptor;
-    readonly gcmTagHex: string;
-}>;
-
-export type SignedMailboxEnvelope = Readonly<
-    UnsignedMailboxEnvelope & {
-        readonly sourceSignatureHex: string;
-    }
->;
 
 export type EncodedMailboxKeyScheduleInput = Readonly<{
     readonly canonicalBytesHex: string;
@@ -127,17 +101,14 @@ export type EncodedMailboxKeyScheduleInput = Readonly<{
 
 export type DecodedMailboxKeyScheduleInput = Readonly<{
     readonly value: MailboxKeyScheduleInput;
-    readonly hkdfExtractSaltHex: string;
 }>;
 
 export type EncodedMailboxAssociatedData = Readonly<{
     readonly canonicalBytesHex: string;
-    readonly hkdfExtractSaltHex: string;
 }>;
 
 export type DecodedMailboxAssociatedData = Readonly<{
     readonly value: MailboxAssociatedData;
-    readonly hkdfExtractSaltHex: string;
 }>;
 
 export type EncodedStreamDescriptor = Readonly<{
@@ -182,85 +153,54 @@ export type AcceptedSetupSession = Readonly<{
     ): BgvCollectiveSetupVerification;
 }>;
 
-type BgvTrusteeEvaluationKeyContext = BgvTrusteeEvaluationKeyStatementContext;
-
-type BgvEvaluationKeyStatementKey = Exclude<
-    BgvTrusteeEvaluationKeyStatementKey,
-    { readonly proofFamily: 'public-key-share' }
->;
-
-type BgvPublicKeyShareStatementKey = Extract<
-    BgvTrusteeEvaluationKeyStatementKey,
-    { readonly proofFamily: 'public-key-share' }
->;
-
-type BgvTrusteeEvaluationKeyStatementCommonInput<Context, Key> = Readonly<{
-    readonly context: Context;
-    readonly ringDegree: number;
-    readonly keys: readonly Key[];
-}>;
-
-type BgvTrusteeEvaluationKeyStatementInput =
-    | Readonly<
-          BgvTrusteeEvaluationKeyStatementCommonInput<
-              BgvTrusteeEvaluationKeyContext,
-              BgvEvaluationKeyStatementKey
-          > & {
-              readonly statementFamily: 'trustee-evaluation-key';
-              readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
-          }
-      >
-    | Readonly<
-          Omit<
-              BgvTrusteeEvaluationKeyStatementCommonInput<
-                  BgvPublicKeyShareStatementContext,
-                  BgvPublicKeyShareStatementKey
-              >,
-              'keys'
-          > & {
-              readonly statementFamily: 'public-key-share';
-              readonly keys: readonly [BgvPublicKeyShareStatementKey];
-              readonly sameSecretBridge: BgvTrusteeEvaluationKeySameSecretBridge;
-          }
-      >;
-
-type BgvTrusteeEvaluationKeyProofCommonInput = Readonly<{
-    readonly secretCoefficients: readonly number[];
-    readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
-    readonly proofRandomnessSeedHex: string;
-}>;
-
-type BgvTrusteeEvaluationKeyProofInput =
-    | Readonly<
-          Extract<
-              BgvTrusteeEvaluationKeyStatementInput,
-              { readonly statementFamily: 'trustee-evaluation-key' }
-          > &
-              BgvTrusteeEvaluationKeyProofCommonInput & {
-                  readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
-              }
-      >
-    | Readonly<
-          Extract<
-              BgvTrusteeEvaluationKeyStatementInput,
-              { readonly statementFamily: 'public-key-share' }
-          > &
-              BgvTrusteeEvaluationKeyProofCommonInput & {
-                  readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-              }
-      >;
-
 export type TranscriptCoreKernel = {
     beginAcceptedSetupSession(): AcceptedSetupSession;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
-    validateCanonicalFoundationValue(
-        input: CanonicalFoundationValueValidationInput,
-    ): CanonicalFoundationValueValidation;
-    deriveCeremonyContextHash(value: CeremonyContextInput): ProtocolHash;
-    deriveActionContextHash(value: ActionContextInput): ProtocolHash;
-    encodeMailboxKeyScheduleInput(
-        value: MailboxKeyScheduleInput,
-    ): EncodedMailboxKeyScheduleInput;
+    encodeFoundationManifest(input: {
+        readonly displayTitleUtf8Hex: string;
+        readonly optionDefinitions: readonly FoundationOptionDefinitionIngress[];
+    }): EncodedFoundationManifest;
+    verifyFoundationManifest(input: {
+        readonly canonicalBytesHex: string;
+    }): FoundationManifestVerification;
+    encodeFoundationActionDefinition(input: {
+        readonly submissionCutoffUnixMilliseconds: string;
+        readonly topCount: number;
+    }): EncodedFoundationActionDefinition;
+    verifyFoundationActionDefinition(input: {
+        readonly canonicalBytesHex: string;
+    }): FoundationActionDefinitionVerification;
+    encodeFoundationBoardPolicy(input: {
+        readonly boardOriginIdentifier: string;
+    }): EncodedFoundationBoardPolicy;
+    verifyFoundationBoardPolicy(input: {
+        readonly canonicalBytesHex: string;
+    }): FoundationBoardPolicyVerification;
+    verifyFoundationSuiteRecord(input: {
+        readonly canonicalBytesHex: string;
+    }): FoundationSuiteRecordVerification;
+    verifyFoundationCeremonyContext(input: {
+        readonly canonicalManifestBytesHex: string;
+        readonly canonicalRosterBytesHex: string;
+        readonly canonicalSuiteRecordBytesHex: string;
+        readonly ceremonyIdentifier: string;
+        readonly expectedSuiteId: ProtocolHash;
+    }): FoundationCeremonyContextVerification;
+    verifyFoundationActionContext(input: {
+        readonly actionIdentifier: string;
+        readonly canonicalActionDefinitionBytesHex: string;
+        readonly canonicalBoardPolicyBytesHex: string;
+        readonly canonicalManifestBytesHex: string;
+        readonly canonicalRosterBytesHex: string;
+        readonly canonicalSuiteRecordBytesHex: string;
+        readonly ceremonyIdentifier: string;
+        readonly expectedCeremonyContextHash: ProtocolHash;
+        readonly expectedSuiteId: ProtocolHash;
+    }): FoundationActionContextVerification;
+    encodeMailboxKeyScheduleInput(input: {
+        readonly kemCiphertextHex: string;
+        readonly value: MailboxKeyScheduleInput;
+    }): EncodedMailboxKeyScheduleInput;
     decodeMailboxKeyScheduleInput(input: {
         readonly canonicalBytesHex: string;
     }): DecodedMailboxKeyScheduleInput;
@@ -289,9 +229,6 @@ export type TranscriptCoreKernel = {
     decodeSignedMailboxEnvelope(input: {
         readonly canonicalBytesHex: string;
     }): DecodedSignedMailboxEnvelope;
-    deriveMailboxKemCiphertextHash(input: {
-        readonly kemCiphertextHex: string;
-    }): ProtocolHash;
     deriveMailboxEnvelopeHash(value: UnsignedMailboxEnvelope): ProtocolHash;
     describeBgvRnsParameters(): BgvRnsParametersDescription;
     describeCollectiveBgvSetupParameters(input?: {
@@ -305,52 +242,23 @@ export type TranscriptCoreKernel = {
         readonly privateEnvelope: unknown;
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
     }): BgvPrivateVssShareEnvelopeVerification;
-    generateTrusteeEvaluationKeyProof(
-        input: BgvTrusteeEvaluationKeyProofInput,
-    ): BgvTrusteeEvaluationKeyProofGeneration;
-    computeSetupCommitmentFromOpening(input: {
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly sourceRnsLimbIndex: number;
-        readonly shamirCoefficientIndex: number;
-        readonly messageCoefficients: readonly number[];
-        readonly randomnessByColumn: readonly (readonly number[])[];
-        readonly ringDegree: number;
-    }): BgvSetupCommitmentOpeningComputation;
-    computeVssCommittedMaterialCommitment(input: {
-        readonly commitmentRole: string;
-        readonly commitmentContext: Record<string, unknown>;
-        readonly rnsLimbIndex: number;
-        readonly ringDegree: number;
-        readonly messageCoefficients: readonly number[];
-        readonly materialSeedHex: string;
-    }): BgvVssCommittedMaterialCommitmentComputation;
-    generateVssShareLinkageProof(input: {
-        readonly context: BgvVssShareLinkageProofContext;
-        readonly ringDegree: number;
-        readonly vssShareLinkage: Record<string, unknown>;
-        readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-        readonly recipientShareMessagesByItem: readonly (readonly number[])[];
-        readonly carryWitnessesByItem: readonly (readonly number[])[];
-        readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-        readonly proofRandomnessSeedHex: string;
-    }): BgvVssShareLinkageProofGeneration;
-    generateSameSecretBridgeProof(input: {
-        readonly context: BgvSameSecretBridgeProofContext;
-        readonly ringDegree: number;
-        readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
-        readonly sameSecretBridge: BgvSameSecretBridgeTargets;
-        readonly secretCoefficients: readonly number[];
-        readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
-        readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
-        readonly proofRandomnessSeedHex: string;
-    }): BgvSameSecretBridgeProofGeneration;
 };
 
 export type TranscriptCoreKernelContextOwner = object;
 
 export type PublishedSdkKernel = Pick<
     TranscriptCoreKernel,
-    'beginAcceptedSetupSession' | 'verifyPrivateVssShareEnvelope'
+    | 'beginAcceptedSetupSession'
+    | 'encodeFoundationActionDefinition'
+    | 'encodeFoundationBoardPolicy'
+    | 'encodeFoundationManifest'
+    | 'verifyFoundationActionContext'
+    | 'verifyFoundationActionDefinition'
+    | 'verifyFoundationBoardPolicy'
+    | 'verifyFoundationCeremonyContext'
+    | 'verifyFoundationManifest'
+    | 'verifyFoundationSuiteRecord'
+    | 'verifyPrivateVssShareEnvelope'
 >;
 
 type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
@@ -377,19 +285,44 @@ type TranscriptCoreKernelCommand =
           'deriveCanonicalObjectHash'
       >
     | KernelCommandFromMethod<
-          'ValidateCanonicalFoundationValue',
-          'validateCanonicalFoundationValue'
+          'EncodeFoundationManifest',
+          'encodeFoundationManifest'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationManifest',
+          'verifyFoundationManifest'
+      >
+    | KernelCommandFromMethod<
+          'EncodeFoundationActionDefinition',
+          'encodeFoundationActionDefinition'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationActionDefinition',
+          'verifyFoundationActionDefinition'
+      >
+    | KernelCommandFromMethod<
+          'EncodeFoundationBoardPolicy',
+          'encodeFoundationBoardPolicy'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationBoardPolicy',
+          'verifyFoundationBoardPolicy'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationSuiteRecord',
+          'verifyFoundationSuiteRecord'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationCeremonyContext',
+          'verifyFoundationCeremonyContext'
+      >
+    | KernelCommandFromMethod<
+          'VerifyFoundationActionContext',
+          'verifyFoundationActionContext'
       >
     | Readonly<{
-          readonly command: 'DeriveCeremonyContextHash';
-          readonly value: CeremonyContextInput;
-      }>
-    | Readonly<{
-          readonly command: 'DeriveActionContextHash';
-          readonly value: ActionContextInput;
-      }>
-    | Readonly<{
           readonly command: 'EncodeMailboxKeyScheduleInput';
+          readonly kemCiphertextHex: string;
           readonly value: MailboxKeyScheduleInput;
       }>
     | KernelCommandFromMethod<
@@ -432,10 +365,6 @@ type TranscriptCoreKernelCommand =
           'DecodeSignedMailboxEnvelope',
           'decodeSignedMailboxEnvelope'
       >
-    | KernelCommandFromMethod<
-          'DeriveMailboxKemCiphertextHash',
-          'deriveMailboxKemCiphertextHash'
-      >
     | Readonly<{
           readonly command: 'DeriveMailboxEnvelopeHash';
           readonly value: UnsignedMailboxEnvelope;
@@ -455,31 +384,18 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'VerifyPrivateVssShareEnvelope',
           'verifyPrivateVssShareEnvelope'
-      >
-    | KernelCommandFromMethod<
-          'GenerateTrusteeEvaluationKeyProof',
-          'generateTrusteeEvaluationKeyProof'
-      >
-    | KernelCommandFromMethod<
-          'ComputeSetupCommitmentFromOpening',
-          'computeSetupCommitmentFromOpening'
-      >
-    | KernelCommandFromMethod<
-          'ComputeVssCommittedMaterialCommitment',
-          'computeVssCommittedMaterialCommitment'
-      >
-    | KernelCommandFromMethod<
-          'GenerateVssShareLinkageProof',
-          'generateVssShareLinkageProof'
-      >
-    | KernelCommandFromMethod<
-          'GenerateSameSecretBridgeProof',
-          'generateSameSecretBridgeProof'
       >;
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
     sealed_lattice_allocate?: (length: number) => number;
+    sealed_lattice_action_randomness_command?: (
+        command: number,
+        inputPointer: number,
+        inputLength: number,
+        statusPointer: number,
+        outputLengthPointer: number,
+    ) => number;
     sealed_lattice_accepted_setup_canonical_stream_begin?: (
         setupSessionHandle: number,
         familyCode: number,
@@ -489,7 +405,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         descriptorLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ) => number;
     sealed_lattice_accepted_setup_command_with_length?: (
         pointer: number,
@@ -517,7 +432,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         descriptorLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ) => number;
     sealed_lattice_bgv_canonical_stream_cancel?: (handle: number) => number;
     sealed_lattice_bgv_canonical_stream_finish?: (handle: number) => number;
@@ -527,7 +441,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         materialRootLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ) => number;
     sealed_lattice_bgv_canonical_material_reader_cancel?: (
         handle: number,
@@ -553,13 +466,11 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         descriptorLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ) => number;
     sealed_lattice_canonical_stream_begin_writer?: (
         streamDomain: number,
         totalByteLength: number,
         statusPointer: number,
-        chunkCountPointer: number,
     ) => number;
     sealed_lattice_canonical_stream_cancel?: (handle: number) => number;
     sealed_lattice_canonical_stream_finish_verifier?: (
@@ -618,12 +529,320 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         tagLength: number,
     ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
+    sealed_lattice_common_proof_begin_generation?: (
+        preparedGenerationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_describe_generation_family_adapter?: (
+        adapterHandle: number,
+        runtimeBindingHashOutputPointer: number,
+        verificationBindingHashOutputPointer: number,
+        proofAttemptLineageIdentifierOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_describe_verification_family_adapter?: (
+        adapterHandle: number,
+        verificationBindingHashOutputPointer: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_prepare_generation_family_adapter?: (
+        adapterHandle: number,
+        authenticatedCheckpointStatePointer: number,
+        authenticatedCheckpointStateByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_prepare_verification_family_adapter?: (
+        adapterHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_discard_generation_family_adapter?: (
+        adapterHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_discard_verification_family_adapter?: (
+        adapterHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_discard_prepared_generation?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_common_proof_discard_prepared_verification?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_common_proof_resume_generation?: (
+        preparedGenerationHandle: number,
+        authenticatedCheckpointStatePointer: number,
+        authenticatedCheckpointStateByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_checkpoint_state_byte_length?: () => number;
+    sealed_lattice_common_proof_generation_describe_checkpoint?: (
+        operationHandle: number,
+        safeBoundaryOrdinalPointer: number,
+        stateByteLengthPointer: number,
+        cursorCountPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_checkpoint_state?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_checkpoint_cursor_byte_length?: (
+        operationHandle: number,
+        cursorIndex: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_checkpoint_cursor?: (
+        operationHandle: number,
+        cursorIndex: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_checkpoint_stable_attempt_binding_hash?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_acknowledge_checkpoint?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_discard_checkpoint?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_acknowledge_output_chunk?: (
+        operationHandle: number,
+        expectedChunkIndex: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_confirm_output_readback?: (
+        operationHandle: number,
+        chunkIndex: number,
+        readbackPointer: number,
+        readbackLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_output_chunk?: (
+        operationHandle: number,
+        expectedChunkIndex: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_copy_storage_request?: (
+        operationHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_finish?: (
+        operationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_poll?: (
+        operationHandle: number,
+        pollKindPointer: number,
+        primaryValuePointer: number,
+        secondaryValuePointer: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_release_cancelled?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_retire_failed?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_request_cancellation?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_generation_supply_storage_response?: (
+        operationHandle: number,
+        responsePointer: number,
+        responseLength: number,
+    ) => number;
+    sealed_lattice_common_proof_release_generated_proof?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_common_proof_application_frame_byte_length?: () => number;
+    sealed_lattice_common_proof_prepare_application?: (
+        terminalCapabilityHandle: number,
+        storageRootHandle: number,
+        storageRootCapabilityPointer: number,
+        predecessorNamespaceSequence: bigint,
+        predecessorAuthenticatedHeadDigestPointer: number,
+        storageInstanceIdentityPointer: number,
+        durableFrameOutputPointer: number,
+        durableFrameOutputByteLength: number,
+        proofApplicationSlotHashOutputPointer: number,
+        proofApplicationSlotHashOutputByteLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_confirm_application?: (
+        pendingHandle: number,
+        storageRootHandle: number,
+        storageRootCapabilityPointer: number,
+        predecessorNamespaceSequence: bigint,
+        predecessorAuthenticatedHeadDigestPointer: number,
+        successorNamespaceSequence: bigint,
+        successorAuthenticatedHeadDigestPointer: number,
+        storageInstanceIdentityPointer: number,
+        authenticatedDurableFramePointer: number,
+        authenticatedDurableFrameByteLength: number,
+    ) => number;
+    sealed_lattice_common_proof_abort_application?: (
+        pendingHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_release_suite?: (handle: number) => number;
+    sealed_lattice_common_proof_select_suite?: (
+        canonicalSuiteRecordPointer: number,
+        canonicalSuiteRecordLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_begin_verification?: (
+        preparedVerificationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_discard_verified_proof?: (
+        handle: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_absorb_input_chunk?: (
+        operationHandle: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_cancel?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_finish?: (
+        operationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_finish_input?: (
+        operationHandle: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_poll?: (
+        operationHandle: number,
+        pollKindPointer: number,
+        primaryValuePointer: number,
+        secondaryValuePointer: number,
+    ) => number;
+    sealed_lattice_common_proof_verification_supply_readback_chunk?: (
+        operationHandle: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
     sealed_lattice_local_storage_root_command?: (
         command: number,
         inputPointer: number,
         inputLength: number,
         statusPointer: number,
         outputLengthPointer: number,
+    ) => number;
+    sealed_lattice_board_verifier_begin?: (
+        canonicalSuiteRecordPointer: number,
+        canonicalSuiteRecordLength: number,
+        canonicalManifestPointer: number,
+        canonicalManifestLength: number,
+        canonicalRosterPointer: number,
+        canonicalRosterLength: number,
+        canonicalActionDefinitionPointer: number,
+        canonicalActionDefinitionLength: number,
+        canonicalBoardPolicyPointer: number,
+        canonicalBoardPolicyLength: number,
+        ceremonyIdentifierPointer: number,
+        ceremonyIdentifierLength: number,
+        actionIdentifierPointer: number,
+        actionIdentifierLength: number,
+        expectedSuiteIdentifierPointer: number,
+        expectedSuiteIdentifierLength: number,
+        expectedCeremonyContextHashPointer: number,
+        expectedCeremonyContextHashLength: number,
+        expectedActionContextHashPointer: number,
+        expectedActionContextHashLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_board_verifier_cached_carrier_length?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_board_verifier_cancel?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_board_verifier_copy_cached_carrier?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_board_verifier_describe?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_board_verifier_release?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+    ) => number;
+    sealed_lattice_board_verifier_verify_unordered?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        framedCarrierPointer: number,
+        framedCarrierLength: number,
+        outputPointer: number,
+        outputCapacity: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_finality_verifier_begin?: (
+        configurationPointer: number,
+        configurationLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_finality_verifier_cancel?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_finality_verifier_describe?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedFinalityHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
+    sealed_lattice_finality_verifier_release?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedFinalityHandle: number,
+    ) => number;
+    sealed_lattice_finality_verifier_verify?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedEvaluatorReplayHandle: number,
+        boardSessionHandle: number,
+        boardCapabilityPointer: number,
+        boardCapabilityLength: number,
+        verifiedFinalityObjectHandlesPointer: number,
+        verifiedFinalityObjectHandlesLength: number,
+        canonicalStatementPointer: number,
+        canonicalStatementLength: number,
+        canonicalCertificatePointer: number,
+        canonicalCertificateLength: number,
+        statusPointer: number,
     ) => number;
     sealed_lattice_state_verifier_begin?: (
         configurationPointer: number,
@@ -691,19 +910,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         canonicalOutputIntentCarrierLength: number,
         statusPointer: number,
     ) => number;
-    sealed_lattice_state_verifier_prepare_recovery?: (
-        sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-        subjectParticipantIdentityPointer: number,
-        subjectParticipantIdentityLength: number,
-        capabilityKindCode: number,
-        predecessorRecoveryHandle: number,
-        preservedIntentHandle: number,
-        canonicalRecoveryTransitionCarrierPointer: number,
-        canonicalRecoveryTransitionCarrierLength: number,
-        statusPointer: number,
-    ) => number;
     sealed_lattice_state_verifier_prepare_reservation?: (
         sessionHandle: number,
         capabilityPointer: number,
@@ -711,26 +917,10 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         subjectParticipantIdentityPointer: number,
         subjectParticipantIdentityLength: number,
         capabilityKindCode: number,
-        predecessorRecoveryHandle: number,
         expectedAuthorizationHashPointer: number,
         expectedAuthorizationHashLength: number,
         canonicalReservationIntentCarrierPointer: number,
         canonicalReservationIntentCarrierLength: number,
-        statusPointer: number,
-    ) => number;
-    sealed_lattice_state_verifier_verify_recovery?: (
-        sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-        subjectParticipantIdentityPointer: number,
-        subjectParticipantIdentityLength: number,
-        capabilityKindCode: number,
-        predecessorRecoveryHandle: number,
-        preservedIntentHandle: number,
-        canonicalRecoveryTransitionCarrierPointer: number,
-        canonicalRecoveryTransitionCarrierLength: number,
-        canonicalStateCertificatePointer: number,
-        canonicalStateCertificateLength: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_state_verifier_verify_reservation?: (
@@ -740,7 +930,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         subjectParticipantIdentityPointer: number,
         subjectParticipantIdentityLength: number,
         capabilityKindCode: number,
-        predecessorRecoveryHandle: number,
         expectedAuthorizationHashPointer: number,
         expectedAuthorizationHashLength: number,
         canonicalReservationIntentCarrierPointer: number,
@@ -748,6 +937,13 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         canonicalStateCertificatePointer: number,
         canonicalStateCertificateLength: number,
         statusPointer: number,
+    ) => number;
+    sealed_lattice_state_producer_command?: (
+        command: number,
+        inputPointer: number,
+        inputLength: number,
+        statusPointer: number,
+        outputLengthPointer: number,
     ) => number;
     sealed_lattice_transcript_core_command_with_length?: (
         pointer: number,

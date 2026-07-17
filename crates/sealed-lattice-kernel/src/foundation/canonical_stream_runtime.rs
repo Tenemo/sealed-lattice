@@ -12,13 +12,12 @@ pub(crate) const CANONICAL_STREAM_RUNTIME_INVALID_SESSION: u32 = u32::MAX - 1;
 const MAXIMUM_CANONICAL_STREAM_CHUNK_COUNT: usize = (MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH as usize)
     .div_ceil(FOUNDATION_PROFILE.stream_chunk_byte_length);
 pub(crate) const MAXIMUM_CANONICAL_STREAM_DESCRIPTOR_BYTE_LENGTH: usize =
-    34 + 64 * MAXIMUM_CANONICAL_STREAM_CHUNK_COUNT;
+    104 + 64 * MAXIMUM_CANONICAL_STREAM_CHUNK_COUNT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CanonicalStreamRuntimeBegin {
     pub handle: u32,
     pub total_byte_length: u32,
-    pub chunk_count: u32,
 }
 
 enum CanonicalStreamRuntimeSessionKind {
@@ -55,7 +54,6 @@ impl CanonicalStreamRuntimeRegistry {
         let stream_domain = stream_domain(stream_domain_code)?;
         let writer = CanonicalStreamWriter::new(stream_domain, u64::from(total_byte_length))
             .map_err(refusal_status)?;
-        let chunk_count = canonical_stream_chunk_count(u64::from(total_byte_length))?;
         let handle = self.take_handle()?;
         self.active_session = Some(CanonicalStreamRuntimeSession {
             handle,
@@ -64,7 +62,6 @@ impl CanonicalStreamRuntimeRegistry {
         Ok(CanonicalStreamRuntimeBegin {
             handle,
             total_byte_length,
-            chunk_count,
         })
     }
 
@@ -82,8 +79,6 @@ impl CanonicalStreamRuntimeRegistry {
             .map_err(|error| refusal_status(error.refusal_reason))?;
         let total_byte_length = u32::try_from(descriptor.total_byte_length)
             .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
-        let chunk_count = u32::try_from(descriptor.ordered_chunk_digests.len())
-            .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
         let verifier =
             CanonicalStreamVerifier::new(stream_domain, descriptor).map_err(refusal_status)?;
         let handle = self.take_handle()?;
@@ -94,7 +89,6 @@ impl CanonicalStreamRuntimeRegistry {
         Ok(CanonicalStreamRuntimeBegin {
             handle,
             total_byte_length,
-            chunk_count,
         })
     }
 
@@ -262,20 +256,6 @@ fn stream_domain(stream_domain_code: u32) -> Result<CanonicalStreamDomain, u32> 
         .ok_or_else(|| refusal_status(RefusalReason::MalformedEncoding))
 }
 
-fn canonical_stream_chunk_count(total_byte_length: u64) -> Result<u32, u32> {
-    if total_byte_length == 0 || total_byte_length > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH {
-        return Err(refusal_status(if total_byte_length == 0 {
-            RefusalReason::WrongTypeOrLength
-        } else {
-            RefusalReason::OutsideSupportedProfile
-        }));
-    }
-    let chunk_byte_length = u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
-        .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)?;
-    u32::try_from(total_byte_length.div_ceil(chunk_byte_length))
-        .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)
-}
-
 fn descriptor_decode_limits() -> CanonicalDecodeLimits {
     CanonicalDecodeLimits {
         maximum_tuple_byte_length: MAXIMUM_CANONICAL_STREAM_DESCRIPTOR_BYTE_LENGTH,
@@ -330,7 +310,6 @@ mod tests {
             )
             .expect("verifier begins");
         assert_eq!(verifier.total_byte_length as usize, bytes.len());
-        assert_eq!(verifier.chunk_count, 2);
         for (chunk_index, chunk) in chunks(&bytes) {
             registry
                 .absorb_chunk(verifier.handle, chunk_index, chunk)

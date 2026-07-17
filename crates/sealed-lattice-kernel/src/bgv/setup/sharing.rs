@@ -131,5 +131,5 @@ fn interpolate_shamir_constant(shares: &[RnsShamirShare], modulus: u64) -> Canon
 }
 
 fn invalid_sharing_input(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }

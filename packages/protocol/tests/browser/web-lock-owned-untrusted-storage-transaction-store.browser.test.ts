@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { UntrustedStorageAuthenticatedRecoveryProtection } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
+import type { UntrustedStorageAuthenticatedRepairProtection } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
 import {
     deriveWebLockStorageNamespaceName,
     openWebLockOwnedStorageTransactionStore,
@@ -25,9 +25,9 @@ const pendingOpenRequests = new Set<
 >();
 const databaseNames = new Set<string>();
 const openedFrames: HTMLIFrameElement[] = [];
-const recoveryProtections = new Map<
+const repairProtections = new Map<
     string,
-    UntrustedStorageAuthenticatedRecoveryProtection
+    UntrustedStorageAuthenticatedRepairProtection
 >();
 
 const copyToArrayBufferView = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
@@ -36,10 +36,10 @@ const copyToArrayBufferView = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
     return copy;
 };
 
-const recoveryProtectionFor = (
+const repairProtectionFor = (
     databaseName: string,
-): UntrustedStorageAuthenticatedRecoveryProtection => {
-    const existingProtection = recoveryProtections.get(databaseName);
+): UntrustedStorageAuthenticatedRepairProtection => {
+    const existingProtection = repairProtections.get(databaseName);
     if (existingProtection !== undefined) {
         return existingProtection;
     }
@@ -48,7 +48,7 @@ const recoveryProtectionFor = (
         false,
         ['decrypt', 'encrypt'],
     );
-    const recoveryIdentity = crypto.getRandomValues(new Uint8Array(64));
+    const repairIdentity = crypto.getRandomValues(new Uint8Array(64));
     const protection = Object.freeze({
         deriveDigest: async (bytes: Uint8Array) =>
             new Uint8Array(
@@ -59,7 +59,7 @@ const recoveryProtectionFor = (
             ),
         open: async (sealedBytes: Uint8Array) => {
             if (sealedBytes.byteLength < 28) {
-                throw new Error('Test recovery head is truncated.');
+                throw new Error('Test repair head is truncated.');
             }
             const nonce = copyToArrayBufferView(sealedBytes.slice(0, 12));
             const ciphertext = copyToArrayBufferView(sealedBytes.slice(12));
@@ -71,7 +71,7 @@ const recoveryProtectionFor = (
                 ),
             );
         },
-        recoveryIdentity,
+        repairIdentity,
         seal: async (plaintext: Uint8Array) => {
             const nonce = crypto.getRandomValues(new Uint8Array(12));
             const ciphertext = new Uint8Array(
@@ -89,7 +89,7 @@ const recoveryProtectionFor = (
             return sealedBytes;
         },
     });
-    recoveryProtections.set(databaseName, protection);
+    repairProtections.set(databaseName, protection);
     return protection;
 };
 const createDatabaseName = (): string => {
@@ -106,7 +106,7 @@ const configurationFor = (
     databaseName: string,
     overrides: Partial<WebLockOwnedStorageConfiguration> = {},
 ): WebLockOwnedStorageConfiguration => ({
-    authenticatedRecoveryProtection: recoveryProtectionFor(databaseName),
+    authenticatedRepairProtection: repairProtectionFor(databaseName),
     databaseName,
     limits: transactionLimits,
     namespace: 'browser-integration',
@@ -184,48 +184,19 @@ const deleteDatabase = (databaseName: string): Promise<void> =>
         );
     });
 
-const waitForLockCounts = async (input: {
-    heldCount: number;
-    lockName: string;
-    pendingCount: number;
-}): Promise<void> => {
-    const deadlineMilliseconds = performance.now() + 2_000;
-    while (true) {
-        const snapshot = await navigator.locks.query();
-        const heldCount = snapshot.held?.filter(
-            (lock) => lock.name === input.lockName,
-        ).length;
-        const pendingCount = snapshot.pending?.filter(
-            (lock) => lock.name === input.lockName,
-        ).length;
-        if (
-            heldCount === input.heldCount &&
-            pendingCount === input.pendingCount
-        ) {
-            return;
-        }
-        if (performance.now() >= deadlineMilliseconds) {
-            throw new Error(
-                `Web Lock state did not reach ${input.heldCount} held and ${input.pendingCount} pending requests.`,
-            );
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+const exclusiveLockIsAvailable = async (lockName: string): Promise<boolean> => {
+    let lockWasAvailable: boolean | undefined;
+    await navigator.locks.request(
+        lockName,
+        { ifAvailable: true, mode: 'exclusive' },
+        (lock) => {
+            lockWasAvailable = lock !== null;
+        },
+    );
+    if (lockWasAvailable === undefined) {
+        throw new Error('The Web Lock availability probe did not run.');
     }
-};
-
-const waitForHandleState = async (
-    handle: WebLockOwnedStorageTransactionStore,
-    expectedState: ReturnType<WebLockOwnedStorageTransactionStore['state']>,
-): Promise<void> => {
-    const deadlineMilliseconds = performance.now() + 2_000;
-    while (handle.state() !== expectedState) {
-        if (performance.now() >= deadlineMilliseconds) {
-            throw new Error(
-                `Owned storage state did not reach ${expectedState}.`,
-            );
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 5));
-    }
+    return lockWasAvailable;
 };
 
 afterEach(async () => {
@@ -275,20 +246,12 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
             configurationFor(databaseName, separateDocumentProviders),
         );
 
-        await waitForLockCounts({
-            heldCount: 1,
-            lockName,
-            pendingCount: 1,
-        });
+        expect(await exclusiveLockIsAvailable(lockName)).toBe(false);
         expect(firstHandle.state()).toBe('open');
 
         await firstHandle.close();
         const secondHandle = await secondOpenRequest;
-        await waitForLockCounts({
-            heldCount: 1,
-            lockName,
-            pendingCount: 0,
-        });
+        expect(await exclusiveLockIsAvailable(lockName)).toBe(false);
         expect(secondHandle.state()).toBe('open');
 
         await secondHandle.close();
@@ -301,6 +264,7 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
         const configuration = configurationFor(databaseName);
         const lockName = deriveWebLockStorageNamespaceName(configuration);
         const handle = await openOwnedStore(configuration);
+        const retainedStore = handle.store;
         let releaseStolenLock: (() => void) | undefined;
         const stolenLockRelease = new Promise<void>((resolve) => {
             releaseStolenLock = resolve;
@@ -324,23 +288,28 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
             },
         );
         await stolenLockAcquired;
-        await waitForHandleState(handle, 'failed');
-
-        await expect(
-            handle.store.beginTransaction({ lifetimeMilliseconds: 1_000 }),
-        ).rejects.toMatchObject({
-            code: 'Closed',
-            name: 'IndexedDbUntrustedStorageAdapterError',
-        });
         releaseStolenLock?.();
         await stealingRequest;
         await expect(handle.close()).rejects.toMatchObject({
             code: 'LockCallbackExited',
             name: 'WebLockOwnedStorageError',
         });
+        expect(handle.state()).toBe('failed');
+        expect(() => handle.store).toThrowError(
+            expect.objectContaining({
+                code: 'Unavailable',
+                name: 'WebLockOwnedStorageError',
+            }),
+        );
+        await expect(
+            retainedStore.beginTransaction({ lifetimeMilliseconds: 1_000 }),
+        ).rejects.toMatchObject({
+            code: 'Closed',
+            name: 'IndexedDbUntrustedStorageAdapterError',
+        });
     });
 
-    it('runs abandoned-object recovery only after the previous owner closes', async () => {
+    it('runs abandoned-object repair only after the previous owner closes', async () => {
         const databaseName = createDatabaseName();
         const configuration = configurationFor(databaseName);
         const lockName = deriveWebLockStorageNamespaceName(configuration);
@@ -359,16 +328,12 @@ describe.skipIf(!webLocksAvailable)('Web Lock storage ownership', () => {
         const secondOpenRequest = openOwnedStore(
             configurationFor(databaseName, separateDocumentProviders),
         );
-        await waitForLockCounts({
-            heldCount: 1,
-            lockName,
-            pendingCount: 1,
-        });
+        expect(await exclusiveLockIsAvailable(lockName)).toBe(false);
         expect(firstHandle.state()).toBe('open');
 
         await firstHandle.close();
         const secondHandle = await secondOpenRequest;
-        expect(secondHandle.recoveryReport).toMatchObject({
+        expect(secondHandle.repairReport).toMatchObject({
             removedCorruptIndexCount: 0,
             removedUnreferencedObjectCount: 1,
             retainedObjectCount: 0,

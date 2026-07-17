@@ -591,5 +591,5 @@ pub(super) fn usize_to_u64_bytes(value: usize) -> CanonicalResult<[u8; 8]> {
 }
 
 pub(super) fn invalid_direct_ballot_relation_proof(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }

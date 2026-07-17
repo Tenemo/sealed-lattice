@@ -18,9 +18,7 @@ pub(super) struct AggregateOpeningRootsInput<'a> {
     pub(super) setup_context_hash: &'a str,
     pub(super) participant: &'a ParticipantBinding,
     pub(super) rns_limb_index: usize,
-    pub(super) rns_prime: u64,
     pub(super) aggregate_commitment_message_values: &'a [u64],
-    pub(super) message_coefficient_bound: u64,
     // The trustee's private deterministic material seed for the aggregate
     // committed-material trees; the same seed regenerates byte-identical trees
     // at proof time.
@@ -38,8 +36,6 @@ pub(super) struct VerifiedAggregateOpeningCredential {
     pub(super) commitment_root: String,
     pub(super) opening_root: String,
     pub(super) aggregate_share_values: Vec<u64>,
-    pub(super) aggregate_commitment_message_values: Vec<u64>,
-    pub(super) aggregate_material_seed_hex: String,
 }
 
 pub(super) fn verify_aggregate_opening_credential(
@@ -56,17 +52,9 @@ pub(super) fn verify_aggregate_opening_credential(
         setup_context_hash: &input.setup_binding.setup_context_hash,
         participant: input.participant,
         rns_limb_index: input.rns_limb_index,
-        rns_prime: input.rns_prime,
         aggregate_commitment_message_values: &aggregate_commitment_message_values,
-        message_coefficient_bound: input.rns_prime,
         aggregate_material_seed_hex: &aggregate_material_seed_hex,
     })?;
-    compare_hash_field(
-        input.credential,
-        "aggregateCommitmentRoot",
-        &computation.commitment_root,
-        "aggregate opening credential commitment root",
-    )?;
     compare_hash_field(
         input.credential,
         "aggregateOpeningRoot",
@@ -78,31 +66,35 @@ pub(super) fn verify_aggregate_opening_credential(
         commitment_root: computation.commitment_root,
         opening_root: computation.opening_root,
         aggregate_share_values,
-        aggregate_commitment_message_values,
-        aggregate_material_seed_hex,
     })
 }
 
 pub(super) fn compute_aggregate_opening(
     input: AggregateOpeningRootsInput<'_>,
 ) -> CanonicalResult<AggregateOpeningComputation> {
+    let rns_prime = DATA_PRIMES
+        .get(input.rns_limb_index)
+        .copied()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "aggregate opening coordinate exceeds the canonical Q_share basis",
+            )
+        })?;
     let commitment_context = json!({
         "objectType": "VssPublicAggregateThresholdCommitmentContext",
         "setupContextHash": input.setup_context_hash,
-        "recipientIdentity": input.participant.trustee_identity.as_str(),
+        "recipientIdentity": input.participant.trustee_identity,
         "recipientRosterPosition": input.participant.roster_position,
         "rnsLimbIndex": input.rns_limb_index,
-        "rnsPrime": input.rns_prime,
+        "rnsPrime": rns_prime,
     });
     let computation =
         compute_vss_committed_material_commitment(VssCommittedMaterialCommitmentInput {
             commitment_role: VSS_PUBLIC_AGGREGATE_COMMITMENT_ROLE,
             commitment_context: &commitment_context,
             rns_limb_index: input.rns_limb_index,
-            rns_prime: input.rns_prime,
-            ring_degree: POLYNOMIAL_DEGREE,
             message_coefficients: input.aggregate_commitment_message_values,
-            message_coefficient_bound: input.message_coefficient_bound,
             material_seed_hex: input.aggregate_material_seed_hex,
         })?;
 
@@ -117,7 +109,7 @@ pub(super) fn compute_aggregate_opening(
 fn take_aggregate_opening_message_values(
     aggregate_opening_root: &str,
 ) -> CanonicalResult<Vec<u64>> {
-    let material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+    let material = crate::bgv::setup::take_authenticated_canonical_proof_material_bytes(
         crate::bgv::setup::TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY,
         aggregate_opening_root,
     )?

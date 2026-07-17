@@ -17,7 +17,7 @@ pub(super) fn verify_collective_public_key_coefficients(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "collectivePublicKey.aggregateCoefficientVectorsLittleEndianHexByLimb is required",
             )
         })?;
@@ -31,7 +31,7 @@ pub(super) fn verify_collective_public_key_coefficients(
         let coefficients = coefficient_vector_from_le_hex(
             aggregate_limb.as_str().ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "collective public-key coefficient vectors must be strings",
                 )
             })?,
@@ -44,7 +44,7 @@ pub(super) fn verify_collective_public_key_coefficients(
             .any(|coefficient| *coefficient >= modulus)
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "collective public-key aggregate contains non-canonical Q_share residues",
             ));
         }

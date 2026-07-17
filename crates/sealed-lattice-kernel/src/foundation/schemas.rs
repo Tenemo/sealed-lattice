@@ -19,11 +19,62 @@ pub const SIGNED_CARRIER_SCHEMA_IDENTIFIER: u16 = 0x0101;
 pub const ROSTER_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x0114;
 pub const ROSTER_SCHEMA_IDENTIFIER: u16 = 0x0115;
 pub const STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER: u16 = 0x1800;
+pub(super) const EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1502;
 pub const ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH: usize = ml_kem_768::EK_LEN;
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 pub const ML_DSA_65_SIGNATURE_BYTE_LENGTH: usize = 3_309;
 const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
+
+/// Roster sizes for which the protocol formulas are defined. Only the
+/// ten-participant prototype profile is selected and evidence-gated today.
+pub const MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 3;
+pub const MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 20;
+pub(crate) const PROTOTYPE_PARTICIPANT_COUNT: u16 = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FoundationRosterParameters {
+    pub participant_count: u16,
+    pub active_fault_bound: u16,
+    pub reconstruction_threshold: u16,
+    pub finality_quorum: u16,
+    pub state_witness_quorum: u16,
+}
+
+/// Derives the roster-dependent protocol parameters without selecting or
+/// certifying that roster size. The passive reconstruction bound deliberately
+/// remains independent of the strict asynchronous active-fault bound when
+/// `n` is divisible by three.
+pub const fn derive_foundation_roster_parameters(
+    participant_count: u16,
+) -> Option<FoundationRosterParameters> {
+    if participant_count < MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT
+        || participant_count > MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT
+    {
+        return None;
+    }
+
+    let active_fault_bound = (participant_count - 1) / 3;
+    let reconstruction_threshold = participant_count / 3 + 1;
+    // Finality needs two signer quorums to intersect in more than f members.
+    // State witnessing has an n-1 universe but also permits one independently
+    // unsafe witness, which yields the same lower bound.
+    let quorum = (participant_count + active_fault_bound) / 2 + 1;
+
+    Some(FoundationRosterParameters {
+        participant_count,
+        active_fault_bound,
+        reconstruction_threshold,
+        finality_quorum: quorum,
+        state_witness_quorum: quorum,
+    })
+}
+
+const PROTOTYPE_ROSTER_PARAMETERS: FoundationRosterParameters =
+    match derive_foundation_roster_parameters(PROTOTYPE_PARTICIPANT_COUNT) {
+        Some(parameters) => parameters,
+        None => panic!("the prototype participant count must be configurable"),
+    };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FoundationProfile {
@@ -45,17 +96,17 @@ pub struct FoundationProfile {
 pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
     protocol_name: "sealed-lattice",
     protocol_version: 1,
-    participant_count: 10,
-    active_fault_bound: 3,
-    reconstruction_threshold: 4,
-    finality_quorum: 7,
-    state_witness_quorum: 7,
+    participant_count: PROTOTYPE_ROSTER_PARAMETERS.participant_count,
+    active_fault_bound: PROTOTYPE_ROSTER_PARAMETERS.active_fault_bound,
+    reconstruction_threshold: PROTOTYPE_ROSTER_PARAMETERS.reconstruction_threshold,
+    finality_quorum: PROTOTYPE_ROSTER_PARAMETERS.finality_quorum,
+    state_witness_quorum: PROTOTYPE_ROSTER_PARAMETERS.state_witness_quorum,
     option_count: 20,
     minimum_score: 1,
     maximum_score: 10,
     maximum_identifier_byte_length: 128,
     stream_chunk_byte_length: 1_048_576,
-    maximum_copied_buffer_byte_length: 1_572_864,
+    maximum_copied_buffer_byte_length: 8_388_608,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -75,13 +126,12 @@ pub enum FoundationObjectType {
     StateReservation = 0x0051,
     StateOutputIntent = 0x0052,
     StateWitnessVote = 0x0053,
-    RecoveryTransition = 0x0054,
     TargetDecryptionShare = 0x0060,
     StorageRootCommitment = 0x0070,
 }
 
 impl FoundationObjectType {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 16] = [
         Self::PublicRandomnessCommitment,
         Self::PublicRandomnessReveal,
         Self::SetupIntent,
@@ -96,7 +146,6 @@ impl FoundationObjectType {
         Self::StateReservation,
         Self::StateOutputIntent,
         Self::StateWitnessVote,
-        Self::RecoveryTransition,
         Self::TargetDecryptionShare,
         Self::StorageRootCommitment,
     ];
@@ -121,7 +170,6 @@ impl FoundationObjectType {
             0x0051 => Some(Self::StateReservation),
             0x0052 => Some(Self::StateOutputIntent),
             0x0053 => Some(Self::StateWitnessVote),
-            0x0054 => Some(Self::RecoveryTransition),
             0x0060 => Some(Self::TargetDecryptionShare),
             0x0070 => Some(Self::StorageRootCommitment),
             _ => None,
@@ -173,7 +221,27 @@ pub struct RosterEntry {
 }
 
 impl RosterEntry {
+    pub fn new(
+        roster_position: u16,
+        signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+        mailbox_encapsulation_key: [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
+    ) -> SchemaResult<Self> {
+        let entry = Self {
+            roster_position,
+            signing_verification_key,
+            mailbox_encapsulation_key,
+        };
+        entry.validate()?;
+        Ok(entry)
+    }
+
     fn validate(&self) -> SchemaResult<()> {
+        if self.roster_position >= MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "roster position is outside the configurable range",
+            ));
+        }
         validate_ml_kem_768_encapsulation_key(&self.mailbox_encapsulation_key)
     }
 
@@ -221,25 +289,29 @@ pub struct Roster {
 
 impl Roster {
     pub fn new(entries: Vec<RosterEntry>) -> SchemaResult<Self> {
-        if entries.len() != usize::from(FOUNDATION_PROFILE.participant_count) {
+        let participant_count = u16::try_from(entries.len()).ok();
+        if participant_count
+            .and_then(derive_foundation_roster_parameters)
+            .is_none()
+        {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
-                "roster size does not match the supported profile",
+                "roster size is outside the configurable range",
             ));
         }
         let mut signing_keys = BTreeSet::new();
         let mut mailbox_keys = BTreeSet::new();
         let mut participant_identities = BTreeSet::new();
-        for (expected_position, entry) in entries.iter().enumerate() {
+        for (entry_index, entry) in entries.iter().enumerate() {
             entry.validate()?;
-            let participant_identity =
-                derive_participant_identity(&entry.signing_verification_key)?;
-            if usize::from(entry.roster_position) != expected_position {
+            if usize::from(entry.roster_position) != entry_index {
                 return Err(FoundationSchemaError::new(
                     RefusalReason::WrongTypeOrLength,
-                    "roster positions must be contiguous and increasing",
+                    "roster positions must be consecutive and canonically ordered",
                 ));
             }
+            let participant_identity =
+                derive_participant_identity(&entry.signing_verification_key)?;
             if !signing_keys.insert(entry.signing_verification_key.as_slice())
                 || !mailbox_keys.insert(entry.mailbox_encapsulation_key.as_slice())
                 || !participant_identities.insert(participant_identity)
@@ -251,6 +323,16 @@ impl Roster {
             }
         }
         Ok(Self { entries })
+    }
+
+    pub(crate) fn require_selected_profile_size(&self) -> SchemaResult<()> {
+        if self.entries.len() != usize::from(FOUNDATION_PROFILE.participant_count) {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "roster size does not match the selected prototype profile",
+            ));
+        }
+        Ok(())
     }
 
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
@@ -307,13 +389,19 @@ impl Roster {
 pub struct StreamDescriptor {
     pub total_byte_length: u64,
     pub ordered_chunk_digests: Vec<Hash512>,
+    pub full_object_digest: Hash512,
 }
 
 impl StreamDescriptor {
-    pub fn new(total_byte_length: u64, ordered_chunk_digests: Vec<Hash512>) -> SchemaResult<Self> {
+    pub fn new(
+        total_byte_length: u64,
+        ordered_chunk_digests: Vec<Hash512>,
+        full_object_digest: Hash512,
+    ) -> SchemaResult<Self> {
         let descriptor = Self {
             total_byte_length,
             ordered_chunk_digests,
+            full_object_digest,
         };
         descriptor.validate()?;
         Ok(descriptor)
@@ -366,6 +454,7 @@ impl StreamDescriptor {
             vec![
                 CanonicalItem::unsigned64(self.total_byte_length),
                 CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &chunk_digests)?,
+                CanonicalItem::hash512(self.full_object_digest.into_bytes()),
             ],
         ))
     }
@@ -377,8 +466,98 @@ impl StreamDescriptor {
     }
 
     pub(super) fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, 2)?;
-        Self::new(read_u64(&tuple.items[0])?, read_hash_list(&tuple.items[1])?)
+        require_header(tuple, STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, 3)?;
+        Self::new(
+            read_u64(&tuple.items[0])?,
+            read_hash_list(&tuple.items[1])?,
+            read_hash(&tuple.items[2])?,
+        )
+    }
+}
+
+/// The single canonical representation of a deterministic evaluator replay.
+/// Board ingestion validates its dependency while the evaluator verifier owns
+/// the two streamed ciphertext checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct EvaluatorReplayPayload {
+    verified_setup_source_hash: Hash512,
+    verified_aggregate_source_hash: Hash512,
+    target_identifier_descriptor: StreamDescriptor,
+    target_order_descriptor: StreamDescriptor,
+}
+
+impl EvaluatorReplayPayload {
+    pub(super) fn new(
+        verified_setup_source_hash: Hash512,
+        verified_aggregate_source_hash: Hash512,
+        target_identifier_descriptor: StreamDescriptor,
+        target_order_descriptor: StreamDescriptor,
+    ) -> Self {
+        Self {
+            verified_setup_source_hash,
+            verified_aggregate_source_hash,
+            target_identifier_descriptor,
+            target_order_descriptor,
+        }
+    }
+
+    pub(super) const fn verified_setup_source_hash(&self) -> Hash512 {
+        self.verified_setup_source_hash
+    }
+
+    pub(super) const fn verified_aggregate_source_hash(&self) -> Hash512 {
+        self.verified_aggregate_source_hash
+    }
+
+    pub(super) const fn target_identifier_descriptor(&self) -> &StreamDescriptor {
+        &self.target_identifier_descriptor
+    }
+
+    pub(super) const fn target_order_descriptor(&self) -> &StreamDescriptor {
+        &self.target_order_descriptor
+    }
+
+    pub(super) fn encode(&self) -> SchemaResult<Vec<u8>> {
+        Ok(self.canonical_tuple()?.encode()?)
+    }
+
+    fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
+        let target_identifier_tuple = CanonicalTuple::decode(
+            &self.target_identifier_descriptor.encode()?,
+            &CanonicalDecodeLimits::default(),
+        )?;
+        let target_order_tuple = CanonicalTuple::decode(
+            &self.target_order_descriptor.encode()?,
+            &CanonicalDecodeLimits::default(),
+        )?;
+        Ok(CanonicalTuple::new(
+            EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::hash512(self.verified_setup_source_hash.into_bytes()),
+                CanonicalItem::hash512(self.verified_aggregate_source_hash.into_bytes()),
+                CanonicalItem::nested_tuple(&target_identifier_tuple)?,
+                CanonicalItem::nested_tuple(&target_order_tuple)?,
+            ],
+        ))
+    }
+
+    pub(super) fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
+        let tuple = CanonicalTuple::decode(bytes, limits)?;
+        Self::from_tuple(&tuple, limits)
+    }
+
+    pub(super) fn from_tuple(
+        tuple: &CanonicalTuple,
+        limits: &CanonicalDecodeLimits,
+    ) -> SchemaResult<Self> {
+        require_header(tuple, EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER, 4)?;
+        Ok(Self::new(
+            read_hash(&tuple.items[0])?,
+            read_hash(&tuple.items[1])?,
+            read_stream_descriptor_item(&tuple.items[2], limits)?,
+            read_stream_descriptor_item(&tuple.items[3], limits)?,
+        ))
     }
 }
 
@@ -388,8 +567,6 @@ pub struct ObjectEnvelope {
     pub object_type: FoundationObjectType,
     pub ceremony_context_hash: Hash512,
     pub action_context_hash: Hash512,
-    pub recovery_epoch: u64,
-    pub recovery_transition_hash: Option<Hash512>,
     pub producer_participant_id: Option<ParticipantIdentity>,
     pub producer_sequence: u64,
     pub ordered_prerequisite_hashes: Vec<Hash512>,
@@ -398,9 +575,6 @@ pub struct ObjectEnvelope {
 
 impl ObjectEnvelope {
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
-        let recovery_transition = self
-            .recovery_transition_hash
-            .map(|hash| CanonicalItem::hash512(hash.into_bytes()));
         let producer = self
             .producer_participant_id
             .map(|identity| CanonicalItem::participant_identity(identity.into_bytes()));
@@ -419,12 +593,10 @@ impl ObjectEnvelope {
                 CanonicalItem::unsigned16(self.object_type.canonical_code()),
                 CanonicalItem::hash512(self.ceremony_context_hash.into_bytes()),
                 CanonicalItem::hash512(self.action_context_hash.into_bytes()),
-                CanonicalItem::unsigned64(self.recovery_epoch),
-                CanonicalItem::optional(CanonicalItemType::Hash512, recovery_transition.as_ref())?,
                 CanonicalItem::optional(CanonicalItemType::ParticipantIdentity, producer.as_ref())?,
                 CanonicalItem::unsigned64(self.producer_sequence),
                 CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &prerequisites)?,
-                CanonicalItem::variable_bytes(self.payload_bytes.clone())?,
+                CanonicalItem::variable_bytes(&self.payload_bytes)?,
             ],
         )
         .encode()?)
@@ -441,7 +613,7 @@ impl ObjectEnvelope {
         budget: &mut CanonicalDecodeBudget,
     ) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode_with_budget(bytes, limits, budget)?;
-        require_header(&tuple, OBJECT_ENVELOPE_SCHEMA_IDENTIFIER, 12)?;
+        require_header(&tuple, OBJECT_ENVELOPE_SCHEMA_IDENTIFIER, 10)?;
         if read_ascii(&tuple.items[0])? != FOUNDATION_PROFILE.protocol_name
             || read_u16(&tuple.items[1])? != FOUNDATION_PROFILE.protocol_version
         {
@@ -462,12 +634,10 @@ impl ObjectEnvelope {
             object_type,
             ceremony_context_hash: read_hash(&tuple.items[4])?,
             action_context_hash: read_hash(&tuple.items[5])?,
-            recovery_epoch: read_u64(&tuple.items[6])?,
-            recovery_transition_hash: read_optional_hash(&tuple.items[7])?,
-            producer_participant_id: read_optional_participant_identity(&tuple.items[8])?,
-            producer_sequence: read_u64(&tuple.items[9])?,
-            ordered_prerequisite_hashes: read_hash_list(&tuple.items[10])?,
-            payload_bytes: read_variable_item(&tuple.items[11], CanonicalItemType::RawBytes)?
+            producer_participant_id: read_optional_participant_identity(&tuple.items[6])?,
+            producer_sequence: read_u64(&tuple.items[7])?,
+            ordered_prerequisite_hashes: read_hash_list(&tuple.items[8])?,
+            payload_bytes: read_variable_item(&tuple.items[9], CanonicalItemType::RawBytes)?
                 .to_vec(),
         })
     }
@@ -521,7 +691,7 @@ impl SignedCarrier {
         })
     }
 
-    /// Verifies the carrier against the producer key selected by the external roster.
+    /// Verifies the carrier against the producer key selected by the anchored participant roster.
     pub fn verify_signature(&self, roster: &Roster) -> VerificationResult<()> {
         let Some(producer_participant_id) = self.envelope.producer_participant_id else {
             return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
@@ -589,7 +759,6 @@ pub fn signature_message(envelope: &ObjectEnvelope, roster_hash: Hash512) -> Sch
         FoundationObjectType::StateReservation => "state-reservation-intent",
         FoundationObjectType::StateOutputIntent => "state-output-intent",
         FoundationObjectType::StateWitnessVote => "state-witness-vote",
-        FoundationObjectType::RecoveryTransition => "state-recovery-transition",
         FoundationObjectType::TargetDecryptionShare => "target-release-output",
         FoundationObjectType::StorageRootCommitment => "storage-root-commitment",
     };
@@ -655,10 +824,14 @@ fn preflight_roster_entry_count(bytes: &[u8], limits: &CanonicalDecodeLimits) ->
     else {
         return Ok(());
     };
-    if declared_entry_count != u32::from(FOUNDATION_PROFILE.participant_count) {
+    if u16::try_from(declared_entry_count)
+        .ok()
+        .and_then(derive_foundation_roster_parameters)
+        .is_none()
+    {
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
-            "roster size does not match the supported profile",
+            "roster size is outside the configurable range",
         ));
     }
     Ok(())
@@ -885,6 +1058,20 @@ pub(super) fn read_hash(item: &CanonicalItem) -> SchemaResult<Hash512> {
     Ok(Hash512::from_bytes(bytes))
 }
 
+fn read_stream_descriptor_item(
+    item: &CanonicalItem,
+    limits: &CanonicalDecodeLimits,
+) -> SchemaResult<StreamDescriptor> {
+    if item.item_type() != CanonicalItemType::NestedTuple {
+        return Err(FoundationSchemaError::new(
+            RefusalReason::WrongTypeOrLength,
+            "evaluator replay stream descriptor has the wrong type",
+        ));
+    }
+    let tuple = CanonicalTuple::decode(item.canonical_bytes(), limits)?;
+    StreamDescriptor::from_tuple(&tuple)
+}
+
 fn read_optional_fixed_64_byte_value(
     item: &CanonicalItem,
     expected_type: CanonicalItemType,
@@ -913,13 +1100,6 @@ fn read_optional_fixed_64_byte_value(
             "optional 64-byte value encoding is malformed",
         )),
     }
-}
-
-fn read_optional_hash(item: &CanonicalItem) -> SchemaResult<Option<Hash512>> {
-    Ok(
-        read_optional_fixed_64_byte_value(item, CanonicalItemType::Hash512)?
-            .map(Hash512::from_bytes),
-    )
 }
 
 fn read_optional_participant_identity(
@@ -1022,6 +1202,53 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn configurable_roster_formulas_preserve_their_intersection_bounds() {
+        assert_eq!(derive_foundation_roster_parameters(2), None);
+        assert_eq!(derive_foundation_roster_parameters(21), None);
+
+        for participant_count in
+            MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT..=MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT
+        {
+            let parameters = derive_foundation_roster_parameters(participant_count)
+                .expect("the documented roster range derives parameters");
+            let n = i32::from(parameters.participant_count);
+            let f = i32::from(parameters.active_fault_bound);
+            let finality_quorum = i32::from(parameters.finality_quorum);
+            let state_witness_quorum = i32::from(parameters.state_witness_quorum);
+
+            assert_eq!(parameters.active_fault_bound, (participant_count - 1) / 3);
+            assert!(n > 3 * f, "the active-fault bound must satisfy n > 3f");
+            assert_eq!(
+                parameters.reconstruction_threshold,
+                participant_count / 3 + 1
+            );
+            let expected_quorum = (participant_count + parameters.active_fault_bound) / 2 + 1;
+            assert_eq!(parameters.finality_quorum, expected_quorum);
+            assert_eq!(parameters.state_witness_quorum, expected_quorum);
+            assert!(
+                2 * finality_quorum - n > f,
+                "two finality quorums must share an honest signer"
+            );
+            assert!(
+                2 * state_witness_quorum - (n - 1) > f + 1,
+                "two state quorums must share a stable honest witness"
+            );
+            assert!(state_witness_quorum < n);
+        }
+
+        assert_eq!(
+            derive_foundation_roster_parameters(PROTOTYPE_PARTICIPANT_COUNT),
+            Some(FoundationRosterParameters {
+                participant_count: 10,
+                active_fault_bound: 3,
+                reconstruction_threshold: 4,
+                finality_quorum: 7,
+                state_witness_quorum: 7,
+            })
+        );
+    }
+
     fn roster_entries() -> Vec<RosterEntry> {
         (0..FOUNDATION_PROFILE.participant_count)
             .map(|roster_position| {
@@ -1069,10 +1296,67 @@ mod tests {
         .expect("entry tuple decodes");
         assert_eq!(tuple.items.len(), 3);
         assert_eq!(
+            read_u16(&tuple.items[0]).expect("roster position decodes"),
+            0
+        );
+        assert_eq!(
             read_item(&tuple.items[2], CanonicalItemType::RawBytes)
                 .expect("mailbox key bytes decode")
                 .len(),
             ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH
+        );
+    }
+
+    #[test]
+    fn roster_schema_accepts_a_configurable_nonselected_size() {
+        let entries = roster_entries().into_iter().take(3).collect();
+        let roster = Roster::new(entries).expect("three-participant roster is structural");
+        assert_eq!(
+            roster
+                .require_selected_profile_size()
+                .expect_err("a structural roster is not selected-profile authority")
+                .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
+        );
+        let encoded = roster.encode().expect("structural roster encodes");
+        assert_eq!(
+            Roster::decode(&encoded, &CanonicalDecodeLimits::default())
+                .expect("structural roster decodes"),
+            roster
+        );
+    }
+
+    #[test]
+    fn roster_requires_explicit_consecutive_positions_in_canonical_order() {
+        let mut duplicate_position = roster_entries();
+        duplicate_position[4].roster_position = 3;
+        assert_eq!(
+            Roster::new(duplicate_position)
+                .expect_err("duplicate roster position must refuse")
+                .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+
+        let mut reordered_positions = roster_entries();
+        reordered_positions.swap(2, 7);
+        assert_eq!(
+            Roster::new(reordered_positions)
+                .expect_err("reordered roster positions must refuse")
+                .refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+
+        let mut outside_range = roster_entries()[0].clone();
+        outside_range.roster_position = MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT;
+        assert_eq!(
+            RosterEntry::new(
+                outside_range.roster_position,
+                outside_range.signing_verification_key,
+                outside_range.mailbox_encapsulation_key,
+            )
+            .expect_err("out-of-range roster position must refuse")
+            .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
         );
     }
 
@@ -1152,7 +1436,7 @@ mod tests {
                 Some(object_type)
             );
         }
-        for unassigned_code in [0, 3, 0x000f, 0x0022, 0x0041, 0xffff] {
+        for unassigned_code in [0, 3, 0x000f, 0x0022, 0x0041, 0x0054, 0xffff] {
             assert_eq!(
                 FoundationObjectType::from_canonical_code(unassigned_code),
                 None
@@ -1193,10 +1477,6 @@ mod tests {
                 "state-output-intent",
             ),
             (FoundationObjectType::StateWitnessVote, "state-witness-vote"),
-            (
-                FoundationObjectType::RecoveryTransition,
-                "state-recovery-transition",
-            ),
             (
                 FoundationObjectType::TargetDecryptionShare,
                 "target-release-output",
@@ -1248,8 +1528,6 @@ mod tests {
             object_type,
             ceremony_context_hash: Hash512::from_bytes([0x22; 64]),
             action_context_hash: Hash512::from_bytes([0x33; 64]),
-            recovery_epoch: 0,
-            recovery_transition_hash: None,
             producer_participant_id: None,
             producer_sequence: 0,
             ordered_prerequisite_hashes: Vec::new(),

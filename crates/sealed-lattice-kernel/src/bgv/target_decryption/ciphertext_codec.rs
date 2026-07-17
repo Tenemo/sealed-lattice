@@ -52,9 +52,6 @@ pub(super) fn read_target_ciphertext_pair(
         target_id: target_id.ciphertext,
         target_order: target_order.ciphertext,
         top_count,
-        target_id_root: target_id.root,
-        target_order_root: target_order.root,
-        target_ciphertext_hash,
     })
 }
 
@@ -78,10 +75,9 @@ pub(super) fn parse_target_ciphertext(
         ));
     }
     let level = object.components[0].level;
-    let basis_id = BgvBasisKind::Data.basis_id();
     let mut components = Vec::with_capacity(2);
     for component in object.components {
-        if component.level != level || component.basis_id != basis_id {
+        if component.level != level || component.basis_kind != BgvBasisKind::Data {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
                 format!("{label} components must use the same data-basis level"),

@@ -1,24 +1,11 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-type VssCommittedMaterialCommitmentField = {
-    readonly commitmentModulusIndex: number;
-    readonly modulus: number;
-    readonly materialRootHex: string;
-};
-
-// Per-field salted Merkle roots over a message's canonical digit columns.
+// A salted Merkle root over a message's canonical digit columns.
 // The private material seed and opening never appear in the published package.
 type VssCommittedMaterialCommitmentValue = {
     readonly objectType: 'VssCommittedMaterialCommitment';
-    readonly commitmentRole:
-        | 'coefficient'
-        | 'recipient-share'
-        | 'aggregate-threshold-share';
     readonly commitmentContextHash: ProtocolHash;
-    readonly rnsLimbIndex: number;
-    readonly rnsPrime: number;
-    readonly ringDegree: number;
-    readonly commitmentFields: readonly VssCommittedMaterialCommitmentField[];
+    readonly materialRootHex: string;
 };
 
 type VssPublicSourceCoefficientCommitments = {

@@ -1,25 +1,37 @@
-//! Ignored benchmark for per-key round-one prove/verify time, peak memory, and
-//! canonical proof size. All measured degrees fit their `8N` coset below the
+//! Ignored benchmark for a largest-group atom proxy and the complete shipped
+//! round-one key schedule. It reports prove/verify time, process-lifetime
+//! high-water memory, canonical container size, and test-only prover phase
+//! timings. Both statements include the production same-secret linkage and
+//! statement/schedule-position bindings. Their `8N` cosets fit below the
 //! `2^20` domain ceiling without splitting columns.
 //!
 //! Run through the guarded focused Rust runner:
-//! `pnpm run test:rust:kernel:accepted-setup -- round_one_key_prover_cost`
+//! `pnpm run test:rust:kernel:measurements -- round_one_key_prover_cost`
+//!
+//! The guarded runner deliberately uses one Rayon thread for memory
+//! containment, so these timings measure the algorithmic and allocation path,
+//! not the optional native parallel-transform path.
 //!
 //! This is native development measurement only. It is not browser or WASM
 //! evidence, and not supported-phone evidence.
 
-use super::super::proof_field::sixteen_limb_group_field_parameters;
-use super::key_proof::{
-    KeyFriProofParameters, KeySource, prove_round_one_key_fri, verify_round_one_key_fri,
+use super::key_proof::{begin_key_prover_phase_timing, finish_key_prover_phase_timing};
+use super::schedule::{
+    SCHEDULE_QUERY_COUNT, prove_key_bearing_trustee_evaluation_keys,
+    verify_key_bearing_trustee_evaluation_keys,
 };
-use super::private_randomness::PrivateProofRandomness;
-use super::proof_codec::encode_key_proof;
-use super::test_support::build_synthetic_key_fixture;
+use crate::bgv::evaluator::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
+use crate::bgv::parameters::POLYNOMIAL_DEGREE;
+use crate::bgv::setup::trustee_evaluation_key_proof::{
+    EvaluationKeyShareKind, generate_development_trustee_instance,
+};
 
-// The process's peak working set (Windows) or high-water RSS (Linux), as a
-// development-only prover peak-memory indicator. Process-wide, so the benchmark
-// must run as the only test in its invocation for the number to mean anything.
-fn peak_memory_bytes() -> Option<u64> {
+const PROOF_RANDOMNESS_SEED: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
+// The process's lifetime peak working set (Windows) or high-water RSS (Linux).
+// It includes fixture generation and all preceding cases, so it is a ceiling
+// observed through each case rather than an isolated per-case prover peak.
+fn process_lifetime_high_water_memory_bytes() -> Option<u64> {
     #[cfg(windows)]
     {
         #[repr(C)]
@@ -81,50 +93,70 @@ fn peak_memory_bytes() -> Option<u64> {
 }
 
 #[test]
-#[ignore = "prover-cost benchmark; run via the guarded accepted-setup runner"]
+#[ignore = "prover-cost benchmark; run via the guarded measurements runner"]
 fn round_one_key_prover_cost() {
     use std::time::Instant;
-    let parameters = sixteen_limb_group_field_parameters();
-    // A level-15 key has 16 digits. For each ring degree m, mask degree m/4
-    // covers two openings per query and stays below m/2, so masked quotients fit
-    // the degree bound 2m. Every measured 8m coset fits below the 2^20 ceiling.
-    let digit_count = 16;
-    let query_count = 80;
-    println!("round-one key ({digit_count} digits, {query_count} queries, mask degree N/4):");
-    for ring_degree in [4096_usize, 8192, 32768] {
-        let proof_parameters = KeyFriProofParameters {
-            query_count,
-            mask_degree: ring_degree / 4,
-        };
-        let (secret, digits, public) =
-            build_synthetic_key_fixture(ring_degree, digit_count, &KeySource::RoundOne);
-        let mut private_randomness = PrivateProofRandomness::for_test(0x1234);
-        let prove_start = Instant::now();
-        let proof = prove_round_one_key_fri(
-            &parameters,
-            ring_degree,
-            &public,
-            &secret,
-            &digits,
-            &proof_parameters,
-            &mut private_randomness,
+
+    // Level 15 is one 16-limb scheduled atom with 16 digit columns. It remains
+    // the closest stable comparison with historical per-atom measurements, but
+    // is explicitly a proxy: the shipped level-16 key has 17 digit columns and
+    // splits into a 16-limb atom plus a one-limb atom.
+    let benchmark_cases = [
+        (
+            "largest-group atom proxy",
+            SELECTED_EVALUATOR_WORKING_LEVEL - 1,
+            1_usize,
+        ),
+        (
+            "complete shipped round-one key schedule",
+            SELECTED_EVALUATOR_WORKING_LEVEL,
+            2_usize,
+        ),
+    ];
+    for (label, level, scheduled_atom_count) in benchmark_cases {
+        let fixture_seed = format!("round-one-key-prover-cost-{label}-{POLYNOMIAL_DEGREE}");
+        let (statement, witness) = generate_development_trustee_instance(
+            &fixture_seed,
+            &[(EvaluationKeyShareKind::RelinearizationRoundOne, level)],
+            POLYNOMIAL_DEGREE,
         )
-        .expect("prove");
+        .expect("build production-shaped development statement");
+        println!(
+            "{label} (N = {POLYNOMIAL_DEGREE}, level {level}, {} digits, {scheduled_atom_count} scheduled atom{}, {SCHEDULE_QUERY_COUNT} queries, mask degree N/4, same-secret linkage):",
+            level + 1,
+            if scheduled_atom_count == 1 { "" } else { "s" }
+        );
+        begin_key_prover_phase_timing();
+        let prove_start = Instant::now();
+        let proof_bytes =
+            prove_key_bearing_trustee_evaluation_keys(&statement, &witness, PROOF_RANDOMNESS_SEED)
+                .expect("prove shipped schedule");
         let prove_ms = prove_start.elapsed().as_secs_f64() * 1000.0;
+        let phase_timings = finish_key_prover_phase_timing();
+        let attributed_prover_ms = phase_timings
+            .iter()
+            .map(|(_, milliseconds)| milliseconds)
+            .sum::<f64>();
+        let schedule_and_bridge_ms = (prove_ms - attributed_prover_ms).max(0.0);
         let verify_start = Instant::now();
-        let accepted =
-            verify_round_one_key_fri(&parameters, ring_degree, &public, &proof, &proof_parameters)
-                .expect("verify");
+        verify_key_bearing_trustee_evaluation_keys(&statement, &proof_bytes)
+            .expect("verify shipped schedule");
         let verify_ms = verify_start.elapsed().as_secs_f64() * 1000.0;
-        assert!(accepted, "benchmark proof must verify");
-        let proof_bytes = encode_key_proof(&proof).expect("encode").len();
-        let proof_kib = proof_bytes as f64 / 1024.0;
-        let proof_mib = proof_bytes as f64 / (1024.0 * 1024.0);
-        let peak = peak_memory_bytes()
+        let proof_kib = proof_bytes.len() as f64 / 1024.0;
+        let proof_mib = proof_bytes.len() as f64 / (1024.0 * 1024.0);
+        let high_water_memory = process_lifetime_high_water_memory_bytes()
             .map(|bytes| format!("{:.0} MiB", bytes as f64 / (1024.0 * 1024.0)))
             .unwrap_or_else(|| "unavailable".to_string());
         println!(
-            "  N = {ring_degree:5}: prove {prove_ms:9.1} ms, verify {verify_ms:8.1} ms, proof {proof_kib:8.1} KiB ({proof_mib:.2} MiB), peak memory {peak}"
+            "  prove {prove_ms:9.1} ms, verify {verify_ms:8.1} ms, proof {proof_kib:8.1} KiB ({proof_mib:.2} MiB), process-lifetime high-water memory through this case {high_water_memory}"
+        );
+        println!(
+            "    phases: {}, schedule/bridge/shared-domain/container overhead {schedule_and_bridge_ms:.1} ms",
+            phase_timings
+                .iter()
+                .map(|(label, milliseconds)| format!("{label} {milliseconds:.1} ms"))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
 }

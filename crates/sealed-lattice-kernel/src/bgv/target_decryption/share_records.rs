@@ -9,28 +9,22 @@ pub(super) fn read_partial_decryption_share(
 ) -> CanonicalResult<()> {
     if string_at_path(share, &["objectType"])? != "BgvTargetDecryptionShare" {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "target decryption accepts only BgvTargetDecryptionShare records",
         ));
     }
-    let trustee_identity = string_at_path(share, &["trusteeIdentity"])?;
+    let trustee_roster_position = usize_at_path(share, &["trusteeRosterPosition"])?;
     let participant = setup_binding
         .participants
-        .iter()
-        .find(|candidate| candidate.trustee_identity == trustee_identity)
+        .get(trustee_roster_position)
+        .filter(|candidate| candidate.roster_position == trustee_roster_position)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "target decryption share trustee is not in the setup roster",
+                CanonicalErrorCode::InvalidProtocolObject,
+                "target decryption share roster position is not in the setup roster",
             )
         })?;
-    compare_share_record_fields(
-        share,
-        setup_binding,
-        target_accepted,
-        target_ciphertexts,
-        participant,
-    )?;
+    compare_share_record_fields(share, target_accepted, participant)?;
     let payload = value_at_path(share, &["sharePayload"])?;
     target_decryption_share_hash(share)?;
     read_partial_limb_set(payload, "targetId", target_ciphertexts.target_id.level)?;
@@ -46,33 +40,21 @@ pub(super) fn read_partial_decryption_share(
 #[cfg(test)]
 pub(super) fn compare_share_record_fields(
     share: &Value,
-    setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
     participant: &ParticipantBinding,
 ) -> CanonicalResult<()> {
-    compare_string_field(
+    compare_unsigned_field(
         share,
-        "trusteeIdentity",
-        &participant.trustee_identity,
-        "target share trustee identity",
+        "trusteeRosterPosition",
+        participant.roster_position as u64,
+        "target share trustee roster position",
     )?;
-    for (field_name, expected) in [
-        (
-            "setupPackageHash",
-            setup_binding.setup_package_hash.as_str(),
-        ),
-        (
-            "targetAcceptedRecordHash",
-            target_accepted.target_accepted_record_hash.as_str(),
-        ),
-        (
-            "targetCiphertextHash",
-            target_ciphertexts.target_ciphertext_hash.as_str(),
-        ),
-    ] {
-        compare_hash_field(share, field_name, expected, field_name)?;
-    }
+    compare_hash_field(
+        share,
+        "targetAcceptedRecordHash",
+        &target_accepted.target_accepted_record_hash,
+        "target share accepted record",
+    )?;
 
     Ok(())
 }
@@ -112,7 +94,7 @@ pub(super) fn read_partial_limb_set(
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     if string_at_path(payload, &["objectType"])? != "BgvTargetDecryptionSharePayload" {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "target share payload object type is not canonical",
         ));
     }
@@ -135,7 +117,7 @@ pub(super) fn read_partial_limb_set(
             let modulus = DATA_PRIMES[limb_index];
             if coefficients.iter().any(|coefficient| *coefficient >= modulus) {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "target partial-decryption limb contains a non-canonical residue",
                 ));
             }
@@ -148,10 +130,8 @@ pub(super) fn read_partial_limb_set(
 pub(super) fn target_decryption_share_hash(share: &Value) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": string_at_path(share, &["objectType"])?,
-        "setupPackageHash": hash_at_path(share, &["setupPackageHash"])?,
-        "trusteeIdentity": string_at_path(share, &["trusteeIdentity"])?,
+        "trusteeRosterPosition": unsigned_at_path(share, &["trusteeRosterPosition"])?,
         "targetAcceptedRecordHash": hash_at_path(share, &["targetAcceptedRecordHash"])?,
-        "targetCiphertextHash": hash_at_path(share, &["targetCiphertextHash"])?,
         "sharePayload": value_at_path(share, &["sharePayload"])?,
     }))
 }

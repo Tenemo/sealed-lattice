@@ -3,6 +3,7 @@ import {
     type BrowserActionStorageCustodyErrorCode,
     type BrowserLocalRecordExpectedContext,
     type BrowserLocalRecordIdentifierInput,
+    type BrowserLocalRecordOpenableIdentifierInput,
     type BrowserLocalRecordOpenInput,
     type BrowserLocalRecordSealInput,
 } from '@sealed-lattice/types';
@@ -282,6 +283,20 @@ export const copyLocalRecordIdentifierInput = (
     }
 };
 
+const copyOpenableLocalRecordIdentifierInput = (
+    value: unknown,
+    errorCode: BrowserActionStorageCustodyErrorCode,
+): BrowserLocalRecordOpenableIdentifierInput => {
+    const identifierInput = copyLocalRecordIdentifierInput(value, errorCode);
+    if (identifierInput.recordType === 'actionRandomness') {
+        throw malformed(
+            errorCode,
+            'Action randomness can only be sealed and opened by the closed worker operation.',
+        );
+    }
+    return identifierInput;
+};
+
 const copyLocalRecordExpectedContext = (
     value: unknown,
     errorCode: BrowserActionStorageCustodyErrorCode = 'InvalidInput',
@@ -323,12 +338,7 @@ const copyLocalRecordExpectedContext = (
                 label: 'Action-randomness commitment',
             },
         ),
-        creationRecoveryEpoch: copyUnsigned64(
-            value.creationRecoveryEpoch,
-            'Local-record creation recovery epoch',
-            errorCode,
-        ),
-        identifierInput: copyLocalRecordIdentifierInput(
+        identifierInput: copyOpenableLocalRecordIdentifierInput(
             value.identifierInput,
             errorCode,
         ),
@@ -373,4 +383,67 @@ export const copyLocalRecordOpenInput = (
             label: 'Local-record envelope',
         }),
     });
+};
+
+export const destroyLocalRecordIdentifierInput = (
+    input: BrowserLocalRecordIdentifierInput,
+): void => {
+    switch (input.recordType) {
+        case 'actionRandomness':
+        case 'publicCoinPrivateMaterial':
+            return;
+        case 'sourceVssMaterial':
+            input.materialContextHash.fill(0);
+            return;
+        case 'aggregateThresholdShare':
+            input.recipientInputRoot.fill(0);
+            return;
+        case 'proofAttempt':
+            input.applicationSlotHash.fill(0);
+            return;
+        case 'ballotAttempt':
+            input.ballotEncryptionAttemptIdentifier.fill(0);
+            input.canonicalBallotStatementBytes.fill(0);
+            return;
+        case 'exactOutputChunk':
+            input.exactOutputHash.fill(0);
+            return;
+        case 'subjectState':
+        case 'witnessState':
+            input.stateKey.fill(0);
+            return;
+        case 'checkpointManifest':
+            input.checkpointLineageIdentifier.fill(0);
+            input.runtimeBuildManifestHash.fill(0);
+            for (const digest of input.orderedSourceDigests) {
+                digest.fill(0);
+            }
+            return;
+        case 'checkpointChunk':
+            input.checkpointIdentifier.fill(0);
+            input.chunkDigest.fill(0);
+            return;
+    }
+};
+
+const destroyLocalRecordExpectedContext = (
+    input: BrowserLocalRecordExpectedContext,
+): void => {
+    input.actionRandomnessCommitment.fill(0);
+    input.predecessorRecordHash?.fill(0);
+    destroyLocalRecordIdentifierInput(input.identifierInput);
+};
+
+export const destroyLocalRecordSealInput = (
+    input: BrowserLocalRecordSealInput,
+): void => {
+    destroyLocalRecordExpectedContext(input);
+    input.plaintext.fill(0);
+};
+
+export const destroyLocalRecordOpenInput = (
+    input: BrowserLocalRecordOpenInput,
+): void => {
+    destroyLocalRecordExpectedContext(input);
+    input.envelope.fill(0);
 };

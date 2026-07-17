@@ -15,7 +15,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
     key_switch_domain: &str,
     key_switch_seed_hex: &str,
     level: usize,
-    ring_degree: usize,
     component_vectors_little_endian_hex_by_digit_and_limb: &[String],
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
@@ -24,7 +23,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
         "keySwitchDomain": key_switch_domain,
         "keySwitchSeedHex": key_switch_seed_hex,
         "level": level,
-        "ringDegree": ring_degree,
         "componentVectorsLittleEndianHexByDigitAndLimb": component_vectors_little_endian_hex_by_digit_and_limb,
     }))
 }
@@ -174,7 +172,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
     level: usize,
     component_vector_root: &str,
     derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
-    ring_degree: usize,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "EvaluationKeyShareComponentMaterialReference",
@@ -184,7 +181,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
         "keySwitchDomain": derived_binding.key_switch_domain,
         "keySwitchSeedHex": derived_binding.key_switch_seed_hex,
         "level": level,
-        "ringDegree": ring_degree,
         "keySwitchComponentVectorRoot": component_vector_root,
     }))
 }
@@ -193,7 +189,7 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_root(
     proof_family: EvaluationKeyShareProofFamily,
     expected_material_root: &str,
     level: usize,
-    ring_degree: usize,
+    expected_ring_degree: usize,
     derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
     accepted_setup_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
@@ -209,16 +205,19 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_root(
     let decoded_material = decode_evaluation_key_share_component_vectors(
         proof_family,
         level,
-        ring_degree,
         derived_binding,
         &chunks,
     )?;
+    if decoded_material.ring_degree != expected_ring_degree {
+        return Err(invalid_evaluation_key_share_material(
+            "evaluation-key component material ring degree does not match the accepted setup",
+        ));
+    }
     let canonical_material_root = evaluation_key_share_component_material_reference_root(
         proof_family,
         level,
         &decoded_material.component_vector_root,
         derived_binding,
-        decoded_material.ring_degree,
     )?;
     if expected_material_root != canonical_material_root {
         return Err(invalid_evaluation_key_share_material(
@@ -300,7 +299,6 @@ impl<'a> CanonicalComponentMaterialReader<'a> {
 fn decode_evaluation_key_share_component_vectors(
     proof_family: EvaluationKeyShareProofFamily,
     level: usize,
-    ring_degree: usize,
     derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
     material_chunks: &[Vec<u8>],
 ) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
@@ -315,11 +313,37 @@ fn decode_evaluation_key_share_component_vectors(
         invalid_evaluation_key_share_material("evaluation-key digit count overflowed")
     })?;
     let limb_count = digit_count;
-    if ring_degree == 0 || limb_count == 0 || limb_count > DATA_PRIMES.len() {
+    if limb_count == 0 || limb_count > DATA_PRIMES.len() {
         return Err(invalid_evaluation_key_share_material(
             "evaluation-key component material shape does not match the proof record",
         ));
     }
+    let total_byte_length = material_chunks.iter().try_fold(0_usize, |total, chunk| {
+        total.checked_add(chunk.len()).ok_or_else(|| {
+            invalid_evaluation_key_share_material(
+                "evaluation-key component material byte length overflowed",
+            )
+        })
+    })?;
+    let payload_byte_length = total_byte_length.checked_sub(magic.len()).ok_or_else(|| {
+        invalid_evaluation_key_share_material(
+            "evaluation-key component material ended before its format marker",
+        )
+    })?;
+    let bytes_per_coefficient_position = digit_count
+        .checked_mul(limb_count)
+        .and_then(|vector_count| vector_count.checked_mul(std::mem::size_of::<u64>()))
+        .ok_or_else(|| {
+            invalid_evaluation_key_share_material(
+                "evaluation-key component material shape overflowed",
+            )
+        })?;
+    if payload_byte_length == 0 || payload_byte_length % bytes_per_coefficient_position != 0 {
+        return Err(invalid_evaluation_key_share_material(
+            "evaluation-key component material byte length does not encode complete coefficient vectors",
+        ));
+    }
+    let ring_degree = payload_byte_length / bytes_per_coefficient_position;
     validate_hex_string(derived_binding.key_switch_seed_hex, "keySwitchSeedHex")?;
     let mut component_b_by_digit = vec![vec![Vec::<u64>::new(); limb_count]; digit_count];
     let mut component_vectors_little_endian_hex_by_digit_and_limb =
@@ -351,7 +375,6 @@ fn decode_evaluation_key_share_component_vectors(
         derived_binding.key_switch_domain,
         derived_binding.key_switch_seed_hex,
         level,
-        ring_degree,
         &component_vectors_little_endian_hex_by_digit_and_limb,
     )?;
 
@@ -639,7 +662,7 @@ mod component_material_stream {
             )
             .expect_err("a summary from another canonical stream domain must reject");
 
-            assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+            assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
             assert!(
                 error
                     .message

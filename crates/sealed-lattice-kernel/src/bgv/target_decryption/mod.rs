@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod bindings;
+mod canonical_partial_stream;
 mod ciphertext_codec;
 #[cfg(test)]
 mod command;
@@ -24,6 +25,7 @@ mod share_statement;
 
 #[cfg(test)]
 use bindings::*;
+pub(crate) use canonical_partial_stream::selected_target_partial_decryption_stream_byte_length;
 pub(crate) use ciphertext_codec::direct_target_ciphertext_hash;
 #[cfg(test)]
 use ciphertext_codec::*;
@@ -34,7 +36,6 @@ pub(crate) use command::{
     derive_bgv_target_decryption_share_proof_statement_from_request,
     finish_bgv_target_decryption_result_release_for_test,
     generate_bgv_target_decryption_share_from_local_share_request,
-    generate_bgv_target_decryption_share_proof_request_for_test,
     verify_bgv_target_decryption_share_proof_statement_binding_from_request,
 };
 #[cfg(test)]
@@ -76,9 +77,11 @@ use crate::{
         serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object},
         setup::{
             TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND,
-            TARGET_DECRYPTION_SHARE_PROOF_FAMILY, VssPublicAggregateThresholdCommitmentSetContext,
+            VssPublicAggregateThresholdCommitmentSetContext,
             accepted_setup_participant_roster_from_package,
-            collective_bgv_setup_context_hashes_from_package, derive_collective_setup_package_hash,
+            collective_bgv_setup_context_hashes_from_package,
+            decryption_threshold_for_participant_count, decryption_threshold_for_roster_length,
+            derive_collective_setup_package_hash,
             target_decryption_interpolation_denominator_clearing_factor,
             verify_vss_public_aggregate_threshold_commitment_set,
         },
@@ -116,13 +119,6 @@ const TARGET_DECRYPTION_FLOODING_NOISE_COMMITMENT_MATERIAL_SEED_DOMAIN: &str =
 const TARGET_DECRYPTION_FLOODING_NOISE_COMMITMENT_ROLE: &str = "target-decryption-flooding-noise";
 #[cfg(test)]
 const TARGET_DECRYPTION_SMUDGING_ROLES: [&str; 2] = ["targetId", "targetOrder"];
-
-#[cfg(test)]
-#[derive(Clone)]
-struct TargetShareProfile {
-    minimum_shares_for_interpolation: usize,
-    decryption_share_quorum: usize,
-}
 
 #[cfg(test)]
 #[derive(Clone)]
@@ -166,7 +162,6 @@ struct AggregateThresholdCommitmentSetBinding {
 #[cfg(test)]
 #[derive(Clone)]
 struct AggregateThresholdCommitmentRecordBinding {
-    rns_prime: u64,
     aggregate_commitment_root: String,
     aggregate_opening_root: String,
     aggregate_commitment: Value,
@@ -184,9 +179,6 @@ struct TargetAcceptedBinding {
 struct TargetCiphertextPair {
     target_id: Ciphertext,
     target_order: Ciphertext,
-    target_id_root: String,
-    target_order_root: String,
-    target_ciphertext_hash: String,
     top_count: usize,
 }
 

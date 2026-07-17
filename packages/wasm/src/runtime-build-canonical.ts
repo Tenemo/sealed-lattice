@@ -11,11 +11,15 @@ const suiteRecordSchemaIdentifier = 0x0118;
 const suiteArtifactReferenceSchemaIdentifier = 0x0117;
 const protocolVersion = 1;
 const maximumRuntimeBuildManifestByteLength = 65_536;
-const maximumCopiedExecutableAssetByteLength = 1_572_864;
+const maximumCopiedExecutableAssetByteLength = 8_388_608;
 const maximumFoundationVariableValueByteLength = 8 * 1024 * 1024 - 4;
+// Streamed artifact anti-exhaustion bound. The authoritative artifact reference
+// still carries and verifies the exact byte length and hash.
+const maximumEvaluatorProgramSetArtifactByteLength = 67_108_864;
 const maximumCanonicalListCount = 4_096;
 const hashByteLength = 64;
 const requiredSuiteArtifactCount = 6;
+const evaluatorProgramSetArtifactKind = 5;
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 const textEncoder = new TextEncoder();
 
@@ -46,7 +50,6 @@ export type CheckpointRandomUseProfile = Readonly<{
 
 export type CheckpointBoundaryProfile = Readonly<{
     orderedRandomUses: readonly CheckpointRandomUseProfile[];
-    safeBoundaryOrdinal: number;
     stateSchemaIdentifier: number;
 }>;
 
@@ -91,6 +94,21 @@ type CanonicalTupleView = Readonly<{
 
 const fail = (message: string): never => {
     throw new RuntimeBuildCanonicalError(message);
+};
+
+export const maximumSuiteArtifactByteLengthForKind = (
+    artifactKind: number,
+): number => {
+    if (
+        !Number.isSafeInteger(artifactKind) ||
+        artifactKind < 1 ||
+        artifactKind > requiredSuiteArtifactCount
+    ) {
+        return fail('A suite artifact kind is outside its accepted profile.');
+    }
+    return artifactKind === evaluatorProgramSetArtifactKind
+        ? maximumEvaluatorProgramSetArtifactByteLength
+        : maximumFoundationVariableValueByteLength;
 };
 
 const unsigned16 = (bytes: Uint8Array, offset: number): number =>
@@ -243,19 +261,6 @@ const readUnsigned16Item = (
         );
     }
     return unsigned16(value, 0);
-};
-
-const readUnsigned32Item = (
-    tuple: CanonicalTupleView,
-    itemIndex: number,
-): number => {
-    const value = requiredItem(tuple, itemIndex, canonicalItemTypes.unsigned32);
-    if (value.byteLength !== 4) {
-        return fail(
-            'A canonical unsigned-32 runtime item has the wrong length.',
-        );
-    }
-    return unsigned32(value, 0);
 };
 
 const readUnsigned64Item = (
@@ -416,19 +421,64 @@ export const requireCanonicalRuntimePath = (path: string): string => {
 };
 
 const privateProofSaltPurpose = 0xfffe;
-const proofRandomnessPurposeRanges: ReadonlyMap<
-    number,
-    readonly [firstPurpose: number, lastPurpose: number]
-> = new Map([
-    [0x1211, [1, 2]],
-    [0x1212, [3, 4]],
-    [0x1214, [5, 6]],
-    [0x1216, [7, 8]],
-    [0x1217, [9, 40]],
-    [0x1302, [41, 42]],
-    [0x1621, [43, 44]],
-    [0x2110, [45, 46]],
-    [0x2111, [47, 48]],
+const sameSecretProofFamilySchemaIdentifier = 0x1211;
+const publicKeyShareProofFamilySchemaIdentifier = 0x1212;
+const relinearizationRoundOneProofFamilySchemaIdentifier = 0x1214;
+const relinearizationRoundTwoProofFamilySchemaIdentifier = 0x1216;
+const galoisKeyShareProofFamilySchemaIdentifier = 0x1217;
+const ballotValidityProofFamilySchemaIdentifier = 0x1302;
+const targetShareProofFamilySchemaIdentifier = 0x1621;
+const vssShareLinkageProofFamilySchemaIdentifier = 0x2110;
+const aggregateThresholdShareProofFamilySchemaIdentifier = 0x2111;
+export const proofRandomnessPurposeRanges = Object.freeze([
+    Object.freeze({
+        familySchemaIdentifier: sameSecretProofFamilySchemaIdentifier,
+        firstPurpose: 1,
+        lastPurpose: 2,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: publicKeyShareProofFamilySchemaIdentifier,
+        firstPurpose: 3,
+        lastPurpose: 4,
+    }),
+    Object.freeze({
+        familySchemaIdentifier:
+            relinearizationRoundOneProofFamilySchemaIdentifier,
+        firstPurpose: 5,
+        lastPurpose: 6,
+    }),
+    Object.freeze({
+        familySchemaIdentifier:
+            relinearizationRoundTwoProofFamilySchemaIdentifier,
+        firstPurpose: 7,
+        lastPurpose: 8,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: galoisKeyShareProofFamilySchemaIdentifier,
+        firstPurpose: 9,
+        lastPurpose: 40,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: ballotValidityProofFamilySchemaIdentifier,
+        firstPurpose: 41,
+        lastPurpose: 42,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: targetShareProofFamilySchemaIdentifier,
+        firstPurpose: 43,
+        lastPurpose: 44,
+    }),
+    Object.freeze({
+        familySchemaIdentifier: vssShareLinkageProofFamilySchemaIdentifier,
+        firstPurpose: 45,
+        lastPurpose: 46,
+    }),
+    Object.freeze({
+        familySchemaIdentifier:
+            aggregateThresholdShareProofFamilySchemaIdentifier,
+        firstPurpose: 47,
+        lastPurpose: 48,
+    }),
 ]);
 
 const isAssignedRandomUse = (family: number, purpose: number): boolean => {
@@ -438,7 +488,10 @@ const isAssignedRandomUse = (family: number, purpose: number): boolean => {
     if (family === 0x0116) {
         return purpose >= 1 && purpose <= 12 && purpose !== 0;
     }
-    if (family === 0x1201 || family === 0x2120) {
+    if (family === 0x1201) {
+        return purpose === 1 || purpose === 2 || purpose === 4;
+    }
+    if (family === 0x2120) {
         return purpose <= 4;
     }
     if (family === 0x0200) {
@@ -447,12 +500,14 @@ const isAssignedRandomUse = (family: number, purpose: number): boolean => {
     if (family === 0x1630) {
         return purpose <= 2;
     }
-    const proofPurposeRange = proofRandomnessPurposeRanges.get(family);
+    const proofPurposeRange = proofRandomnessPurposeRanges.find(
+        (range) => range.familySchemaIdentifier === family,
+    );
     return (
         proofPurposeRange !== undefined &&
         (purpose === privateProofSaltPurpose ||
-            (purpose >= proofPurposeRange[0] &&
-                purpose <= proofPurposeRange[1]))
+            (purpose >= proofPurposeRange.firstPurpose &&
+                purpose <= proofPurposeRange.lastPurpose))
     );
 };
 
@@ -478,7 +533,9 @@ const parseRuntimeAssetReference = (
         (assetRole === 1 || assetRole === 2) &&
         byteLength > BigInt(maximumCopiedExecutableAssetByteLength)
     ) {
-        return fail('A runtime executable exceeds the copied-buffer ceiling.');
+        return fail(
+            'A runtime executable exceeds the copied-buffer safety bound.',
+        );
     }
     if (byteLength > BigInt(maximumFoundationVariableValueByteLength)) {
         return fail(
@@ -517,17 +574,17 @@ const parseCheckpointBoundary = (
 ): CheckpointBoundaryProfile => {
     if (
         tuple.schemaIdentifier !== checkpointBoundaryProfileSchemaIdentifier ||
-        tuple.items.length !== 3
+        tuple.items.length !== 2
     ) {
         return fail(
             'A checkpoint boundary profile has the wrong schema or shape.',
         );
     }
-    const stateSchemaIdentifier = readUnsigned16Item(tuple, 1);
+    const stateSchemaIdentifier = readUnsigned16Item(tuple, 0);
     if (stateSchemaIdentifier === 0) {
         return fail('A checkpoint boundary must name a state schema.');
     }
-    const orderedRandomUses = readNestedTupleList(tuple, 2).map(
+    const orderedRandomUses = readNestedTupleList(tuple, 1).map(
         parseCheckpointRandomUse,
     );
     for (let index = 1; index < orderedRandomUses.length; index += 1) {
@@ -545,7 +602,6 @@ const parseCheckpointBoundary = (
     }
     return Object.freeze({
         orderedRandomUses: Object.freeze(orderedRandomUses),
-        safeBoundaryOrdinal: readUnsigned32Item(tuple, 0),
         stateSchemaIdentifier,
     });
 };
@@ -568,11 +624,6 @@ const parseRuntimeOperationProfile = (
     if (operationKind === 0 || safeBoundaries.length === 0) {
         return fail('A runtime operation profile is empty or unassigned.');
     }
-    safeBoundaries.forEach((boundary, expectedOrdinal) => {
-        if (boundary.safeBoundaryOrdinal !== expectedOrdinal) {
-            fail('Checkpoint boundaries are not contiguous from zero.');
-        }
-    });
     return Object.freeze({
         operationKind,
         safeBoundaries: Object.freeze(safeBoundaries),
@@ -587,7 +638,9 @@ export const decodeRuntimeBuildManifest = (
         canonicalManifestBytes.byteLength >
             maximumRuntimeBuildManifestByteLength
     ) {
-        return fail('The runtime build manifest exceeds its byte ceiling.');
+        return fail(
+            'The runtime build manifest exceeds its small-record safety bound.',
+        );
     }
     const tuple = parseCanonicalTuple(
         canonicalManifestBytes,
@@ -688,14 +741,16 @@ export const decodeSuiteArtifactReferences = (
         canonicalSuiteRecordBytes.byteLength >
             maximumRuntimeBuildManifestByteLength
     ) {
-        return fail('The canonical suite record exceeds its byte ceiling.');
+        return fail(
+            'The canonical suite record exceeds its small-record safety bound.',
+        );
     }
     const tuple = parseCanonicalTuple(
         canonicalSuiteRecordBytes,
         suiteRecordSchemaIdentifier,
-        27,
+        22,
     );
-    const references = readNestedTupleList(tuple, 26).map((referenceTuple) => {
+    const references = readNestedTupleList(tuple, 21).map((referenceTuple) => {
         if (
             referenceTuple.schemaIdentifier !==
                 suiteArtifactReferenceSchemaIdentifier ||
@@ -711,10 +766,11 @@ export const decodeSuiteArtifactReferences = (
             artifactKind < 1 ||
             artifactKind > requiredSuiteArtifactCount ||
             byteLength === 0n ||
-            byteLength > BigInt(maximumFoundationVariableValueByteLength)
+            byteLength >
+                BigInt(maximumSuiteArtifactByteLengthForKind(artifactKind))
         ) {
             return fail(
-                'A suite artifact reference is outside its accepted profile.',
+                'A suite artifact reference is outside its accepted kind or safety bounds.',
             );
         }
         return Object.freeze({
@@ -773,13 +829,14 @@ const createFoundationVariableBytesHash = (
         value: Uint8Array;
     }>[],
     variableByteLength: bigint,
+    maximumVariableByteLength = maximumFoundationVariableValueByteLength,
 ): RuntimeBuildHashAccumulator => {
     if (
         variableByteLength < 0n ||
-        variableByteLength > BigInt(maximumFoundationVariableValueByteLength)
+        variableByteLength > BigInt(maximumVariableByteLength)
     ) {
         return fail(
-            'A foundation hash input exceeds its canonical byte ceiling.',
+            'A foundation hash input exceeds its canonical safety bound.',
         );
     }
     const expectedByteLength = Number(variableByteLength);
@@ -902,11 +959,13 @@ export const createSuiteArtifactHashAccumulator = (
             },
         ],
         byteLength,
+        maximumSuiteArtifactByteLengthForKind(artifactKind),
     );
 
 export const runtimeBuildCanonicalLimits = Object.freeze({
     hashByteLength,
     maximumCopiedExecutableAssetByteLength,
+    maximumEvaluatorProgramSetArtifactByteLength,
     maximumFoundationVariableValueByteLength,
     maximumRuntimeBuildManifestByteLength,
 });

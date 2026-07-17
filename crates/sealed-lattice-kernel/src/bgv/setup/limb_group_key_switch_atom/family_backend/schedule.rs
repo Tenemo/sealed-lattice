@@ -16,25 +16,35 @@ use rayon::prelude::*;
 
 use super::super::limb_group_statement::LimbGroupContext;
 use super::super::negacyclic_transform::NegacyclicDomain;
-use super::super::proof_field::{ProofFieldParameters, sixteen_limb_group_field_parameters};
+#[cfg(test)]
+use super::super::proof_field::ProofFieldParameters;
+use super::super::proof_field::sixteen_limb_group_field_parameters;
 use super::key_proof::{
-    KeyFriProofParameters, LinkageStatement, LinkageWitness, prove_key_fri, verify_key_fri,
+    KeyFriProofParameters, LinkageStatement, key_fri_proof_decoding_shape,
+    verify_key_fri_with_negacyclic_domain,
 };
+#[cfg(test)]
+use super::key_proof::{LinkageWitness, prove_key_fri_with_negacyclic_domain};
+#[cfg(test)]
 use super::private_randomness::PrivateProofRandomness;
-use super::proof_codec::{decode_key_proof, encode_key_proof};
-use super::statement_bridge::{
-    BridgeKeyMaterialInput, BridgeKeyPublicInput, BridgedKeyKind, bridge_key_material,
-    bridge_key_public,
-};
+use super::proof_codec::decode_key_proof;
+#[cfg(test)]
+use super::proof_codec::encode_key_proof;
+#[cfg(test)]
+use super::statement_bridge::{BridgeKeyMaterialInput, bridge_key_material};
+use super::statement_bridge::{BridgeKeyPublicInput, BridgedKeyKind, bridge_key_public};
 use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS};
 use crate::bgv::setup::ProofByteSource;
+#[cfg(test)]
+use crate::bgv::setup::trustee_evaluation_key_proof::TrusteeEvaluationKeyWitness;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, TrusteeEvaluationKeyStatement,
-    TrusteeEvaluationKeyWitness, public_key_switch_sample,
+    public_key_switch_sample,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 const SCHEDULE_MAGIC: &[u8; 8] = b"SLKSATS2";
+#[cfg(test)]
 const SCHEDULE_RANDOMNESS_DOMAIN: &str =
     "sealed-lattice/setup/key-switch-atom/schedule-private-randomness/v1";
 pub(crate) const SCHEDULE_QUERY_COUNT: usize = 80;
@@ -51,6 +61,7 @@ fn invalid_schedule(message: &str) -> CanonicalError {
 }
 // Per-column mask degree for scheduled proofs; N/4 stays inside the quotient
 // degree budget.
+#[cfg(test)]
 fn schedule_mask_degree(ring_degree: usize) -> usize {
     ring_degree / 4
 }
@@ -109,6 +120,7 @@ pub(crate) fn statement_is_key_bearing(statement: &TrusteeEvaluationKeyStatement
 
 // Each scheduled proof gets a distinct private mask/salt stream. The caller's
 // fresh seed is already bound to the statement, trustee, and setup context.
+#[cfg(test)]
 fn key_private_randomness(
     statement_hash: &[u8; 64],
     proof_randomness_seed_hex: &str,
@@ -213,16 +225,12 @@ fn bridged_kind<'a>(key: &'a EvaluationKeyShareDescriptor) -> CanonicalResult<Br
                 aggregate_residues_by_digit: &key.round_one_aggregate_diagonal,
             }
         }
-        EvaluationKeyShareKind::PublicKeyShare => {
-            return Err(invalid_schedule(
-                "public-key share descriptors do not belong to the key-bearing schedule",
-            ));
-        }
     })
 }
 
 // Prove every scheduled key with the atom family backend, returning the
 // container bytes.
+#[cfg(test)]
 pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
@@ -235,20 +243,25 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
         ));
     }
     let linkage_randomness = witness
-        .opening_randomness_by_limb()
+        .opening_randomness_by_source_limb_and_commitment_limb()
         .first()
         .ok_or_else(|| {
             invalid_schedule("the linkage witness requires the first target's opening randomness")
         })?;
     let linkage_witness = LinkageWitness {
         negative_indicator: witness.negative_indicator_coefficients(),
-        randomness_by_column: linkage_randomness,
+        randomness_by_commitment_limb: linkage_randomness,
     };
     let parameters = sixteen_limb_group_field_parameters();
     let statement_hash = statement.statement_hash();
     let ring_degree = statement.ring_degree;
+    // These immutable tables depend only on the field and ring degree. Share
+    // them across every scheduled atom instead of rebuilding and retaining two
+    // copies per concurrently active bridge/prover.
+    let negacyclic_domain = NegacyclicDomain::new(&parameters, ring_degree)?;
     let proof_parameters = KeyFriProofParameters {
         query_count: SCHEDULE_QUERY_COUNT,
+        #[cfg(test)]
         mask_degree: schedule_mask_degree(ring_degree),
     };
 
@@ -266,6 +279,7 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
                 statement_hash: &statement_hash,
                 proof_randomness_seed_hex,
                 ring_degree,
+                negacyclic_domain: &negacyclic_domain,
                 key: &statement.keys()[scheduled_proof.key_index],
                 scheduled: scheduled_proof,
                 proof_index,
@@ -306,11 +320,13 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
     Ok(container)
 }
 
+#[cfg(test)]
 struct ProveOneKey<'a, const LIMB_COUNT: usize> {
     parameters: &'a ProofFieldParameters<LIMB_COUNT>,
     statement_hash: &'a [u8; 64],
     proof_randomness_seed_hex: &'a str,
     ring_degree: usize,
+    negacyclic_domain: &'a NegacyclicDomain<'a, LIMB_COUNT>,
     key: &'a EvaluationKeyShareDescriptor,
     scheduled: &'a ScheduledProof,
     proof_index: usize,
@@ -321,13 +337,13 @@ struct ProveOneKey<'a, const LIMB_COUNT: usize> {
     proof_parameters: &'a KeyFriProofParameters,
 }
 
+#[cfg(test)]
 fn prove_one_key<const LIMB_COUNT: usize>(
     input: ProveOneKey<'_, LIMB_COUNT>,
 ) -> CanonicalResult<Vec<u8>> {
     let group_primes = &DATA_PRIMES[input.scheduled.group_start_limb
         ..input.scheduled.group_start_limb + input.scheduled.group_limb_count];
     let group = LimbGroupContext::new(input.parameters, group_primes)?;
-    let domain = NegacyclicDomain::new(input.parameters, input.ring_degree)?;
     let public_sample_by_digit =
         group_public_samples(input.key, input.scheduled, input.ring_degree);
     let component_b_by_digit = group_component_slice(input.key, input.scheduled);
@@ -335,7 +351,7 @@ fn prove_one_key<const LIMB_COUNT: usize>(
         input.parameters,
         BridgeKeyMaterialInput {
             group: &group,
-            domain: &domain,
+            domain: input.negacyclic_domain,
             component_b_by_digit: &component_b_by_digit,
             public_sample_by_digit: &public_sample_by_digit,
             secret_coefficients: input.secret,
@@ -350,9 +366,10 @@ fn prove_one_key<const LIMB_COUNT: usize>(
         input.proof_randomness_seed_hex,
         input.proof_index,
     );
-    let proof = prove_key_fri(
+    let proof = prove_key_fri_with_negacyclic_domain(
         input.parameters,
         input.ring_degree,
+        input.negacyclic_domain,
         &bridged.public,
         &bridged.source,
         input.secret,
@@ -394,14 +411,17 @@ fn copy_schedule_proof_bytes(
 
 pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
     statement: &TrusteeEvaluationKeyStatement,
-    proof_bytes: &(impl ProofByteSource + Sync + ?Sized),
+    proof_bytes: &(impl ProofByteSource + ?Sized),
 ) -> CanonicalResult<()> {
     let linkage_statement = linkage_statement(statement)?;
     let parameters = sixteen_limb_group_field_parameters();
     let statement_hash = statement.statement_hash();
     let ring_degree = statement.ring_degree;
+    // Public bridging and proof verification use the same immutable domain.
+    let negacyclic_domain = NegacyclicDomain::new(&parameters, ring_degree)?;
     let proof_parameters = KeyFriProofParameters {
         query_count: SCHEDULE_QUERY_COUNT,
+        #[cfg(test)]
         mask_degree: schedule_mask_degree(ring_degree),
     };
 
@@ -461,14 +481,13 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
             let group_primes = &DATA_PRIMES[scheduled_proof.group_start_limb
                 ..scheduled_proof.group_start_limb + scheduled_proof.group_limb_count];
             let limb_group = LimbGroupContext::new(&parameters, group_primes)?;
-            let domain = NegacyclicDomain::new(&parameters, ring_degree)?;
             let public_sample_by_digit = group_public_samples(key, scheduled_proof, ring_degree);
             let component_b_by_digit = group_component_slice(key, scheduled_proof);
             let (public, source) = bridge_key_public(
                 &parameters,
                 BridgeKeyPublicInput {
                     group: &limb_group,
-                    domain: &domain,
+                    domain: &negacyclic_domain,
                     component_b_by_digit: &component_b_by_digit,
                     public_sample_by_digit: &public_sample_by_digit,
                     kind: bridged_kind(key)?,
@@ -476,10 +495,17 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
                     group_start_limb: scheduled_proof.group_start_limb,
                 },
             )?;
-            let proof = decode_key_proof(&parameters, bytes)?;
-            let accepted = verify_key_fri(
+            let decoding_shape = key_fri_proof_decoding_shape(
+                ring_degree,
+                public.digits.len(),
+                true,
+                proof_parameters.query_count,
+            )?;
+            let proof = decode_key_proof(&parameters, bytes, &decoding_shape)?;
+            let accepted = verify_key_fri_with_negacyclic_domain(
                 &parameters,
                 ring_degree,
+                &negacyclic_domain,
                 &public,
                 &source,
                 &proof,

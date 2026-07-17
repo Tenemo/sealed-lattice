@@ -1,8 +1,6 @@
 use super::setup_proof::SetupProofMaterialBytes;
 use super::*;
-use crate::bgv::setup_helpers::{
-    compare_required_string, compare_required_u64, read_positive_usize_at_path,
-};
+use crate::bgv::setup_helpers::{compare_required_string, read_positive_usize_at_path};
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 pub(in crate::bgv::setup) const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/same-secret-bridge/proof-bytes";
@@ -93,7 +91,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
             trustee_identities: &trustee_identities,
             rns_limb_count: q_share_rns_limb_count,
             threshold_degree,
-            ring_degree,
         },
     )?;
     let statement_records = array_at_path(statement_set, &["statementRecords"])?;
@@ -166,7 +163,7 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         let validated_proof_reference = validate_same_secret_bridge_proof_reference(
             proof_bytes_hash.as_str().ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "same-secret bridge proof hash must be a string",
                 )
             })?,
@@ -212,8 +209,6 @@ mod reconstructed;
 mod statement_record;
 
 use bridge_transport::*;
-#[cfg(test)]
-pub(in crate::bgv::setup) use reconstructed::verify_and_retain_same_secret_bridge_proof_binding;
 use reconstructed::{
     StatementRecordVerificationInput, StatementSetBinding,
     verify_reconstructed_same_secret_bridge_proof,

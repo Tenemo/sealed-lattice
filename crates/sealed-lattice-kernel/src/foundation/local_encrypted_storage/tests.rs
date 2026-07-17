@@ -58,11 +58,30 @@ fn assert_schema_refused<Value>(
     }
 }
 
-fn replace_tuple_item(bytes: &[u8], index: usize, item: CanonicalItem) -> Vec<u8> {
-    let mut tuple = CanonicalTuple::decode(bytes, &CanonicalDecodeLimits::default())
-        .expect("the source tuple is canonical");
-    tuple.items[index] = item;
-    tuple.encode().expect("the mutated tuple remains canonical")
+fn fixed_lowercase_hex<const BYTE_LENGTH: usize>(value: &str) -> [u8; BYTE_LENGTH] {
+    assert_eq!(value.len(), BYTE_LENGTH * 2);
+    let mut bytes = [0_u8; BYTE_LENGTH];
+    for (byte_index, byte) in bytes.iter_mut().enumerate() {
+        let hexadecimal_pair = &value[byte_index * 2..byte_index * 2 + 2];
+        *byte = u8::from_str_radix(hexadecimal_pair, 16).expect("test hexadecimal byte");
+    }
+    bytes
+}
+
+#[test]
+fn storage_kmac256_wrapper_matches_nist_sp_800_185_sample_four() {
+    // NIST SP 800-185 supplemental KMAC examples, Sample #4.
+    let key: [u8; 32] =
+        fixed_lowercase_hex("404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f");
+    let expected: [u8; 64] = fixed_lowercase_hex(concat!(
+        "20c570c31346f703c9ac36c61c03cb64c3970d0cfc787e9b79599d273a68d2f7",
+        "f69d4cc3de9d104a351689f27cf6f5951f0103f33f4f24871024d9c27773a8dd",
+    ));
+
+    assert_eq!(
+        kmac256::<64>(&key, &[0x00, 0x01, 0x02, 0x03], b"My Tagged Application"),
+        expected
+    );
 }
 
 #[test]
@@ -146,96 +165,6 @@ fn storage_root_commitment_binds_the_root_and_every_context_field() {
 }
 
 #[test]
-fn recovery_round_trips_canonical_base32_and_rejects_mutated_bound_values() {
-    let root = test_storage_root();
-    let recovery = root.recovery_value().expect("recovery value");
-    let encoded = recovery.encode().expect("recovery value encodes");
-    assert_eq!(encoded.len(), RECOVERY_VALUE_CANONICAL_BYTE_LENGTH);
-
-    let canonical = recovery
-        .to_canonical_base32()
-        .expect("recovery value has canonical base32");
-    assert_eq!(canonical.len(), RECOVERY_VALUE_BASE32_CHARACTER_LENGTH);
-    assert!(!canonical.contains('='));
-    let ingress = CanonicalLocalStorageRecoveryIngress::decode(
-        &canonical.to_ascii_lowercase(),
-        &CanonicalDecodeLimits::default(),
-    )
-    .expect("case-insensitive ingress accepts lowercase");
-    assert_eq!(ingress.canonical_base32(), canonical.as_str());
-    let recovered = expect_valid(
-        ingress
-            .into_recovery_value()
-            .recover(test_binding(), root.storage_root_commitment_payload()),
-    );
-    assert_eq!(
-        recovered.storage_root_commitment(),
-        root.storage_root_commitment()
-    );
-
-    for invalid in [
-        canonical[..canonical.len() - 1].to_owned(),
-        format!("{}=", &canonical[..canonical.len() - 1]),
-        format!(" {}", &canonical[..canonical.len() - 1]),
-    ] {
-        assert!(
-            CanonicalLocalStorageRecoveryIngress::decode(
-                &invalid,
-                &CanonicalDecodeLimits::default()
-            )
-            .is_err()
-        );
-    }
-
-    for (index, item) in [
-        (5, CanonicalItem::hash512(test_hash(0x61).into_bytes())),
-        (
-            6,
-            CanonicalItem::fixed_bytes([0x62; ACTION_STORAGE_ROOT_BYTE_LENGTH])
-                .expect("fixed root item"),
-        ),
-        (
-            7,
-            CanonicalItem::fixed_bytes([0x63; RECOVERY_CHECKSUM_BYTE_LENGTH])
-                .expect("fixed checksum item"),
-        ),
-    ] {
-        assert_schema_refused(
-            LocalStorageRecoveryValue::decode(
-                &replace_tuple_item(&encoded, index, item),
-                &CanonicalDecodeLimits::default(),
-            ),
-            RefusalReason::WrongHashOrRoot,
-        );
-    }
-}
-
-#[test]
-fn recovery_requires_the_expected_context_and_verified_commitment() {
-    let root = test_storage_root();
-    let encoded = root
-        .recovery_value()
-        .expect("recovery value")
-        .encode()
-        .expect("recovery value encodes");
-    let decode = || {
-        LocalStorageRecoveryValue::decode(&encoded, &CanonicalDecodeLimits::default())
-            .expect("recovery value decodes")
-    };
-    assert_refused(
-        decode().recover(alternate_binding(), root.storage_root_commitment_payload()),
-        RefusalReason::WrongContext,
-    );
-    assert_refused(
-        decode().recover(
-            test_binding(),
-            StorageRootCommitmentPayload::new(test_hash(0x77)),
-        ),
-        RefusalReason::WrongHashOrRoot,
-    );
-}
-
-#[test]
 fn device_wrapping_schemas_round_trip_and_recompute_opened_roots() {
     let root = test_storage_root();
     let associated_data = root.device_wrapping_associated_data();
@@ -307,11 +236,6 @@ fn local_storage_schemas_apply_their_own_decode_limits() {
             &limits,
         )
         .map(|_| ()),
-        LocalStorageRecoveryValue::decode(
-            &vec![0; RECOVERY_VALUE_CANONICAL_BYTE_LENGTH + 1],
-            &limits,
-        )
-        .map(|_| ()),
         DeviceWrappingAssociatedData::decode(
             &vec![0; DEVICE_WRAPPING_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH + 1],
             &limits,
@@ -371,7 +295,6 @@ fn action_storage_and_local_record_inputs_round_trip_canonically() {
         LocalRecordType::CheckpointChunk,
         test_hash(0xa2),
         4,
-        2,
         Some(test_hash(0xa3)),
         19,
     )
@@ -396,7 +319,6 @@ fn action_storage_and_local_record_inputs_round_trip_canonically() {
                 LocalRecordType::CheckpointChunk,
                 test_hash(0xa2),
                 version,
-                2,
                 predecessor,
                 19,
             ),
@@ -414,11 +336,6 @@ fn all_record_identifier_assignments_are_closed_and_context_bound() {
             LocalRecordIdentifierInput::ActionRandomness,
         )
         .expect("action-randomness identifier"),
-        derive_local_record_identifier(
-            test_binding(),
-            LocalRecordIdentifierInput::PublicCoinPrivateMaterial,
-        )
-        .expect("public-coin identifier"),
         derive_local_record_identifier(
             test_binding(),
             LocalRecordIdentifierInput::SourceVssMaterial {
@@ -485,11 +402,24 @@ fn all_record_identifier_assignments_are_closed_and_context_bound() {
             },
         )
         .expect("checkpoint-chunk identifier"),
+        derive_local_record_identifier(
+            test_binding(),
+            LocalRecordIdentifierInput::CommonProofExternalMemory {
+                common_proof_environment_identifier: [0xcc; 32],
+                common_proof_runtime_binding_hash: test_hash(0xcd),
+                proof_attempt_lineage_identifier: [0xce; 32],
+                record_kind: CommonProofExternalMemoryRecordKind::DataChunk,
+                object_ordinal: 10,
+                chunk_ordinal: 11,
+                byte_offset: 12,
+            },
+        )
+        .expect("common-proof external-memory identifier"),
     ];
     let unique_identifiers = identifiers.iter().collect::<std::collections::HashSet<_>>();
     assert_eq!(unique_identifiers.len(), identifiers.len());
 
-    for record_type_code in 1..=11 {
+    for record_type_code in [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
         assert_eq!(
             LocalRecordType::from_canonical_code(record_type_code)
                 .expect("assigned record type")
@@ -498,7 +428,8 @@ fn all_record_identifier_assignments_are_closed_and_context_bound() {
         );
     }
     assert_eq!(LocalRecordType::from_canonical_code(0), None);
-    assert_eq!(LocalRecordType::from_canonical_code(12), None);
+    assert_eq!(LocalRecordType::from_canonical_code(2), None);
+    assert_eq!(LocalRecordType::from_canonical_code(13), None);
 
     let digest_items = source_digests
         .iter()
@@ -521,7 +452,329 @@ fn all_record_identifier_assignments_are_closed_and_context_bound() {
         ],
     )
     .expect("checkpoint identifier hashes");
-    assert_eq!(identifiers[9], expected_checkpoint_identifier);
+    assert_eq!(identifiers[8], expected_checkpoint_identifier);
+}
+
+#[test]
+fn common_proof_external_memory_identifier_binds_every_coordinate() {
+    let input = |environment_byte,
+                 runtime_byte,
+                 lineage_byte,
+                 record_kind,
+                 object_ordinal,
+                 chunk_ordinal,
+                 byte_offset| {
+        LocalRecordIdentifierInput::CommonProofExternalMemory {
+            common_proof_environment_identifier: [environment_byte; 32],
+            common_proof_runtime_binding_hash: test_hash(runtime_byte),
+            proof_attempt_lineage_identifier: [lineage_byte; 32],
+            record_kind,
+            object_ordinal,
+            chunk_ordinal,
+            byte_offset,
+        }
+    };
+    let baseline = input(
+        0xd1,
+        0xd2,
+        0xd3,
+        CommonProofExternalMemoryRecordKind::DataChunk,
+        4,
+        5,
+        6,
+    );
+    let baseline_identifier =
+        derive_local_record_identifier(test_binding(), baseline).expect("baseline identifier");
+    let changed_inputs = [
+        input(
+            0xe1,
+            0xd2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::DataChunk,
+            4,
+            5,
+            6,
+        ),
+        input(
+            0xd1,
+            0xe2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::DataChunk,
+            4,
+            5,
+            6,
+        ),
+        input(
+            0xd1,
+            0xd2,
+            0xe3,
+            CommonProofExternalMemoryRecordKind::DataChunk,
+            4,
+            5,
+            6,
+        ),
+        input(
+            0xd1,
+            0xd2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::SealMarker,
+            4,
+            5,
+            6,
+        ),
+        input(
+            0xd1,
+            0xd2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::DataChunk,
+            7,
+            5,
+            6,
+        ),
+        input(
+            0xd1,
+            0xd2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::DataChunk,
+            4,
+            8,
+            6,
+        ),
+        input(
+            0xd1,
+            0xd2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::DataChunk,
+            4,
+            5,
+            9,
+        ),
+    ];
+    for changed_input in changed_inputs {
+        assert_ne!(
+            derive_local_record_identifier(test_binding(), changed_input)
+                .expect("changed identifier"),
+            baseline_identifier,
+        );
+    }
+
+    derive_local_record_identifier(
+        test_binding(),
+        input(
+            0xd1,
+            0xd2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::ObjectHeader,
+            4,
+            0,
+            0,
+        ),
+    )
+    .expect("the canonical object-header coordinates derive");
+    for invalid_input in [
+        input(
+            0xd1,
+            0xd2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::ObjectHeader,
+            4,
+            1,
+            0,
+        ),
+        input(
+            0xd1,
+            0xd2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::ObjectHeader,
+            4,
+            0,
+            1,
+        ),
+        input(
+            0xd1,
+            0xd2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::DataChunk,
+            4,
+            0,
+            0,
+        ),
+        input(
+            0xd1,
+            0xd2,
+            0xd3,
+            CommonProofExternalMemoryRecordKind::SealMarker,
+            4,
+            0,
+            0,
+        ),
+    ] {
+        assert_schema_refused(
+            derive_local_record_identifier(test_binding(), invalid_input),
+            RefusalReason::WrongContext,
+        );
+    }
+
+    assert_eq!(
+        CommonProofExternalMemoryRecordKind::from_canonical_code(1),
+        Some(CommonProofExternalMemoryRecordKind::ObjectHeader),
+    );
+    assert_eq!(
+        CommonProofExternalMemoryRecordKind::from_canonical_code(2),
+        Some(CommonProofExternalMemoryRecordKind::DataChunk),
+    );
+    assert_eq!(
+        CommonProofExternalMemoryRecordKind::from_canonical_code(3),
+        Some(CommonProofExternalMemoryRecordKind::SealMarker),
+    );
+    assert_eq!(
+        CommonProofExternalMemoryRecordKind::from_canonical_code(0),
+        None,
+    );
+    assert_eq!(
+        CommonProofExternalMemoryRecordKind::from_canonical_code(4),
+        None,
+    );
+}
+
+#[test]
+fn common_proof_external_memory_records_authenticate_their_type_and_coordinates() {
+    let root = test_storage_root();
+    let action_randomness_commitment = test_hash(0xf1);
+    let identifier_input = LocalRecordIdentifierInput::CommonProofExternalMemory {
+        common_proof_environment_identifier: [0xf2; 32],
+        common_proof_runtime_binding_hash: test_hash(0xf3),
+        proof_attempt_lineage_identifier: [0xf4; 32],
+        record_kind: CommonProofExternalMemoryRecordKind::DataChunk,
+        object_ordinal: 17,
+        chunk_ordinal: 19,
+        byte_offset: 23,
+    };
+    let plaintext = b"secret external-memory data chunk";
+    let nonce = [0xf5; LOCAL_RECORD_NONCE_BYTE_LENGTH];
+    let envelope = root
+        .seal_local_record(LocalRecordSealInput {
+            action_randomness_commitment,
+            identifier_input,
+            record_version: 0,
+            predecessor_record_hash: None,
+            nonce,
+            plaintext,
+        })
+        .expect("the common-proof external-memory record seals");
+    assert_eq!(
+        expect_valid(root.open_local_record(
+            action_randomness_commitment,
+            identifier_input,
+            0,
+            None,
+            &envelope,
+        ))
+        .as_slice(),
+        plaintext,
+    );
+
+    let changed_identifier_inputs = [
+        LocalRecordIdentifierInput::CommonProofExternalMemory {
+            common_proof_environment_identifier: [0xf2; 32],
+            common_proof_runtime_binding_hash: test_hash(0xf3),
+            proof_attempt_lineage_identifier: [0xf4; 32],
+            record_kind: CommonProofExternalMemoryRecordKind::SealMarker,
+            object_ordinal: 17,
+            chunk_ordinal: 19,
+            byte_offset: 23,
+        },
+        LocalRecordIdentifierInput::CommonProofExternalMemory {
+            common_proof_environment_identifier: [0xf2; 32],
+            common_proof_runtime_binding_hash: test_hash(0xf3),
+            proof_attempt_lineage_identifier: [0xf4; 32],
+            record_kind: CommonProofExternalMemoryRecordKind::DataChunk,
+            object_ordinal: 18,
+            chunk_ordinal: 19,
+            byte_offset: 23,
+        },
+        LocalRecordIdentifierInput::CommonProofExternalMemory {
+            common_proof_environment_identifier: [0xf2; 32],
+            common_proof_runtime_binding_hash: test_hash(0xf3),
+            proof_attempt_lineage_identifier: [0xf4; 32],
+            record_kind: CommonProofExternalMemoryRecordKind::DataChunk,
+            object_ordinal: 17,
+            chunk_ordinal: 20,
+            byte_offset: 23,
+        },
+        LocalRecordIdentifierInput::CommonProofExternalMemory {
+            common_proof_environment_identifier: [0xf2; 32],
+            common_proof_runtime_binding_hash: test_hash(0xf3),
+            proof_attempt_lineage_identifier: [0xf4; 32],
+            record_kind: CommonProofExternalMemoryRecordKind::DataChunk,
+            object_ordinal: 17,
+            chunk_ordinal: 19,
+            byte_offset: 24,
+        },
+    ];
+    for changed_identifier_input in changed_identifier_inputs {
+        assert_refused(
+            root.open_local_record(
+                action_randomness_commitment,
+                changed_identifier_input,
+                0,
+                None,
+                &envelope,
+            ),
+            RefusalReason::WrongContext,
+        );
+    }
+    assert_refused(
+        root.open_local_record(
+            action_randomness_commitment,
+            LocalRecordIdentifierInput::CheckpointChunk {
+                checkpoint_identifier: test_hash(0xf6),
+                chunk_index: 19,
+                chunk_digest: test_hash(0xf7),
+            },
+            0,
+            None,
+            &envelope,
+        ),
+        RefusalReason::WrongContext,
+    );
+
+    let alternate_coordinate_envelope = root
+        .seal_local_record(LocalRecordSealInput {
+            action_randomness_commitment,
+            identifier_input: LocalRecordIdentifierInput::CommonProofExternalMemory {
+                common_proof_environment_identifier: [0xf2; 32],
+                common_proof_runtime_binding_hash: test_hash(0xf3),
+                proof_attempt_lineage_identifier: [0xf4; 32],
+                record_kind: CommonProofExternalMemoryRecordKind::DataChunk,
+                object_ordinal: 17,
+                chunk_ordinal: 20,
+                byte_offset: 23,
+            },
+            record_version: 0,
+            predecessor_record_hash: None,
+            nonce,
+            plaintext,
+        })
+        .expect("the alternate coordinate record seals");
+    assert_ne!(
+        envelope.ciphertext(),
+        alternate_coordinate_envelope.ciphertext()
+    );
+    assert_ne!(envelope.tag(), alternate_coordinate_envelope.tag());
+
+    let mut tampered_envelope = envelope;
+    tampered_envelope.tag[0] ^= 1;
+    assert_refused(
+        root.open_local_record(
+            action_randomness_commitment,
+            identifier_input,
+            0,
+            None,
+            &tampered_envelope,
+        ),
+        RefusalReason::WrongHashOrRoot,
+    );
 }
 
 #[test]
@@ -535,7 +788,6 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             action_randomness_commitment,
             identifier_input: test_checkpoint_identifier_input(&source_digests),
             record_version: 0,
-            creation_recovery_epoch: 4,
             predecessor_record_hash: None,
             nonce: [0xd4; LOCAL_RECORD_NONCE_BYTE_LENGTH],
             plaintext,
@@ -547,7 +799,6 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             action_randomness_commitment,
             test_checkpoint_identifier_input(&source_digests),
             0,
-            4,
             None,
             &envelope,
         ))
@@ -569,7 +820,6 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             test_hash(0xd5),
             test_checkpoint_identifier_input(&source_digests),
             0,
-            4,
             None,
             &envelope,
         ),
@@ -581,26 +831,12 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             action_randomness_commitment,
             test_checkpoint_identifier_input(&alternate_source_digests),
             0,
-            4,
             None,
             &envelope,
         ),
         RefusalReason::WrongContext,
     );
 
-    let mut mutated_authenticator = envelope.clone();
-    mutated_authenticator.record_authenticator[0] ^= 1;
-    assert_refused(
-        root.open_local_record(
-            action_randomness_commitment,
-            test_checkpoint_identifier_input(&source_digests),
-            0,
-            4,
-            None,
-            &mutated_authenticator,
-        ),
-        RefusalReason::WrongHashOrRoot,
-    );
     let mut mutated_ciphertext = envelope.clone();
     mutated_ciphertext.ciphertext[3] ^= 1;
     assert_refused(
@@ -608,7 +844,6 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             action_randomness_commitment,
             test_checkpoint_identifier_input(&source_digests),
             0,
-            4,
             None,
             &mutated_ciphertext,
         ),
@@ -621,7 +856,6 @@ fn local_record_sealing_round_trips_and_rejects_bound_mutations() {
             action_randomness_commitment,
             test_checkpoint_identifier_input(&source_digests),
             0,
-            4,
             None,
             &mutated_tag,
         ),
@@ -638,7 +872,6 @@ fn record_versions_derive_distinct_keys_and_enforce_predecessors_and_size_caps()
             action_randomness_commitment: test_hash(0xe2),
             identifier_input: test_checkpoint_identifier_input(&source_digests),
             record_version: 0,
-            creation_recovery_epoch: 0,
             predecessor_record_hash: None,
             nonce: [0xe3; LOCAL_RECORD_NONCE_BYTE_LENGTH],
             plaintext: b"same plaintext",
@@ -650,7 +883,6 @@ fn record_versions_derive_distinct_keys_and_enforce_predecessors_and_size_caps()
             action_randomness_commitment: test_hash(0xe2),
             identifier_input: test_checkpoint_identifier_input(&source_digests),
             record_version: 1,
-            creation_recovery_epoch: 0,
             predecessor_record_hash: Some(predecessor_hash),
             nonce: [0xe3; LOCAL_RECORD_NONCE_BYTE_LENGTH],
             plaintext: b"same plaintext",
@@ -665,7 +897,6 @@ fn record_versions_derive_distinct_keys_and_enforce_predecessors_and_size_caps()
             action_randomness_commitment: test_hash(0xe2),
             identifier_input: test_checkpoint_identifier_input(&source_digests),
             record_version: 2,
-            creation_recovery_epoch: 0,
             predecessor_record_hash: Some(version_one.envelope_hash().expect("predecessor hash")),
             nonce: [0xe4; LOCAL_RECORD_NONCE_BYTE_LENGTH],
             plaintext: &oversized_plaintext,

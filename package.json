@@ -22,7 +22,7 @@
         "test:rust:kernel": "tsx ./tools/ci/run-rust-kernel-tests.ts",
         "test:rust:kernel:heavy": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts",
         "test:rust:kernel:accepted-setup": "tsx ./tools/ci/run-rust-kernel-accepted-setup-tests.ts",
-        "test:rust:kernel:accepted-setup:ten-participant-evidence": "tsx ./tools/ci/run-rust-kernel-accepted-setup-tests.ts --ci bgv::setup::tests::accepted_setup::vss_material::ten_participant_vss_proof_bearing_collective_setup_package_passes_preterminal_accepted_setup",
+        "test:rust:kernel:accepted-setup:ten-participant-evidence": "tsx ./tools/ci/run-rust-kernel-accepted-setup-tests.ts --ci bgv::setup::tests::accepted_setup::vss_material::ten_participant_vss_structural_collective_setup_package_refuses_without_common_proof_authority",
         "test:rust:kernel:full-profile-evidence": "tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-full-profile-evidence",
         "test:rust:kernel:measurements": "tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-measurements",
         "test:rust:process-memory-guard": "tsx ./tools/ci/run-process-memory-guard-tests.ts",

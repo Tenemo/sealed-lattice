@@ -8,9 +8,15 @@ use crate::hashing::derive_canonical_object_hash;
 #[serde(tag = "command")]
 enum TranscriptCoreCommand {
     DeriveCanonicalObjectHash,
-    ValidateCanonicalFoundationValue,
-    DeriveCeremonyContextHash,
-    DeriveActionContextHash,
+    EncodeFoundationManifest,
+    VerifyFoundationManifest,
+    EncodeFoundationActionDefinition,
+    VerifyFoundationActionDefinition,
+    EncodeFoundationBoardPolicy,
+    VerifyFoundationBoardPolicy,
+    VerifyFoundationSuiteRecord,
+    VerifyFoundationCeremonyContext,
+    VerifyFoundationActionContext,
     EncodeMailboxKeyScheduleInput,
     DecodeMailboxKeyScheduleInput,
     EncodeMailboxAssociatedData,
@@ -19,7 +25,6 @@ enum TranscriptCoreCommand {
     DecodeStreamDescriptor,
     EncodeSignedMailboxEnvelope,
     DecodeSignedMailboxEnvelope,
-    DeriveMailboxKemCiphertextHash,
     DeriveMailboxEnvelopeHash,
     DeriveSetupMailboxSlotHash,
     EncodePrivateRandomCursor,
@@ -28,17 +33,13 @@ enum TranscriptCoreCommand {
     DescribeCollectiveBgvSetupParameters,
     VerifyCollectiveBgvSetup,
     VerifyPrivateVssShareEnvelope,
-    GenerateTrusteeEvaluationKeyProof,
-    ComputeSetupCommitmentFromOpening,
-    ComputeVssCommittedMaterialCommitment,
-    GenerateVssShareLinkageProof,
-    GenerateSameSecretBridgeProof,
+    DeriveSuccinctSetupStatementHash,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
     serde_json::from_value(json!({ "command": command_name })).map_err(|_| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("unsupported command: {command_name}"),
         )
     })
@@ -51,7 +52,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "command must be a string",
             )
         })?;
@@ -61,7 +62,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         TranscriptCoreCommand::DeriveCanonicalObjectHash => {
             let value = request.get("value").ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "value field is required",
                 )
             })?;
@@ -70,14 +71,32 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
                 "canonicalObjectHash": derive_canonical_object_hash(value)?,
             }))
         }
-        TranscriptCoreCommand::ValidateCanonicalFoundationValue => {
-            super::foundation_command::validate_canonical_foundation_value(&request)
+        TranscriptCoreCommand::EncodeFoundationManifest => {
+            super::foundation_command::encode_foundation_manifest(&request)
         }
-        TranscriptCoreCommand::DeriveCeremonyContextHash => {
-            super::foundation_command::derive_ceremony_context_hash(&request)
+        TranscriptCoreCommand::VerifyFoundationManifest => {
+            super::foundation_command::verify_foundation_manifest(&request)
         }
-        TranscriptCoreCommand::DeriveActionContextHash => {
-            super::foundation_command::derive_action_context_hash(&request)
+        TranscriptCoreCommand::EncodeFoundationActionDefinition => {
+            super::foundation_command::encode_foundation_action_definition(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationActionDefinition => {
+            super::foundation_command::verify_foundation_action_definition(&request)
+        }
+        TranscriptCoreCommand::EncodeFoundationBoardPolicy => {
+            super::foundation_command::encode_foundation_board_policy(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationBoardPolicy => {
+            super::foundation_command::verify_foundation_board_policy(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationSuiteRecord => {
+            super::foundation_command::verify_foundation_suite_record(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationCeremonyContext => {
+            super::foundation_command::verify_foundation_ceremony_context(&request)
+        }
+        TranscriptCoreCommand::VerifyFoundationActionContext => {
+            super::foundation_command::verify_foundation_action_context(&request)
         }
         TranscriptCoreCommand::EncodeMailboxKeyScheduleInput => {
             super::mailbox_command::encode_mailbox_key_schedule_input(&request)
@@ -103,9 +122,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         TranscriptCoreCommand::DecodeSignedMailboxEnvelope => {
             super::mailbox_command::decode_signed_mailbox_envelope(&request)
         }
-        TranscriptCoreCommand::DeriveMailboxKemCiphertextHash => {
-            super::mailbox_command::derive_mailbox_kem_ciphertext_hash_command(&request)
-        }
         TranscriptCoreCommand::DeriveMailboxEnvelopeHash => {
             super::mailbox_command::derive_mailbox_envelope_hash_command(&request)
         }
@@ -125,11 +141,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         TranscriptCoreCommand::DescribeBgvRnsParameters
         | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
-        | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
-        | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
-        | TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment
-        | TranscriptCoreCommand::GenerateVssShareLinkageProof
-        | TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
+        | TranscriptCoreCommand::DeriveSuccinctSetupStatementHash => {
             run_bgv_command(command, &request)
         }
     }
@@ -145,13 +157,13 @@ pub(super) fn run_accepted_setup_command_inner(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "command must be a string",
             )
         })?;
     if parse_transcript_core_command(command)? != TranscriptCoreCommand::VerifyCollectiveBgvSetup {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "accepted-setup session can execute only VerifyCollectiveBgvSetup",
         ));
     }
@@ -172,20 +184,8 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::VerifyPrivateVssShareEnvelope => {
             crate::bgv::setup::verify_private_vss_share_envelope_from_request(request)
         }
-        TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof => {
-            crate::bgv::setup::generate_trustee_evaluation_key_proof_from_request(request)
-        }
-        TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
-            crate::bgv::setup::compute_setup_commitment_from_opening_request(request)
-        }
-        TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment => {
-            crate::bgv::setup::compute_vss_committed_material_commitment_request(request)
-        }
-        TranscriptCoreCommand::GenerateVssShareLinkageProof => {
-            crate::bgv::setup::generate_vss_share_linkage_proof_from_request(request)
-        }
-        TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
-            crate::bgv::setup::generate_same_secret_bridge_proof_from_request(request)
+        TranscriptCoreCommand::DeriveSuccinctSetupStatementHash => {
+            crate::bgv::setup::derive_succinct_setup_statement_hash_from_request(request)
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }

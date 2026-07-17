@@ -16,8 +16,6 @@ pub(in super::super) fn setup_commitment_full_value(commitment: &SetupCommitment
         "ringDegree": commitment.ring_degree,
         "commitmentLimbs": commitment.limbs.iter().map(|limb| {
             json!({
-                "commitmentModulusIndex": limb.commitment_modulus_index,
-                "modulus": limb.modulus,
                 "rows": limb.rows,
             })
         }).collect::<Vec<_>>()
@@ -47,27 +45,12 @@ pub(in super::super) fn parse_setup_commitment_full_value(
         ));
     }
 
-    let mut seen_limb_indices = Vec::new();
     let mut limbs = Vec::with_capacity(commitment_limb_values.len());
-    for limb_value in commitment_limb_values {
-        let commitment_modulus_index = read_usize(limb_value, "commitmentModulusIndex")?;
-        if !SETUP_COMMITMENT_MODULUS_LIMB_INDICES.contains(&commitment_modulus_index) {
-            return Err(invalid_commitment_input(
-                "setup commitment limb uses a modulus outside the accepted commitment parameters",
-            ));
-        }
-        if seen_limb_indices.contains(&commitment_modulus_index) {
-            return Err(invalid_commitment_input(
-                "setup commitment limbs must have distinct commitmentModulusIndex values",
-            ));
-        }
-        seen_limb_indices.push(commitment_modulus_index);
-        let modulus = read_u64(limb_value, "modulus")?;
-        if DATA_PRIMES.get(commitment_modulus_index) != Some(&modulus) {
-            return Err(invalid_commitment_input(
-                "setup commitment limb modulus does not match the selected commitment modulus",
-            ));
-        }
+    for (limb_value, commitment_modulus_index) in commitment_limb_values
+        .iter()
+        .zip(SETUP_COMMITMENT_MODULUS_LIMB_INDICES)
+    {
+        let modulus = DATA_PRIMES[commitment_modulus_index];
         let row_values = limb_value
             .get("rows")
             .and_then(Value::as_array)
@@ -87,7 +70,6 @@ pub(in super::super) fn parse_setup_commitment_full_value(
             rows,
         });
     }
-    limbs.sort_by_key(|limb| limb.commitment_modulus_index);
 
     Ok(SetupCommitmentValue {
         source_rns_limb_index,
@@ -105,8 +87,6 @@ fn setup_commitment_root_payload(commitment: &SetupCommitmentValue) -> Value {
         "ringDegree": commitment.ring_degree,
         "commitmentLimbs": commitment.limbs.iter().map(|limb| {
             json!({
-                "commitmentModulusIndex": limb.commitment_modulus_index,
-                "modulus": limb.modulus,
                 "rowCoefficientHash512": limb.rows.iter().map(|row| {
                     coefficient_vector_hash512(
                         row,
@@ -131,65 +111,6 @@ pub(super) fn read_usize(value: &Value, field_name: &str) -> CanonicalResult<usi
     let value = read_u64(value, field_name)?;
     usize::try_from(value)
         .map_err(|_| invalid_commitment_input(format!("{field_name} does not fit usize")))
-}
-
-pub(super) fn read_unsigned_message_coefficients(
-    value: &Value,
-    field_name: &str,
-) -> CanonicalResult<Vec<u128>> {
-    let coefficient_values = value
-        .get(field_name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            invalid_commitment_input(format!(
-                "{field_name} must be an array of unsigned integers"
-            ))
-        })?;
-    coefficient_values
-        .iter()
-        .enumerate()
-        .map(|(coefficient_index, coefficient_value)| {
-            coefficient_value.as_u64().map(u128::from).ok_or_else(|| {
-                invalid_commitment_input(format!(
-                    "{field_name}[{coefficient_index}] must be a non-negative integer"
-                ))
-            })
-        })
-        .collect()
-}
-
-pub(super) fn read_randomness_by_column(
-    value: &Value,
-    field_name: &str,
-) -> CanonicalResult<Vec<Vec<i128>>> {
-    let column_values = value
-        .get(field_name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            invalid_commitment_input(format!("{field_name} must be an array of columns"))
-        })?;
-    column_values
-        .iter()
-        .enumerate()
-        .map(|(column_index, column_value)| {
-            let coefficient_values = column_value.as_array().ok_or_else(|| {
-                invalid_commitment_input(format!(
-                    "{field_name}[{column_index}] must be an array of signed integers"
-                ))
-            })?;
-            coefficient_values
-                .iter()
-                .enumerate()
-                .map(|(coefficient_index, coefficient_value)| {
-                    coefficient_value.as_i64().map(i128::from).ok_or_else(|| {
-                        invalid_commitment_input(format!(
-                            "{field_name}[{column_index}][{coefficient_index}] must be a signed integer"
-                        ))
-                    })
-                })
-                .collect()
-        })
-        .collect()
 }
 
 fn read_residue_row(value: &Value, ring_degree: usize, modulus: u64) -> CanonicalResult<Vec<u64>> {

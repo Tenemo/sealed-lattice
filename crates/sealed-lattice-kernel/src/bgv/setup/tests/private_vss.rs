@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
 
 const PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE: usize = 128;
 
@@ -73,8 +74,6 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
     let source_trustee_commitment_root = private_envelope["sourceTrusteeCommitmentRoot"]
         .as_str()
         .expect("source trustee commitment root");
-    let limb_opening = &private_envelope["rnsShareOpenings"][0];
-    let rns_prime = limb_opening["rnsPrime"].as_u64().expect("RNS prime");
     let coefficient_messages_by_shamir_index = vec![vec![0_u64; ring_degree]; 4];
     let opening_randomness_by_shamir_index = (0..4_u64)
         .map(|shamir_coefficient_index| {
@@ -112,20 +111,17 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
             setup_context: &setup_context,
             public_matrix_seed_hash,
             private_envelope_aad_hash,
-            source_trustee_identity: "trustee-0",
             source_trustee_roster_position: 0,
-            recipient_identity: "trustee-2",
             recipient_roster_position: 2,
             source_trustee_commitment_root,
             rns_limb_index: 0,
-            rns_prime,
-            ring_degree,
             coefficient_commitment_roots: &coefficient_commitment_roots,
             share_values: &share_values,
             coefficient_commitments: &coefficient_commitments,
             witness: &PrivateVssShareSuccinctProofWitness {
                 coefficient_messages_by_shamir_index,
-                opening_randomness_by_shamir_index,
+                opening_randomness_by_shamir_index_and_commitment_limb:
+                    opening_randomness_by_shamir_index,
                 carry_witnesses: vec![0_i128; ring_degree],
             },
             proof_randomness_seed_hex: &proof_randomness_seed_hex,
@@ -137,14 +133,10 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
             setup_context: &setup_context,
             public_matrix_seed_hash,
             private_envelope_aad_hash,
-            source_trustee_identity: "trustee-0",
             source_trustee_roster_position: 0,
-            recipient_identity: "trustee-2",
             recipient_roster_position: 2,
             source_trustee_commitment_root,
             rns_limb_index: 0,
-            rns_prime,
-            ring_degree,
             coefficient_commitment_roots: &coefficient_commitment_roots,
             share_values: &share_values,
             coefficient_commitments: &coefficient_commitments,
@@ -173,9 +165,7 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
     let source_trustee_commitment_root = private_envelope["sourceTrusteeCommitmentRoot"]
         .as_str()
         .expect("source trustee commitment root");
-    let rns_prime = private_envelope["rnsShareOpenings"][0]["rnsPrime"]
-        .as_u64()
-        .expect("RNS prime");
+    let rns_prime = DATA_PRIMES[0];
 
     // One committed degree-(t-1) polynomial, shared by every recipient: four
     // non-zero Shamir coefficient messages and their commitments.
@@ -235,27 +225,23 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
             "recipientRosterPosition": recipient_roster_position,
         }))
         .expect("private VSS proof randomness seed");
-        let recipient_identity = format!("trustee-{recipient_roster_position}");
         let proof_bytes_hash = private_vss_share_succinct_proof_bytes_hash_for_tests(
             PrivateVssShareSuccinctProofGenerationInput {
                 setup_context: &setup_context,
                 public_matrix_seed_hash,
                 private_envelope_aad_hash,
-                source_trustee_identity: "trustee-0",
                 source_trustee_roster_position: 0,
-                recipient_identity: &recipient_identity,
                 recipient_roster_position: recipient_roster_position as u64,
                 source_trustee_commitment_root,
                 rns_limb_index: 0,
-                rns_prime,
-                ring_degree,
                 coefficient_commitment_roots: &coefficient_commitment_roots,
                 share_values: &share_values,
                 coefficient_commitments: &coefficient_commitments,
                 witness: &PrivateVssShareSuccinctProofWitness {
                     coefficient_messages_by_shamir_index: coefficient_messages_by_shamir_index
                         .clone(),
-                    opening_randomness_by_shamir_index: opening_randomness_by_shamir_index.clone(),
+                    opening_randomness_by_shamir_index_and_commitment_limb:
+                        opening_randomness_by_shamir_index.clone(),
                     carry_witnesses,
                 },
                 proof_randomness_seed_hex: &proof_randomness_seed_hex,
@@ -272,14 +258,10 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
                 setup_context: &setup_context,
                 public_matrix_seed_hash,
                 private_envelope_aad_hash,
-                source_trustee_identity: "trustee-0",
                 source_trustee_roster_position: 0,
-                recipient_identity: &recipient_identity,
                 recipient_roster_position: recipient_roster_position as u64,
                 source_trustee_commitment_root,
                 rns_limb_index: 0,
-                rns_prime,
-                ring_degree,
                 coefficient_commitment_roots: &coefficient_commitment_roots,
                 share_values: &share_values,
                 coefficient_commitments: &coefficient_commitments,
@@ -314,9 +296,6 @@ fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_openi
     let source_trustee_commitment_root = private_envelope["sourceTrusteeCommitmentRoot"]
         .as_str()
         .expect("source trustee commitment root");
-    let limb_opening = &private_envelope["rnsShareOpenings"][0];
-    let rns_prime = limb_opening["rnsPrime"].as_u64().expect("RNS prime");
-
     let opening_randomness_by_shamir_index = (0..4_u64)
         .map(|shamir_coefficient_index| {
             randomness_fixture(0, shamir_coefficient_index, ring_degree)
@@ -366,20 +345,17 @@ fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_openi
             setup_context: &setup_context,
             public_matrix_seed_hash,
             private_envelope_aad_hash,
-            source_trustee_identity: "trustee-0",
             source_trustee_roster_position: 0,
-            recipient_identity: "trustee-2",
             recipient_roster_position: 2,
             source_trustee_commitment_root,
             rns_limb_index: 0,
-            rns_prime,
-            ring_degree,
             coefficient_commitment_roots: &coefficient_commitment_roots,
             share_values: &share_values,
             coefficient_commitments: &coefficient_commitments,
             witness: &PrivateVssShareSuccinctProofWitness {
                 coefficient_messages_by_shamir_index,
-                opening_randomness_by_shamir_index,
+                opening_randomness_by_shamir_index_and_commitment_limb:
+                    opening_randomness_by_shamir_index,
                 carry_witnesses: vec![0_i128; ring_degree],
             },
             proof_randomness_seed_hex: &proof_randomness_seed_hex,
@@ -443,12 +419,13 @@ fn private_vss_share_envelope_verifier_refuses_unauthenticated_proof_material_re
         request["privateEnvelope"]["rnsShareOpenings"][0]["privateVssShareProofBytesHash"]
             .as_str()
             .expect("private VSS proof bytes hash");
-    let _removed_proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
-        "vss-opening-carry",
-        proof_bytes_hash,
-    )
-    .expect("private VSS proof material store lookup")
-    .expect("private VSS proof material was retained");
+    let _removed_proof_material =
+        crate::bgv::setup::take_authenticated_canonical_proof_material_bytes(
+            "vss-opening-carry",
+            proof_bytes_hash,
+        )
+        .expect("private VSS proof material store lookup")
+        .expect("private VSS proof material was retained");
 
     assert_private_vss_share_proof_refusal(&request);
 }
@@ -459,9 +436,7 @@ fn private_vss_share_envelope_verifier_refuses_share_value_drift_after_proof_gen
         PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
         "refuses-share-value-drift-after-proof-generation",
     );
-    let rns_prime = request["privateEnvelope"]["rnsShareOpenings"][0]["rnsPrime"]
-        .as_u64()
-        .expect("RNS prime");
+    let rns_prime = DATA_PRIMES[0];
     let first_share_value = request["privateEnvelope"]["rnsShareOpenings"][0]["shareValues"][0]
         .as_u64()
         .expect("share value");
@@ -495,7 +470,9 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
     .expect("roster hash");
     let setup_parameters_hash =
         crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
-            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(10),
+            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
+                u64::from(crate::foundation::PROTOTYPE_PARTICIPANT_COUNT),
+            ),
         )
         .expect("roster-derived setup parameters hash");
     let setup_parameters_hash = setup_parameters_hash.as_str();
@@ -506,7 +483,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         "rosterHash": roster_hash,
         "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
-        "participantCount": 10,
+        "participantCount": u64::from(crate::foundation::PROTOTYPE_PARTICIPANT_COUNT),
     });
     let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(&setup_context)
         .expect("setup context hash");
@@ -537,7 +514,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 rns_prime,
                 ring_degree,
             );
-            let randomness_by_column =
+            let randomness_by_commitment_limb =
                 randomness_fixture(rns_limb_index, shamir_coefficient_index, ring_degree);
             let coefficient_message_wide = coefficient_message
                 .iter()
@@ -548,7 +525,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 rns_limb_index,
                 shamir_coefficient_index,
                 &coefficient_message_wide,
-                &randomness_by_column,
+                &randomness_by_commitment_limb,
                 ring_degree,
             )
             .expect("setup commitment");
@@ -562,7 +539,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 "commitmentRoot": coefficient_commitment_roots
                     .last()
                     .expect("coefficient commitment root"),
-                "randomnessByColumn": randomness_by_column,
+                "randomnessByCommitmentLimb": randomness_by_commitment_limb,
             }));
             coefficient_messages_by_shamir_index.push(coefficient_message);
         }
@@ -577,7 +554,6 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         rns_share_openings.push(serde_json::json!({
             "objectType": "PrivateVssShareLimbOpening",
             "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
             "shareValues": share_values,
             "carryWitnessesDecimal": carry_witnesses_decimal,
             "aggregateOpening": {
@@ -656,10 +632,7 @@ fn proof_shaped_private_vss_share_envelope_request(
         let limb_object = limb_opening
             .as_object_mut()
             .expect("private envelope limb opening object");
-        let rns_prime = limb_object
-            .get("rnsPrime")
-            .and_then(serde_json::Value::as_u64)
-            .expect("RNS prime");
+        let rns_prime = DATA_PRIMES[rns_limb_index];
         let share_values = limb_object
             .get("shareValues")
             .and_then(serde_json::Value::as_array)
@@ -723,20 +696,17 @@ fn proof_shaped_private_vss_share_envelope_request(
                     setup_context: &setup_context,
                     public_matrix_seed_hash: &public_matrix_seed_hash,
                     private_envelope_aad_hash: &private_envelope_aad_hash,
-                    source_trustee_identity: "trustee-0",
                     source_trustee_roster_position: 0,
-                    recipient_identity: "trustee-2",
                     recipient_roster_position: 2,
                     source_trustee_commitment_root: &source_trustee_commitment_root,
                     rns_limb_index,
-                    rns_prime,
-                    ring_degree,
                     coefficient_commitment_roots: &coefficient_commitment_roots,
                     share_values: &share_values,
                     coefficient_commitments: &coefficient_commitments,
                     witness: &PrivateVssShareSuccinctProofWitness {
                         coefficient_messages_by_shamir_index,
-                        opening_randomness_by_shamir_index,
+                        opening_randomness_by_shamir_index_and_commitment_limb:
+                            opening_randomness_by_shamir_index,
                         carry_witnesses,
                     },
                     proof_randomness_seed_hex: &proof_randomness_seed_hex,
@@ -773,21 +743,27 @@ fn randomness_fixture(
     rns_limb_index: usize,
     shamir_coefficient_index: u64,
     ring_degree: usize,
-) -> Vec<Vec<i128>> {
-    (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-        .map(|randomness_column_index| {
-            (0..ring_degree)
-                .map(|coefficient_position| {
-                    match (rns_limb_index
-                        + shamir_coefficient_index as usize
-                        + randomness_column_index
-                        + coefficient_position)
-                        % 3
-                    {
-                        0 => -1,
-                        1 => 0,
-                        _ => 1,
-                    }
+) -> Vec<Vec<Vec<i128>>> {
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+        .iter()
+        .enumerate()
+        .map(|(commitment_limb_position, _)| {
+            (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+                .map(|randomness_column_index| {
+                    (0..ring_degree)
+                        .map(|coefficient_position| {
+                            let support_position = rns_limb_index
+                                + shamir_coefficient_index as usize
+                                + commitment_limb_position
+                                + randomness_column_index
+                                + coefficient_position;
+                            match support_position % 3 {
+                                0 => -1,
+                                1 => 0,
+                                _ => 1,
+                            }
+                        })
+                        .collect()
                 })
                 .collect()
         })
@@ -829,7 +805,7 @@ fn aggregate_opening_columns(
     coefficient_openings: &[serde_json::Value],
     recipient_roster_position: usize,
     ring_degree: usize,
-) -> Vec<Vec<i128>> {
+) -> Vec<Vec<Vec<i128>>> {
     let trustee_point = i128::try_from(recipient_roster_position + 1).expect("trustee point");
     let mut trustee_point_powers = Vec::new();
     let mut power = 1_i128;
@@ -841,23 +817,38 @@ fn aggregate_opening_columns(
     let first_opening = coefficient_openings
         .first()
         .expect("coefficient openings must be non-empty");
-    let randomness_width = first_opening["randomnessByColumn"]
+    let commitment_limb_count = first_opening["randomnessByCommitmentLimb"]
+        .as_array()
+        .expect("randomness by commitment limb")
+        .len();
+    let randomness_width = first_opening["randomnessByCommitmentLimb"][0]
         .as_array()
         .expect("randomness columns")
         .len();
-    let mut aggregate_columns = vec![vec![0_i128; ring_degree]; randomness_width];
+    let mut aggregate_columns =
+        vec![vec![vec![0_i128; ring_degree]; randomness_width]; commitment_limb_count];
     for (opening, trustee_point_power) in coefficient_openings.iter().zip(trustee_point_powers) {
-        let randomness_columns = opening["randomnessByColumn"]
+        let randomness_by_commitment_limb = opening["randomnessByCommitmentLimb"]
             .as_array()
-            .expect("randomness columns");
-        for (column_index, randomness_column) in randomness_columns.iter().enumerate() {
-            let coefficients = randomness_column.as_array().expect("randomness column");
-            for (coefficient_position, coefficient) in coefficients.iter().enumerate() {
-                aggregate_columns[column_index][coefficient_position] += coefficient
-                    .as_i64()
-                    .map(i128::from)
-                    .expect("randomness coefficient")
-                    * trustee_point_power;
+            .expect("randomness by commitment limb");
+        for (commitment_limb_position, randomness_columns) in
+            randomness_by_commitment_limb.iter().enumerate()
+        {
+            for (column_index, randomness_column) in randomness_columns
+                .as_array()
+                .expect("randomness columns")
+                .iter()
+                .enumerate()
+            {
+                let coefficients = randomness_column.as_array().expect("randomness column");
+                for (coefficient_position, coefficient) in coefficients.iter().enumerate() {
+                    aggregate_columns[commitment_limb_position][column_index]
+                        [coefficient_position] += coefficient
+                        .as_i64()
+                        .map(i128::from)
+                        .expect("randomness coefficient")
+                        * trustee_point_power;
+                }
             }
         }
     }

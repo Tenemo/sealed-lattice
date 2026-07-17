@@ -6,38 +6,30 @@ use super::prover::prove_evaluation_key_share;
 use super::relation::{
     EvaluationKeyShareKind, PrivateVssShareStatement, SetupProofStatement,
     SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
-    generate_development_public_key_share_instance, generate_development_trustee_instance,
-    generate_development_trustee_instance_with_linkage,
+    generate_development_trustee_instance, generate_development_trustee_instance_with_linkage,
     round_one_aggregate_diagonal_from_components,
 };
 use super::verifier::verify_evaluation_key_share;
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::accepted_setup::describe_collective_bgv_setup_parameters;
 use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_ROW_COUNT, SetupCommitmentLimb,
-    SetupCommitmentValue, setup_commitment_full_value, setup_commitment_root,
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+    SETUP_COMMITMENT_ROW_COUNT, SetupCommitmentLimb, SetupCommitmentValue,
+    setup_commitment_full_value, setup_commitment_root,
 };
 use crate::bgv::setup::setup_proof::ProofByteSource;
-use crate::hashing::derive_canonical_object_hash;
+use crate::foundation::PROTOTYPE_PARTICIPANT_COUNT;
 
 use super::relation::{LimbColumnLayout, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL};
 use super::{
     CONSISTENCY_REPETITIONS, DEEP_EVALUATION_POINT_COUNT, DOMAIN_BLOWUP, LOW_DEGREE_QUERY_COUNT,
 };
 
-use super::{
-    generate_target_decryption_share_proof_bytes_from_request,
-    generate_trustee_evaluation_key_proof_from_request, prover,
-    verify_target_decryption_share_proof_bytes_from_request,
-};
+use super::prover;
 
 mod codec_and_commands;
 mod relation_algebra;
-mod same_secret_bridge;
 mod soundness;
-mod target_decryption_share;
-mod verification;
-mod vss_share_linkage;
 
 const SMALL_RING_DEGREE: usize = 128;
 // Smallest ring whose rate-1/2 low-degree claim bound folds past the adaptive
@@ -111,450 +103,113 @@ fn round_one(level: usize) -> (EvaluationKeyShareKind, usize) {
     (EvaluationKeyShareKind::RelinearizationRoundOne, level)
 }
 
-fn round_two(level: usize) -> (EvaluationKeyShareKind, usize) {
-    (EvaluationKeyShareKind::RelinearizationRoundTwo, level)
-}
-
-fn rotation(galois_element: usize, level: usize) -> (EvaluationKeyShareKind, usize) {
-    (
-        EvaluationKeyShareKind::GaloisRotation { galois_element },
-        level,
-    )
-}
-
 fn repeated_hash(byte_pair: &str) -> String {
     byte_pair.repeat(64)
-}
-
-// A committed-material VSS commitment plus its holder regeneration seed, for
-// the material-binding families' fixtures (share-linkage, same-secret bridge,
-// target-decryption). The commitment itself carries the context hash used to
-// rebuild byte-identical trees.
-struct TestCommittedMaterialCommitment {
-    commitment: super::relation::VssShareLinkageCommitment,
-    commitment_value: serde_json::Value,
-    commitment_root: String,
-    material_seed_hex: String,
-}
-
-fn test_committed_material_commitment(
-    commitment_role: &str,
-    commitment_context: serde_json::Value,
-    rns_limb_index: usize,
-    rns_prime: u64,
-    ring_degree: usize,
-    message_coefficients: &[u64],
-    message_coefficient_bound: u64,
-) -> TestCommittedMaterialCommitment {
-    let context_bytes =
-        serde_json::to_vec(&commitment_context).expect("serialize commitment context for seed");
-    let material_seed_hex = crate::hashing::hash512_hex(
-        "sealed-lattice/test/vss-committed-material-seed",
-        &[commitment_role.as_bytes(), &context_bytes],
-    );
-    let computation = crate::bgv::setup::compute_vss_committed_material_commitment(
-        crate::bgv::setup::VssCommittedMaterialCommitmentInput {
-            commitment_role,
-            commitment_context: &commitment_context,
-            rns_limb_index,
-            rns_prime,
-            ring_degree,
-            message_coefficients,
-            message_coefficient_bound,
-            material_seed_hex: &material_seed_hex,
-        },
-    )
-    .expect("committed-material commitment");
-    let material_roots_by_commitment_field = computation.commitment["commitmentFields"]
-        .as_array()
-        .expect("commitment fields")
-        .iter()
-        .map(|field| {
-            let bytes = crate::transcript_core::decode_hex(
-                field["materialRootHex"]
-                    .as_str()
-                    .expect("material root hex"),
-            )
-            .expect("material root bytes");
-            let digest: super::merkle_commitment::MerkleDigest =
-                bytes.as_slice().try_into().expect("full Merkle digest");
-            digest
-        })
-        .collect();
-
-    TestCommittedMaterialCommitment {
-        commitment: super::relation::VssShareLinkageCommitment {
-            commitment_context_hash: computation.commitment["commitmentContextHash"]
-                .as_str()
-                .expect("commitment context hash")
-                .to_string(),
-            material_roots_by_commitment_field,
-        },
-        commitment_value: computation.commitment,
-        commitment_root: computation.commitment_root,
-        material_seed_hex,
-    }
 }
 
 fn zero_setup_commitment_for_tests(
     source_rns_limb_index: usize,
     shamir_coefficient_index: u64,
+    ring_degree: usize,
 ) -> SetupCommitmentValue {
     SetupCommitmentValue {
         source_rns_limb_index,
         shamir_coefficient_index,
-        ring_degree: SMALL_RING_DEGREE,
+        ring_degree,
         limbs: (0..SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
             .map(|commitment_modulus_index| SetupCommitmentLimb {
                 commitment_modulus_index,
                 modulus: DATA_PRIMES[commitment_modulus_index],
-                rows: vec![vec![0_u64; SMALL_RING_DEGREE]; SETUP_COMMITMENT_ROW_COUNT],
+                rows: vec![vec![0_u64; ring_degree]; SETUP_COMMITMENT_ROW_COUNT],
             })
             .collect(),
     }
 }
 
-fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
+fn private_vss_statement_for_ring_degree(ring_degree: usize) -> TrusteeEvaluationKeyStatement {
     let source_trustee_commitment_root = repeated_hash("33");
     let private_envelope_aad_hash = repeated_hash("44");
+    let coefficient_commitments = (0..4_u64)
+        .map(|shamir_coefficient_index| {
+            zero_setup_commitment_for_tests(0, shamir_coefficient_index, ring_degree)
+        })
+        .collect::<Vec<_>>();
+    let coefficient_commitment_roots = coefficient_commitments
+        .iter()
+        .map(|commitment| setup_commitment_root(commitment).expect("zero commitment root"))
+        .collect();
     TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             setup_context_hash: repeated_hash("11"),
-            trustee_identity: "trustee-0".to_string(),
             trustee_roster_position: 0,
             binding_roots: Vec::new(),
         },
-        ring_degree: SMALL_RING_DEGREE,
+        ring_degree,
         proof: SetupProofStatement::PrivateVssShare(PrivateVssShareStatement {
             public_matrix_seed_hash: repeated_hash("66"),
             private_envelope_aad_hash,
-            source_trustee_identity: "trustee-0".to_string(),
             source_trustee_roster_position: 0,
-            recipient_identity: "trustee-2".to_string(),
             recipient_roster_position: 2,
             source_trustee_commitment_root,
             source_rns_limb_index: 0,
-            share_values: vec![0_u64; SMALL_RING_DEGREE],
-            coefficient_commitment_roots: vec![
-                repeated_hash("77"),
-                repeated_hash("88"),
-                repeated_hash("99"),
-                repeated_hash("aa"),
-            ],
-            coefficient_commitments: (0..4_u64)
-                .map(|shamir_coefficient_index| {
-                    zero_setup_commitment_for_tests(0, shamir_coefficient_index)
-                })
-                .collect(),
+            share_values: vec![0_u64; ring_degree],
+            coefficient_commitment_roots,
+            coefficient_commitments,
         }),
     }
 }
 
-fn statement_request_value(
-    statement: &super::relation::TrusteeEvaluationKeyStatement,
-) -> serde_json::Value {
-    let keys = statement
-        .keys()
-        .iter()
-        .map(|key| {
-            let mut entry = serde_json::json!({
-                "proofFamily": match key.kind {
-                    EvaluationKeyShareKind::RelinearizationRoundOne => "relinearization-round-one",
-                    EvaluationKeyShareKind::RelinearizationRoundTwo => "relinearization-round-two",
-                    EvaluationKeyShareKind::GaloisRotation { .. } => "galois-rotation",
-                    EvaluationKeyShareKind::PublicKeyShare => "public-key-share",
-                },
-                "level": key.level,
-                "componentBByDigit": key.component_b_by_digit,
-            });
-            if let EvaluationKeyShareKind::GaloisRotation { galois_element } = key.kind {
-                entry["rotation"] = serde_json::json!(galois_element);
-            }
-            if !key.round_one_aggregate_diagonal.is_empty() {
-                entry["roundOneAggregateDiagonal"] =
-                    serde_json::json!(key.round_one_aggregate_diagonal);
-            }
-            entry
-        })
-        .collect::<Vec<_>>();
-    let mut context_value = serde_json::json!({
-        "setupContextHash": statement.context.setup_context_hash,
-        "trusteeIdentity": statement.context.trustee_identity,
-        "trusteeRosterPosition": statement.context.trustee_roster_position,
-    });
-    for (binding_label, binding_root) in statement
-        .family_shape()
-        .binding_labels()
-        .iter()
-        .zip(&statement.context.binding_roots)
-    {
-        context_value[binding_label] = serde_json::json!(binding_root);
-    }
-    let mut request = serde_json::json!({
-        "context": context_value,
-        "ringDegree": statement.ring_degree,
-        "keys": keys,
-    });
-    if let Some(linkage) = statement.same_secret_linkage() {
-        request["sameSecretLinkage"] = serde_json::json!({
-            "publicMatrixSeedHash": linkage.public_matrix_seed_hash,
-            "commitments": linkage
-                .commitments
-                .iter()
-                .map(setup_commitment_full_value)
-                .collect::<Vec<_>>(),
-        });
-    }
-
-    request
+fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
+    private_vss_statement_for_ring_degree(SMALL_RING_DEGREE)
 }
 
-fn proof_generation_request(
-    statement: &TrusteeEvaluationKeyStatement,
-    witness: &super::relation::TrusteeEvaluationKeyWitness,
-) -> serde_json::Value {
-    let mut request = statement_request_value(statement);
-    request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients());
-    request["errorCoefficientsByKey"] = serde_json::json!(witness.error_coefficients_by_key());
-    if !witness.opening_randomness_by_limb().is_empty() {
-        request["openingRandomnessByLimb"] =
-            serde_json::json!(witness.opening_randomness_by_limb());
-    }
-    proof_randomness_fields(&mut request);
-    request
-}
-
-fn zero_i64_vector() -> Vec<i64> {
-    vec![0_i64; SMALL_RING_DEGREE]
+fn private_vss_proof_fixture(
+    ring_degree: usize,
+) -> (
+    TrusteeEvaluationKeyStatement,
+    super::relation::TrusteeEvaluationKeyWitness,
+) {
+    let statement = private_vss_statement_for_ring_degree(ring_degree);
+    let coefficient_count = statement
+        .private_vss_share()
+        .expect("private VSS statement")
+        .coefficient_commitments
+        .len();
+    let witness = super::relation::TrusteeEvaluationKeyWitness::PrivateVssShare {
+        coefficient_messages_by_shamir_index: vec![vec![0_i64; ring_degree]; coefficient_count],
+        opening_randomness_by_shamir_index_and_commitment_limb: vec![
+            zero_opening_randomness_for_ring_degree(ring_degree);
+            coefficient_count
+        ],
+        carry_witnesses: vec![0_i64; ring_degree],
+    };
+    (statement, witness)
 }
 
 fn zero_u64_vector() -> Vec<u64> {
     vec![0_u64; SMALL_RING_DEGREE]
 }
 
-fn zero_opening_randomness() -> Vec<Vec<i64>> {
-    vec![zero_i64_vector(); 5]
+fn zero_opening_randomness_for_ring_degree(ring_degree: usize) -> Vec<Vec<Vec<i64>>> {
+    vec![
+        vec![vec![0_i64; ring_degree]; SETUP_COMMITMENT_RANDOMNESS_WIDTH];
+        SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+    ]
+}
+
+fn zero_opening_randomness() -> Vec<Vec<Vec<i64>>> {
+    zero_opening_randomness_for_ring_degree(SMALL_RING_DEGREE)
 }
 
 fn zero_setup_commitment_value(
     source_rns_limb_index: usize,
     shamir_coefficient_index: u64,
 ) -> SetupCommitmentValue {
-    zero_setup_commitment_for_tests(source_rns_limb_index, shamir_coefficient_index)
-}
-
-fn vector_context_base(binding_roots: serde_json::Value) -> serde_json::Value {
-    let mut context = serde_json::json!({
-        "setupContextHash": repeated_hash("10"),
-        "trusteeIdentity": "statement-vector-trustee",
-        "trusteeRosterPosition": 0,
-    });
-    for (key, value) in binding_roots
-        .as_object()
-        .expect("binding roots object")
-        .iter()
-    {
-        context[key] = value.clone();
-    }
-    context
-}
-
-fn proof_randomness_fields(request: &mut serde_json::Value) {
-    request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
-}
-
-fn generated_proof_bytes(
-    statement: &TrusteeEvaluationKeyStatement,
-    generated: &serde_json::Value,
-) -> Vec<u8> {
-    let proof_family = statement.family_shape().proof_family();
-    let proof_bytes_hash = generated["proofBytesHash"]
-        .as_str()
-        .expect("generated proof bytes hash");
-    let proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
-        proof_family,
-        proof_bytes_hash,
+    zero_setup_commitment_for_tests(
+        source_rns_limb_index,
+        shamir_coefficient_index,
+        SMALL_RING_DEGREE,
     )
-    .expect("generated proof material lookup")
-    .expect("generated proof material remains retained");
-    let proof_bytes_hash = match proof_family {
-        super::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY => {
-            super::trustee_evaluation_key_proof_material_bytes_hash(&proof_material)
-        }
-        super::PUBLIC_KEY_SHARE_PROOF_FAMILY => {
-            super::public_key_share_succinct_proof_material_bytes_hash(&proof_material)
-        }
-        _ => panic!("unsupported generated proof family {proof_family}"),
-    }
-    .expect("generated proof bytes hash");
-    assert_eq!(
-        generated["proofBytesHash"]
-            .as_str()
-            .expect("generated proof bytes hash"),
-        proof_bytes_hash,
-    );
-
-    proof_material.chunks().flatten().copied().collect()
-}
-
-fn verify_proof_bytes(
-    statement: &TrusteeEvaluationKeyStatement,
-    proof_bytes: &[u8],
-) -> crate::encoding::CanonicalResult<()> {
-    // Mirror the production dispatch: key-bearing statements verify against
-    // the atom schedule backend, every other family on the shared engine.
-    if crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::statement_is_key_bearing(
-        statement,
-    ) {
-        return crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::verify_key_bearing_trustee_evaluation_keys(
-            statement, proof_bytes,
-        );
-    }
-    let proof = decode_trustee_evaluation_key_proof(statement, proof_bytes)?;
-
-    verify_evaluation_key_share(statement, &proof)
-}
-
-fn verify_generated_proof(
-    statement: &TrusteeEvaluationKeyStatement,
-    generated: &serde_json::Value,
-) -> Vec<u8> {
-    let proof_bytes = generated_proof_bytes(statement, generated);
-    verify_proof_bytes(statement, &proof_bytes).expect("generated proof should verify");
-    proof_bytes
-}
-
-fn same_secret_statement_hash_vector_request() -> serde_json::Value {
-    let commitments = DATA_PRIMES
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(rns_limb_index, _)| {
-            setup_commitment_full_value(&zero_setup_commitment_value(rns_limb_index, 0))
-        })
-        .collect::<Vec<_>>();
-    let target_materials = DATA_PRIMES
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(rns_limb_index, rns_prime)| {
-            test_committed_material_commitment(
-                "coefficient",
-                serde_json::json!({ "testPurpose": "statement-vector-same-secret-bridge" }),
-                rns_limb_index,
-                rns_prime,
-                SMALL_RING_DEGREE,
-                &zero_u64_vector(),
-                rns_prime,
-            )
-        })
-        .collect::<Vec<_>>();
-    let target_constant_commitments = target_materials
-        .iter()
-        .map(|material| material.commitment_value.clone())
-        .collect::<Vec<_>>();
-    let material_seeds = target_materials
-        .iter()
-        .map(|material| material.material_seed_hex.clone())
-        .collect::<Vec<_>>();
-    let mut request = serde_json::json!({
-        "context": vector_context_base(serde_json::json!({})),
-        "ringDegree": SMALL_RING_DEGREE,
-        "keys": [],
-        "sameSecretLinkage": {
-            "publicMatrixSeedHash": repeated_hash("40"),
-            "commitments": commitments,
-        },
-        "sameSecretBridge": {
-            "targetConstantCommitments": target_constant_commitments,
-        },
-        "secretCoefficients": zero_i64_vector(),
-        "errorCoefficientsByKey": [],
-        "openingRandomnessByLimb": vec![zero_opening_randomness(); DATA_PRIMES.len()],
-        "vssCommittedMaterialSeedsByBoundMessage": material_seeds,
-    });
-    proof_randomness_fields(&mut request);
-    request
-}
-
-fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
-    let component_b_by_limb = DATA_PRIMES
-        .iter()
-        .map(|_| zero_u64_vector())
-        .collect::<Vec<_>>();
-    let target_materials = DATA_PRIMES
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(rns_limb_index, rns_prime)| {
-            test_committed_material_commitment(
-                "coefficient",
-                serde_json::json!({ "testPurpose": "statement-vector-public-key-bridge" }),
-                rns_limb_index,
-                rns_prime,
-                SMALL_RING_DEGREE,
-                &zero_u64_vector(),
-                rns_prime,
-            )
-        })
-        .collect::<Vec<_>>();
-    let target_constant_commitments = target_materials
-        .iter()
-        .map(|material| material.commitment_value.clone())
-        .collect::<Vec<_>>();
-    let material_seeds = target_materials
-        .iter()
-        .map(|material| material.material_seed_hex.clone())
-        .collect::<Vec<_>>();
-    let mut request = serde_json::json!({
-        "context": vector_context_base(serde_json::json!({})),
-        "ringDegree": SMALL_RING_DEGREE,
-        "keys": [{
-            "proofFamily": "public-key-share",
-            "level": DATA_PRIMES.len() - 1,
-            "componentBByDigit": [component_b_by_limb],
-        }],
-        "sameSecretBridge": {
-            "publicMatrixSeedHash": repeated_hash("41"),
-            "targetConstantCommitments": target_constant_commitments,
-        },
-        "secretCoefficients": zero_i64_vector(),
-        "errorCoefficientsByKey": [[zero_i64_vector()]],
-        "vssCommittedMaterialSeedsByBoundMessage": material_seeds,
-    });
-    proof_randomness_fields(&mut request);
-    request
-}
-
-fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
-    // The key-bearing family links its atom secret to the canonical source
-    // constant commitment directly. The TS/WASM vector builds the same source
-    // body so both languages pin one statement hash.
-    let source_commitment = setup_commitment_full_value(&zero_setup_commitment_value(0, 0));
-    let mut request = serde_json::json!({
-        "context": vector_context_base(serde_json::json!({
-            "evaluatorKeyScheduleRoot": repeated_hash("34"),
-        })),
-        "ringDegree": SMALL_RING_DEGREE,
-        "keys": [{
-            "proofFamily": "relinearization-round-one",
-            "level": 2,
-            "componentBByDigit": [
-                [zero_u64_vector(), zero_u64_vector(), zero_u64_vector()],
-                [zero_u64_vector(), zero_u64_vector(), zero_u64_vector()],
-                [zero_u64_vector(), zero_u64_vector(), zero_u64_vector()],
-            ],
-        }],
-        "sameSecretLinkage": {
-            "publicMatrixSeedHash": repeated_hash("43"),
-            "commitments": [source_commitment],
-        },
-        "secretCoefficients": zero_i64_vector(),
-        "errorCoefficientsByKey": [[zero_i64_vector(), zero_i64_vector(), zero_i64_vector()]],
-        "openingRandomnessByLimb": [zero_opening_randomness()],
-    });
-    proof_randomness_fields(&mut request);
-    request
 }
 
 fn private_vss_setup_context_vector() -> serde_json::Value {
@@ -564,7 +219,7 @@ fn private_vss_setup_context_vector() -> serde_json::Value {
         "manifestHash": repeated_hash("10"),
         "rosterHash": repeated_hash("20"),
         "setupParametersHash": setup_parameters["setupParametersHash"],
-        "participantCount": 10,
+        "participantCount": u64::from(PROTOTYPE_PARTICIPANT_COUNT),
         "setupEpoch": "statement-vector-epoch",
     })
 }
@@ -595,33 +250,12 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
         "sourceTrusteeRosterPosition": 0,
         "sourceTrusteeCoefficientCommitmentRecord": source_record,
         "sourceTrusteeCoefficientCommitmentMaterialRecords": material_records,
-        "recipientIdentity": "statement-vector-recipient",
         "recipientRosterPosition": 2,
         "rnsLimbIndex": 0,
-        "rnsPrime": DATA_PRIMES[0],
-        "ringDegree": SMALL_RING_DEGREE,
         "shareValues": zero_u64_vector(),
         "coefficientMessagesByShamirIndex": vec![zero_u64_vector(); 4],
-        "openingRandomnessByShamirIndex": vec![vec![zero_i64_vector(); 5]; 4],
+        "openingRandomnessByShamirIndexAndCommitmentLimb": vec![zero_opening_randomness(); 4],
     });
     request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     request
-}
-
-fn component_material_bytes_for_request_key(
-    key: &super::relation::EvaluationKeyShareDescriptor,
-    ring_degree: usize,
-) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"SLEKCMV2");
-    for component_b_by_limb in &key.component_b_by_digit {
-        for component_b in component_b_by_limb {
-            assert_eq!(component_b.len(), ring_degree);
-            for coefficient in component_b {
-                bytes.extend_from_slice(&coefficient.to_le_bytes());
-            }
-        }
-    }
-
-    bytes
 }

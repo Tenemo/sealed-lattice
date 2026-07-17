@@ -5,15 +5,36 @@ import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import {
     foundationProfile,
+    type MailboxAssociatedData,
+    type MailboxCiphertextDescriptor,
+    type MailboxKeyScheduleInput,
+    type MailboxPayloadType,
     type ProtocolHash,
     type RefusalReason,
+    type SetupMailboxSlot,
+    type SignedMailboxEnvelope,
+    type UnsignedMailboxEnvelope,
     type VerificationResult,
 } from '@sealed-lattice/types';
 
+export type {
+    MailboxAssociatedData,
+    MailboxCiphertextDescriptor,
+    MailboxKeyScheduleInput,
+    MailboxPayloadType,
+    SetupMailboxSlot,
+    SignedMailboxEnvelope,
+    UnsignedMailboxEnvelope,
+} from '@sealed-lattice/types';
+
+import {
+    resolveAuthenticatedMailboxFrozenRosterSourceVerificationKey,
+    type AuthenticatedMailboxFrozenRoster,
+} from './authenticated-mailbox-frozen-roster.js';
 import {
     decapsulateClosedMailboxCiphertext,
-    encapsulateFreshMailbox,
-    signFreshMailboxEnvelope,
+    encapsulateResetSafeSetupMailbox,
+    signResetSafeSetupMailboxEnvelope,
     type BrowserLocalMailboxCapability,
     type BrowserLocalSigningCapability,
 } from './browser-local-key-provider.js';
@@ -25,11 +46,9 @@ const mailboxSignatureContext = textEncoder.encode(
 const aesGcmKeyByteLength = 32;
 const aesGcmNonceByteLength = 12;
 const aesGcmTagByteLength = 16;
-const mlKem768EncapsulationKeyByteLength = ml_kem768.lengths.publicKey!;
 const mlKem768CiphertextByteLength = ml_kem768.lengths.cipherText!;
 const mlDsa65VerificationKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
-const maximumMailboxCiphertextByteLength = 2_147_483_648;
 const canonicalUnsignedDecimalPattern = /^(?:0|[1-9][0-9]*)$/u;
 const refusalReasons = new Set<RefusalReason>([
     'malformedEncoding',
@@ -47,60 +66,16 @@ const refusalReasons = new Set<RefusalReason>([
     'consumedState',
 ]);
 
-export type MailboxPayloadType = 1 | 2;
-
-export type MailboxKeyScheduleInput = Readonly<{
-    readonly suiteId: ProtocolHash;
-    readonly ceremonyContextHash: ProtocolHash;
-    readonly actionContextHash: ProtocolHash;
-    readonly rosterHash: ProtocolHash;
-    readonly sourceParticipantId: string;
-    readonly recipientParticipantId: string;
-    readonly producerSequence: string;
-    readonly envelopeAttemptIdentifierHex: string;
-    readonly payloadType: MailboxPayloadType;
-    readonly statementHash: ProtocolHash;
-    readonly orderedMaterialRoots: readonly ProtocolHash[];
-    readonly kemCiphertextHash: ProtocolHash;
-}>;
-
-export type MailboxAssociatedData = Readonly<
-    MailboxKeyScheduleInput & {
-        readonly plaintextByteLength: string;
-    }
->;
-
-export type MailboxAssociatedDataExpectation = Omit<
-    MailboxAssociatedData,
-    'envelopeAttemptIdentifierHex' | 'kemCiphertextHash'
->;
-
-export type MailboxCiphertextDescriptor = Readonly<{
-    readonly totalByteLength: string;
-    readonly orderedChunkDigests: readonly ProtocolHash[];
-}>;
-
-export type UnsignedMailboxEnvelope = Readonly<{
-    readonly associatedData: MailboxAssociatedData;
-    readonly kemCiphertextHex: string;
-    readonly ciphertextDescriptor: MailboxCiphertextDescriptor;
-    readonly gcmTagHex: string;
-}>;
-
-export type SignedMailboxEnvelope = Readonly<
-    UnsignedMailboxEnvelope & {
-        readonly sourceSignatureHex: string;
-    }
->;
-
 export type AuthenticatedMailboxKernel = Readonly<{
-    encodeMailboxKeyScheduleInput(value: MailboxKeyScheduleInput): Readonly<{
+    encodeMailboxKeyScheduleInput(input: {
+        readonly kemCiphertextHex: string;
+        readonly value: MailboxKeyScheduleInput;
+    }): Readonly<{
         readonly canonicalBytesHex: string;
         readonly hkdfExtractSaltHex: string;
     }>;
     encodeMailboxAssociatedData(value: MailboxAssociatedData): Readonly<{
         readonly canonicalBytesHex: string;
-        readonly hkdfExtractSaltHex: string;
     }>;
     encodeSignedMailboxEnvelope(value: SignedMailboxEnvelope): Readonly<{
         readonly canonicalBytesHex: string;
@@ -112,10 +87,8 @@ export type AuthenticatedMailboxKernel = Readonly<{
         readonly value: SignedMailboxEnvelope;
         readonly envelopeHash: ProtocolHash;
     }>;
-    deriveMailboxKemCiphertextHash(input: {
-        readonly kemCiphertextHex: string;
-    }): ProtocolHash;
     deriveMailboxEnvelopeHash(value: UnsignedMailboxEnvelope): ProtocolHash;
+    deriveSetupMailboxSlotHash(value: SetupMailboxSlot): ProtocolHash;
 }>;
 
 type MailboxLeaseState =
@@ -186,7 +159,6 @@ export type AuthenticatedMailboxStreamBoundary = Readonly<{
 
 export type AuthenticatedMailboxCarrier = Readonly<{
     readonly canonicalEnvelopeBytes: Uint8Array;
-    readonly envelopeHash: ProtocolHash;
 }>;
 
 type MailboxChunkPull = (input: {
@@ -205,6 +177,45 @@ type MailboxChunkSink = (input: {
     readonly bytes: ArrayBuffer;
     readonly chunkIndex: number;
 }) => Promise<void>;
+
+export type AuthenticatedMailboxPlaintextSinkLease = Readonly<{
+    /**
+     * committed means the exact envelope was already published. prepared
+     * means every exact plaintext chunk is durably staged but unpublished.
+     */
+    readonly disposition: 'committed' | 'fresh' | 'prepared';
+    /** Removes only an unpublished fresh transaction and its staged bytes. */
+    cancel(): Promise<void>;
+    /**
+     * Publishes a prepared delivery exactly once. A failed or interrupted
+     * commit must remain recoverable as prepared or committed by reserve.
+     */
+    commit(): Promise<void>;
+    /**
+     * Releases lease ownership without publishing or deleting prepared state.
+     * It is a no-op for an already committed delivery.
+     */
+    release(): Promise<void>;
+    /** Makes every exact staged chunk durable without publishing plaintext. */
+    seal(): Promise<void>;
+    stageChunk(input: {
+        readonly bytes: ArrayBuffer;
+        readonly chunkIndex: number;
+    }): Promise<void>;
+}>;
+
+export type AuthenticatedMailboxPlaintextSinkBoundary = Readonly<{
+    /**
+     * Reserves a delivery by its authenticated envelope. Concurrent reserves
+     * for the same envelope must have one publisher. Prepared and committed
+     * state must survive restarts so a retry cannot duplicate or lose delivery.
+     */
+    reserve(input: {
+        readonly envelopeHash: ProtocolHash;
+        readonly plaintextByteLength: number;
+        readonly producerSlot: AuthenticatedMailboxProducerSlot;
+    }): Promise<AuthenticatedMailboxPlaintextSinkLease>;
+}>;
 
 export type AuthenticatedMailboxProducerSlot = Readonly<{
     readonly suiteId: ProtocolHash;
@@ -252,12 +263,11 @@ export type AuthenticatedMailboxInboundSlotAuthority = Readonly<{
     /**
      * Reserves a signed semantic slot. Only a previously committed exact
      * carrier may return byteIdenticalRetransmission; conflicting bytes return
-     * equivocation, and a fresh lease is committed only after plaintext
-     * consumption succeeds.
+     * equivocation. The caller commits a fresh lease before publishing its
+     * prepared plaintext delivery.
      */
     reserve(input: {
         readonly canonicalEnvelopeBytes: Uint8Array;
-        readonly envelopeHash: ProtocolHash;
         readonly producerSlot: AuthenticatedMailboxProducerSlot;
     }): Promise<VerificationResult<AuthenticatedMailboxInboundSlotLease>>;
 }>;
@@ -286,12 +296,7 @@ export type AuthenticatedMailboxStagingBoundary = Readonly<{
 
 type AuthenticatedMailboxSealCommonInput = Readonly<{
     readonly abortSignal?: AbortSignal;
-    readonly associatedData: Omit<
-        MailboxAssociatedData,
-        | 'kemCiphertextHash'
-        | 'plaintextByteLength'
-        | 'envelopeAttemptIdentifierHex'
-    >;
+    readonly associatedData: SetupMailboxSlot;
     readonly emitCiphertextChunk: MailboxChunkSink;
     readonly gcmRuntime: AuthenticatedMailboxGcmRuntime;
     readonly kernel: AuthenticatedMailboxKernel;
@@ -309,14 +314,15 @@ export type AuthenticatedMailboxSealInput = AuthenticatedMailboxSealCommonInput;
 export type AuthenticatedMailboxOpenInput = Readonly<{
     readonly abortSignal?: AbortSignal;
     readonly carrier: AuthenticatedMailboxCarrier;
-    readonly consumePlaintextChunk: MailboxChunkSink;
-    readonly expectedAssociatedData: MailboxAssociatedDataExpectation;
+    readonly expectedEnvelopeHash?: ProtocolHash;
+    readonly expectedAssociatedData: SetupMailboxSlot;
     readonly gcmRuntime: AuthenticatedMailboxGcmRuntime;
     readonly inboundSlotAuthority: AuthenticatedMailboxInboundSlotAuthority;
     readonly kernel: AuthenticatedMailboxKernel;
+    readonly plaintextSinkBoundary: AuthenticatedMailboxPlaintextSinkBoundary;
     readonly pullCiphertextChunk: MailboxChunkPull;
     readonly recipientMailboxCapability: BrowserLocalMailboxCapability;
-    readonly sourceVerificationKey: Uint8Array;
+    readonly sourceRoster: AuthenticatedMailboxFrozenRoster;
     readonly stagingBoundary: AuthenticatedMailboxStagingBoundary;
     readonly streamBoundary: AuthenticatedMailboxStreamBoundary;
 }>;
@@ -391,17 +397,66 @@ const requireNonemptyBytes = (value: Uint8Array, label: string): Uint8Array => {
     return value.slice();
 };
 
-const requireMailboxByteLength = (value: number, label: string): number => {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new TypeError(`${label} must be a positive safe integer.`);
-    }
-    if (value > maximumMailboxCiphertextByteLength) {
-        throw new RangeError(
-            `${label} exceeds the supported mailbox stream profile.`,
+const copyAuthenticatedMailboxCarrierBytes = (carrier: unknown): Uint8Array => {
+    if (
+        (typeof carrier !== 'object' && typeof carrier !== 'function') ||
+        carrier === null ||
+        Array.isArray(carrier)
+    ) {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox carrier has the wrong type.',
         );
     }
 
-    return value;
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+        descriptor = Object.getOwnPropertyDescriptor(
+            carrier,
+            'canonicalEnvelopeBytes',
+        );
+    } catch {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox carrier cannot be inspected safely.',
+        );
+    }
+    if (descriptor === undefined || !('value' in descriptor)) {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox carrier must contain canonical bytes as an ordinary data property.',
+        );
+    }
+    const canonicalEnvelopeBytes: unknown = descriptor.value;
+    if (!isUint8Array(canonicalEnvelopeBytes)) {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox carrier bytes have the wrong type.',
+        );
+    }
+    if (canonicalEnvelopeBytes.byteLength === 0) {
+        throw new AuthenticatedMailboxRefusalError(
+            'malformedEncoding',
+            'The authenticated mailbox carrier is empty.',
+        );
+    }
+    if (
+        canonicalEnvelopeBytes.byteLength >
+        foundationProfile.maximumCopiedBufferByteLength
+    ) {
+        throw new AuthenticatedMailboxRefusalError(
+            'outsideSupportedProfile',
+            'The authenticated mailbox carrier exceeds the copied-buffer profile.',
+        );
+    }
+    try {
+        return canonicalEnvelopeBytes.slice();
+    } catch {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox carrier bytes are unavailable.',
+        );
+    }
 };
 
 const parseMailboxByteLength = (
@@ -422,13 +477,13 @@ const parseMailboxByteLength = (
     if (
         !Number.isSafeInteger(parsed) ||
         parsed <= 0 ||
-        parsed > maximumMailboxCiphertextByteLength
+        parsed > foundationProfile.maximumCanonicalStreamByteLength
     ) {
         throw new AuthenticatedMailboxRefusalError(
-            parsed > maximumMailboxCiphertextByteLength
+            parsed > foundationProfile.maximumCanonicalStreamByteLength
                 ? 'outsideSupportedProfile'
                 : refusalReason,
-            `${label} is outside the supported mailbox stream profile.`,
+            `${label} exceeds the absolute mailbox stream safety bound.`,
         );
     }
 
@@ -451,12 +506,11 @@ const deriveAesKeyAndNonce = (
 const canonicalAssociatedDataMatches = (
     kernel: AuthenticatedMailboxKernel,
     actual: MailboxAssociatedData,
-    expectation: MailboxAssociatedDataExpectation,
+    expectation: SetupMailboxSlot,
 ): boolean => {
     const expected: MailboxAssociatedData = {
         ...expectation,
         envelopeAttemptIdentifierHex: actual.envelopeAttemptIdentifierHex,
-        kemCiphertextHash: actual.kemCiphertextHash,
     };
 
     return (
@@ -498,20 +552,6 @@ const throwIfAborted = (abortSignal: AbortSignal | undefined): void => {
         throw new Error('The authenticated mailbox operation was cancelled.');
     }
 };
-
-const callbackInput = (
-    abortSignal: AbortSignal | undefined,
-    bytes: ArrayBuffer,
-    chunkIndex: number,
-): {
-    readonly abortSignal?: AbortSignal;
-    readonly bytes: ArrayBuffer;
-    readonly chunkIndex: number;
-} => ({
-    ...(abortSignal === undefined ? {} : { abortSignal }),
-    bytes,
-    chunkIndex,
-});
 
 const pullInput = (
     abortSignal: AbortSignal | undefined,
@@ -587,11 +627,29 @@ const signatureValid = (
     }
 };
 
+const isCanonicalMailboxDecodeFailure = (error: unknown): boolean => {
+    if (typeof error !== 'object' || error === null) {
+        return false;
+    }
+    try {
+        return (
+            Reflect.get(error, 'name') === 'TranscriptCoreKernelCommandError' &&
+            Reflect.get(error, 'code') === 'InvalidProtocolObject'
+        );
+    } catch {
+        return false;
+    }
+};
+
 const validatedCarrierEnvelope = (
     kernel: AuthenticatedMailboxKernel,
     carrier: AuthenticatedMailboxCarrier,
     sourceVerificationKey: Uint8Array,
-): SignedMailboxEnvelope => {
+    expectedEnvelopeHash?: ProtocolHash,
+): Readonly<{
+    envelope: SignedMailboxEnvelope;
+    envelopeHash: ProtocolHash;
+}> => {
     let decodedEnvelope: ReturnType<
         AuthenticatedMailboxKernel['decodeSignedMailboxEnvelope']
     >;
@@ -599,13 +657,19 @@ const validatedCarrierEnvelope = (
         decodedEnvelope = kernel.decodeSignedMailboxEnvelope({
             canonicalBytesHex: bytesToHex(carrier.canonicalEnvelopeBytes),
         });
-    } catch {
+    } catch (error) {
+        if (!isCanonicalMailboxDecodeFailure(error)) {
+            throw error;
+        }
         throw new AuthenticatedMailboxRefusalError(
             'malformedEncoding',
             'The signed mailbox envelope is not canonical.',
         );
     }
-    if (decodedEnvelope.envelopeHash !== carrier.envelopeHash) {
+    if (
+        expectedEnvelopeHash !== undefined &&
+        decodedEnvelope.envelopeHash !== expectedEnvelopeHash
+    ) {
         throw new AuthenticatedMailboxRefusalError(
             'wrongHashOrRoot',
             'The signed mailbox envelope does not match its expected envelope hash.',
@@ -624,26 +688,18 @@ const validatedCarrierEnvelope = (
         );
     }
 
-    return decodedEnvelope.value;
+    return {
+        envelope: decodedEnvelope.value,
+        envelopeHash: decodedEnvelope.envelopeHash,
+    };
 };
 
 const validateDescriptorLength = (envelope: SignedMailboxEnvelope): number => {
     const plaintextByteLength = parseMailboxByteLength(
-        envelope.associatedData.plaintextByteLength,
-        'wrongTypeOrLength',
-        'The authenticated mailbox plaintext byte length',
-    );
-    const descriptorByteLength = parseMailboxByteLength(
         envelope.ciphertextDescriptor.totalByteLength,
         'wrongTypeOrLength',
         'The mailbox ciphertext descriptor byte length',
     );
-    if (descriptorByteLength !== plaintextByteLength) {
-        throw new AuthenticatedMailboxRefusalError(
-            'wrongTypeOrLength',
-            'The mailbox ciphertext descriptor length does not match its authenticated plaintext length.',
-        );
-    }
     if (
         !Array.isArray(envelope.ciphertextDescriptor.orderedChunkDigests) ||
         envelope.ciphertextDescriptor.orderedChunkDigests.length !==
@@ -713,347 +769,292 @@ const cancelSynchronousLease = (
     }
 };
 
-const throwAfterCleanup = (
-    operationFailure: unknown,
-    cleanupFailures: readonly unknown[],
-): never => {
-    if (cleanupFailures.length > 0) {
-        throw new AuthenticatedMailboxCleanupError(
-            operationFailure,
-            cleanupFailures,
-        );
-    }
-    throw operationFailure instanceof Error
-        ? operationFailure
-        : new AuthenticatedMailboxOperationError(operationFailure);
-};
-
-const retransmitCachedCiphertext = async (input: {
-    readonly abortSignal?: AbortSignal;
-    readonly descriptor: MailboxCiphertextDescriptor;
-    readonly emitCiphertextChunk: MailboxChunkSink;
-    readonly pullCiphertextChunk: MailboxChunkPull;
-    readonly streamBoundary: AuthenticatedMailboxStreamBoundary;
-}): Promise<void> => {
-    let verifier: MailboxStreamVerifierLease | undefined;
-    let operationFailure: unknown;
-    try {
-        verifier = input.streamBoundary.openVerifier({
-            descriptor: input.descriptor,
-        });
-        for (
-            let chunkIndex = 0;
-            chunkIndex < verifier.chunkCount;
-            chunkIndex += 1
-        ) {
-            throwIfAborted(input.abortSignal);
-            const byteLength = expectedChunkByteLength(
-                verifier.totalByteLength,
-                verifier.chunkCount,
-                chunkIndex,
-            );
-            const chunk = requirePulledChunk(
-                await input.pullCiphertextChunk(
-                    pullInput(input.abortSignal, chunkIndex, byteLength),
-                ),
-                byteLength,
-            );
-            try {
-                verifier.absorbChunk(chunkIndex, chunk);
-                await input.emitCiphertextChunk(
-                    callbackInput(input.abortSignal, chunk, chunkIndex),
-                );
-            } finally {
-                new Uint8Array(chunk).fill(0);
-            }
-        }
-        await requireNoTrailingChunk(
-            input.pullCiphertextChunk,
-            input.abortSignal,
-            verifier.chunkCount,
-        );
-        verifier.finish();
-    } catch (error) {
-        operationFailure = asVerificationRefusal(error);
-    }
-    const cleanupFailures: unknown[] = [];
-    cancelSynchronousLease(verifier, cleanupFailures);
-    if (operationFailure !== undefined) {
-        throwAfterCleanup(operationFailure, cleanupFailures);
-    }
-    if (cleanupFailures.length > 0) {
-        throw new AuthenticatedMailboxCleanupError(
-            new Error('Cached mailbox ciphertext retransmission completed.'),
-            cleanupFailures,
-        );
-    }
-};
-
-const cachedSeal = async (
+const emitCachedCiphertext = async (
     input: AuthenticatedMailboxSealCommonInput,
-    cacheLease: AuthenticatedMailboxOutboundCacheLease,
-    sourceVerificationKey: Uint8Array,
-): Promise<AuthenticatedMailboxCarrier> => {
-    const carrier = await cacheLease.cachedCarrier();
-    const canonicalEnvelopeBytes = requireNonemptyBytes(
-        carrier.canonicalEnvelopeBytes,
-        'cached carrier canonicalEnvelopeBytes',
-    );
-    try {
-        const cachedCarrier = Object.freeze({
-            canonicalEnvelopeBytes,
-            envelopeHash: carrier.envelopeHash,
-        });
-        const envelope = validatedCarrierEnvelope(
-            input.kernel,
-            cachedCarrier,
-            sourceVerificationKey,
+    lease: AuthenticatedMailboxOutboundCacheLease,
+    plaintextByteLength: number,
+): Promise<void> => {
+    const chunkCount = expectedChunkCount(plaintextByteLength);
+    for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+        throwIfAborted(input.abortSignal);
+        const byteLength = expectedChunkByteLength(
+            plaintextByteLength,
+            chunkCount,
+            chunkIndex,
         );
-        const expectedAssociatedData: MailboxAssociatedDataExpectation = {
-            ...input.associatedData,
-            plaintextByteLength: String(input.plaintextByteLength),
-        };
-        if (
-            !canonicalAssociatedDataMatches(
-                input.kernel,
-                envelope.associatedData,
-                expectedAssociatedData,
-            )
-        ) {
-            throw new Error(
-                'The cached mailbox carrier conflicts with its producer slot.',
-            );
+        const chunk = requirePulledChunk(
+            await lease.pullChunk(
+                pullInput(input.abortSignal, chunkIndex, byteLength),
+            ),
+            byteLength,
+        );
+        try {
+            await input.emitCiphertextChunk({
+                ...(input.abortSignal === undefined
+                    ? {}
+                    : { abortSignal: input.abortSignal }),
+                bytes: chunk,
+                chunkIndex,
+            });
+        } finally {
+            new Uint8Array(chunk).fill(0);
         }
-        if (validateDescriptorLength(envelope) !== input.plaintextByteLength) {
-            throw new Error(
-                'The cached mailbox carrier conflicts with its plaintext length.',
-            );
-        }
-        await retransmitCachedCiphertext({
-            ...(input.abortSignal === undefined
-                ? {}
-                : { abortSignal: input.abortSignal }),
-            descriptor: envelope.ciphertextDescriptor,
-            emitCiphertextChunk: input.emitCiphertextChunk,
-            pullCiphertextChunk: cacheLease.pullChunk,
-            streamBoundary: input.streamBoundary,
-        });
-
-        return Object.freeze({
-            canonicalEnvelopeBytes: canonicalEnvelopeBytes.slice(),
-            envelopeHash: carrier.envelopeHash,
-        });
-    } finally {
-        canonicalEnvelopeBytes.fill(0);
     }
+    await requireNoTrailingChunk(
+        lease.pullChunk,
+        input.abortSignal,
+        chunkCount,
+    );
 };
 
 const sealMailbox = async (
     input: AuthenticatedMailboxSealCommonInput,
 ): Promise<AuthenticatedMailboxCarrier> => {
-    const plaintextByteLength = requireMailboxByteLength(
-        input.plaintextByteLength,
-        'plaintextByteLength',
+    const plaintextByteLength = parseMailboxByteLength(
+        String(input.plaintextByteLength),
+        'wrongTypeOrLength',
+        'The authenticated mailbox plaintext byte length',
     );
-    const recipientEncapsulationKey = requireExactBytes(
-        input.recipientEncapsulationKey,
-        mlKem768EncapsulationKeyByteLength,
-        'recipientEncapsulationKey',
-    );
-    const sourceVerificationKey = requireExactBytes(
-        input.sourceVerificationKey,
-        mlDsa65VerificationKeyByteLength,
-        'sourceVerificationKey',
-    );
-    const chunkCount = expectedChunkCount(plaintextByteLength);
-    const cacheLease = await input.outboundCache.reserve({
-        plaintextByteLength,
-        producerSlot: producerSlot(input.associatedData),
-    });
-    if (cacheLease.disposition === 'cached') {
-        try {
-            return await cachedSeal(input, cacheLease, sourceVerificationKey);
-        } finally {
-            recipientEncapsulationKey.fill(0);
-            sourceVerificationKey.fill(0);
-        }
+    if (plaintextByteLength !== input.plaintextByteLength) {
+        throw new AuthenticatedMailboxRefusalError(
+            'wrongTypeOrLength',
+            'The authenticated mailbox plaintext byte length must be a positive safe integer.',
+        );
     }
-
-    let cacheCommitted = false;
-    let envelopeAttemptIdentifier: Uint8Array | undefined;
-    let gcmEncryptor: MailboxGcmEncryptorLease | undefined;
-    let keyAndNonce: Uint8Array | undefined;
-    let sharedSecret: Uint8Array | undefined;
+    throwIfAborted(input.abortSignal);
+    const setupMailboxSlot: SetupMailboxSlot = input.associatedData;
+    const setupMailboxSlotHash =
+        input.kernel.deriveSetupMailboxSlotHash(setupMailboxSlot);
+    let outboundLease: AuthenticatedMailboxOutboundCacheLease | undefined;
+    let outboundCommitted = false;
+    let encryptor: MailboxGcmEncryptorLease | undefined;
     let streamWriter: MailboxStreamWriterLease | undefined;
+    let encapsulation:
+        | Readonly<{
+              readonly ciphertext: Uint8Array;
+              readonly envelopeAttemptIdentifier: Uint8Array;
+              readonly sharedSecret: Uint8Array;
+          }>
+        | undefined;
+    let gcmTag: Uint8Array | undefined;
+    let keyAndNonce: Uint8Array | undefined;
+    let signature: Uint8Array | undefined;
+    let sourceVerificationKey: Uint8Array | undefined;
+    let recipientEncapsulationKey: Uint8Array | undefined;
     let operationFailure: unknown;
     let result: AuthenticatedMailboxCarrier | undefined;
     try {
-        throwIfAborted(input.abortSignal);
-        const encapsulation = encapsulateFreshMailbox({
-            signingCapability: input.sourceSigningCapability,
+        outboundLease = await input.outboundCache.reserve({
+            plaintextByteLength,
+            producerSlot: producerSlot(input.associatedData),
+        });
+        sourceVerificationKey = requireExactBytes(
+            input.sourceVerificationKey,
+            mlDsa65VerificationKeyByteLength,
+            'sourceVerificationKey',
+        );
+        recipientEncapsulationKey = requireExactBytes(
+            input.recipientEncapsulationKey,
+            ml_kem768.lengths.publicKey!,
+            'recipientEncapsulationKey',
+        );
+        encapsulation = encapsulateResetSafeSetupMailbox({
             recipientEncapsulationKey,
+            setupMailboxSlot,
+            setupMailboxSlotHash,
+            signingCapability: input.sourceSigningCapability,
+            sourceVerificationKey,
         });
-        envelopeAttemptIdentifier = encapsulation.envelopeAttemptIdentifier;
-        sharedSecret = encapsulation.sharedSecret;
-        const kemCiphertextHex = bytesToHex(encapsulation.ciphertext);
-        const keyScheduleInput: MailboxKeyScheduleInput = {
-            ...input.associatedData,
-            envelopeAttemptIdentifierHex: bytesToHex(envelopeAttemptIdentifier),
-            kemCiphertextHash: input.kernel.deriveMailboxKemCiphertextHash({
-                kemCiphertextHex,
-            }),
-        };
-        const associatedData: MailboxAssociatedData = {
-            ...keyScheduleInput,
-            plaintextByteLength: String(plaintextByteLength),
-        };
-        const encodedKeySchedule =
-            input.kernel.encodeMailboxKeyScheduleInput(keyScheduleInput);
-        const encodedAssociatedData =
-            input.kernel.encodeMailboxAssociatedData(associatedData);
-        keyAndNonce = deriveAesKeyAndNonce(
-            sharedSecret,
-            encodedKeySchedule.hkdfExtractSaltHex,
-            encodedKeySchedule.canonicalBytesHex,
-        );
-        const canonicalAssociatedData = hexToBytes(
-            encodedAssociatedData.canonicalBytesHex,
-        );
-        try {
-            gcmEncryptor = input.gcmRuntime.openEncryptor({
-                associatedData: canonicalAssociatedData,
-                key: keyAndNonce.subarray(0, aesGcmKeyByteLength),
-                nonce: keyAndNonce.subarray(aesGcmKeyByteLength),
-                totalByteLength: plaintextByteLength,
-            });
-        } finally {
-            canonicalAssociatedData.fill(0);
-        }
-        streamWriter = input.streamBoundary.openWriter({
-            totalByteLength: plaintextByteLength,
-        });
-        if (streamWriter.chunkCount !== chunkCount) {
-            throw new Error(
-                'The canonical mailbox stream returned the wrong chunk count.',
+
+        if (outboundLease.disposition === 'cached') {
+            const cachedCarrier = await outboundLease.cachedCarrier();
+            const canonicalEnvelopeBytes = requireNonemptyBytes(
+                cachedCarrier.canonicalEnvelopeBytes,
+                'cachedCarrier.canonicalEnvelopeBytes',
             );
-        }
-        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
-            throwIfAborted(input.abortSignal);
-            const byteLength = expectedChunkByteLength(
+            const validatedCachedCarrier = validatedCarrierEnvelope(
+                input.kernel,
+                { canonicalEnvelopeBytes },
+                sourceVerificationKey,
+            );
+            const cachedEnvelope = validatedCachedCarrier.envelope;
+            if (
+                !canonicalAssociatedDataMatches(
+                    input.kernel,
+                    cachedEnvelope.associatedData,
+                    input.associatedData,
+                ) ||
+                validateDescriptorLength(cachedEnvelope) !== plaintextByteLength
+            ) {
+                canonicalEnvelopeBytes.fill(0);
+                throw new AuthenticatedMailboxRefusalError(
+                    'wrongContext',
+                    'The cached setup-mailbox carrier does not match its requested producer slot.',
+                );
+            }
+            result = Object.freeze({ canonicalEnvelopeBytes });
+            await emitCachedCiphertext(
+                input,
+                outboundLease,
                 plaintextByteLength,
-                chunkCount,
-                chunkIndex,
             );
-            const chunk = requirePulledChunk(
-                await input.pullPlaintextChunk(
-                    pullInput(input.abortSignal, chunkIndex, byteLength),
+            outboundCommitted = true;
+        } else {
+            const kemCiphertextHex = bytesToHex(encapsulation.ciphertext);
+            const keySchedule: MailboxKeyScheduleInput = {
+                ...input.associatedData,
+                envelopeAttemptIdentifierHex: bytesToHex(
+                    encapsulation.envelopeAttemptIdentifier,
                 ),
-                byteLength,
+            };
+            const mailboxAssociatedData: MailboxAssociatedData = keySchedule;
+            const encodedKeySchedule =
+                input.kernel.encodeMailboxKeyScheduleInput({
+                    kemCiphertextHex,
+                    value: keySchedule,
+                });
+            const encodedAssociatedData =
+                input.kernel.encodeMailboxAssociatedData(mailboxAssociatedData);
+            keyAndNonce = deriveAesKeyAndNonce(
+                encapsulation.sharedSecret,
+                encodedKeySchedule.hkdfExtractSaltHex,
+                encodedKeySchedule.canonicalBytesHex,
+            );
+            const canonicalAssociatedData = hexToBytes(
+                encodedAssociatedData.canonicalBytesHex,
             );
             try {
-                gcmEncryptor.encryptChunk(chunk);
-                streamWriter.absorbChunk(chunkIndex, chunk);
-                await cacheLease.stageChunk({ bytes: chunk, chunkIndex });
+                encryptor = input.gcmRuntime.openEncryptor({
+                    associatedData: canonicalAssociatedData,
+                    key: keyAndNonce.subarray(0, aesGcmKeyByteLength),
+                    nonce: keyAndNonce.subarray(aesGcmKeyByteLength),
+                    totalByteLength: plaintextByteLength,
+                });
             } finally {
-                new Uint8Array(chunk).fill(0);
+                canonicalAssociatedData.fill(0);
             }
-        }
-        await requireNoTrailingChunk(
-            input.pullPlaintextChunk,
-            input.abortSignal,
-            chunkCount,
-        );
-        const gcmTag = gcmEncryptor.finish();
-        const ciphertextDescriptor = streamWriter.finish();
-        try {
+            streamWriter = input.streamBoundary.openWriter({
+                totalByteLength: plaintextByteLength,
+            });
+            if (
+                streamWriter.totalByteLength !== plaintextByteLength ||
+                streamWriter.chunkCount !==
+                    expectedChunkCount(plaintextByteLength)
+            ) {
+                throw new AuthenticatedMailboxRefusalError(
+                    'wrongTypeOrLength',
+                    'The canonical mailbox stream writer returned inconsistent metadata.',
+                );
+            }
+            for (
+                let chunkIndex = 0;
+                chunkIndex < streamWriter.chunkCount;
+                chunkIndex += 1
+            ) {
+                throwIfAborted(input.abortSignal);
+                const byteLength = expectedChunkByteLength(
+                    plaintextByteLength,
+                    streamWriter.chunkCount,
+                    chunkIndex,
+                );
+                const chunk = requirePulledChunk(
+                    await input.pullPlaintextChunk(
+                        pullInput(input.abortSignal, chunkIndex, byteLength),
+                    ),
+                    byteLength,
+                );
+                try {
+                    encryptor.encryptChunk(chunk);
+                    streamWriter.absorbChunk(chunkIndex, chunk);
+                    await outboundLease.stageChunk({
+                        bytes: chunk,
+                        chunkIndex,
+                    });
+                } finally {
+                    new Uint8Array(chunk).fill(0);
+                }
+            }
+            await requireNoTrailingChunk(
+                input.pullPlaintextChunk,
+                input.abortSignal,
+                streamWriter.chunkCount,
+            );
+            const ciphertextDescriptor = streamWriter.finish();
+            gcmTag = encryptor.finish();
             const unsignedEnvelope: UnsignedMailboxEnvelope = {
-                associatedData,
+                associatedData: mailboxAssociatedData,
                 kemCiphertextHex,
                 ciphertextDescriptor,
                 gcmTagHex: bytesToHex(gcmTag),
             };
             const envelopeHash =
                 input.kernel.deriveMailboxEnvelopeHash(unsignedEnvelope);
-            const sourceSignature = signFreshMailboxEnvelope({
-                signingCapability: input.sourceSigningCapability,
-                signingPermit: encapsulation.signingPermit,
+            signature = signResetSafeSetupMailboxEnvelope({
                 envelopeHash,
+                setupMailboxSlot,
+                setupMailboxSlotHash,
+                signingCapability: input.sourceSigningCapability,
+                sourceVerificationKey,
             });
-            try {
-                const encodedEnvelope =
-                    input.kernel.encodeSignedMailboxEnvelope({
-                        ...unsignedEnvelope,
-                        sourceSignatureHex: bytesToHex(sourceSignature),
-                    });
-                if (encodedEnvelope.envelopeHash !== envelopeHash) {
-                    throw new Error(
-                        'The canonical mailbox envelope hash changed while attaching its signature.',
-                    );
-                }
-                if (
-                    !signatureValid(
-                        envelopeHash,
-                        bytesToHex(sourceSignature),
-                        sourceVerificationKey,
-                    )
-                ) {
-                    throw new Error(
-                        'The browser-local provider produced an invalid mailbox signature.',
-                    );
-                }
-                result = Object.freeze({
-                    canonicalEnvelopeBytes: hexToBytes(
-                        encodedEnvelope.canonicalBytesHex,
-                    ),
-                    envelopeHash,
-                });
-                await cacheLease.commit(result);
-                cacheCommitted = true;
-                await retransmitCachedCiphertext({
-                    ...(input.abortSignal === undefined
-                        ? {}
-                        : { abortSignal: input.abortSignal }),
-                    descriptor: ciphertextDescriptor,
-                    emitCiphertextChunk: input.emitCiphertextChunk,
-                    pullCiphertextChunk: cacheLease.pullChunk,
-                    streamBoundary: input.streamBoundary,
-                });
-            } finally {
-                sourceSignature.fill(0);
+            const encodedEnvelope = input.kernel.encodeSignedMailboxEnvelope({
+                ...unsignedEnvelope,
+                sourceSignatureHex: bytesToHex(signature),
+            });
+            if (encodedEnvelope.envelopeHash !== envelopeHash) {
+                throw new AuthenticatedMailboxRefusalError(
+                    'wrongHashOrRoot',
+                    'The canonical mailbox encoder returned an inconsistent envelope hash.',
+                );
             }
-        } finally {
-            gcmTag.fill(0);
+            const canonicalEnvelopeBytes = requireNonemptyBytes(
+                hexToBytes(encodedEnvelope.canonicalBytesHex),
+                'canonicalEnvelopeBytes',
+            );
+            result = Object.freeze({ canonicalEnvelopeBytes });
+            await outboundLease.commit(result);
+            outboundCommitted = true;
+            await emitCachedCiphertext(
+                input,
+                outboundLease,
+                plaintextByteLength,
+            );
         }
     } catch (error) {
-        operationFailure = asVerificationRefusal(error);
+        operationFailure = error;
     }
 
     const cleanupFailures: unknown[] = [];
-    cancelSynchronousLease(gcmEncryptor, cleanupFailures);
+    cancelSynchronousLease(encryptor, cleanupFailures);
     cancelSynchronousLease(streamWriter, cleanupFailures);
-    if (!cacheCommitted) {
+    if (outboundLease !== undefined && !outboundCommitted) {
         try {
-            await cacheLease.cancel();
+            await outboundLease.cancel();
         } catch (error) {
             cleanupFailures.push(error);
         }
     }
-    envelopeAttemptIdentifier?.fill(0);
+    encapsulation?.ciphertext.fill(0);
+    encapsulation?.envelopeAttemptIdentifier.fill(0);
+    encapsulation?.sharedSecret.fill(0);
+    gcmTag?.fill(0);
     keyAndNonce?.fill(0);
-    recipientEncapsulationKey.fill(0);
-    sharedSecret?.fill(0);
-    sourceVerificationKey.fill(0);
-    if (operationFailure !== undefined) {
-        throwAfterCleanup(operationFailure, cleanupFailures);
-    }
+    recipientEncapsulationKey?.fill(0);
+    signature?.fill(0);
+    sourceVerificationKey?.fill(0);
     if (cleanupFailures.length > 0) {
         throw new AuthenticatedMailboxCleanupError(
-            new Error('Authenticated mailbox sealing completed.'),
+            operationFailure ??
+                new Error('Authenticated mailbox sealing completed.'),
             cleanupFailures,
         );
     }
+    if (operationFailure !== undefined) {
+        throw operationFailure instanceof Error
+            ? operationFailure
+            : new AuthenticatedMailboxOperationError(operationFailure);
+    }
     if (result === undefined) {
-        throw new Error('Authenticated mailbox sealing produced no carrier.');
+        throw new Error('Authenticated mailbox sealing produced no result.');
     }
 
     return result;
@@ -1066,15 +1067,7 @@ export const sealAuthenticatedMailbox = async (
 export const openAuthenticatedMailbox = async (
     input: AuthenticatedMailboxOpenInput,
 ): Promise<VerificationResult<OpenedAuthenticatedMailbox>> => {
-    const canonicalEnvelopeBytes = requireNonemptyBytes(
-        input.carrier.canonicalEnvelopeBytes,
-        'carrier.canonicalEnvelopeBytes',
-    );
-    const sourceVerificationKey = requireExactBytes(
-        input.sourceVerificationKey,
-        mlDsa65VerificationKeyByteLength,
-        'sourceVerificationKey',
-    );
+    let canonicalEnvelopeBytes: Uint8Array | undefined;
     let gcmVerifier: MailboxGcmVerifierLease | undefined;
     let inboundSlotLease: AuthenticatedMailboxInboundSlotLease | undefined;
     let inboundSlotCommitted = false;
@@ -1086,18 +1079,35 @@ export const openAuthenticatedMailbox = async (
     let stagedStreamVerifier: MailboxStreamVerifierLease | undefined;
     let streamVerifier: MailboxStreamVerifierLease | undefined;
     let operationFailure: unknown;
+    let plaintextSinkCommitted = false;
+    let plaintextSinkLease: AuthenticatedMailboxPlaintextSinkLease | undefined;
+    let retainPlaintextSinkForRetry = false;
     let result: VerificationResult<OpenedAuthenticatedMailbox> | undefined;
+    let sourceVerificationKey: Uint8Array | undefined;
     try {
-        throwIfAborted(input.abortSignal);
-        const carrier = Object.freeze({
-            canonicalEnvelopeBytes,
-            envelopeHash: input.carrier.envelopeHash,
-        });
-        const envelope = validatedCarrierEnvelope(
-            input.kernel,
-            carrier,
-            sourceVerificationKey,
+        canonicalEnvelopeBytes = copyAuthenticatedMailboxCarrierBytes(
+            input.carrier,
         );
+        throwIfAborted(input.abortSignal);
+        sourceVerificationKey =
+            resolveAuthenticatedMailboxFrozenRosterSourceVerificationKey(
+                input.sourceRoster,
+                input.expectedAssociatedData.rosterHash,
+                input.expectedAssociatedData.sourceParticipantId,
+            );
+        if (sourceVerificationKey === undefined) {
+            throw new AuthenticatedMailboxRefusalError(
+                'wrongContext',
+                'The mailbox source is not bound to the expected frozen roster.',
+            );
+        }
+        const validatedCarrier = validatedCarrierEnvelope(
+            input.kernel,
+            { canonicalEnvelopeBytes },
+            sourceVerificationKey,
+            input.expectedEnvelopeHash,
+        );
+        const { envelope, envelopeHash } = validatedCarrier;
         if (
             !canonicalAssociatedDataMatches(
                 input.kernel,
@@ -1113,25 +1123,29 @@ export const openAuthenticatedMailbox = async (
         const plaintextByteLength = validateDescriptorLength(envelope);
         const slotReservation = await input.inboundSlotAuthority.reserve({
             canonicalEnvelopeBytes: canonicalEnvelopeBytes.slice(),
-            envelopeHash: input.carrier.envelopeHash,
             producerSlot: producerSlot(envelope.associatedData),
         });
         if (!slotReservation.isValid) {
             result = slotReservation;
         } else {
             inboundSlotLease = slotReservation.value;
+            const inboundDisposition = inboundSlotLease.disposition;
+            plaintextSinkLease = await input.plaintextSinkBoundary.reserve({
+                envelopeHash,
+                plaintextByteLength,
+                producerSlot: producerSlot(envelope.associatedData),
+            });
+            plaintextSinkCommitted =
+                plaintextSinkLease.disposition === 'committed';
             if (
-                inboundSlotLease.disposition === 'byteIdenticalRetransmission'
+                inboundDisposition === 'fresh' &&
+                plaintextSinkLease.disposition === 'committed'
             ) {
-                result = {
-                    isValid: true,
-                    value: {
-                        disposition: 'byteIdenticalRetransmission',
-                        envelopeHash: input.carrier.envelopeHash,
-                        plaintextByteLength,
-                    },
-                };
-            } else {
+                throw new Error(
+                    'A committed plaintext delivery is missing its authenticated inbound mailbox slot.',
+                );
+            }
+            if (plaintextSinkLease.disposition === 'fresh') {
                 streamVerifier = input.streamBoundary.openVerifier({
                     descriptor: envelope.ciphertextDescriptor,
                 });
@@ -1170,9 +1184,10 @@ export const openAuthenticatedMailbox = async (
                     ciphertext: kemCiphertext,
                 });
                 const encodedKeySchedule =
-                    input.kernel.encodeMailboxKeyScheduleInput(
-                        envelope.associatedData,
-                    );
+                    input.kernel.encodeMailboxKeyScheduleInput({
+                        kemCiphertextHex: envelope.kemCiphertextHex,
+                        value: envelope.associatedData,
+                    });
                 const encodedAssociatedData =
                     input.kernel.encodeMailboxAssociatedData(
                         envelope.associatedData,
@@ -1196,7 +1211,7 @@ export const openAuthenticatedMailbox = async (
                     canonicalAssociatedData.fill(0);
                 }
                 stagingLease = await input.stagingBoundary.open({
-                    envelopeHash: input.carrier.envelopeHash,
+                    envelopeHash,
                     totalByteLength: plaintextByteLength,
                 });
                 for (
@@ -1270,9 +1285,10 @@ export const openAuthenticatedMailbox = async (
                     try {
                         stagedStreamVerifier.absorbChunk(chunkIndex, chunk);
                         gcmVerifier.decryptChunk(chunk);
-                        await input.consumePlaintextChunk(
-                            callbackInput(input.abortSignal, chunk, chunkIndex),
-                        );
+                        await plaintextSinkLease.stageChunk({
+                            bytes: chunk,
+                            chunkIndex,
+                        });
                     } finally {
                         new Uint8Array(chunk).fill(0);
                     }
@@ -1284,19 +1300,36 @@ export const openAuthenticatedMailbox = async (
                 );
                 stagedStreamVerifier.finish();
                 gcmVerifier.finishDecryption();
-                await inboundSlotLease.commit();
-                inboundSlotCommitted = true;
+                await plaintextSinkLease.seal();
+                retainPlaintextSinkForRetry = true;
                 await stagingLease.dispose();
                 stagingDisposed = true;
-                result = {
-                    isValid: true,
-                    value: {
-                        disposition: 'accepted',
-                        envelopeHash: input.carrier.envelopeHash,
-                        plaintextByteLength,
-                    },
-                };
             }
+            if (plaintextSinkLease.disposition !== 'committed') {
+                retainPlaintextSinkForRetry = true;
+                if (inboundDisposition === 'fresh') {
+                    await inboundSlotLease.commit();
+                    inboundSlotCommitted = true;
+                } else {
+                    inboundSlotCommitted = true;
+                }
+                await plaintextSinkLease.commit();
+                plaintextSinkCommitted = true;
+            } else {
+                inboundSlotCommitted = true;
+                plaintextSinkCommitted = true;
+            }
+            result = {
+                isValid: true,
+                value: {
+                    disposition:
+                        inboundDisposition === 'byteIdenticalRetransmission'
+                            ? 'byteIdenticalRetransmission'
+                            : 'accepted',
+                    envelopeHash,
+                    plaintextByteLength,
+                },
+            };
         }
     } catch (error) {
         operationFailure = asVerificationRefusal(error);
@@ -1320,11 +1353,22 @@ export const openAuthenticatedMailbox = async (
             cleanupFailures.push(error);
         }
     }
-    canonicalEnvelopeBytes.fill(0);
+    if (plaintextSinkLease !== undefined && !plaintextSinkCommitted) {
+        try {
+            if (retainPlaintextSinkForRetry) {
+                await plaintextSinkLease.release();
+            } else {
+                await plaintextSinkLease.cancel();
+            }
+        } catch (error) {
+            cleanupFailures.push(error);
+        }
+    }
+    canonicalEnvelopeBytes?.fill(0);
     kemCiphertext?.fill(0);
     keyAndNonce?.fill(0);
     sharedSecret?.fill(0);
-    sourceVerificationKey.fill(0);
+    sourceVerificationKey?.fill(0);
     if (cleanupFailures.length > 0) {
         throw new AuthenticatedMailboxCleanupError(
             operationFailure ??

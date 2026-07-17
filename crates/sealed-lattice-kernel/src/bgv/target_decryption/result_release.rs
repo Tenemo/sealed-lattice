@@ -18,7 +18,6 @@ pub(super) struct TargetDecryptionResultReleaseBeginInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) target_accepted: &'a TargetAcceptedBinding,
     pub(super) target_ciphertexts: &'a TargetCiphertextPair,
-    pub(super) target_share_profile: &'a TargetShareProfile,
 }
 
 pub(super) struct TargetDecryptionResultReleaseShareInput<'a> {
@@ -42,7 +41,7 @@ struct TargetResultReleaseSession {
     setup_binding: SetupBinding,
     target_accepted: TargetAcceptedBinding,
     target_ciphertexts: TargetCiphertextPair,
-    target_share_profile: TargetShareProfile,
+    required_share_count: usize,
     seen_roster_positions: BTreeSet<usize>,
     verified_shares: Vec<VerifiedTargetShareRelease>,
 }
@@ -52,7 +51,8 @@ pub(super) fn begin_target_decryption_result_release(
 ) -> CanonicalResult<Value> {
     let release_verification_id =
         target_result_release_verification_id(input.release_verification_id)?.to_string();
-    validate_target_result_release_profile(input.target_share_profile)?;
+    let required_share_count =
+        decryption_threshold_for_roster_length(input.setup_binding.participants.len())?;
     let sessions = target_result_release_sessions();
     let mut sessions = sessions.lock().map_err(|_| {
         CanonicalError::new(
@@ -72,22 +72,20 @@ pub(super) fn begin_target_decryption_result_release(
             setup_binding: input.setup_binding.clone(),
             target_accepted: input.target_accepted.clone(),
             target_ciphertexts: input.target_ciphertexts.clone(),
-            target_share_profile: input.target_share_profile.clone(),
+            required_share_count,
             seen_roster_positions: BTreeSet::new(),
-            verified_shares: Vec::with_capacity(input.target_share_profile.decryption_share_quorum),
+            verified_shares: Vec::with_capacity(required_share_count),
         },
     );
 
     Ok(json!({
-        "requiredShareCount": input.target_share_profile.decryption_share_quorum,
+        "requiredShareCount": required_share_count,
     }))
 }
 
 pub(super) fn absorb_target_decryption_result_release_share(
     input: TargetDecryptionResultReleaseShareInput<'_>,
 ) -> CanonicalResult<Value> {
-    let _material_eviction_guard =
-        target_proof_material_eviction_guard_for_request(input.target_share_proof);
     let release_verification_id =
         target_result_release_verification_id(input.release_verification_id)?.to_string();
     let sessions = target_result_release_sessions();
@@ -97,14 +95,24 @@ pub(super) fn absorb_target_decryption_result_release_share(
             "target result release session store is unavailable",
         )
     })?;
-    let absorb_result = {
-        let session = sessions.get_mut(&release_verification_id).ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "target result release verification id is not active",
-            )
-        })?;
-        absorb_target_result_release_share(session, input.target_share_proof)
+    let session = sessions.get_mut(&release_verification_id).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "target result release verification id is not active",
+        )
+    })?;
+    // Once an active session begins this attempt, transfer the proof material
+    // into the verifier. Any refusal consumes the material and aborts the
+    // session. Requests without an active session never reach this boundary.
+    let absorb_result = match take_target_decryption_share_proof_material_for_active_attempt(
+        input.target_share_proof,
+    ) {
+        Ok(proof_material_attempt) => absorb_target_result_release_share(
+            session,
+            input.target_share_proof,
+            proof_material_attempt,
+        ),
+        Err(error) => Err(error),
     };
     match absorb_result {
         Ok(()) => Ok(Value::Null),
@@ -134,13 +142,14 @@ pub(super) fn finish_target_decryption_result_release(
         )
     })?;
     drop(sessions);
-    validate_target_result_release_quorum(
-        &session.target_share_profile,
-        session.verified_shares.len(),
-    )?;
+    if session.verified_shares.len() != session.required_share_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "target result release requires exactly the target decryption share threshold",
+        ));
+    }
 
     release_verified_target_shares(
-        &session.setup_binding,
         &session.target_accepted,
         &session.target_ciphertexts,
         session.verified_shares,
@@ -150,11 +159,12 @@ pub(super) fn finish_target_decryption_result_release(
 fn absorb_target_result_release_share(
     session: &mut TargetResultReleaseSession,
     target_share_proof: &Value,
+    proof_material_attempt: TargetDecryptionShareProofMaterialAttempt,
 ) -> CanonicalResult<()> {
-    if session.verified_shares.len() >= session.target_share_profile.decryption_share_quorum {
+    if session.verified_shares.len() >= session.required_share_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "target result release session already has the required share quorum",
+            "target result release session already has the required share threshold",
         ));
     }
     let verified_share = verify_target_share_release_entry(
@@ -162,6 +172,7 @@ fn absorb_target_result_release_share(
         &session.target_accepted,
         &session.target_ciphertexts,
         target_share_proof,
+        proof_material_attempt,
     )?;
     if !session
         .seen_roster_positions
@@ -173,36 +184,6 @@ fn absorb_target_result_release_share(
         ));
     }
     session.verified_shares.push(verified_share);
-
-    Ok(())
-}
-
-fn validate_target_result_release_quorum(
-    target_share_profile: &TargetShareProfile,
-    share_count: usize,
-) -> CanonicalResult<()> {
-    validate_target_result_release_profile(target_share_profile)?;
-    if share_count != target_share_profile.decryption_share_quorum {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "target result release requires exactly the target decryption share quorum",
-        ));
-    }
-
-    Ok(())
-}
-
-fn validate_target_result_release_profile(
-    target_share_profile: &TargetShareProfile,
-) -> CanonicalResult<()> {
-    if target_share_profile.decryption_share_quorum
-        < target_share_profile.minimum_shares_for_interpolation
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "target result release quorum is below the interpolation threshold",
-        ));
-    }
 
     Ok(())
 }
@@ -229,7 +210,6 @@ fn target_result_release_verification_id(value: &str) -> CanonicalResult<&str> {
 }
 
 fn release_verified_target_shares(
-    setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
     verified_shares: Vec<VerifiedTargetShareRelease>,
@@ -266,9 +246,7 @@ fn release_verified_target_shares(
         .collect::<Vec<_>>();
     let result_preimage = json!({
         "objectType": "BgvTargetDecryptionResult",
-        "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
         "topCount": target_ciphertexts.top_count,
         "targetIdByOption": target_id_by_option,
         "targetOrderByOption": target_order_by_option,
@@ -290,19 +268,20 @@ fn verify_target_share_release_entry(
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
     share_proof: &Value,
+    proof_material_attempt: TargetDecryptionShareProofMaterialAttempt,
 ) -> CanonicalResult<VerifiedTargetShareRelease> {
     let target_decryption_share = value_at_path(share_proof, &["targetDecryptionShare"])?;
     let proof_statement = value_at_path(share_proof, &["proofStatement"])?;
     let proof_material = value_at_path(share_proof, &["proofMaterial"])?;
-    let trustee_identity = string_at_path(proof_statement, &["trusteeIdentity"])?;
+    let trustee_roster_position = usize_at_path(proof_statement, &["trusteeRosterPosition"])?;
     let participant = setup_binding
         .participants
-        .iter()
-        .find(|candidate| candidate.trustee_identity == trustee_identity)
+        .get(trustee_roster_position)
+        .filter(|candidate| candidate.roster_position == trustee_roster_position)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "target result release share proof trustee is not part of the setup roster",
+                CanonicalErrorCode::InvalidProtocolObject,
+                "target result release share proof roster position is not part of the setup roster",
             )
         })?;
     verify_target_decryption_share_proof_material(
@@ -314,6 +293,7 @@ fn verify_target_share_release_entry(
             target_decryption_share,
             proof_statement,
             proof_material,
+            proof_material_attempt,
         },
     )?;
     let payload = value_at_path(target_decryption_share, &["sharePayload"])?;
@@ -332,8 +312,7 @@ fn verify_target_share_release_entry(
         target_id_partials,
         target_order_partials,
         evidence: json!({
-            "trusteeIdentity": participant.trustee_identity,
-            "rosterPosition": participant.roster_position,
+            "trusteeRosterPosition": participant.roster_position,
             "targetDecryptionShareHash": target_decryption_share_hash(target_decryption_share)?,
             "proofStatementRoot": target_decryption_share_proof_statement_root(proof_statement)?,
             "proofBytesHash": hash_at_path(proof_material, &["proofBytesHash"])?,

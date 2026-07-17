@@ -2,211 +2,47 @@ use super::*;
 use std::sync::OnceLock;
 
 #[test]
-fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "cdcdabab",
-        &[round_one(2), round_two(2), rotation(3, 1)],
-        SMALL_RING_DEGREE,
-        1,
-    )
-    .expect("development instance");
-
-    let generate_request = proof_generation_request(&statement, &witness);
-
-    let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
-        .expect("generate key-bearing atom proof");
-    let proof_bytes = verify_generated_proof(&statement, &generated);
-
-    let mut fresh_randomness_request = generate_request.clone();
-    fresh_randomness_request["proofRandomnessSeedHex"] = serde_json::json!("42".repeat(64));
-    let fresh_randomness_generated =
-        super::generate_trustee_evaluation_key_proof_from_request(&fresh_randomness_request)
-            .expect("generate key-bearing atom proof with fresh randomness");
-    let fresh_randomness_proof_bytes =
-        verify_generated_proof(&statement, &fresh_randomness_generated);
-    assert_ne!(
-        proof_bytes, fresh_randomness_proof_bytes,
-        "key-bearing proof commitments must consume the bound private proof randomness"
+fn retained_private_vss_statement_hash_vector_matches() {
+    let expected_hashes = expected_statement_hash_vectors();
+    let mut private_vss_request = private_vss_statement_hash_vector_request();
+    private_vss_request["sourceTrusteeIdentity"] =
+        private_vss_request["sourceTrusteeCoefficientCommitmentRecord"]["sourceTrusteeIdentity"]
+            .clone();
+    let (_, private_vss_statement_hash) =
+        crate::bgv::setup::private_vss::generate_private_vss_share_proof_from_request(
+            &private_vss_request,
+        )
+        .expect("private VSS vector proof generation");
+    assert_eq!(
+        private_vss_statement_hash,
+        expected_hashes["privateVssShare"]
+            .as_str()
+            .expect("private VSS vector hash")
     );
-
-    let mut tampered_proof_bytes = proof_bytes.clone();
-    let tamper_position = tampered_proof_bytes.len() / 2;
-    tampered_proof_bytes[tamper_position] ^= 1;
-    assert!(
-        verify_proof_bytes(&statement, &tampered_proof_bytes).is_err(),
-        "tampered key-bearing proof bytes must be rejected"
-    );
-
-    let (mut wrong_commitment_statement, _) = generate_development_trustee_instance_with_linkage(
-        "cdcdabab",
-        &[round_one(2), round_two(2), rotation(3, 1)],
-        SMALL_RING_DEGREE,
-        1,
-    )
-    .expect("second development instance");
-    let commitment = &mut wrong_commitment_statement
-        .same_secret_linkage_mut()
-        .expect("source linkage")
-        .commitments[0];
-    commitment.limbs[0].rows[0][0] =
-        (commitment.limbs[0].rows[0][0] + 1) % commitment.limbs[0].modulus;
-    assert!(
-        verify_proof_bytes(&wrong_commitment_statement, &proof_bytes).is_err(),
-        "a proof must not verify after its BDLOP source commitment is changed"
-    );
-
-    let mut wrong_secret_request = generate_request.clone();
-    wrong_secret_request["secretCoefficients"][0] =
-        serde_json::json!(if witness.secret_coefficients()[0] == 1 {
-            0
-        } else {
-            1
-        });
-    assert!(
-        super::generate_trustee_evaluation_key_proof_from_request(&wrong_secret_request).is_err(),
-        "a wrong key secret must not open the source commitment"
-    );
-
-    let mut nonternary_secret_request = generate_request.clone();
-    nonternary_secret_request["secretCoefficients"][0] = serde_json::json!(2);
-    let error =
-        super::generate_trustee_evaluation_key_proof_from_request(&nonternary_secret_request)
-            .expect_err("a nonternary secret must be rejected");
-    assert!(
-        error.message.contains("only ternary coefficients"),
-        "unexpected nonternary-secret error: {}",
-        error.message
-    );
-
-    let mut wrong_randomness_request = generate_request.clone();
-    wrong_randomness_request["openingRandomnessByLimb"][0][0][0] =
-        serde_json::json!(if witness.opening_randomness_by_limb()[0][0][0] == 1 {
-            0
-        } else {
-            1
-        });
-    assert!(
-        super::generate_trustee_evaluation_key_proof_from_request(&wrong_randomness_request)
-            .is_err(),
-        "wrong BDLOP opening randomness must be rejected"
-    );
-}
-
-#[test]
-fn key_bearing_atom_command_requires_source_linkage() {
-    let (statement, witness) =
-        generate_development_trustee_instance("cdcdabac", &[round_one(1)], SMALL_RING_DEGREE)
-            .expect("development instance");
-    let mut request = proof_generation_request(&statement, &witness);
-    request
-        .as_object_mut()
-        .expect("proof-generation request object")
-        .remove("sameSecretLinkage");
-    assert!(
-        super::generate_trustee_evaluation_key_proof_from_request(&request).is_err(),
-        "a key-bearing statement without BDLOP source linkage must be refused"
-    );
-}
-
-#[test]
-fn trustee_proof_commands_reject_noncanonical_public_statement_material() {
-    let (round_two_statement, round_two_witness) =
-        generate_development_trustee_instance("feed0102", &[round_two(2)], SMALL_RING_DEGREE)
-            .expect("round-two instance");
-    let mut component_request = proof_generation_request(&round_two_statement, &round_two_witness);
-    component_request["keys"][0]["componentBByDigit"][0][0][0] = serde_json::json!(DATA_PRIMES[0]);
-    assert!(
-        super::generate_trustee_evaluation_key_proof_from_request(&component_request).is_err(),
-        "out-of-range componentBByDigit values must reject before proving"
-    );
-
-    let mut aggregate_request = proof_generation_request(&round_two_statement, &round_two_witness);
-    aggregate_request["keys"][0]["roundOneAggregateDiagonal"][0][0] =
-        serde_json::json!(DATA_PRIMES[0]);
-    assert!(
-        super::generate_trustee_evaluation_key_proof_from_request(&aggregate_request).is_err(),
-        "out-of-range aggregate statement values must reject before proving"
-    );
-
-    let (statement, witness) =
-        generate_development_trustee_instance("feed0304", &[round_one(2)], SMALL_RING_DEGREE)
-            .expect("round-one instance");
-    let mut material_bytes =
-        component_material_bytes_for_request_key(&statement.keys()[0], SMALL_RING_DEGREE);
-    let coefficient_offset = 8 + (4 * 8);
-    material_bytes[coefficient_offset..coefficient_offset + 8]
-        .copy_from_slice(&DATA_PRIMES[0].to_le_bytes());
-    let mut material_request = proof_generation_request(&statement, &witness);
-    material_request["keys"][0]
-        .as_object_mut()
-        .expect("key object")
-        .remove("componentBByDigit");
-    material_request["keys"][0]["componentMaterialBytesHex"] =
-        serde_json::json!(crate::hashing::to_hex(&material_bytes));
-    assert!(
-        super::generate_trustee_evaluation_key_proof_from_request(&material_request).is_err(),
-        "out-of-range binary component material must reject before proving"
-    );
-}
-
-#[test]
-fn public_key_share_commands_round_trip() {
-    let generate_request = public_key_share_statement_hash_vector_request();
-    let statement = super::super::commands::statement_from_request(&generate_request)
-        .expect("public-key share statement");
-
-    let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
-        .expect("generate public-key share command");
-
-    let _proof_bytes = verify_generated_proof(&statement, &generated);
-}
-
-#[test]
-fn proof_command_validates_and_consumes_randomness_seed() {
-    let generate_request = public_key_share_statement_hash_vector_request();
-    let statement = super::super::commands::statement_from_request(&generate_request)
-        .expect("public-key share statement");
-
-    let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
-        .expect("generate with private randomness");
-    let first_generated_proof_bytes = generated_proof_bytes(&statement, &generated);
-
-    let mut changed_seed_request = generate_request.clone();
-    changed_seed_request["proofRandomnessSeedHex"] = serde_json::json!("11".repeat(64));
-    let changed_seed_generated =
-        super::generate_trustee_evaluation_key_proof_from_request(&changed_seed_request)
-            .expect("generate with changed private randomness");
-    let changed_seed_proof_bytes = generated_proof_bytes(&statement, &changed_seed_generated);
-    assert_ne!(
-        generated["proofBytesHash"], changed_seed_generated["proofBytesHash"],
-        "different private randomness must produce different proof masks"
-    );
-    assert_ne!(first_generated_proof_bytes, changed_seed_proof_bytes);
-
-    let mut short_seed_request = generate_request.clone();
-    short_seed_request["proofRandomnessSeedHex"] = serde_json::json!("00".repeat(63));
-    assert!(
-        super::generate_trustee_evaluation_key_proof_from_request(&short_seed_request).is_err(),
-        "short proof randomness seed material must reject"
-    );
-
-    let mut missing_seed_request = generate_request;
-    missing_seed_request
-        .as_object_mut()
-        .expect("request object")
-        .remove("proofRandomnessSeedHex");
-    assert!(
-        super::generate_trustee_evaluation_key_proof_from_request(&missing_seed_request).is_err(),
-        "proof generation without private randomness must reject"
+    assert_eq!(
+        crate::bgv::setup::derive_succinct_setup_statement_hash_from_request(
+            &serde_json::json!({
+                "proofFamily": "private-vss-share",
+                "setupContext": private_vss_request["setupContext"],
+                "publicMatrixSeedHash": private_vss_request["publicMatrixSeedHash"],
+                "privateEnvelopeAadHash": private_vss_request["privateEnvelopeAadHash"],
+                "sourceTrusteeIdentity": private_vss_request["sourceTrusteeIdentity"],
+                "sourceTrusteeRosterPosition": private_vss_request["sourceTrusteeRosterPosition"],
+                "recipientRosterPosition": private_vss_request["recipientRosterPosition"],
+                "rnsLimbIndex": private_vss_request["rnsLimbIndex"],
+                "shareValues": private_vss_request["shareValues"],
+                "sourceTrusteeCoefficientCommitmentMaterialRecords": private_vss_request["sourceTrusteeCoefficientCommitmentMaterialRecords"],
+            }),
+        )
+        .expect("private VSS command statement hash")["statementHash"],
+        expected_hashes["privateVssShare"]
     );
 }
 
 #[test]
 fn proof_codec_round_trips_and_rejects_malformed_bytes() {
     let codec_test_ring_degree = LOW_DEGREE_QUERY_COUNT.next_power_of_two();
-    let (statement, witness) =
-        generate_development_public_key_share_instance("c0dec0de", codec_test_ring_degree)
-            .expect("public-key share instance");
+    let (statement, witness) = private_vss_proof_fixture(codec_test_ring_degree);
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let bytes = encode_trustee_evaluation_key_proof(&proof);
@@ -252,9 +88,7 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
 #[test]
 fn proof_codec_decodes_chunked_material_across_adversarial_boundaries() {
     let codec_test_ring_degree = LOW_DEGREE_QUERY_COUNT.next_power_of_two();
-    let (statement, witness) =
-        generate_development_public_key_share_instance("c0dec0df", codec_test_ring_degree)
-            .expect("public-key share instance");
+    let (statement, witness) = private_vss_proof_fixture(codec_test_ring_degree);
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let bytes = encode_trustee_evaluation_key_proof(&proof);
@@ -294,9 +128,7 @@ fn folded_layer_proof_codec_fixture() -> &'static (TrusteeEvaluationKeyStatement
     // smallest ring that still commits a folded Merkle layer.
     static FIXTURE: OnceLock<(TrusteeEvaluationKeyStatement, Vec<u8>)> = OnceLock::new();
     FIXTURE.get_or_init(|| {
-        let (statement, witness) =
-            generate_development_public_key_share_instance("c0dec0de", FOLDED_LAYER_RING_DEGREE)
-                .expect("public-key share instance");
+        let (statement, witness) = private_vss_proof_fixture(FOLDED_LAYER_RING_DEGREE);
         let canonical_proof =
             prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
         let canonical_proof_bytes = encode_trustee_evaluation_key_proof(&canonical_proof);
@@ -444,22 +276,14 @@ fn heavy_rust_kernel_proof_codec_rejects_noncanonical_values_in_every_encoded_ar
 }
 
 #[test]
-fn proof_codec_rejects_noncanonical_values_for_each_succinct_family_shape() {
-    let family_cases = [
-        super::same_secret_bridge::same_secret_bridge_instance(),
-        generate_development_public_key_share_instance("2222bbbb", SMALL_RING_DEGREE)
-            .expect("public-key share instance"),
-    ];
-
-    for (statement, witness) in family_cases {
-        let mut proof =
-            prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-        proof.limb_proofs[0].masked_consistency_claims[0] = statement.limb_moduli()[0];
-        let encoded = encode_trustee_evaluation_key_proof(&proof);
-        assert!(
-            decode_trustee_evaluation_key_proof(&statement, &encoded).is_err(),
-            "noncanonical proof bytes must reject for {}",
-            statement.family_shape().proof_family()
-        );
-    }
+fn proof_codec_rejects_noncanonical_values_for_retained_private_vss_family() {
+    let (statement, witness) = private_vss_proof_fixture(SMALL_RING_DEGREE);
+    let mut proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    proof.limb_proofs[0].masked_consistency_claims[0] = statement.limb_moduli()[0];
+    let encoded = encode_trustee_evaluation_key_proof(&proof);
+    assert!(
+        decode_trustee_evaluation_key_proof(&statement, &encoded).is_err(),
+        "noncanonical private VSS proof bytes must reject"
+    );
 }

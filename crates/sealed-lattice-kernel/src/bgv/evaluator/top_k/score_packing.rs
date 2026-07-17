@@ -6,7 +6,7 @@ pub(crate) fn galois_element_moving_slot_to_target(
 ) -> CanonicalResult<usize> {
     if source_slot >= POLYNOMIAL_DEGREE || target_slot >= POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "slot move requires source and target slots inside the selected ring",
         ));
     }
@@ -23,7 +23,7 @@ pub(crate) fn direct_score_packing_galois_elements(
 ) -> CanonicalResult<Vec<usize>> {
     if option_count < 2 || option_count * 2 > POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "direct score packing requires at least two options and a valid packed window",
         ));
     }
@@ -34,11 +34,10 @@ pub(crate) fn pack_direct_score_slots(
     context: &EvaluatorContext,
     direct_scores: &Ciphertext,
     option_count: usize,
-    seed_hex: &str,
 ) -> CanonicalResult<Ciphertext> {
     if option_count < 2 || option_count * 2 > POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "direct score-slot packing requires at least two options and a valid packed window",
         ));
     }
@@ -47,13 +46,8 @@ pub(crate) fn pack_direct_score_slots(
         &normalize_scaling(direct_scores)?,
         &packed_score_slot_selector(&option_indices)?,
     )?;
-    let duplicated_scores = rotate_with_compact_inverse_generator_basis(
-        context,
-        &selected_scores,
-        option_count,
-        selected_scores.level,
-        &format!("{seed_hex}-direct-score-pack-rotation"),
-    )?;
+    let duplicated_scores =
+        rotate_with_compact_inverse_generator_basis(context, &selected_scores, option_count)?;
 
     sum_aligned(&[selected_scores, duplicated_scores])
 }

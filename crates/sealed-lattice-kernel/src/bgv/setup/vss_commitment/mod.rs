@@ -1,32 +1,25 @@
 use super::*;
 use crate::bgv::setup_helpers::{
-    compare_required_string, compare_required_u64, is_lowercase_protocol_hash,
-    read_positive_u64_at_path, read_positive_usize_at_path,
+    compare_required_string, is_lowercase_protocol_hash, read_positive_usize_at_path,
 };
 
+#[cfg(test)]
 pub(in crate::bgv::setup) const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/vss-share-linkage/proof-bytes";
+#[cfg(test)]
 pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_COUNT: usize = 2;
 #[cfg(test)]
 pub(crate) const VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT: usize = 17;
+#[cfg(test)]
 pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_BASE: u64 = 129_140_163;
-// The decoder splits each digit into base-three trits; the digit base above is
-// this trit base raised to the base-digit trit count (3^17 = 129_140_163). A
-// single trit therefore ranges over {0, 1, 2}, which is the witness bound the
-// trit-granular share-linkage consistency claims publish.
-pub(crate) const VSS_PUBLIC_MESSAGE_TRIT_BASE: u64 = 3;
-// Single home: the VSS public commitment binds over exactly the BDLOP setup
-// commitment modulus limbs, so alias that constant instead of restating it and
-// letting the two drift.
-pub(in crate::bgv::setup) const VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] =
-    super::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
-
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::setup) struct VssPublicMessageEncodingLayout {
     low_digit_trit_count: usize,
     high_digit_trit_count: usize,
 }
 
+#[cfg(test)]
 impl VssPublicMessageEncodingLayout {
     pub(in crate::bgv::setup) fn digit_trit_count(
         self,
@@ -36,7 +29,7 @@ impl VssPublicMessageEncodingLayout {
             0 => Ok(self.low_digit_trit_count),
             1 => Ok(self.high_digit_trit_count),
             _ => Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "VSS message digit index is outside the selected profile",
             )),
         }
@@ -49,47 +42,6 @@ impl VssPublicMessageEncodingLayout {
     pub(in crate::bgv::setup) fn encoding_column_count(self) -> usize {
         VSS_PUBLIC_MESSAGE_DIGIT_COUNT + self.total_trit_count()
     }
-
-    pub(in crate::bgv::setup) fn digit_encoding_column(
-        self,
-        digit_index: usize,
-    ) -> CanonicalResult<usize> {
-        if digit_index < VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
-            Ok(digit_index)
-        } else {
-            Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS message digit index is outside the selected profile",
-            ))
-        }
-    }
-
-    pub(in crate::bgv::setup) fn trit_encoding_column(
-        self,
-        digit_index: usize,
-        trit_index: usize,
-    ) -> CanonicalResult<usize> {
-        let trit_count = self.digit_trit_count(digit_index)?;
-        if trit_index >= trit_count {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS message trit index is outside the statement-bound layout",
-            ));
-        }
-
-        let previous_trit_count =
-            (0..digit_index).try_fold(0_usize, |sum, previous_digit_index| {
-                sum.checked_add(self.digit_trit_count(previous_digit_index)?)
-                    .ok_or_else(|| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::MalformedLength,
-                            "VSS message trit column offset overflowed",
-                        )
-                    })
-            })?;
-
-        Ok(VSS_PUBLIC_MESSAGE_DIGIT_COUNT + previous_trit_count + trit_index)
-    }
 }
 
 pub(crate) struct VssPublicCoefficientCommitmentSetContext<'a> {
@@ -99,7 +51,6 @@ pub(crate) struct VssPublicCoefficientCommitmentSetContext<'a> {
     pub(crate) trustee_identities: &'a [String],
     pub(crate) rns_limb_count: usize,
     pub(crate) threshold_degree: usize,
-    pub(crate) ring_degree: usize,
 }
 
 pub(crate) struct VssPublicRecipientShareCommitmentSetContext<'a> {
@@ -108,7 +59,6 @@ pub(crate) struct VssPublicRecipientShareCommitmentSetContext<'a> {
     pub(crate) participant_count: usize,
     pub(crate) trustee_identities: &'a [String],
     pub(crate) rns_limb_count: usize,
-    pub(crate) ring_degree: usize,
 }
 
 pub(crate) struct VssPublicAggregateThresholdCommitmentSetContext<'a> {
@@ -117,7 +67,6 @@ pub(crate) struct VssPublicAggregateThresholdCommitmentSetContext<'a> {
     pub(crate) participant_count: usize,
     pub(crate) trustee_identities: &'a [String],
     pub(crate) rns_limb_count: usize,
-    pub(crate) ring_degree: usize,
 }
 
 pub(crate) fn verify_vss_public_coefficient_commitment_set(
@@ -165,7 +114,6 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set(
                 source_trustee_roster_position,
                 expected_coefficient_count,
                 threshold_degree: context.threshold_degree,
-                ring_degree: context.ring_degree,
             },
         )?);
     }
@@ -224,7 +172,6 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set(
                 source_trustee_roster_position,
                 expected_recipient_share_count,
                 rns_limb_count: context.rns_limb_count,
-                ring_degree: context.ring_degree,
             },
         )?);
     }
@@ -280,7 +227,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set(
                 recipient_identity: &context.trustee_identities
                     [recipient_record_index / context.rns_limb_count],
                 expected_rns_limb_index: recipient_record_index % context.rns_limb_count,
-                ring_degree: context.ring_degree,
             },
         )?);
     }
@@ -293,36 +239,39 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set(
     Ok(expected_set_root)
 }
 
+#[cfg(test)]
 fn invalid_vss_public_input(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
+#[cfg(test)]
 mod committed_material;
+#[cfg(test)]
 mod message_encoding;
+#[cfg(test)]
 mod readers;
 mod record_verification;
 mod share_linkage;
 
+#[cfg(test)]
 use readers::*;
 pub(crate) use record_verification::*;
 
-pub(crate) use committed_material::compute_vss_committed_material_commitment_request;
 #[cfg(test)]
 pub(crate) use committed_material::{
     VssCommittedMaterialCommitmentInput, compute_vss_committed_material_commitment,
 };
 
+#[cfg(test)]
 pub(crate) use message_encoding::vss_public_canonical_message_digit_columns;
+#[cfg(test)]
 pub(in crate::bgv::setup) use message_encoding::{
-    vss_public_cross_limb_message_encoding_layout, vss_public_message_digit_bound,
-    vss_public_message_digit_trits_for_count, vss_public_message_digit_weight,
-    vss_public_message_digits, vss_public_message_encoding_layout,
-    vss_public_share_linkage_packed_message_encoding_layout,
-    vss_public_share_linkage_source_message_encoding_layout,
+    vss_public_message_encoding_layout, vss_public_share_linkage_packed_message_encoding_layout,
 };
 #[cfg(test)]
 pub(crate) use record_verification::validate_standalone_vss_committed_material_commitment;
 pub(crate) use share_linkage::verify_vss_share_linkage_bindings_request;
+#[cfg(test)]
 pub(crate) use share_linkage::{
     VssAggregateThresholdProofContext, verify_vss_public_aggregate_threshold_proofs,
 };

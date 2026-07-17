@@ -7,16 +7,19 @@
 //! query positions so the algebraic identities can be checked pointwise and the
 //! FRI-tested random combination bound to the opened values.
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 
 #[cfg(test)]
 use super::merkle::sorted_unique_indices;
 use super::merkle::{
-    BatchedMerkleOpening, MerkleDigest, MerkleTree, StreamingLeafHasher, consistent_sorted_leaves,
-    leaf_hash, verify_merkle_batch,
+    BatchedMerkleOpening, MerkleDigest, consistent_sorted_leaves, leaf_hash, verify_merkle_batch,
 };
+#[cfg(test)]
+use super::merkle::{MerkleTree, StreamingLeafHasher};
+#[cfg(test)]
 use super::private_randomness::{PROOF_SALT_BYTE_LENGTH, PrivateProofRandomness};
+#[cfg(test)]
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 // The in-memory commitment is the byte-identity oracle the streamed builder
@@ -41,6 +44,7 @@ pub(super) struct ColumnOpening<const LIMB_COUNT: usize> {
     pub(super) opening: BatchedMerkleOpening,
 }
 
+#[cfg(test)]
 fn invalid_column(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
@@ -119,6 +123,7 @@ impl<const LIMB_COUNT: usize> ColumnCommitment<LIMB_COUNT> {
 // drawn in the same per-leaf order as the in-memory path. Peak memory is one
 // incremental leaf-hash state per coset position plus whatever single codeword
 // the caller is currently absorbing.
+#[cfg(test)]
 pub(super) struct StreamedColumnCommitmentBuilder<const LIMB_COUNT: usize> {
     domain_size: usize,
     column_count: usize,
@@ -127,6 +132,7 @@ pub(super) struct StreamedColumnCommitmentBuilder<const LIMB_COUNT: usize> {
     states: Vec<StreamingLeafHasher>,
 }
 
+#[cfg(test)]
 pub(super) struct StreamedColumnCommitment {
     domain_size: usize,
     column_count: usize,
@@ -134,6 +140,7 @@ pub(super) struct StreamedColumnCommitment {
     tree: MerkleTree,
 }
 
+#[cfg(test)]
 impl<const LIMB_COUNT: usize> StreamedColumnCommitmentBuilder<LIMB_COUNT> {
     pub(super) fn begin(
         domain_size: usize,
@@ -218,6 +225,7 @@ impl<const LIMB_COUNT: usize> StreamedColumnCommitmentBuilder<LIMB_COUNT> {
     }
 }
 
+#[cfg(test)]
 impl StreamedColumnCommitment {
     pub(super) fn root(&self) -> MerkleDigest {
         self.tree.root()

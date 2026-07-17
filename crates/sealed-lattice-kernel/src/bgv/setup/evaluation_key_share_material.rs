@@ -57,7 +57,7 @@ impl EvaluationKeyShareProofFamily {
 }
 
 fn invalid_evaluation_key_share_material(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 fn validate_hex_string(value: &str, field_name: &str) -> CanonicalResult<()> {

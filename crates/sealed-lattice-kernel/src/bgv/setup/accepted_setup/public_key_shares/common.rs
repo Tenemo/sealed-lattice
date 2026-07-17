@@ -9,7 +9,7 @@ pub(in super::super) fn public_key_common_binding(
 ) -> CanonicalResult<PublicKeyCommonBinding> {
     let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "commonRandomness was required before public-key share verification",
         )
     })?;

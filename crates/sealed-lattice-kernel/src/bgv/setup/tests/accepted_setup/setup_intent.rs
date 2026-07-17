@@ -17,7 +17,7 @@ fn foundation_setup_parameters_hash_is_byte_stable() {
         setup_parameters["setupParametersHash"]
             .as_str()
             .expect("setup parameters hash"),
-        "7f9ebdddb630b12e5aa3bef13381d862eaa5f66b9309692b9239b67069308058dd59b95565860d5c31de77b3a93852d694545e9343f4fb3eef9f21860d35f4dc",
+        "faf7e7a20ec6c45c08aa0083a5c596ae45a06c703c22653cac5d1672cdcc8667e8e2da7def0edd14224747ac9842de7286043e83e92f86b899bed8a91605d9b7",
     );
 }
 
@@ -28,7 +28,10 @@ fn collective_setup_parameters_expose_operative_foundation_parameters() {
     );
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
 
-    assert_eq!(setup_parameters["participantCount"], 10);
+    assert_eq!(
+        setup_parameters["participantCount"],
+        u64::from(crate::foundation::PROTOTYPE_PARTICIPANT_COUNT)
+    );
     assert_eq!(
         setup_parameters["qShare"]["primes"]
             .as_array()
@@ -74,7 +77,6 @@ fn collective_setup_intent_accepts_signed_canonical_registrations() {
         .expect("setup-intent verification response");
 
     assert_eq!(result["isValid"], true, "unexpected result: {result}");
-    assert_eq!(result["value"], serde_json::json!({}));
 }
 
 #[test]
@@ -175,8 +177,14 @@ fn collective_setup_verifier_refuses_malformed_setup_context_tokens_first() {
 
         let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
             .expect("verification response");
-        assert_eq!(result["isValid"], false, "unexpected result: {result}");
-        assert_eq!(result["refusalReason"], "wrongContext");
+        assert_eq!(
+            result["isValid"], false,
+            "unexpected result for setupContext.{field_name}={malformed_value:?}: {result}"
+        );
+        assert_eq!(
+            result["refusalReason"], "malformedEncoding",
+            "unexpected refusal for setupContext.{field_name}={malformed_value:?}: {result}"
+        );
     }
 }
 

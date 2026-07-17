@@ -498,7 +498,7 @@ const assertKernelMemoryWithinProfile = (
     if (memory.buffer.byteLength > maximumByteLength) {
         throw commandBoundaryError(
             'MalformedLength',
-            'The transcript-core kernel exceeded the accepted linear-memory profile.',
+            'The transcript-core kernel exceeded the absolute linear-memory safety bound.',
         );
     }
 };
@@ -548,6 +548,7 @@ const requireKernelMemoryRange = (
 
 type NumberExportName =
     | 'sealed_lattice_allocate'
+    | 'sealed_lattice_action_randomness_command'
     | 'sealed_lattice_accepted_setup_canonical_stream_begin'
     | 'sealed_lattice_accepted_setup_command_with_length'
     | 'sealed_lattice_accepted_setup_session_begin'
@@ -560,12 +561,67 @@ type NumberExportName =
     | 'sealed_lattice_bgv_canonical_material_reader_cancel'
     | 'sealed_lattice_bgv_canonical_material_reader_finish'
     | 'sealed_lattice_bgv_canonical_material_reader_read_chunk'
+    | 'sealed_lattice_board_verifier_begin'
+    | 'sealed_lattice_board_verifier_cached_carrier_length'
+    | 'sealed_lattice_board_verifier_cancel'
+    | 'sealed_lattice_board_verifier_copy_cached_carrier'
+    | 'sealed_lattice_board_verifier_describe'
+    | 'sealed_lattice_board_verifier_release'
+    | 'sealed_lattice_board_verifier_verify_unordered'
+    | 'sealed_lattice_finality_verifier_begin'
+    | 'sealed_lattice_finality_verifier_cancel'
+    | 'sealed_lattice_finality_verifier_describe'
+    | 'sealed_lattice_finality_verifier_release'
+    | 'sealed_lattice_finality_verifier_verify'
     | 'sealed_lattice_canonical_stream_absorb_chunk'
     | 'sealed_lattice_canonical_stream_begin_verifier'
     | 'sealed_lattice_canonical_stream_begin_writer'
     | 'sealed_lattice_canonical_stream_cancel'
     | 'sealed_lattice_canonical_stream_finish_verifier'
     | 'sealed_lattice_canonical_stream_finish_writer'
+    | 'sealed_lattice_common_proof_begin_generation'
+    | 'sealed_lattice_common_proof_begin_verification'
+    | 'sealed_lattice_common_proof_abort_application'
+    | 'sealed_lattice_common_proof_application_frame_byte_length'
+    | 'sealed_lattice_common_proof_confirm_application'
+    | 'sealed_lattice_common_proof_describe_generation_family_adapter'
+    | 'sealed_lattice_common_proof_describe_verification_family_adapter'
+    | 'sealed_lattice_common_proof_discard_generation_family_adapter'
+    | 'sealed_lattice_common_proof_discard_prepared_generation'
+    | 'sealed_lattice_common_proof_discard_prepared_verification'
+    | 'sealed_lattice_common_proof_discard_verification_family_adapter'
+    | 'sealed_lattice_common_proof_discard_verified_proof'
+    | 'sealed_lattice_common_proof_generation_acknowledge_checkpoint'
+    | 'sealed_lattice_common_proof_generation_acknowledge_output_chunk'
+    | 'sealed_lattice_common_proof_generation_checkpoint_cursor_byte_length'
+    | 'sealed_lattice_common_proof_generation_checkpoint_state_byte_length'
+    | 'sealed_lattice_common_proof_generation_confirm_output_readback'
+    | 'sealed_lattice_common_proof_generation_copy_checkpoint_cursor'
+    | 'sealed_lattice_common_proof_generation_copy_checkpoint_stable_attempt_binding_hash'
+    | 'sealed_lattice_common_proof_generation_copy_checkpoint_state'
+    | 'sealed_lattice_common_proof_generation_copy_output_chunk'
+    | 'sealed_lattice_common_proof_generation_copy_storage_request'
+    | 'sealed_lattice_common_proof_generation_describe_checkpoint'
+    | 'sealed_lattice_common_proof_generation_discard_checkpoint'
+    | 'sealed_lattice_common_proof_generation_finish'
+    | 'sealed_lattice_common_proof_generation_poll'
+    | 'sealed_lattice_common_proof_generation_release_cancelled'
+    | 'sealed_lattice_common_proof_generation_retire_failed'
+    | 'sealed_lattice_common_proof_generation_request_cancellation'
+    | 'sealed_lattice_common_proof_generation_supply_storage_response'
+    | 'sealed_lattice_common_proof_prepare_application'
+    | 'sealed_lattice_common_proof_prepare_generation_family_adapter'
+    | 'sealed_lattice_common_proof_prepare_verification_family_adapter'
+    | 'sealed_lattice_common_proof_release_generated_proof'
+    | 'sealed_lattice_common_proof_release_suite'
+    | 'sealed_lattice_common_proof_select_suite'
+    | 'sealed_lattice_common_proof_resume_generation'
+    | 'sealed_lattice_common_proof_verification_absorb_input_chunk'
+    | 'sealed_lattice_common_proof_verification_cancel'
+    | 'sealed_lattice_common_proof_verification_finish'
+    | 'sealed_lattice_common_proof_verification_finish_input'
+    | 'sealed_lattice_common_proof_verification_poll'
+    | 'sealed_lattice_common_proof_verification_supply_readback_chunk'
     | 'sealed_lattice_mailbox_gcm_authenticate_chunk'
     | 'sealed_lattice_mailbox_gcm_begin_encryptor'
     | 'sealed_lattice_mailbox_gcm_begin_verifier'
@@ -577,6 +633,7 @@ type NumberExportName =
     | 'sealed_lattice_mailbox_gcm_finish_encryptor'
     | 'sealed_lattice_deallocate'
     | 'sealed_lattice_local_storage_root_command'
+    | 'sealed_lattice_state_producer_command'
     | 'sealed_lattice_state_verifier_begin'
     | 'sealed_lattice_state_verifier_cancel'
     | 'sealed_lattice_state_verifier_certify_intent'
@@ -585,9 +642,7 @@ type NumberExportName =
     | 'sealed_lattice_state_verifier_release'
     | 'sealed_lattice_state_verifier_finish_output'
     | 'sealed_lattice_state_verifier_prepare_output'
-    | 'sealed_lattice_state_verifier_prepare_recovery'
     | 'sealed_lattice_state_verifier_prepare_reservation'
-    | 'sealed_lattice_state_verifier_verify_recovery'
     | 'sealed_lattice_state_verifier_verify_reservation'
     | 'sealed_lattice_transcript_core_command_with_length';
 
@@ -636,7 +691,7 @@ const copyIntoKernelMemory = (
     if (requiredByteLength > maximumTranscriptCoreKernelMemoryByteLength) {
         throw commandBoundaryError(
             'MalformedLength',
-            'The transcript-core command allocation exceeds the accepted linear-memory profile.',
+            'The transcript-core command allocation exceeds the absolute linear-memory safety bound.',
         );
     }
     if (requiredByteLength > memory.buffer.byteLength) {

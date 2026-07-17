@@ -1,8 +1,10 @@
+#[cfg(test)]
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
 
+#[cfg(test)]
 use crate::{
     bgv::setup::limb_group_key_switch_atom::proof_field::ProofFieldParameters,
     encoding::{append_bytes, append_varuint},
@@ -12,14 +14,17 @@ use crate::{
 pub(super) const PROOF_SALT_BYTE_LENGTH: usize = 16;
 // Fifteen 64-bit words reduced modulo the largest proof field leave less than
 // 2^-180 statistical bias while avoiding a variable-time rejection loop.
+#[cfg(test)]
 const FIELD_ELEMENT_WORD_COUNT: usize = 15;
 
+#[cfg(test)]
 #[derive(Clone)]
 pub(super) struct PrivateProofRandomness {
     reader: <Shake256 as ExtendableOutput>::Reader,
     consumed_byte_length: u64,
 }
 
+#[cfg(test)]
 impl PrivateProofRandomness {
     pub(super) fn new(domain: &str, parts: &[&[u8]]) -> Self {
         let mut preimage = Vec::new();

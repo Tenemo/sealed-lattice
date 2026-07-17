@@ -9,7 +9,7 @@ fn require_setup_package_shape(setup_package: &Value) -> CanonicalResult<()> {
     if string_at_path(setup_package, &["objectType"])? != "SetupPackage" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
-            "target decryption requires a SetupPackage-shaped input; passive or unknown setup packages are refused",
+            "target decryption requires a SetupPackage-shaped input",
         ));
     }
     Ok(())
@@ -89,7 +89,6 @@ fn read_aggregate_threshold_commitment_set_binding(
             participant_count: participants.len(),
             trustee_identities: &trustee_identities,
             rns_limb_count,
-            ring_degree: POLYNOMIAL_DEGREE,
         },
     )?;
 
@@ -97,9 +96,7 @@ fn read_aggregate_threshold_commitment_set_binding(
     let mut recipient_records = Vec::with_capacity(participants.len());
     for recipient_position in 0..participants.len() {
         let mut limb_records = Vec::with_capacity(rns_limb_count);
-        for (rns_limb_index, expected_rns_prime) in
-            DATA_PRIMES.iter().copied().enumerate().take(rns_limb_count)
-        {
+        for rns_limb_index in 0..rns_limb_count {
             let record_index = recipient_position
                 .checked_mul(rns_limb_count)
                 .and_then(|base| base.checked_add(rns_limb_index))
@@ -116,7 +113,6 @@ fn read_aggregate_threshold_commitment_set_binding(
                 )
             })?;
             limb_records.push(AggregateThresholdCommitmentRecordBinding {
-                rns_prime: expected_rns_prime,
                 aggregate_commitment_root: hash_at_path(record, &["aggregateCommitmentRoot"])?
                     .to_string(),
                 aggregate_opening_root: hash_at_path(record, &["aggregateOpeningRoot"])?
@@ -140,7 +136,7 @@ pub(super) fn read_target_accepted_binding(
 ) -> CanonicalResult<TargetAcceptedBinding> {
     if string_at_path(record, &["objectType"])? != "TargetAcceptedRecord" {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "targetAcceptedRecord must be a canonical TargetAcceptedRecord",
         ));
     }
@@ -165,36 +161,4 @@ pub(super) fn target_accepted_record_hash_preimage(record: &Value) -> CanonicalR
         "setupPackageHash": hash_at_path(record, &["setupPackageHash"])?,
         "targetCiphertextHash": hash_at_path(record, &["targetCiphertextHash"])?,
     }))
-}
-
-pub(super) fn read_target_share_profile(
-    value: &Value,
-    setup_binding: &SetupBinding,
-) -> CanonicalResult<TargetShareProfile> {
-    if string_at_path(value, &["objectType"])? != "TargetDecryptionShareProfile" {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "targetShareProfile must be a TargetDecryptionShareProfile object",
-        ));
-    }
-    let minimum_shares_for_interpolation = usize_field(value, "minimumSharesForInterpolation")?;
-    let decryption_share_quorum = usize_field(value, "decryptionShareQuorum")?;
-    let participant_count = setup_binding.participants.len();
-    let decryption_threshold = participant_count / 3 + 1;
-    if decryption_threshold == 0
-        || decryption_threshold > participant_count
-        || minimum_shares_for_interpolation < decryption_threshold
-        || minimum_shares_for_interpolation > decryption_share_quorum
-        || decryption_share_quorum > participant_count
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "targetShareProfile quorum values are inconsistent with the setup roster",
-        ));
-    }
-
-    Ok(TargetShareProfile {
-        minimum_shares_for_interpolation,
-        decryption_share_quorum,
-    })
 }

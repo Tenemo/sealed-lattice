@@ -24,7 +24,6 @@ import { derivePublicKeyShareSetRoot } from './share-statement-records.js';
 const binaryChunkedPublicKeyShareMaterialSet = (
     input: Readonly<{
         readonly setupContext: CollectiveBgvSetupContext;
-        readonly ringDegree: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyShares: PublicKeyShareSet;
         readonly publicKeyShareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
@@ -55,7 +54,6 @@ const binaryChunkedPublicKeyShareMaterialSet = (
             setupContextHash: deriveCollectiveBgvSetupContextHash(
                 input.setupContext,
             ),
-            ringDegree: input.ringDegree,
             publicMatrixSeedHash: input.publicMatrixSeedHash,
             publicKeyShareSetRoot: derivePublicKeyShareSetRoot(
                 input.setupContext,
@@ -108,7 +106,6 @@ export const createBinaryChunkedPublicKeyShareMaterialBundle = async (
         publicKeyShareMaterialRecordsFromContributions(input);
     const materialSet = binaryChunkedPublicKeyShareMaterialSet({
         setupContext: input.setupContext,
-        ringDegree: input.ringDegree,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         publicKeyShares: input.publicKeyShares,
         publicKeyShareMaterialRecords: shareMaterialRecords,

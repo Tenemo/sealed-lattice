@@ -25,7 +25,6 @@ pub(super) type CoefficientCommitmentMaterialRecordsVerification =
 pub(super) struct PrivateEnvelopeBinding {
     pub(super) private_envelope_hash: String,
     pub(super) private_envelope_aad_hash: String,
-    pub(super) recipient_identity: String,
     pub(super) recipient_roster_position: u64,
 }
 
@@ -100,7 +99,7 @@ pub(super) fn verify_setup_context(
     {
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_hash("setupParametersHashMismatch"),
-            "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
+            "setupContext.setupParametersHash does not match the roster-derived collective BGV setup parameters",
             "setupContext.setupParametersHash",
         )));
     }

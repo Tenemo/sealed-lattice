@@ -43,7 +43,6 @@ impl MerkleContext {
 
 pub(super) const WITNESS_TREE_ORDINAL_BASE: u16 = 0x1000;
 pub(super) const QUOTIENT_TREE_ORDINAL_BASE: u16 = 0x2000;
-pub(super) const VSS_COMMITTED_MATERIAL_TREE_ORDINAL_BASE: u16 = 0x3000;
 pub(super) const MAIN_LOW_DEGREE_TREE_ORDINAL_BASE: u16 = 0x4000;
 pub(super) const RESIDUAL_LOW_DEGREE_TREE_ORDINAL_BASE: u16 = 0x6000;
 
@@ -70,6 +69,7 @@ pub(super) fn low_degree_tree_context(
 
 // Merkle commitment over a power-of-two leaf count. Leaves are rows of u64
 // values (one row per evaluation position across all committed columns).
+#[cfg(test)]
 pub(in crate::bgv::setup) struct MerkleTree {
     levels: Vec<Vec<MerkleDigest>>,
 }
@@ -144,6 +144,7 @@ pub(super) fn phase_pair_leaf_hash(
     )
 }
 
+#[cfg(test)]
 impl MerkleTree {
     pub(in crate::bgv::setup) fn from_leaf_hashes(
         context: MerkleContext,
@@ -243,6 +244,7 @@ pub(in crate::bgv::setup) struct BatchedMerkleOpening {
 
 // Sorted, unique leaf indices from a possibly unsorted, repeating index list.
 // Prover and verifier both canonicalize the same way so the node order agrees.
+#[cfg(test)]
 pub(in crate::bgv::setup) fn sorted_unique_indices(
     indices: impl IntoIterator<Item = usize>,
 ) -> Vec<usize> {
@@ -277,6 +279,7 @@ pub(in crate::bgv::setup) fn consistent_sorted_leaves(
     Some(leaves_by_index.into_iter().collect())
 }
 
+#[cfg(test)]
 impl MerkleTree {
     // Open a set of leaf indices at once. `sorted_unique_indices` must be
     // strictly ascending with no repeats and every index below the leaf count.

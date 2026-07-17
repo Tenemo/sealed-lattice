@@ -128,7 +128,7 @@ pub(super) fn verify_galois_key_share_batches(
             &expected_trustees,
             u64::try_from(trustee_roster_position).map_err(|_| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "Galois key share batch position does not fit u64",
                 )
             })?,
@@ -155,7 +155,7 @@ pub(super) fn galois_key_share_material_for_schedule(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "Galois key share batch does not contain a required scheduled material root",
             )
         })
@@ -171,13 +171,13 @@ pub(in crate::bgv::setup) struct EvaluationKeyProofCommonBinding {
 fn derive_evaluator_key_schedule_root(setup_package: &Value) -> CanonicalResult<String> {
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupContext was required before evaluation-key share verification",
         )
     })?;
     let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "commonRandomness was required before evaluation-key share verification",
         )
     })?;
@@ -196,7 +196,7 @@ pub(in crate::bgv::setup) fn evaluation_key_proof_common_binding(
 ) -> CanonicalResult<EvaluationKeyProofCommonBinding> {
     let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "commonRandomness was required before evaluation-key share verification",
         )
     })?;
@@ -206,7 +206,7 @@ pub(in crate::bgv::setup) fn evaluation_key_proof_common_binding(
     let vss_share_linkage_statement = setup_package.get("vssShareLinkageStatement").ok_or_else(
         || {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "vssShareLinkageStatement was required before evaluation-key share verification",
             )
         },
@@ -218,7 +218,7 @@ pub(in crate::bgv::setup) fn evaluation_key_proof_common_binding(
         ring_degree: usize::try_from(value_u64(vss_share_linkage_statement, "ringDegree")?)
             .map_err(|_| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "verified VSS ringDegree does not fit usize",
                 )
             })?,
@@ -252,7 +252,7 @@ pub(in crate::bgv::setup) fn scheduled_relinearization_levels() -> CanonicalResu
         .map(|entry| {
             entry.get("level").and_then(Value::as_u64).ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "relinearization level schedule entry is missing its level",
                 )
             })
@@ -305,7 +305,7 @@ pub(super) fn verify_relinearization_key_switch_sample_binding(
         material_root,
         usize::try_from(level).map_err(|_| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "relinearization key-switch level does not fit usize",
             )
         })?,
@@ -335,7 +335,7 @@ pub(super) fn verify_galois_key_switch_sample_binding(
         material_root,
         usize::try_from(level).map_err(|_| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "Galois key-switch level does not fit usize",
             )
         })?,
@@ -356,7 +356,7 @@ fn verify_evaluation_key_component_material_root(root: &Value) -> CanonicalResul
     validate_hash_string(
         root.as_str().ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "evaluation-key component material root must be a string",
             )
         })?,
@@ -370,7 +370,7 @@ fn verify_galois_key_share_batch(batch: &Value, expected_schedule: &Value) -> Ca
     verify_evaluation_key_record_object(batch, GALOIS_KEY_SHARE_BATCH_OBJECT_TYPE)?;
     let expected_entries = expected_schedule.as_array().ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "expected Galois key schedule must be an array",
         )
     })?;
@@ -394,13 +394,13 @@ fn verify_evaluation_key_record_object(
 ) -> CanonicalResult<()> {
     if !record.is_object() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "evaluation-key share record must be an object",
         ));
     }
     if record.get("objectType").and_then(Value::as_str) != Some(expected_object_type) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!("evaluation-key share objectType must be {expected_object_type}"),
         ));
     }

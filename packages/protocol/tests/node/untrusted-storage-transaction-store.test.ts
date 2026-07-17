@@ -6,7 +6,7 @@ import {
     type UntrustedStorageAdapter,
     type UntrustedStorageAtomicMutation,
     type UntrustedStorageAuthenticator,
-    type UntrustedStorageRecoveryReport,
+    type UntrustedStorageRepairReport,
     type UntrustedStorageTransactionErrorCode,
     type UntrustedStorageTransactionLimits,
 } from '#packages/protocol/src/runtime/untrusted-storage-transaction-store';
@@ -37,6 +37,7 @@ class DeterministicInMemoryStorageAdapter implements UntrustedStorageAdapter {
     #values = new Map<string, Uint8Array>();
     public afterNextAtomicMutation: (() => void) | undefined;
     public beforeNextAtomicMutation: (() => void) | undefined;
+    public beforeNextUnreferencedObjectDeletion: (() => void) | undefined;
     public failNextAtomicMutationCount = 0;
     public failNextDeleteCount = 0;
     public forceNextAtomicConflict = false;
@@ -72,6 +73,31 @@ class DeterministicInMemoryStorageAdapter implements UntrustedStorageAdapter {
                 .filter((key) => key.startsWith(prefix))
                 .sort(),
         );
+    }
+
+    public deleteUnreferencedObjects(input: {
+        indexPrefix: string;
+        objectKeys: readonly string[];
+    }): Promise<boolean> {
+        const beforeDeletion = this.beforeNextUnreferencedObjectDeletion;
+        this.beforeNextUnreferencedObjectDeletion = undefined;
+        beforeDeletion?.();
+        const referencedObjectKeys = new Set(
+            [...this.#values.entries()]
+                .filter(([key]) => key.startsWith(input.indexPrefix))
+                .map(([, value]) => textDecoder.decode(value)),
+        );
+        if (
+            input.objectKeys.some((objectKey) =>
+                referencedObjectKeys.has(objectKey),
+            )
+        ) {
+            return Promise.resolve(false);
+        }
+        for (const objectKey of input.objectKeys) {
+            this.#values.delete(objectKey);
+        }
+        return Promise.resolve(true);
     }
 
     public applyAtomicMutation(
@@ -205,7 +231,7 @@ const openTestStore = async (input?: {
     namespace?: string;
 }): Promise<{
     adapter: DeterministicInMemoryStorageAdapter;
-    recoveryReport: UntrustedStorageRecoveryReport;
+    repairReport: UntrustedStorageRepairReport;
     store: UntrustedStorageTransactionStore;
 }> => {
     const adapter = input?.adapter ?? new DeterministicInMemoryStorageAdapter();
@@ -574,12 +600,22 @@ describe('untrusted storage transaction store', () => {
             postCommitTransaction.commit(),
             'AuthenticationFailed',
         );
-        await postCommitTransaction.closeAfterFailure();
+        const postCommitPublicationDispositions: string[] = [];
+        await postCommitTransaction.closeAfterFailure((disposition) => {
+            postCommitPublicationDispositions.push(disposition);
+        });
+        await postCommitTransaction.closeAfterFailure((disposition) => {
+            postCommitPublicationDispositions.push(disposition);
+        });
+        expect(postCommitPublicationDispositions).toEqual([
+            'published-or-indeterminate',
+            'published-or-indeterminate',
+        ]);
         await expectStorageError(
             postCommitTransaction.commit(),
             'InvalidState',
         );
-        await expect(postCommitStore.store.recover()).resolves.toMatchObject({
+        await expect(postCommitStore.store.repair()).resolves.toMatchObject({
             retainedObjectCount: 1,
         });
 
@@ -603,7 +639,7 @@ describe('untrusted storage transaction store', () => {
             abortTransaction.closeAfterFailure(),
             'CleanupFailed',
         );
-        await expect(abortStore.store.recover()).resolves.toMatchObject({
+        await expect(abortStore.store.repair()).resolves.toMatchObject({
             removedUnreferencedObjectCount: 1,
             retainedObjectCount: 0,
         });
@@ -888,6 +924,47 @@ describe('untrusted storage transaction store', () => {
         await secondTransaction.abort();
     });
 
+    it('rejects lone UTF-16 surrogates without rejecting valid supplementary characters', async () => {
+        const { store } = await openTestStore();
+        const transaction = await store.beginTransaction({
+            lifetimeMilliseconds: 100,
+        });
+        for (const malformedLogicalRecordKey of [
+            '\ud800',
+            '\udc00',
+            'prefix-\ud800-suffix',
+            '\ud800\ud800',
+        ]) {
+            await expectStorageError(
+                transaction.issueWriteLease({
+                    declaredByteLength: 1,
+                    logicalRecordKey: malformedLogicalRecordKey,
+                }),
+                'MalformedLength',
+            );
+        }
+
+        const validLogicalRecordKey = 'supplementary-\ud83d\ude42';
+        const lease = await transaction.issueWriteLease({
+            declaredByteLength: 1,
+            logicalRecordKey: validLogicalRecordKey,
+        });
+        await lease.write(new Uint8Array([7]));
+        await lease.seal(
+            exactAuthenticator(validLogicalRecordKey, new Uint8Array([7])),
+        );
+        await transaction.commit();
+        expect(
+            await store.readAuthenticated({
+                authenticate: exactAuthenticator(
+                    validLogicalRecordKey,
+                    new Uint8Array([7]),
+                ),
+                logicalRecordKey: validLogicalRecordKey,
+            }),
+        ).toEqual(new Uint8Array([7]));
+    });
+
     it('expires only after the exact deadline and cleans staged objects idempotently', async () => {
         let currentTimeMilliseconds = 0.25;
         const { adapter, store } = await openTestStore({
@@ -1069,7 +1146,7 @@ describe('untrusted storage transaction store', () => {
         );
     });
 
-    it('fails recovery when retained storage exceeds the configured total quota', async () => {
+    it('fails repair when retained storage exceeds the configured total quota', async () => {
         const adapter = new DeterministicInMemoryStorageAdapter();
         const namespace = 'over-total-quota';
         const objectKey =
@@ -1096,7 +1173,7 @@ describe('untrusted storage transaction store', () => {
         );
     });
 
-    it('bounds hostile owned-key enumeration before recovery builds record maps', async () => {
+    it('bounds hostile owned-key enumeration before repair builds record maps', async () => {
         const adapter = new DeterministicInMemoryStorageAdapter();
         const namespace = 'owned-record-cap';
         const objectKey =
@@ -1136,7 +1213,35 @@ describe('untrusted storage transaction store', () => {
         );
     });
 
-    it('recovers abandoned writes but fails closed on corrupt, dangling, or aliased committed indices', async () => {
+    it('does not delete an object that becomes committed after the repair listing', async () => {
+        const adapter = new DeterministicInMemoryStorageAdapter();
+        const namespace = 'repair-publication-race';
+        const objectKey =
+            `sealed-lattice-runtime-store/${namespace}/objects/` +
+            `${identifierFilledWithByte(9)}/${identifierFilledWithByte(10)}`;
+        const committedIndexKey = indexKey(namespace, 'newly-committed');
+        adapter.rawWrite(objectKey, new Uint8Array([4, 5, 6]));
+        adapter.beforeNextUnreferencedObjectDeletion = () => {
+            adapter.rawWrite(committedIndexKey, textEncoder.encode(objectKey));
+        };
+
+        await expectStorageError(
+            openPositivelyVerifiedStorageTransactionStore({
+                adapter,
+                createIdentifier: createDeterministicIdentifierFactory(),
+                limits: defaultLimits,
+                monotonicClockMilliseconds: () => 0,
+                namespace,
+            }),
+            'Conflict',
+        );
+        expect(adapter.rawRead(objectKey)).toEqual(new Uint8Array([4, 5, 6]));
+        expect(adapter.rawRead(committedIndexKey)).toEqual(
+            textEncoder.encode(objectKey),
+        );
+    });
+
+    it('repairs abandoned writes but fails closed on corrupt, dangling, or aliased committed indices', async () => {
         const adapter = new DeterministicInMemoryStorageAdapter();
         const crashedStore = await openTestStore({ adapter });
         const abandonedTransaction = await crashedStore.store.beginTransaction({
@@ -1149,7 +1254,7 @@ describe('untrusted storage transaction store', () => {
         await abandonedLease.write(new Uint8Array([9, 9, 9]));
 
         const afterCrash = await openTestStore({ adapter });
-        expect(afterCrash.recoveryReport).toMatchObject({
+        expect(afterCrash.repairReport).toMatchObject({
             removedCorruptIndexCount: 0,
             removedUnreferencedObjectCount: 1,
             retainedObjectCount: 0,

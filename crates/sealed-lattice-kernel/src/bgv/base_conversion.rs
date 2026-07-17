@@ -10,14 +10,13 @@ pub(crate) fn lift_plaintext_coefficients_to_basis(
     coefficients: &[u64],
     target_basis_kind: BgvBasisKind,
     target_level: usize,
-    bgv_parameters_hash: String,
 ) -> CanonicalResult<RnsPolynomial> {
     if coefficients
         .iter()
         .any(|coefficient| *coefficient >= PLAINTEXT_MODULUS)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "plaintext coefficient is outside GF(65537)",
         ));
     }
@@ -25,7 +24,7 @@ pub(crate) fn lift_plaintext_coefficients_to_basis(
         .moduli_for_level(target_level)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "target basis level is outside the selected parameters",
             )
         })?;
@@ -39,12 +38,7 @@ pub(crate) fn lift_plaintext_coefficients_to_basis(
         })
         .collect::<Vec<_>>();
 
-    RnsPolynomial::coefficient_domain(
-        target_basis_kind,
-        target_level,
-        bgv_parameters_hash,
-        residues_by_modulus,
-    )
+    RnsPolynomial::coefficient_domain(target_basis_kind, target_level, residues_by_modulus)
 }
 
 // "Plaintext-lifted" means the SAME field value (< 65537) is stored identically
@@ -64,26 +58,33 @@ pub(crate) fn convert_plaintext_lifted_basis(
             "source basis has no residue limbs",
         )
     })?;
-    for (coefficient_index, first_limb_coefficient) in
-        first_limb.iter().enumerate().take(source.coefficient_count)
-    {
+    let source_moduli = source
+        .basis_kind
+        .moduli_for_level(source.level)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "source basis level is outside the selected parameters",
+            )
+        })?;
+    for (coefficient_index, first_limb_coefficient) in first_limb.iter().enumerate() {
         let field_value = *first_limb_coefficient;
         if field_value >= PLAINTEXT_MODULUS {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "source basis is not a canonical plaintext-lifted BGV-RNS object",
             ));
         }
-        for (modulus_index, modulus) in source.moduli.iter().enumerate() {
+        for (modulus_index, modulus) in source_moduli.iter().enumerate() {
             if source.residues_by_modulus[modulus_index][coefficient_index] != field_value {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "source basis is not a consistent plaintext-lifted BGV-RNS object",
                 ));
             }
             if source.residues_by_modulus[modulus_index][coefficient_index] >= *modulus {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "source basis contains a non-canonical residue",
                 ));
             }
@@ -97,32 +98,25 @@ pub(crate) fn convert_plaintext_lifted_basis(
             .collect::<Vec<_>>(),
         target_basis_kind,
         target_level,
-        source.bgv_parameters_hash.clone(),
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{convert_plaintext_lifted_basis, lift_plaintext_coefficients_to_basis};
-    use crate::bgv::parameters::{BgvBasisKind, POLYNOMIAL_DEGREE, bgv_parameters_hash};
+    use crate::bgv::parameters::{BgvBasisKind, POLYNOMIAL_DEGREE};
 
     #[test]
     fn base_conversion_lifts_plaintext_coefficients_to_selected_bases() {
         let mut coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
         coefficients[0] = 65_536;
         coefficients[1] = 1;
-        let bgv_parameters_hash = bgv_parameters_hash().expect("parameters hash");
-        let source = lift_plaintext_coefficients_to_basis(
-            &coefficients,
-            BgvBasisKind::Data,
-            0,
-            bgv_parameters_hash,
-        )
-        .expect("data basis object");
+        let source = lift_plaintext_coefficients_to_basis(&coefficients, BgvBasisKind::Data, 0)
+            .expect("data basis object");
         let converted = convert_plaintext_lifted_basis(&source, BgvBasisKind::Extended, 1)
             .expect("extended basis conversion");
 
-        assert_eq!(converted.moduli.len(), 2);
+        assert_eq!(converted.residues_by_modulus.len(), 2);
         assert_eq!(converted.residues_by_modulus[0][0], 65_536);
         assert_eq!(converted.residues_by_modulus[1][1], 1);
         // Every residue vector spans the full ring, and the unset coefficients
@@ -139,13 +133,8 @@ mod tests {
     #[test]
     fn base_conversion_rejects_inconsistent_plaintext_lift() {
         let coefficients = vec![7_u64; POLYNOMIAL_DEGREE];
-        let mut source = lift_plaintext_coefficients_to_basis(
-            &coefficients,
-            BgvBasisKind::Data,
-            1,
-            bgv_parameters_hash().expect("parameters hash"),
-        )
-        .expect("data basis object");
+        let mut source = lift_plaintext_coefficients_to_basis(&coefficients, BgvBasisKind::Data, 1)
+            .expect("data basis object");
         source.residues_by_modulus[1][0] = 8;
 
         assert!(convert_plaintext_lifted_basis(&source, BgvBasisKind::Extended, 2).is_err());
@@ -154,13 +143,8 @@ mod tests {
     #[test]
     fn base_conversion_rejects_congruent_but_non_lifted_residues() {
         let coefficients = vec![7_u64; POLYNOMIAL_DEGREE];
-        let mut source = lift_plaintext_coefficients_to_basis(
-            &coefficients,
-            BgvBasisKind::Data,
-            1,
-            bgv_parameters_hash().expect("parameters hash"),
-        )
-        .expect("data basis object");
+        let mut source = lift_plaintext_coefficients_to_basis(&coefficients, BgvBasisKind::Data, 1)
+            .expect("data basis object");
         source.residues_by_modulus[1][0] = 7 + 65_537;
 
         assert!(convert_plaintext_lifted_basis(&source, BgvBasisKind::Extended, 2).is_err());

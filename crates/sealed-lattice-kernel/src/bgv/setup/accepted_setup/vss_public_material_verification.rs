@@ -111,71 +111,34 @@ fn verify_vss_public_material_binding(
         ("proofMaterialSet".to_string(), proof_material_set.clone()),
     ]);
     let statement_verification =
-        crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_statement_and_proof_material_set_from_request(
+        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(
             &Value::Object(proof_material_request),
             &trustee_identities,
-            proof_binding_session,
         )?;
     let setup_context = setup_package
         .get("setupContext")
         .ok_or_else(|| public_material_error("VSS public material requires setup context"))?;
     compare_setup_context_binding(setup_context, statement, "VSS share-linkage statement")?;
-    compare_setup_context_participant_count(
-        setup_context,
-        &statement_verification,
-        "VSS share-linkage statement",
-    )?;
-    compare_setup_context_threshold_degree(
-        setup_context,
-        &statement_verification,
-        "VSS share-linkage statement",
-    )?;
-    let ring_degree = usize::try_from(unsigned_at_path(&statement_verification, &["ringDegree"])?)
-        .map_err(|_| public_material_error("VSS share-linkage ring degree does not fit usize"))?;
-
     let common_randomness = setup_package
         .get("commonRandomness")
         .ok_or_else(|| public_material_error("VSS public material requires common randomness"))?;
     let accepted_public_matrix_seed_hash =
         hash_at_path(common_randomness, &["publicMatrixSeedHash"])?;
     compare_required_string(
-        hash_at_path(&statement_verification, &["publicMatrixSeedHash"])?,
+        &statement_verification.public_matrix_seed_hash,
         accepted_public_matrix_seed_hash,
         "VSS share-linkage statement publicMatrixSeedHash",
     )?;
-    compare_complete_q_share_limb_count(&statement_verification, "VSS share-linkage statement")?;
-
-    // The proven threshold-share aggregate binding: every aggregate record's
-    // committed T_{j,l} is shown to be the modular sum of the committed source
-    // recipient shares by a unit-point share-linkage proof.
-    crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
-        proof_binding_session,
-        coefficient_set,
-        recipient_share_set,
-        aggregate_threshold_set,
-        &crate::bgv::setup::VssAggregateThresholdProofContext {
-            public_matrix_seed_hash: accepted_public_matrix_seed_hash,
-            setup_context_hash: setup_context_hash(setup_context)?,
-            ring_degree,
-            participant_count: unsigned_at_path(&statement_verification, &["participantCount"])?
-                .try_into()
-                .map_err(|_| {
-                    public_material_error("aggregate participant count does not fit usize")
-                })?,
-            rns_limb_count: unsigned_at_path(&statement_verification, &["qShareRnsLimbCount"])?
-                .try_into()
-                .map_err(|_| {
-                    public_material_error("aggregate RNS limb count does not fit usize")
-                })?,
-            trustee_identities: &trustee_identities,
-        },
-    )?;
-
-    Ok(ring_degree)
+    let _ring_degree = statement_verification.ring_degree;
+    let _ = proof_binding_session;
+    Err(CanonicalError::new(
+        CanonicalErrorCode::InvalidProtocolObject,
+        "accepted setup requires the VSS share-linkage and aggregate relations to be verified by the common proof suite",
+    ))
 }
 
 fn public_material_error(message: &'static str) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 fn vss_public_material_refusal(

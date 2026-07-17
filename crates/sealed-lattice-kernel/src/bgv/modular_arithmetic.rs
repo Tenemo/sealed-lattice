@@ -123,7 +123,7 @@ pub(crate) fn inverse_mod(value: u64, modulus: u64) -> CanonicalResult<u64> {
     validate_modulus(modulus)?;
     if value == 0 || value >= modulus {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "modular inverse input must be non-zero and less than the modulus",
         ));
     }
@@ -148,7 +148,7 @@ pub(crate) fn inverse_mod(value: u64, modulus: u64) -> CanonicalResult<u64> {
     // gcd != 1 means `value` is not invertible modulo `modulus`.
     if previous_remainder != 1 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "modular inverse input is not invertible",
         ));
     }
@@ -171,7 +171,7 @@ pub(crate) fn integer_square_root_ceil(value: usize) -> usize {
 fn validate_modulus(modulus: u64) -> CanonicalResult<()> {
     if modulus <= 1 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "modulus must be greater than one",
         ));
     }
@@ -181,7 +181,7 @@ fn validate_modulus(modulus: u64) -> CanonicalResult<()> {
 
 fn out_of_range_error() -> CanonicalError {
     CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
+        CanonicalErrorCode::InvalidProtocolObject,
         "modular arithmetic operand is outside the canonical residue range",
     )
 }
@@ -208,11 +208,11 @@ pub(crate) fn is_prime_for_tests(value: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{add_mod, inverse_mod, mul_mod, pow_mod, sub_mod};
-    use crate::bgv::parameters::{DATA_PRIMES, SPECIAL_PRIME};
+    use crate::bgv::parameters::{DATA_PRIMES, SPECIAL_PRIMES};
 
     #[test]
     fn modular_arithmetic_handles_boundaries_for_every_selected_prime() {
-        for modulus in DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]) {
+        for modulus in DATA_PRIMES.into_iter().chain(SPECIAL_PRIMES) {
             assert_eq!(add_mod(modulus - 1, 1, modulus).expect("add"), 0);
             assert_eq!(
                 add_mod(modulus / 2, modulus / 2, modulus).expect("add"),
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn arithmetic_rejects_noncanonical_residues_for_every_selected_prime() {
-        for modulus in DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]) {
+        for modulus in DATA_PRIMES.into_iter().chain(SPECIAL_PRIMES) {
             assert!(add_mod(modulus, 0, modulus).is_err());
             assert!(sub_mod(0, modulus, modulus).is_err());
             assert!(mul_mod(1, modulus, modulus).is_err());
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn optimized_multiplication_matches_generic_modular_arithmetic_for_bgv_primes() {
-        for modulus in DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]) {
+        for modulus in DATA_PRIMES.into_iter().chain(SPECIAL_PRIMES) {
             let mut state = modulus ^ 0xa076_1d64_78bd_642f;
             let mut cases = vec![
                 (0, 0),

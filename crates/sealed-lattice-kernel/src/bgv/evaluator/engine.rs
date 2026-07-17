@@ -9,7 +9,7 @@ use crate::{
         evaluator::prg::DeterministicSampler,
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
         ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
-        parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
+        parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE},
         rns::RnsPolynomial,
         serialization::{BgvObjectKind, ciphertext_root, serialize_bgv_object},
     },
@@ -107,7 +107,7 @@ impl Ciphertext {
     fn assert_two_components(&self) -> CanonicalResult<()> {
         if self.components.len() != 2 {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "BGV evaluator operation requires a two-component ciphertext",
             ));
         }
@@ -450,7 +450,7 @@ fn validate_public_key_component_shape(component: &[Vec<u64>], label: &str) -> C
         let modulus = DATA_PRIMES[limb_index];
         if limb.iter().any(|coefficient| *coefficient >= modulus) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("BGV evaluator public key {label} limb has non-canonical residues"),
             ));
         }

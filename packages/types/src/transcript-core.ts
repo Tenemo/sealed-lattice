@@ -4,7 +4,6 @@ export const canonicalErrorCodeValues = [
     'FixtureMismatch',
     'InvalidChunkSize',
     'InvalidEnum',
-    'InvalidFixture',
     'InvalidProtocolObject',
     'InvalidHex',
     'InvalidUtf8',

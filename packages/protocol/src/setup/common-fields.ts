@@ -1,7 +1,11 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
-
-import { protocolHashPattern } from '../common/verification-helpers.js';
+import {
+    configurableParticipantCountRange,
+    deriveFoundationRosterParameters,
+    isProtocolHash,
+    type FoundationRosterParameters,
+    type ProtocolHash,
+} from '@sealed-lattice/types';
 
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
@@ -11,7 +15,7 @@ export const assertProtocolHash = (
     value: unknown,
     fieldName: string,
 ): ProtocolHash => {
-    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
+    if (!isProtocolHash(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
     }
 
@@ -44,6 +48,22 @@ export const assertPositiveSafeInteger = (
     return value;
 };
 
+export const requireFoundationRosterParameters = (
+    value: unknown,
+    fieldName: string,
+): FoundationRosterParameters => {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+        throw new TypeError(`${fieldName} must be an integer.`);
+    }
+    try {
+        return deriveFoundationRosterParameters(value);
+    } catch {
+        throw new RangeError(
+            `${fieldName} must be from ${String(configurableParticipantCountRange.minimum)} through ${String(configurableParticipantCountRange.maximum)}.`,
+        );
+    }
+};
+
 export const assertNonNegativeSafeInteger = (
     value: unknown,
     fieldName: string,
@@ -59,17 +79,6 @@ export const assertNonNegativeSafeInteger = (
     }
 
     return value;
-};
-
-export const assertJsonRecord = (
-    value: unknown,
-    fieldName: string,
-): JsonRecord => {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        throw new TypeError(`${fieldName} must be an object.`);
-    }
-
-    return value as JsonRecord;
 };
 
 const lowercaseHexBytesPattern = /^(?:[0-9a-f]{2})*$/u;
@@ -93,13 +102,14 @@ export const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
     return bytes;
 };
 
-export const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
 export const deriveCollectiveBgvSetupContextHash = (
     setupContext: CollectiveBgvSetupContext,
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
+): ProtocolHash => {
+    requireFoundationRosterParameters(
+        setupContext.participantCount,
+        'setupContext.participantCount',
+    );
+    return deriveCanonicalObjectHash({
         objectType: 'CollectiveBgvSetupContext',
         ceremonyId: setupContext.ceremonyId,
         manifestHash: setupContext.manifestHash,
@@ -108,6 +118,7 @@ export const deriveCollectiveBgvSetupContextHash = (
         setupEpoch: setupContext.setupEpoch,
         participantCount: setupContext.participantCount,
     });
+};
 
 export const assertSetupContextHashMatches = (
     setupContext: CollectiveBgvSetupContext,

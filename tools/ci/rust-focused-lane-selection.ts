@@ -10,11 +10,12 @@ import {
 
 export const fullProfileEvidenceRustTests = [
     'bgv::setup::tests::private_vss::private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_private_share_proofs',
-    'bgv::target_decryption::tests::replay_release::foundation_profile_replay_target_release_matches_plaintext_oracle',
+    'bgv::target_decryption::tests::evaluator_replay::prototype_profile_evaluator_replay_matches_plaintext_oracle_and_binds_target_roots',
 ] as const;
 
 export const measurementRustTests = [
     'bgv::evaluator::top_k::tests::level_budget_probe::production_rank_lookup_level_budget_measurement',
+    'bgv::proof_suite::selected_accounting::tests::selected_exact_family_and_action_proof_accounting_reports_browser_ceiling_mismatch',
     'bgv::setup::limb_group_key_switch_atom::family_backend::bench::round_one_key_prover_cost',
 ] as const;
 

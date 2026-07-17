@@ -1,21 +1,26 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { createVssSourceTrusteeCoefficientCommitmentContribution } from '#packages/protocol/src/setup/vss-coefficient-commitments/commitment-contribution';
 import {
-    createVssSourceTrusteeCoefficientOpeningState,
-    createVssSourceTrusteeCoefficientOpeningStateProvider,
-    createVssCoefficientCommitmentBundle,
+    setupCommitmentModulusLimbCount,
+    setupCommitmentHidingSecretWidth,
     setupCommitmentRandomnessWidth,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
-} from '#packages/protocol/src/index';
+} from '#packages/protocol/src/setup/vss-coefficient-commitments/constants-and-types';
 import {
     RandomByteSampler,
     maximumPrivateSamplerCandidateDrawsPerOutput,
+    sampleCommitmentOpeningRandomness,
     sampleCenteredTernaryVector,
     sampleUniformResidueVector,
 } from '#packages/protocol/src/setup/vss-coefficient-commitments/encoding';
-import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
+import { createVssSourceTrusteeCoefficientOpeningState } from '#packages/protocol/src/setup/vss-coefficient-commitments/opening-state';
+import {
+    type ClosedWorkerStructuredCommitmentOpeningCapability,
+    type ClosedWorkerStructuredCommitmentOpeningOperations,
+} from '#packages/wasm/src/index';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -23,15 +28,11 @@ import {
 } from '#tests/support/setup-fixtures';
 
 const qSharePrimes = [
-    140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
+    140_700_980_543_489, 140_546_359_361_537, 140_507_704_066_049,
 ] as const;
 const ringDegree = 8;
-const participantCount = 2;
+const participantCount = 3;
 const thresholdDegree = 2;
-
-const transcriptCoreKernel = await loadTranscriptCoreKernel();
-const setupCommitmentComputer: typeof transcriptCoreKernel.computeSetupCommitmentFromOpening =
-    (input) => transcriptCoreKernel.computeSetupCommitmentFromOpening(input);
 
 const fixtureHash = makeSetupFixtureHash('setup-vss-coefficient-commitments');
 
@@ -39,11 +40,155 @@ const deterministicRandomBytes = makeVssOpeningRandomBytes(
     'setup-vss-coefficient-commitments',
 );
 
+type TestOpeningRecord = Readonly<{
+    randomnessByCommitmentLimb: readonly (readonly (readonly number[])[])[];
+    rnsLimbIndex: number;
+    shamirCoefficientIndex: number;
+}>;
+
+const testOpeningRecords = new WeakMap<
+    ClosedWorkerStructuredCommitmentOpeningCapability,
+    TestOpeningRecord
+>();
+const testOpeningCapabilitiesBySlot = new Map<
+    string,
+    ClosedWorkerStructuredCommitmentOpeningCapability
+>();
+const activeTestOpeningCapabilities =
+    new Set<ClosedWorkerStructuredCommitmentOpeningCapability>();
+
+const structuredCommitmentOpenings: ClosedWorkerStructuredCommitmentOpeningOperations =
+    Object.freeze({
+        create: ({
+            shamirCoefficientIndex,
+            sourceRnsLimbIndex,
+            sourceSetupIntentObjectHash,
+        }) => {
+            const slotKey = `${sourceSetupIntentObjectHash}:${String(sourceRnsLimbIndex)}:${String(shamirCoefficientIndex)}`;
+            const existing = testOpeningCapabilitiesBySlot.get(slotKey);
+            if (existing !== undefined) {
+                return existing;
+            }
+            const capability = Object.freeze(
+                {},
+            ) as unknown as ClosedWorkerStructuredCommitmentOpeningCapability;
+            const randomnessByCommitmentLimb = Object.freeze(
+                Array.from(
+                    { length: setupCommitmentModulusLimbCount },
+                    (_unused, commitmentLimbPosition) =>
+                        sampleCommitmentOpeningRandomness(
+                            new RandomByteSampler(
+                                deterministicRandomBytes(
+                                    `${slotKey}:${String(commitmentLimbPosition)}`,
+                                ),
+                            ),
+                            ringDegree,
+                        ),
+                ),
+            );
+            testOpeningRecords.set(capability, {
+                randomnessByCommitmentLimb,
+                rnsLimbIndex: sourceRnsLimbIndex,
+                shamirCoefficientIndex,
+            });
+            testOpeningCapabilitiesBySlot.set(slotKey, capability);
+            activeTestOpeningCapabilities.add(capability);
+            return capability;
+        },
+        computeCommitment: ({
+            capability,
+            messageCoefficients,
+            publicMatrixSeedHash: selectedPublicMatrixSeedHash,
+        }) => {
+            const record = testOpeningRecords.get(capability);
+            if (
+                record === undefined ||
+                !activeTestOpeningCapabilities.has(capability)
+            ) {
+                throw new Error(
+                    'structured-commitment opening capability is not active in this scope',
+                );
+            }
+            if (selectedPublicMatrixSeedHash !== publicMatrixSeedHash) {
+                throw new Error('test matrix-seed hash is outside the scope');
+            }
+            return {
+                commitment: {
+                    objectType: 'SetupCommitment' as const,
+                    sourceRnsLimbIndex: record.rnsLimbIndex,
+                    shamirCoefficientIndex: record.shamirCoefficientIndex,
+                    ringDegree,
+                    commitmentLimbs: record.randomnessByCommitmentLimb.map(
+                        (randomnessByColumn, commitmentLimbPosition) => ({
+                            rows: Array.from(
+                                { length: setupCommitmentHidingSecretWidth },
+                                (_unused, rowIndex) =>
+                                    messageCoefficients.map(
+                                        (
+                                            messageCoefficient,
+                                            coefficientIndex,
+                                        ) => {
+                                            const randomnessCoefficient =
+                                                randomnessByColumn[
+                                                    rowIndex %
+                                                        randomnessByColumn.length
+                                                ]?.[coefficientIndex] ?? 0;
+                                            const modulus =
+                                                qSharePrimes[
+                                                    commitmentLimbPosition
+                                                ] ?? qSharePrimes[0];
+                                            return Number(
+                                                (BigInt(messageCoefficient) +
+                                                    BigInt(
+                                                        randomnessCoefficient,
+                                                    ) +
+                                                    BigInt(modulus)) %
+                                                    BigInt(modulus),
+                                            );
+                                        },
+                                    ),
+                            ),
+                        }),
+                    ),
+                },
+            };
+        },
+        release: (capability) => {
+            if (!activeTestOpeningCapabilities.delete(capability)) {
+                throw new Error(
+                    'structured-commitment opening capability is not active in this scope',
+                );
+            }
+        },
+        revoke: () => {
+            activeTestOpeningCapabilities.clear();
+        },
+    });
+
+const withDeterministicOpeningEntropy = <Result>(
+    label: string,
+    operation: () => Result,
+): Result => {
+    const randomBytes = deterministicRandomBytes(label);
+    const entropySpy = vi.spyOn(globalThis.crypto, 'getRandomValues');
+    entropySpy.mockImplementation(
+        <Value extends ArrayBufferView>(value: Value): Value => {
+            new Uint8Array(
+                value.buffer,
+                value.byteOffset,
+                value.byteLength,
+            ).set(randomBytes(value.byteLength));
+            return value;
+        },
+    );
+    try {
+        return operation();
+    } finally {
+        entropySpy.mockRestore();
+    }
+};
+
 const setupContext = makeSetupContext(fixtureHash, participantCount);
-const setupContextHash = deriveCanonicalObjectHash({
-    objectType: 'CollectiveBgvSetupContext',
-    ...setupContext,
-});
 const publicMatrixSeedHash = fixtureHash('public-matrix-seed');
 const setupParameters = {
     participantCount,
@@ -54,7 +199,7 @@ const setupParameters = {
 const coefficientCommitmentInput = {
     setupContext,
     publicMatrixSeedHash,
-    setupCommitmentComputer,
+    structuredCommitmentOpenings,
     qSharePrimes,
     ringDegree,
     thresholdDegree,
@@ -74,25 +219,28 @@ const sourceTrusteeReference = (
 const sourceTrusteeOpeningState = (
     sourceTrusteeRosterPosition: number,
 ): VssSourceTrusteeCoefficientOpeningState =>
-    createVssSourceTrusteeCoefficientOpeningState({
-        ...sourceTrusteeReference(sourceTrusteeRosterPosition),
-        ...setupParameters,
-        randomBytes: deterministicRandomBytes(
-            `opening-${sourceTrusteeIdentity(sourceTrusteeRosterPosition)}`,
-        ),
-    });
+    withDeterministicOpeningEntropy(
+        `opening-${sourceTrusteeIdentity(sourceTrusteeRosterPosition)}`,
+        () =>
+            createVssSourceTrusteeCoefficientOpeningState({
+                ...sourceTrusteeReference(sourceTrusteeRosterPosition),
+                ...setupParameters,
+                sourceSetupIntentObjectHash: fixtureHash(
+                    `setup-intent-${String(sourceTrusteeRosterPosition)}`,
+                ),
+                structuredCommitmentOpenings,
+            }),
+    );
 
-const sourceTrusteeOpeningStates =
-    (): readonly VssSourceTrusteeCoefficientOpeningState[] => [
-        sourceTrusteeOpeningState(0),
-        sourceTrusteeOpeningState(1),
-    ];
-
-const coefficientCommitmentBundleInput = (
-    openingStates: readonly VssSourceTrusteeCoefficientOpeningState[] = sourceTrusteeOpeningStates(),
-): Parameters<typeof createVssCoefficientCommitmentBundle>[0] => ({
+const sourceTrusteeCommitmentContributionInput = (
+    openingState: VssSourceTrusteeCoefficientOpeningState = sourceTrusteeOpeningState(
+        0,
+    ),
+): Parameters<
+    typeof createVssSourceTrusteeCoefficientCommitmentContribution
+>[0] => ({
     ...coefficientCommitmentInput,
-    sourceTrusteeOpeningStates: openingStates,
+    sourceTrusteeOpeningState: openingState,
 });
 
 const requiredItem = <Item>(
@@ -120,10 +268,22 @@ const requiredOpening = (
 
 const requiredRandomnessColumn = (
     openingState: VssCoefficientOpeningInput,
+    commitmentLimbPosition: number,
     randomnessColumnIndex: number,
 ): readonly number[] => {
+    const openingRecord = testOpeningRecords.get(
+        openingState.openingCapability,
+    );
+    if (openingRecord === undefined) {
+        throw new Error('fixture opaque opening record is missing');
+    }
+    const randomnessByColumn = requiredItem(
+        openingRecord.randomnessByCommitmentLimb,
+        commitmentLimbPosition,
+        'fixture commitment-limb randomness tape is missing',
+    );
     return requiredItem(
-        openingState.randomnessByColumn,
+        randomnessByColumn,
         randomnessColumnIndex,
         'fixture randomness column is missing',
     );
@@ -148,21 +308,28 @@ const requiredOpeningByCoordinate = (
 
 const decodeShortSecretResidues = (
     openingState: VssCoefficientOpeningInput,
-): readonly (-1 | 0 | 1)[] =>
-    openingState.coefficientMessage.map((coefficient) => {
+): readonly (-1 | 0 | 1)[] => {
+    const rnsPrime = requiredItem(
+        qSharePrimes,
+        openingState.rnsLimbIndex,
+        'fixture opening RNS limb is outside Q_share',
+    );
+
+    return openingState.coefficientMessage.map((coefficient) => {
         if (coefficient === 0) {
             return 0;
         }
         if (coefficient === 1) {
             return 1;
         }
-        if (coefficient === openingState.rnsPrime - 1) {
+        if (coefficient === rnsPrime - 1) {
             return -1;
         }
         throw new Error(
             'constant Shamir coefficient is not a centered ternary residue',
         );
     });
+};
 
 type RejectionCase<Input> = Readonly<{
     name: string;
@@ -170,30 +337,19 @@ type RejectionCase<Input> = Readonly<{
     input: () => Input;
 }>;
 
-const mutateFirstSourceTrustee = (
+const mutateSourceTrusteeOpeningState = (
     mutate: (
         sourceTrusteeState: VssSourceTrusteeCoefficientOpeningState,
     ) => VssSourceTrusteeCoefficientOpeningState,
-): readonly VssSourceTrusteeCoefficientOpeningState[] => {
-    const openingStates = sourceTrusteeOpeningStates();
-    return [
-        mutate(
-            requiredItem(
-                openingStates,
-                0,
-                'first source trustee fixture is missing',
-            ),
-        ),
-        ...openingStates.slice(1),
-    ];
-};
+): VssSourceTrusteeCoefficientOpeningState =>
+    mutate(sourceTrusteeOpeningState(0));
 
 const mutateFirstOpening = (
     mutate: (
         openingState: VssCoefficientOpeningInput,
     ) => VssCoefficientOpeningInput,
-): readonly VssSourceTrusteeCoefficientOpeningState[] =>
-    mutateFirstSourceTrustee((sourceTrusteeState) => ({
+): VssSourceTrusteeCoefficientOpeningState =>
+    mutateSourceTrusteeOpeningState((sourceTrusteeState) => ({
         ...sourceTrusteeState,
         coefficientOpenings: [
             mutate(requiredOpening(sourceTrusteeState, 0)),
@@ -201,17 +357,12 @@ const mutateFirstOpening = (
         ],
     }));
 
-const malformedCoefficientCommitmentBundleCases = [
-    {
-        name: 'missing participant',
-        expectedMessage: /every accepted participant/u,
-        input: () => sourceTrusteeOpeningStates().slice(0, 1),
-    },
+const malformedCoefficientCommitmentContributionCases = [
     {
         name: 'duplicate opening coordinate',
         expectedMessage: /distinct limb\/coefficient coordinates/u,
         input: () =>
-            mutateFirstSourceTrustee((sourceTrusteeState) => ({
+            mutateSourceTrusteeOpeningState((sourceTrusteeState) => ({
                 ...sourceTrusteeState,
                 coefficientOpenings: [
                     requiredOpening(sourceTrusteeState, 0),
@@ -233,20 +384,17 @@ const malformedCoefficientCommitmentBundleCases = [
             })),
     },
     {
-        name: 'randomness outside the centered ternary domain',
-        expectedMessage: /centered ternary/u,
+        name: 'opening capability from another worker scope',
+        expectedMessage: /not active in this scope/u,
         input: () =>
             mutateFirstOpening((openingState) => ({
                 ...openingState,
-                randomnessByColumn: [
-                    [2, ...requiredRandomnessColumn(openingState, 0).slice(1)],
-                    ...openingState.randomnessByColumn.slice(1),
-                ],
+                openingCapability: Object.freeze(
+                    {},
+                ) as unknown as ClosedWorkerStructuredCommitmentOpeningCapability,
             })),
     },
-] as const satisfies readonly RejectionCase<
-    readonly VssSourceTrusteeCoefficientOpeningState[]
->[];
+] as const satisfies readonly RejectionCase<VssSourceTrusteeCoefficientOpeningState>[];
 
 const openingStateGenerationInput = (
     overrides: Partial<
@@ -255,28 +403,9 @@ const openingStateGenerationInput = (
 ): Parameters<typeof createVssSourceTrusteeCoefficientOpeningState>[0] => ({
     ...sourceTrusteeReference(0),
     ...setupParameters,
-    randomBytes: deterministicRandomBytes('trustee-0'),
+    sourceSetupIntentObjectHash: fixtureHash('setup-intent-0'),
+    structuredCommitmentOpenings,
     ...overrides,
-});
-
-const sourceTrusteeReferences = [
-    sourceTrusteeReference(0),
-    sourceTrusteeReference(1),
-] as const;
-
-const sourceTrusteeOpeningStateProviderInput = (
-    sourceTrustees: Parameters<
-        typeof createVssSourceTrusteeCoefficientOpeningStateProvider
-    >[0]['sourceTrustees'] = sourceTrusteeReferences,
-): Parameters<
-    typeof createVssSourceTrusteeCoefficientOpeningStateProvider
->[0] => ({
-    sourceTrustees,
-    ...setupParameters,
-    randomBytesForSourceTrustee: (sourceTrustee) =>
-        deterministicRandomBytes(
-            `provider-${sourceTrustee.sourceTrusteeIdentity}`,
-        ),
 });
 
 const invalidOpeningStateGenerationCases = [
@@ -285,24 +414,14 @@ const invalidOpeningStateGenerationCases = [
         expectedMessage: /inside the accepted participant count/u,
         input: () =>
             openingStateGenerationInput({
-                sourceTrusteeIdentity: 'trustee-2',
-                sourceTrusteeRosterPosition: 2,
-                randomBytes: deterministicRandomBytes('trustee-2'),
+                sourceTrusteeIdentity: sourceTrusteeIdentity(participantCount),
+                sourceTrusteeRosterPosition: participantCount,
             }),
     },
     {
         name: 'empty RNS basis',
         expectedMessage: /at least one RNS prime/u,
         input: () => openingStateGenerationInput({ qSharePrimes: [] }),
-    },
-    {
-        name: 'short randomness response',
-        expectedMessage: /exactly the requested byte length/u,
-        input: () =>
-            openingStateGenerationInput({
-                randomBytes: (byteLength) =>
-                    new Uint8Array(Math.max(0, byteLength - 1)),
-            }),
     },
 ] as const satisfies readonly RejectionCase<
     Parameters<typeof createVssSourceTrusteeCoefficientOpeningState>[0]
@@ -350,10 +469,13 @@ describe('VSS coefficient commitment builders', () => {
     });
 
     it('generates local openings with one short secret shared across RNS limbs', () => {
-        const generatedSourceTrusteeState =
-            createVssSourceTrusteeCoefficientOpeningState(
-                openingStateGenerationInput(),
-            );
+        const generatedSourceTrusteeState = withDeterministicOpeningEntropy(
+            'trustee-0',
+            () =>
+                createVssSourceTrusteeCoefficientOpeningState(
+                    openingStateGenerationInput(),
+                ),
+        );
         const constantSecretForFirstLimb = decodeShortSecretResidues(
             requiredOpeningByCoordinate(generatedSourceTrusteeState, 0, 0),
         );
@@ -368,6 +490,7 @@ describe('VSS coefficient commitment builders', () => {
         const firstRandomnessColumn = requiredRandomnessColumn(
             requiredOpeningByCoordinate(generatedSourceTrusteeState, 0, 0),
             0,
+            0,
         );
 
         expect(generatedSourceTrusteeState.coefficientOpenings).toHaveLength(
@@ -378,12 +501,28 @@ describe('VSS coefficient commitment builders', () => {
             nonConstantOpening.coefficientMessage.every(
                 (coefficient) =>
                     coefficient >= 0 &&
-                    coefficient < nonConstantOpening.rnsPrime,
+                    coefficient <
+                        requiredItem(
+                            qSharePrimes,
+                            nonConstantOpening.rnsLimbIndex,
+                            'fixture opening RNS limb is outside Q_share',
+                        ),
             ),
         ).toBe(true);
-        expect(
+        const firstOpeningRecord = testOpeningRecords.get(
             requiredOpeningByCoordinate(generatedSourceTrusteeState, 0, 0)
-                .randomnessByColumn,
+                .openingCapability,
+        );
+        expect(firstOpeningRecord).toBeDefined();
+        expect(firstOpeningRecord?.randomnessByCommitmentLimb).toHaveLength(
+            setupCommitmentModulusLimbCount,
+        );
+        expect(
+            requiredItem(
+                firstOpeningRecord?.randomnessByCommitmentLimb ?? [],
+                0,
+                'fixture commitment-limb randomness tape is missing',
+            ),
         ).toHaveLength(setupCommitmentRandomnessWidth);
         expect(
             firstRandomnessColumn.every(
@@ -395,80 +534,66 @@ describe('VSS coefficient commitment builders', () => {
         ).toBe(true);
     });
 
-    it('loads deterministic source openings through a provider and rejects non-contiguous rosters', () => {
-        const sourceTrusteeOpeningStateProvider =
-            createVssSourceTrusteeCoefficientOpeningStateProvider({
-                ...sourceTrusteeOpeningStateProviderInput(),
-            });
-
-        expect(
-            sourceTrusteeOpeningStateProvider.loadSourceTrusteeOpeningState(
-                sourceTrusteeReferences[0],
-            ),
-        ).toEqual(
-            sourceTrusteeOpeningStateProvider.loadSourceTrusteeOpeningState(
-                sourceTrusteeReferences[0],
-            ),
-        );
-
-        expect(() =>
-            createVssSourceTrusteeCoefficientOpeningStateProvider({
-                ...sourceTrusteeOpeningStateProviderInput([
-                    sourceTrusteeReferences[0],
-                    sourceTrusteeReferences[0],
-                ]),
-            }),
-        ).toThrow(/contiguous from zero/u);
+    it('fails closed when Web Crypto entropy is unavailable', () => {
+        const entropySpy = vi.spyOn(globalThis.crypto, 'getRandomValues');
+        entropySpy.mockImplementation(() => {
+            throw new Error('entropy source failed');
+        });
+        try {
+            expect(() =>
+                createVssSourceTrusteeCoefficientOpeningState(
+                    openingStateGenerationInput(),
+                ),
+            ).toThrow(/Web Crypto getRandomValues failed/u);
+        } finally {
+            entropySpy.mockRestore();
+        }
     });
 
     it('creates deterministic commitment records from local openings', () => {
-        const bundle = createVssCoefficientCommitmentBundle(
-            coefficientCommitmentBundleInput([
-                sourceTrusteeOpeningState(1),
-                sourceTrusteeOpeningState(0),
-            ]),
-        );
-        const repeatedBundle = createVssCoefficientCommitmentBundle(
-            coefficientCommitmentBundleInput([
-                sourceTrusteeOpeningState(1),
-                sourceTrusteeOpeningState(0),
-            ]),
-        );
-        const firstCommitment =
-            bundle.privateOpeningMaterialBySourceTrustee[0]
-                ?.coefficientCommitments[0];
-        const firstOpening = requiredOpening(sourceTrusteeOpeningState(0), 0);
+        const openingState = sourceTrusteeOpeningState(0);
+        const contribution =
+            createVssSourceTrusteeCoefficientCommitmentContribution(
+                sourceTrusteeCommitmentContributionInput(openingState),
+            );
+        const repeatedContribution =
+            createVssSourceTrusteeCoefficientCommitmentContribution(
+                sourceTrusteeCommitmentContributionInput(openingState),
+            );
+        const firstCommitment = contribution.coefficientCommitments[0];
+        const firstOpening = requiredOpening(openingState, 0);
 
         expect(
-            bundle.commitmentSet.sourceTrusteeRecords.map(
-                (record) => record.sourceTrusteeIdentity,
+            contribution.sourceTrusteeCoefficientCommitmentRecord
+                .sourceTrusteeIdentity,
+        ).toBe('trustee-0');
+        expect(
+            deriveCanonicalObjectHash(
+                contribution.sourceTrusteeCoefficientCommitmentRecord,
             ),
-        ).toEqual(['trustee-0', 'trustee-1']);
-        expect(bundle.commitmentSet.setupContextHash).toBe(setupContextHash);
-        expect(deriveCanonicalObjectHash(bundle.commitmentSet)).toBe(
-            deriveCanonicalObjectHash(repeatedBundle.commitmentSet),
+        ).toBe(
+            deriveCanonicalObjectHash(
+                repeatedContribution.sourceTrusteeCoefficientCommitmentRecord,
+            ),
         );
-        const recomputedCommitment = setupCommitmentComputer({
-            publicMatrixSeedHash,
-            sourceRnsLimbIndex: firstOpening.rnsLimbIndex,
-            shamirCoefficientIndex: firstOpening.shamirCoefficientIndex,
-            messageCoefficients: firstOpening.coefficientMessage,
-            randomnessByColumn: firstOpening.randomnessByColumn,
-            ringDegree,
-        }).commitment;
+        const recomputedCommitment =
+            structuredCommitmentOpenings.computeCommitment({
+                capability: firstOpening.openingCapability,
+                messageCoefficients: firstOpening.coefficientMessage,
+                publicMatrixSeedHash,
+            }).commitment;
         expect(firstCommitment).toEqual(recomputedCommitment);
         expect(deriveCanonicalObjectHash(recomputedCommitment)).toBe(
-            bundle.privateOpeningMaterialBySourceTrustee[0]
-                ?.coefficientOpenings[0]?.commitmentRoot,
+            contribution.coefficientOpenings[0]?.commitmentRoot,
         );
     });
 
-    it.each(malformedCoefficientCommitmentBundleCases)(
+    it.each(malformedCoefficientCommitmentContributionCases)(
         'rejects malformed local opening state before root publication: $name',
         ({ expectedMessage, input }) => {
             expect(() =>
-                createVssCoefficientCommitmentBundle(
-                    coefficientCommitmentBundleInput(input()),
+                createVssSourceTrusteeCoefficientCommitmentContribution(
+                    sourceTrusteeCommitmentContributionInput(input()),
                 ),
             ).toThrow(expectedMessage);
         },

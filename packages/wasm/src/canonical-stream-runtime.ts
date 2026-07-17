@@ -1,18 +1,25 @@
-import type { RefusalReason } from '@sealed-lattice/types';
-import { foundationProfile } from '@sealed-lattice/types';
+import { foundationProfile, type RefusalReason } from '@sealed-lattice/types';
 
-import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
+import { pumpCanonicalStreamChunks } from './canonical-stream-chunk-pump.js';
 import type { TranscriptCoreKernelContextOwner } from './transcript-core-bridge/kernel-types.js';
+import { WasmMemoryBoundary } from './wasm-memory-boundary.js';
+import { WasmStatusBoundary } from './wasm-status-boundary.js';
 
-const maximumCanonicalStreamByteLength = 2_147_483_648;
-const maximumCanonicalStreamChunkCount =
-    maximumCanonicalStreamByteLength / foundationProfile.streamChunkByteLength;
+const maximumCanonicalStreamChunkCount = Math.ceil(
+    foundationProfile.maximumCanonicalStreamByteLength /
+        foundationProfile.streamChunkByteLength,
+);
+const canonicalStreamDescriptorFixedByteLength = 104;
 const maximumCanonicalStreamDescriptorByteLength =
-    34 + 64 * maximumCanonicalStreamChunkCount;
-const runtimeInternalFailureStatus = 0xffff_ffff;
-const runtimeInvalidSessionStatus = 0xffff_fffe;
+    canonicalStreamDescriptorFixedByteLength +
+    64 * maximumCanonicalStreamChunkCount;
 const wasm32WordByteLength = 4;
 const canonicalStreamLeaseIdentifierByteLength = 32;
+
+export const deriveCanonicalStreamChunkCount = (
+    totalByteLength: number,
+): number =>
+    Math.ceil(totalByteLength / foundationProfile.streamChunkByteLength);
 
 export const canonicalStreamDomains = Object.freeze({
     privateMailboxCiphertext: 1,
@@ -37,7 +44,6 @@ export const canonicalStreamDomains = Object.freeze({
     targetOrderPartialDecryption: 20,
     maliciousTargetShareProof: 21,
     checkpointState: 22,
-    stateBallotCandidateListExactOutput: 23,
     stateFinalitySignatureExactOutput: 24,
     stateTargetReleaseExactOutput: 25,
     publicKeyShareMaterial: 26,
@@ -66,7 +72,7 @@ export class CanonicalStreamResourceError extends Error {
     public readonly refusalReason = 'outsideSupportedProfile' as const;
 
     public constructor(
-        message = 'The canonical stream exceeds the supported runtime profile.',
+        message = 'The canonical stream exceeds an absolute runtime safety bound.',
     ) {
         super(message);
         this.name = 'CanonicalStreamResourceError';
@@ -123,6 +129,11 @@ export type CanonicalStreamChunkPull = (input: {
     readonly expectedByteLength: number;
 }) => Promise<ArrayBuffer | undefined>;
 
+/**
+ * Consumes one runtime-owned chunk. The `bytes` buffer remains valid only until
+ * the returned promise settles and is then zeroed. A consumer that needs to
+ * retain the chunk must copy it before resolving.
+ */
 export type CanonicalStreamChunkSink = (input: {
     readonly abortSignal?: AbortSignal;
     readonly bytes: ArrayBuffer;
@@ -181,13 +192,11 @@ type CanonicalStreamKernelContext = Readonly<{
         descriptorLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ): number;
     beginWriter(
         streamDomain: number,
         totalByteLength: number,
         statusPointer: number,
-        chunkCountPointer: number,
     ): number;
     bgvAbsorbChunk?: (
         handle: number,
@@ -203,7 +212,6 @@ type CanonicalStreamKernelContext = Readonly<{
         descriptorLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ) => number;
     bgvCancel?: (handle: number) => number;
     bgvFinish?: (handle: number) => number;
@@ -213,7 +221,6 @@ type CanonicalStreamKernelContext = Readonly<{
         materialRootLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ) => number;
     bgvMaterialReaderCancel?: (handle: number) => number;
     bgvMaterialReaderFinish?: (handle: number) => number;
@@ -360,6 +367,8 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
     readonly #authorityOwner: TranscriptCoreKernelContextOwner;
     readonly #context: CanonicalStreamKernelContext;
     readonly #counters: MutableCounters;
+    readonly #memoryBoundary: WasmMemoryBoundary;
+    readonly #statusBoundary: WasmStatusBoundary;
     readonly #issuedLeaseIdentifiers = new Set<string>();
     readonly #leaseAuthorities = new Map<string, ActiveLease>();
     #activeLease: ActiveLease | undefined;
@@ -386,7 +395,31 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             startedSessionCount: 0,
             wasmToJavascriptPayloadCopyCount: 0,
         };
-        this.#assertMemoryWithinProfile();
+        this.#memoryBoundary = new WasmMemoryBoundary({
+            context,
+            createInternalError: (message) =>
+                new CanonicalStreamInternalError(message),
+            createResourceError: (message) =>
+                new CanonicalStreamResourceError(message),
+            label: 'canonical stream',
+            observeMemoryByteLength: (byteLength) => {
+                this.#counters.maximumObservedWasmMemoryByteLength = Math.max(
+                    this.#counters.maximumObservedWasmMemoryByteLength,
+                    byteLength,
+                );
+            },
+        });
+        this.#statusBoundary = new WasmStatusBoundary({
+            createInternalError: (message) =>
+                new CanonicalStreamInternalError(message),
+            createRefusalError: (refusalReason) =>
+                new CanonicalStreamRefusalError(refusalReason),
+            createResourceError: () => new CanonicalStreamResourceError(),
+            internalFailureMessage:
+                'The WASM canonical stream session failed internally.',
+            unknownStatusMessage:
+                'The WASM canonical stream returned an unknown status code.',
+        });
     }
 
     public counterSnapshot(): CanonicalStreamRuntimeCounterSnapshot {
@@ -413,25 +446,27 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             input.totalByteLength,
             'canonical stream byte length',
         );
-        if (input.totalByteLength > maximumCanonicalStreamByteLength) {
+        if (
+            input.totalByteLength >
+            foundationProfile.maximumCanonicalStreamByteLength
+        ) {
             throw new CanonicalStreamResourceError();
         }
         const leaseIdentifier = this.#issueLeaseIdentifier();
         let handle = 0;
         let metadataPointer = 0;
         try {
-            metadataPointer = this.#allocateMetadata(2);
+            metadataPointer = this.#allocateMetadata(1);
             handle = this.#context.runExclusive('canonical stream begin', () =>
                 this.#context.beginWriter(
                     input.streamDomain,
                     input.totalByteLength,
                     metadataPointer,
-                    metadataPointer + wasm32WordByteLength,
                 ),
             );
-            const metadata = this.#readWords(metadataPointer, 2);
-            this.#throwStatus(metadata[0]);
-            if (handle === 0 || metadata[1] === 0) {
+            const [status] = this.#readWords(metadataPointer, 1);
+            this.#statusBoundary.throwIfError(status);
+            if (handle === 0) {
                 throw new CanonicalStreamInternalError(
                     'The WASM stream writer returned malformed begin metadata.',
                 );
@@ -439,7 +474,9 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             const lease: ActiveLease = {
                 authorityContext: this.#context,
                 authorityOwner: this.#authorityOwner,
-                chunkCount: metadata[1],
+                chunkCount: deriveCanonicalStreamChunkCount(
+                    input.totalByteLength,
+                ),
                 handle,
                 identifier: leaseIdentifier,
                 kind: 'writer',
@@ -452,10 +489,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             return this.#throwAfterUnactivatedBeginFailure(handle, error);
         } finally {
             if (metadataPointer !== 0) {
-                this.#context.deallocate(
-                    metadataPointer,
-                    2 * wasm32WordByteLength,
-                );
+                this.#context.deallocate(metadataPointer, wasm32WordByteLength);
             }
         }
     }
@@ -489,7 +523,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         let handle = 0;
         let metadataPointer = 0;
         try {
-            metadataPointer = this.#allocateMetadata(3);
+            metadataPointer = this.#allocateMetadata(2);
             descriptorPointer = this.#copyMetadataIntoWasm(
                 input.descriptorBytes,
             );
@@ -500,12 +534,14 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                     input.descriptorBytes.byteLength,
                     metadataPointer,
                     metadataPointer + wasm32WordByteLength,
-                    metadataPointer + 2 * wasm32WordByteLength,
                 ),
             );
-            const metadata = this.#readWords(metadataPointer, 3);
-            this.#throwStatus(metadata[0]);
-            if (handle === 0 || metadata[1] === 0 || metadata[2] === 0) {
+            const [status, totalByteLength] = this.#readWords(
+                metadataPointer,
+                2,
+            );
+            this.#statusBoundary.throwIfError(status);
+            if (handle === 0 || totalByteLength === 0) {
                 throw new CanonicalStreamInternalError(
                     'The WASM stream verifier returned malformed begin metadata.',
                 );
@@ -516,12 +552,12 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                     : { atomicVerifierFinish }),
                 authorityContext: this.#context,
                 authorityOwner: this.#authorityOwner,
-                chunkCount: metadata[2],
+                chunkCount: deriveCanonicalStreamChunkCount(totalByteLength),
                 handle,
                 identifier: leaseIdentifier,
                 kind: 'verifier',
                 state: 'active',
-                totalByteLength: metadata[1],
+                totalByteLength,
             };
             this.#activate(lease);
             return this.#verifierLease(lease);
@@ -537,7 +573,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             if (metadataPointer !== 0) {
                 this.#context.deallocate(
                     metadataPointer,
-                    3 * wasm32WordByteLength,
+                    2 * wasm32WordByteLength,
                 );
             }
         }
@@ -553,59 +589,16 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         const lease = this.openWriter(input);
         let operationFailure: unknown;
         try {
-            for (
-                let chunkIndex = 0;
-                chunkIndex < lease.chunkCount;
-                chunkIndex += 1
-            ) {
-                this.#throwIfCancelled(input.abortSignal);
-                const expectedByteLength = this.#expectedChunkByteLength(
-                    lease,
-                    chunkIndex,
-                );
-                const bytes = await input.pullChunk({
-                    ...(input.abortSignal === undefined
-                        ? {}
-                        : { abortSignal: input.abortSignal }),
-                    chunkIndex,
-                    expectedByteLength,
-                });
-                if (bytes === undefined) {
-                    this.#throwIfCancelled(input.abortSignal);
-                    return lease.finish();
-                }
-                try {
-                    this.#throwIfCancelled(input.abortSignal);
-                    lease.absorbChunk(chunkIndex, bytes);
-                    await input.emitChunk({
-                        ...(input.abortSignal === undefined
-                            ? {}
-                            : { abortSignal: input.abortSignal }),
-                        bytes,
-                        chunkIndex,
-                    });
-                } finally {
-                    this.#releaseBuffer(bytes);
-                }
-            }
-            const trailingBytes = await input.pullChunk({
+            return await pumpCanonicalStreamChunks({
                 ...(input.abortSignal === undefined
                     ? {}
                     : { abortSignal: input.abortSignal }),
-                chunkIndex: lease.chunkCount,
-                expectedByteLength: 0,
+                consumeChunk: input.emitChunk,
+                createCancellationError: () =>
+                    new CanonicalStreamCancellationError(),
+                lease,
+                pullChunk: input.pullChunk,
             });
-            if (trailingBytes !== undefined) {
-                try {
-                    this.#throwIfCancelled(input.abortSignal);
-                    lease.absorbChunk(lease.chunkCount, trailingBytes);
-                } finally {
-                    this.#releaseBuffer(trailingBytes);
-                }
-            } else {
-                this.#throwIfCancelled(input.abortSignal);
-            }
-            return lease.finish();
         } catch (error) {
             operationFailure = error;
             throw error;
@@ -624,60 +617,16 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         const lease = this.openVerifier(input);
         let operationFailure: unknown;
         try {
-            for (
-                let chunkIndex = 0;
-                chunkIndex < lease.chunkCount;
-                chunkIndex += 1
-            ) {
-                this.#throwIfCancelled(input.abortSignal);
-                const expectedByteLength = this.#expectedChunkByteLength(
-                    lease,
-                    chunkIndex,
-                );
-                const bytes = await input.pullChunk({
-                    ...(input.abortSignal === undefined
-                        ? {}
-                        : { abortSignal: input.abortSignal }),
-                    chunkIndex,
-                    expectedByteLength,
-                });
-                if (bytes === undefined) {
-                    this.#throwIfCancelled(input.abortSignal);
-                    lease.finish();
-                    return;
-                }
-                try {
-                    this.#throwIfCancelled(input.abortSignal);
-                    lease.absorbChunk(chunkIndex, bytes);
-                    await input.consumeVerifiedChunk({
-                        ...(input.abortSignal === undefined
-                            ? {}
-                            : { abortSignal: input.abortSignal }),
-                        bytes,
-                        chunkIndex,
-                    });
-                } finally {
-                    this.#releaseBuffer(bytes);
-                }
-            }
-            const trailingBytes = await input.pullChunk({
+            await pumpCanonicalStreamChunks({
                 ...(input.abortSignal === undefined
                     ? {}
                     : { abortSignal: input.abortSignal }),
-                chunkIndex: lease.chunkCount,
-                expectedByteLength: 0,
+                consumeChunk: input.consumeVerifiedChunk,
+                createCancellationError: () =>
+                    new CanonicalStreamCancellationError(),
+                lease,
+                pullChunk: input.pullChunk,
             });
-            if (trailingBytes !== undefined) {
-                try {
-                    this.#throwIfCancelled(input.abortSignal);
-                    lease.absorbChunk(lease.chunkCount, trailingBytes);
-                } finally {
-                    this.#releaseBuffer(trailingBytes);
-                }
-            } else {
-                this.#throwIfCancelled(input.abortSignal);
-            }
-            lease.finish();
         } catch (error) {
             operationFailure = error;
             throw error;
@@ -814,7 +763,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                             bytes.byteLength,
                         ),
                 );
-                this.#throwStatus(status);
+                this.#statusBoundary.throwIfError(status);
                 this.#charge('absorbedPayloadChunkCount', 1);
                 this.#charge('absorbedPayloadByteLength', bytes.byteLength);
             } finally {
@@ -840,7 +789,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         let metadataPointer = 0;
         let outputPointer = 0;
         try {
-            this.#preflightAllocation(
+            this.#memoryBoundary.validateAllocationByteLength(
                 2 * wasm32WordByteLength +
                     maximumCanonicalStreamDescriptorByteLength,
             );
@@ -855,7 +804,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                     ),
             );
             const [status, outputLength] = this.#readWords(metadataPointer, 2);
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             if (
                 outputPointer === 0 ||
                 outputLength === 0 ||
@@ -911,7 +860,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                     'canonical stream verifier finish',
                     () => this.#context.finishVerifier(lease.handle),
                 );
-                this.#throwStatus(status);
+                this.#statusBoundary.throwIfError(status);
             } else {
                 lease.atomicVerifierFinish({
                     streamHandle: lease.handle,
@@ -933,7 +882,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 'canonical stream cancellation',
                 () => this.#context.cancel(lease.handle),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             lease.state = 'cancelled';
             this.#charge('cancelledSessionCount', 1);
             this.#releaseLease(lease);
@@ -969,7 +918,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                     'canonical stream failure cleanup',
                     () => this.#context.cancel(lease.handle),
                 );
-                this.#throwStatus(status);
+                this.#statusBoundary.throwIfError(status);
             } catch (error) {
                 cleanupFailure = error;
             }
@@ -995,7 +944,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                     'canonical stream begin failure cleanup',
                     () => this.#context.cancel(handle),
                 );
-                this.#throwStatus(status);
+                this.#statusBoundary.throwIfError(status);
             } catch (error) {
                 cleanupFailure = error;
             }
@@ -1048,54 +997,13 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         }
     }
 
-    #throwIfCancelled(abortSignal: AbortSignal | undefined): void {
-        if (abortSignal?.aborted === true) {
-            throw new CanonicalStreamCancellationError();
-        }
-    }
-
-    #expectedChunkByteLength(
-        lease:
-            | ActiveLease
-            | CanonicalStreamWriterLease
-            | CanonicalStreamVerifierLease,
-        chunkIndex: number,
-    ): number {
-        if (chunkIndex + 1 < lease.chunkCount) {
-            return foundationProfile.streamChunkByteLength;
-        }
-        return (
-            lease.totalByteLength -
-            (lease.chunkCount - 1) * foundationProfile.streamChunkByteLength
-        );
-    }
-
-    #releaseBuffer(buffer: ArrayBuffer): void {
-        if (buffer.byteLength > 0) {
-            new Uint8Array(buffer).fill(0);
-        }
-    }
-
     #copyMetadataIntoWasm(bytes: Uint8Array): number {
-        const pointer = this.#allocate(bytes.byteLength);
-        try {
-            new Uint8Array(this.#context.memory.buffer).set(bytes, pointer);
-            return pointer;
-        } catch (error) {
-            this.#context.deallocate(pointer, bytes.byteLength);
-            throw error;
-        }
+        return this.#memoryBoundary.copy(bytes);
     }
 
     #copyPayloadIntoWasm(buffer: ArrayBuffer): number {
         const bytes = new Uint8Array(buffer);
-        const pointer = this.#allocate(bytes.byteLength);
-        try {
-            new Uint8Array(this.#context.memory.buffer).set(bytes, pointer);
-        } catch (error) {
-            this.#context.deallocate(pointer, bytes.byteLength);
-            throw error;
-        }
+        const pointer = this.#memoryBoundary.copy(bytes);
         this.#charge('javascriptToWasmPayloadCopyCount', 1);
         this.#counters.maximumObservedCopiedPayloadByteLength = Math.max(
             this.#counters.maximumObservedCopiedPayloadByteLength,
@@ -1109,103 +1017,11 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
     }
 
     #allocateMetadata(wordCount: number): number {
-        const byteLength = wordCount * wasm32WordByteLength;
-        const pointer = this.#allocate(byteLength);
-        new Uint8Array(this.#context.memory.buffer, pointer, byteLength).fill(
-            0,
-        );
-        return pointer;
-    }
-
-    #allocate(byteLength: number): number {
-        this.#preflightAllocation(byteLength);
-        const pointer = this.#context.allocate(byteLength) >>> 0;
-        this.#assertMemoryWithinProfile();
-        if (
-            pointer === 0 ||
-            pointer + byteLength > this.#context.memory.buffer.byteLength
-        ) {
-            throw new CanonicalStreamInternalError(
-                'The WASM stream allocator returned an invalid memory range.',
-            );
-        }
-        this.#counters.maximumObservedWasmMemoryByteLength = Math.max(
-            this.#counters.maximumObservedWasmMemoryByteLength,
-            this.#context.memory.buffer.byteLength,
-        );
-        return pointer;
-    }
-
-    #preflightAllocation(byteLength: number): void {
-        assertSafeNonNegativeInteger(byteLength, 'canonical stream allocation');
-        this.#assertMemoryWithinProfile();
-        if (
-            byteLength > foundationProfile.maximumCopiedBufferByteLength ||
-            this.#context.memory.buffer.byteLength >
-                foundationProfile.maximumWasmMemoryByteLength - byteLength
-        ) {
-            throw new CanonicalStreamResourceError(
-                'The canonical stream allocation would exceed the WASM memory profile.',
-            );
-        }
-    }
-
-    #assertMemoryWithinProfile(): void {
-        if (
-            this.#context.memory.buffer.byteLength >
-            foundationProfile.maximumWasmMemoryByteLength
-        ) {
-            throw new CanonicalStreamResourceError(
-                'The WASM instance already exceeds the memory profile.',
-            );
-        }
+        return this.#memoryBoundary.allocateZeroedWords(wordCount);
     }
 
     #readWords(pointer: number, wordCount: number): readonly number[] {
-        const byteLength = wordCount * wasm32WordByteLength;
-        if (
-            pointer === 0 ||
-            pointer + byteLength > this.#context.memory.buffer.byteLength
-        ) {
-            throw new CanonicalStreamInternalError(
-                'The WASM stream metadata range is invalid.',
-            );
-        }
-        const view = new DataView(
-            this.#context.memory.buffer,
-            pointer,
-            byteLength,
-        );
-        return Object.freeze(
-            Array.from({ length: wordCount }, (_, index) =>
-                view.getUint32(index * wasm32WordByteLength, true),
-            ),
-        );
-    }
-
-    #throwStatus(status: number): void {
-        const normalizedStatus = status >>> 0;
-        if (normalizedStatus === 0) {
-            return;
-        }
-        if (
-            normalizedStatus === runtimeInternalFailureStatus ||
-            normalizedStatus === runtimeInvalidSessionStatus
-        ) {
-            throw new CanonicalStreamInternalError(
-                'The WASM canonical stream session failed internally.',
-            );
-        }
-        const refusalReason = refusalReasonByCode.get(normalizedStatus);
-        if (refusalReason === undefined) {
-            throw new CanonicalStreamInternalError(
-                'The WASM canonical stream returned an unknown status code.',
-            );
-        }
-        if (refusalReason === 'outsideSupportedProfile') {
-            throw new CanonicalStreamResourceError();
-        }
-        throw new CanonicalStreamRefusalError(refusalReason);
+        return this.#memoryBoundary.readWords(pointer, wordCount);
     }
 
     #charge(counterName: keyof MutableCounters, amount: number): void {

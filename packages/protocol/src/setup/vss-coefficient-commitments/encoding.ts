@@ -3,18 +3,33 @@ export {
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
-    deriveCollectiveBgvSetupContextHash,
 } from '../common-fields.js';
 
 import {
-    setupCommitmentRandomnessWidth,
-    type VssOpeningRandomByteSource,
+    setupCommitmentHidingErrorWidth,
+    setupCommitmentHidingSecretWidth,
 } from './constants-and-types.js';
+
+type VssOpeningRandomByteSource = (byteLength: number) => Uint8Array;
+
+class VssOpeningEntropyError extends Error {
+    public readonly failureCause: unknown;
+
+    public constructor(failureCause: unknown) {
+        super(
+            'VSS coefficient opening generation failed because Web Crypto getRandomValues failed.',
+        );
+        this.name = 'VssOpeningEntropyError';
+        this.failureCause = failureCause;
+    }
+}
 
 const twoToTheSixtyFourth = 1n << 64n;
 export const maximumPrivateSamplerCandidateDrawsPerOutput = 64;
 
-export const defaultRandomBytes: VssOpeningRandomByteSource = (byteLength) => {
+export const webCryptoRandomBytes: VssOpeningRandomByteSource = (
+    byteLength,
+) => {
     const cryptoProvider = globalThis.crypto;
     if (cryptoProvider === undefined) {
         throw new Error(
@@ -22,7 +37,11 @@ export const defaultRandomBytes: VssOpeningRandomByteSource = (byteLength) => {
         );
     }
     const bytes = new Uint8Array(byteLength);
-    cryptoProvider.getRandomValues(bytes);
+    try {
+        cryptoProvider.getRandomValues(bytes);
+    } catch (error) {
+        throw new VssOpeningEntropyError(error);
+    }
 
     return bytes;
 };
@@ -100,36 +119,6 @@ export const assertResidueVector = (
                 `${fieldName}.${String(coefficientIndex)} must be a residue below the declared modulus.`,
             );
         }
-    });
-};
-
-export const assertRandomness = (
-    randomnessByColumn: readonly (readonly number[])[],
-    ringDegree: number,
-    fieldName: string,
-): void => {
-    if (randomnessByColumn.length !== setupCommitmentRandomnessWidth) {
-        throw new Error(
-            `${fieldName} must contain the selected randomness width.`,
-        );
-    }
-    randomnessByColumn.forEach((randomnessColumn, randomnessColumnIndex) => {
-        if (randomnessColumn.length !== ringDegree) {
-            throw new Error(
-                `${fieldName}.${String(randomnessColumnIndex)} length must match ringDegree.`,
-            );
-        }
-        randomnessColumn.forEach((coefficient, coefficientIndex) => {
-            if (
-                !Number.isSafeInteger(coefficient) ||
-                coefficient < -1 ||
-                coefficient > 1
-            ) {
-                throw new TypeError(
-                    `${fieldName}.${String(randomnessColumnIndex)}.${String(coefficientIndex)} must be centered ternary.`,
-                );
-            }
-        });
     });
 };
 
@@ -228,6 +217,11 @@ export const sampleCommitmentOpeningRandomness = (
     sampler: RandomByteSampler,
     ringDegree: number,
 ): readonly (readonly number[])[] =>
-    Array.from({ length: setupCommitmentRandomnessWidth }, () =>
-        sampleCenteredTernaryVector(sampler, ringDegree),
-    );
+    Object.freeze([
+        ...Array.from({ length: setupCommitmentHidingSecretWidth }, () =>
+            sampleCenteredTernaryVector(sampler, ringDegree),
+        ),
+        ...Array.from({ length: setupCommitmentHidingErrorWidth }, () =>
+            sampleCenteredTernaryVector(sampler, ringDegree),
+        ),
+    ]);

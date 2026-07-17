@@ -18,7 +18,7 @@ impl<'a> VssRecordVerificationContext<'a> {
     ) -> CanonicalResult<Self> {
         let setup_context = setup_package.get("setupContext").ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "setupContext was required before VSS response verification",
             )
         })?;
@@ -216,7 +216,7 @@ pub(super) fn verify_vss_response_record_binding(
         .map(String::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "source trustee commitment root missing for VSS response verification",
             )
         })?;
@@ -337,16 +337,7 @@ pub(super) fn verify_vss_response_record(
             Some("recipientRosterPosition"),
         )));
     };
-    let recovery_epoch = recipient_registration.recovery_epoch;
-    let device_epoch = recipient_registration.device_epoch;
-
-    let payload = vss_response_payload_value(
-        verification_context,
-        &verified_record,
-        kind,
-        recovery_epoch,
-        device_epoch,
-    )?;
+    let payload = vss_response_payload_value(verification_context, &verified_record, kind)?;
     let expected_root = derive_canonical_object_hash(&payload)?;
     if record_root != expected_root {
         return Ok(Err(kind.variant_refusal(
@@ -379,8 +370,6 @@ fn vss_response_payload_value(
     verification_context: &VssRecordVerificationContext<'_>,
     verified_record: &VerifiedVssResponseRecord,
     kind: VssResponseKind,
-    recovery_epoch: u64,
-    device_epoch: u64,
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": kind.expected_object_type(),
@@ -392,8 +381,6 @@ fn vss_response_payload_value(
         "sourceTrusteeCommitmentRoot": verified_record.expected_source_trustee_commitment_root.as_str(),
         "privateVssEnvelopeCommitmentRoot": verification_context.private_vss_envelope_commitment_root.as_str(),
         "privateEnvelopeHash": verified_record.expected_private_envelope_hash.as_str(),
-        "recoveryEpoch": recovery_epoch,
-        "deviceEpoch": device_epoch,
     }))
 }
 
@@ -409,7 +396,7 @@ pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "VSS source trustee commitments were required before VSS share acceptance verification",
             )
         })?;

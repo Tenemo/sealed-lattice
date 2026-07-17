@@ -8,17 +8,6 @@ pub(super) struct EvaluationKeyShareFixtureMaterial {
     pub(super) component_vector_root: String,
 }
 
-// The relinearization key-share rounds object and the per-level public
-// round-one aggregate diagonals recomputed while building it.
-pub(super) struct RelinearizationKeyShareRoundsFixture {
-    pub(super) rounds: serde_json::Value,
-    pub(super) round_one_aggregate_diagonals_by_level: BTreeMap<u64, Vec<Vec<u64>>>,
-}
-
-pub(super) struct GaloisKeyShareBatchesFixture {
-    pub(super) batches: serde_json::Value,
-}
-
 pub(in super::super) fn source_constant_commitments_from_fixture_package(
     package: &serde_json::Value,
     trustee_roster_position: u64,
@@ -45,7 +34,7 @@ pub(in super::super) fn source_constant_commitments_from_fixture_package(
 /// Roster size declared by the package the proof fixtures bind. The proof
 /// records, proof sets, and per-trustee enumeration all follow the package's
 /// own participantCount so the fixtures build the right number of proofs for
-/// any supported roster size.
+/// any configurable roster size.
 pub(super) fn participant_count_from_package(package: &serde_json::Value) -> u64 {
     package["setupContext"]["participantCount"]
         .as_u64()
@@ -55,32 +44,17 @@ pub(super) fn participant_count_from_package(package: &serde_json::Value) -> u64
 pub(in super::super) fn vss_commitment_ring_degree_from_fixture_package(
     package: &serde_json::Value,
 ) -> usize {
-    let ring_degree = package["vssPublicCoefficientCommitmentSet"]["sourceTrusteeRecords"][0]
-        ["coefficientCommitments"][0]["ringDegree"]
+    let ring_degree = package["vssShareLinkageStatement"]["ringDegree"]
         .as_u64()
-        .or_else(|| {
-            package["vssCoefficientCommitmentMaterial"]["ringDegree"].as_u64()
-        })
+        .or_else(|| package["vssCoefficientCommitmentMaterial"]["ringDegree"].as_u64())
         .expect("VSS coefficient commitment ring degree");
     usize::try_from(ring_degree).expect("VSS coefficient commitment ring degree fits usize")
 }
 
 mod evaluation_key_share_component_material;
-mod galois_key_share_batches;
-mod proof_checkpointing;
-mod public_key_share_proofs;
-mod relinearization_key_share_rounds;
-mod trustee_evaluation_key_proofs;
 mod vss_public_material;
 
-pub(super) use evaluation_key_share_component_material::*;
-pub(super) use galois_key_share_batches::*;
-pub(super) use proof_checkpointing::*;
-pub(super) use public_key_share_proofs::*;
-pub(super) use relinearization_key_share_rounds::*;
-pub(super) use trustee_evaluation_key_proofs::*;
 pub(super) use vss_public_material::{
-    CompactAggregateThresholdProofFixture, FinalizedCollectiveSetupPackageFixture,
-    compact_aggregate_threshold_proof_fixture, descriptor_backed_vss_proof_material_fixture,
-    finalize_collective_setup_package,
+    FinalizedCollectiveSetupPackageFixture, finalize_collective_setup_package,
+    vss_public_coefficient_commitment_record,
 };

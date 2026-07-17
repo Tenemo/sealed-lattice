@@ -48,6 +48,7 @@
 
 use super::super::proof_field::ProofFieldParameters;
 
+#[cfg(test)]
 pub(super) fn carry_shift(ring_degree: usize) -> i64 {
     (ring_degree + 1) as i64
 }
@@ -88,6 +89,7 @@ pub(super) fn table_values<const LIMB_COUNT: usize>(
 // multiplicity column per table chunk (each length `N`, aligned to
 // `table_values`). A shifted carry outside `[0, 2N + 2]` remains uncounted, so
 // the multiset balance fails.
+#[cfg(test)]
 pub(super) fn multiplicities<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     shifted_carries: &[usize],
@@ -132,6 +134,7 @@ pub(super) fn reciprocal<const LIMB_COUNT: usize>(
 // trick: one field inversion plus three multiplications per element, instead of
 // one exponentiation-cost inversion per element. Returns `None` if any
 // denominator is zero.
+#[cfg(test)]
 pub(super) fn batch_reciprocals<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     challenge: &[u64; LIMB_COUNT],
@@ -170,6 +173,7 @@ pub(super) fn batch_reciprocals<const LIMB_COUNT: usize>(
 
 // The per-digit lookup fraction column `f_d[x] = 1/(mu - shifted_c_d(x))` over
 // the trace domain (length `N`).
+#[cfg(test)]
 pub(super) fn lookup_fraction_column<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     challenge: &[u64; LIMB_COUNT],
@@ -181,6 +185,7 @@ pub(super) fn lookup_fraction_column<const LIMB_COUNT: usize>(
 // The table fraction column `f_T[x] = m(x)/(mu - T(x))` over a table chunk's
 // domain. Padding rows carry multiplicity zero, so their fraction is zero
 // regardless of the (in-range) padding value.
+#[cfg(test)]
 pub(super) fn table_fraction_column<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     challenge: &[u64; LIMB_COUNT],
@@ -199,6 +204,7 @@ pub(super) fn table_fraction_column<const LIMB_COUNT: usize>(
 
 // The sum of a fraction column's values, i.e. its logUp terminal
 // `sum_x f(x)`.
+#[cfg(test)]
 pub(super) fn column_sum<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     column: &[[u64; LIMB_COUNT]],

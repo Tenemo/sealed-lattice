@@ -1,9 +1,10 @@
 use super::*;
+use crate::foundation::FOUNDATION_PROFILE;
 
 #[test]
 fn q_share_trustee_points_are_distinct_for_foundation_roster() {
     for modulus in DATA_PRIMES {
-        let trustee_points = (0..10)
+        let trustee_points = (0..usize::from(FOUNDATION_PROFILE.participant_count))
             .map(|roster_position| {
                 canonical_trustee_point(roster_position, modulus).expect("trustee point")
             })
@@ -24,6 +25,9 @@ fn q_share_trustee_points_are_distinct_for_foundation_roster() {
 
 #[test]
 fn every_four_share_subset_recovers_the_constant_for_each_q_share_prime() {
+    let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+    let reconstruction_threshold = usize::from(FOUNDATION_PROFILE.reconstruction_threshold);
+    assert_eq!(reconstruction_threshold, 4);
     for modulus in DATA_PRIMES {
         let secret = modulus - 17;
         let coefficients = [
@@ -32,7 +36,7 @@ fn every_four_share_subset_recovers_the_constant_for_each_q_share_prime() {
             (modulus / 3) + 7,
             (modulus / 5) + 11,
         ];
-        let shares = (0..10)
+        let shares = (0..usize::from(FOUNDATION_PROFILE.participant_count))
             .map(|roster_position| {
                 let trustee_point =
                     canonical_trustee_point(roster_position, modulus).expect("trustee point");
@@ -46,10 +50,10 @@ fn every_four_share_subset_recovers_the_constant_for_each_q_share_prime() {
             })
             .collect::<Vec<_>>();
 
-        for first_index in 0..7 {
-            for second_index in (first_index + 1)..8 {
-                for third_index in (second_index + 1)..9 {
-                    for fourth_index in (third_index + 1)..10 {
+        for first_index in 0..(participant_count - 3) {
+            for second_index in (first_index + 1)..(participant_count - 2) {
+                for third_index in (second_index + 1)..(participant_count - 1) {
+                    for fourth_index in (third_index + 1)..participant_count {
                         let selected_shares = [
                             shares[first_index],
                             shares[second_index],
@@ -58,7 +62,7 @@ fn every_four_share_subset_recovers_the_constant_for_each_q_share_prime() {
                         ];
                         let recovered_secret = interpolate_shamir_constant_with_threshold(
                             &selected_shares,
-                            4,
+                            reconstruction_threshold,
                             modulus,
                         )
                         .expect("interpolate");

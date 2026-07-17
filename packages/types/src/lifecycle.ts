@@ -1,27 +1,13 @@
-/** Poll policy for frozen rosters containing fewer than ten participants. */
-export type SmallRosterPolicy = 'ForbidMicroRoster' | 'AllowMicroRoster';
-
-/** Untrusted poll specification input accepted by validation helpers. */
+/** Untrusted pre-protocol poll input accepted by validation helpers. */
 export type PollSpecInput = {
     readonly pollId: string;
     readonly question: string;
     readonly options: readonly string[];
     readonly topOptionCount: number;
-    readonly minRosterSize?: number;
-    readonly maxRosterSize?: number;
-    readonly smallRosterPolicy?: SmallRosterPolicy;
 };
 
-/** Normalized poll specification after validation defaults have been applied. */
-export type PollSpec = {
-    readonly pollId: string;
-    readonly question: string;
-    readonly options: readonly string[];
-    readonly topOptionCount: number;
-    readonly minRosterSize: number;
-    readonly maxRosterSize: number;
-    readonly smallRosterPolicy: SmallRosterPolicy;
-};
+/** Pre-protocol poll input whose twenty options can be encoded as a canonical manifest. */
+export type PollSpec = Readonly<PollSpecInput>;
 
 /** Stable poll specification validation error code. */
 export type PollSpecValidationErrorCode =
@@ -31,9 +17,7 @@ export type PollSpecValidationErrorCode =
     | 'InvalidOptionCount'
     | 'EmptyOptionLabel'
     | 'DuplicateOptionLabel'
-    | 'InvalidTopOptionCount'
-    | 'InvalidRosterBounds'
-    | 'UnsupportedSmallRosterPolicy';
+    | 'InvalidTopOptionCount';
 
 /** Structured poll specification validation error. */
 export type PollSpecValidationError = {

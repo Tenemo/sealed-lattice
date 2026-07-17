@@ -1,0 +1,599 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use num_bigint::{BigInt, BigUint};
+use num_traits::{One, Zero};
+
+use crate::bgv::setup::{SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES};
+
+use super::{
+    bounds::{RelationBoundCertificate, RelationConstraintDescriptor, SignedIntegerInterval},
+    checking::RelationPlanChecker,
+    compiled_plan::RelationPlanCheckContext,
+    expressions::strictly_sorted_unique,
+    integer_lift::{
+        RelationIntegerLiftBatchDescriptor, RelationIntegerLiftComponentDescriptor,
+        RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor,
+        RelationIntegerLiftReversedColumnBindingDescriptor,
+    },
+    model::{
+        RelationColumnDescriptor, RelationPlanError, RelationTreeDescriptor,
+        RelationVerifierSource, SuiteModulusReference,
+    },
+};
+
+const TRIT_RADIX: u64 = 3;
+pub(super) const MATERIAL_DIGIT_RADIX: u64 = 129_140_163;
+pub(super) const MATERIAL_DIGIT_TRIT_COUNT: usize = 17;
+const MODULAR_QUOTIENT_BIT_COUNT: usize = 17;
+pub(super) const TRUSTEE_QUOTIENT_LOW_TRIT_COUNT: usize = 9;
+pub(super) const TRUSTEE_QUOTIENT_HIGH_RADIX: u16 = 19_683;
+pub(super) const TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE: u64 = 49_207;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SameSecretRelationPlanInput {
+    pub(crate) ring_degree: u64,
+    pub(crate) evaluation_domain_size: u64,
+    pub(crate) opening_degree_bound_exclusive: u64,
+    pub(crate) material_column_degree_bound_exclusive: u64,
+    pub(crate) public_polynomial_column_degree_bound_exclusive: u64,
+    pub(crate) sharing_data_modulus_indices: Vec<u16>,
+    pub(crate) commitment_data_modulus_indices: Vec<u16>,
+    pub(crate) commitment_module_rank: u16,
+    pub(crate) first_mask_purpose: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PublicKeyShareRelationPlanInput {
+    pub(crate) ring_degree: u64,
+    pub(crate) evaluation_domain_size: u64,
+    pub(crate) opening_degree_bound_exclusive: u64,
+    pub(crate) public_polynomial_column_degree_bound_exclusive: u64,
+    pub(crate) data_modulus_indices: Vec<u16>,
+    pub(crate) commitment_data_modulus_indices: Vec<u16>,
+    pub(crate) commitment_module_rank: u16,
+    pub(crate) plaintext_modulus: u64,
+    pub(crate) first_mask_purpose: u16,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct KeyRelationGeometry {
+    ring_degree: u64,
+    evaluation_domain_size: u64,
+    opening_degree_bound_exclusive: u64,
+    material_column_degree_bound_exclusive: Option<u64>,
+    public_polynomial_column_degree_bound_exclusive: u64,
+    relation_data_modulus_indices: Vec<u16>,
+    relation_special_modulus_indices: Vec<u16>,
+    relation_target_modulus_indices: Vec<u16>,
+    commitment_data_modulus_indices: Vec<u16>,
+    commitment_module_rank: u16,
+    plaintext_modulus: Option<u64>,
+    schedule_position: Option<u32>,
+    first_mask_purpose: u16,
+}
+
+pub(super) struct TrusteeKeyRelationGeometryInput {
+    pub(super) schedule_position: u32,
+    pub(super) ring_degree: u64,
+    pub(super) evaluation_domain_size: u64,
+    pub(super) opening_degree_bound_exclusive: u64,
+    pub(super) public_polynomial_column_degree_bound_exclusive: u64,
+    pub(super) data_modulus_count: usize,
+    pub(super) special_modulus_count: usize,
+    pub(super) commitment_data_modulus_indices: Vec<u16>,
+    pub(super) commitment_module_rank: u16,
+    pub(super) plaintext_modulus: u64,
+    pub(super) first_mask_purpose: u16,
+}
+
+impl KeyRelationGeometry {
+    pub(super) fn for_same_secret(input: &SameSecretRelationPlanInput) -> Self {
+        Self {
+            ring_degree: input.ring_degree,
+            evaluation_domain_size: input.evaluation_domain_size,
+            opening_degree_bound_exclusive: input.opening_degree_bound_exclusive,
+            material_column_degree_bound_exclusive: Some(
+                input.material_column_degree_bound_exclusive,
+            ),
+            public_polynomial_column_degree_bound_exclusive: input
+                .public_polynomial_column_degree_bound_exclusive,
+            relation_data_modulus_indices: input.sharing_data_modulus_indices.clone(),
+            relation_special_modulus_indices: Vec::new(),
+            relation_target_modulus_indices: Vec::new(),
+            commitment_data_modulus_indices: input.commitment_data_modulus_indices.clone(),
+            commitment_module_rank: input.commitment_module_rank,
+            plaintext_modulus: None,
+            schedule_position: None,
+            first_mask_purpose: input.first_mask_purpose,
+        }
+    }
+
+    pub(super) fn for_public_key_share(input: &PublicKeyShareRelationPlanInput) -> Self {
+        Self {
+            ring_degree: input.ring_degree,
+            evaluation_domain_size: input.evaluation_domain_size,
+            opening_degree_bound_exclusive: input.opening_degree_bound_exclusive,
+            material_column_degree_bound_exclusive: None,
+            public_polynomial_column_degree_bound_exclusive: input
+                .public_polynomial_column_degree_bound_exclusive,
+            relation_data_modulus_indices: input.data_modulus_indices.clone(),
+            relation_special_modulus_indices: Vec::new(),
+            relation_target_modulus_indices: Vec::new(),
+            commitment_data_modulus_indices: input.commitment_data_modulus_indices.clone(),
+            commitment_module_rank: input.commitment_module_rank,
+            plaintext_modulus: Some(input.plaintext_modulus),
+            schedule_position: None,
+            first_mask_purpose: input.first_mask_purpose,
+        }
+    }
+
+    pub(super) fn for_trustee(
+        input: TrusteeKeyRelationGeometryInput,
+    ) -> Result<Self, RelationPlanError> {
+        let relation_data_modulus_indices = (0..input.data_modulus_count)
+            .map(|index| u16::try_from(index).map_err(|_| RelationPlanError::CountOverflow))
+            .collect::<Result<Vec<_>, _>>()?;
+        let relation_special_modulus_indices = (0..input.special_modulus_count)
+            .map(|index| u16::try_from(index).map_err(|_| RelationPlanError::CountOverflow))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            ring_degree: input.ring_degree,
+            evaluation_domain_size: input.evaluation_domain_size,
+            opening_degree_bound_exclusive: input.opening_degree_bound_exclusive,
+            material_column_degree_bound_exclusive: None,
+            public_polynomial_column_degree_bound_exclusive: input
+                .public_polynomial_column_degree_bound_exclusive,
+            relation_data_modulus_indices,
+            relation_special_modulus_indices,
+            relation_target_modulus_indices: Vec::new(),
+            commitment_data_modulus_indices: input.commitment_data_modulus_indices,
+            commitment_module_rank: input.commitment_module_rank,
+            plaintext_modulus: Some(input.plaintext_modulus),
+            schedule_position: Some(input.schedule_position),
+            first_mask_purpose: input.first_mask_purpose,
+        })
+    }
+
+    pub(super) fn for_target_release(
+        ring_degree: u64,
+        evaluation_domain_size: u64,
+        opening_degree_bound_exclusive: u64,
+        material_column_degree_bound_exclusive: u64,
+        public_polynomial_column_degree_bound_exclusive: u64,
+        target_modulus_indices: Vec<u16>,
+        first_mask_purpose: u16,
+    ) -> Self {
+        Self {
+            ring_degree,
+            evaluation_domain_size,
+            opening_degree_bound_exclusive,
+            material_column_degree_bound_exclusive: Some(material_column_degree_bound_exclusive),
+            public_polynomial_column_degree_bound_exclusive,
+            relation_data_modulus_indices: Vec::new(),
+            relation_special_modulus_indices: Vec::new(),
+            relation_target_modulus_indices: target_modulus_indices,
+            commitment_data_modulus_indices: Vec::new(),
+            commitment_module_rank: 0,
+            plaintext_modulus: None,
+            schedule_position: None,
+            first_mask_purpose,
+        }
+    }
+
+    fn trace_domain_size(&self) -> Result<u64, RelationPlanError> {
+        self.ring_degree
+            .checked_div(2)
+            .filter(|trace_size| *trace_size > 1 && *trace_size * 2 == self.ring_degree)
+            .ok_or(RelationPlanError::InvalidDomain)
+    }
+
+    pub(super) fn validate(
+        &self,
+        context: &RelationPlanCheckContext,
+    ) -> Result<Vec<(SuiteModulusReference, u64)>, RelationPlanError> {
+        RelationPlanChecker::new(context).check_context()?;
+        self.trace_domain_size()?;
+        if !self.ring_degree.is_power_of_two()
+            || self.evaluation_domain_size == 0
+            || !self.evaluation_domain_size.is_power_of_two()
+            || self.opening_degree_bound_exclusive <= 1
+            || self.public_polynomial_column_degree_bound_exclusive == 0
+            || self.public_polynomial_column_degree_bound_exclusive
+                > self.opening_degree_bound_exclusive
+            || self
+                .material_column_degree_bound_exclusive
+                .is_some_and(|degree| degree == 0 || degree > self.opening_degree_bound_exclusive)
+            || (self.relation_data_modulus_indices.is_empty()
+                == self.relation_target_modulus_indices.is_empty())
+            || (!self.relation_data_modulus_indices.is_empty()
+                && !strictly_sorted_unique(&self.relation_data_modulus_indices))
+            || (!self.relation_special_modulus_indices.is_empty()
+                && !strictly_sorted_unique(&self.relation_special_modulus_indices))
+            || (!self.relation_target_modulus_indices.is_empty()
+                && !strictly_sorted_unique(&self.relation_target_modulus_indices))
+            || (self.commitment_data_modulus_indices.is_empty()
+                != (self.commitment_module_rank == 0))
+            || (!self.commitment_data_modulus_indices.is_empty()
+                && !strictly_sorted_unique(&self.commitment_data_modulus_indices))
+            || self.first_mask_purpose == 0
+            || self.first_mask_purpose >= 0xff00
+        {
+            return Err(RelationPlanError::InvalidDomain);
+        }
+        if !self.commitment_data_modulus_indices.is_empty() {
+            let expected_commitment_module_rank = u16::try_from(SETUP_COMMITMENT_MODULE_RANK)
+                .map_err(|_| RelationPlanError::CountOverflow)?;
+            if self.commitment_module_rank != expected_commitment_module_rank {
+                return Err(RelationPlanError::InvalidDomain);
+            }
+            let expected_commitment_data_modulus_indices = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+                .iter()
+                .copied()
+                .map(|index| u16::try_from(index).map_err(|_| RelationPlanError::CountOverflow))
+                .collect::<Result<Vec<_>, _>>()?;
+            if self.commitment_data_modulus_indices != expected_commitment_data_modulus_indices {
+                return Err(RelationPlanError::NonCanonicalOrder);
+            }
+        }
+        let expected_evaluation_domain = self
+            .opening_degree_bound_exclusive
+            .checked_next_power_of_two()
+            .and_then(|degree_domain| {
+                degree_domain.checked_mul(u64::from(context.evaluation_blowup_factor))
+            })
+            .ok_or(RelationPlanError::CountOverflow)?;
+        if expected_evaluation_domain != self.evaluation_domain_size {
+            return Err(RelationPlanError::InvalidDomain);
+        }
+        if self.plaintext_modulus.is_some() {
+            let expected_data_modulus_indices = (0..self.relation_data_modulus_indices.len())
+                .map(|index| u16::try_from(index).map_err(|_| RelationPlanError::CountOverflow))
+                .collect::<Result<Vec<_>, _>>()?;
+            if self.relation_data_modulus_indices != expected_data_modulus_indices
+                || self.commitment_data_modulus_indices.iter().any(|index| {
+                    self.relation_data_modulus_indices
+                        .binary_search(index)
+                        .is_err()
+                })
+            {
+                return Err(RelationPlanError::NonCanonicalOrder);
+            }
+        }
+
+        let all_data_modulus_indices = self
+            .relation_data_modulus_indices
+            .iter()
+            .chain(&self.commitment_data_modulus_indices)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let mut resolved_moduli = all_data_modulus_indices
+            .into_iter()
+            .map(|index| {
+                let reference = SuiteModulusReference::data(index);
+                let modulus = context.resolved_modulus(reference)?;
+                if modulus <= self.ring_degree
+                    || modulus >= context.base_field_modulus
+                    || modulus.is_multiple_of(2)
+                {
+                    return Err(RelationPlanError::InvalidModulus);
+                }
+                Ok((reference, modulus))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut resolved_special_moduli = self
+            .relation_special_modulus_indices
+            .iter()
+            .copied()
+            .map(|index| {
+                let reference = SuiteModulusReference::special(index);
+                let modulus = context.resolved_modulus(reference)?;
+                if modulus <= self.ring_degree
+                    || modulus >= context.base_field_modulus
+                    || modulus.is_multiple_of(2)
+                {
+                    return Err(RelationPlanError::InvalidModulus);
+                }
+                Ok((reference, modulus))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        resolved_moduli.append(&mut resolved_special_moduli);
+        let mut resolved_target_moduli = self
+            .relation_target_modulus_indices
+            .iter()
+            .copied()
+            .map(|index| {
+                let reference = SuiteModulusReference::target(index);
+                let modulus = context.resolved_modulus(reference)?;
+                if modulus <= self.ring_degree
+                    || modulus >= context.base_field_modulus
+                    || modulus.is_multiple_of(2)
+                {
+                    return Err(RelationPlanError::InvalidModulus);
+                }
+                Ok((reference, modulus))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        resolved_moduli.append(&mut resolved_target_moduli);
+        if let Some(plaintext_modulus) = self.plaintext_modulus {
+            if context.resolved_modulus(SuiteModulusReference::plaintext())? != plaintext_modulus
+                || plaintext_modulus < 3
+                || resolved_moduli
+                    .iter()
+                    .any(|(_, modulus)| plaintext_modulus >= *modulus)
+            {
+                return Err(RelationPlanError::InvalidModulus);
+            }
+            resolved_moduli.push((SuiteModulusReference::plaintext(), plaintext_modulus));
+        }
+        resolved_moduli.sort_by_key(|(reference, _)| *reference);
+        if !self.commitment_data_modulus_indices.is_empty() {
+            self.validate_anchor_lift_bound(context)?;
+        }
+        Ok(resolved_moduli)
+    }
+
+    fn validate_anchor_lift_bound(
+        &self,
+        context: &RelationPlanCheckContext,
+    ) -> Result<(), RelationPlanError> {
+        let commitment_moduli = self
+            .commitment_data_modulus_indices
+            .iter()
+            .copied()
+            .map(|index| context.resolved_modulus(SuiteModulusReference::data(index)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let modulus_product = commitment_moduli
+            .iter()
+            .copied()
+            .map(BigUint::from)
+            .product::<BigUint>();
+        let maximum_modulus = commitment_moduli
+            .iter()
+            .copied()
+            .max()
+            .ok_or(RelationPlanError::MissingModulus)?;
+        let maximum_centered_matrix_coefficient = (maximum_modulus - 1) / 2;
+        let maximum_lift = u128::from(self.commitment_module_rank)
+            .checked_add(1)
+            .and_then(|term_count| term_count.checked_mul(u128::from(self.ring_degree)))
+            .and_then(|coefficient_count| {
+                coefficient_count.checked_mul(u128::from(maximum_centered_matrix_coefficient))
+            })
+            .and_then(|bound| bound.checked_add(4))
+            .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+        if modulus_product <= BigUint::from(maximum_lift) * BigUint::from(2_u8) {
+            return Err(RelationPlanError::NoWrapBoundViolated);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum KeyVerifierSourceKey {
+    StatementRoot {
+        field_ordinal: u64,
+        list_ordinal: Option<u64>,
+    },
+    BdlopMatrix {
+        data_modulus_index: u16,
+        matrix_part: u16,
+        row: u16,
+        column: u16,
+    },
+    TrusteeBdlopMatrix {
+        data_modulus_index: u16,
+        matrix_part: u16,
+        row: u16,
+        column: u16,
+    },
+    PublicKeyCommonReference {
+        data_modulus_index: u16,
+    },
+    RelinearizationCommonReference {
+        schedule_position: u32,
+        decomposition_block_index: u16,
+        modulus_reference: SuiteModulusReference,
+    },
+    GaloisCommonReference {
+        schedule_position: u32,
+        decomposition_block_index: u16,
+        modulus_reference: SuiteModulusReference,
+    },
+    NegacyclicAutomorphismMapping {
+        ring_degree: u64,
+        galois_element: u64,
+    },
+    TargetConvertedRadixDigit {
+        target_role: u16,
+        component_ordinal: u16,
+        target_modulus_index: u16,
+        scale: u64,
+        radix: u64,
+        digit_ordinal: u16,
+        digit_count: u16,
+    },
+    TargetPartialDecryptionRadixDigit {
+        target_role: u16,
+        target_modulus_index: u16,
+        radix: u64,
+        digit_ordinal: u16,
+        digit_count: u16,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum BoundPolynomialRootUse {
+    Input,
+    Output,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ProofTreePhase {
+    Base,
+    Auxiliary,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct BoundedUnsignedColumn {
+    target_column_ordinal: u32,
+    ordered_digit_column_ordinals: Vec<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct BoundedMaterialDigitWitnessLayout {
+    pub(super) target_column_ordinal: u32,
+    pub(super) trit_column_ordinals: Vec<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct UpperBoundComparatorWitnessLayout {
+    pub(super) difference_digits: Vec<BoundedMaterialDigitWitnessLayout>,
+    pub(super) borrow_column_ordinals: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SplitIntegerVector {
+    pub(super) halves: [u32; 2],
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ShiftedSmallVector {
+    pub(super) coefficients: SplitIntegerVector,
+    pub(super) offset: u64,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ReversibleShiftedSmallVector {
+    pub(super) source: ShiftedSmallVector,
+    pub(super) reversed: SplitIntegerVector,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct AnchorOpeningWitness {
+    hiding_secrets: Vec<ReversibleShiftedSmallVector>,
+    hiding_errors: Vec<ShiftedSmallVector>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct AnchorQuotientWitness {
+    rows: Vec<[u32; 2]>,
+}
+
+pub(super) struct AnchorEquationInputs<'input> {
+    commitments: &'input [SplitIntegerVector],
+    first_matrix: &'input [Vec<SplitIntegerVector>],
+    second_matrix: &'input [SplitIntegerVector],
+    opening: &'input AnchorOpeningWitness,
+    secret: &'input ShiftedSmallVector,
+    quotients: &'input AnchorQuotientWitness,
+}
+
+impl<'input> AnchorEquationInputs<'input> {
+    pub(super) fn new(
+        commitments: &'input [SplitIntegerVector],
+        first_matrix: &'input [Vec<SplitIntegerVector>],
+        second_matrix: &'input [SplitIntegerVector],
+        opening: &'input AnchorOpeningWitness,
+        secret: &'input ShiftedSmallVector,
+        quotients: &'input AnchorQuotientWitness,
+    ) -> Self {
+        Self {
+            commitments,
+            first_matrix,
+            second_matrix,
+            opening,
+            secret,
+            quotients,
+        }
+    }
+}
+
+pub(super) struct PublicKeyEquationInputs<'input> {
+    public_key_share: &'input SplitIntegerVector,
+    common_reference: &'input SplitIntegerVector,
+    secret: &'input ReversibleShiftedSmallVector,
+    error: &'input ShiftedSmallVector,
+    quotient_columns: [u32; 2],
+}
+
+impl<'input> PublicKeyEquationInputs<'input> {
+    pub(super) fn new(
+        public_key_share: &'input SplitIntegerVector,
+        common_reference: &'input SplitIntegerVector,
+        secret: &'input ReversibleShiftedSmallVector,
+        error: &'input ShiftedSmallVector,
+        quotient_columns: [u32; 2],
+    ) -> Self {
+        Self {
+            public_key_share,
+            common_reference,
+            secret,
+            error,
+            quotient_columns,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct TrusteeAnchorOpeningWitness {
+    hiding_secrets: Vec<SplitIntegerVector>,
+    hiding_errors: Vec<ShiftedSmallVector>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct TrusteeRadixThreeQuotientWitness {
+    low_quotients: [u32; 2],
+    high_carries: [u32; 2],
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct TargetCommittedMaterialVector {
+    pub(super) bound_columns: [u32; 4],
+    pub(super) trits_by_half: [Vec<u32>; 2],
+    pub(super) upper_bound_comparators: Vec<UpperBoundComparatorWitnessLayout>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct TargetBoundedUnsignedVector {
+    pub(super) digit_columns_by_half: [[u32; 2]; 2],
+    pub(super) trits_by_half: [Vec<u32>; 2],
+    pub(super) upper_bound_comparators: Vec<UpperBoundComparatorWitnessLayout>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct TargetCenteredVector {
+    pub(super) value: ShiftedSmallVector,
+    pub(super) trits_by_half: [Vec<u32>; 2],
+}
+
+#[derive(Default)]
+struct PendingIntegerLiftBatch {
+    reversed_bindings: BTreeMap<(u32, u32), RelationIntegerLiftReversedColumnBindingDescriptor>,
+    negacyclic_automorphism_permutations:
+        Vec<RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor>,
+    components: Vec<RelationIntegerLiftComponentDescriptor>,
+}
+
+pub(super) struct KeyRelationPlanBuilder<'context> {
+    application_statement_schema_identifier: u16,
+    geometry: &'context KeyRelationGeometry,
+    context: &'context RelationPlanCheckContext,
+    ordered_non_native_moduli: Vec<SuiteModulusReference>,
+    resolved_moduli: BTreeMap<SuiteModulusReference, u64>,
+    ordered_verifier_sources: Vec<RelationVerifierSource>,
+    source_ordinals: BTreeMap<KeyVerifierSourceKey, u32>,
+    ordered_columns: Vec<RelationColumnDescriptor>,
+    semantic_cells_by_column: BTreeMap<u32, (SignedIntegerInterval, RelationBoundCertificate)>,
+    bound_trees: Vec<RelationTreeDescriptor>,
+    base_tree_columns: Vec<u32>,
+    auxiliary_tree_columns: Vec<u32>,
+    pending_integer_lift_batches: BTreeMap<(SuiteModulusReference, u16), PendingIntegerLiftBatch>,
+    ordered_integer_lift_batches: Vec<RelationIntegerLiftBatchDescriptor>,
+    ordered_constraints: Vec<RelationConstraintDescriptor>,
+}
+
+mod column_builder;
+mod equations;
+mod integer_lift;
+
+pub(super) use column_builder::*;

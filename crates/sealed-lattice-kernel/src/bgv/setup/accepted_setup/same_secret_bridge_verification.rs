@@ -1,11 +1,16 @@
 use super::*;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
-    SameSecretBridgeStatement, SameSecretLinkageStatement, VssPublicCommandCommitmentExpectation,
+    SameSecretLinkageStatement, VssPublicCommandCommitmentExpectation,
     vss_share_linkage_commitment_from_value,
 };
 
 const SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD: &str = "sameSecretBridgeStatementSet";
 const SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD: &str = "sameSecretBridgeProofMaterialSet";
+
+#[derive(Clone)]
+pub(in crate::bgv::setup) struct SameSecretBridgeStatement {
+    pub(in crate::bgv::setup) target_constant_commitment_roots: Vec<String>,
+}
 
 pub(super) enum SameSecretBridgeVerification {
     Verified(VerifiedSameSecretBridgeMaterial),
@@ -101,22 +106,22 @@ fn verify_same_secret_bridge_setup_binding(
         statement_set,
         "same-secret bridge statement set",
     )?;
-    let derived_profile = json!({
-        "participantCount": verified_statement_set.participant_count,
-        "qShareRnsLimbCount": verified_statement_set.q_share_rns_limb_count,
-        "thresholdDegree": verified_statement_set.threshold_degree,
-    });
-    compare_setup_context_participant_count(
-        setup_context,
-        &derived_profile,
-        "same-secret bridge statement set",
+    let roster = accepted_roster_from_setup_context(setup_context)?;
+    compare_required_u64(
+        verified_statement_set.participant_count as u64,
+        roster.participant_count,
+        "same-secret bridge statement set participant count",
     )?;
-    compare_setup_context_threshold_degree(
-        setup_context,
-        &derived_profile,
-        "same-secret bridge statement set",
+    compare_required_u64(
+        verified_statement_set.threshold_degree as u64,
+        roster.decryption_threshold,
+        "same-secret bridge statement set threshold degree",
     )?;
-    compare_complete_q_share_limb_count(&derived_profile, "same-secret bridge statement set")?;
+    compare_required_u64(
+        verified_statement_set.q_share_rns_limb_count as u64,
+        DATA_PRIMES.len() as u64,
+        "same-secret bridge statement set Q_share limb count",
+    )?;
     compare_required_string(
         hash_at_path(statement_set, &["publicMatrixSeedHash"])?,
         hash_at_path(common_randomness, &["publicMatrixSeedHash"])?,
@@ -193,16 +198,12 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                 trustee_roster_position as usize,
                 q_share_rns_limb_count,
                 threshold_degree,
-                ring_degree,
             )?;
-        let mut bridge_rns_primes = Vec::with_capacity(authoritative_targets.len());
         let mut target_constant_commitment_roots = Vec::with_capacity(authoritative_targets.len());
-        let mut target_constant_commitments = Vec::with_capacity(authoritative_targets.len());
         for (target_rns_limb_index, target) in authoritative_targets.iter().enumerate() {
-            let target_rns_prime = DATA_PRIMES[target_rns_limb_index];
             let target_constant_commitment_root =
                 crate::hashing::derive_canonical_object_hash(target.commitment_body)?;
-            let commitment = vss_share_linkage_commitment_from_value(
+            vss_share_linkage_commitment_from_value(
                 target.commitment_body,
                 VssPublicCommandCommitmentExpectation {
                     field_name: format!(
@@ -210,15 +211,9 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                         target_rns_limb_index * threshold_degree,
                     ),
                     root: &target_constant_commitment_root,
-                    role: "coefficient",
-                    rns_limb_index: target_rns_limb_index,
-                    rns_prime: target_rns_prime,
-                    ring_degree,
                 },
             )?;
-            bridge_rns_primes.push(target_rns_prime);
             target_constant_commitment_roots.push(target_constant_commitment_root);
-            target_constant_commitments.push(commitment);
         }
 
         let source_constant_commitments = super::super::source_constant_commitments::canonical_source_constant_commitments_from_bridge_statement(
@@ -236,12 +231,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                 commitments: source_constant_commitments.commitments,
             },
             statement: SameSecretBridgeStatement {
-                public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
-                source_trustee_identity: trustee_identity,
-                source_trustee_roster_position: trustee_roster_position,
-                bridge_rns_primes,
                 target_constant_commitment_roots,
-                target_constant_commitments,
             },
         };
         if statements_by_roster_position
@@ -282,7 +272,7 @@ fn same_secret_bridge_verification_request(
 }
 
 fn same_secret_bridge_error(message: &'static str) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 fn same_secret_bridge_refusal(

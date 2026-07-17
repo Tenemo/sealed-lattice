@@ -1,26 +1,28 @@
 import {
     deriveCollectiveBgvSetupRosterHash as deriveCollectiveBgvSetupRosterHashInternal,
-    derivePollSpecHash as derivePollSpecHashInternal,
+    prepareFoundationManifestIngress,
     validatePollSpec as validatePollSpecInternal,
 } from '@sealed-lattice/protocol';
-import type {
-    SetupProofMaterialStream as ProtocolSetupProofMaterialStream,
-    SetupProofMaterialStreamSet as ProtocolSetupProofMaterialStreamSet,
-    PublicKeyShareMaterialStream as ProtocolPublicKeyShareMaterialStream,
-    EvaluationKeyShareComponentMaterialStream as ProtocolEvaluationKeyShareComponentMaterialStream,
-    TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
-    TransportedVssShareLinkageProofMaterialSet as ProtocolTransportedVssShareLinkageProofMaterialSet,
-    TransportedSameSecretBridgeProofMaterialSet as ProtocolTransportedSameSecretBridgeProofMaterialSet,
-    TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
-    SetupPackage as ProtocolSetupPackage,
-    CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput,
-} from '@sealed-lattice/protocol';
-import type {
-    PollSpecInput,
-    PollSpecValidation,
-    ProtocolHash,
-    VerificationResult,
+import type { CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput } from '@sealed-lattice/protocol';
+import {
+    isProtocolHash,
+    type PollSpecInput,
+    type PollSpecValidation,
+    type ProtocolHash,
+    type VerificationResult,
 } from '@sealed-lattice/types';
+import {
+    openFoundationCeremonyRuntime,
+    type CanonicalFoundationActionDefinition,
+    type CanonicalFoundationBoardPolicy,
+    type CanonicalFoundationManifest,
+    type FoundationActionContextVerification,
+    type FoundationActionDefinitionVerification,
+    type FoundationBoardPolicyVerification,
+    type FoundationCeremonyContextVerification,
+    type FoundationManifestVerification,
+    type FoundationSuiteRecordVerification,
+} from '@sealed-lattice/wasm/published-sdk';
 
 import { loadFreshTranscriptCoreKernel } from './kernel.js';
 import {
@@ -30,13 +32,22 @@ import {
     snapshotSetupPackageVerificationInput,
 } from './setup-verification-input.js';
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
+class SetupPackageVerificationCleanupError extends Error {
+    public override readonly name = 'SetupPackageVerificationCleanupError';
+
+    public constructor(
+        public readonly operationFailure: unknown,
+        public readonly cleanupFailure: unknown,
+    ) {
+        super('Setup-package verification and session cleanup both failed.');
+    }
+}
 
 function assertProtocolHash(
     value: unknown,
     fieldName: string,
 ): asserts value is ProtocolHash {
-    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
+    if (!isProtocolHash(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
     }
 }
@@ -49,19 +60,26 @@ const assertSetupPackageVerificationBindings = (
 };
 
 export type {
-    CanonicalSignedRootObject,
     PollSpec,
     PollSpecInput,
     PollSpecValidation,
     PollSpecValidationError,
     PollSpecValidationErrorCode,
     ProtocolHash,
-    ProtocolSignatureEnvelope,
     RefusalReason,
-    SignedObjectType,
-    SmallRosterPolicy,
     VerificationResult,
 } from '@sealed-lattice/types';
+export type {
+    CanonicalFoundationActionDefinition,
+    CanonicalFoundationBoardPolicy,
+    CanonicalFoundationManifest,
+    FoundationActionContextVerification,
+    FoundationActionDefinitionVerification,
+    FoundationBoardPolicyVerification,
+    FoundationCeremonyContextVerification,
+    FoundationManifestVerification,
+    FoundationSuiteRecordVerification,
+};
 export type CollectiveBgvSetupContext = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
@@ -69,6 +87,19 @@ export type CollectiveBgvSetupContext = Readonly<{
     readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
     readonly participantCount: number;
+}>;
+
+export type SetupMaterialStream = Readonly<{
+    readonly descriptorBytes: Uint8Array;
+    readonly pullChunk: (input: {
+        readonly abortSignal?: AbortSignal;
+        readonly chunkIndex: number;
+        readonly expectedByteLength: number;
+    }) => Promise<ArrayBuffer | undefined>;
+}>;
+
+export type SetupProofMaterialStreamSet = Readonly<{
+    readonly proofMaterialStreams: readonly SetupMaterialStream[];
 }>;
 
 export type VerifyPrivateVssShareInput = Readonly<{
@@ -85,34 +116,20 @@ export type PrivateVssShareVerification = VerificationResult<{
     readonly privateEnvelopeHash: ProtocolHash;
 }>;
 
-export type SetupPackage = ProtocolSetupPackage;
 export type CollectiveBgvSetupRosterEntryInput =
     ProtocolCollectiveBgvSetupRosterEntryInput;
 
-export type PublicKeyShareMaterialStream = ProtocolPublicKeyShareMaterialStream;
-export type TransportedPublicKeyShareProofMaterialSet =
-    ProtocolTransportedPublicKeyShareProofMaterialSet;
-export type TransportedVssShareLinkageProofMaterialSet =
-    ProtocolTransportedVssShareLinkageProofMaterialSet;
-export type TransportedSameSecretBridgeProofMaterialSet =
-    ProtocolTransportedSameSecretBridgeProofMaterialSet;
-export type TransportedEvaluationKeyShareProofMaterialSet =
-    ProtocolTransportedEvaluationKeyShareProofMaterialSet;
-export type EvaluationKeyShareComponentMaterialStream =
-    ProtocolEvaluationKeyShareComponentMaterialStream;
-export type SetupProofMaterialStream = ProtocolSetupProofMaterialStream;
-export type SetupProofMaterialStreamSet = ProtocolSetupProofMaterialStreamSet;
 export type VerifySetupPackageInput = Readonly<{
     readonly setupPackage: unknown;
     readonly expectedSetupPackageHash?: ProtocolHash;
     readonly expectedManifestHash: ProtocolHash;
     readonly expectedRosterHash: ProtocolHash;
-    readonly publicKeyShareMaterialStream: PublicKeyShareMaterialStream;
-    readonly transportedPublicKeyShareProofMaterial: TransportedPublicKeyShareProofMaterialSet;
-    readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
-    readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
-    readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
-    readonly evaluationKeyShareComponentMaterialStreams: readonly EvaluationKeyShareComponentMaterialStream[];
+    readonly publicKeyShareMaterialStream: SetupMaterialStream;
+    readonly transportedPublicKeyShareProofMaterial: SetupProofMaterialStreamSet;
+    readonly transportedVssShareLinkageProofMaterial: SetupProofMaterialStreamSet;
+    readonly transportedSameSecretBridgeProofMaterial: SetupProofMaterialStreamSet;
+    readonly transportedEvaluationKeyShareProofMaterial: SetupProofMaterialStreamSet;
+    readonly evaluationKeyShareComponentMaterialStreams: readonly SetupMaterialStream[];
 }>;
 
 export type SetupPackageVerification = VerificationResult<void>;
@@ -120,13 +137,84 @@ export type SetupPackageVerification = VerificationResult<void>;
 export const deriveCollectiveBgvSetupRosterHash =
     deriveCollectiveBgvSetupRosterHashInternal;
 
-export const derivePollSpecHash = derivePollSpecHashInternal;
-
 export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation {
     return validatePollSpecInternal(input);
 }
+
+const loadFoundationCeremonyRuntime = async () =>
+    openFoundationCeremonyRuntime(await loadFreshTranscriptCoreKernel());
+
+export const createCanonicalManifest = async (
+    input: PollSpecInput,
+): Promise<CanonicalFoundationManifest> => {
+    const validation = validatePollSpecInternal(input);
+    if (!validation.isValid) {
+        throw new TypeError(
+            validation.errors.map((error) => error.message).join(' '),
+        );
+    }
+    const runtime = await loadFoundationCeremonyRuntime();
+    return runtime.encodeManifest(
+        prepareFoundationManifestIngress(validation.normalized),
+    );
+};
+
+export const verifyCanonicalManifest = async (
+    canonicalBytes: Uint8Array,
+): Promise<FoundationManifestVerification> =>
+    (await loadFoundationCeremonyRuntime()).verifyManifest(canonicalBytes);
+
+export const createCanonicalActionDefinition = async (input: {
+    readonly submissionCutoffUnixMilliseconds: bigint;
+    readonly topCount: number;
+}): Promise<CanonicalFoundationActionDefinition> =>
+    (await loadFoundationCeremonyRuntime()).encodeActionDefinition(input);
+
+export const verifyCanonicalActionDefinition = async (
+    canonicalBytes: Uint8Array,
+): Promise<FoundationActionDefinitionVerification> =>
+    (await loadFoundationCeremonyRuntime()).verifyActionDefinition(
+        canonicalBytes,
+    );
+
+export const createCanonicalBoardPolicy = async (input: {
+    readonly boardOriginIdentifier: string;
+}): Promise<CanonicalFoundationBoardPolicy> =>
+    (await loadFoundationCeremonyRuntime()).encodeBoardPolicy(input);
+
+export const verifyCanonicalBoardPolicy = async (
+    canonicalBytes: Uint8Array,
+): Promise<FoundationBoardPolicyVerification> =>
+    (await loadFoundationCeremonyRuntime()).verifyBoardPolicy(canonicalBytes);
+
+export const verifyCanonicalSuiteRecord = async (
+    canonicalBytes: Uint8Array,
+): Promise<FoundationSuiteRecordVerification> =>
+    (await loadFoundationCeremonyRuntime()).verifySuiteRecord(canonicalBytes);
+
+export const verifyCanonicalCeremonyContext = async (input: {
+    readonly canonicalManifestBytes: Uint8Array;
+    readonly canonicalRosterBytes: Uint8Array;
+    readonly canonicalSuiteRecordBytes: Uint8Array;
+    readonly ceremonyIdentifier: string;
+    readonly expectedSuiteId: ProtocolHash;
+}): Promise<FoundationCeremonyContextVerification> =>
+    (await loadFoundationCeremonyRuntime()).verifyCeremonyContext(input);
+
+export const verifyCanonicalActionContext = async (input: {
+    readonly actionIdentifier: string;
+    readonly canonicalActionDefinitionBytes: Uint8Array;
+    readonly canonicalBoardPolicyBytes: Uint8Array;
+    readonly canonicalManifestBytes: Uint8Array;
+    readonly canonicalRosterBytes: Uint8Array;
+    readonly canonicalSuiteRecordBytes: Uint8Array;
+    readonly ceremonyIdentifier: string;
+    readonly expectedCeremonyContextHash: ProtocolHash;
+    readonly expectedSuiteId: ProtocolHash;
+}): Promise<FoundationActionContextVerification> =>
+    (await loadFoundationCeremonyRuntime()).verifyActionContext(input);
 
 export const verifyPrivateVssShare = async (
     input: VerifyPrivateVssShareInput,
@@ -172,7 +260,14 @@ export const verifySetupPackage = async (
             value: undefined,
         };
     } catch (error) {
-        acceptedSetupSession.cancel();
+        try {
+            acceptedSetupSession.cancel();
+        } catch (cleanupFailure) {
+            throw new SetupPackageVerificationCleanupError(
+                error,
+                cleanupFailure,
+            );
+        }
         throw error;
     }
 };

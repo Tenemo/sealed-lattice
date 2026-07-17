@@ -1,13 +1,7 @@
-// Setup-proof commands and the shared per-limb polynomial-IOP engine.
-// Statements containing diagonal-source evaluation keys route to the limb-group
-// atom schedule; the other supported proof families use the shared engine here.
-// That engine commits masked witness columns per proof limb, batches support and
-// relation constraints through quotients and a univariate sumcheck, binds
-// cross-limb claims as masked centered integers, and checks low degree through
-// DEEP evaluations and FRI. Same-secret relations open the accepted BDLOP
-// constant commitments, tying the relation witness to the committed secret.
-// Verifiers rebuild statements from authenticated public material before checking
-// any proof.
+// Setup-proof commands for the trustee evaluation-key atom proof and the
+// recipient-private VSS proof. Public VSS linkage, threshold aggregation,
+// same-secret anchoring, public-key shares, and target decryption use the common
+// proof suite instead of this per-modulus engine.
 
 mod commands;
 mod evaluation_domain;
@@ -20,63 +14,35 @@ mod prover;
 mod relation;
 mod verifier;
 
-pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
-#[cfg(test)]
-pub(crate) use commands::verify_vss_share_linkage_proof_material_set_from_request;
-pub(crate) use commands::{
-    generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
-    verify_same_secret_bridge_proof_source_from_request,
-};
-#[cfg(test)]
-pub(crate) use commands::{
-    generate_target_decryption_share_proof_bytes_from_request,
-    verify_target_decryption_share_proof_bytes_from_request,
-    verify_target_decryption_share_proof_source_from_request,
-};
-#[cfg(test)]
 pub(in crate::bgv::setup) use commands::{
-    prove_trustee_evaluation_key_proof_bytes, verify_and_retain_vss_share_linkage_proof_binding,
-    verify_trustee_evaluation_key_proof_bytes,
-};
-
-pub(in crate::bgv::setup) use commands::{
-    VssPublicCommandCommitmentExpectation, verified_vss_share_linkage_proof_material_bytes,
-    verify_vss_share_linkage_proof_source_from_request,
-    verify_vss_share_linkage_statement_and_proof_material_set_from_request,
-    vss_share_linkage_commitment_from_value, vss_share_linkage_proof_verification_binding_hash,
-};
-#[cfg(test)]
-pub(in crate::bgv::setup) use commands::{
-    VssShareLinkageMaterialRecordStatementInput, verify_vss_share_linkage_material_record_statement,
+    VssPublicCommandCommitmentExpectation, vss_share_linkage_commitment_from_value,
 };
 pub(in crate::bgv::setup) use fiat_shamir_transcript::HashChainTranscriptCore;
 pub(in crate::bgv::setup) use merkle_commitment::{
     BatchedMerkleOpening as SetupBatchedMerkleOpening, MerkleContext as SetupMerkleContext,
-    MerkleDigest as SetupMerkleDigest, MerkleTree as SetupMerkleTree,
-    consistent_sorted_leaves as consistent_setup_merkle_leaves,
-    sorted_unique_indices as sorted_unique_setup_merkle_indices, verify_merkle_batch_with_context,
+    MerkleDigest as SetupMerkleDigest, consistent_sorted_leaves as consistent_setup_merkle_leaves,
+    verify_merkle_batch_with_context,
+};
+#[cfg(test)]
+pub(in crate::bgv::setup) use merkle_commitment::{
+    MerkleTree as SetupMerkleTree, sorted_unique_indices as sorted_unique_setup_merkle_indices,
 };
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof_from_source;
 #[cfg(test)]
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 #[cfg(test)]
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
-pub(in crate::bgv::setup) use prover::{
-    VssCommittedMaterialTreeInput, vss_committed_material_roots_by_commitment_field,
-};
+#[cfg(test)]
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
+#[cfg(test)]
+pub(in crate::bgv::setup) use relation::generate_development_trustee_instance;
 pub(in crate::bgv::setup) use relation::public_key_switch_sample;
 pub(in crate::bgv::setup) use relation::{
-    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-    PrivateVssShareStatement, SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE,
-    SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS, SameSecretBridgeStatement,
+    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PrivateVssShareStatement,
+    SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE, SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS,
     SameSecretLinkageAtomFieldForms, SameSecretLinkageStatement, SetupProofStatement,
     SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
     build_same_secret_linkage_atom_field_forms,
-};
-#[cfg(test)]
-pub(in crate::bgv::setup) use relation::{
-    KeyBearingWitness, SameSecretLinkageWitness, VssCommittedMaterialWitness,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 
@@ -88,21 +54,6 @@ use crate::{
     bgv::setup::setup_proof::{CanonicalProofMaterialBytes, SetupProofFamily},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
-
-#[cfg(test)]
-use crate::hashing::hash512_hex;
-
-// Canonical hash of authenticated trustee evaluation-key proof bytes, bound into
-// the package proof records and the chunked proof stream reference.
-#[cfg(test)]
-pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes: &[u8]) -> String {
-    hash512_hex(
-        SetupProofFamily::TrusteeEvaluationKey
-            .proof_bytes_hash_domain()
-            .expect("trustee evaluation-key proofs have a byte-hash domain"),
-        &[proof_bytes],
-    )
-}
 
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_bytes_hash(
     proof_bytes: &CanonicalProofMaterialBytes,
@@ -120,36 +71,11 @@ pub(crate) const PUBLIC_KEY_SHARE_PROOF_FAMILY: &str =
     SetupProofFamily::PublicKeyShare.wire_label();
 pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str =
     SetupProofFamily::PrivateVssShare.wire_label();
-pub(crate) const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str =
-    SetupProofFamily::VssShareLinkage.wire_label();
-pub(crate) const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str =
-    SetupProofFamily::SameSecretBridge.wire_label();
 #[cfg(test)]
 pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str =
     SetupProofFamily::TargetDecryptionShare.wire_label();
-pub(crate) const TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND: i64 = 16;
 #[cfg(test)]
-pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(
-    proof_bytes: &[u8],
-) -> String {
-    hash512_hex(
-        SetupProofFamily::PublicKeyShare
-            .proof_bytes_hash_domain()
-            .expect("public-key share proofs have a byte-hash domain"),
-        &[proof_bytes],
-    )
-}
-
-pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_bytes_hash(
-    proof_bytes: &CanonicalProofMaterialBytes,
-) -> CanonicalResult<String> {
-    proof_bytes.hash512_hex(
-        SetupProofFamily::PublicKeyShare
-            .proof_bytes_hash_domain()
-            .expect("public-key share proofs have a byte-hash domain"),
-    )
-}
-
+pub(crate) const TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND: i64 = 16;
 pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_material_bytes_hash(
     proof_bytes: &CanonicalProofMaterialBytes,
 ) -> CanonicalResult<String> {
@@ -171,6 +97,7 @@ pub(super) const COMMITMENT_BOUND_FACTOR: usize = 2;
 // DEEP schedule opens at most 339 evaluations, while 512 coefficients leave
 // margin. The trace/4 cap keeps the cubic row-check composition inside the
 // committed degree bound for smaller traces.
+#[cfg(test)]
 pub(super) fn column_mask_degree(trace_size: usize) -> usize {
     512.min(trace_size / 4)
 }
@@ -189,50 +116,22 @@ pub(super) const LINCHECK_REPETITIONS: usize = 2;
 // the third to detect an inconsistent per-field witness.
 pub(in crate::bgv::setup) const CONSISTENCY_REPETITIONS: usize = 20;
 pub(in crate::bgv::setup) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
-pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_REPETITIONS: usize = 20;
-pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 // Each consistency claim is one shared integer: a bounded clear combination
 // plus a family-selected mask committed in base-3 digit columns. Its residues
 // are published in every proof field carrying the claim. The 58-digit mask fits
 // inside the two-field CRT lift window, leaving another field for consistency.
 pub(in crate::bgv::setup) const CLAIM_MASK_RADIX: u64 = 3;
 pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
-// Share-linkage carry and message-trit claims both use the 58-digit mask, so
-// their lift consumes two of three commitment fields. A message claim binds one
-// base-three trit with witness bound two, not a packed message digit.
-pub(in crate::bgv::setup) const VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 58;
-pub(in crate::bgv::setup) const VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT: usize = 58;
-// Same-secret-bridge target-message digit claims use all three setup
-// commitment fields, so the wider eighty-seven-digit mask stays inside that
-// CRT window. This leaves no independent check field for those message claims;
-// their cross-field value is instead fixed by the bridge relation to the
-// separately consistency-checked ternary secret and negative indicator. This
-// constant serves the bridge family only (share-linkage trit claims use the
-// 58-digit mask above).
-pub(in crate::bgv::setup) const VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
-// Target-decryption message claims need wider masks than the setup families
-// because lifted aggregate-message openings have a much larger clear range. That
-// clear range is fixed by the largest active target prime, which is
-// DATA_PRIMES[0] at every canonical target level because the data primes
-// decrease monotonically, so the aggregate-message bound is independent of how
-// many target limbs are active. One hundred forty-two base-3 digits keep the
-// aggregate mask inside the five-field aggregate CRT lift window with margin at
-// the canonical target level. Target smudging-message claims have smaller
-// witness ranges and use the shorter one hundred fourteen digit mask inside a
-// four-field lift.
-pub(in crate::bgv::setup) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize =
-    142;
-pub(in crate::bgv::setup) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize =
-    114;
 // Integer-point asynchronous interpolation has subset-dependent rational
 // weights. Multiplying every private noise polynomial by n! clears all of their
 // denominators before the RNS limbs are recombined.
+#[cfg(test)]
 pub(in crate::bgv) fn target_decryption_interpolation_denominator_clearing_factor(
     participant_count: u64,
 ) -> CanonicalResult<u64> {
-    if !super::accepted_setup::participant_count_is_supported(participant_count) {
+    if !super::accepted_setup::participant_count_is_configurable(participant_count) {
         return Err(invalid_succinct_setup_proof(
-            "target-decryption participant count is outside the supported roster range",
+            "target-decryption participant count is outside the configurable roster range",
         ));
     }
 
@@ -282,6 +181,7 @@ fn invalid_succinct_setup_proof(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
+#[cfg(test)]
 pub(super) fn signed_value_residue(value: i64, modulus: u64) -> u64 {
     let modulus_i128 = i128::from(modulus);
     let reduced = (i128::from(value) % modulus_i128 + modulus_i128) % modulus_i128;

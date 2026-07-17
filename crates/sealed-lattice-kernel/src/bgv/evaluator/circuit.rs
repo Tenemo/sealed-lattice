@@ -1,7 +1,6 @@
+use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
-use std::collections::BTreeMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::RwLock;
+use std::{collections::BTreeMap, sync::RwLock};
 
 use crate::{
     bgv::{
@@ -23,16 +22,17 @@ use crate::{
 
 // The evaluator context owns the development key set and the evaluation keys
 // needed by homomorphic multiplication and rotation. One relinearization key
-// at the working level serves every reachable level: the CRT-idempotent
-// gadget makes the lower-level key a literal sub-matrix, and the key-switch
-// path slices the active window from the ciphertext level. Rotation keys are
-// held per Galois element at their schedule level and truncate the same way.
+// at the working level serves every reachable level: lower levels retain the
+// active data-prime block prefix and the complete special basis. Native runs
+// retain one rotation key per Galois element at the working level; lower-level
+// rotations project that same key through the active CRT prefix.
 pub(crate) struct EvaluatorContext {
     key: DevelopmentBgvKey,
     working_level: usize,
     relinearization_key: KeySwitchKey,
+    galois_key_seed_hex: String,
     #[cfg(not(target_arch = "wasm32"))]
-    generated_rotation_keys: RwLock<BTreeMap<(usize, usize, String), KeySwitchKey>>,
+    generated_rotation_keys: RwLock<BTreeMap<usize, Arc<KeySwitchKey>>>,
 }
 
 impl EvaluatorContext {
@@ -52,11 +52,14 @@ impl EvaluatorContext {
             working_level,
             &format!("{key_switch_seed_hex}-relin"),
         )?;
+        let galois_key_seed_hex =
+            format!("{key_switch_seed_hex}-galois-keys-level-{working_level}");
 
         Ok(Self {
             key,
             working_level,
             relinearization_key,
+            galois_key_seed_hex,
             #[cfg(not(target_arch = "wasm32"))]
             generated_rotation_keys: RwLock::new(BTreeMap::new()),
         })
@@ -74,7 +77,7 @@ impl EvaluatorContext {
     fn relinearization_key(&self, level: usize) -> CanonicalResult<&KeySwitchKey> {
         if self.relinearization_key.level < level {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "no relinearization key for the requested level",
             ));
         }
@@ -85,46 +88,68 @@ impl EvaluatorContext {
     pub(crate) fn resolve_galois_key(
         &self,
         galois_element: usize,
-        level: usize,
-        fallback_seed_hex: &str,
-    ) -> CanonicalResult<KeySwitchKey> {
-        let seed = fallback_seed_hex;
+        requested_level: usize,
+    ) -> CanonicalResult<Arc<KeySwitchKey>> {
+        if requested_level > self.working_level {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "requested Galois-key level exceeds the evaluator working level",
+            ));
+        }
 
         #[cfg(target_arch = "wasm32")]
         {
-            return generate_galois_key(&self.key, galois_element, level, seed);
+            // Browser runs keep only the key needed by the current rotation.
+            // Generating the requested active prefix avoids retaining the
+            // working-level schedule in constrained WASM memory. The stable
+            // context seed makes that prefix identical to the native cached
+            // working-level key under CRT truncation.
+            Ok(Arc::new(generate_galois_key(
+                &self.key,
+                galois_element,
+                requested_level,
+                &self.galois_key_seed_hex,
+            )?))
         }
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let cache_key = (galois_element, level, seed.to_string());
             // The read guard must drop before the write acquisition below, or
             // the first cache miss deadlocks on the same thread.
             {
                 let generated_rotation_keys =
                     self.generated_rotation_keys.read().map_err(|_| {
                         CanonicalError::new(
-                            CanonicalErrorCode::InvalidFixture,
+                            CanonicalErrorCode::InvalidProtocolObject,
                             "generated rotation-key cache is poisoned",
                         )
                     })?;
-                if let Some(rotation_key) = generated_rotation_keys.get(&cache_key) {
-                    return Ok(rotation_key.clone());
+                if let Some(rotation_key) = generated_rotation_keys.get(&galois_element) {
+                    return Ok(Arc::clone(rotation_key));
                 }
             }
 
-            let generated_key = generate_galois_key(&self.key, galois_element, level, seed)?;
-            self.generated_rotation_keys
-                .write()
-                .map_err(|_| {
+            let mut generated_rotation_keys =
+                self.generated_rotation_keys.write().map_err(|_| {
                     CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
+                        CanonicalErrorCode::InvalidProtocolObject,
                         "generated rotation-key cache is poisoned",
                     )
-                })?
-                .insert(cache_key, generated_key.clone());
+                })?;
+            if let Some(rotation_key) = generated_rotation_keys.get(&galois_element) {
+                return Ok(Arc::clone(rotation_key));
+            }
+            // Keep generation under the exclusive guard so concurrent callers
+            // cannot materialize duplicate giant keys on the same cache miss.
+            let scheduled_key = Arc::new(generate_galois_key(
+                &self.key,
+                galois_element,
+                self.working_level,
+                &self.galois_key_seed_hex,
+            )?);
+            generated_rotation_keys.insert(galois_element, Arc::clone(&scheduled_key));
 
-            Ok(generated_key)
+            Ok(scheduled_key)
         }
     }
 
@@ -132,13 +157,10 @@ impl EvaluatorContext {
         &self,
         ciphertext: &Ciphertext,
         galois_element: usize,
-        level: usize,
-        fallback_seed_hex: &str,
     ) -> CanonicalResult<Ciphertext> {
-        let generated_rotation_key =
-            self.resolve_galois_key(galois_element, level, fallback_seed_hex)?;
+        let generated_rotation_key = self.resolve_galois_key(galois_element, ciphertext.level)?;
 
-        rotate(ciphertext, galois_element, &generated_rotation_key)
+        rotate(ciphertext, galois_element, generated_rotation_key.as_ref())
     }
 }
 
@@ -243,7 +265,7 @@ fn evaluate_polynomial_by_power_table(
 ) -> CanonicalResult<Ciphertext> {
     if coefficients.is_empty() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "polynomial evaluation requires at least the constant coefficient",
         ));
     }
@@ -304,13 +326,13 @@ fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
 ) -> CanonicalResult<Ciphertext> {
     if coefficients.is_empty() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "polynomial evaluation requires at least the constant coefficient",
         ));
     }
     if baby_step_count < 2 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "Paterson-Stockmeyer baby-step count must be at least two",
         ));
     }
@@ -448,7 +470,7 @@ fn linear_combination_from_powers(
 fn sum_ciphertexts_at_common_level(ciphertexts: &[Ciphertext]) -> CanonicalResult<Ciphertext> {
     if ciphertexts.is_empty() {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "cannot sum an empty ciphertext set",
         ));
     }
@@ -477,7 +499,50 @@ fn higher_power_needed(coefficients: &[u64], power: usize) -> bool {
 
 fn missing_power() -> CanonicalError {
     CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
+        CanonicalErrorCode::InvalidProtocolObject,
         "polynomial evaluation reached a power that was not built",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::sync::Arc;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use super::EvaluatorContext;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn evaluator_context_reuses_one_scheduled_galois_key_across_requested_levels() {
+        let context =
+            EvaluatorContext::new("scheduled-galois-key-reuse", 2).expect("evaluator context");
+        let working_level_key = context
+            .resolve_galois_key(3, 2)
+            .expect("working-level Galois key");
+        let lower_level_key = context
+            .resolve_galois_key(3, 0)
+            .expect("lower-level Galois-key use");
+
+        assert!(Arc::ptr_eq(&working_level_key, &lower_level_key));
+        assert_eq!(working_level_key.level, 2);
+        assert_eq!(
+            context
+                .generated_rotation_keys
+                .read()
+                .expect("rotation-key cache")
+                .len(),
+            1
+        );
+
+        let error = context
+            .resolve_galois_key(3, 3)
+            .err()
+            .expect("a level above the context must be refused");
+        assert!(
+            error
+                .message
+                .contains("exceeds the evaluator working level")
+        );
+    }
 }

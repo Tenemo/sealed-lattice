@@ -35,12 +35,6 @@ pub(super) fn rebind_collective_setup_intent_registration_with_signature_seed(
         .as_str()
         .expect("setup-intent trustee identity")
         .to_string();
-    let recovery_epoch = registration["recoveryEpoch"]
-        .as_u64()
-        .expect("setup-intent recovery epoch");
-    let device_epoch = registration["deviceEpoch"]
-        .as_u64()
-        .expect("setup-intent device epoch");
     let roster_position =
         u64::try_from(registration_index).expect("setup-intent registration index must fit u64");
     let signing_public_key_hash = create_ml_dsa_public_key_hash_fixture(signature_seed_label)
@@ -51,8 +45,6 @@ pub(super) fn rebind_collective_setup_intent_registration_with_signature_seed(
         "setupContextHash": setup_context_hash,
         "trusteeIdentity": trustee_identity,
         "rosterPosition": roster_position,
-        "recoveryEpoch": recovery_epoch,
-        "deviceEpoch": device_epoch,
         "signingPublicKeyHash": signing_public_key_hash,
         "privateVssMailboxPublicKeyHash": registration["privateVssMailboxPublicKeyHash"],
     });

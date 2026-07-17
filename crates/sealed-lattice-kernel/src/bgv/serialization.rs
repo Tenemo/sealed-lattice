@@ -1,9 +1,9 @@
 #[cfg(test)]
-use crate::bgv::rns::PolynomialDomain;
+use crate::bgv::parameters::BgvBasisKind;
+#[cfg(test)]
+use crate::encoding::CanonicalReader;
 #[cfg(test)]
 use crate::transcript_core::encode_hex;
-#[cfg(test)]
-use crate::{bgv::parameters::POLYNOMIAL_DEGREE, encoding::CanonicalReader};
 use crate::{
     bgv::rns::RnsPolynomial,
     encoding::{
@@ -13,14 +13,10 @@ use crate::{
 };
 
 const CANONICAL_MAGIC: &str = "sealed-lattice-bgv-rns-canonical-object";
-const CANONICAL_OBJECT_VERSION: u64 = 1;
+const CANONICAL_OBJECT_VERSION: u64 = 2;
 // Max polynomial components in a BGV object: a degree-2 ciphertext has 3.
 #[cfg(test)]
 const MAXIMUM_COMPONENT_COUNT: usize = 3;
-// Max RNS limbs: 17 data primes + 1 special prime (the extended basis).
-#[cfg(test)]
-const MAXIMUM_MODULUS_COUNT: usize = 18;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BgvObjectKind {
     #[cfg(test)]
@@ -118,7 +114,7 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
     // bytes to match exactly, rejecting any non-canonical input encoding.
     if serialize_bgv_object(object.object_kind, &object.components)? != bytes {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "BGV object is not canonical because it does not reserialize byte-identically",
         ));
     }
@@ -141,18 +137,9 @@ pub(crate) fn ciphertext_root(canonical_bytes: &[u8]) -> String {
 }
 
 fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {
-    append_string(output, &polynomial.bgv_parameters_hash);
-    append_string(output, &polynomial.basis_id);
+    append_string(output, polynomial.basis_kind.basis_id());
     append_varuint(output, polynomial.level as u64);
-    append_varuint(output, polynomial.coefficient_count as u64);
-    append_string(output, polynomial.domain.as_str());
-    append_varuint(output, polynomial.moduli.len() as u64);
-    for modulus in &polynomial.moduli {
-        append_varuint(output, *modulus);
-    }
-    append_varuint(output, polynomial.residues_by_modulus.len() as u64);
     for residues in &polynomial.residues_by_modulus {
-        append_varuint(output, residues.len() as u64);
         for residue in residues {
             append_varuint(output, *residue);
         }
@@ -161,72 +148,37 @@ fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {
 
 #[cfg(test)]
 fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolynomial> {
-    let bgv_parameters_hash = reader.read_string()?;
     let basis_id = reader.read_string()?;
+    let basis_kind = BgvBasisKind::from_basis_id(&basis_id).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidEnum,
+            "BGV-RNS basis identifier is not selected",
+        )
+    })?;
     let level = usize::try_from(reader.read_varuint()?).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "level does not fit usize",
         )
     })?;
-    let coefficient_count = usize::try_from(reader.read_varuint()?).map_err(|_| {
+    let moduli = basis_kind.moduli_for_level(level).ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "coefficient count does not fit usize",
+            CanonicalErrorCode::InvalidProtocolObject,
+            "BGV-RNS object level is outside the selected basis",
         )
     })?;
-    if coefficient_count != POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "BGV-RNS object coefficient count must match the selected polynomial degree",
-        ));
-    }
-    let domain = PolynomialDomain::from_str(&reader.read_string()?).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidEnum,
-            "BGV polynomial domain is not supported",
-        )
-    })?;
-    let modulus_count = read_bounded_count(reader, MAXIMUM_MODULUS_COUNT, "modulus")?;
-    let mut moduli = Vec::with_capacity(modulus_count);
-    for _ in 0..modulus_count {
-        moduli.push(reader.read_varuint()?);
-    }
-    let limb_count = read_bounded_count(reader, MAXIMUM_MODULUS_COUNT, "residue limb")?;
-    if limb_count != modulus_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "BGV canonical object residue limb count does not match modulus count",
-        ));
-    }
-    let mut residues_by_modulus = Vec::with_capacity(limb_count);
-    for _ in 0..limb_count {
-        let residue_count = usize::try_from(reader.read_varuint()?).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "residue count does not fit usize",
-            )
-        })?;
-        if residue_count != coefficient_count {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "BGV canonical object residue count does not match coefficient count",
-            ));
-        }
-        let mut residues = Vec::with_capacity(residue_count);
-        for _ in 0..residue_count {
+    let mut residues_by_modulus = Vec::with_capacity(moduli.len());
+    for _ in &moduli {
+        let mut residues = Vec::with_capacity(crate::bgv::parameters::POLYNOMIAL_DEGREE);
+        for _ in 0..crate::bgv::parameters::POLYNOMIAL_DEGREE {
             residues.push(reader.read_varuint()?);
         }
         residues_by_modulus.push(residues);
     }
 
     Ok(RnsPolynomial {
-        bgv_parameters_hash,
-        basis_id,
+        basis_kind,
         level,
-        coefficient_count,
-        domain,
-        moduli,
         residues_by_modulus,
     })
 }
@@ -275,12 +227,12 @@ fn validate_component_count(
 
 #[cfg(test)]
 mod tests {
-    use super::{BgvObjectKind, CANONICAL_MAGIC, parse_bgv_object, serialize_bgv_object};
+    use super::{
+        BgvObjectKind, CANONICAL_MAGIC, CANONICAL_OBJECT_VERSION, parse_bgv_object,
+        serialize_bgv_object,
+    };
     use crate::{
-        bgv::{
-            encoding::encode_batch_plaintext_slots,
-            parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
-        },
+        bgv::{encoding::encode_batch_plaintext_slots, parameters::POLYNOMIAL_DEGREE},
         encoding::{CanonicalErrorCode, append_string, append_varuint},
     };
 
@@ -292,7 +244,10 @@ mod tests {
         let parsed = parse_bgv_object(&canonical_bytes).expect("parse");
 
         assert_eq!(parsed.object_kind, BgvObjectKind::Plaintext);
-        assert_eq!(parsed.components[0].moduli, vec![DATA_PRIMES[0]]);
+        assert_eq!(
+            parsed.components[0].basis_kind,
+            crate::bgv::parameters::BgvBasisKind::Data
+        );
         assert_eq!(
             serialize_bgv_object(parsed.object_kind, &parsed.components).expect("reserialize"),
             canonical_bytes
@@ -313,19 +268,14 @@ mod tests {
         assert_eq!(parsed.object_kind, BgvObjectKind::Ciphertext);
         assert_eq!(parsed.components.len(), 2);
         assert_eq!(
-            parsed.components[0].bgv_parameters_hash,
-            parsed.components[1].bgv_parameters_hash
+            parsed.components[0].basis_kind,
+            parsed.components[1].basis_kind
         );
         assert!(serialize_bgv_object(BgvObjectKind::Ciphertext, &[left.polynomial]).is_err());
     }
 
     #[test]
-    fn parser_rejects_noncanonical_domain_and_trailing_bytes() {
-        let encoded = encode_batch_plaintext_slots(&[9], 0).expect("encode");
-        let mut polynomial = encoded.polynomial;
-        polynomial.domain = crate::bgv::rns::PolynomialDomain::Ntt;
-        assert!(serialize_bgv_object(BgvObjectKind::Plaintext, &[polynomial]).is_err());
-
+    fn parser_rejects_trailing_bytes() {
         let encoded = encode_batch_plaintext_slots(&vec![0; POLYNOMIAL_DEGREE], 0).expect("encode");
         let mut canonical_bytes =
             serialize_bgv_object(BgvObjectKind::Plaintext, &[encoded.polynomial])
@@ -335,23 +285,21 @@ mod tests {
     }
 
     #[test]
-    fn parser_rejects_wrong_coefficient_count_before_residue_allocation() {
+    fn parser_rejects_unknown_basis_before_residue_allocation() {
         let mut canonical_bytes = Vec::new();
         append_string(&mut canonical_bytes, CANONICAL_MAGIC);
-        append_varuint(&mut canonical_bytes, 1);
+        append_varuint(&mut canonical_bytes, CANONICAL_OBJECT_VERSION);
         append_string(&mut canonical_bytes, BgvObjectKind::Plaintext.as_str());
         append_varuint(&mut canonical_bytes, 1);
-        append_string(&mut canonical_bytes, "untrusted-parameters-hash");
         append_string(&mut canonical_bytes, "untrusted-basis");
         append_varuint(&mut canonical_bytes, 0);
-        append_varuint(&mut canonical_bytes, (POLYNOMIAL_DEGREE as u64) + 1);
 
         let error =
-            parse_bgv_object(&canonical_bytes).expect_err("wrong count must fail immediately");
+            parse_bgv_object(&canonical_bytes).expect_err("unknown basis must fail immediately");
 
-        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
+        assert_eq!(error.code, CanonicalErrorCode::InvalidEnum);
         assert!(
-            error.message.contains("selected polynomial degree"),
+            error.message.contains("basis identifier"),
             "unexpected error: {error:?}"
         );
     }

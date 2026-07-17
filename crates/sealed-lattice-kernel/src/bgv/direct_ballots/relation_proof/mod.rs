@@ -163,7 +163,7 @@ mod tests {
             result.expect("valid support witness should pass");
         } else {
             let error = result.expect_err("invalid support witness should reject");
-            assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+            assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
             assert!(error.message.contains("test witness support check failed"));
         }
     }

@@ -8,6 +8,7 @@ import {
 import {
     canonicalStreamDomains,
     CanonicalStreamCancellationError,
+    CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
     openCanonicalStreamWorkerRuntime,
@@ -85,6 +86,33 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
 
     beforeEach(async () => {
         kernel = await loadFreshTranscriptCoreKernel();
+    });
+
+    it('rejects an accepted-setup session owned by another kernel', async () => {
+        const otherKernel = await loadFreshTranscriptCoreKernel();
+        const otherKernelSession = otherKernel.beginAcceptedSetupSession();
+
+        expect(() =>
+            openBgvCanonicalStreamRuntime({
+                acceptedSetupSession: otherKernelSession,
+                kernel,
+            }),
+        ).toThrowError(CanonicalStreamInternalError);
+        expect(
+            otherKernelSession.verifyCollectiveBgvSetup({ setupPackage: {} }),
+        ).toEqual({
+            isValid: false,
+            refusalReason: 'outsideSupportedProfile',
+        });
+
+        const matchingSession = kernel.beginAcceptedSetupSession();
+        expect(() =>
+            openBgvCanonicalStreamRuntime({
+                acceptedSetupSession: matchingSession,
+                kernel,
+            }),
+        ).not.toThrow();
+        matchingSession.cancel();
     });
 
     it('retains setup proof bytes only after canonical terminal authentication', async () => {
@@ -234,14 +262,15 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
                     pullCount += 1;
                     return Promise.resolve(undefined);
                 },
-                totalByteLength: 2_147_483_649,
+                totalByteLength:
+                    foundationProfile.maximumCanonicalStreamByteLength + 1,
             }),
         ).rejects.toThrowError(CanonicalStreamResourceError);
         expect(pullCount).toBe(0);
         expect(emissionCount).toBe(0);
     });
 
-    it('refuses retained material that cannot fit the remaining WASM profile before pulling bytes', async () => {
+    it('refuses retained material that cannot fit the remaining WASM safety bound before pulling bytes', async () => {
         const runtime = openBgvCanonicalStreamRuntime({ kernel });
         const descriptorBytes = canonicalStreamDescriptorFixture(
             foundationProfile.maximumWasmMemoryByteLength,
@@ -286,13 +315,22 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
             materialRoot: '41'.repeat(64),
         });
 
-        expect(() =>
+        let overlappingOwnershipFailure: unknown;
+        try {
             secondRuntime.openVerifier({
                 descriptorBytes: descriptor,
                 family: bgvCanonicalStreamFamilies.publicKeyShare,
                 materialRoot: '42'.repeat(64),
-            }),
-        ).toThrowError(CanonicalStreamResourceError);
+            });
+        } catch (error) {
+            overlappingOwnershipFailure = error;
+        }
+        expect(overlappingOwnershipFailure).toBeInstanceOf(
+            CanonicalStreamRefusalError,
+        );
+        expect(overlappingOwnershipFailure).toMatchObject({
+            refusalReason: 'consumedState',
+        });
         expect(() => first.absorbChunk(0, chunks[0])).not.toThrow();
         expect(() => first.finish()).not.toThrow();
         expect(first.state()).toBe('completed');

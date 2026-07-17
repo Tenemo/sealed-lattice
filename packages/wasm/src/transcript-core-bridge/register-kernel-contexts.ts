@@ -10,27 +10,7 @@ import {
     resolveNumberExport,
     resolveOptionalNumberExport,
     runKernelCommand,
-    TranscriptCoreKernelCommandError,
 } from './kernel-runtime.js';
-
-const translateAcceptedSetupCommandFailure = <Result>(
-    operation: () => Result,
-): Result => {
-    try {
-        return operation();
-    } catch (error) {
-        if (
-            error instanceof TranscriptCoreKernelCommandError &&
-            error.code === 'InvalidFixture'
-        ) {
-            throw new TranscriptCoreKernelCommandError({
-                code: 'InvalidProtocolObject',
-                message: error.message.replace(/^InvalidFixture: /u, ''),
-            });
-        }
-        throw error;
-    }
-};
 
 export const registerKernelContexts = (
     kernel: TranscriptCoreKernelContextOwner,
@@ -104,64 +84,12 @@ export const registerKernelContexts = (
                 wasmExports,
                 'sealed_lattice_bgv_canonical_stream_finish',
             ),
-            bgvMaterialReaderBegin: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_bgv_canonical_material_reader_begin',
-            ),
-            bgvMaterialReaderCancel: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_bgv_canonical_material_reader_cancel',
-            ),
-            bgvMaterialReaderFinish: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_bgv_canonical_material_reader_finish',
-            ),
-            bgvMaterialReaderReadChunk: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_bgv_canonical_material_reader_read_chunk',
-            ),
             beginVerifier: canonicalStreamBeginVerifier,
             beginWriter: canonicalStreamBeginWriter,
             cancel: canonicalStreamCancel,
             deallocate: runtime.deallocate,
             finishVerifier: canonicalStreamFinishVerifier,
             finishWriter: canonicalStreamFinishWriter,
-            mailboxGcmAuthenticateChunk: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_authenticate_chunk',
-            ),
-            mailboxGcmBeginEncryptor: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_begin_encryptor',
-            ),
-            mailboxGcmBeginVerifier: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_begin_verifier',
-            ),
-            mailboxGcmCancel: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_cancel',
-            ),
-            mailboxGcmDecryptChunk: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_decrypt_chunk',
-            ),
-            mailboxGcmEncryptChunk: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_encrypt_chunk',
-            ),
-            mailboxGcmFinishAuthentication: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_finish_authentication',
-            ),
-            mailboxGcmFinishDecryptor: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_finish_decryptor',
-            ),
-            mailboxGcmFinishEncryptor: resolveOptionalNumberExport(
-                wasmExports,
-                'sealed_lattice_mailbox_gcm_finish_encryptor',
-            ),
             memory: runtime.memory,
             runExclusive: runtime.runExclusive,
         });
@@ -174,23 +102,21 @@ export const registerKernelContexts = (
         cancel: acceptedSetupSessionCancel,
         deallocate: runtime.deallocate,
         executeCommand: (request, sessionHandle, beforeKernelInvocation) =>
-            translateAcceptedSetupCommandFailure(() =>
-                runtime.runExclusive('accepted-setup command', () =>
-                    runKernelCommand<BgvCollectiveSetupVerification>(
-                        runtime.memory,
-                        runtime.allocate,
-                        runtime.deallocate,
-                        (pointer, length, outputLengthPointer) => {
-                            beforeKernelInvocation();
-                            return acceptedSetupCommandWithLength(
-                                pointer,
-                                length,
-                                sessionHandle,
-                                outputLengthPointer,
-                            );
-                        },
-                        request,
-                    ),
+            runtime.runExclusive('accepted-setup command', () =>
+                runKernelCommand<BgvCollectiveSetupVerification>(
+                    runtime.memory,
+                    runtime.allocate,
+                    runtime.deallocate,
+                    (pointer, length, outputLengthPointer) => {
+                        beforeKernelInvocation();
+                        return acceptedSetupCommandWithLength(
+                            pointer,
+                            length,
+                            sessionHandle,
+                            outputLengthPointer,
+                        );
+                    },
+                    request,
                 ),
             ),
         memory: runtime.memory,

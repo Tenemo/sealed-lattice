@@ -5,24 +5,23 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
     packed_scores: &Ciphertext,
     option_count: usize,
     score_domain_max: u64,
-    seed_hex: &str,
 ) -> CanonicalResult<PackedRankEvaluation> {
     if option_count < 2 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "batched packed-rank evaluation requires at least two options",
         ));
     }
     if option_count * 2 > POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "batched packed-rank evaluation exceeds the generator-ordered slot window",
         ));
     }
     let pair_count = option_count * option_count.saturating_sub(1) / 2;
     if pair_count > GENERATOR_SUBGROUP_ORDER {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "batched packed-rank evaluation exceeds the generator subgroup slot window",
         ));
     }
@@ -45,8 +44,6 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
             context,
             packed_scores,
             galois_power(shift)?,
-            packed_scores.level,
-            &format!("{seed_hex}-batched-pair-score-shift-{shift}"),
         )?;
         let difference = ciphertext_sub(packed_scores, &shifted_scores)?;
         // Shift the signed difference into [0, 2*score_domain_max] so the
@@ -65,8 +62,6 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
                 context,
                 &lower_pair_inputs,
                 next_window_offset,
-                lower_pair_inputs.level,
-                &format!("{seed_hex}-batched-pair-window-{shift}"),
             )?
         };
         add_to_aligned_sum(&mut comparison_input_sum, windowed_inputs)?;
@@ -117,8 +112,6 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
                 context,
                 &windowed_lower_beats_higher,
                 galois_power(window_offset)?,
-                windowed_lower_beats_higher.level,
-                &format!("{seed_hex}-batched-pair-window-return-{shift}"),
             )?
         };
         let lower_pair_mask = packed_pair_lower_mask(option_count, shift)?;
@@ -136,8 +129,6 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
             context,
             &lower_beats_higher_for_return,
             shift,
-            lower_beats_higher_for_return.level,
-            &format!("{seed_hex}-batched-pair-rank-return-{shift}"),
         )?;
         add_to_aligned_sum(&mut rank_sum, higher_beats_lower_for_lower_slots)?;
         add_to_aligned_sum(&mut rank_sum, lower_beats_higher_at_higher_slot)?;

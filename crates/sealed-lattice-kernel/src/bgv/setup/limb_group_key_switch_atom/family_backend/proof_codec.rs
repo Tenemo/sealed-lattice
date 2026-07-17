@@ -1,35 +1,37 @@
-//! Canonical length-framed binary codec for the atom-family FRI proofs.
+//! Canonical binary codec for the atom-family FRI proofs.
 //!
-//! The encoding is self-describing (every variable-length vector carries a
-//! `u32` count) and fixed-width for scalars (field elements are `LIMB_COUNT`
-//! little-endian `u64` limbs; digests and salts are byte runs). Decoding is
-//! strict: it bounds-checks every read, rejects a truncated or trailing-byte
-//! stream, rejects field limbs that are not a reduced residue below the
-//! modulus, and rejects salts or digests of the wrong width. Trustee
+//! Statement-derived dimensions are not repeated in the proof. The decoder is
+//! given the expected FRI, column, query, and lookup-terminal shape and reads
+//! exactly that shape. Only genuinely data-dependent collections carry a
+//! count. Scalars are fixed-width: field elements are `LIMB_COUNT`
+//! little-endian `u64` limbs; digests and salts are byte runs. Decoding rejects
+//! truncated or trailing bytes and non-canonical field residues. Trustee
 //! evaluation-key transport carries this byte form.
 
 use super::super::proof_field::ProofFieldParameters;
 use super::super::wide_unsigned::is_less_than;
 use super::column_commitment::{ColumnOpening, ColumnRow};
-use super::key_proof::KeyFriProof;
+use super::key_proof::{KeyFriProof, KeyFriProofDecodingShape};
 use super::low_degree::{FriLayerOpening, FriProof, FriQueryAnswer};
 use super::merkle::{BatchedMerkleOpening, MERKLE_DIGEST_BYTES, MerkleDigest};
 use super::private_randomness::PROOF_SALT_BYTE_LENGTH;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-const CODEC_MAGIC: &[u8; 8] = b"SLKSATM2";
+const CODEC_MAGIC: &[u8; 8] = b"SLKSATM3";
 const SALT_BYTES: usize = PROOF_SALT_BYTE_LENGTH;
 
 fn invalid_codec(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::MalformedLength, message)
 }
 
+#[cfg(test)]
 pub(super) struct Writer {
     // Exposed to sibling `family_backend` modules so they can reuse this
     // canonical writer and take the finished byte buffer.
     pub(super) bytes: Vec<u8>,
 }
 
+#[cfg(test)]
 impl Writer {
     pub(super) fn new() -> Self {
         Self {
@@ -49,26 +51,25 @@ impl Writer {
         }
     }
 
-    fn write_field_vec<const LIMB_COUNT: usize>(
-        &mut self,
-        elements: &[[u64; LIMB_COUNT]],
-    ) -> CanonicalResult<()> {
-        self.write_u32(elements.len())?;
+    fn write_fields<const LIMB_COUNT: usize>(&mut self, elements: &[[u64; LIMB_COUNT]]) {
         for element in elements {
             self.write_field(element);
         }
-        Ok(())
     }
 
     pub(super) fn write_digest(&mut self, digest: &MerkleDigest) {
         self.bytes.extend_from_slice(digest);
     }
 
-    fn write_digest_vec(&mut self, digests: &[MerkleDigest]) -> CanonicalResult<()> {
-        self.write_u32(digests.len())?;
+    fn write_digests(&mut self, digests: &[MerkleDigest]) {
         for digest in digests {
             self.write_digest(digest);
         }
+    }
+
+    fn write_digest_vec(&mut self, digests: &[MerkleDigest]) -> CanonicalResult<()> {
+        self.write_u32(digests.len())?;
+        self.write_digests(digests);
         Ok(())
     }
 
@@ -143,8 +144,7 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
         Ok(element)
     }
 
-    fn read_field_vec(&mut self) -> CanonicalResult<Vec<[u64; LIMB_COUNT]>> {
-        let count = self.read_u32()?;
+    fn read_fields(&mut self, count: usize) -> CanonicalResult<Vec<[u64; LIMB_COUNT]>> {
         (0..count).map(|_| self.read_field()).collect()
     }
 
@@ -153,9 +153,18 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
         Ok(slice.try_into().expect("digest width"))
     }
 
+    fn read_digests(&mut self, count: usize) -> CanonicalResult<Vec<MerkleDigest>> {
+        (0..count).map(|_| self.read_digest()).collect()
+    }
+
     fn read_digest_vec(&mut self) -> CanonicalResult<Vec<MerkleDigest>> {
         let count = self.read_u32()?;
-        (0..count).map(|_| self.read_digest()).collect()
+        if count > self.remaining_element_bound() / MERKLE_DIGEST_BYTES {
+            return Err(invalid_codec(
+                "digest count exceeds the remaining proof bytes",
+            ));
+        }
+        self.read_digests(count)
     }
 
     fn read_salt(&mut self) -> CanonicalResult<Vec<u8>> {
@@ -170,15 +179,14 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn write_fri<const LIMB_COUNT: usize>(
     writer: &mut Writer,
     fri: &FriProof<LIMB_COUNT>,
 ) -> CanonicalResult<()> {
-    writer.write_digest_vec(&fri.layer_roots)?;
-    writer.write_field_vec(&fri.final_coefficients)?;
-    writer.write_u32(fri.query_answers.len())?;
+    writer.write_digests(&fri.layer_roots);
+    writer.write_fields(&fri.final_coefficients);
     for answer in &fri.query_answers {
-        writer.write_u32(answer.layers.len())?;
         for layer in &answer.layers {
             writer.write_field(&layer.value);
             writer.write_field(&layer.sibling_value);
@@ -192,15 +200,14 @@ pub(super) fn write_fri<const LIMB_COUNT: usize>(
 
 pub(super) fn read_fri<const LIMB_COUNT: usize>(
     reader: &mut Reader<'_, LIMB_COUNT>,
+    shape: &KeyFriProofDecodingShape,
 ) -> CanonicalResult<FriProof<LIMB_COUNT>> {
-    let layer_roots = reader.read_digest_vec()?;
-    let final_coefficients = reader.read_field_vec()?;
-    let answer_count = reader.read_u32()?;
-    let mut query_answers = Vec::with_capacity(answer_count.min(reader.remaining_element_bound()));
-    for _ in 0..answer_count {
-        let layer_count = reader.read_u32()?;
-        let mut layers = Vec::with_capacity(layer_count.min(reader.remaining_element_bound()));
-        for _ in 0..layer_count {
+    let layer_roots = reader.read_digests(shape.fri_layer_count)?;
+    let final_coefficients = reader.read_fields(shape.fri_final_coefficient_count)?;
+    let mut query_answers = Vec::with_capacity(shape.query_count);
+    for _ in 0..shape.query_count {
+        let mut layers = Vec::with_capacity(shape.fri_layer_count);
+        for _ in 0..shape.fri_layer_count {
             let value = reader.read_field()?;
             let sibling_value = reader.read_field()?;
             let value_salt = reader.read_salt()?;
@@ -225,6 +232,7 @@ pub(super) fn read_fri<const LIMB_COUNT: usize>(
     })
 }
 
+#[cfg(test)]
 pub(super) fn write_column_opening<const LIMB_COUNT: usize>(
     writer: &mut Writer,
     opening: &ColumnOpening<LIMB_COUNT>,
@@ -232,7 +240,7 @@ pub(super) fn write_column_opening<const LIMB_COUNT: usize>(
     writer.write_u32(opening.rows.len())?;
     for row in &opening.rows {
         writer.write_u32(row.index)?;
-        writer.write_field_vec(&row.values)?;
+        writer.write_fields(&row.values);
         writer.write_salt(&row.salt)?;
     }
     writer.write_digest_vec(&opening.opening.authentication_nodes)?;
@@ -241,12 +249,13 @@ pub(super) fn write_column_opening<const LIMB_COUNT: usize>(
 
 pub(super) fn read_column_opening<const LIMB_COUNT: usize>(
     reader: &mut Reader<'_, LIMB_COUNT>,
+    expected_column_count: usize,
 ) -> CanonicalResult<ColumnOpening<LIMB_COUNT>> {
     let row_count = reader.read_u32()?;
     let mut rows = Vec::with_capacity(row_count.min(reader.remaining_element_bound()));
     for _ in 0..row_count {
         let index = reader.read_u32()?;
-        let values = reader.read_field_vec()?;
+        let values = reader.read_fields(expected_column_count)?;
         let salt = reader.read_salt()?;
         rows.push(ColumnRow {
             index,
@@ -263,6 +272,7 @@ pub(super) fn read_column_opening<const LIMB_COUNT: usize>(
     })
 }
 
+#[cfg(test)]
 pub(super) fn encode_key_proof<const LIMB_COUNT: usize>(
     proof: &KeyFriProof<LIMB_COUNT>,
 ) -> CanonicalResult<Vec<u8>> {
@@ -277,26 +287,27 @@ pub(super) fn encode_key_proof<const LIMB_COUNT: usize>(
     write_column_opening(&mut writer, &proof.aux_opening)?;
     write_column_opening(&mut writer, &proof.quotient_opening)?;
     writer.write_field(&proof.lookup_terminal);
-    writer.write_field_vec(&proof.table_terminals)?;
+    writer.write_fields(&proof.table_terminals);
     Ok(writer.bytes)
 }
 
 pub(super) fn decode_key_proof<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     bytes: &[u8],
+    shape: &KeyFriProofDecodingShape,
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     let mut reader = Reader::new(bytes, parameters)?;
     let base_root = reader.read_digest()?;
     let material_root = reader.read_digest()?;
     let aux_root = reader.read_digest()?;
     let quotient_root = reader.read_digest()?;
-    let fri = read_fri(&mut reader)?;
-    let base_opening = read_column_opening(&mut reader)?;
-    let material_opening = read_column_opening(&mut reader)?;
-    let aux_opening = read_column_opening(&mut reader)?;
-    let quotient_opening = read_column_opening(&mut reader)?;
+    let fri = read_fri(&mut reader, shape)?;
+    let base_opening = read_column_opening(&mut reader, shape.base_column_count)?;
+    let material_opening = read_column_opening(&mut reader, shape.material_column_count)?;
+    let aux_opening = read_column_opening(&mut reader, shape.auxiliary_column_count)?;
+    let quotient_opening = read_column_opening(&mut reader, shape.quotient_column_count)?;
     let lookup_terminal = reader.read_field()?;
-    let table_terminals = reader.read_field_vec()?;
+    let table_terminals = reader.read_fields(shape.table_terminal_count)?;
     reader.finish()?;
     Ok(KeyFriProof {
         base_root,
@@ -317,7 +328,8 @@ pub(super) fn decode_key_proof<const LIMB_COUNT: usize>(
 mod tests {
     use super::super::super::proof_field::sixteen_limb_group_field_parameters;
     use super::super::key_proof::{
-        KeyFriProofParameters, KeySource, prove_round_one_key_fri, verify_round_one_key_fri,
+        KeyFriProofParameters, KeySource, key_fri_proof_decoding_shape, prove_round_one_key_fri,
+        verify_round_one_key_fri,
     };
     use super::super::private_randomness::PrivateProofRandomness;
     use super::super::test_support::build_synthetic_key_fixture;
@@ -357,7 +369,14 @@ mod tests {
         let parameters = sixteen_limb_group_field_parameters();
         let (public, ring_degree, proof_parameters, proof) = sample_proof();
         let bytes = encode_key_proof(&proof).expect("encode");
-        let decoded = decode_key_proof(&parameters, &bytes).expect("decode");
+        let decoding_shape = key_fri_proof_decoding_shape(
+            ring_degree,
+            public.digits.len(),
+            false,
+            proof_parameters.query_count,
+        )
+        .expect("decoding shape");
+        let decoded = decode_key_proof(&parameters, &bytes, &decoding_shape).expect("decode");
         // Re-encoding the decoded proof reproduces the exact bytes (canonical).
         let reencoded = encode_key_proof(&decoded).expect("re-encode");
         assert_eq!(bytes, reencoded, "encoding must be canonical");
@@ -377,8 +396,15 @@ mod tests {
     #[test]
     fn malformed_proof_encodings_are_rejected() {
         let parameters = sixteen_limb_group_field_parameters();
-        let (_public, _ring_degree, _proof_parameters, proof) = sample_proof();
+        let (public, ring_degree, proof_parameters, proof) = sample_proof();
         let bytes = encode_key_proof(&proof).expect("encode");
+        let decoding_shape = key_fri_proof_decoding_shape(
+            ring_degree,
+            public.digits.len(),
+            false,
+            proof_parameters.query_count,
+        )
+        .expect("decoding shape");
 
         let mut trailing = bytes.clone();
         trailing.push(0);
@@ -387,7 +413,12 @@ mod tests {
         let mut wrong_magic = bytes.clone();
         wrong_magic[0] ^= 0xff;
         let mut corrupted_length = bytes;
-        let offset = CODEC_MAGIC.len() + 4 * MERKLE_DIGEST_BYTES;
+        let offset = CODEC_MAGIC.len()
+            + 4 * MERKLE_DIGEST_BYTES
+            + decoding_shape.fri_layer_count * MERKLE_DIGEST_BYTES
+            + decoding_shape.fri_final_coefficient_count * 13 * 8
+            + 2 * 13 * 8
+            + 2 * SALT_BYTES;
         corrupted_length[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
 
         for (case_name, malformed) in [
@@ -398,7 +429,7 @@ mod tests {
             ("corrupted length", corrupted_length),
         ] {
             assert!(
-                decode_key_proof(&parameters, &malformed).is_err(),
+                decode_key_proof(&parameters, &malformed, &decoding_shape).is_err(),
                 "{case_name} must be rejected"
             );
         }

@@ -12,10 +12,14 @@
 //! carry bound the relation layer checks - a carry outside that bound means the
 //! material does not satisfy the key-switch relation and the bridge refuses.
 
-use super::super::limb_group_statement::{LimbGroupContext, validate_signed_support};
+use super::super::limb_group_statement::LimbGroupContext;
+#[cfg(test)]
+use super::super::limb_group_statement::validate_signed_support;
 use super::super::negacyclic_transform::NegacyclicDomain;
 use super::super::proof_field::ProofFieldParameters;
-use super::key_proof::{DigitPublic, DigitWitness, KeyPublic, KeySource};
+#[cfg(test)]
+use super::key_proof::DigitWitness;
+use super::key_proof::{DigitPublic, KeyPublic, KeySource};
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 fn invalid_bridge(message: &str) -> CanonicalError {
@@ -37,6 +41,7 @@ pub(super) enum BridgedKeyKind<'a> {
 
 // The bridged statement and witness for one key: the family backend's public
 // inputs and source, plus the per-digit witnesses with the extracted carries.
+#[cfg(test)]
 pub(super) struct BridgedKey<const LIMB_COUNT: usize> {
     pub(super) public: KeyPublic<LIMB_COUNT>,
     pub(super) source: KeySource<LIMB_COUNT>,
@@ -45,6 +50,7 @@ pub(super) struct BridgedKey<const LIMB_COUNT: usize> {
 
 // The forward automorphism image `phi_g(s)`: `s(X) -> s(X^g)` as a signed
 // vector, mirroring the tested transpose map's semantics.
+#[cfg(test)]
 fn galois_signed_image(secret: &[i64], galois_element: usize) -> Vec<i64> {
     let degree = secret.len();
     let ring_order = 2 * degree;
@@ -60,6 +66,7 @@ fn galois_signed_image(secret: &[i64], galois_element: usize) -> Vec<i64> {
     image
 }
 
+#[cfg(test)]
 pub(super) struct BridgeKeyMaterialInput<'a, const LIMB_COUNT: usize> {
     pub(super) group: &'a LimbGroupContext<LIMB_COUNT>,
     pub(super) domain: &'a NegacyclicDomain<'a, LIMB_COUNT>,
@@ -89,6 +96,7 @@ fn diagonal_local_index(
         .filter(|local_index| *local_index < group_limb_count)
 }
 
+#[cfg(test)]
 pub(super) fn bridge_key_material<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     input: BridgeKeyMaterialInput<'_, LIMB_COUNT>,
@@ -292,13 +300,14 @@ pub(super) fn bridge_key_public<const LIMB_COUNT: usize>(
     }
 
     let mut public_digits = Vec::with_capacity(digit_count);
-    for (digit_index, (component_b_by_limb, public_sample_by_limb)) in component_b_by_digit
+    for (digit_index, (_component_b_by_limb, public_sample_by_limb)) in component_b_by_digit
         .iter()
         .zip(public_sample_by_digit.iter())
         .enumerate()
     {
+        #[cfg(test)]
         let recombined_component_b =
-            group.recombine_centered(parameters, component_b_by_limb, ring_degree)?;
+            group.recombine_centered(parameters, _component_b_by_limb, ring_degree)?;
         let recombined_sample =
             group.recombine_centered(parameters, public_sample_by_limb, ring_degree)?;
         let gadget_idempotent =
@@ -308,6 +317,7 @@ pub(super) fn bridge_key_public<const LIMB_COUNT: usize>(
             };
         public_digits.push(DigitPublic {
             recombined_sample,
+            #[cfg(test)]
             recombined_component_b,
             gadget_idempotent,
         });

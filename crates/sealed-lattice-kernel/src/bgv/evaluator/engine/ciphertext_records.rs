@@ -14,7 +14,6 @@ pub(crate) fn ciphertext_canonical_bytes_hex(ciphertext: &Ciphertext) -> Canonic
 }
 
 fn ciphertext_canonical_bytes(ciphertext: &Ciphertext) -> CanonicalResult<Vec<u8>> {
-    let parameters_hash = bgv_parameters_hash()?;
     let components = ciphertext
         .components
         .iter()
@@ -22,7 +21,6 @@ fn ciphertext_canonical_bytes(ciphertext: &Ciphertext) -> CanonicalResult<Vec<u8
             RnsPolynomial::coefficient_domain(
                 BgvBasisKind::Data,
                 ciphertext.level,
-                parameters_hash.clone(),
                 component.clone(),
             )
         })

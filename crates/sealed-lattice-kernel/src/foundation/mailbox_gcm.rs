@@ -10,12 +10,12 @@ use ghash::{
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
+use super::authenticated_mailbox::MAILBOX_GCM_TAG_BYTE_LENGTH;
 use super::schemas::SchemaResult;
 use super::{FoundationSchemaError, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH, RefusalReason};
 
 pub(crate) const MAILBOX_GCM_KEY_BYTE_LENGTH: usize = 32;
 pub(crate) const MAILBOX_GCM_NONCE_BYTE_LENGTH: usize = 12;
-pub(crate) const MAILBOX_GCM_TAG_BYTE_LENGTH: usize = 16;
 
 const GCM_BLOCK_BYTE_LENGTH: usize = 16;
 
@@ -38,7 +38,7 @@ impl MailboxGcmAuthentication {
         associated_data: &[u8],
         expected_ciphertext_byte_length: u64,
     ) -> SchemaResult<(Self, Aes256Counter)> {
-        require_supported_length(expected_ciphertext_byte_length)?;
+        require_safe_length(expected_ciphertext_byte_length)?;
 
         let cipher = Aes256::new_from_slice(key).map_err(|_| {
             schema_error(
@@ -393,11 +393,11 @@ impl MailboxGcmDecryptor {
     }
 }
 
-fn require_supported_length(byte_length: u64) -> SchemaResult<()> {
+fn require_safe_length(byte_length: u64) -> SchemaResult<()> {
     if byte_length == 0 || byte_length > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH {
         return Err(schema_error(
             RefusalReason::OutsideSupportedProfile,
-            "mailbox ciphertext length is outside the canonical stream profile",
+            "mailbox ciphertext length exceeds the canonical stream safety bound",
         ));
     }
     byte_length.checked_mul(8).ok_or_else(|| {
@@ -469,7 +469,9 @@ mod tests {
     }
 
     #[test]
-    fn matches_nist_aes_256_gcm_partial_block_and_associated_data_vector() {
+    fn matches_nist_gcm_aes_256_example_five_for_every_fragmentation() {
+        // NIST's published GCM-AES256 Example 5: 160 AAD bits, 480 plaintext
+        // bits, and a 128-bit tag.
         let key =
             decode_hex::<32>("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308");
         let nonce = decode_hex::<12>("cafebabefacedbaddecaf888");

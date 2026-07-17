@@ -1,4 +1,4 @@
-import { foundationProfile, type RefusalReason } from '@sealed-lattice/types';
+import { foundationProfile } from '@sealed-lattice/types';
 
 import {
     CanonicalStreamCleanupError,
@@ -8,16 +8,14 @@ import {
     CanonicalStreamResourceError,
     type CanonicalStreamKernelContext,
 } from './canonical-stream-runtime.js';
-import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
 import type { TranscriptCoreKernelContextOwner } from './transcript-core-bridge/kernel-types.js';
+import { WasmMemoryBoundary } from './wasm-memory-boundary.js';
+import { WasmStatusBoundary } from './wasm-status-boundary.js';
 
 const mailboxGcmKeyByteLength = 32;
 const mailboxGcmNonceByteLength = 12;
 const mailboxGcmTagByteLength = 16;
 const maximumMailboxAssociatedDataByteLength = 65_536;
-const maximumMailboxCiphertextByteLength = 2_147_483_648;
-const runtimeInternalFailureStatus = 0xffff_ffff;
-const runtimeInvalidSessionStatus = 0xffff_fffe;
 const wasm32WordByteLength = 4;
 
 export type MailboxGcmLeaseState =
@@ -120,7 +118,7 @@ const requireTotalByteLength = (value: number): number => {
     if (!Number.isSafeInteger(value) || value <= 0) {
         throw new CanonicalStreamRefusalError('wrongTypeOrLength');
     }
-    if (value > maximumMailboxCiphertextByteLength) {
+    if (value > foundationProfile.maximumCanonicalStreamByteLength) {
         throw new CanonicalStreamResourceError(
             'The mailbox ciphertext exceeds the canonical stream profile.',
         );
@@ -152,11 +150,31 @@ const requireMailboxContext = (
 
 class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
     readonly #context: RequiredMailboxGcmKernelContext;
+    readonly #memoryBoundary: WasmMemoryBoundary;
+    readonly #statusBoundary: WasmStatusBoundary;
     #activeLease: ActiveMailboxGcmLease | undefined;
 
     public constructor(context: RequiredMailboxGcmKernelContext) {
         this.#context = context;
-        this.#assertMemoryWithinProfile();
+        this.#memoryBoundary = new WasmMemoryBoundary({
+            context,
+            createInternalError: (message) =>
+                new CanonicalStreamInternalError(message),
+            createResourceError: (message) =>
+                new CanonicalStreamResourceError(message),
+            label: 'mailbox GCM',
+        });
+        this.#statusBoundary = new WasmStatusBoundary({
+            createInternalError: (message) =>
+                new CanonicalStreamInternalError(message),
+            createRefusalError: (refusalReason) =>
+                new CanonicalStreamRefusalError(refusalReason),
+            createResourceError: () => new CanonicalStreamResourceError(),
+            internalFailureMessage:
+                'The mailbox GCM kernel session failed internally.',
+            unknownStatusMessage:
+                'The mailbox GCM kernel returned an unknown status code.',
+        });
     }
 
     public openEncryptor(input: {
@@ -225,7 +243,7 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
             keyPointer = this.#copyIntoWasm(key);
             noncePointer = this.#copyIntoWasm(nonce);
             associatedDataPointer = this.#copyIntoWasm(associatedData);
-            statusPointer = this.#allocate(wasm32WordByteLength);
+            statusPointer = this.#memoryBoundary.allocateZeroedWords(1);
             handle = this.#context.runExclusive(
                 `mailbox GCM ${kind} begin`,
                 () =>
@@ -242,13 +260,8 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                         statusPointer,
                     ),
             );
-            const status =
-                new Uint32Array(
-                    this.#context.memory.buffer,
-                    statusPointer,
-                    1,
-                )[0] ?? runtimeInternalFailureStatus;
-            this.#throwStatus(status);
+            const [status] = this.#memoryBoundary.readWords(statusPointer, 1);
+            this.#statusBoundary.throwIfError(status);
             if (handle === 0) {
                 throw new CanonicalStreamInternalError(
                     'The mailbox GCM kernel returned an invalid session handle.',
@@ -293,7 +306,7 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                         byteLength,
                     ),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
         } catch (error) {
             return this.#failLease(lease, error);
         } finally {
@@ -326,7 +339,7 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                         byteLength,
                     ),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             new Uint8Array(bytes).set(
                 new Uint8Array(
                     this.#context.memory.buffer,
@@ -356,7 +369,7 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                         mailboxGcmTagByteLength,
                     ),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             const tag = new Uint8Array(mailboxGcmTagByteLength);
             tag.set(
                 new Uint8Array(
@@ -389,7 +402,7 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                         canonicalTag.byteLength,
                     ),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             lease.state = 'decrypting';
         } catch (error) {
             return this.#failLease(lease, error);
@@ -405,7 +418,7 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                 'mailbox GCM decryption finish',
                 () => this.#context.mailboxGcmFinishDecryptor(lease.handle),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             this.#completeLease(lease);
         } catch (error) {
             return this.#failLease(lease, error);
@@ -426,7 +439,7 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                 'mailbox GCM cancellation',
                 () => this.#context.mailboxGcmCancel(lease.handle),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
             lease.state = 'cancelled';
             this.#activeLease = undefined;
         } catch (error) {
@@ -448,8 +461,8 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                     'mailbox GCM failure cleanup',
                     () => this.#context.mailboxGcmCancel(lease.handle),
                 );
-                if (status >>> 0 !== runtimeInvalidSessionStatus) {
-                    this.#throwStatus(status);
+                if (!this.#statusBoundary.isInvalidSession(status)) {
+                    this.#statusBoundary.throwIfError(status);
                 }
             } catch (error) {
                 cleanupFailure = error;
@@ -472,7 +485,7 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                 'mailbox GCM begin failure cleanup',
                 () => this.#context.mailboxGcmCancel(handle),
             );
-            this.#throwStatus(status);
+            this.#statusBoundary.throwIfError(status);
         } catch (cleanupFailure) {
             throw new CanonicalStreamCleanupError(
                 operationFailure,
@@ -518,70 +531,15 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
     }
 
     #copyIntoWasm(bytes: Uint8Array): number {
-        const pointer = this.#allocate(bytes.byteLength);
-        new Uint8Array(this.#context.memory.buffer).set(bytes, pointer);
-        return pointer;
+        return this.#memoryBoundary.copy(bytes);
     }
 
     #allocate(byteLength: number): number {
-        const pointer = this.#context.allocate(byteLength) >>> 0;
-        if (
-            pointer === 0 ||
-            pointer + byteLength > this.#context.memory.buffer.byteLength
-        ) {
-            throw new CanonicalStreamResourceError(
-                'The mailbox GCM WASM allocation failed.',
-            );
-        }
-        this.#assertMemoryWithinProfile();
-        return pointer;
+        return this.#memoryBoundary.allocate(byteLength);
     }
 
     #zeroAndDeallocate(pointer: number, byteLength: number): void {
-        if (pointer === 0) {
-            return;
-        }
-        new Uint8Array(this.#context.memory.buffer, pointer, byteLength).fill(
-            0,
-        );
-        this.#context.deallocate(pointer, byteLength);
-    }
-
-    #assertMemoryWithinProfile(): void {
-        if (
-            this.#context.memory.buffer.byteLength >
-            foundationProfile.maximumWasmMemoryByteLength
-        ) {
-            throw new CanonicalStreamResourceError(
-                'The mailbox GCM WASM memory exceeds the supported profile.',
-            );
-        }
-    }
-
-    #throwStatus(status: number): void {
-        const normalizedStatus = status >>> 0;
-        if (normalizedStatus === 0) {
-            return;
-        }
-        if (
-            normalizedStatus === runtimeInternalFailureStatus ||
-            normalizedStatus === runtimeInvalidSessionStatus
-        ) {
-            throw new CanonicalStreamInternalError(
-                'The mailbox GCM kernel session failed internally.',
-            );
-        }
-        const refusalReason: RefusalReason | undefined =
-            refusalReasonByCode.get(normalizedStatus);
-        if (refusalReason === undefined) {
-            throw new CanonicalStreamInternalError(
-                'The mailbox GCM kernel returned an unknown status code.',
-            );
-        }
-        if (refusalReason === 'outsideSupportedProfile') {
-            throw new CanonicalStreamResourceError();
-        }
-        throw new CanonicalStreamRefusalError(refusalReason);
+        this.#memoryBoundary.zeroAndDeallocate(pointer, byteLength);
     }
 }
 

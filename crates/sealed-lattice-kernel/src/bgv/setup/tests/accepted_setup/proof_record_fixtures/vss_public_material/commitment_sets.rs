@@ -10,7 +10,7 @@ pub(in super::super::super) fn vss_public_coefficient_commitment_set_object(
         .as_str()
         .expect("public matrix seed hash");
     let participant_count = participant_count_from_package(package);
-    let threshold_degree = participant_count / 3 + 1;
+    let threshold_degree = decryption_threshold_for_participant_count(participant_count);
     let source_trustee_records = (0..participant_count)
         .map(|source_trustee_roster_position| {
             vss_public_source_coefficient_record(
@@ -60,7 +60,7 @@ pub(super) fn vss_public_source_coefficient_record(
     })
 }
 
-pub(super) fn vss_public_coefficient_commitment_record(
+pub(in super::super::super) fn vss_public_coefficient_commitment_record(
     setup_context: &serde_json::Value,
     ring_degree: usize,
     source_trustee_identity: &str,
@@ -89,18 +89,18 @@ pub(super) fn vss_public_coefficient_commitment_record(
     });
     let context_hash = accepted_committed_material_context_hash("coefficient", &commitment_context);
     let material_seed_hex = accepted_vss_material_seed(&context_hash);
-    let computation =
-        crate::bgv::setup::compute_vss_committed_material_commitment_request(&serde_json::json!({
-            "commitmentRole": "coefficient",
-            "commitmentContext": commitment_context,
-            "rnsLimbIndex": rns_limb_index,
-            "ringDegree": ring_degree,
-            "messageCoefficients": coefficient_message,
-            "materialSeedHex": material_seed_hex,
-        }))
-        .expect("VSS coefficient committed-material commitment");
+    let computation = crate::bgv::setup::compute_vss_committed_material_commitment(
+        crate::bgv::setup::VssCommittedMaterialCommitmentInput {
+            commitment_role: "coefficient",
+            commitment_context: &commitment_context,
+            rns_limb_index,
+            message_coefficients: &coefficient_message,
+            material_seed_hex: &material_seed_hex,
+        },
+    )
+    .expect("VSS coefficient committed-material commitment");
 
-    computation["commitment"].clone()
+    computation.commitment
 }
 
 pub(in super::super::super) fn vss_public_recipient_share_commitment_set_object(
@@ -190,18 +190,18 @@ pub(super) fn vss_public_recipient_share_commitment_record(
     let context_hash =
         accepted_committed_material_context_hash("recipient-share", &commitment_context);
     let material_seed_hex = accepted_vss_material_seed(&context_hash);
-    let computation =
-        crate::bgv::setup::compute_vss_committed_material_commitment_request(&serde_json::json!({
-            "commitmentRole": "recipient-share",
-            "commitmentContext": commitment_context,
-            "rnsLimbIndex": rns_limb_index,
-            "ringDegree": ring_degree,
-            "messageCoefficients": share_coefficients,
-            "materialSeedHex": material_seed_hex,
-        }))
-        .expect("VSS recipient-share committed-material commitment");
+    let computation = crate::bgv::setup::compute_vss_committed_material_commitment(
+        crate::bgv::setup::VssCommittedMaterialCommitmentInput {
+            commitment_role: "recipient-share",
+            commitment_context: &commitment_context,
+            rns_limb_index,
+            message_coefficients: &share_coefficients,
+            material_seed_hex: &material_seed_hex,
+        },
+    )
+    .expect("VSS recipient-share committed-material commitment");
 
-    computation["commitment"].clone()
+    computation.commitment
 }
 
 pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_object(
@@ -229,7 +229,6 @@ pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_obj
 
     VssProofMaterialSetFixture {
         value: aggregate_set,
-        proof_binding_leases: aggregate_threshold_proofs.proof_binding_leases,
     }
 }
 
@@ -303,20 +302,20 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
     let context_hash =
         accepted_committed_material_context_hash("aggregate-threshold-share", &commitment_context);
     let material_seed_hex = accepted_vss_material_seed(&context_hash);
-    let computation =
-        crate::bgv::setup::compute_vss_committed_material_commitment_request(&serde_json::json!({
-            "commitmentRole": "aggregate-threshold-share",
-            "commitmentContext": commitment_context,
-            "rnsLimbIndex": rns_limb_index,
-            "ringDegree": ring_degree,
-            "messageCoefficients": aggregate_message,
-            "materialSeedHex": material_seed_hex,
-        }))
-        .expect("VSS aggregate committed-material commitment");
+    let computation = crate::bgv::setup::compute_vss_committed_material_commitment(
+        crate::bgv::setup::VssCommittedMaterialCommitmentInput {
+            commitment_role: "aggregate-threshold-share",
+            commitment_context: &commitment_context,
+            rns_limb_index,
+            message_coefficients: &aggregate_message,
+            material_seed_hex: &material_seed_hex,
+        },
+    )
+    .expect("VSS aggregate committed-material commitment");
 
     serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
-        "aggregateOpeningRoot": computation["openingRoot"],
-        "commitment": computation["commitment"],
+        "aggregateOpeningRoot": computation.opening_root,
+        "commitment": computation.commitment,
     })
 }

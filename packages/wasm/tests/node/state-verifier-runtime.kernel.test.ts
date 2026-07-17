@@ -17,14 +17,16 @@ import {
     stateWitnessVoteKinds,
     type StateVerifierSession,
     type StateVerifierSessionInput,
-    type VerifiedStateRecovery,
     type VerifiedStateReservation,
+    type VerifiedStateReservationIntent,
     type VerifiedStateDurableBinding,
 } from '#packages/wasm/src/state-verifier-runtime';
 import {
     createStateVerifierTestVector,
     type StateVerifierTestVector,
 } from '#packages/wasm/tests/state-verifier-test-vectors';
+
+const maximumRetainedVerifiedStateObjectCount = 512;
 
 const stateConfiguration = (
     vector: StateVerifierTestVector,
@@ -33,7 +35,6 @@ const stateConfiguration = (
     actionContextHash,
     canonicalRosterBytes: vector.canonicalRosterBytes,
     ceremonyContextHash: vector.ceremonyContextHash,
-    maximumRecoveryTransitionsPerStateKey: 2,
     suiteIdentifier: vector.suiteIdentifier,
 });
 
@@ -110,13 +111,9 @@ describe('State verifier real-WASM runtime in Node', () => {
 
     it('preserves the exact closed state capability registry', () => {
         expect(stateCapabilityKinds).toEqual({
-            ballotCandidateList: 1,
             finalitySignature: 2,
             targetRelease: 3,
             setupActionRandomnessRoot: 4,
-            setupPublicSeedBranch: 5,
-            setupDealerSetBranch: 6,
-            setupRkgRoundOneBranch: 7,
             setupTerminalPackage: 8,
         });
     });
@@ -142,7 +139,6 @@ describe('State verifier real-WASM runtime in Node', () => {
             if (!durableBinding.isValid) {
                 throw new Error(durableBinding.refusalReason);
             }
-            expect(Reflect.ownKeys(durableBinding.value)).toEqual([]);
             const description = copyVerifiedStateDurableBinding(
                 durableBinding.value,
             );
@@ -150,7 +146,6 @@ describe('State verifier real-WASM runtime in Node', () => {
                 capabilityKind: stateCapabilityKinds.targetRelease,
                 intentObjectHash: vector.reservation.objectHash,
                 reservationIntentObjectHash: vector.reservation.objectHash,
-                subjectEpoch: 0n,
                 subjectParticipantIdentity: vector.subjectParticipantIdentity,
                 voteKind: stateWitnessVoteKinds.reservation,
                 witnessVoteSequence: 1n,
@@ -223,8 +218,6 @@ describe('State verifier real-WASM runtime in Node', () => {
             if (!output.isValid) {
                 throw new Error(output.refusalReason);
             }
-            expect(Reflect.ownKeys(output.value)).toEqual([]);
-            expect(Object.getPrototypeOf(output.value)).toBeNull();
             expect(session.releaseVerifiedObject(output.value)).toEqual({
                 isValid: true,
                 value: undefined,
@@ -239,6 +232,143 @@ describe('State verifier real-WASM runtime in Node', () => {
             });
         } finally {
             session.cancel();
+        }
+    });
+
+    it('disposes abandoned output leases and state sessions idempotently', () => {
+        const session = openSession(kernel, vector);
+        const reservation = verifyReservation(session, vector);
+        if (!reservation.isValid) {
+            throw new Error(reservation.refusalReason);
+        }
+        const openedOutput = session.openOutputVerification({
+            canonicalOutputIntentCarrier: vector.output.canonicalIntentCarrier,
+            canonicalStateCertificate: vector.output.canonicalStateCertificate,
+            exactOutputDescriptorBytes: descriptorFor(
+                kernel,
+                canonicalStreamDomains.stateTargetReleaseExactOutput,
+                vector.exactOutputBytes,
+            ),
+            verifiedReservation: reservation.value,
+        });
+        if (!openedOutput.isValid) {
+            throw new Error(openedOutput.refusalReason);
+        }
+
+        openedOutput.value.dispose();
+        expect(openedOutput.value.state()).toBe('cancelled');
+        expect(() => openedOutput.value.dispose()).not.toThrow();
+        expect(session.releaseVerifiedObject(reservation.value)).toEqual({
+            isValid: true,
+            value: undefined,
+        });
+
+        session.dispose();
+        expect(session.state()).toBe('cancelled');
+        expect(() => session.dispose()).not.toThrow();
+
+        const replacementSession = openSession(kernel, vector);
+        replacementSession.dispose();
+        expect(replacementSession.state()).toBe('cancelled');
+    });
+
+    it('consumes the canonical stream when state-output capacity preflight refuses', () => {
+        const session = openSession(kernel, vector);
+        try {
+            const reservation = verifyReservation(session, vector);
+            if (!reservation.isValid) {
+                throw new Error(reservation.refusalReason);
+            }
+            const openedOutput = session.openOutputVerification({
+                canonicalOutputIntentCarrier:
+                    vector.output.canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    vector.output.canonicalStateCertificate,
+                exactOutputDescriptorBytes: descriptorFor(
+                    kernel,
+                    canonicalStreamDomains.stateTargetReleaseExactOutput,
+                    vector.exactOutputBytes,
+                ),
+                verifiedReservation: reservation.value,
+            });
+            if (!openedOutput.isValid) {
+                throw new Error(openedOutput.refusalReason);
+            }
+            for (const [chunkIndex, chunk] of chunkBuffers(
+                vector.exactOutputBytes,
+            ).entries()) {
+                expect(
+                    openedOutput.value.absorbChunk(chunkIndex, chunk),
+                ).toEqual({ isValid: true, value: undefined });
+            }
+
+            const retainedIntents: VerifiedStateReservationIntent[] = [];
+            for (
+                let retainedObjectIndex = 1;
+                retainedObjectIndex < maximumRetainedVerifiedStateObjectCount;
+                retainedObjectIndex += 1
+            ) {
+                const intent = session.verifyReservationIntent({
+                    canonicalReservationIntentCarrier:
+                        vector.reservation.canonicalIntentCarrier,
+                    capabilityKind: stateCapabilityKinds.targetRelease,
+                    expectedAuthorizationHash: vector.authorizationHash,
+                    subjectParticipantIdentity:
+                        vector.subjectParticipantIdentity,
+                });
+                expect(intent.isValid).toBe(true);
+                if (!intent.isValid) {
+                    throw new Error(intent.refusalReason);
+                }
+                retainedIntents.push(intent.value);
+            }
+
+            expect(openedOutput.value.finish()).toEqual({
+                isValid: false,
+                refusalReason: 'outsideSupportedProfile',
+            });
+            expect(openedOutput.value.state()).toBe('failed');
+            expect(openedOutput.value.finish()).toEqual({
+                isValid: false,
+                refusalReason: 'consumedState',
+            });
+
+            const retryDescriptor = descriptorFor(
+                kernel,
+                canonicalStreamDomains.stateTargetReleaseExactOutput,
+                vector.exactOutputBytes,
+            );
+            const releasableIntent = retainedIntents.pop();
+            if (releasableIntent === undefined) {
+                throw new Error('The capacity setup retained no state intent.');
+            }
+            expect(session.releaseVerifiedObject(releasableIntent)).toEqual({
+                isValid: true,
+                value: undefined,
+            });
+
+            const retriedOutput = session.openOutputVerification({
+                canonicalOutputIntentCarrier:
+                    vector.output.canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    vector.output.canonicalStateCertificate,
+                exactOutputDescriptorBytes: retryDescriptor,
+                verifiedReservation: reservation.value,
+            });
+            if (!retriedOutput.isValid) {
+                throw new Error(retriedOutput.refusalReason);
+            }
+            for (const [chunkIndex, chunk] of chunkBuffers(
+                vector.exactOutputBytes,
+            ).entries()) {
+                expect(
+                    retriedOutput.value.absorbChunk(chunkIndex, chunk),
+                ).toEqual({ isValid: true, value: undefined });
+            }
+            expect(retriedOutput.value.finish().isValid).toBe(true);
+            expect(retriedOutput.value.state()).toBe('completed');
+        } finally {
+            session.dispose();
         }
     });
 
@@ -274,6 +404,7 @@ describe('State verifier real-WASM runtime in Node', () => {
                 isValid: false,
                 refusalReason: 'invalidSignature',
             });
+            expect(openedOutput.value.state()).toBe('failed');
         } finally {
             session.cancel();
         }
@@ -299,7 +430,7 @@ describe('State verifier real-WASM runtime in Node', () => {
         }
     });
 
-    it('rejects forged, wrong-kind, cross-session, and wrong-domain substitutions', async () => {
+    it('rejects forged, cross-session, and wrong-domain substitutions', async () => {
         const session = openSession(kernel, vector);
         const otherKernel = await loadFreshTranscriptCoreKernel();
         const otherSession = openSession(otherKernel, vector);
@@ -307,17 +438,6 @@ describe('State verifier real-WASM runtime in Node', () => {
             const reservation = verifyReservation(session, vector);
             if (!reservation.isValid) {
                 throw new Error(reservation.refusalReason);
-            }
-            const recovery = session.verifyRecovery({
-                canonicalRecoveryTransitionCarrier:
-                    vector.recoveryFirst.canonicalIntentCarrier,
-                canonicalStateCertificate:
-                    vector.recoveryFirst.canonicalStateCertificate,
-                capabilityKind: stateCapabilityKinds.finalitySignature,
-                subjectParticipantIdentity: vector.subjectParticipantIdentity,
-            });
-            if (!recovery.isValid) {
-                throw new Error(recovery.refusalReason);
             }
             const descriptor = descriptorFor(
                 kernel,
@@ -332,16 +452,6 @@ describe('State verifier real-WASM runtime in Node', () => {
                 exactOutputDescriptorBytes: descriptor,
             } as const;
 
-            expect(
-                session.openOutputVerification({
-                    ...outputInput,
-                    verifiedReservation:
-                        recovery.value as unknown as VerifiedStateReservation,
-                }),
-            ).toEqual({
-                isValid: false,
-                refusalReason: 'wrongTypeOrLength',
-            });
             expect(
                 session.openOutputVerification({
                     ...outputInput,
@@ -386,60 +496,6 @@ describe('State verifier real-WASM runtime in Node', () => {
             });
         } finally {
             otherSession.cancel();
-            session.cancel();
-        }
-    });
-
-    it('chains recovery handles and rejects cross-kind predecessor substitution', () => {
-        const session = openSession(kernel, vector);
-        try {
-            const firstRecovery = session.verifyRecovery({
-                canonicalRecoveryTransitionCarrier:
-                    vector.recoveryFirst.canonicalIntentCarrier,
-                canonicalStateCertificate:
-                    vector.recoveryFirst.canonicalStateCertificate,
-                capabilityKind: stateCapabilityKinds.finalitySignature,
-                subjectParticipantIdentity: vector.subjectParticipantIdentity,
-            });
-            expect(firstRecovery.isValid).toBe(true);
-            if (!firstRecovery.isValid) {
-                throw new Error(firstRecovery.refusalReason);
-            }
-            const secondRecovery = session.verifyRecovery({
-                canonicalRecoveryTransitionCarrier:
-                    vector.recoverySecond.canonicalIntentCarrier,
-                canonicalStateCertificate:
-                    vector.recoverySecond.canonicalStateCertificate,
-                capabilityKind: stateCapabilityKinds.finalitySignature,
-                subjectParticipantIdentity: vector.subjectParticipantIdentity,
-                verifiedPredecessorRecovery: firstRecovery.value,
-            });
-            expect(secondRecovery.isValid).toBe(true);
-            if (!secondRecovery.isValid) {
-                throw new Error(secondRecovery.refusalReason);
-            }
-
-            const reservation = verifyReservation(session, vector);
-            if (!reservation.isValid) {
-                throw new Error(reservation.refusalReason);
-            }
-            expect(
-                session.verifyRecovery({
-                    canonicalRecoveryTransitionCarrier:
-                        vector.recoverySecond.canonicalIntentCarrier,
-                    canonicalStateCertificate:
-                        vector.recoverySecond.canonicalStateCertificate,
-                    capabilityKind: stateCapabilityKinds.finalitySignature,
-                    subjectParticipantIdentity:
-                        vector.subjectParticipantIdentity,
-                    verifiedPredecessorRecovery:
-                        reservation.value as unknown as VerifiedStateRecovery,
-                }),
-            ).toEqual({
-                isValid: false,
-                refusalReason: 'wrongTypeOrLength',
-            });
-        } finally {
             session.cancel();
         }
     });

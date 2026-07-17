@@ -2,7 +2,7 @@ use super::*;
 
 use super::same_secret_bridge_verification::VerifiedSameSecretBridgeMaterial;
 use crate::bgv::setup::commitment::setup_commitment_root;
-use crate::bgv::setup::setup_proof::take_verified_setup_proof_material_bytes;
+use crate::bgv::setup::setup_proof::take_authenticated_setup_proof_material_bytes;
 use crate::hashing::derive_canonical_object_hash;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::{
@@ -99,7 +99,7 @@ fn verify_trustee_evaluation_key_proof_set(
         != Some(TRUSTEE_EVALUATION_KEY_PROOF_SET_OBJECT_TYPE)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "trusteeEvaluationKeyProofs objectType must match the accepted parameters",
         ));
     }
@@ -135,7 +135,7 @@ fn verify_trustee_evaluation_key_proof_set(
         verify_trustee_evaluation_key_proof_record(
             proof_bytes_hash.as_str().ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "trustee evaluation-key proof hash must be a string",
                 )
             })?,
@@ -177,7 +177,7 @@ fn verify_trustee_evaluation_key_proof_record(
             != trustee_evaluation_key_proof_material_bytes_hash(proof_bytes.as_ref())?
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "trustee evaluation-key proofBytesHash must match supplied proof bytes",
             ));
         }
@@ -241,7 +241,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupContext was required for trustee evaluation-key statement assembly",
         )
     })?;
@@ -249,7 +249,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
         .get("relinearizationKeyShareRounds")
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "relinearizationKeyShareRounds was required for trustee evaluation-key statement assembly",
             )
         })?;
@@ -298,7 +298,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             .get(level)
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "round-one public aggregate diagonal is missing for a scheduled level",
                 )
             })?
@@ -327,7 +327,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "galoisKeyShareBatches was required for trustee evaluation-key statement assembly",
             )
         })?;
@@ -335,14 +335,14 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
         .get(
             usize::try_from(inputs.trustee_roster_position).map_err(|_| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "trustee roster position does not fit usize",
                 )
             })?,
         )
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "Galois key share batches do not cover the trustee roster position",
             )
         })?;
@@ -388,7 +388,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     let verified_same_secret_bridge =
         inputs.verified_same_secret_bridge.ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "same-secret bridge material was required for trustee evaluation-key proof verification",
             )
         })?;
@@ -409,7 +409,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
         .cloned()
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "verified same-secret bridge source linkage was empty",
             )
         })?;
@@ -420,7 +420,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     };
     let context = SuccinctSetupProofContext {
         setup_context_hash: setup_context_hash(setup_context)?,
-        trustee_identity: bridge_binding.trustee_identity.clone(),
         trustee_roster_position: inputs.trustee_roster_position,
         binding_roots: vec![
             binding.evaluator_key_schedule_root.clone(),
@@ -477,7 +476,7 @@ fn relinearization_record_for_trustee_and_level<'a>(
         .position(|scheduled_level| *scheduled_level == level)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!(
                     "relinearization {record_field_name} do not cover a scheduled trustee and level"
                 ),
@@ -485,20 +484,20 @@ fn relinearization_record_for_trustee_and_level<'a>(
         })?;
     let participant_count = usize::try_from(participant_count).map_err(|_| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "participant count does not fit usize",
         )
     })?;
     let trustee_roster_position = usize::try_from(trustee_roster_position).map_err(|_| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "trustee roster position does not fit usize",
         )
     })?;
     let records = array_value(rounds, record_field_name)?;
     if records.len() != scheduled_levels.len() * participant_count {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             format!(
                 "relinearization {record_field_name} do not cover every scheduled trustee and level"
             ),
@@ -509,7 +508,7 @@ fn relinearization_record_for_trustee_and_level<'a>(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!(
                     "relinearization {record_field_name} do not cover a scheduled trustee and level"
                 ),
@@ -532,7 +531,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
         .get("relinearizationKeyShareRounds")
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "relinearizationKeyShareRounds was required for round-one aggregate recomputation",
             )
         })?;
@@ -569,7 +568,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
         })? + 1;
         let material_root = record.as_str().ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "round-one component material root must be a string",
             )
         })?;
@@ -594,7 +593,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
                 .and_then(|by_limb| by_limb.get(digit_index))
                 .ok_or_else(|| {
                     CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
+                        CanonicalErrorCode::InvalidProtocolObject,
                         "round-one component material does not cover the aggregate diagonal",
                     )
                 })?;
@@ -624,7 +623,7 @@ fn trustee_evaluation_key_proof_bytes_from_hash(
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
     validate_hash_string(proof_bytes_hash, "trusteeEvaluationKeyProof.proofBytesHash")?;
-    take_verified_setup_proof_material_bytes(
+    take_authenticated_setup_proof_material_bytes(
         TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         proof_bytes_hash,
         "trusteeEvaluationKeyProof.proofBytesHash",

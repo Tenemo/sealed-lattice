@@ -39,22 +39,21 @@ fn trustee_verifier_rejects_oversized_ring_degree_before_processing_proof_limbs(
 }
 
 #[test]
-fn tampered_component_material_is_rejected() {
-    let (mut statement, witness) =
-        generate_development_public_key_share_instance("0011aabb", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
+fn tampered_private_vss_share_is_rejected() {
+    let (mut statement, witness) = private_vss_proof_fixture(SMALL_RING_DEGREE);
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    statement.keys_mut()[0].component_b_by_digit[0][0][0] ^= 1;
+    statement
+        .private_vss_share_mut()
+        .expect("private VSS statement")
+        .share_values[0] ^= 1;
     let result = verify_evaluation_key_share(&statement, &proof);
-    assert!(result.is_err(), "tampered component material must reject");
+    assert!(result.is_err(), "a tampered private VSS share must reject");
 }
 
 #[test]
 fn tampered_deep_evaluation_is_rejected() {
-    let (statement, witness) =
-        generate_development_public_key_share_instance("c0ffee11", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
+    let (statement, witness) = private_vss_proof_fixture(SMALL_RING_DEGREE);
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let modulus = statement.limb_moduli()[0];
@@ -66,9 +65,7 @@ fn tampered_deep_evaluation_is_rejected() {
 
 #[test]
 fn tampered_consistency_claim_is_rejected() {
-    let (statement, witness) =
-        generate_development_public_key_share_instance("13371337", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
+    let (statement, witness) = private_vss_proof_fixture(SMALL_RING_DEGREE);
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     proof.limb_proofs[0].masked_consistency_claims[0] += 1;
@@ -78,9 +75,7 @@ fn tampered_consistency_claim_is_rejected() {
 
 #[test]
 fn tampered_sumcheck_residual_zero_anchor_is_rejected() {
-    let (statement, witness) =
-        generate_development_public_key_share_instance("a11ce000", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
+    let (statement, witness) = private_vss_proof_fixture(SMALL_RING_DEGREE);
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let modulus = statement.limb_moduli()[0];
@@ -99,9 +94,7 @@ fn tampered_sumcheck_residual_zero_anchor_is_rejected() {
 
 #[test]
 fn tampered_sumcheck_residual_low_degree_proof_is_rejected() {
-    let (statement, witness) =
-        generate_development_public_key_share_instance("a11ce001", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
+    let (statement, witness) = private_vss_proof_fixture(SMALL_RING_DEGREE);
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let modulus = statement.limb_moduli()[0];
@@ -120,19 +113,15 @@ fn tampered_sumcheck_residual_low_degree_proof_is_rejected() {
 }
 
 #[test]
-fn forged_secret_inconsistent_across_limbs_is_rejected() {
-    // A prover that commits a different secret in one limb field would produce
-    // masked consistency claims that disagree across limbs as integers.
-    // Emulate that by proving two honest instances with different secrets and
-    // splicing one limb proof across them.
-    let (statement, witness) =
-        generate_development_public_key_share_instance("aaaa0001", SMALL_RING_DEGREE)
-            .expect("first instance");
+fn spliced_private_vss_limb_from_a_different_statement_is_rejected() {
+    let (statement, witness) = private_vss_proof_fixture(SMALL_RING_DEGREE);
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    let (other_statement, other_witness) =
-        generate_development_public_key_share_instance("bbbb0002", SMALL_RING_DEGREE)
-            .expect("second instance");
+    let (mut other_statement, other_witness) = private_vss_proof_fixture(SMALL_RING_DEGREE);
+    other_statement.context.setup_context_hash = repeated_hash("12");
+    other_statement
+        .validate_shape()
+        .expect("second private VSS statement");
     let other_proof =
         prove_evaluation_key_share(&other_statement, &other_witness, PROOF_RANDOMNESS_SEED)
             .expect("prove");
@@ -145,7 +134,7 @@ fn forged_secret_inconsistent_across_limbs_is_rejected() {
     let result = verify_evaluation_key_share(&statement, &spliced);
     assert!(
         result.is_err(),
-        "a spliced limb proof from a different secret must reject"
+        "a private VSS limb proof bound to another statement must reject"
     );
 }
 
@@ -272,11 +261,11 @@ fn private_vss_statement_rejects_noncanonical_context_and_hash_fields() {
 
 // Private-VSS message (Shamir coefficient) columns are committed witnesses
 // covered by the opening lincheck, but they carry no cross-field consistency
-// claim. Only carry and opening-randomness columns are claimed, so the
-// consistency set is exactly the logical set minus the message columns. This
-// bounds the disclosed smudging leakage to the carry-driven figure. If the
-// consistency set includes message columns, the leakage accounting and mask
-// sizing both regress, so pin the shape.
+// claim. Only the carry is shared across commitment fields. Opening randomness
+// is independently sampled for each commitment field and is bound locally by
+// the corresponding opening relation and ternary constraints. The message
+// columns remain covered by the opening lincheck without a cross-field
+// consistency claim.
 #[test]
 fn private_vss_consistency_set_excludes_committed_message_columns() {
     let statement = private_vss_statement_for_context_tests();
@@ -299,26 +288,22 @@ fn private_vss_consistency_set_excludes_committed_message_columns() {
         layout.private_vss_coefficient_columns + 1 + layout.private_vss_randomness_columns
     );
 
-    // The consistency-claimed set is only carry + randomness; the message
-    // columns are excluded.
+    // The carry is the only cross-field consistency claim. Equating opening
+    // randomness here would collapse the independent commitment-field tapes.
     assert_eq!(
         layout.consistency_vector_count(),
-        1 + layout.private_vss_randomness_columns,
-        "the consistency set must be the carry plus the opening-randomness columns only"
+        1,
+        "the consistency set must contain only the shared carry"
     );
     assert_eq!(
         layout.private_vss_logical_columns() - layout.consistency_vector_count(),
-        layout.private_vss_coefficient_columns,
-        "exactly the message columns are committed without a consistency assertion"
+        layout.private_vss_coefficient_columns + layout.private_vss_randomness_columns,
+        "message and field-local opening columns are committed without a cross-field equality assertion"
     );
     // The carry must stay in the consistency set: carry consistency plus the
     // public range-checked share pin the polynomial evaluation per recipient.
     // Exactly one non-randomness consistency vector (the carry) must remain.
-    assert_eq!(
-        layout.consistency_vector_count() - layout.private_vss_randomness_columns,
-        1,
-        "the carry must remain the one non-randomness consistency vector"
-    );
+    assert_eq!(layout.consistency_vector_count(), 1);
 
     // The published claim count, which sizes the masks and the alpha challenges,
     // tracks the reduced consistency set, not the full logical set.

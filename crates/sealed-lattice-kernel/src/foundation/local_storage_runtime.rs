@@ -1,14 +1,15 @@
-use core::str;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use super::local_encrypted_storage::LocalRecordSealWithIdentifierInput;
+use super::runtime_input::RuntimeInputReader as InputReader;
 use super::{
-    ActionStorageRoot, CanonicalDecodeLimits, CanonicalLocalStorageRecoveryIngress,
-    DeviceWrappedStorageRoot, Hash512, LocalRecordEnvelope, LocalRecordIdentifierInput,
+    ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionStorageRoot, CanonicalDecodeLimits,
+    CommonProofExternalMemoryRecordKind, DeviceWrappedStorageRoot, Hash512,
+    LOCAL_RECORD_NONCE_BYTE_LENGTH, LocalRecordEnvelope, LocalRecordIdentifierInput,
     LocalRecordType, LocalStorageBinding, ParticipantIdentity, RefusalReason,
     StorageRootCommitmentPayload, derive_local_record_envelope_hash,
     derive_local_record_identifier,
@@ -17,7 +18,6 @@ use super::{
 pub(crate) const LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH: usize = 32;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW: u32 = 1;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_STAGE_OPENED: u32 = 2;
-pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_STAGE_RECOVERY: u32 = 3;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_ASSOCIATED_DATA: u32 = 4;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_COPY_FOR_DEVICE_WRAP: u32 = 5;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_ENCODE_DEVICE_ENVELOPE: u32 = 6;
@@ -25,37 +25,177 @@ pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DECODE_DEVICE_ENVELOPE: u32 = 7;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_COMMIT: u32 = 8;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DISCARD: u32 = 9;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DESTROY: u32 = 10;
-pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_PREPARE_RECOVERY: u32 = 11;
-pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_CONFIRM_RECOVERY: u32 = 12;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_RESET: u32 = 13;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER: u32 = 14;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD: u32 = 15;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD: u32 = 16;
 pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_HASH_RECORD_ENVELOPE: u32 = 17;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DERIVE_REPAIR_IDENTITY: u32 = 18;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_SEAL_REPAIR_HEAD: u32 = 19;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_OPEN_REPAIR_HEAD: u32 = 20;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DIGEST_REPAIR_HEAD: u32 = 21;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_DERIVE_COMMON_PROOF_EXTERNAL_MEMORY_RECORD_IDENTIFIER:
+    u32 = 22;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_SEAL_COMMON_PROOF_EXTERNAL_MEMORY_RECORD: u32 = 23;
+pub(crate) const LOCAL_STORAGE_ROOT_COMMAND_OPEN_COMMON_PROOF_EXTERNAL_MEMORY_RECORD: u32 = 24;
 
 pub(crate) const LOCAL_STORAGE_ROOT_STATUS_RESOURCE_LIMIT: u32 = 0x0001_0000;
 pub(crate) const LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE: u32 = 0x0001_0001;
 pub(crate) const LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH: u32 = 0x0001_0002;
-
 const HASH_BYTE_LENGTH: usize = 64;
+const COMMON_PROOF_EXTERNAL_MEMORY_IDENTIFIER_CONTEXT_BYTE_LENGTH: usize = 32
+    + HASH_BYTE_LENGTH
+    + 32
+    + core::mem::size_of::<u16>()
+    + core::mem::size_of::<u32>() * 2
+    + core::mem::size_of::<u64>();
 #[cfg(test)]
 const BINDING_BYTE_LENGTH: usize = HASH_BYTE_LENGTH * 4;
 const HANDLE_BYTE_LENGTH: usize = 4;
-const MUTATION_IDENTIFIER_BYTE_LENGTH: usize = 32;
-const RECOVERY_CHECKSUM_BYTE_LENGTH: usize = 16;
-const RECOVERY_TEXT_BYTE_LENGTH: usize = 708;
 const MAXIMUM_CHECKPOINT_SOURCE_DIGEST_COUNT: usize = 4_096;
 const MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT: u64 = 1 << 30;
 const MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT: u64 = 1 << 40;
+
+// One active browser-foundation root owns at most one default canonical
+// foundation collection of long-lived local-record identifiers. Common-proof
+// scratch coordinates have a separate worker-internal one-write path and are
+// not retained in this version ledger.
+fn maximum_tracked_local_record_identifier_count_per_active_root() -> usize {
+    CanonicalDecodeLimits::default().maximum_item_count
+}
+
+/// Opaque storage coordinate minted only inside the browser worker after the
+/// authenticated store has re-read its current head and the local storage-root
+/// registry has accepted the worker-private lease capability. Downstream
+/// runtimes consume this source instead of caller-provided head coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BrowserWorkerAuthenticatedStorageHeadSource {
+    local_storage_binding: LocalStorageBinding,
+    storage_root_commitment: Hash512,
+    namespace_sequence: u64,
+    authenticated_head_digest: Hash512,
+    storage_instance_identity: Hash512,
+}
+
+impl BrowserWorkerAuthenticatedStorageHeadSource {
+    #[cfg(test)]
+    pub(crate) const fn from_test_fixture(
+        local_storage_binding: LocalStorageBinding,
+        storage_root_commitment: Hash512,
+        namespace_sequence: u64,
+        authenticated_head_digest: Hash512,
+        storage_instance_identity: Hash512,
+    ) -> Self {
+        Self {
+            local_storage_binding,
+            storage_root_commitment,
+            namespace_sequence,
+            authenticated_head_digest,
+            storage_instance_identity,
+        }
+    }
+
+    pub(crate) const fn local_storage_binding(&self) -> LocalStorageBinding {
+        self.local_storage_binding
+    }
+
+    pub(crate) const fn storage_root_commitment(&self) -> Hash512 {
+        self.storage_root_commitment
+    }
+
+    pub(crate) const fn namespace_sequence(&self) -> u64 {
+        self.namespace_sequence
+    }
+
+    pub(crate) const fn authenticated_head_digest(&self) -> Hash512 {
+        self.authenticated_head_digest
+    }
+
+    pub(crate) const fn storage_instance_identity(&self) -> Hash512 {
+        self.storage_instance_identity
+    }
+}
+
+/// Opaque result of one browser-owned compare-and-apply transaction followed
+/// by authenticated exact-record readback. This value must remain impossible
+/// to construct from a caller-selected outcome or from a head alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BrowserWorkerAuthenticatedStorageTransitionSource {
+    local_storage_binding: LocalStorageBinding,
+    storage_root_commitment: Hash512,
+    predecessor_namespace_sequence: u64,
+    predecessor_authenticated_head_digest: Hash512,
+    successor_namespace_sequence: u64,
+    successor_authenticated_head_digest: Hash512,
+    storage_instance_identity: Hash512,
+    authenticated_record_digest: Hash512,
+}
+
+impl BrowserWorkerAuthenticatedStorageTransitionSource {
+    pub(crate) const fn local_storage_binding(&self) -> LocalStorageBinding {
+        self.local_storage_binding
+    }
+
+    pub(crate) const fn storage_root_commitment(&self) -> Hash512 {
+        self.storage_root_commitment
+    }
+
+    pub(crate) const fn predecessor_namespace_sequence(&self) -> u64 {
+        self.predecessor_namespace_sequence
+    }
+
+    pub(crate) const fn predecessor_authenticated_head_digest(&self) -> Hash512 {
+        self.predecessor_authenticated_head_digest
+    }
+
+    pub(crate) const fn successor_namespace_sequence(&self) -> u64 {
+        self.successor_namespace_sequence
+    }
+
+    pub(crate) const fn successor_authenticated_head_digest(&self) -> Hash512 {
+        self.successor_authenticated_head_digest
+    }
+
+    pub(crate) const fn storage_instance_identity(&self) -> Hash512 {
+        self.storage_instance_identity
+    }
+
+    pub(crate) const fn authenticated_record_digest(&self) -> Hash512 {
+        self.authenticated_record_digest
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) const fn from_test_fixture(
+        local_storage_binding: LocalStorageBinding,
+        storage_root_commitment: Hash512,
+        predecessor_namespace_sequence: u64,
+        predecessor_authenticated_head_digest: Hash512,
+        successor_namespace_sequence: u64,
+        successor_authenticated_head_digest: Hash512,
+        storage_instance_identity: Hash512,
+        authenticated_record_digest: Hash512,
+    ) -> Self {
+        Self {
+            local_storage_binding,
+            storage_root_commitment,
+            predecessor_namespace_sequence,
+            predecessor_authenticated_head_digest,
+            successor_namespace_sequence,
+            successor_authenticated_head_digest,
+            storage_instance_identity,
+            authenticated_record_digest,
+        }
+    }
+}
 
 struct RootLease {
     capability: Zeroizing<[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH]>,
     handle: u32,
     local_record_seal_invocation_count: u64,
     local_record_sealed_plaintext_byte_length: u64,
-    mutation_identifier: Option<[u8; MUTATION_IDENTIFIER_BYTE_LENGTH]>,
     root: ActionStorageRoot,
-    sealed_record_versions: HashSet<([u8; HASH_BYTE_LENGTH], u64)>,
+    sealed_record_highest_versions: HashMap<[u8; HASH_BYTE_LENGTH], u64>,
 }
 
 #[derive(Default)]
@@ -91,9 +231,8 @@ impl RootRegistry {
             handle,
             local_record_seal_invocation_count: 0,
             local_record_sealed_plaintext_byte_length: 0,
-            mutation_identifier: None,
             root,
-            sealed_record_versions: HashSet::new(),
+            sealed_record_highest_versions: HashMap::new(),
         });
         Ok(handle)
     }
@@ -110,18 +249,12 @@ impl RootRegistry {
         require_lease_mut(self.active.as_mut(), handle, capability)
     }
 
-    fn commit(
-        &mut self,
-        handle: u32,
-        capability: &[u8],
-        mutation_identifier: [u8; MUTATION_IDENTIFIER_BYTE_LENGTH],
-    ) -> RuntimeResult<()> {
+    fn commit(&mut self, handle: u32, capability: &[u8]) -> RuntimeResult<()> {
         require_lease(self.staged.as_ref(), handle, capability)?;
-        let mut staged = self
+        let staged = self
             .staged
             .take()
             .ok_or(LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE)?;
-        staged.mutation_identifier = Some(mutation_identifier);
         self.active = Some(staged);
         Ok(())
     }
@@ -150,78 +283,69 @@ thread_local! {
     static ROOT_REGISTRY: RefCell<RootRegistry> = RefCell::new(RootRegistry::default());
 }
 
-struct InputReader<'input> {
-    bytes: &'input [u8],
-    offset: usize,
+/// Joins a freshly authenticated browser-store head to the active local
+/// storage root. The opaque storage-root capability never leaves the worker;
+/// callers outside that worker therefore cannot mint this source from copied
+/// coordinates.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_browser_worker_authenticated_storage_head_source(
+    storage_root_handle: u32,
+    storage_root_capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    namespace_sequence: u64,
+    authenticated_head_digest: Hash512,
+    storage_instance_identity: Hash512,
+) -> RuntimeResult<BrowserWorkerAuthenticatedStorageHeadSource> {
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active(storage_root_handle, storage_root_capability)?;
+        Ok(BrowserWorkerAuthenticatedStorageHeadSource {
+            local_storage_binding: lease.root.binding(),
+            storage_root_commitment: lease.root.storage_root_commitment(),
+            namespace_sequence,
+            authenticated_head_digest,
+            storage_instance_identity,
+        })
+    })
 }
 
-impl<'input> InputReader<'input> {
-    const fn new(bytes: &'input [u8]) -> Self {
-        Self { bytes, offset: 0 }
-    }
-
-    fn read_array<const BYTE_LENGTH: usize>(&mut self) -> RuntimeResult<[u8; BYTE_LENGTH]> {
-        let end = self
-            .offset
-            .checked_add(BYTE_LENGTH)
-            .ok_or_else(malformed_status)?;
-        let bytes = self
-            .bytes
-            .get(self.offset..end)
-            .ok_or_else(malformed_status)?;
-        self.offset = end;
-        bytes.try_into().map_err(|_| malformed_status())
-    }
-
-    fn read_slice(&mut self, byte_length: usize) -> RuntimeResult<&'input [u8]> {
-        let end = self
-            .offset
-            .checked_add(byte_length)
-            .ok_or_else(malformed_status)?;
-        let bytes = self
-            .bytes
-            .get(self.offset..end)
-            .ok_or_else(malformed_status)?;
-        self.offset = end;
-        Ok(bytes)
-    }
-
-    fn read_u8(&mut self) -> RuntimeResult<u8> {
-        Ok(self.read_array::<1>()?[0])
-    }
-
-    fn read_u16(&mut self) -> RuntimeResult<u16> {
-        Ok(u16::from_le_bytes(self.read_array()?))
-    }
-
-    fn read_u32(&mut self) -> RuntimeResult<u32> {
-        Ok(u32::from_le_bytes(self.read_array()?))
-    }
-
-    fn read_u64(&mut self) -> RuntimeResult<u64> {
-        Ok(u64::from_le_bytes(self.read_array()?))
-    }
-
-    fn read_remaining(&mut self) -> &'input [u8] {
-        let remaining = &self.bytes[self.offset..];
-        self.offset = self.bytes.len();
-        remaining
-    }
-
-    fn finish(self) -> RuntimeResult<()> {
-        if self.offset == self.bytes.len() {
-            Ok(())
-        } else {
-            Err(malformed_status())
+/// Joins one authenticated browser-store compare-and-apply result to the
+/// active local storage root. The opaque storage-root capability stays inside
+/// the worker, so copied transition coordinates cannot mint this source in a
+/// different worker or after the root lease is destroyed.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_browser_worker_authenticated_storage_transition_source(
+    storage_root_handle: u32,
+    storage_root_capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    predecessor_namespace_sequence: u64,
+    predecessor_authenticated_head_digest: Hash512,
+    successor_namespace_sequence: u64,
+    successor_authenticated_head_digest: Hash512,
+    storage_instance_identity: Hash512,
+    authenticated_record_digest: Hash512,
+) -> RuntimeResult<BrowserWorkerAuthenticatedStorageTransitionSource> {
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active(storage_root_handle, storage_root_capability)?;
+        if predecessor_namespace_sequence.checked_add(1) != Some(successor_namespace_sequence) {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
         }
-    }
+        Ok(BrowserWorkerAuthenticatedStorageTransitionSource {
+            local_storage_binding: lease.root.binding(),
+            storage_root_commitment: lease.root.storage_root_commitment(),
+            predecessor_namespace_sequence,
+            predecessor_authenticated_head_digest,
+            successor_namespace_sequence,
+            successor_authenticated_head_digest,
+            storage_instance_identity,
+            authenticated_record_digest,
+        })
+    })
 }
 
 pub(crate) fn run_local_storage_root_command(command: u32, input: &[u8]) -> RuntimeResult<Vec<u8>> {
     match command {
         LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW => stage_new(input),
         LOCAL_STORAGE_ROOT_COMMAND_STAGE_OPENED => stage_opened(input),
-        LOCAL_STORAGE_ROOT_COMMAND_STAGE_RECOVERY => stage_recovery(input),
         LOCAL_STORAGE_ROOT_COMMAND_ASSOCIATED_DATA => associated_data(input),
         LOCAL_STORAGE_ROOT_COMMAND_COPY_FOR_DEVICE_WRAP => copy_for_device_wrap(input),
         LOCAL_STORAGE_ROOT_COMMAND_ENCODE_DEVICE_ENVELOPE => encode_device_envelope(input),
@@ -229,13 +353,24 @@ pub(crate) fn run_local_storage_root_command(command: u32, input: &[u8]) -> Runt
         LOCAL_STORAGE_ROOT_COMMAND_COMMIT => commit(input),
         LOCAL_STORAGE_ROOT_COMMAND_DISCARD => discard(input),
         LOCAL_STORAGE_ROOT_COMMAND_DESTROY => destroy(input),
-        LOCAL_STORAGE_ROOT_COMMAND_PREPARE_RECOVERY => prepare_recovery(input),
-        LOCAL_STORAGE_ROOT_COMMAND_CONFIRM_RECOVERY => confirm_recovery(input),
         LOCAL_STORAGE_ROOT_COMMAND_RESET => reset(input),
         LOCAL_STORAGE_ROOT_COMMAND_DERIVE_RECORD_IDENTIFIER => derive_record_identifier(input),
         LOCAL_STORAGE_ROOT_COMMAND_SEAL_RECORD => seal_record(input),
         LOCAL_STORAGE_ROOT_COMMAND_OPEN_RECORD => open_record(input),
         LOCAL_STORAGE_ROOT_COMMAND_HASH_RECORD_ENVELOPE => hash_record_envelope(input),
+        LOCAL_STORAGE_ROOT_COMMAND_DERIVE_REPAIR_IDENTITY => derive_repair_identity(input),
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_REPAIR_HEAD => seal_repair_head(input),
+        LOCAL_STORAGE_ROOT_COMMAND_OPEN_REPAIR_HEAD => open_repair_head(input),
+        LOCAL_STORAGE_ROOT_COMMAND_DIGEST_REPAIR_HEAD => digest_repair_head(input),
+        LOCAL_STORAGE_ROOT_COMMAND_DERIVE_COMMON_PROOF_EXTERNAL_MEMORY_RECORD_IDENTIFIER => {
+            derive_common_proof_external_memory_record_identifier(input)
+        }
+        LOCAL_STORAGE_ROOT_COMMAND_SEAL_COMMON_PROOF_EXTERNAL_MEMORY_RECORD => {
+            seal_common_proof_external_memory_record(input)
+        }
+        LOCAL_STORAGE_ROOT_COMMAND_OPEN_COMMON_PROOF_EXTERNAL_MEMORY_RECORD => {
+            open_common_proof_external_memory_record(input)
+        }
         _ => Err(malformed_status()),
     }
 }
@@ -262,30 +397,6 @@ fn stage_opened(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         return Err(refusal_status(RefusalReason::WrongHashOrRoot));
     }
     stage_root(capability, root)
-}
-
-fn stage_recovery(input: &[u8]) -> RuntimeResult<Vec<u8>> {
-    let mut reader = InputReader::new(input);
-    let capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH] = reader.read_array()?;
-    let binding = read_binding(&mut reader)?;
-    let expected_commitment = read_commitment(&mut reader)?;
-    let recovery_text_bytes = reader.read_array::<RECOVERY_TEXT_BYTE_LENGTH>()?;
-    reader.finish()?;
-    let recovery_text = str::from_utf8(&recovery_text_bytes).map_err(|_| malformed_status())?;
-    let ingress = CanonicalLocalStorageRecoveryIngress::decode(
-        recovery_text,
-        &CanonicalDecodeLimits::default(),
-    )
-    .map_err(schema_status)?;
-    let canonical_recovery_text = ingress.canonical_base32().as_bytes().to_vec();
-    let root = ingress
-        .into_recovery_value()
-        .recover(binding, expected_commitment)
-        .into_result()
-        .map_err(refusal_status)?;
-    let mut output = stage_root(capability, root)?;
-    output.extend_from_slice(&canonical_recovery_text);
-    Ok(output)
 }
 
 fn stage_root(
@@ -375,16 +486,8 @@ fn decode_device_envelope(input: &[u8]) -> RuntimeResult<Vec<u8>> {
 }
 
 fn commit(input: &[u8]) -> RuntimeResult<Vec<u8>> {
-    let mut reader = InputReader::new(input);
-    let handle = u32::from_le_bytes(reader.read_array()?);
-    let capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH] = reader.read_array()?;
-    let mutation_identifier = reader.read_array()?;
-    reader.finish()?;
-    ROOT_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .commit(handle, &capability, mutation_identifier)
-    })?;
+    let (handle, capability) = read_lease_input(input)?;
+    ROOT_REGISTRY.with(|registry| registry.borrow_mut().commit(handle, &capability))?;
     Ok(Vec::new())
 }
 
@@ -400,63 +503,6 @@ fn destroy(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     Ok(Vec::new())
 }
 
-fn prepare_recovery(input: &[u8]) -> RuntimeResult<Vec<u8>> {
-    let mut reader = InputReader::new(input);
-    let handle = u32::from_le_bytes(reader.read_array()?);
-    let capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH] = reader.read_array()?;
-    let mutation_identifier = reader.read_array()?;
-    reader.finish()?;
-    ROOT_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let lease = registry.active(handle, &capability)?;
-        if lease.mutation_identifier.as_ref() != Some(&mutation_identifier) {
-            return Err(refusal_status(RefusalReason::ConsumedState));
-        }
-        let recovery_value = lease.root.recovery_value().map_err(schema_status)?;
-        let canonical_recovery_text = recovery_value
-            .to_canonical_base32()
-            .map_err(schema_status)?;
-        let mut output =
-            Vec::with_capacity(RECOVERY_CHECKSUM_BYTE_LENGTH + RECOVERY_TEXT_BYTE_LENGTH);
-        output.extend_from_slice(recovery_value.checksum());
-        output.extend_from_slice(canonical_recovery_text.as_bytes());
-        Ok(output)
-    })
-}
-
-fn confirm_recovery(input: &[u8]) -> RuntimeResult<Vec<u8>> {
-    let mut reader = InputReader::new(input);
-    let handle = u32::from_le_bytes(reader.read_array()?);
-    let capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH] = reader.read_array()?;
-    let recovery_text_bytes = reader.read_array::<RECOVERY_TEXT_BYTE_LENGTH>()?;
-    let confirmed_checksum = reader.read_array::<RECOVERY_CHECKSUM_BYTE_LENGTH>()?;
-    reader.finish()?;
-    let recovery_text = str::from_utf8(&recovery_text_bytes).map_err(|_| malformed_status())?;
-    let ingress = CanonicalLocalStorageRecoveryIngress::decode(
-        recovery_text,
-        &CanonicalDecodeLimits::default(),
-    )
-    .map_err(schema_status)?;
-    if ingress.canonical_base32().as_bytes() != recovery_text_bytes {
-        return Err(refusal_status(RefusalReason::MalformedEncoding));
-    }
-    let recovery_value = ingress.into_recovery_value();
-    ROOT_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let lease = registry.active(handle, &capability)?;
-        if recovery_value.binding() != lease.root.binding() {
-            return Err(refusal_status(RefusalReason::WrongContext));
-        }
-        if recovery_value.storage_root_commitment() != lease.root.storage_root_commitment() {
-            return Err(refusal_status(RefusalReason::WrongHashOrRoot));
-        }
-        if !bool::from(recovery_value.checksum().ct_eq(&confirmed_checksum)) {
-            return Err(refusal_status(RefusalReason::WrongHashOrRoot));
-        }
-        Ok(Vec::new())
-    })
-}
-
 fn reset(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     if !input.is_empty() {
         return Err(malformed_status());
@@ -465,19 +511,53 @@ fn reset(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     Ok(Vec::new())
 }
 
-fn derive_record_identifier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+struct RecordIdentifierRequest<'input> {
+    handle: u32,
+    capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    record_type: LocalRecordType,
+    identifier_context: &'input [u8],
+}
+
+fn read_record_identifier_request(input: &[u8]) -> RuntimeResult<RecordIdentifierRequest<'_>> {
     let mut reader = InputReader::new(input);
     let handle = reader.read_u32()?;
     let capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH] = reader.read_array()?;
     let record_type = read_record_type(&mut reader)?;
     let identifier_context = reader.read_remaining();
+    Ok(RecordIdentifierRequest {
+        handle,
+        capability,
+        record_type,
+        identifier_context,
+    })
+}
+
+fn derive_record_identifier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let request = read_record_identifier_request(input)?;
+    if request.record_type == LocalRecordType::CommonProofExternalMemory {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    derive_record_identifier_for_request(&request)
+}
+
+fn derive_common_proof_external_memory_record_identifier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let request = read_record_identifier_request(input)?;
+    if request.record_type != LocalRecordType::CommonProofExternalMemory {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    derive_record_identifier_for_request(&request)
+}
+
+fn derive_record_identifier_for_request(
+    request: &RecordIdentifierRequest<'_>,
+) -> RuntimeResult<Vec<u8>> {
     ROOT_REGISTRY.with(|registry| {
         let registry = registry.borrow();
-        let lease = registry.active(handle, &capability)?;
+        let lease = registry.active(request.handle, &request.capability)?;
         Ok(derive_record_identifier_from_context(
             lease.root.binding(),
-            record_type,
-            identifier_context,
+            request.record_type,
+            request.identifier_context,
         )?
         .as_bytes()
         .to_vec())
@@ -487,6 +567,34 @@ fn derive_record_identifier(input: &[u8]) -> RuntimeResult<Vec<u8>> {
 fn seal_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let mut reader = InputReader::new(input);
     let request = read_record_request(&mut reader)?;
+    if matches!(
+        request.record_type,
+        LocalRecordType::ActionRandomness | LocalRecordType::CommonProofExternalMemory
+    ) {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    let nonce = reader.read_array()?;
+    let plaintext = reader.read_remaining();
+    ROOT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let lease = registry.active_mut(request.handle, &request.capability)?;
+        seal_record_with_active_lease(
+            lease,
+            request.action_randomness_commitment,
+            request.record_type,
+            request.identifier_context,
+            request.record_version,
+            request.predecessor_record_hash,
+            nonce,
+            plaintext,
+        )
+    })
+}
+
+fn seal_common_proof_external_memory_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let request = read_record_request(&mut reader)?;
+    require_common_proof_external_memory_record_request(&request)?;
     let nonce = reader.read_array()?;
     let plaintext = reader.read_remaining();
     ROOT_REGISTRY.with(|registry| {
@@ -497,51 +605,54 @@ fn seal_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
             request.record_type,
             request.identifier_context,
         )?;
-        let record_version_key = (record_identifier.into_bytes(), request.record_version);
-        if lease.sealed_record_versions.contains(&record_version_key) {
-            return Err(refusal_status(RefusalReason::ConsumedState));
-        }
-        let next_seal_invocation_count = lease
-            .local_record_seal_invocation_count
-            .checked_add(1)
-            .ok_or_else(outside_supported_profile_status)?;
-        let plaintext_byte_length =
-            u64::try_from(plaintext.len()).map_err(|_| outside_supported_profile_status())?;
-        let next_sealed_plaintext_byte_length = lease
-            .local_record_sealed_plaintext_byte_length
-            .checked_add(plaintext_byte_length)
-            .ok_or_else(outside_supported_profile_status)?;
-        if next_seal_invocation_count > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
-            || next_sealed_plaintext_byte_length
-                > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT
-        {
-            return Err(outside_supported_profile_status());
-        }
-        let envelope = lease
-            .root
-            .seal_local_record_with_identifier(LocalRecordSealWithIdentifierInput {
-                action_randomness_commitment: request.action_randomness_commitment,
-                record_type: request.record_type,
-                record_identifier,
-                record_version: request.record_version,
-                creation_recovery_epoch: request.creation_recovery_epoch,
-                predecessor_record_hash: request.predecessor_record_hash,
-                nonce,
-                plaintext,
-            })
-            .map_err(schema_status)?;
-        let encoded_envelope = envelope.encode().map_err(schema_status)?;
-        lease.sealed_record_versions.insert(record_version_key);
-        lease.local_record_seal_invocation_count = next_seal_invocation_count;
-        lease.local_record_sealed_plaintext_byte_length = next_sealed_plaintext_byte_length;
-        Ok(encoded_envelope)
+        seal_record_with_identifier_and_active_lease_budget(
+            lease,
+            request.action_randomness_commitment,
+            request.record_type,
+            record_identifier,
+            request.record_version,
+            request.predecessor_record_hash,
+            nonce,
+            plaintext,
+        )
     })
 }
 
 fn open_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     let mut reader = InputReader::new(input);
     let request = read_record_request(&mut reader)?;
-    let envelope_bytes = reader.read_remaining();
+    if matches!(
+        request.record_type,
+        LocalRecordType::ActionRandomness | LocalRecordType::CommonProofExternalMemory
+    ) {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    open_record_request(&request, reader.read_remaining())
+}
+
+fn open_common_proof_external_memory_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let request = read_record_request(&mut reader)?;
+    require_common_proof_external_memory_record_request(&request)?;
+    open_record_request(&request, reader.read_remaining())
+}
+
+fn require_common_proof_external_memory_record_request(
+    request: &RecordRequest<'_>,
+) -> RuntimeResult<()> {
+    if request.record_type != LocalRecordType::CommonProofExternalMemory {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    if request.record_version != 0 || request.predecessor_record_hash.is_some() {
+        return Err(refusal_status(RefusalReason::WrongContext));
+    }
+    Ok(())
+}
+
+fn open_record_request(
+    request: &RecordRequest<'_>,
+    envelope_bytes: &[u8],
+) -> RuntimeResult<Vec<u8>> {
     if envelope_bytes.is_empty() {
         return Err(malformed_status());
     }
@@ -550,25 +661,217 @@ fn open_record(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     ROOT_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let lease = registry.active(request.handle, &request.capability)?;
-        let record_identifier = derive_record_identifier_from_context(
-            lease.root.binding(),
+        open_record_with_active_lease(
+            lease,
+            request.action_randomness_commitment,
             request.record_type,
             request.identifier_context,
-        )?;
+            request.record_version,
+            request.predecessor_record_hash,
+            &envelope,
+        )
+        .map(|mut plaintext| core::mem::take(&mut *plaintext))
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn seal_record_with_active_lease(
+    lease: &mut RootLease,
+    action_randomness_commitment: Hash512,
+    record_type: LocalRecordType,
+    identifier_context: &[u8],
+    record_version: u64,
+    predecessor_record_hash: Option<Hash512>,
+    nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+    plaintext: &[u8],
+) -> RuntimeResult<Vec<u8>> {
+    let record_identifier = derive_record_identifier_from_context(
+        lease.root.binding(),
+        record_type,
+        identifier_context,
+    )?;
+    let record_identifier_bytes = record_identifier.into_bytes();
+    let is_new_identifier = match lease
+        .sealed_record_highest_versions
+        .get(&record_identifier_bytes)
+    {
+        Some(highest_record_version) if record_version <= *highest_record_version => {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
+        Some(_) => false,
+        None => true,
+    };
+    if is_new_identifier {
+        if lease.sealed_record_highest_versions.len()
+            >= maximum_tracked_local_record_identifier_count_per_active_root()
+        {
+            return Err(outside_supported_profile_status());
+        }
         lease
-            .root
-            .open_local_record_with_identifier(
-                request.action_randomness_commitment,
-                request.record_type,
-                record_identifier,
-                request.record_version,
-                request.creation_recovery_epoch,
-                request.predecessor_record_hash,
-                &envelope,
-            )
-            .into_result()
-            .map(|plaintext| plaintext.to_vec())
-            .map_err(refusal_status)
+            .sealed_record_highest_versions
+            .try_reserve(1)
+            .map_err(|_| LOCAL_STORAGE_ROOT_STATUS_RESOURCE_LIMIT)?;
+    }
+    let encoded_envelope = seal_record_with_identifier_and_active_lease_budget(
+        lease,
+        action_randomness_commitment,
+        record_type,
+        record_identifier,
+        record_version,
+        predecessor_record_hash,
+        nonce,
+        plaintext,
+    )?;
+    lease
+        .sealed_record_highest_versions
+        .insert(record_identifier_bytes, record_version);
+    Ok(encoded_envelope)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn seal_record_with_identifier_and_active_lease_budget(
+    lease: &mut RootLease,
+    action_randomness_commitment: Hash512,
+    record_type: LocalRecordType,
+    record_identifier: Hash512,
+    record_version: u64,
+    predecessor_record_hash: Option<Hash512>,
+    nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+    plaintext: &[u8],
+) -> RuntimeResult<Vec<u8>> {
+    let next_seal_invocation_count = lease
+        .local_record_seal_invocation_count
+        .checked_add(1)
+        .ok_or_else(outside_supported_profile_status)?;
+    let plaintext_byte_length =
+        u64::try_from(plaintext.len()).map_err(|_| outside_supported_profile_status())?;
+    let next_sealed_plaintext_byte_length = lease
+        .local_record_sealed_plaintext_byte_length
+        .checked_add(plaintext_byte_length)
+        .ok_or_else(outside_supported_profile_status)?;
+    if next_seal_invocation_count > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
+        || next_sealed_plaintext_byte_length
+            > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT
+    {
+        return Err(outside_supported_profile_status());
+    }
+    let envelope = lease
+        .root
+        .seal_local_record_with_identifier(LocalRecordSealWithIdentifierInput {
+            action_randomness_commitment,
+            record_type,
+            record_identifier,
+            record_version,
+            predecessor_record_hash,
+            nonce,
+            plaintext,
+        })
+        .map_err(schema_status)?;
+    let encoded_envelope = envelope.encode().map_err(schema_status)?;
+    lease.local_record_seal_invocation_count = next_seal_invocation_count;
+    lease.local_record_sealed_plaintext_byte_length = next_sealed_plaintext_byte_length;
+    Ok(encoded_envelope)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn open_record_with_active_lease(
+    lease: &RootLease,
+    action_randomness_commitment: Hash512,
+    record_type: LocalRecordType,
+    identifier_context: &[u8],
+    record_version: u64,
+    predecessor_record_hash: Option<Hash512>,
+    envelope: &LocalRecordEnvelope,
+) -> RuntimeResult<Zeroizing<Vec<u8>>> {
+    let record_identifier = derive_record_identifier_from_context(
+        lease.root.binding(),
+        record_type,
+        identifier_context,
+    )?;
+    lease
+        .root
+        .open_local_record_with_identifier(
+            action_randomness_commitment,
+            record_type,
+            record_identifier,
+            record_version,
+            predecessor_record_hash,
+            envelope,
+        )
+        .into_result()
+        .map_err(refusal_status)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn seal_action_randomness_root(
+    storage_handle: u32,
+    storage_capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    expected_binding: LocalStorageBinding,
+    action_randomness_commitment: Hash512,
+    record_version: u64,
+    predecessor_record_hash: Option<Hash512>,
+    nonce: [u8; LOCAL_RECORD_NONCE_BYTE_LENGTH],
+    action_randomness_root: &[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+) -> RuntimeResult<Vec<u8>> {
+    ROOT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let lease = registry.active_mut(storage_handle, storage_capability)?;
+        if lease.root.binding() != expected_binding {
+            return Err(refusal_status(RefusalReason::WrongContext));
+        }
+        seal_record_with_active_lease(
+            lease,
+            action_randomness_commitment,
+            LocalRecordType::ActionRandomness,
+            &[],
+            record_version,
+            predecessor_record_hash,
+            nonce,
+            action_randomness_root,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn open_action_randomness_root(
+    storage_handle: u32,
+    storage_capability: &[u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    expected_binding: LocalStorageBinding,
+    action_randomness_commitment: Hash512,
+    record_version: u64,
+    predecessor_record_hash: Option<Hash512>,
+    canonical_envelope: &[u8],
+) -> RuntimeResult<Zeroizing<[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]>> {
+    if canonical_envelope.is_empty() {
+        return Err(malformed_status());
+    }
+    let envelope =
+        LocalRecordEnvelope::decode(canonical_envelope, &CanonicalDecodeLimits::default())
+            .map_err(schema_status)?;
+    if envelope.encode().map_err(schema_status)? != canonical_envelope {
+        return Err(refusal_status(RefusalReason::MalformedEncoding));
+    }
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active(storage_handle, storage_capability)?;
+        if lease.root.binding() != expected_binding {
+            return Err(refusal_status(RefusalReason::WrongContext));
+        }
+        let plaintext = open_record_with_active_lease(
+            lease,
+            action_randomness_commitment,
+            LocalRecordType::ActionRandomness,
+            &[],
+            record_version,
+            predecessor_record_hash,
+            &envelope,
+        )?;
+        if plaintext.len() != ACTION_RANDOMNESS_ROOT_BYTE_LENGTH {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
+        let mut root = Zeroizing::new([0u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]);
+        root.copy_from_slice(plaintext.as_slice());
+        Ok(root)
     })
 }
 
@@ -595,6 +898,134 @@ fn hash_record_envelope(input: &[u8]) -> RuntimeResult<Vec<u8>> {
     })
 }
 
+struct AuthenticatedRepairRequest<'input> {
+    handle: u32,
+    capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
+    runtime_build_manifest_hash: Hash512,
+    namespace: &'input [u8],
+}
+
+fn read_authenticated_repair_request<'input>(
+    reader: &mut InputReader<'input>,
+) -> RuntimeResult<AuthenticatedRepairRequest<'input>> {
+    let handle = reader.read_u32()?;
+    let capability = reader.read_array()?;
+    let runtime_build_manifest_hash = Hash512::from_bytes(reader.read_array()?);
+    let namespace = reader.read_length_prefixed_bytes()?;
+    if namespace.is_empty()
+        || namespace.len() > 64
+        || !(namespace[0].is_ascii_lowercase() || namespace[0].is_ascii_digit())
+        || !namespace
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+        || namespace.last() == Some(&b'-')
+        || namespace.windows(2).any(|pair| pair == b"--")
+    {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    Ok(AuthenticatedRepairRequest {
+        handle,
+        capability,
+        runtime_build_manifest_hash,
+        namespace,
+    })
+}
+
+fn derive_repair_identity(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let request = read_authenticated_repair_request(&mut reader)?;
+    reader.finish()?;
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active(request.handle, &request.capability)?;
+        Ok(lease
+            .root
+            .authenticated_repair_identity(request.runtime_build_manifest_hash, request.namespace)
+            .map_err(schema_status)?
+            .into_bytes()
+            .to_vec())
+    })
+}
+
+fn seal_repair_head(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let request = read_authenticated_repair_request(&mut reader)?;
+    let nonce = reader.read_array()?;
+    let plaintext = reader.read_remaining();
+    ROOT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let lease = registry.active_mut(request.handle, &request.capability)?;
+        let next_seal_invocation_count = lease
+            .local_record_seal_invocation_count
+            .checked_add(1)
+            .ok_or_else(outside_supported_profile_status)?;
+        let plaintext_byte_length =
+            u64::try_from(plaintext.len()).map_err(|_| outside_supported_profile_status())?;
+        let next_sealed_plaintext_byte_length = lease
+            .local_record_sealed_plaintext_byte_length
+            .checked_add(plaintext_byte_length)
+            .ok_or_else(outside_supported_profile_status)?;
+        if next_seal_invocation_count > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
+            || next_sealed_plaintext_byte_length
+                > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT
+        {
+            return Err(outside_supported_profile_status());
+        }
+        let envelope = lease
+            .root
+            .seal_authenticated_repair_head(
+                request.runtime_build_manifest_hash,
+                request.namespace,
+                nonce,
+                plaintext,
+            )
+            .map_err(schema_status)?;
+        lease.local_record_seal_invocation_count = next_seal_invocation_count;
+        lease.local_record_sealed_plaintext_byte_length = next_sealed_plaintext_byte_length;
+        Ok(envelope)
+    })
+}
+
+fn open_repair_head(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let request = read_authenticated_repair_request(&mut reader)?;
+    let envelope = reader.read_remaining();
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active(request.handle, &request.capability)?;
+        lease
+            .root
+            .open_authenticated_repair_head(
+                request.runtime_build_manifest_hash,
+                request.namespace,
+                envelope,
+            )
+            .into_result()
+            .map(|mut plaintext| core::mem::take(&mut *plaintext))
+            .map_err(refusal_status)
+    })
+}
+
+fn digest_repair_head(input: &[u8]) -> RuntimeResult<Vec<u8>> {
+    let mut reader = InputReader::new(input);
+    let request = read_authenticated_repair_request(&mut reader)?;
+    let sealed_head_bytes = reader.read_remaining();
+    ROOT_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let lease = registry.active(request.handle, &request.capability)?;
+        Ok(lease
+            .root
+            .derive_authenticated_repair_head_digest(
+                request.runtime_build_manifest_hash,
+                request.namespace,
+                sealed_head_bytes,
+            )
+            .map_err(schema_status)?
+            .into_bytes()
+            .to_vec())
+    })
+}
+
 struct RecordRequest<'input> {
     handle: u32,
     capability: [u8; LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH],
@@ -602,7 +1033,6 @@ struct RecordRequest<'input> {
     record_type: LocalRecordType,
     identifier_context: &'input [u8],
     record_version: u64,
-    creation_recovery_epoch: u64,
     predecessor_record_hash: Option<Hash512>,
 }
 
@@ -617,7 +1047,6 @@ fn read_record_request<'input>(
         usize::try_from(reader.read_u32()?).map_err(|_| malformed_status())?;
     let identifier_context = reader.read_slice(identifier_context_byte_length)?;
     let record_version = reader.read_u64()?;
-    let creation_recovery_epoch = reader.read_u64()?;
     let predecessor_record_hash = match reader.read_u8()? {
         0 => None,
         1 => Some(Hash512::from_bytes(reader.read_array()?)),
@@ -630,7 +1059,6 @@ fn read_record_request<'input>(
         record_type,
         identifier_context,
         record_version,
-        creation_recovery_epoch,
         predecessor_record_hash,
     })
 }
@@ -650,10 +1078,6 @@ fn derive_record_identifier_from_context(
         LocalRecordType::ActionRandomness => {
             reader.finish()?;
             LocalRecordIdentifierInput::ActionRandomness
-        }
-        LocalRecordType::PublicCoinPrivateMaterial => {
-            reader.finish()?;
-            LocalRecordIdentifierInput::PublicCoinPrivateMaterial
         }
         LocalRecordType::SourceVssMaterial => {
             let material_context_hash = Hash512::from_bytes(reader.read_array()?);
@@ -751,6 +1175,32 @@ fn derive_record_identifier_from_context(
                 checkpoint_identifier,
                 chunk_index,
                 chunk_digest,
+            }
+        }
+        LocalRecordType::CommonProofExternalMemory => {
+            if identifier_context.len()
+                != COMMON_PROOF_EXTERNAL_MEMORY_IDENTIFIER_CONTEXT_BYTE_LENGTH
+            {
+                return Err(malformed_status());
+            }
+            let common_proof_environment_identifier = reader.read_array()?;
+            let common_proof_runtime_binding_hash = Hash512::from_bytes(reader.read_array()?);
+            let proof_attempt_lineage_identifier = reader.read_array()?;
+            let record_kind =
+                CommonProofExternalMemoryRecordKind::from_canonical_code(reader.read_u16()?)
+                    .ok_or_else(|| refusal_status(RefusalReason::WrongTypeOrLength))?;
+            let object_ordinal = reader.read_u32()?;
+            let chunk_ordinal = reader.read_u32()?;
+            let byte_offset = reader.read_u64()?;
+            reader.finish()?;
+            LocalRecordIdentifierInput::CommonProofExternalMemory {
+                common_proof_environment_identifier,
+                common_proof_runtime_binding_hash,
+                proof_attempt_lineage_identifier,
+                record_kind,
+                object_ordinal,
+                chunk_ordinal,
+                byte_offset,
             }
         }
     };

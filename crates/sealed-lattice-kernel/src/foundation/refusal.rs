@@ -20,6 +20,23 @@ pub enum RefusalReason {
 }
 
 impl RefusalReason {
+    #[cfg(test)]
+    pub(crate) const ALL: [Self; 13] = [
+        Self::MalformedEncoding,
+        Self::UnsupportedVersionOrSuite,
+        Self::OutsideSupportedProfile,
+        Self::WrongContext,
+        Self::WrongTypeOrLength,
+        Self::WrongHashOrRoot,
+        Self::InvalidSignature,
+        Self::DuplicateIdentity,
+        Self::Equivocation,
+        Self::MissingPrerequisite,
+        Self::InvalidProof,
+        Self::InvalidArithmeticRelation,
+        Self::ConsumedState,
+    ];
+
     pub const fn canonical_code(self) -> u16 {
         self as u16
     }
@@ -65,26 +82,6 @@ impl RefusalReason {
             Self::ConsumedState => "consumedState",
         }
     }
-
-    /// Decodes the language-neutral name used at JavaScript and evidence boundaries.
-    pub fn try_from_name(name: &str) -> Result<Self, Self> {
-        match name {
-            "malformedEncoding" => Ok(Self::MalformedEncoding),
-            "unsupportedVersionOrSuite" => Ok(Self::UnsupportedVersionOrSuite),
-            "outsideSupportedProfile" => Ok(Self::OutsideSupportedProfile),
-            "wrongContext" => Ok(Self::WrongContext),
-            "wrongTypeOrLength" => Ok(Self::WrongTypeOrLength),
-            "wrongHashOrRoot" => Ok(Self::WrongHashOrRoot),
-            "invalidSignature" => Ok(Self::InvalidSignature),
-            "duplicateIdentity" => Ok(Self::DuplicateIdentity),
-            "equivocation" => Ok(Self::Equivocation),
-            "missingPrerequisite" => Ok(Self::MissingPrerequisite),
-            "invalidProof" => Ok(Self::InvalidProof),
-            "invalidArithmeticRelation" => Ok(Self::InvalidArithmeticRelation),
-            "consumedState" => Ok(Self::ConsumedState),
-            _ => Err(Self::MalformedEncoding),
-        }
-    }
 }
 
 impl fmt::Display for RefusalReason {
@@ -125,31 +122,29 @@ impl<VerifiedValue> VerificationResult<VerifiedValue> {
 #[cfg(test)]
 mod tests {
     use super::RefusalReason;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct RefusalReasonVector {
+        code: u16,
+        name: String,
+    }
 
     #[test]
     fn refusal_codes_and_names_are_closed_and_stable() {
-        let expected = [
-            (0x0001, "malformedEncoding"),
-            (0x0002, "unsupportedVersionOrSuite"),
-            (0x0003, "outsideSupportedProfile"),
-            (0x0004, "wrongContext"),
-            (0x0005, "wrongTypeOrLength"),
-            (0x0006, "wrongHashOrRoot"),
-            (0x0007, "invalidSignature"),
-            (0x0008, "duplicateIdentity"),
-            (0x0009, "equivocation"),
-            (0x000a, "missingPrerequisite"),
-            (0x000b, "invalidProof"),
-            (0x000c, "invalidArithmeticRelation"),
-            (0x000d, "consumedState"),
-        ];
+        let expected: Vec<RefusalReasonVector> = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test-vectors/foundation-refusal-reasons.json"
+        )))
+        .expect("foundation refusal-reason vectors must parse");
+        assert_eq!(expected.len(), RefusalReason::ALL.len());
 
-        for (expected_code, expected_name) in expected {
-            let reason = RefusalReason::try_from_canonical_code(expected_code)
+        for (reason, expected) in RefusalReason::ALL.into_iter().zip(expected) {
+            let decoded = RefusalReason::try_from_canonical_code(expected.code)
                 .expect("assigned refusal code decodes");
-            assert_eq!(reason.canonical_code(), expected_code);
-            assert_eq!(reason.name(), expected_name);
-            assert_eq!(RefusalReason::try_from_name(expected_name), Ok(reason));
+            assert_eq!(decoded, reason);
+            assert_eq!(reason.canonical_code(), expected.code);
+            assert_eq!(reason.name(), expected.name);
         }
     }
 
@@ -158,16 +153,6 @@ mod tests {
         for code in [0, 0x000e, 0x0100, u16::MAX] {
             assert_eq!(
                 RefusalReason::try_from_canonical_code(code),
-                Err(RefusalReason::MalformedEncoding)
-            );
-        }
-    }
-
-    #[test]
-    fn unknown_refusal_names_fail_as_malformed_encoding() {
-        for name in ["", "InvalidProof", "invalid-proof", "unknown"] {
-            assert_eq!(
-                RefusalReason::try_from_name(name),
                 Err(RefusalReason::MalformedEncoding)
             );
         }

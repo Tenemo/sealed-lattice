@@ -114,13 +114,13 @@ pub(super) fn verify_context(
             Vec::new(),
         )));
     };
-    if !participant_count_is_supported(participant_count) {
+    if !participant_count_is_configurable(participant_count) {
         return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::OutsideSupportedProfile,
-                "participantCountOutsideSupportedRange",
-                "setupContext.participantCount must be a supported roster size in 3..=20",
+                "participantCountOutsideConfigurableRange",
+                "setupContext.participantCount must be an integer from 3 through 20",
                 "setupPackage.setupContext.participantCount".to_string(),
             )],
         )));
@@ -141,7 +141,7 @@ pub(super) fn verify_context(
             vec![Refusal::new(
                 crate::foundation::RefusalReason::WrongHashOrRoot,
                 "setupParametersHashMismatch",
-                "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
+                "setupContext.setupParametersHash does not match the roster-derived collective BGV setup parameters",
                 "setupPackage.setupContext.setupParametersHash".to_string(),
             )],
         )));
@@ -173,7 +173,7 @@ fn compare_expected_hash(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 format!("setupContext.{context_field_name} must be a protocol hash"),
             )
         })?;

@@ -13,7 +13,6 @@ import type {
 const wasm32WordByteLength = 4;
 
 type AcceptedSetupCanonicalStreamBeginInput = Readonly<{
-    readonly chunkCountPointer: number;
     readonly descriptorLength: number;
     readonly descriptorPointer: number;
     readonly familyCode: number;
@@ -35,7 +34,6 @@ type AcceptedSetupSessionKernelContext = Readonly<{
         descriptorLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
-        chunkCountPointer: number,
     ): number;
     cancel(sessionHandle: number): number;
     deallocate(pointer: number, length: number): void;
@@ -63,15 +61,22 @@ const sessionImplementations = new WeakMap<
 
 class AcceptedSetupSessionImplementation implements AcceptedSetupSession {
     readonly #context: AcceptedSetupSessionKernelContext;
+    readonly #kernel: TranscriptCoreKernelContextOwner;
     readonly #sessionHandle: number;
     #active = true;
 
     public constructor(
+        kernel: TranscriptCoreKernelContextOwner,
         context: AcceptedSetupSessionKernelContext,
         sessionHandle: number,
     ) {
+        this.#kernel = kernel;
         this.#context = context;
         this.#sessionHandle = sessionHandle;
+    }
+
+    public belongsToKernel(kernel: TranscriptCoreKernelContextOwner): boolean {
+        return this.#kernel === kernel;
     }
 
     public beginCanonicalStream(
@@ -87,7 +92,6 @@ class AcceptedSetupSessionImplementation implements AcceptedSetupSession {
             input.descriptorLength,
             input.statusPointer,
             input.totalByteLengthPointer,
-            input.chunkCountPointer,
         );
     }
 
@@ -194,6 +198,7 @@ export const openAcceptedSetupSession = (
             );
         }
         const session = new AcceptedSetupSessionImplementation(
+            kernel,
             context,
             sessionHandle,
         );
@@ -219,6 +224,21 @@ export const openAcceptedSetupSession = (
         if (statusPointer !== 0) {
             context.deallocate(statusPointer, wasm32WordByteLength);
         }
+    }
+};
+
+export const requireAcceptedSetupSessionKernelOwner = (
+    session: AcceptedSetupSession,
+    kernel: TranscriptCoreKernelContextOwner,
+): void => {
+    const implementation = sessionImplementations.get(session);
+    if (
+        implementation === undefined ||
+        !implementation.belongsToKernel(kernel)
+    ) {
+        throw new CanonicalStreamInternalError(
+            'The accepted-setup session belongs to another WASM kernel.',
+        );
     }
 };
 

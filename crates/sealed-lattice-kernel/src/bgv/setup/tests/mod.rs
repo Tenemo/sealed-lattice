@@ -28,7 +28,7 @@ mod private_vss;
 mod sharing_algebra;
 mod vss_share_relation;
 
-const TEST_SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND: i128 = 1;
+const TEST_SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND: i128 = 2;
 
 fn valid_hash(fill: char) -> String {
     fill.to_string().repeat(128)

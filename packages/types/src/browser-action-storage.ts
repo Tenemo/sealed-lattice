@@ -1,3 +1,8 @@
+import type {
+    StateCapabilityKind,
+    VerificationResult,
+} from './foundation-contract.js';
+
 export const browserActionStorageCustodyErrorCodes = Object.freeze([
     'Closed',
     'CommitmentMismatch',
@@ -6,10 +11,9 @@ export const browserActionStorageCustodyErrorCodes = Object.freeze([
     'InvalidCanonicalMaterial',
     'InvalidInput',
     'InvalidState',
+    'MissingRecord',
     'OwnedWorkerFailure',
     'RecordAuthenticationFailed',
-    'RecoveryAlreadyExported',
-    'RecoveryConfirmationFailed',
     'StorageFailure',
     'Unavailable',
 ] as const);
@@ -52,14 +56,149 @@ export type WorkerPreparedDeviceWrappingState = Readonly<{
     wrappedStorageRoot: Uint8Array;
 }>;
 
-export type WorkerPreparedRecoveryState = WorkerPreparedDeviceWrappingState &
+export type BrowserAuthenticatedRepairProtectionInput = Readonly<{
+    namespace: string;
+    runtimeBuildManifestHash: Uint8Array;
+}>;
+
+export type WorkerOpenedBrowserAuthenticatedRepairProtection = Readonly<{
+    repairIdentity: Uint8Array;
+    repairProtectionSessionIdentifier: string;
+}>;
+
+export type BrowserFoundationWitnessProvisioningBinding = Readonly<{
+    subjectParticipantIdentity: Uint8Array;
+    witnessParticipantIdentity: Uint8Array;
+}>;
+
+export type BrowserFoundationInitializationWitnessInput =
+    BrowserFoundationWitnessProvisioningBinding;
+
+export type BrowserFoundationInitializationPreparationInput = Readonly<{
+    actionRandomnessRecordContext: BrowserActionRandomnessRecordContext;
+    orderedWitnessBindings: readonly BrowserFoundationInitializationWitnessInput[];
+    runtimeBuildManifestHash: Uint8Array;
+}>;
+
+/** Worker-only validated preparation input. */
+export type WorkerBrowserFoundationInitializationPreparationInput = Readonly<{
+    actionRandomnessRecordContext: BrowserActionRandomnessRecordContext;
+    orderedWitnessBindings: readonly BrowserFoundationWitnessProvisioningBinding[];
+    runtimeBuildManifestHash: Uint8Array;
+}>;
+
+/** Structured-clone-safe result retained only inside the custody channel. */
+export type WorkerPreparedBrowserFoundationInitialization = Readonly<{
+    actionRandomness: BrowserSealedActionRandomnessSession &
+        Readonly<{
+            envelopeHash: Uint8Array;
+            localRecordIdentifier: Uint8Array;
+        }>;
+    witnessStateRecords: readonly Readonly<{
+        authorizedEmptyPlaintext: Uint8Array;
+        canonicalEnvelope: Uint8Array;
+        envelopeHash: Uint8Array;
+        localRecordIdentifier: Uint8Array;
+        roleIndex: number;
+        stateKey: Uint8Array;
+    }>[];
+}>;
+
+/** Worker-only deterministic bindings used to authenticate a retained batch. */
+export type WorkerDerivedBrowserFoundationInitializationRecords = Readonly<{
+    actionRandomnessLocalRecordIdentifier: Uint8Array;
+    witnessStateRecords: readonly Readonly<{
+        authorizedEmptyPlaintext: Uint8Array;
+        localRecordIdentifier: Uint8Array;
+        roleIndex: number;
+        stateKey: Uint8Array;
+    }>[];
+}>;
+
+export type BrowserActionStateVerifierSessionInput = Readonly<{
+    canonicalRosterBytes: Uint8Array;
+}>;
+
+export type BrowserActionStateReservationVerificationInput = Readonly<{
+    canonicalReservationIntentCarrier: Uint8Array;
+    canonicalStateCertificate: Uint8Array;
+    capabilityKind: StateCapabilityKind;
+    expectedAuthorizationHash: Uint8Array;
+    stateVerifierSessionIdentifier: string;
+    subjectParticipantIdentity: Uint8Array;
+}>;
+
+export type BrowserActionRandomnessReservationVerificationInput = Readonly<{
+    actionRandomnessSessionIdentifier: string;
+    canonicalReservationIntentCarrier: Uint8Array;
+    canonicalStateCertificate: Uint8Array;
+    stateVerifierSessionIdentifier: string;
+}>;
+
+export type BrowserStateObjectSignatureOperation = Readonly<{
+    signStateObjectMessage(signatureMessageHash: Uint8Array): Uint8Array;
+}>;
+
+export type BrowserProducedActionRandomnessReservationIntent = Readonly<{
+    canonicalReservationIntentCarrier: Uint8Array;
+    stateIntentIdentifier: string;
+}>;
+
+export type BrowserProducedActionRandomnessReservation = Readonly<{
+    canonicalStateCertificate: Uint8Array;
+    stateReservationIdentifier: string;
+}>;
+
+export type BrowserActionRandomnessReservationIntentProductionInput = Readonly<{
+    actionRandomnessSessionIdentifier: string;
+    signatureOperation: BrowserStateObjectSignatureOperation;
+    stateVerifierSessionIdentifier: string;
+}>;
+
+export type BrowserActionRandomnessReservationIntentWitnessVerificationInput =
     Readonly<{
-        canonicalRecoveryText: string;
+        canonicalReservationIntentCarrier: Uint8Array;
+        stateVerifierSessionIdentifier: string;
+        subjectParticipantIdentity: Uint8Array;
     }>;
 
-export type LocalStorageRecoveryExportMaterial = Readonly<{
-    canonicalRecoveryText: string;
-    recoveryChecksum: Uint8Array;
+export type BrowserActionRandomnessReservationWitnessVoteProductionInput =
+    Readonly<{
+        signatureOperation: BrowserStateObjectSignatureOperation;
+        stateIntentIdentifier: string;
+        witnessParticipantIdentity: Uint8Array;
+    }>;
+
+export type BrowserActionRandomnessReservationCertificationInput = Readonly<{
+    stateIntentIdentifier: string;
+    untrustedVoteCarriers: readonly Uint8Array[];
+}>;
+
+export type BrowserActionRandomnessRecordContext = Readonly<{
+    predecessorRecordHash?: Uint8Array;
+    recordVersion: bigint;
+}>;
+
+export type BrowserSealedActionRandomnessSession = Readonly<{
+    actionRandomnessCommitment: Uint8Array;
+    actionRandomnessSessionIdentifier: string;
+    canonicalEnvelope: Uint8Array;
+}>;
+
+export type BrowserOpenedActionRandomnessSession = Omit<
+    BrowserSealedActionRandomnessSession,
+    'canonicalEnvelope'
+>;
+
+export type BrowserActionProofAttemptBinding = Readonly<{
+    applicationSlotHash: Uint8Array;
+    attemptIdentifier: Uint8Array;
+}>;
+
+export type BrowserTargetReleaseAttemptInput = Readonly<{
+    actionRandomnessSessionIdentifier: string;
+    rosterPosition: number;
+    stateReservationIdentifier: string;
 }>;
 
 export type BrowserLocalRecordIdentifierInput =
@@ -111,10 +250,14 @@ export type BrowserLocalRecordIdentifierInput =
           recordType: 'checkpointChunk';
       }>;
 
+export type BrowserLocalRecordOpenableIdentifierInput = Exclude<
+    BrowserLocalRecordIdentifierInput,
+    Readonly<{ recordType: 'actionRandomness' }>
+>;
+
 export type BrowserLocalRecordExpectedContext = Readonly<{
     actionRandomnessCommitment: Uint8Array;
-    creationRecoveryEpoch: bigint;
-    identifierInput: BrowserLocalRecordIdentifierInput;
+    identifierInput: BrowserLocalRecordOpenableIdentifierInput;
     predecessorRecordHash?: Uint8Array;
     recordVersion: bigint;
 }>;
@@ -139,23 +282,9 @@ export type BrowserActionStorageWorkerKernel = Readonly<{
         untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
         state: WorkerPreparedDeviceWrappingState;
     }): Promise<void>;
-    stageRecoveryValueImportAndDeviceWrapping(input: {
-        binding: BrowserActionStorageRootBinding;
-        caseInsensitiveRecoveryText: string;
-        untrustedExpectedCommitment: UntrustedExpectedStorageRootCommitment;
-    }): Promise<WorkerPreparedRecoveryState>;
-    commitStagedActionStorageRoot(input: {
-        mutationIdentifier: Uint8Array;
-    }): Promise<void>;
+    commitStagedActionStorageRoot(): Promise<void>;
     discardStagedActionStorageRoot(): Promise<void>;
     destroyActiveActionStorageRoot(): Promise<void>;
-    prepareRecoveryExport(input: {
-        activeMutationIdentifier: Uint8Array;
-    }): Promise<LocalStorageRecoveryExportMaterial>;
-    confirmRecoveryChecksum(input: {
-        canonicalRecoveryText: string;
-        confirmedChecksum: Uint8Array;
-    }): Promise<void>;
     deriveActiveLocalRecordIdentifier(
         input: BrowserLocalRecordIdentifierInput,
     ): Promise<Uint8Array>;
@@ -166,4 +295,51 @@ export type BrowserActionStorageWorkerKernel = Readonly<{
         input: BrowserLocalRecordOpenInput,
     ): Promise<Uint8Array>;
     hashActiveLocalRecordEnvelope(envelope: Uint8Array): Promise<Uint8Array>;
+    openActiveAuthenticatedRepairProtection(
+        input: BrowserAuthenticatedRepairProtectionInput,
+    ): Promise<WorkerOpenedBrowserAuthenticatedRepairProtection>;
+    sealAuthenticatedRepairHead(input: {
+        plaintext: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Promise<Uint8Array>;
+    openAuthenticatedRepairHead(input: {
+        canonicalEnvelope: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Promise<Uint8Array>;
+    deriveAuthenticatedRepairHeadDigest(input: {
+        sealedHeadBytes: Uint8Array;
+        repairProtectionSessionIdentifier: string;
+    }): Promise<Uint8Array>;
+    closeAuthenticatedRepairProtection(identifier: string): Promise<void>;
+    prepareBrowserFoundationInitialization(
+        input: WorkerBrowserFoundationInitializationPreparationInput,
+    ): Promise<WorkerPreparedBrowserFoundationInitialization>;
+    deriveBrowserFoundationInitializationRecords(
+        input: WorkerBrowserFoundationInitializationPreparationInput,
+    ): Promise<WorkerDerivedBrowserFoundationInitializationRecords>;
+    openActionStateVerifierSession(
+        input: BrowserActionStateVerifierSessionInput,
+    ): Promise<VerificationResult<string>>;
+    verifyActionStateReservation(
+        input: BrowserActionStateReservationVerificationInput,
+    ): Promise<VerificationResult<string>>;
+    verifyActionRandomnessReservation(
+        input: BrowserActionRandomnessReservationVerificationInput,
+    ): Promise<VerificationResult<string>>;
+    releaseActionStateObject(identifier: string): Promise<void>;
+    closeActionStateVerifierSession(identifier: string): Promise<void>;
+    createAndSealActionRandomness(
+        input: BrowserActionRandomnessRecordContext,
+    ): Promise<BrowserSealedActionRandomnessSession>;
+    openSealedActionRandomness(
+        input: BrowserActionRandomnessRecordContext &
+            Readonly<{
+                actionRandomnessCommitment: Uint8Array;
+                canonicalEnvelope: Uint8Array;
+            }>,
+    ): Promise<BrowserOpenedActionRandomnessSession>;
+    closeActionRandomness(identifier: string): Promise<void>;
+    deriveTargetReleaseAttempt(
+        input: BrowserTargetReleaseAttemptInput,
+    ): Promise<BrowserActionProofAttemptBinding>;
 }>;

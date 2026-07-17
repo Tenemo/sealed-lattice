@@ -1,3 +1,4 @@
+import { foundationProfile } from '@sealed-lattice/types';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import type {
@@ -426,7 +427,7 @@ describe('canonical setup material streaming in the public package', () => {
                 rosterHash: expectedRosterHash,
                 setupEpoch: 'epoch',
                 setupParametersHash: proofBytesHash,
-                participantCount: 1,
+                participantCount: 3,
             },
             publicMatrixSeedHash: proofBytesHash,
             sourceTrusteeCoefficientCommitmentMaterialRecords: [],
@@ -467,7 +468,7 @@ describe('canonical setup material streaming in the public package', () => {
                     rosterHash: expectedRosterHash,
                     setupEpoch: 'epoch',
                     setupParametersHash: proofBytesHash,
-                    participantCount: 1,
+                    participantCount: 3,
                 },
                 publicMatrixSeedHash: proofBytesHash,
                 sourceTrusteeCoefficientCommitmentMaterialRecords: [],
@@ -521,7 +522,12 @@ describe('canonical setup material streaming in the public package', () => {
     });
 
     it('rejects an oversized descriptor before copying or loading a kernel', async () => {
-        const oversizedDescriptor = new Uint8Array(131_177);
+        const maximumDescriptorByteLength = canonicalStreamDescriptorFixture(
+            foundationProfile.maximumCanonicalStreamByteLength,
+        ).byteLength;
+        const oversizedDescriptor = new Uint8Array(
+            maximumDescriptorByteLength + 1,
+        );
         const callerSlice = vi.fn(() => new Uint8Array());
         Object.defineProperty(oversizedDescriptor, 'slice', {
             value: callerSlice,
@@ -581,5 +587,38 @@ describe('canonical setup material streaming in the public package', () => {
             loadedFreshMockKernels[1]?.acceptedSetupSession
                 .verifyCollectiveBgvSetup,
         ).toHaveBeenCalledOnce();
+    });
+
+    it('preserves setup verification and cancellation failures together', async () => {
+        const transportCase = setupProofMaterialTransportCases[0];
+        const verificationFailure = new Error('material staging failed');
+        const cancellationFailure = new Error('session cancellation failed');
+        readMaterial.mockRejectedValueOnce(verificationFailure);
+        createFreshMockKernel = () => {
+            const kernel = mockKernel;
+            kernel.acceptedSetupSession.cancel.mockImplementationOnce(() => {
+                throw cancellationFailure;
+            });
+            loadedFreshMockKernels.push(kernel);
+            return kernel;
+        };
+
+        const operation = publicPackage.verifySetupPackage({
+            setupPackage: setupPackageWithProofBytesHashes(transportCase, [
+                proofBytesHash,
+            ]),
+            ...setupVerificationBindings,
+            transportedPublicKeyShareProofMaterial: transportedProofMaterialSet(
+                transportCase,
+                proofMaterialSource(59),
+            ),
+        });
+
+        const error = await operation.catch((failure: unknown) => failure);
+        expect(error).toMatchObject({
+            name: 'SetupPackageVerificationCleanupError',
+            operationFailure: verificationFailure,
+            cleanupFailure: cancellationFailure,
+        });
     });
 });

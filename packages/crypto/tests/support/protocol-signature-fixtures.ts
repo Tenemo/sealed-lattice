@@ -6,8 +6,8 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    canonicalJson,
     deriveCanonicalObjectHash,
+    encodeCanonicalProtocolSignatureMessage,
 } from '#packages/crypto/src/index';
 
 const textEncoder = new TextEncoder();
@@ -41,17 +41,6 @@ const decodeHexField = (
     return bytes;
 };
 
-const canonicalProtocolSignatureMessage = (
-    signature: Pick<ProtocolSignatureEnvelope, 'publicKeyHash' | 'signedRoot'>,
-): Uint8Array =>
-    textEncoder.encode(
-        canonicalJson({
-            messageDomain: 'sealed-lattice/protocol-signature',
-            publicKeyHash: signature.publicKeyHash,
-            signedRoot: signature.signedRoot,
-        }),
-    );
-
 export const createMlDsaKeyPairFixture = (
     seedLabel: string,
 ): MlDsaKeyPairFixture => {
@@ -83,7 +72,7 @@ export const createProtocolSignatureFixture = (
         mlDsa65SecretKeyByteLength,
         'secretKeyBytesHex',
     );
-    const message = canonicalProtocolSignatureMessage({
+    const message = encodeCanonicalProtocolSignatureMessage({
         publicKeyHash: input.publicKeyHash,
         signedRoot: input.signedRoot,
     });

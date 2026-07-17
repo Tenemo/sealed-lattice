@@ -3,12 +3,28 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
+use crate::foundation::{CanonicalItem, CanonicalTuple};
+
 use super::commitment_parameters::*;
 use super::validation::*;
 use super::*;
+use crate::bgv::setup::sampling::sample_public_setup_residues;
 
 static SETUP_COMMITMENT_MATRIX_NTT_CACHE: OnceLock<Mutex<SetupCommitmentMatrixNttCache>> =
     OnceLock::new();
+
+// Version three binds the prime-local rank-one layout. Purpose eleven supplies
+// two ternary columns and purpose twelve supplies one independently sampled
+// ternary column. A matrix belongs to a commitment prime, not to a sharing
+// limb or source trustee.
+const SETUP_COMMITMENT_MATRIX_COEFFICIENT_DOMAIN: &str =
+    "sealed-lattice-bdlop-commitment/purpose-11-12-matrix-coefficient/v3";
+const PUBLIC_SETUP_SAMPLER_CUSTOMIZATION_SCHEMA_IDENTIFIER: u16 = 0x1208;
+const SETUP_COMMITMENT_MATRIX_COORDINATE_SCHEMA_IDENTIFIER: u16 = 0x2123;
+const SETUP_COMMITMENT_MATRIX_COORDINATE_SCHEMA_VERSION: u16 = 3;
+const FOUNDATION_SCHEMA_VERSION: u16 = 1;
+const SETUP_COMMITMENT_MATRIX_PART_A1: u16 = 1;
+const SETUP_COMMITMENT_MATRIX_PART_A2: u16 = 2;
 
 #[derive(Debug, Default)]
 struct SetupCommitmentMatrixNttCache {
@@ -18,7 +34,6 @@ struct SetupCommitmentMatrixNttCache {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct SetupCommitmentMatrixNttKey {
-    source_rns_limb_index: usize,
     commitment_modulus_index: usize,
     matrix_row_index: usize,
     randomness_column_index: usize,
@@ -28,32 +43,50 @@ struct SetupCommitmentMatrixNttKey {
 
 pub(in super::super) fn setup_commitment_matrix_polynomial(
     public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
     commitment_modulus_index: usize,
     matrix_row_index: usize,
     randomness_column_index: usize,
     ring_degree: usize,
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
-    let mut coefficients = Vec::with_capacity(ring_degree);
-    for ring_coefficient_position in 0..ring_degree {
-        coefficients.push(setup_commitment_matrix_coefficient(
-            public_matrix_seed_hash,
-            source_rns_limb_index,
-            commitment_modulus_index,
-            matrix_row_index,
-            randomness_column_index,
-            ring_coefficient_position,
-            modulus,
-        )?);
+    validate_ring_degree(ring_degree)?;
+    validate_matrix_coordinate(
+        commitment_modulus_index,
+        matrix_row_index,
+        randomness_column_index,
+        0,
+    )?;
+    if modulus != DATA_PRIMES[commitment_modulus_index] {
+        return Err(invalid_commitment_input(
+            "commitment matrix modulus does not match its selected data-prime coordinate",
+        ));
     }
 
-    Ok(coefficients)
+    if let Some(structural_polynomial) =
+        structural_matrix_polynomial_kind(matrix_row_index, randomness_column_index)
+    {
+        let mut coefficients = vec![0_u64; ring_degree];
+        if structural_polynomial == StructuralMatrixPolynomial::One {
+            coefficients[0] = 1;
+        }
+        return Ok(coefficients);
+    }
+
+    let canonical_customization_bytes = setup_commitment_matrix_sampler_customization(
+        commitment_modulus_index,
+        matrix_row_index,
+        randomness_column_index,
+    )?;
+    sample_public_setup_residues(
+        public_matrix_seed_hash,
+        &canonical_customization_bytes,
+        modulus,
+        ring_degree,
+    )
 }
 
 pub(super) fn setup_commitment_matrix_ntt(
     public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
     commitment_modulus_index: usize,
     matrix_row_index: usize,
     randomness_column_index: usize,
@@ -61,7 +94,6 @@ pub(super) fn setup_commitment_matrix_ntt(
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
     let key = SetupCommitmentMatrixNttKey {
-        source_rns_limb_index,
         commitment_modulus_index,
         matrix_row_index,
         randomness_column_index,
@@ -85,7 +117,6 @@ pub(super) fn setup_commitment_matrix_ntt(
 
     let matrix_polynomial = setup_commitment_matrix_polynomial(
         public_matrix_seed_hash,
-        source_rns_limb_index,
         commitment_modulus_index,
         matrix_row_index,
         randomness_column_index,
@@ -111,7 +142,6 @@ pub(super) fn setup_commitment_matrix_ntt(
 // expensive hash sampling happens once per coordinate set and seed.
 pub(in super::super) fn setup_commitment_matrix_coefficients_cached(
     public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
     commitment_modulus_index: usize,
     matrix_row_index: usize,
     randomness_column_index: usize,
@@ -120,7 +150,6 @@ pub(in super::super) fn setup_commitment_matrix_coefficients_cached(
 ) -> CanonicalResult<Vec<u64>> {
     let matrix_ntt = setup_commitment_matrix_ntt(
         public_matrix_seed_hash,
-        source_rns_limb_index,
         commitment_modulus_index,
         matrix_row_index,
         randomness_column_index,
@@ -131,67 +160,67 @@ pub(in super::super) fn setup_commitment_matrix_coefficients_cached(
     inverse_negacyclic_ntt(&matrix_ntt, modulus)
 }
 
-fn setup_commitment_matrix_coefficient(
-    public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
+fn setup_commitment_matrix_sampler_customization(
     commitment_modulus_index: usize,
     matrix_row_index: usize,
     randomness_column_index: usize,
-    ring_coefficient_position: usize,
-    modulus: u64,
-) -> CanonicalResult<u64> {
-    validate_matrix_coordinate(
-        source_rns_limb_index,
-        commitment_modulus_index,
-        matrix_row_index,
-        randomness_column_index,
-        ring_coefficient_position,
-    )?;
-    if let Some(structural_coefficient) = structural_matrix_coefficient(
-        matrix_row_index,
-        randomness_column_index,
-        ring_coefficient_position,
-    ) {
-        return Ok(structural_coefficient % modulus);
-    }
-
-    sample_commitment_matrix_residue(
-        public_matrix_seed_hash,
-        source_rns_limb_index,
-        commitment_modulus_index,
-        matrix_row_index,
-        randomness_column_index,
-        ring_coefficient_position,
-        modulus,
+) -> CanonicalResult<Vec<u8>> {
+    let commitment_data_prime_index = u16::try_from(commitment_modulus_index)
+        .map_err(|_| invalid_commitment_input("commitment data-prime index does not fit u16"))?;
+    let (matrix_part, row, column) = if matrix_row_index < SETUP_COMMITMENT_MODULE_RANK {
+        (
+            SETUP_COMMITMENT_MATRIX_PART_A1,
+            matrix_row_index,
+            randomness_column_index,
+        )
+    } else {
+        (SETUP_COMMITMENT_MATRIX_PART_A2, 0, randomness_column_index)
+    };
+    let row = u16::try_from(row)
+        .map_err(|_| invalid_commitment_input("commitment matrix row does not fit u16"))?;
+    let column = u16::try_from(column)
+        .map_err(|_| invalid_commitment_input("commitment matrix column does not fit u16"))?;
+    let canonical_coordinate_bytes = CanonicalTuple::new(
+        SETUP_COMMITMENT_MATRIX_COORDINATE_SCHEMA_IDENTIFIER,
+        SETUP_COMMITMENT_MATRIX_COORDINATE_SCHEMA_VERSION,
+        vec![
+            CanonicalItem::unsigned16(commitment_data_prime_index),
+            CanonicalItem::unsigned16(matrix_part),
+            CanonicalItem::unsigned16(row),
+            CanonicalItem::unsigned16(column),
+        ],
     )
-}
+    .encode()
+    .map_err(|error| {
+        invalid_commitment_input(format!(
+            "commitment matrix coordinate encoding failed: {error}"
+        ))
+    })?;
 
-// Structural identity and message-blinding entries are the ring scalar 1
-// (constant coefficient only), not an all-ones coefficient vector.
-fn structural_matrix_coefficient(
-    matrix_row_index: usize,
-    randomness_column_index: usize,
-    ring_coefficient_position: usize,
-) -> Option<u64> {
-    if matrix_row_index < SETUP_COMMITMENT_MODULE_RANK
-        && randomness_column_index > SETUP_COMMITMENT_MODULE_RANK
-    {
-        let identity_column_index = randomness_column_index - SETUP_COMMITMENT_MODULE_RANK - 1;
-        let is_identity_entry = identity_column_index == matrix_row_index;
-        return Some(u64::from(
-            is_identity_entry && ring_coefficient_position == 0,
-        ));
-    }
-    if matrix_row_index == SETUP_COMMITMENT_MODULE_RANK
-        && randomness_column_index >= SETUP_COMMITMENT_MODULE_RANK
-    {
-        let is_message_blinding_column = randomness_column_index == SETUP_COMMITMENT_MODULE_RANK;
-        return Some(u64::from(
-            is_message_blinding_column && ring_coefficient_position == 0,
-        ));
-    }
-
-    None
+    CanonicalTuple::new(
+        PUBLIC_SETUP_SAMPLER_CUSTOMIZATION_SCHEMA_IDENTIFIER,
+        FOUNDATION_SCHEMA_VERSION,
+        vec![
+            CanonicalItem::nonempty_ascii(SETUP_COMMITMENT_MATRIX_COEFFICIENT_DOMAIN).map_err(
+                |error| {
+                    invalid_commitment_input(format!(
+                        "commitment matrix role-domain encoding failed: {error}"
+                    ))
+                },
+            )?,
+            CanonicalItem::variable_bytes(canonical_coordinate_bytes).map_err(|error| {
+                invalid_commitment_input(format!(
+                    "commitment matrix coordinate byte encoding failed: {error}"
+                ))
+            })?,
+        ],
+    )
+    .encode()
+    .map_err(|error| {
+        invalid_commitment_input(format!(
+            "commitment matrix sampler customization encoding failed: {error}"
+        ))
+    })
 }
 
 pub(in super::super) fn structural_matrix_polynomial_kind(
@@ -221,46 +250,111 @@ pub(in super::super) fn structural_matrix_polynomial_kind(
     None
 }
 
-fn sample_commitment_matrix_residue(
-    public_matrix_seed_hash: &str,
-    source_rns_limb_index: usize,
-    commitment_modulus_index: usize,
-    matrix_row_index: usize,
-    randomness_column_index: usize,
-    ring_coefficient_position: usize,
-    modulus: u64,
-) -> CanonicalResult<u64> {
-    let source_limb_text = source_rns_limb_index.to_string();
-    let commitment_modulus_text = commitment_modulus_index.to_string();
-    let matrix_row_text = matrix_row_index.to_string();
-    let randomness_column_text = randomness_column_index.to_string();
-    let position_text = ring_coefficient_position.to_string();
-    let modulus_text = modulus.to_string();
-    let mut block_index = 0_u64;
-    loop {
-        let block_index_text = block_index.to_string();
-        let output = hash512(
-            "sealed-lattice-bdlop-commitment/matrix-coefficient",
-            &[
-                public_matrix_seed_hash.as_bytes(),
-                source_limb_text.as_bytes(),
-                commitment_modulus_text.as_bytes(),
-                matrix_row_text.as_bytes(),
-                randomness_column_text.as_bytes(),
-                position_text.as_bytes(),
-                modulus_text.as_bytes(),
-                block_index_text.as_bytes(),
-            ],
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcript_core::encode_hex;
+
+    #[test]
+    fn matrix_sampler_customization_has_the_exact_version_three_encoding() -> CanonicalResult<()> {
+        let customization = setup_commitment_matrix_sampler_customization(0, 0, 0)?;
+
+        assert_eq!(
+            encode_hex(&customization),
+            concat!(
+                "0812010002000000020047000000430000007365616c65642d6c6174746963652d",
+                "62646c6f702d636f6d6d69746d656e742f707572706f73652d31312d31322d6d",
+                "61747269782d636f656666696369656e742f763301002c00000028000000232103",
+                "000400000003000200000000000300020000000100030002000000000003000200",
+                "00000000"
+            )
         );
-        for chunk in output.chunks_exact(8) {
-            let mut word = [0_u8; 8];
-            word.copy_from_slice(chunk);
-            if let Some(reduced_value) = reduce_unbiased_u64(u64::from_le_bytes(word), modulus) {
-                return Ok(reduced_value);
-            }
-        }
-        block_index = block_index
-            .checked_add(1)
-            .ok_or_else(|| invalid_commitment_input("matrix sampling block index overflow"))?;
+        Ok(())
+    }
+
+    #[test]
+    fn matrix_sampler_matches_the_independent_cshake_vector() -> CanonicalResult<()> {
+        let zero_seed = "00".repeat(64);
+        let a1 = setup_commitment_matrix_polynomial(&zero_seed, 0, 0, 0, 8, DATA_PRIMES[0])?;
+        let a2 = setup_commitment_matrix_polynomial(
+            &zero_seed,
+            0,
+            SETUP_COMMITMENT_MODULE_RANK,
+            0,
+            8,
+            DATA_PRIMES[0],
+        )?;
+
+        assert_eq!(
+            a1,
+            vec![
+                74_233_248_433_461,
+                93_662_928_840_886,
+                69_113_591_029_174,
+                95_983_993_961_951,
+                47_260_697_516_106,
+                74_728_968_932_805,
+                23_165_785_688_220,
+                43_774_976_744_748,
+            ]
+        );
+        assert_eq!(
+            a2,
+            vec![
+                23_215_683_972_662,
+                76_502_121_174_878,
+                79_984_457_241_307,
+                64_002_282_650_182,
+                92_286_285_641_774,
+                60_829_121_885_974,
+                105_821_010_475_260,
+                79_724_811_664_109,
+            ]
+        );
+        assert_ne!(a1, a2);
+        Ok(())
+    }
+
+    #[test]
+    fn hnf_structural_polynomials_are_not_sampled() -> CanonicalResult<()> {
+        let seed = "11".repeat(64);
+        let identity = setup_commitment_matrix_polynomial(
+            &seed,
+            0,
+            0,
+            SETUP_COMMITMENT_MODULE_RANK + 1,
+            8,
+            DATA_PRIMES[0],
+        )?;
+        let message_blinding = setup_commitment_matrix_polynomial(
+            &seed,
+            0,
+            SETUP_COMMITMENT_MODULE_RANK,
+            SETUP_COMMITMENT_MODULE_RANK,
+            8,
+            DATA_PRIMES[0],
+        )?;
+        let zero = setup_commitment_matrix_polynomial(
+            &seed,
+            0,
+            SETUP_COMMITMENT_MODULE_RANK,
+            SETUP_COMMITMENT_MODULE_RANK + 1,
+            8,
+            DATA_PRIMES[0],
+        )?;
+
+        assert_eq!(identity, vec![1, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(message_blinding, identity);
+        assert_eq!(zero, vec![0; 8]);
+        Ok(())
+    }
+
+    #[test]
+    fn matrix_sampler_rejects_a_modulus_not_owned_by_the_coordinate() {
+        let error =
+            setup_commitment_matrix_polynomial(&"22".repeat(64), 0, 0, 0, 8, DATA_PRIMES[1])
+                .expect_err("a matrix coordinate cannot select an unrelated modulus");
+
+        assert!(error.message.contains("does not match"));
     }
 }

@@ -7,12 +7,17 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::{
         CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE, CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
-        CanonicalStreamDomain, CanonicalStreamRuntimeBegin, CanonicalStreamVerifier,
-        FOUNDATION_PROFILE, RefusalReason, VerifiedCanonicalStreamSummary,
-        absorb_canonical_stream_chunk, begin_canonical_stream_verifier, cancel_canonical_stream,
-        derive_canonical_stream_descriptor, finish_canonical_stream_verifier_with_summary,
+        CanonicalStreamDomain, CanonicalStreamRuntimeBegin, RefusalReason,
+        VerifiedCanonicalStreamSummary, absorb_canonical_stream_chunk,
+        begin_canonical_stream_verifier, cancel_canonical_stream,
+        finish_canonical_stream_verifier_with_summary,
     },
     hashing::to_hex,
+};
+
+#[cfg(test)]
+use crate::foundation::{
+    CanonicalStreamVerifier, FOUNDATION_PROFILE, derive_canonical_stream_descriptor,
 };
 
 use super::{
@@ -52,13 +57,13 @@ pub(crate) const TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY: &str =
 const MATERIAL_ROOT_BYTE_LENGTH: usize = 64;
 
 #[derive(Clone)]
-struct VerifiedCanonicalProofMaterial {
+struct AuthenticatedCanonicalProofMaterial {
     proof_bytes: BgvProofMaterialBytes,
     proof_family: &'static str,
 }
 
-static VERIFIED_CANONICAL_PROOF_MATERIALS: OnceLock<
-    Mutex<BTreeMap<String, VerifiedCanonicalProofMaterial>>,
+static AUTHENTICATED_CANONICAL_PROOF_MATERIALS: OnceLock<
+    Mutex<BTreeMap<String, AuthenticatedCanonicalProofMaterial>>,
 > = OnceLock::new();
 
 #[derive(Clone)]
@@ -72,13 +77,6 @@ struct VerifiedCanonicalSetupProofBinding {
 pub(in crate::bgv::setup) struct CanonicalSetupProofBindingLease {
     proof_bytes_hash: String,
     binding: VerifiedCanonicalSetupProofBinding,
-}
-
-#[cfg(test)]
-impl CanonicalSetupProofBindingLease {
-    pub(in crate::bgv::setup) fn proof_bytes_hash(&self) -> &str {
-        &self.proof_bytes_hash
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -110,34 +108,12 @@ impl AcceptedSetupProofBindingSession {
     }
 }
 
-#[cfg(test)]
-pub(in crate::bgv::setup) fn begin_accepted_setup_fixture_proof_binding_session()
--> CanonicalResult<AcceptedSetupProofBindingSession> {
-    AcceptedSetupProofBindingSession::begin_fresh()
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn finish_accepted_setup_fixture_proof_binding_session(
-    session: AcceptedSetupProofBindingSession,
-    proof_bytes_hash: &str,
-) -> CanonicalResult<CanonicalSetupProofBindingLease> {
-    let lease = accepted_setup_proof_binding_lease(session.session_handle, proof_bytes_hash)?
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "accepted-setup fixture proof binding was not retained",
-            )
-        })?;
-    cancel_accepted_setup_proof_binding_session(session.session_handle)?;
-    Ok(lease)
-}
-
 struct AcceptedSetupProofBindingSessionState {
     bindings: BTreeMap<String, VerifiedCanonicalSetupProofBinding>,
     component_materials:
         BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>,
     component_material_roots: BTreeSet<String>,
-    proof_materials: BTreeMap<String, VerifiedCanonicalProofMaterial>,
+    proof_materials: BTreeMap<String, AuthenticatedCanonicalProofMaterial>,
     proof_bytes_hashes: BTreeSet<String>,
     public_key_share_materials: BTreeMap<String, VerifiedCanonicalPublicKeyShareMaterialStoreEntry>,
     public_key_share_material_roots: BTreeSet<String>,
@@ -152,7 +128,7 @@ pub(crate) enum AcceptedSetupMaterialStore {
 
 enum AcceptedSetupMaterial {
     Component(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry),
-    Proof(VerifiedCanonicalProofMaterial),
+    Proof(AuthenticatedCanonicalProofMaterial),
     PublicKeyShare(VerifiedCanonicalPublicKeyShareMaterialStoreEntry),
 }
 
@@ -493,7 +469,7 @@ pub(in crate::bgv::setup) fn retain_accepted_setup_proof_binding(
     }
 
     {
-        let mut materials = verified_canonical_proof_materials()
+        let mut materials = authenticated_canonical_proof_materials()
             .lock()
             .map_err(|_| canonical_proof_store_error())?;
         let material = materials.get(proof_bytes_hash).ok_or_else(|| {
@@ -651,24 +627,16 @@ fn invalid_setup_proof_binding_session(message: &'static str) -> CanonicalError 
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
-fn verified_canonical_proof_materials()
--> &'static Mutex<BTreeMap<String, VerifiedCanonicalProofMaterial>> {
-    VERIFIED_CANONICAL_PROOF_MATERIALS.get_or_init(|| Mutex::new(BTreeMap::new()))
+fn authenticated_canonical_proof_materials()
+-> &'static Mutex<BTreeMap<String, AuthenticatedCanonicalProofMaterial>> {
+    AUTHENTICATED_CANONICAL_PROOF_MATERIALS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-#[cfg(test)]
-pub(in crate::bgv::setup) fn verified_canonical_setup_proof_material_bytes(
-    proof_family: &str,
-    proof_bytes_hash: &str,
-) -> CanonicalResult<Option<SetupProofMaterialBytes>> {
-    verified_canonical_proof_material_bytes(proof_family, proof_bytes_hash)
-}
-
-pub(crate) fn verified_canonical_proof_material_bytes(
+pub(crate) fn authenticated_canonical_proof_material_bytes(
     proof_family: &str,
     proof_bytes_hash: &str,
 ) -> CanonicalResult<Option<BgvProofMaterialBytes>> {
-    let materials = verified_canonical_proof_materials()
+    let materials = authenticated_canonical_proof_materials()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
     let Some(material) = materials.get(proof_bytes_hash) else {
@@ -683,11 +651,11 @@ pub(crate) fn verified_canonical_proof_material_bytes(
     Ok(Some(Arc::clone(&material.proof_bytes)))
 }
 
-pub(crate) fn take_verified_canonical_proof_material_bytes(
+pub(crate) fn take_authenticated_canonical_proof_material_bytes(
     proof_family: &str,
     proof_bytes_hash: &str,
 ) -> CanonicalResult<Option<BgvProofMaterialBytes>> {
-    let mut materials = verified_canonical_proof_materials()
+    let mut materials = authenticated_canonical_proof_materials()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
     let Some(material) = materials.get(proof_bytes_hash) else {
@@ -705,15 +673,8 @@ pub(crate) fn take_verified_canonical_proof_material_bytes(
 }
 
 #[cfg(test)]
-pub(in crate::bgv::setup) fn evict_verified_canonical_setup_proof_materials(
-    proof_bytes_hashes: &[String],
-) {
-    evict_verified_canonical_proof_materials(proof_bytes_hashes);
-}
-
-#[cfg(test)]
-pub(crate) fn evict_verified_canonical_proof_materials(proof_bytes_hashes: &[String]) {
-    let Ok(mut materials) = verified_canonical_proof_materials().lock() else {
+pub(crate) fn evict_authenticated_canonical_proof_materials(proof_bytes_hashes: &[String]) {
+    let Ok(mut materials) = authenticated_canonical_proof_materials().lock() else {
         return;
     };
     for proof_bytes_hash in proof_bytes_hashes {
@@ -721,6 +682,7 @@ pub(crate) fn evict_verified_canonical_proof_materials(proof_bytes_hashes: &[Str
     }
 }
 
+#[cfg(test)]
 pub(crate) fn retain_generated_canonical_proof_material(
     proof_family: &'static str,
     proof_bytes_hash: String,
@@ -728,12 +690,12 @@ pub(crate) fn retain_generated_canonical_proof_material(
 ) -> CanonicalResult<BgvProofMaterialBytes> {
     validate_generated_proof_stream(proof_family, &proof_bytes)?;
     let proof_bytes = Arc::new(CanonicalProofMaterialBytes::from_contiguous(proof_bytes)?);
-    let mut materials = verified_canonical_proof_materials()
+    let mut materials = authenticated_canonical_proof_materials()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
     match materials.entry(proof_bytes_hash) {
         Entry::Vacant(entry) => {
-            entry.insert(VerifiedCanonicalProofMaterial {
+            entry.insert(AuthenticatedCanonicalProofMaterial {
                 proof_bytes: Arc::clone(&proof_bytes),
                 proof_family,
             });
@@ -746,6 +708,7 @@ pub(crate) fn retain_generated_canonical_proof_material(
     }
 }
 
+#[cfg(test)]
 fn validate_generated_proof_stream(proof_family: &str, proof_bytes: &[u8]) -> CanonicalResult<()> {
     let stream_domain = proof_material_stream_domain(proof_family)?;
     let descriptor =
@@ -783,6 +746,7 @@ fn proof_material_stream_domain(proof_family: &str) -> CanonicalResult<Canonical
         })
 }
 
+#[cfg(test)]
 fn canonical_stream_summary_error(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
@@ -838,7 +802,7 @@ impl BgvCanonicalStreamSink {
                     ));
                 }
                 Ok(AcceptedSetupMaterial::Proof(
-                    VerifiedCanonicalProofMaterial {
+                    AuthenticatedCanonicalProofMaterial {
                         proof_bytes,
                         proof_family,
                     },
@@ -917,7 +881,7 @@ impl Default for BgvCanonicalStreamRegistry {
 impl BgvCanonicalStreamRegistry {
     fn refuse_overlapping_transaction(&self) -> Result<(), u32> {
         if self.active_session.is_some() || self.active_material_reader.is_some() {
-            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
+            Err(refusal_status(RefusalReason::ConsumedState))
         } else {
             Ok(())
         }
@@ -958,6 +922,37 @@ impl BgvCanonicalStreamRegistry {
             .ok_or(CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)?;
         self.next_material_reader_handle = handle.checked_add(1);
         Ok(handle)
+    }
+
+    fn recover_active_transactions(&mut self) -> Result<(), u32> {
+        let mut first_error = None;
+        if let Some(reader) = self.active_material_reader.take()
+            && let Err(error) = evict_material_reader_source(&reader)
+        {
+            first_error = Some(error);
+        }
+        if let Some(active_session) = self.active_session.take() {
+            let BgvCanonicalStreamSession {
+                handle,
+                owner,
+                sink,
+                ..
+            } = active_session;
+            if let Err(error) = cancel_canonical_stream(handle) {
+                first_error.get_or_insert(error);
+            }
+            sink.cancel();
+            if let Some(owner) = owner
+                && owner.release().is_err()
+            {
+                first_error.get_or_insert(CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE);
+            }
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }
 
@@ -1055,7 +1050,7 @@ fn begin_bgv_canonical_stream_inner(
     let sink = match family.kind {
         StreamFamilyKind::ProofMaterial { proof_family } => {
             if owner.is_none()
-                && verified_canonical_proof_materials()
+                && authenticated_canonical_proof_materials()
                     .lock()
                     .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)?
                     .contains_key(&material_root)
@@ -1190,7 +1185,7 @@ fn retain_standalone_stream_material(
             "evaluation-key and public-key share material require an accepted-setup session",
         ));
     };
-    let mut materials = verified_canonical_proof_materials()
+    let mut materials = authenticated_canonical_proof_materials()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
     match materials.entry(material_root) {
@@ -1230,14 +1225,11 @@ pub(crate) fn begin_bgv_canonical_material_reader(
         return Err(refusal_status(RefusalReason::MalformedEncoding));
     };
     let material_root = to_hex(material_root);
-    let material = verified_canonical_proof_material_bytes(proof_family, &material_root)
+    let material = authenticated_canonical_proof_material_bytes(proof_family, &material_root)
         .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)?
         .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
     let total_byte_length = u32::try_from(material.len())
         .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
-    let chunk_count = u32::try_from(material.chunk_count())
-        .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)?;
-
     let mut registry = lock_registry()?;
     registry.refuse_overlapping_transaction()?;
     let handle = registry.take_material_reader_handle()?;
@@ -1252,7 +1244,6 @@ pub(crate) fn begin_bgv_canonical_material_reader(
     Ok(CanonicalStreamRuntimeBegin {
         handle,
         total_byte_length,
-        chunk_count,
     })
 }
 
@@ -1317,7 +1308,7 @@ pub(crate) fn cancel_bgv_canonical_material_reader(handle: u32) -> Result<(), u3
 }
 
 fn evict_material_reader_source(reader: &BgvCanonicalMaterialReaderSession) -> Result<(), u32> {
-    let mut materials = verified_canonical_proof_materials()
+    let mut materials = authenticated_canonical_proof_materials()
         .lock()
         .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)?;
     if let Some(material) = materials.get(&reader.material_root)
@@ -1330,16 +1321,18 @@ fn evict_material_reader_source(reader: &BgvCanonicalMaterialReaderSession) -> R
 }
 
 fn lock_registry() -> Result<std::sync::MutexGuard<'static, BgvCanonicalStreamRegistry>, u32> {
-    match bgv_canonical_stream_registry().lock() {
+    let registry_mutex = bgv_canonical_stream_registry();
+    match registry_mutex.lock() {
         Ok(registry) => Ok(registry),
         Err(poisoned) => {
             let mut registry = poisoned.into_inner();
-            registry.active_material_reader = None;
-            if let Some(active_session) = registry.active_session.take() {
-                let _ = cancel_canonical_stream(active_session.handle);
-                active_session.sink.cancel();
+            let recovery_result = registry.recover_active_transactions();
+            drop(registry);
+            registry_mutex.clear_poison();
+            match recovery_result {
+                Ok(()) => Err(CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE),
+                Err(error) => Err(error),
             }
-            Err(CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)
         }
     }
 }
@@ -1446,7 +1439,7 @@ mod tests {
         let material_root = to_hex(&material_root_bytes);
         let retained_proof_bytes = vec![0xd2; FOUNDATION_PROFILE.stream_chunk_byte_length + 17];
         let replacement_proof_bytes = vec![0xd3; FOUNDATION_PROFILE.stream_chunk_byte_length + 17];
-        evict_verified_canonical_proof_materials(std::slice::from_ref(&material_root));
+        evict_authenticated_canonical_proof_materials(std::slice::from_ref(&material_root));
 
         let first_handle = begin_accepted_setup_proof_binding_session()
             .expect("first accepted-setup material session");
@@ -1508,7 +1501,7 @@ mod tests {
         cancel_accepted_setup_proof_binding_session(first_handle)
             .expect("owning session cancellation drains material");
         assert!(
-            verified_canonical_proof_material_bytes("public-key-share", &material_root)
+            authenticated_canonical_proof_material_bytes("public-key-share", &material_root)
                 .expect("drained proof material lookup")
                 .is_none()
         );
@@ -1522,7 +1515,7 @@ mod tests {
         finish_accepted_setup_proof_binding_session(second_handle)
             .expect("terminal completion drains owned raw material");
         assert!(
-            verified_canonical_proof_material_bytes("public-key-share", &material_root)
+            authenticated_canonical_proof_material_bytes("public-key-share", &material_root)
                 .expect("completed session proof material lookup")
                 .is_none()
         );
@@ -1531,7 +1524,7 @@ mod tests {
     #[test]
     fn accepted_setup_proof_bindings_are_one_shot_and_session_scoped() {
         let proof_bytes_hash = "c1".repeat(MATERIAL_ROOT_BYTE_LENGTH);
-        evict_verified_canonical_proof_materials(std::slice::from_ref(&proof_bytes_hash));
+        evict_authenticated_canonical_proof_materials(std::slice::from_ref(&proof_bytes_hash));
         retain_generated_canonical_proof_material(
             "public-key-share",
             proof_bytes_hash.clone(),
@@ -1631,7 +1624,7 @@ mod tests {
         let finish_root = "c3".repeat(MATERIAL_ROOT_BYTE_LENGTH);
         let cancel_root = "c4".repeat(MATERIAL_ROOT_BYTE_LENGTH);
         let roots = [finish_root.clone(), cancel_root.clone()];
-        evict_verified_canonical_proof_materials(&roots);
+        evict_authenticated_canonical_proof_materials(&roots);
         retain_generated_canonical_proof_material(
             "public-key-share",
             finish_root.clone(),
@@ -1741,16 +1734,73 @@ mod tests {
 
         assert_eq!(
             registry.refuse_overlapping_transaction(),
-            Err(refusal_status(RefusalReason::OutsideSupportedProfile)),
+            Err(refusal_status(RefusalReason::ConsumedState)),
         );
         assert!(registry.active_material_reader.is_some());
+    }
+
+    #[test]
+    fn registry_recovery_releases_an_owned_material_root() {
+        let material_root = "d7".repeat(MATERIAL_ROOT_BYTE_LENGTH);
+        let first_session = begin_accepted_setup_proof_binding_session()
+            .expect("first recovery-test accepted-setup session");
+        reserve_accepted_setup_material_root(
+            first_session,
+            AcceptedSetupMaterialStore::Proof,
+            &material_root,
+        )
+        .expect("first session reserves the material root");
+
+        let mut registry = BgvCanonicalStreamRegistry {
+            active_session: Some(BgvCanonicalStreamSession {
+                handle: u32::MAX,
+                material_root: material_root.clone(),
+                owner: Some(AcceptedSetupStreamOwner {
+                    material_root: material_root.clone(),
+                    session: AcceptedSetupProofBindingSession {
+                        session_handle: first_session,
+                    },
+                    store: AcceptedSetupMaterialStore::Proof,
+                }),
+                sink: BgvCanonicalStreamSink::ProofMaterial {
+                    chunks: Vec::new(),
+                    proof_family: "public-key-share",
+                },
+            }),
+            ..BgvCanonicalStreamRegistry::default()
+        };
+
+        assert_eq!(registry.recover_active_transactions(), Ok(()));
+        assert!(registry.active_session.is_none());
+
+        let second_session = begin_accepted_setup_proof_binding_session()
+            .expect("second recovery-test accepted-setup session");
+        reserve_accepted_setup_material_root(
+            second_session,
+            AcceptedSetupMaterialStore::Proof,
+            &material_root,
+        )
+        .expect("poison recovery releases the first session's material-root reservation");
+        release_accepted_setup_material_root(
+            second_session,
+            AcceptedSetupMaterialStore::Proof,
+            &material_root,
+        )
+        .expect("second session releases the material root");
+        cancel_accepted_setup_proof_binding_session(first_session)
+            .expect("first recovery-test session cancels");
+        cancel_accepted_setup_proof_binding_session(second_session)
+            .expect("second recovery-test session cancels");
     }
 
     #[test]
     fn material_reader_finish_and_cancel_evict_retained_source_material() {
         let finished_root = "a1".repeat(MATERIAL_ROOT_BYTE_LENGTH);
         let cancelled_root = "a2".repeat(MATERIAL_ROOT_BYTE_LENGTH);
-        evict_verified_canonical_proof_materials(&[finished_root.clone(), cancelled_root.clone()]);
+        evict_authenticated_canonical_proof_materials(&[
+            finished_root.clone(),
+            cancelled_root.clone(),
+        ]);
 
         let finished_material = retain_generated_canonical_proof_material(
             "public-key-share",
@@ -1771,7 +1821,7 @@ mod tests {
         }
         finish_bgv_canonical_material_reader(61).expect("complete material reader finish");
         assert!(
-            verified_canonical_proof_material_bytes("public-key-share", &finished_root)
+            authenticated_canonical_proof_material_bytes("public-key-share", &finished_root)
                 .expect("finished material store lookup")
                 .is_none()
         );
@@ -1795,7 +1845,7 @@ mod tests {
         }
         cancel_bgv_canonical_material_reader(62).expect("incomplete material reader cancellation");
         assert!(
-            verified_canonical_proof_material_bytes("public-key-share", &cancelled_root)
+            authenticated_canonical_proof_material_bytes("public-key-share", &cancelled_root)
                 .expect("cancelled material store lookup")
                 .is_none()
         );
@@ -1811,7 +1861,7 @@ mod tests {
             wrong_output_length_root.clone(),
             retry_root.clone(),
         ];
-        evict_verified_canonical_proof_materials(&roots);
+        evict_authenticated_canonical_proof_materials(&roots);
 
         let retain_material = |material_root: &str, byte: u8| {
             retain_generated_canonical_proof_material(
@@ -1842,7 +1892,7 @@ mod tests {
             Err(refusal_status(RefusalReason::WrongTypeOrLength)),
         );
         assert!(
-            verified_canonical_proof_material_bytes("public-key-share", &wrong_index_root)
+            authenticated_canonical_proof_material_bytes("public-key-share", &wrong_index_root)
                 .expect("wrong-index source lookup")
                 .is_none()
         );
@@ -1863,9 +1913,12 @@ mod tests {
             Err(refusal_status(RefusalReason::WrongTypeOrLength)),
         );
         assert!(
-            verified_canonical_proof_material_bytes("public-key-share", &wrong_output_length_root,)
-                .expect("wrong-output-length source lookup")
-                .is_none()
+            authenticated_canonical_proof_material_bytes(
+                "public-key-share",
+                &wrong_output_length_root,
+            )
+            .expect("wrong-output-length source lookup")
+            .is_none()
         );
 
         retain_material(&retry_root, 0x73);
@@ -1881,7 +1934,7 @@ mod tests {
         finish_bgv_canonical_material_reader(retry_reader.handle)
             .expect("clean retry reader finishes");
         assert!(
-            verified_canonical_proof_material_bytes("public-key-share", &retry_root)
+            authenticated_canonical_proof_material_bytes("public-key-share", &retry_root)
                 .expect("clean retry source lookup")
                 .is_none()
         );

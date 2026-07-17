@@ -14,7 +14,7 @@ pub(super) fn verify_setup_commitment_opening(
     public_matrix_seed_hash: &str,
     expected_commitment: &SetupCommitmentValue,
     message_coefficients: &[u128],
-    randomness_by_column: &[Vec<i128>],
+    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
     randomness_infinity_bound: i128,
 ) -> CanonicalResult<SetupCommitmentOpeningVerification> {
     let source_message_modulus = DATA_PRIMES
@@ -29,7 +29,7 @@ pub(super) fn verify_setup_commitment_opening(
         public_matrix_seed_hash,
         expected_commitment,
         message_coefficients,
-        randomness_by_column,
+        randomness_by_commitment_limb,
         randomness_infinity_bound,
         Some(u128::from(source_message_modulus)),
     )
@@ -40,14 +40,14 @@ pub(in super::super) fn verify_setup_lifted_commitment_opening(
     public_matrix_seed_hash: &str,
     expected_commitment: &SetupCommitmentValue,
     message_coefficients: &[u128],
-    randomness_by_column: &[Vec<i128>],
+    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
     randomness_infinity_bound: i128,
 ) -> CanonicalResult<SetupCommitmentOpeningVerification> {
     verify_setup_commitment_opening_with_message_bound(
         public_matrix_seed_hash,
         expected_commitment,
         message_coefficients,
-        randomness_by_column,
+        randomness_by_commitment_limb,
         randomness_infinity_bound,
         None,
     )
@@ -58,12 +58,12 @@ pub(super) fn verify_setup_signed_lifted_commitment_opening(
     public_matrix_seed_hash: &str,
     expected_commitment: &SetupCommitmentValue,
     message_coefficients: &[i128],
-    randomness_by_column: &[Vec<i128>],
+    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
     randomness_infinity_bound: i128,
 ) -> CanonicalResult<SetupCommitmentOpeningVerification> {
     validate_signed_message_coefficients(message_coefficients, expected_commitment.ring_degree)?;
-    validate_randomness_by_column(
-        randomness_by_column,
+    validate_randomness_by_commitment_limb(
+        randomness_by_commitment_limb,
         randomness_infinity_bound,
         expected_commitment.ring_degree,
     )?;
@@ -88,7 +88,7 @@ pub(super) fn verify_setup_signed_lifted_commitment_opening(
         expected_commitment.source_rns_limb_index,
         expected_commitment.shamir_coefficient_index,
         message_coefficients,
-        randomness_by_column,
+        randomness_by_commitment_limb,
         expected_commitment.ring_degree,
     )?;
     if &computed_commitment != expected_commitment {
@@ -109,7 +109,7 @@ fn verify_setup_commitment_opening_with_message_bound(
     public_matrix_seed_hash: &str,
     expected_commitment: &SetupCommitmentValue,
     message_coefficients: &[u128],
-    randomness_by_column: &[Vec<i128>],
+    randomness_by_commitment_limb: &[Vec<Vec<i128>>],
     randomness_infinity_bound: i128,
     message_exclusive_bound: Option<u128>,
 ) -> CanonicalResult<SetupCommitmentOpeningVerification> {
@@ -118,8 +118,8 @@ fn verify_setup_commitment_opening_with_message_bound(
         message_exclusive_bound,
         expected_commitment.ring_degree,
     )?;
-    validate_randomness_by_column(
-        randomness_by_column,
+    validate_randomness_by_commitment_limb(
+        randomness_by_commitment_limb,
         randomness_infinity_bound,
         expected_commitment.ring_degree,
     )?;
@@ -135,7 +135,7 @@ fn verify_setup_commitment_opening_with_message_bound(
         expected_commitment.source_rns_limb_index,
         expected_commitment.shamir_coefficient_index,
         message_coefficients,
-        randomness_by_column,
+        randomness_by_commitment_limb,
         expected_commitment.ring_degree,
     )?;
     if &computed_commitment != expected_commitment {

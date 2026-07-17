@@ -1,7 +1,5 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
-
-import { isProtocolHashString } from '../common/verification-helpers.js';
+import { isProtocolHash, type ProtocolHash } from '@sealed-lattice/types';
 
 export type CollectiveBgvSetupRosterEntryInput = Readonly<{
     readonly rosterPosition: number;
@@ -40,7 +38,7 @@ export const deriveCollectiveBgvSetupRosterHash = (
             ) {
                 throw new TypeError('trusteeIdentity must be non-empty.');
             }
-            if (!isProtocolHashString(entry.signingPublicKeyHash)) {
+            if (!isProtocolHash(entry.signingPublicKeyHash)) {
                 throw new TypeError(
                     'signingPublicKeyHash must be a protocol hash.',
                 );

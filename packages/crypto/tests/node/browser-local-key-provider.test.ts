@@ -1,26 +1,35 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
-import { describe, expect, it } from 'vitest';
+import { recipientPrivateVssShareMailboxPayloadType } from '@sealed-lattice/types';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
     BrowserLocalKeyProviderError,
+    type BrowserLocalExternalKeyProviderInput,
     type BrowserLocalMailboxCapability,
+    type BrowserLocalSigningCapability,
     decapsulateClosedMailboxCiphertext,
     encapsulateFreshMailbox,
+    encapsulateResetSafeSetupMailbox,
     openBrowserLocalExternalKeyProvider,
     signFreshMailboxEnvelope,
+    signResetSafeSetupObject,
 } from '../../src/browser-local-key-provider.js';
 
 import {
     createBrowserLocalKeyOperations,
     createBrowserLocalMailboxOperations,
     createBrowserLocalSigningOperations,
+    defaultResetSafeSetupMailboxScope,
 } from '#packages/crypto/tests/support/browser-local-key-operations';
 
 const textEncoder = new TextEncoder();
 const mailboxSignatureContext = textEncoder.encode(
     'sealed-lattice/mailbox-signature/v1',
+);
+const objectSignatureContext = textEncoder.encode(
+    'sealed-lattice/object-signature/v1',
 );
 
 const createKeyMaterial = () => {
@@ -34,16 +43,16 @@ const createKeyMaterial = () => {
     return { signing, mailbox };
 };
 
-const deterministicEntropy = () => {
-    let callIndex = 0;
+const setupMailboxSlot = Object.freeze({
+    ...defaultResetSafeSetupMailboxScope,
+    recipientParticipantId: '66'.repeat(64),
+    producerSequence: '0',
+    payloadType: recipientPrivateVssShareMailboxPayloadType,
+    statementHash: '77'.repeat(64),
+    orderedMaterialRoots: Object.freeze(['88'.repeat(64)]),
+});
 
-    return (byteLength: number): Uint8Array => {
-        callIndex += 1;
-
-        return new Uint8Array(byteLength).fill(callIndex);
-    };
-};
-
+const setupMailboxSlotHash = 'a5'.repeat(64);
 const expectProviderError = (
     operation: () => unknown,
     code: BrowserLocalKeyProviderError['code'],
@@ -64,7 +73,6 @@ describe('browser-local external key provider', () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({
             ...createBrowserLocalKeyOperations({ signing, mailbox }),
-            entropy: deterministicEntropy(),
         });
 
         expect(provider.signingCapability).not.toBe(provider.mailboxCapability);
@@ -106,6 +114,205 @@ describe('browser-local external key provider', () => {
             ciphertext: encapsulation.cipherText,
         });
         expect(recoveredSharedSecret).toEqual(encapsulation.sharedSecret);
+        signature.fill(0);
+        freshMailbox.ciphertext.fill(0);
+        freshMailbox.envelopeAttemptIdentifier.fill(0);
+        freshMailbox.sharedSecret.fill(0);
+        encapsulation.cipherText.fill(0);
+        encapsulation.sharedSecret.fill(0);
+        recoveredSharedSecret.fill(0);
+        provider.close();
+    });
+
+    it('rejects one operation object reused for signing and mailbox capabilities', () => {
+        const { signing, mailbox } = createKeyMaterial();
+        const signingOperations = createBrowserLocalSigningOperations(signing);
+        const mailboxOperations = createBrowserLocalMailboxOperations(mailbox);
+        let revocationCount = 0;
+        const reusedOperations = {
+            decapsulateClosedCiphertext:
+                mailboxOperations.decapsulateClosedCiphertext,
+            encapsulationKey: mailboxOperations.encapsulationKey,
+            revoke: () => {
+                revocationCount += 1;
+                signingOperations.revoke();
+                mailboxOperations.revoke();
+            },
+            signClosedMessage: signingOperations.signClosedMessage,
+            verificationKey: signingOperations.verificationKey,
+        };
+
+        expectProviderError(
+            () =>
+                openBrowserLocalExternalKeyProvider({
+                    mailbox: reusedOperations,
+                    signing: reusedOperations,
+                }),
+            'UnsupportedProvider',
+        );
+        expect(revocationCount).toBe(1);
+    });
+
+    it('replays one reset-safe setup-mailbox operation byte-identically without deriving another view', () => {
+        const { signing, mailbox } = createKeyMaterial();
+        const randomnessObservation = {
+            encapsulationConsumptionCount: 0,
+            signatureConsumptionCount: 0,
+        };
+        const provider = openBrowserLocalExternalKeyProvider({
+            ...createBrowserLocalKeyOperations({
+                signing,
+                mailbox,
+                resetSafeSetupMailboxRandomnessObservation:
+                    randomnessObservation,
+            }),
+        });
+        expect(randomnessObservation).toEqual({
+            encapsulationConsumptionCount: 0,
+            signatureConsumptionCount: 0,
+        });
+
+        const first = encapsulateResetSafeSetupMailbox({
+            recipientEncapsulationKey: mailbox.publicKey,
+            setupMailboxSlot,
+            setupMailboxSlotHash,
+            signingCapability: provider.signingCapability,
+            sourceVerificationKey: signing.publicKey,
+        });
+        const firstCiphertext = first.ciphertext.slice();
+        const firstAttemptIdentifier = first.envelopeAttemptIdentifier.slice();
+        const firstSharedSecret = first.sharedSecret.slice();
+        first.ciphertext.fill(0);
+        first.envelopeAttemptIdentifier.fill(0);
+        first.sharedSecret.fill(0);
+
+        const replay = encapsulateResetSafeSetupMailbox({
+            recipientEncapsulationKey: mailbox.publicKey,
+            setupMailboxSlot,
+            setupMailboxSlotHash,
+            signingCapability: provider.signingCapability,
+            sourceVerificationKey: signing.publicKey,
+        });
+        expect(replay.ciphertext).toEqual(firstCiphertext);
+        expect(replay.envelopeAttemptIdentifier).toEqual(
+            firstAttemptIdentifier,
+        );
+        expect(replay.sharedSecret).toEqual(firstSharedSecret);
+        expect(
+            ml_kem768.decapsulate(replay.ciphertext, mailbox.secretKey),
+        ).toEqual(replay.sharedSecret);
+        expect(randomnessObservation).toEqual({
+            encapsulationConsumptionCount: 1,
+            signatureConsumptionCount: 0,
+        });
+
+        provider.close();
+    });
+
+    it('verifies a reset-safe setup-object signature against the capability-owned key', () => {
+        const { signing, mailbox } = createKeyMaterial();
+        const provider = openBrowserLocalExternalKeyProvider({
+            ...createBrowserLocalKeyOperations({ signing, mailbox }),
+        });
+        const signatureMessageHash = 'a4'.repeat(64);
+        const first = signResetSafeSetupObject({
+            signatureMessageHash,
+            signingCapability: provider.signingCapability,
+        });
+        const replay = signResetSafeSetupObject({
+            signatureMessageHash,
+            signingCapability: provider.signingCapability,
+        });
+        expect(first).toEqual(replay);
+        expect(
+            ml_dsa65.verify(
+                first,
+                new Uint8Array(64).fill(0xa4),
+                signing.publicKey,
+                { context: objectSignatureContext },
+            ),
+        ).toBe(true);
+        first.fill(0);
+        replay.fill(0);
+        provider.close();
+        expectProviderError(
+            () =>
+                signResetSafeSetupObject({
+                    signatureMessageHash,
+                    signingCapability: provider.signingCapability,
+                }),
+            'CapabilityUnavailable',
+        );
+    });
+
+    it('rejects a non-recipient-private setup-mailbox payload type', () => {
+        const { signing, mailbox } = createKeyMaterial();
+        const provider = openBrowserLocalExternalKeyProvider({
+            ...createBrowserLocalKeyOperations({ signing, mailbox }),
+        });
+
+        expectProviderError(
+            () =>
+                encapsulateResetSafeSetupMailbox({
+                    recipientEncapsulationKey: mailbox.publicKey,
+                    setupMailboxSlot: {
+                        ...setupMailboxSlot,
+                        payloadType: 1,
+                    } as unknown as typeof setupMailboxSlot,
+                    setupMailboxSlotHash,
+                    signingCapability: provider.signingCapability,
+                    sourceVerificationKey: signing.publicKey,
+                }),
+            'MalformedRandomness',
+        );
+        provider.close();
+    });
+
+    it('refuses conflicting reset-safe producer slots as typed equivocation', () => {
+        const { signing, mailbox } = createKeyMaterial();
+        const provider = openBrowserLocalExternalKeyProvider({
+            ...createBrowserLocalKeyOperations({ signing, mailbox }),
+        });
+        const first = encapsulateResetSafeSetupMailbox({
+            recipientEncapsulationKey: mailbox.publicKey,
+            setupMailboxSlot,
+            setupMailboxSlotHash,
+            signingCapability: provider.signingCapability,
+            sourceVerificationKey: signing.publicKey,
+        });
+        expectProviderError(
+            () =>
+                encapsulateResetSafeSetupMailbox({
+                    recipientEncapsulationKey: mailbox.publicKey,
+                    setupMailboxSlot: {
+                        ...setupMailboxSlot,
+                        statementHash: '99'.repeat(64),
+                    },
+                    setupMailboxSlotHash: 'c7'.repeat(64),
+                    signingCapability: provider.signingCapability,
+                    sourceVerificationKey: signing.publicKey,
+                }),
+            'Equivocation',
+        );
+        const wrongRecipient = ml_kem768.keygen(
+            new Uint8Array(ml_kem768.lengths.seed!).fill(0xe9),
+        );
+        expectProviderError(
+            () =>
+                encapsulateResetSafeSetupMailbox({
+                    recipientEncapsulationKey: wrongRecipient.publicKey,
+                    setupMailboxSlot,
+                    setupMailboxSlotHash,
+                    signingCapability: provider.signingCapability,
+                    sourceVerificationKey: signing.publicKey,
+                }),
+            'Equivocation',
+        );
+
+        first.ciphertext.fill(0);
+        first.envelopeAttemptIdentifier.fill(0);
+        first.sharedSecret.fill(0);
+        provider.close();
     });
 
     it('refuses malformed and mismatched frozen roster keys', () => {
@@ -125,7 +332,6 @@ describe('browser-local external key provider', () => {
                         verificationKey: secondSigning.publicKey,
                     },
                     mailbox: createBrowserLocalMailboxOperations(first.mailbox),
-                    entropy: deterministicEntropy(),
                 }),
             'KeyMismatch',
         );
@@ -137,7 +343,6 @@ describe('browser-local external key provider', () => {
                         ...createBrowserLocalMailboxOperations(first.mailbox),
                         encapsulationKey: secondMailbox.publicKey,
                     },
-                    entropy: deterministicEntropy(),
                 }),
             'KeyMismatch',
         );
@@ -149,64 +354,337 @@ describe('browser-local external key provider', () => {
                         verificationKey: first.signing.publicKey.subarray(1),
                     },
                     mailbox: createBrowserLocalMailboxOperations(first.mailbox),
-                    entropy: deterministicEntropy(),
+                }),
+            'MalformedKey',
+        );
+        expectProviderError(
+            () =>
+                openBrowserLocalExternalKeyProvider({
+                    signing: createBrowserLocalSigningOperations(first.signing),
+                    mailbox: {
+                        ...createBrowserLocalMailboxOperations(first.mailbox),
+                        encapsulationKey: new Uint8Array(
+                            ml_kem768.lengths.publicKey!,
+                        ).fill(0xff),
+                    },
                 }),
             'MalformedKey',
         );
     });
 
-    it('fails closed when entropy is unavailable or returns the wrong length', () => {
+    it('fails closed when Web Crypto entropy is unavailable during opening or use', () => {
         const { signing, mailbox } = createKeyMaterial();
-        const input = {
-            ...createBrowserLocalKeyOperations({ signing, mailbox }),
-        } as const;
+        const entropySpy = vi.spyOn(globalThis.crypto, 'getRandomValues');
+        try {
+            entropySpy.mockImplementationOnce(() => {
+                throw new Error('entropy source failed while opening');
+            });
+            expectProviderError(
+                () =>
+                    openBrowserLocalExternalKeyProvider({
+                        ...createBrowserLocalKeyOperations({
+                            signing,
+                            mailbox,
+                        }),
+                    }),
+                'EntropyUnavailable',
+            );
 
+            const provider = openBrowserLocalExternalKeyProvider({
+                ...createBrowserLocalKeyOperations({ signing, mailbox }),
+            });
+            entropySpy.mockImplementationOnce(() => {
+                throw new Error('entropy source failed after opening');
+            });
+            expectProviderError(
+                () =>
+                    encapsulateFreshMailbox({
+                        signingCapability: provider.signingCapability,
+                        recipientEncapsulationKey: mailbox.publicKey,
+                    }),
+                'EntropyUnavailable',
+            );
+            provider.close();
+        } finally {
+            entropySpy.mockRestore();
+        }
+    });
+
+    it('fails closed for unsupported, lost, and wrong-context reset-safe randomness capabilities', () => {
+        const { signing, mailbox } = createKeyMaterial();
+        const keyOperations = createBrowserLocalKeyOperations({
+            signing,
+            mailbox,
+        });
+        const providerWithoutResetSafeRandomness =
+            openBrowserLocalExternalKeyProvider({
+                signing: keyOperations.signing,
+                mailbox: keyOperations.mailbox,
+            });
+        expectProviderError(
+            () =>
+                encapsulateResetSafeSetupMailbox({
+                    recipientEncapsulationKey: mailbox.publicKey,
+                    setupMailboxSlot,
+                    setupMailboxSlotHash,
+                    signingCapability:
+                        providerWithoutResetSafeRandomness.signingCapability,
+                    sourceVerificationKey: signing.publicKey,
+                }),
+            'UnsupportedProvider',
+        );
+        providerWithoutResetSafeRandomness.close();
+
+        const wrongContextProvider = openBrowserLocalExternalKeyProvider({
+            ...createBrowserLocalKeyOperations({
+                signing,
+                mailbox,
+                resetSafeSetupMailboxScope: {
+                    ...defaultResetSafeSetupMailboxScope,
+                    actionContextHash: 'f1'.repeat(64),
+                },
+            }),
+        });
+        expectProviderError(
+            () =>
+                encapsulateResetSafeSetupMailbox({
+                    recipientEncapsulationKey: mailbox.publicKey,
+                    setupMailboxSlot,
+                    setupMailboxSlotHash,
+                    signingCapability: wrongContextProvider.signingCapability,
+                    sourceVerificationKey: signing.publicKey,
+                }),
+            'KeyMismatch',
+        );
+        wrongContextProvider.close();
+
+        const revocableOperations = createBrowserLocalKeyOperations({
+            signing,
+            mailbox,
+        });
+        const providerWithLostRandomness = openBrowserLocalExternalKeyProvider({
+            ...revocableOperations,
+        });
+        revocableOperations.resetSafeSetupMailboxRandomness!.revoke();
+        expectProviderError(
+            () =>
+                encapsulateResetSafeSetupMailbox({
+                    recipientEncapsulationKey: mailbox.publicKey,
+                    setupMailboxSlot,
+                    setupMailboxSlotHash,
+                    signingCapability:
+                        providerWithLostRandomness.signingCapability,
+                    sourceVerificationKey: signing.publicKey,
+                }),
+            'CapabilityUnavailable',
+        );
+        providerWithLostRandomness.close();
+    });
+
+    it('rejects signing providers that ignore exact hedges or replace their frozen key', () => {
+        const first = createKeyMaterial();
+        const replacementSigning = ml_dsa65.keygen(
+            new Uint8Array(ml_dsa65.lengths.seed!).fill(0xfa),
+        );
+        let hiddenRandomnessCounter = 0;
         expectProviderError(
             () =>
                 openBrowserLocalExternalKeyProvider({
-                    ...input,
-                    entropy: () => {
-                        throw new Error('entropy source failed');
+                    ...createBrowserLocalKeyOperations(first),
+                    signing: {
+                        verificationKey: first.signing.publicKey,
+                        signClosedMessage: ({ message, context }) => {
+                            hiddenRandomnessCounter += 1;
+                            return ml_dsa65.sign(
+                                message,
+                                first.signing.secretKey,
+                                {
+                                    context,
+                                    extraEntropy: new Uint8Array(32).fill(
+                                        hiddenRandomnessCounter,
+                                    ),
+                                },
+                            );
+                        },
+                        revoke: () => undefined,
                     },
                 }),
-            'EntropyUnavailable',
+            'UnsupportedProvider',
         );
         expectProviderError(
             () =>
                 openBrowserLocalExternalKeyProvider({
-                    ...input,
-                    entropy: (byteLength) => new Uint8Array(byteLength - 1),
+                    ...createBrowserLocalKeyOperations(first),
+                    signing: {
+                        verificationKey: first.signing.publicKey,
+                        signClosedMessage: ({ message, context }) =>
+                            ml_dsa65.sign(message, first.signing.secretKey, {
+                                context,
+                                extraEntropy: false,
+                            }),
+                        revoke: () => undefined,
+                    },
                 }),
-            'EntropyUnavailable',
+            'UnsupportedProvider',
         );
 
-        let entropyAvailable = true;
+        let activeSigningSecretKey = first.signing.secretKey;
         const provider = openBrowserLocalExternalKeyProvider({
-            ...input,
-            entropy: (byteLength) => {
-                if (!entropyAvailable) {
-                    throw new Error('entropy source was lost after opening');
-                }
-                return new Uint8Array(byteLength).fill(0x58);
+            ...createBrowserLocalKeyOperations(first),
+            signing: {
+                verificationKey: first.signing.publicKey,
+                signClosedMessage: ({ message, context, hedge }) =>
+                    ml_dsa65.sign(message, activeSigningSecretKey, {
+                        context,
+                        extraEntropy: hedge,
+                    }),
+                revoke: () => undefined,
             },
         });
-        entropyAvailable = false;
+        activeSigningSecretKey = replacementSigning.secretKey;
+        const freshMailbox = encapsulateFreshMailbox({
+            recipientEncapsulationKey: first.mailbox.publicKey,
+            signingCapability: provider.signingCapability,
+        });
         expectProviderError(
             () =>
-                encapsulateFreshMailbox({
+                signFreshMailboxEnvelope({
+                    envelopeHash: 'b6'.repeat(64),
                     signingCapability: provider.signingCapability,
-                    recipientEncapsulationKey: mailbox.publicKey,
+                    signingPermit: freshMailbox.signingPermit,
                 }),
-            'EntropyUnavailable',
+            'KeyMismatch',
         );
         provider.close();
+    });
+
+    it('detects mailbox-key replacement before protocol decapsulation', () => {
+        const first = createKeyMaterial();
+        const replacementMailbox = ml_kem768.keygen(
+            new Uint8Array(ml_kem768.lengths.seed!).fill(0xfb),
+        );
+        let activeMailboxSecretKey = first.mailbox.secretKey;
+        const provider = openBrowserLocalExternalKeyProvider({
+            ...createBrowserLocalKeyOperations(first),
+            mailbox: {
+                encapsulationKey: first.mailbox.publicKey,
+                decapsulateClosedCiphertext: (ciphertext) =>
+                    ml_kem768.decapsulate(ciphertext, activeMailboxSecretKey),
+                revoke: () => undefined,
+            },
+        });
+        const encapsulation = ml_kem768.encapsulate(
+            first.mailbox.publicKey,
+            new Uint8Array(ml_kem768.lengths.msg!).fill(0x9b),
+        );
+
+        activeMailboxSecretKey = replacementMailbox.secretKey;
+        expectProviderError(
+            () =>
+                decapsulateClosedMailboxCiphertext({
+                    capability: provider.mailboxCapability,
+                    ciphertext: encapsulation.cipherText,
+                }),
+            'KeyMismatch',
+        );
+
+        encapsulation.cipherText.fill(0);
+        encapsulation.sharedSecret.fill(0);
+        provider.close();
+    });
+
+    it('fails closed after external signing or mailbox capability loss', () => {
+        const signingLossMaterial = createKeyMaterial();
+        const signingLossOperations =
+            createBrowserLocalKeyOperations(signingLossMaterial);
+        const signingLossProvider = openBrowserLocalExternalKeyProvider({
+            ...signingLossOperations,
+        });
+        const freshMailbox = encapsulateFreshMailbox({
+            signingCapability: signingLossProvider.signingCapability,
+            recipientEncapsulationKey: signingLossMaterial.mailbox.publicKey,
+        });
+        signingLossOperations.signing.revoke();
+        expectProviderError(
+            () =>
+                signFreshMailboxEnvelope({
+                    envelopeHash: 'd1'.repeat(64),
+                    signingCapability: signingLossProvider.signingCapability,
+                    signingPermit: freshMailbox.signingPermit,
+                }),
+            'CapabilityUnavailable',
+        );
+        freshMailbox.ciphertext.fill(0);
+        freshMailbox.envelopeAttemptIdentifier.fill(0);
+        freshMailbox.sharedSecret.fill(0);
+        signingLossProvider.close();
+
+        const mailboxLossMaterial = createKeyMaterial();
+        const mailboxLossOperations =
+            createBrowserLocalKeyOperations(mailboxLossMaterial);
+        const mailboxLossProvider = openBrowserLocalExternalKeyProvider({
+            ...mailboxLossOperations,
+        });
+        const mailboxCiphertext = ml_kem768.encapsulate(
+            mailboxLossMaterial.mailbox.publicKey,
+            new Uint8Array(ml_kem768.lengths.msg!).fill(0x4b),
+        );
+        mailboxLossOperations.mailbox.revoke();
+        expectProviderError(
+            () =>
+                decapsulateClosedMailboxCiphertext({
+                    capability: mailboxLossProvider.mailboxCapability,
+                    ciphertext: mailboxCiphertext.cipherText,
+                }),
+            'CapabilityUnavailable',
+        );
+        mailboxCiphertext.cipherText.fill(0);
+        mailboxCiphertext.sharedSecret.fill(0);
+        mailboxLossProvider.close();
+    });
+
+    it('refuses asynchronous key operations without a remote fallback', () => {
+        const signingMaterial = createKeyMaterial();
+        const signingOperations =
+            createBrowserLocalKeyOperations(signingMaterial);
+        expectProviderError(
+            () =>
+                openBrowserLocalExternalKeyProvider({
+                    ...signingOperations,
+                    signing: {
+                        ...signingOperations.signing,
+                        signClosedMessage: (() =>
+                            Promise.resolve(
+                                new Uint8Array(ml_dsa65.lengths.signature!),
+                            )) as unknown as BrowserLocalExternalKeyProviderInput['signing']['signClosedMessage'],
+                    },
+                }),
+            'UnsupportedProvider',
+        );
+
+        const mailboxMaterial = createKeyMaterial();
+        const mailboxOperations =
+            createBrowserLocalKeyOperations(mailboxMaterial);
+        expectProviderError(
+            () =>
+                openBrowserLocalExternalKeyProvider({
+                    ...mailboxOperations,
+                    mailbox: {
+                        ...mailboxOperations.mailbox,
+                        decapsulateClosedCiphertext: (() =>
+                            Promise.resolve(
+                                new Uint8Array(32),
+                            )) as unknown as BrowserLocalExternalKeyProviderInput['mailbox']['decapsulateClosedCiphertext'],
+                    },
+                }),
+            'UnsupportedProvider',
+        );
     });
 
     it('keeps revocation scoped to the named capability and closes both capabilities', () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({
             ...createBrowserLocalKeyOperations({ signing, mailbox }),
-            entropy: deterministicEntropy(),
         });
         const encapsulation = ml_kem768.encapsulate(
             mailbox.publicKey,
@@ -240,11 +718,119 @@ describe('browser-local external key provider', () => {
         );
     });
 
+    it('invalidates every capability and attempts every external revocation when close callbacks fail', () => {
+        const { signing, mailbox } = createKeyMaterial();
+        const operations = createBrowserLocalKeyOperations({
+            signing,
+            mailbox,
+        });
+        const revocations: string[] = [];
+        const provider = openBrowserLocalExternalKeyProvider({
+            signing: {
+                ...operations.signing,
+                revoke: () => {
+                    revocations.push('signing');
+                    operations.signing.revoke();
+                    throw new Error('signing revocation failed');
+                },
+            },
+            mailbox: {
+                ...operations.mailbox,
+                revoke: () => {
+                    revocations.push('mailbox');
+                    operations.mailbox.revoke();
+                    throw new Error('mailbox revocation failed');
+                },
+            },
+            resetSafeSetupMailboxRandomness: {
+                ...operations.resetSafeSetupMailboxRandomness!,
+                revoke: () => {
+                    revocations.push('reset-safe randomness');
+                    operations.resetSafeSetupMailboxRandomness!.revoke();
+                    throw new Error('randomness revocation failed');
+                },
+            },
+        });
+        const encapsulation = ml_kem768.encapsulate(
+            mailbox.publicKey,
+            new Uint8Array(ml_kem768.lengths.msg!).fill(0x64),
+        );
+
+        expectProviderError(() => provider.close(), 'CapabilityUnavailable');
+        expect(revocations).toEqual([
+            'reset-safe randomness',
+            'signing',
+            'mailbox',
+        ]);
+        expectProviderError(
+            () =>
+                encapsulateFreshMailbox({
+                    signingCapability: provider.signingCapability,
+                    recipientEncapsulationKey: mailbox.publicKey,
+                }),
+            'CapabilityUnavailable',
+        );
+        expectProviderError(
+            () =>
+                decapsulateClosedMailboxCiphertext({
+                    capability: provider.mailboxCapability,
+                    ciphertext: encapsulation.cipherText,
+                }),
+            'CapabilityUnavailable',
+        );
+        expect(() => provider.close()).not.toThrow();
+    });
+
+    it('attempts every external revocation when key self-testing and cleanup both fail', () => {
+        const first = createKeyMaterial();
+        const secondSigning = ml_dsa65.keygen(
+            new Uint8Array(ml_dsa65.lengths.seed!).fill(0x75),
+        );
+        const operations = createBrowserLocalKeyOperations(first);
+        const revocations: string[] = [];
+
+        expectProviderError(
+            () =>
+                openBrowserLocalExternalKeyProvider({
+                    signing: {
+                        ...operations.signing,
+                        verificationKey: secondSigning.publicKey,
+                        revoke: () => {
+                            revocations.push('signing');
+                            operations.signing.revoke();
+                            throw new Error('signing revocation failed');
+                        },
+                    },
+                    mailbox: {
+                        ...operations.mailbox,
+                        revoke: () => {
+                            revocations.push('mailbox');
+                            operations.mailbox.revoke();
+                            throw new Error('mailbox revocation failed');
+                        },
+                    },
+                    resetSafeSetupMailboxRandomness: {
+                        ...operations.resetSafeSetupMailboxRandomness!,
+                        revoke: () => {
+                            revocations.push('reset-safe randomness');
+                            operations.resetSafeSetupMailboxRandomness!.revoke();
+                            throw new Error('randomness revocation failed');
+                        },
+                    },
+                }),
+            'CapabilityUnavailable',
+        );
+        expect(revocations).toEqual([
+            'reset-safe randomness',
+            'signing',
+            'mailbox',
+        ]);
+    });
+
     it('rejects capability-kind substitution at runtime', () => {
         const { signing, mailbox } = createKeyMaterial();
         const provider = openBrowserLocalExternalKeyProvider({
             ...createBrowserLocalKeyOperations({ signing, mailbox }),
-            entropy: deterministicEntropy(),
         });
 
         expectProviderError(
@@ -256,6 +842,15 @@ describe('browser-local external key provider', () => {
                 }),
             'CapabilityUnavailable',
         );
+        expectProviderError(
+            () =>
+                encapsulateFreshMailbox({
+                    signingCapability:
+                        provider.mailboxCapability as unknown as BrowserLocalSigningCapability,
+                    recipientEncapsulationKey: mailbox.publicKey,
+                }),
+            'CapabilityUnavailable',
+        );
         const freshMailbox = encapsulateFreshMailbox({
             signingCapability: provider.signingCapability,
             recipientEncapsulationKey: mailbox.publicKey,
@@ -264,5 +859,9 @@ describe('browser-local external key provider', () => {
         expect(
             ml_kem768.decapsulate(freshMailbox.ciphertext, mailbox.secretKey),
         ).toEqual(freshMailbox.sharedSecret);
+        freshMailbox.ciphertext.fill(0);
+        freshMailbox.envelopeAttemptIdentifier.fill(0);
+        freshMailbox.sharedSecret.fill(0);
+        provider.close();
     });
 });

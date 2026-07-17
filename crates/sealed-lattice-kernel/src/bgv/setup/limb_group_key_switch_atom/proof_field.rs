@@ -9,13 +9,16 @@
 //! because p = 1 mod 2^64 for every even-base generalized Fermat prime with
 //! exponent 64.
 
-use super::wide_unsigned::{is_less_than, shift_right_one_in_place, subtract_in_place};
+#[cfg(test)]
+use super::wide_unsigned::shift_right_one_in_place;
+use super::wide_unsigned::{is_less_than, subtract_in_place};
 
 /// Field parameters plus derived Montgomery constants. `LIMB_COUNT` is the
 /// number of 64-bit limbs; the modulus must satisfy p < 2^(64 * LIMB_COUNT).
 #[derive(Clone)]
 pub(crate) struct ProofFieldParameters<const LIMB_COUNT: usize> {
     pub(crate) modulus: [u64; LIMB_COUNT],
+    #[cfg(test)]
     pub(crate) modulus_half_floor: [u64; LIMB_COUNT],
     montgomery_radix_squared: [u64; LIMB_COUNT],
     negated_modulus_inverse_word: u64,
@@ -136,10 +139,15 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
         montgomery_radix_squared: [u64; LIMB_COUNT],
         primitive_65536th_root: [u64; LIMB_COUNT],
     ) -> Self {
-        let mut modulus_half_floor = modulus;
-        shift_right_one_in_place(&mut modulus_half_floor);
+        #[cfg(test)]
+        let modulus_half_floor = {
+            let mut modulus_half_floor = modulus;
+            shift_right_one_in_place(&mut modulus_half_floor);
+            modulus_half_floor
+        };
         Self {
             modulus,
+            #[cfg(test)]
             modulus_half_floor,
             montgomery_radix_squared,
             negated_modulus_inverse_word: negated_inverse_word(modulus[0]),
@@ -162,6 +170,7 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
     }
 
     /// Converts a Montgomery-form element back to its canonical residue.
+    #[cfg(test)]
     pub(crate) fn to_raw_value(&self, element: &[u64; LIMB_COUNT]) -> [u64; LIMB_COUNT] {
         let mut one_raw = [0_u64; LIMB_COUNT];
         one_raw[0] = 1;
@@ -176,6 +185,7 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
 
     /// Maps a signed word to its centered residue: negative values become
     /// p - |value|.
+    #[cfg(test)]
     pub(crate) fn signed_word_to_element(&self, value: i64) -> [u64; LIMB_COUNT] {
         if value >= 0 {
             return self.unsigned_word_to_element(value as u64);
@@ -271,21 +281,27 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
     }
 
     /// Exponentiation by a little-endian limb exponent, in Montgomery form.
+    /// All callers use public exponents (domain sizes, fixed roots, or the
+    /// public modulus for inversion), so work stops at the highest set bit
+    /// instead of squaring through zero high limbs.
     pub(crate) fn power(
         &self,
         base: &[u64; LIMB_COUNT],
         exponent: &[u64; LIMB_COUNT],
     ) -> [u64; LIMB_COUNT] {
         let mut result = self.one();
+        let Some(highest_nonzero_limb) = exponent.iter().rposition(|limb| *limb != 0) else {
+            return result;
+        };
+        let bit_length = highest_nonzero_limb * 64
+            + (64 - exponent[highest_nonzero_limb].leading_zeros() as usize);
         let mut running = *base;
-        for exponent_limb in exponent {
-            let mut bits = *exponent_limb;
-            for _ in 0..64 {
-                if bits & 1 == 1 {
-                    result = self.multiply(&result, &running);
-                }
+        for bit_index in 0..bit_length {
+            if exponent[bit_index / 64] & (1_u64 << (bit_index % 64)) != 0 {
+                result = self.multiply(&result, &running);
+            }
+            if bit_index + 1 < bit_length {
                 running = self.multiply(&running, &running);
-                bits >>= 1;
             }
         }
         result
@@ -302,6 +318,7 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
 
     /// Lifts a Montgomery element to its centered integer representative,
     /// returned as (is_negative, magnitude limbs).
+    #[cfg(test)]
     pub(crate) fn centered_raw(&self, element: &[u64; LIMB_COUNT]) -> (bool, [u64; LIMB_COUNT]) {
         let raw = self.to_raw_value(element);
         if is_less_than(&self.modulus_half_floor, &raw) {
@@ -438,6 +455,38 @@ mod tests {
     fn multiplication_matches_bigint_reference() {
         check_multiplication_against_bigint(&sixteen_limb_group_field_parameters());
         check_multiplication_against_bigint(&eight_limb_group_field_parameters());
+    }
+
+    fn check_power_against_bigint<const LIMB_COUNT: usize>(
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ) {
+        let modulus = to_biguint(&parameters.modulus);
+        let raw_base = BigUint::from(0x1234_5678_9abc_def1_u64) % &modulus;
+        let base = parameters.raw_value_to_element(&from_biguint(&raw_base));
+        let mut exponents = vec![[0_u64; LIMB_COUNT]];
+        for small_exponent in [1_u64, 2, 65_536, 131_073] {
+            let mut exponent = [0_u64; LIMB_COUNT];
+            exponent[0] = small_exponent;
+            exponents.push(exponent);
+        }
+        if LIMB_COUNT > 1 {
+            let mut cross_limb_exponent = [0_u64; LIMB_COUNT];
+            cross_limb_exponent[0] = 7;
+            cross_limb_exponent[1] = 1;
+            exponents.push(cross_limb_exponent);
+        }
+
+        for exponent in exponents {
+            let expected = raw_base.modpow(&to_biguint(&exponent), &modulus);
+            let observed = parameters.to_raw_value(&parameters.power(&base, &exponent));
+            assert_eq!(to_biguint(&observed), expected);
+        }
+    }
+
+    #[test]
+    fn public_exponentiation_matches_bigint_across_zero_small_and_cross_limb_exponents() {
+        check_power_against_bigint(&sixteen_limb_group_field_parameters());
+        check_power_against_bigint(&eight_limb_group_field_parameters());
     }
 
     fn check_field_axioms<const LIMB_COUNT: usize>(parameters: &ProofFieldParameters<LIMB_COUNT>) {

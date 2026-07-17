@@ -2,16 +2,10 @@ use super::common::*;
 
 use super::super::same_secret_bridge_verification::VerifiedSameSecretBridgeMaterial;
 use super::shares::*;
-use super::succinct_proof_transport::*;
 use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
-use crate::bgv::setup::trustee_evaluation_key_proof::{
-    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-    PUBLIC_KEY_SHARE_PROOF_FAMILY, SetupProofStatement, SuccinctSetupProofContext,
-    TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof_from_source,
-    public_key_share_succinct_proof_material_bytes_hash, verify_evaluation_key_share,
-};
+use crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY;
 
 pub(in super::super) fn verify_public_key_share_succinct_proofs(
     setup_package: &Value,
@@ -49,7 +43,7 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
     };
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
+            CanonicalErrorCode::InvalidProtocolObject,
             "setupContext was required before public-key share succinct proof verification",
         )
     })?;
@@ -59,7 +53,7 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         .and_then(Value::as_str)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "commonRandomness.publicMatrixSeedHash was required before public-key share succinct proof verification",
             )
     })?;
@@ -134,7 +128,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
     let verification_context = PublicKeyShareSuccinctProofVerificationContext {
         setup_context,
         public_matrix_seed_hash,
-        ring_degree,
         share_records: &share_records,
         material_bindings: &material_bindings,
         verified_same_secret_bridge,
@@ -148,7 +141,7 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
             &verification_context,
             proof_bytes_hash.as_str().ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
+                    CanonicalErrorCode::InvalidProtocolObject,
                     "public-key share succinct proof hash must be a string",
                 )
             })?,
@@ -180,7 +173,6 @@ pub(in super::super) enum PublicKeyShareSuccinctProofVerification {
 struct PublicKeyShareSuccinctProofVerificationContext<'a> {
     setup_context: &'a Value,
     public_matrix_seed_hash: &'a str,
-    ring_degree: usize,
     share_records: &'a BTreeMap<u64, Value>,
     material_bindings: &'a BTreeMap<u64, PublicKeyShareMaterialBinding>,
     verified_same_secret_bridge: Option<&'a VerifiedSameSecretBridgeMaterial>,
@@ -196,108 +188,84 @@ fn verify_public_key_share_succinct_proof_record(
         proof_bytes_hash,
         "publicKeyShareSuccinctProofs.proofBytesHashes",
     )?;
-    if !context.share_records.contains_key(&trustee_roster_position) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proof must reference an accepted share record",
-        ));
-    }
-    let material_binding = context
-        .material_bindings
+    let share_record = context
+        .share_records
         .get(&trustee_roster_position)
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share succinct proof must reference accepted public-key share material",
+                CanonicalErrorCode::InvalidProtocolObject,
+                "public-key share succinct proof must reference an accepted share record",
             )
         })?;
+    if !context
+        .material_bindings
+        .contains_key(&trustee_roster_position)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "public-key share succinct proof must reference accepted public-key share material",
+        ));
+    }
     // The public-key relation opens the constant commitment bound by the
     // verified same-secret bridge statement.
     let verified_same_secret_bridge = context
         .verified_same_secret_bridge
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
+                CanonicalErrorCode::InvalidProtocolObject,
                 "same-secret bridge material was required for public-key share succinct proof verification",
             )
         })?;
     let bridge_binding =
         verified_same_secret_bridge.statement_for_roster_position(trustee_roster_position)?;
     let trustee_identity = bridge_binding.trustee_identity.as_str();
-    if bridge_binding.statement.bridge_rns_primes.is_empty()
-        || bridge_binding
-            .statement
-            .target_constant_commitment_roots
-            .is_empty()
-        || bridge_binding
-            .statement
-            .target_constant_commitments
-            .is_empty()
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "same-secret bridge statement must carry the limb-zero target commitment",
-        ));
-    }
-    let statement = TrusteeEvaluationKeyStatement {
-        context: SuccinctSetupProofContext {
-            setup_context_hash: setup_context_hash(context.setup_context)?,
-            trustee_identity: trustee_identity.to_string(),
-            trustee_roster_position,
-            binding_roots: Vec::new(),
-        },
-        ring_degree: context.ring_degree,
-        proof: SetupProofStatement::PublicKeyShare {
-            // A public-key share is one digit spanning all Q_share limbs with no diagonal source; key_switch_seed_hex carries the public matrix seed because the relation's public sample is the shared reference polynomial a.
-            key: EvaluationKeyShareDescriptor {
-                kind: EvaluationKeyShareKind::PublicKeyShare,
-                level: DATA_PRIMES.len() - 1,
-                key_switch_domain: PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL.to_string(),
-                key_switch_seed_hex: context.public_matrix_seed_hash.to_string(),
-                component_b_by_digit: vec![material_binding.coefficients_by_limb.clone()],
-                round_one_aggregate_diagonal: Vec::new(),
-            },
-            same_secret_bridge: bridge_binding.statement.clone(),
-        },
-    };
-    let verification_binding_hash =
-        public_key_share_succinct_proof_verification_binding_hash(proof_bytes_hash, &statement)?;
+    let public_key_share_root = derive_public_key_share_root(
+        context.setup_context,
+        context.public_matrix_seed_hash,
+        trustee_roster_position,
+        share_record,
+    )?;
+    let verification_binding_hash = public_key_share_succinct_proof_verification_binding_hash(
+        proof_bytes_hash,
+        &setup_context_hash(context.setup_context)?,
+        trustee_identity,
+        trustee_roster_position,
+        &bridge_binding.statement.target_constant_commitment_roots,
+        &public_key_share_root,
+    )?;
     if !crate::bgv::setup::consume_accepted_setup_proof_binding(
         context.proof_binding_session.session_handle,
         PUBLIC_KEY_SHARE_PROOF_FAMILY,
         proof_bytes_hash,
         &verification_binding_hash,
     )? {
-        // Production verification receives authenticated raw stream bytes. Test
-        // fixtures instead restore the exact verifier-derived binding above, so
-        // no proof corpus survives between fixture construction and this pass.
-        let proof_bytes = public_key_share_succinct_proof_bytes_from_hash(
-            proof_bytes_hash,
-            context.proof_binding_session,
-        )?;
-        if proof_bytes_hash
-            != public_key_share_succinct_proof_material_bytes_hash(proof_bytes.as_ref())?
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share succinct proofBytesHash must match supplied proof bytes",
-            ));
-        }
-        let proof =
-            decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes.as_ref())?;
-        verify_evaluation_key_share(&statement, &proof)?;
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "public-key share proof was not verified by the common proof verifier for the reconstructed statement",
+        ));
     }
 
     Ok(())
 }
 
+/// Binds a session-owned common-proof verification result to the exact public
+/// material reconstructed by accepted setup. This is verifier state, not a
+/// serialized receipt or a producer-supplied verdict.
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_verification_binding_hash(
     proof_bytes_hash: &str,
-    statement: &TrusteeEvaluationKeyStatement,
+    setup_context_hash: &str,
+    trustee_identity: &str,
+    trustee_roster_position: u64,
+    anchor_commitment_roots: &[String],
+    public_key_share_root: &str,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
-        "objectType": "AcceptedSetupPublicKeyShareSuccinctProofVerificationBinding",
+        "objectType": "AcceptedSetupPublicKeyShareCommonProofBinding",
         "proofBytesHash": proof_bytes_hash,
-        "statementHash": crate::hashing::to_hex(&statement.statement_hash()),
+        "setupContextHash": setup_context_hash,
+        "trusteeIdentity": trustee_identity,
+        "trusteeRosterPosition": trustee_roster_position,
+        "anchorCommitmentRoots": anchor_commitment_roots,
+        "publicKeyShareRoot": public_key_share_root,
     }))
 }
